@@ -1,0 +1,10 @@
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+pydantic-settings>=2.2.0
+python-dotenv>=1.0.0
+SQLAlchemy>=2.0.28
+httpx>=0.27.0
+aiofiles>=23.2.1
+# 异步数据库驱动
+aiosqlite>=0.20.0  # SQLite 异步驱动（用于 AsyncSession）
+greenlet>=3.0.0    # SQLAlchemy async 内部依赖（协程切换）

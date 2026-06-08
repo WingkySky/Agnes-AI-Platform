@@ -1,0 +1,149 @@
+/* =====================================================
+ * 全局自定义样式（在 Element Plus 基础样式之上叠加）
+ * - 深色主题全局变量
+ * - 通用卡片/按钮/表单美化
+ * ===================================================== */
+
+:root {
+  --agnes-primary: #6b9cff;
+  --agnes-primary-hover: #85b2ff;
+  --agnes-accent: #a78bff;
+  --agnes-bg-card: rgba(22, 32, 54, 0.7);
+  --agnes-border: rgba(120, 170, 230, 0.2);
+  --agnes-text-muted: #8ba3c9;
+}
+
+/* 全局 */
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: #0b0f1a;
+  color: #e8eef7;
+}
+
+/* 美化滚动条 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #0e1422;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a3b5e;
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3d5282;
+}
+
+/* =====================================================
+ * Element Plus 组件自定义样式（深色模式微调）
+ * ===================================================== */
+
+/* Card */
+.el-card {
+  background: var(--agnes-bg-card) !important;
+  border: 1px solid var(--agnes-border) !important;
+  border-radius: 14px !important;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25) !important;
+}
+.el-card__header {
+  border-bottom: 1px solid var(--agnes-border) !important;
+  padding: 16px 22px !important;
+}
+.el-card__body {
+  padding: 22px !important;
+}
+
+/* Input / Textarea */
+.el-input__wrapper,
+.el-textarea__inner {
+  background: rgba(15, 24, 42, 0.7) !important;
+  border: 1px solid var(--agnes-border) !important;
+  box-shadow: none !important;
+  color: #e8eef7 !important;
+}
+.el-input__wrapper.is-focus,
+.el-textarea__inner:focus {
+  border-color: var(--agnes-primary) !important;
+}
+.el-input__inner::placeholder,
+.el-textarea__inner::placeholder {
+  color: #6b84aa !important;
+}
+
+/* Tabs */
+.el-tabs__item {
+  color: #a0b4d6 !important;
+}
+.el-tabs__item.is-active {
+  color: #fff !important;
+}
+.el-tabs__active-bar {
+  background: linear-gradient(90deg, #6b9cff, #a78bff) !important;
+}
+
+/* Button 渐变主按钮 */
+.el-button--primary {
+  background: linear-gradient(135deg, #5a86ff 0%, #9a7bff 100%) !important;
+  border: none !important;
+  color: #fff !important;
+  transition: transform 0.15s ease, box-shadow 0.15s ease !important;
+}
+.el-button--primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(100, 150, 255, 0.35) !important;
+}
+
+/* Tag 预设芯片 */
+.el-tag {
+  border-radius: 20px !important;
+  padding: 0 12px !important;
+  cursor: pointer;
+  transition: all 0.15s ease !important;
+}
+.el-tag:hover {
+  transform: translateY(-1px);
+}
+
+/* Select */
+.el-select {
+  width: 100%;
+}
+
+/* Dialog */
+.el-dialog {
+  background: #111827 !important;
+  border: 1px solid var(--agnes-border) !important;
+}
+.el-dialog__title {
+  color: #fff !important;
+}
+.el-dialog__body {
+  color: #e8eef7 !important;
+}
+
+/* 通用样式工具类 */
+.page-title {
+  font-size: 22px;
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+.page-desc {
+  color: var(--agnes-text-muted);
+  font-size: 13px;
+  margin: 0 0 20px;
+}
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 10px;
+  color: #d5e3f7;
+}
+.muted-text {
+  color: var(--agnes-text-muted);
+  font-size: 12px;
+}
