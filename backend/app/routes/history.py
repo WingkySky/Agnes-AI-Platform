@@ -14,6 +14,7 @@ import hashlib
 import tempfile
 import asyncio
 import httpx
+import glob as glob_module
 from typing import Optional, List
 
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
@@ -98,6 +99,8 @@ async def delete_history_record(record_id: int, db: AsyncSession = Depends(get_a
         raise HTTPException(status_code=404, detail="未找到对应记录")
 
     try:
+        # 删除记录前先清理缩略图缓存
+        _cleanup_thumbnail_cache(record_id)
         await db.delete(record)
         await db.commit()
         logger.info("[历史记录] 已异步删除: id=%s", record_id)
@@ -133,6 +136,8 @@ async def batch_delete_history(
         deleted_ids = []
         for record in records:
             deleted_ids.append(record.id)
+            # 清理该记录的缩略图缓存
+            _cleanup_thumbnail_cache(record.id)
             await db.delete(record)
 
         await db.commit()
@@ -324,6 +329,26 @@ def _get_cache_path(record_id: int, suffix: str, video_url: str = "") -> str:
     return os.path.join(THUMBNAIL_CACHE_DIR, filename)
 
 
+def _cleanup_thumbnail_cache(record_id: int):
+    """
+    清理指定记录 ID 的所有缩略图和预览缓存文件。
+    删除记录时调用，避免缓存残留。
+    """
+    try:
+        # 匹配所有以 video_{id}_ 开头的缓存文件（包括新旧格式）
+        patterns = [
+            os.path.join(THUMBNAIL_CACHE_DIR, f"video_{record_id}_*"),
+            os.path.join(THUMBNAIL_CACHE_DIR, f"video_{record_id}_thumb.jpg"),
+            os.path.join(THUMBNAIL_CACHE_DIR, f"video_{record_id}_preview.gif"),
+        ]
+        for pattern in patterns:
+            for f in glob_module.glob(pattern):
+                os.remove(f)
+                logger.info("[缓存清理] 已删除缓存文件: %s", f)
+    except Exception as e:
+        logger.warning("[缓存清理] 清理记录 %d 的缓存失败: %s", record_id, e)
+
+
 async def _download_video_partial(video_url: str, output_path: str, max_bytes: int = 5 * 1024 * 1024) -> bool:
     """
     下载视频的前 N 字节到临时文件（用于 ffmpeg 提取帧）。
@@ -442,7 +467,7 @@ async def get_video_thumbnail(record_id: int, db: AsyncSession = Depends(get_asy
             media_type="image/jpeg",
             headers={
                 "Access-Control-Allow-Origin": "*",
-                "Cache-Control": "public, max-age=86400",
+                "Cache-Control": "public, max-age=60, must-revalidate",
             },
         )
 
@@ -466,7 +491,7 @@ async def get_video_thumbnail(record_id: int, db: AsyncSession = Depends(get_asy
             media_type="image/jpeg",
             headers={
                 "Access-Control-Allow-Origin": "*",
-                "Cache-Control": "public, max-age=86400",
+                "Cache-Control": "public, max-age=60, must-revalidate",
             },
         )
     finally:
@@ -504,7 +529,7 @@ async def get_video_preview(record_id: int, db: AsyncSession = Depends(get_async
             media_type="image/gif",
             headers={
                 "Access-Control-Allow-Origin": "*",
-                "Cache-Control": "public, max-age=86400",
+                "Cache-Control": "public, max-age=60, must-revalidate",
             },
         )
 
@@ -524,7 +549,7 @@ async def get_video_preview(record_id: int, db: AsyncSession = Depends(get_async
             media_type="image/gif",
             headers={
                 "Access-Control-Allow-Origin": "*",
-                "Cache-Control": "public, max-age=86400",
+                "Cache-Control": "public, max-age=60, must-revalidate",
             },
         )
     finally:

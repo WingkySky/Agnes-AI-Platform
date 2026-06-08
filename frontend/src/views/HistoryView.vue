@@ -294,13 +294,28 @@ function getVideoStreamUrl(item) {
 // ---------- 视频缩略图 & 预览方法 ----------
 
 /**
+ * 生成简单的哈希值（用于缓存破坏）
+ */
+function simpleHash(str) {
+  let hash = 0
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i)
+    hash = ((hash << 5) - hash) + char
+    hash |= 0 // 转为 32 位整数
+  }
+  return Math.abs(hash).toString(36)
+}
+
+/**
  * 加载视频首帧缩略图
  */
 async function loadVideoThumbnail(item) {
   if (videoThumbnails[item.id] || thumbnailLoading[item.id] || thumbnailFailed[item.id]) return
   thumbnailLoading[item.id] = true
   try {
-    const url = `/api/history/video/${item.id}/thumbnail`
+    // URL 中加入视频链接哈希作为缓存破坏参数，避免删除旧记录后新记录复用 ID 时命中浏览器缓存
+    const urlHash = item.result_url ? simpleHash(item.result_url) : 'nourl'
+    const url = `/api/history/video/${item.id}/thumbnail?v=${urlHash}`
     // 用 Image 对象预加载，验证图片是否可用
     await new Promise((resolve, reject) => {
       const img = new Image()
@@ -324,7 +339,9 @@ async function loadVideoPreview(item) {
   if (videoPreviews[item.id] || previewLoading[item.id]) return
   previewLoading[item.id] = true
   try {
-    const url = `/api/history/video/${item.id}/preview`
+    // URL 中加入视频链接哈希作为缓存破坏参数
+    const urlHash = item.result_url ? simpleHash(item.result_url) : 'nourl'
+    const url = `/api/history/video/${item.id}/preview?v=${urlHash}`
     // 用 Image 对象预加载 GIF
     await new Promise((resolve, reject) => {
       const img = new Image()

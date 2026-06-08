@@ -347,8 +347,16 @@ const videoUrl = computed(() => {
   if (!activeTask.value) return ''
   // 优先使用后端代理接口播放视频（通过 task_id 代理，避免 CORS）
   const backendTaskId = activeTask.value.backendTaskId || activeTask.value.taskId
-  if (backendTaskId && activeTask.value.status === 'success') {
-    return `/api/videos/${backendTaskId}/stream`
+  const status = activeTask.value.status
+  console.log('[VideoView] videoUrl 计算:', {
+    backendTaskId,
+    status,
+    resultUrl: activeTask.value.resultUrl?.substring(0, 60),
+  })
+  if (backendTaskId && status === 'success') {
+    const proxyUrl = `/api/videos/${backendTaskId}/stream`
+    console.log('[VideoView] 使用代理 URL:', proxyUrl)
+    return proxyUrl
   }
   // 任务未完成时返回空（不使用直链）
   return ''
