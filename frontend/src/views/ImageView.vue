@@ -3,16 +3,19 @@
      模式：
        - 文生图 (text2image)
        - 图生图 (image2image)
-     特性：
-       - 任务提交到全局 Store（切换 tab 不丢失状态）
-       - 轮询由 Store 统一管理
-       - 可同时并发生成多个图片任务（最多 5 个）
+     关键交互：
+       - 左侧「生成图片」按钮始终可用（受并发数限制）
+       - 提交后自动选中新任务作为预览对象
+       - 右侧预览区显示「当前选中任务」（队列点击可切换）
+       - 正在进行的任务可在预览区内点击「中止」
      ===================================================== -->
 
 <template>
   <div class="image-view">
     <h2 class="page-title">🎨 图片生成</h2>
-    <p class="page-desc">根据文字描述或参考图生成 AI 图片。支持多种尺寸，可同时提交多个任务，在右下「队列」中查看进度。</p>
+    <p class="page-desc">
+      根据文字描述或参考图生成 AI 图片。支持同时提交多个任务，点击右下「队列」可随时切换查看不同任务的状态。
+    </p>
 
     <el-row :gutter="24">
       <!-- 左侧：参数区 -->
@@ -78,30 +81,35 @@
               </el-col>
             </el-row>
 
-            <!-- 生成按钮（使用 Store 中的图片任务并发数判断） -->
+            <!-- 生成按钮：始终可用（受并发数限制） -->
             <el-button
               type="primary"
               size="large"
               class="generate-btn"
               :disabled="!canSubmit"
-              @click="handleGenerate"
-            >
+              @click="handleGenerate">
               <el-icon><MagicStick /></el-icon>
               <span>✨ 生成图片（加入队列）</span>
             </el-button>
+
             <div class="queue-hint">
-              当前进行中: {{ queue.runningImageCount }} / 5
+              当前进行中: {{ queue.runningImageCount }} / 5 · 已提交任务: {{ taskCount }}
             </div>
           </el-form>
         </el-card>
       </el-col>
 
-      <!-- 右侧：结果区（从 Store 读取当前任务状态） -->
+      <!-- 右侧：预览/结果区（显示 "当前选中任务"） -->
       <el-col :xs="24" :md="13">
         <el-card shadow="never">
           <template #header>
           <div class="card-header">
-            <span>生成结果</span>
+            <div class="header-title">
+              <span>生成结果</span>
+              <span v-if="activeTask" class="task-pill" :class="'status-' + activeTask.status">
+                {{ statusLabel }}
+              </span>
+            </div>
             <span v-if="resultUrl" class="header-actions">
               <el-button size="small" @click="downloadImage">
               <el-icon><Download /></el-icon>
@@ -115,18 +123,27 @@
           </div>
           </template>
 
-          <!-- 加载中（从 Store 读取） -->
+          <!-- 情况 A：有选中任务且正在进行中 -->
           <div v-if="activeTask && taskRunning" class="result-loading">
+            <div class="task-id-row">任务 ID: {{ activeTask.taskId }}</div>
             <el-progress
               :percentage="taskProgress"
               :stroke-width="12"
               :color="progressColor" />
-            <div class="loading-text">AI 正在精心绘制...</div>
-            <div class="loading-sub">已耗时 {{ taskElapsedSec }} 秒 · 队列后台持续轮询</div>
-            <div v-if="activeTask.errorMessage" class="error-msg">{{ activeTask.errorMessage }}</div>
+            <div class="loading-text">{{ statusLabel }}中...</div>
+            <div class="loading-sub">已耗时 {{ taskElapsedSec }} 秒</div>
+            <div class="prompt-row">{{ activeTask.prompt }}</div>
+            <el-button
+              type="danger"
+              size="small"
+              class="cancel-btn-inline"
+              @click="cancelActiveTask">
+              <el-icon><CircleCloseFilled /></el-icon>
+              中止此任务
+            </el-button>
           </div>
 
-          <!-- 成功（从 Store 读取） -->
+          <!-- 情况 B：有选中任务且已成功 -->
           <div v-else-if="activeTask && activeTask.status === 'success'" class="result-wrap">
             <img v-if="resultUrl" :src="resultUrl" class="result-img" alt="generated" />
             <img v-else-if="activeTask.imageB64" :src="'data:image/png;base64,' + activeTask.imageB64" class="result-img" />
@@ -139,46 +156,48 @@
               <span class="meta-label">尺寸：</span>
               <span class="meta-value">{{ size }}</span>
               </div>
-              <div class="meta-row">
-              <span class="meta-label">状态：</span>
-              <span class="tag-success">success</span>
-              </div>
             </div>
           </div>
 
-          <!-- 失败（从 Store 读取） -->
+          <!-- 情况 C：任务失败 -->
           <div v-else-if="activeTask && activeTask.status === 'failed'" class="result-failed">
             <el-icon :size="48" color="#ff7b7b"><CircleCloseFilled /></el-icon>
             <div class="failed-text">图片生成失败</div>
-            <div class="failed-sub">{{ activeTask.errorMessage || '请检查 API 或稍后重试' }}</div>
-            <el-button type="primary" size="small" class="retry-btn" @click="handleGenerate">
-              重新生成
+            <div class="failed-sub">{{ activeTask.errorMessage || '未知错误，请重试' }}</div>
+            <el-button type="primary" size="small" class="retry-btn" @click="retryActiveTask">
+              使用相同参数重试
             </el-button>
           </div>
 
-          <!-- 取消（从 Store 读取） -->
+          <!-- 情况 D：已取消 -->
           <div v-else-if="activeTask && activeTask.status === 'cancelled'" class="result-failed">
             <el-icon :size="48" color="#ffb86b"><CircleCloseFilled /></el-icon>
             <div class="failed-text">任务已取消</div>
-            <div class="failed-sub">点击右下「队列」查看历史任务</div>
+            <div class="failed-sub">该任务已停止，可重新提交新任务</div>
           </div>
 
-          <!-- 空状态 -->
+          <!-- 情况 E：选中的是视频任务，不匹配当前视图 -->
+          <div v-else-if="activeTaskIsOtherType" class="empty-state">
+            <el-icon :size="48"><VideoPlay /></el-icon>
+            <p class="empty-text">当前选中的是视频任务</p>
+            <p class="empty-sub">请点击右下「队列」切换到图片任务，或前往视频生成页查看该任务</p>
+          </div>
+
+          <!-- 情况 F：没有选中的任务 -->
           <div v-else class="empty-state">
             <el-icon :size="48"><PictureFilled /></el-icon>
-            <p class="empty-text">填写左侧参数，点击「生成图片」开始创作</p>
-            <p class="empty-sub">生成后可切换到其他页面继续创作，状态不丢失</p>
+            <p class="empty-text">尚未选择任务预览</p>
+            <p class="empty-sub">提交新图片任务后，或点击右下「队列」中任一任务条目，此处将显示对应任务的状态和结果</p>
           </div>
         </el-card>
 
-        <!-- 近期生成提示 -->
+        <!-- 使用技巧 -->
         <div class="tips-card">
-          <div class="tipstitle">💡 使用技巧</div>
+          <div class="tip-title">💡 使用技巧</div>
           <ul>
-            <li>提示词越具体，效果越好，可以包含主题、风格、光照、构图</li>
-            <li>图生图模式下，参考图会影响整体风格与构图</li>
-            <li>可同时提交多个图片任务（最多 5 个并发），点击右下「队列」查看所有任务</li>
-            <li>任务完成后 20 分钟内仍可在队列中查看，之后自动清理（数据库历史保留）</li>
+            <li>可同时提交多个图片任务（最多 5 个并发），无需等待当前任务完成</li>
+            <li>点击右下「队列」可随时查看、切换、中止任意任务</li>
+            <li>任务完成后在队列中保留约 20 分钟，超过可在「生成历史」查看</li>
           </ul>
         </div>
       </el-col>
@@ -190,11 +209,10 @@
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  MagicStick, Download, Link, PictureFilled, Loading, CircleCloseFilled
+  MagicStick, Download, Link, PictureFilled, Loading, CircleCloseFilled, VideoPlay
 } from '@element-plus/icons-vue'
 import PromptTemplates from '@/components/PromptTemplates.vue'
 import ImageUploader from '@/components/ImageUploader.vue'
-// ---------- 全局 Store 替换本地状态 ----------
 import { useTaskQueueStore } from '@/stores/taskQueue'
 
 const IMAGE_TEMPLATES = [
@@ -233,22 +251,28 @@ const referenceFile = ref(null)
 // ---------- 使用全局 Store 管理任务 ----------
 const queue = useTaskQueueStore()
 
-// 当前在本视图中激活的任务 ID
-const activeTaskId = ref('')
-
-// 计算属性：从 Store 读取对应任务
+// 当前预览的任务 = Store 中的 activeTask，但仅当其是图片类型
 const activeTask = computed(() => {
-  if (!activeTaskId.value) return null
-  return queue.tasks[activeTaskId.value] || null
+  if (!queue.activeTaskId) return null
+  const task = queue.tasks[queue.activeTaskId]
+  if (!task) return null
+  return task.type === 'image' ? task : null
 })
 
-// 任务还在运行中
+// 选中任务是否为视频类型（在图片视图中不显示预览，仅提示）
+const activeTaskIsOtherType = computed(() => {
+  if (!queue.activeTaskId) return false
+  const task = queue.tasks[queue.activeTaskId]
+  return task && task.type !== 'image'
+})
+
+// 当前任务是否在运行
 const taskRunning = computed(() => {
   if (!activeTask.value) return false
   return ['pending', 'queued', 'processing'].includes(activeTask.value.status)
 })
 
-// 从 Store 读取的进度和耗时
+// 进度、耗时（通过 queue._tick 驱动每秒响应式刷新）
 const taskProgress = computed(() => {
   if (!activeTask.value) return 0
   return Math.min(activeTask.value.progress || 0, 99)
@@ -257,20 +281,44 @@ const taskElapsedSec = computed(() => {
   if (!activeTask.value) return 0
   const created = activeTask.value.createdAt || 0
   if (!created) return 0
+  // 读取 queue._tick 让此 computed 随 tick 刷新
+  queue._tick
   return Math.floor((Date.now() - created) / 1000)
 })
 
-// 从 Store 读取的图片结果 URL
+// 结果 URL
 const resultUrl = computed(() => {
   if (!activeTask.value) return ''
   return activeTask.value.resultUrl || activeTask.value.url || ''
 })
 
+// 状态标签（中文化）
+const statusLabel = computed(() => {
+  if (!activeTask.value) return ''
+  const s = activeTask.value.status
+  const map = {
+    queued: '排队',
+    pending: '等待中',
+    processing: '生成',
+    success: '已完成',
+    failed: '失败',
+    cancelled: '已取消',
+  }
+  return map[s] || s
+})
+
 const progressColor = '#ff8c42'
 
+// 任务总数
+const taskCount = computed(() => {
+  if (!queue.tasks) return 0
+  return Object.keys(queue.tasks).length
+})
+
+// 能否提交：提示词不为空 + 未达并发上限
 const canSubmit = computed(() => {
   if (!prompt.value.trim()) return false
-  if (mode.value === 'image2image' && !referenceFile.value) return false
+  if (queue.runningImageCount >= 5) return false
   return true
 })
 
@@ -287,14 +335,18 @@ function handleImageClear() {
   referenceFile.value = null
 }
 
-// ---------- 开始生成（提交到 Store，不阻塞本地） ----------
+// ---------- 提交任务 ----------
 async function handleGenerate() {
-  if (!canSubmit.value) {
-    if (!prompt.value.trim()) {
-      ElMessage.warning('请先填写提示词')
-    } else if (mode.value === 'image2image' && !referenceFile.value) {
-      ElMessage.warning('请先上传参考图')
-    }
+  if (!prompt.value.trim()) {
+    ElMessage.warning('请先填写提示词')
+    return
+  }
+  if (mode.value === 'image2image' && !referenceFile.value) {
+    ElMessage.warning('请先上传参考图')
+    return
+  }
+  if (queue.runningImageCount >= 5) {
+    ElMessage.warning('已达 5 个图片并发上限，请等待任务完成')
     return
   }
 
@@ -309,24 +361,43 @@ async function handleGenerate() {
   }
 
   try {
-    console.log('[ImageView] 提交到任务队列，参数：', params)
+    console.log('[ImageView] 提交图片任务，参数：', params)
     const taskId = await queue.submitImageTask(params)
-    activeTaskId.value = taskId
-    ElMessage.success('图片任务已提交，可点击右下「队列」查看进度')
+    queue.setActiveTask(taskId)  // 提交后自动选中新任务 → 预览区立即显示
+    ElMessage.success('图片任务已提交，可点击右下「队列」查看所有任务')
   } catch (e) {
     console.error('[ImageView] 提交任务失败：', e)
     ElMessage.error('创建图片任务失败：' + (e.message || '未知错误'))
   }
 }
 
-// ---------- 下载图片 ----------
+// ---------- 中止当前任务 ----------
+function cancelActiveTask() {
+  if (!queue.activeTaskId) return
+  queue.cancelTask(queue.activeTaskId)
+  ElMessage.info('已请求中止该任务')
+}
+
+// ---------- 重试当前任务 ----------
+function retryActiveTask() {
+  if (!activeTask.value) return
+  const taskId = queue.retryTask(activeTask.value.taskId)
+  if (taskId) {
+    queue.setActiveTask(taskId)
+    ElMessage.success('已重新提交任务')
+  } else {
+    ElMessage.warning('重试失败，请重新手动填写参数')
+  }
+}
+
+// ---------- 下载 / 复制 ----------
 async function downloadImage() {
   if (!resultUrl.value) {
     ElMessage.warning('图片链接为空，无法下载')
     return
   }
   try {
-    ElMessage.info('正在准备下载，请稍候…')
+    ElMessage.info('正在准备下载…')
     const response = await fetch(resultUrl.value, { mode: 'cors' })
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     const blob = await response.blob()
@@ -340,13 +411,12 @@ async function downloadImage() {
     setTimeout(() => URL.revokeObjectURL(blobUrl), 1000)
     ElMessage.success('已开始下载图片')
   } catch (err) {
-    console.warn('[ImageView] fetch 下载失败，回退为新标签页打开：', err)
+    console.warn('[ImageView] fetch 下载失败：', err)
     ElMessage.warning('跨域下载受限，已在新标签页打开。请右键图片选择「另存为」')
     window.open(resultUrl.value, '_blank', 'noopener,noreferrer')
   }
 }
 
-// ---------- 复制链接 ----------
 function copyImageUrl() {
   if (!resultUrl.value) {
     ElMessage.warning('图片链接为空')
@@ -354,23 +424,16 @@ function copyImageUrl() {
   }
   if (navigator.clipboard && window.isSecureContext) {
     navigator.clipboard.writeText(resultUrl.value)
-      .then(() => ElMessage.success('图片链接已复制到剪贴板'))
+      .then(() => ElMessage.success('图片链接已复制'))
       .catch(() => ElMessage.error('复制失败，请手动复制'))
   } else {
     const ta = document.createElement('textarea')
     ta.value = resultUrl.value
-    ta.style.position = 'fixed'
-    ta.style.left = '-9999px'
-    ta.style.top = '0'
     document.body.appendChild(ta)
     ta.select()
-    try {
-      document.execCommand('copy')
-      ElMessage.success('图片链接已复制到剪贴板')
-    } catch (e) {
-      ElMessage.error('复制失败，请手动复制')
-    }
+    document.execCommand('copy')
     document.body.removeChild(ta)
+    ElMessage.success('图片链接已复制')
   }
 }
 </script>
@@ -378,12 +441,42 @@ function copyImageUrl() {
 <style scoped>
 .image-view { color: #e8eef7; }
 .page-title { margin: 0 0 4px 0; }
-.page-desc { color: #8ba3c9; font-size: 14px; margin-bottom: 20px; }
+.page-desc { color: #8ba3c9; font-size: 14px; margin-bottom: 20px; line-height: 1.6; }
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   font-weight: 600;
+}
+.header-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.task-pill {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.task-pill.status-queued,
+.task-pill.status-pending,
+.task-pill.status-processing {
+  background: rgba(255, 140, 66, 0.2);
+  color: #ffa56b;
+}
+.task-pill.status-success {
+  background: rgba(46, 184, 128, 0.2);
+  color: #2ee58c;
+}
+.task-pill.status-failed {
+  background: rgba(255, 123, 123, 0.2);
+  color: #ff9b9b;
+}
+.task-pill.status-cancelled {
+  background: rgba(255, 184, 107, 0.2);
+  color: #ffb86b;
 }
 .tab-sub { font-size: 12px; color: #8ba3c9; margin-left: 6px; }
 .mode-tabs { margin-bottom: 12px; }
@@ -404,8 +497,14 @@ function copyImageUrl() {
 
 /* 结果区 */
 .result-loading {
-  padding: 60px 20px;
+  padding: 50px 20px;
   text-align: center;
+}
+.task-id-row {
+  font-size: 12px;
+  color: #6b84aa;
+  margin-bottom: 16px;
+  font-family: monospace;
 }
 .loading-text {
   margin-top: 16px;
@@ -417,15 +516,23 @@ function copyImageUrl() {
   font-size: 12px;
   color: #8ba3c9;
 }
-.error-msg {
+.prompt-row {
   margin-top: 16px;
-  color: #ff9b9b;
+  padding: 10px 14px;
+  background: rgba(15, 24, 42, 0.4);
+  border-radius: 8px;
   font-size: 13px;
+  color: #a0b4d6;
+  text-align: left;
+  word-break: break-word;
+  max-height: 80px;
+  overflow: auto;
 }
+.cancel-btn-inline { margin-top: 20px; }
 .result-wrap { text-align: center; }
 .result-img {
   width: 100%;
-  max-height: 500px;
+  max-height: 520px;
   object-fit: contain;
   border-radius: 12px;
   background: #000;
@@ -440,17 +547,7 @@ function copyImageUrl() {
 }
 .meta-row { font-size: 13px; padding: 4px 0; color: #d5e3f7; }
 .meta-label { color: #8ba3c9; margin-right: 6px; }
-.meta-value { word-break: break-all; }
-.tag-success {
-  display: inline-block;
-  padding: 2px 8px;
-  background: rgba(46, 184, 128, 0.2);
-  color: #2ee58c;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 500;
-  margin: 0 4px;
-}
+.meta-value { word-break: break-word; }
 
 .result-failed {
   padding: 60px 20px;
@@ -467,7 +564,7 @@ function copyImageUrl() {
   color: #6b84aa;
 }
 .empty-text { margin-top: 16px; font-size: 14px; }
-.empty-sub { margin-top: 8px; font-size: 12px; color: #8ba3c9; }
+.empty-sub { margin-top: 8px; font-size: 12px; color: #8ba3c9; line-height: 1.6; }
 
 .tips-card {
   margin-top: 16px;
@@ -478,6 +575,6 @@ function copyImageUrl() {
   font-size: 13px;
   color: #a0b4d6;
 }
-.tipstitle { font-weight: 600; color: #d5e3f7; margin-bottom: 8px; }
+.tip-title { font-weight: 600; color: #d5e3f7; margin-bottom: 8px; }
 .tips-card ul { margin: 0; padding-left: 20px; line-height: 1.8; }
 </style>

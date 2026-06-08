@@ -49,6 +49,8 @@ export const useTaskQueueStore = defineStore('taskQueue', {
     panelOpen: false,
     // 当前选中的任务 ID（用于在视图中显示某任务的详情）
     activeTaskId: null,
+    // 时间戳标记（每秒递增，驱动耗时/时间显示的响应式刷新）
+    _tick: 0,
     // 已初始化标志
     _initialized: false,
   }),
@@ -86,8 +88,10 @@ export const useTaskQueueStore = defineStore('taskQueue', {
     activeTask(state) {
       return state.activeTaskId ? state.tasks[state.activeTaskId] : null
     },
-    // 根据任务 ID 计算已耗时（秒）
-    elapsedSec: () => (task) => {
+    // 根据任务 ID 计算已耗时（秒）— 通过 _tick 实现响应式刷新
+    elapsedSec: (state) => (task) => {
+      // 读取 _tick 让此 getter 与它建立响应式关联
+      state._tick
       if (!task) return 0
       return Math.floor((Date.now() - task.createdAt) / 1000)
     },
@@ -123,6 +127,9 @@ export const useTaskQueueStore = defineStore('taskQueue', {
 
       // 5. 每分钟清理一次过期历史
       setInterval(() => this._cleanupOldHistory(), 60 * 1000)
+
+      // 6. 每秒递增 tick，驱动耗时/时间显示的响应式刷新
+      setInterval(() => { this._tick++ }, 1000)
     },
 
     // =====================================================
@@ -153,8 +160,8 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         backendTaskId: null,
       }
       this.tasks[taskId] = task
-      this.activeTaskId = taskId  // 提交后自动选中为活跃任务
-      this._saveToStorage()
+      // 自动选中为活跃任务（便于立即在预览区展示）
+      this.setActiveTask(taskId)
 
       // 异步创建任务（不 await，立即返回 taskId）
       this._createImageTaskInBackground(taskId, params)
@@ -208,8 +215,8 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         backendTaskId: null,
       }
       this.tasks[taskId] = task
-      this.activeTaskId = taskId
-      this._saveToStorage()
+      // 自动选中为活跃任务（便于立即在预览区展示）
+      this.setActiveTask(taskId)
 
       this._createVideoTaskInBackground(taskId, params)
       return taskId
@@ -394,7 +401,10 @@ export const useTaskQueueStore = defineStore('taskQueue', {
     // 【面板/选中】
     // =====================================================
     setActiveTask(taskId) {
+      // 设置当前活跃任务（队列点击、提交任务后都会调用）
       this.activeTaskId = taskId
+      // 持久化：刷新/切换页面后仍能记住选中的任务
+      this._saveToStorage()
     },
     togglePanel() {
       this.panelOpen = !this.panelOpen
@@ -485,6 +495,8 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         }))
         const data = {
           tasks: tasksToSave,
+          // 持久化当前选中的任务 ID，刷新后可恢复选中状态
+          activeTaskId: this.activeTaskId,
           savedAt: Date.now(),
         }
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
@@ -509,6 +521,10 @@ export const useTaskQueueStore = defineStore('taskQueue', {
             t.status = 'processing'
           }
           this.tasks[t.taskId] = t
+        }
+        // 恢复 activeTaskId（如果该任务仍然存在）
+        if (data.activeTaskId && this.tasks[data.activeTaskId]) {
+          this.activeTaskId = data.activeTaskId
         }
       } catch (_) {
         // 解析失败不影响启动

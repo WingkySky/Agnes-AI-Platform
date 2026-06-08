@@ -140,6 +140,8 @@ const statusLabel = computed(() => {
 })
 
 const elapsedSec = computed(() => {
+  // 通过 queue._tick 驱动每秒刷新
+  queue._tick
   return Math.floor((Date.now() - props.task.createdAt) / 1000)
 })
 
