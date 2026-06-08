@@ -155,7 +155,8 @@ class AgnesAIClient:
                 cleaned_image = cleaned_image.split(";base64,", 1)[1]
             # 图生图：直接在 body 中添加 image 参数
             body["image"] = [cleaned_image]
-            body["response_format"] = response_format
+            if response_format == "b64_json":
+                body["return_base64"] = True
         elif response_format == "b64_json":
             body["return_base64"] = True
 
