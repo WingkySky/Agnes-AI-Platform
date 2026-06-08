@@ -133,16 +133,16 @@
             <video
               v-if="detailItem.result_url"
               ref="detailVideoEl"
-              :src="detailItem.result_url"
+              :src="getVideoStreamUrl(detailItem)"
               :poster="detailPoster"
               controls
               playsinline
               preload="metadata"
-              crossorigin="anonymous"
               class="detail-video"
               @loadeddata="captureDetailPoster"
               @canplay="onDetailVideoCanPlay"
               @error="onDetailVideoError"
+              @abort="onDetailVideoAbort"
             />
             <div v-else class="detail-video-empty">
               <el-icon :size="36" color="#ff9b9b"><CircleCloseFilled /></el-icon>
@@ -248,6 +248,15 @@ const isIndeterminate = computed(() => {
   const selectedOnPage = pageIds.filter(id => selectedIds.value.includes(id))
   return selectedOnPage.length > 0 && selectedOnPage.length < pageIds.length
 })
+
+/**
+ * 获取视频播放 URL：优先使用后端代理接口，解决 CORS 和 Range 请求问题
+ */
+function getVideoStreamUrl(item) {
+  if (item.type !== 'video' || !item.result_url) return ''
+  // 使用后端代理接口播放视频
+  return `/api/history/video/${item.id}/stream`
+}
 
 // 打开详情弹窗时重置视频状态
 watch(detailVisible, (val) => {
@@ -496,6 +505,16 @@ function onDetailVideoError(e) {
   detailVideoLoading.value = false
   detailVideoFailed.value = true
   ElMessage.error('视频加载失败，请尝试「下载」或「新标签页打开」')
+}
+
+/**
+ * 视频加载被中止（通常是 Range 请求 206 失败或跨域问题）
+ */
+function onDetailVideoAbort() {
+  console.warn('[History] 视频加载被中止，尝试重新加载')
+  detailVideoLoading.value = false
+  detailVideoFailed.value = true
+  ElMessage.warning('视频播放受限，请尝试「下载」或「新标签页打开」')
 }
 
 function confirmDelete() {
