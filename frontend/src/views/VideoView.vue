@@ -187,7 +187,7 @@
                 @loadedmetadata="onVideoLoaded"
                 @error="handleVideoError"
                 @canplay="onVideoCanPlay"
-              />
+              ></video>
               <div v-else class="video-placeholder">
                 <el-icon :size="48" color="#ffd166"><VideoPlay /></el-icon>
                 <div class="placeholder-title">{{ t('preview.videoUrlEmptyTitle') }}</div>

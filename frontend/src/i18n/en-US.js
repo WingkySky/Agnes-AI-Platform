@@ -185,6 +185,7 @@ export default {
     selectAllPage: 'Select all on this page',
     selectedCount: 'Selected',
     deleteSelected: 'Delete selected',
+    deleteRecord: 'Delete this record',
     confirmDeleteTitle: 'Confirm deletion',
     confirmDeleteMsg: 'Are you sure you want to delete this record? This cannot be undone.',
     confirmDelete: 'Confirm delete',

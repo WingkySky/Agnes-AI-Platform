@@ -186,6 +186,7 @@ export default {
     selectAllPage: '全选当前页',
     selectedCount: '已选',
     deleteSelected: '删除选中',
+    deleteRecord: '删除此记录',
     confirmDeleteTitle: '确认删除',
     confirmDeleteMsg: '确定要删除这条记录吗？此操作不可撤销。',
     confirmDelete: '确认删除',

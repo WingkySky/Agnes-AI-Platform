@@ -169,7 +169,7 @@
               @canplay="onDetailVideoCanPlay"
               @error="onDetailVideoError"
               @abort="onDetailVideoAbort"
-            />
+            ></video>
             <div v-else class="detail-video-empty">
               <el-icon :size="36" color="#ff9b9b"><CircleCloseFilled /></el-icon>
               <div>{{ t('history.videoUrlEmpty') }}</div>

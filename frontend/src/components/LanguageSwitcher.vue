@@ -7,25 +7,25 @@
 <template>
   <div class="language-switcher">
     <el-dropdown trigger="click" @command="onSelect" :teleported="false">
-    <el-button type="primary" link text-color="text--primary" size="small" class="switcher-btn">
-      <el-icon><LocationFilled /></el-icon>
-      <span class="current-label">{{ currentLabel }}</span>
-      <el-icon class="caret-icon"><ArrowDown /></el-icon>
-    </el-button>
-    <template #dropdown>
-      <el-dropdown-menu>
-        <el-dropdown-item
-          v-for="loc in supportedLocales"
-          :key="loc"
-          :command="loc"
-          :class="{ active: loc === currentLocale }"
-        >
-          <span class="option-label">{{ localeLabels[loc] }}</span>
-          <el-icon v-if="loc === currentLocale" class="check-icon"><Check /></el-icon>
-        </el-dropdown-item>
-      </el-dropdown-menu>
-    </template>
-  </el-dropdown>
+      <el-button type="primary" link text-color="text--primary" size="small" class="switcher-btn">
+        <el-icon><LocationFilled /></el-icon>
+        <span class="current-label">{{ currentLabel }}</span>
+        <el-icon class="caret-icon"><ArrowDown /></el-icon>
+      </el-button>
+      <template #dropdown>
+        <el-dropdown-menu>
+          <el-dropdown-item
+            v-for="loc in supportedLocales"
+            :key="loc"
+            :command="loc"
+            :class="{ active: loc === currentLocale }"
+          >
+            <span class="option-label">{{ localeLabels[loc] }}</span>
+            <el-icon v-if="loc === currentLocale" class="check-icon"><Check /></el-icon>
+          </el-dropdown-item>
+        </el-dropdown-menu>
+      </template>
+    </el-dropdown>
   </div>
 </template>
 
