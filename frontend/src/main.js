@@ -1,7 +1,7 @@
 /* =====================================================
  * Agnes AI Platform 前端入口
  * - 挂载 Vue 应用
- * - 初始化 Element Plus（中文语言 + 深色主题 CSS 变量）
+ * - 初始化 Element Plus（语言随 i18n 响应式变化）
  * - 初始化 Vue Router 与 Pinia
  * ===================================================== */
 
@@ -10,13 +10,15 @@ import { createPinia } from 'pinia'
 import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
 import 'element-plus/theme-chalk/dark/css-vars.css'
-import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 
 import App from './App.vue'
 import router from './router'
 import './assets/main.css'
 import { useTaskQueueStore } from './stores/taskQueue'
+
+// 国际化（i18n）插件
+import i18n from '@/i18n'
 
 // 创建 Vue 应用
 const app = createApp(App)
@@ -29,11 +31,10 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
 // 注册插件
 app.use(createPinia())
 app.use(router)
-app.use(ElementPlus, {
-  locale: zhCn,
-  // 全局 size 默认值
-  size: 'default'
-})
+// 使用 Element Plus（默认语言通过 <el-config-provider> 覆盖）
+app.use(ElementPlus)
+// 挂载 i18n 插件：提供 $t 全局属性
+app.use(i18n)
 
 // 确保 body 使用深色主题类（Element Plus 会根据 class="dark" 应用深色变量）
 document.documentElement.classList.add('dark')

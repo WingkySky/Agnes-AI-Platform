@@ -15,25 +15,28 @@
 
 <template>
   <div class="image-uploader">
-    <div class="section-title">参考图 {{ optional ? '（可选）' : '' }}</div>
+    <!-- 标题国际化 -->
+    <div class="section-title">
+      {{ t('params.refImage') }}{{ optional ? '（' + t('common.optional') + '）' : '' }}
+    </div>
 
     <!-- 模式切换 -->
     <div class="mode-switch">
       <el-radio-group v-model="mode" size="small">
-        <el-radio-button value="file">📁 上传本地图片</el-radio-button>
-        <el-radio-button value="url">🔗 粘贴图片 URL</el-radio-button>
+        <el-radio-button value="file">{{ t('params.uploadLocal') }}</el-radio-button>
+        <el-radio-button value="url">{{ t('params.pasteUrl') }}</el-radio-button>
       </el-radio-group>
     </div>
 
     <!-- 已上传预览 -->
     <div v-if="currentFile" class="preview-wrap">
-      <img :src="currentFile.previewUrl" class="preview-img" alt="preview" />
+      <img :src="currentFile.previewUrl" class="preview-img" :alt="t('common.preview')" />
       <div class="preview-info">
         <div class="preview-name">{{ currentFile.name }}</div>
         <div class="preview-size">{{ formatSize(currentFile.size) }}</div>
         <el-button size="small" type="danger" plain @click="clearFile">
           <el-icon><Delete /></el-icon>
-          移除
+          {{ t('params.remove') }}
         </el-button>
       </div>
     </div>
@@ -46,8 +49,8 @@
          @click="$refs.fileInput.click()"
          :class="{ 'drag-over': isDragOver }">
       <el-icon :size="36" class="upload-icon"><UploadFilled /></el-icon>
-      <div class="upload-hint">点击或拖拽图片到此处</div>
-      <div class="upload-desc">支持 PNG / JPG / WEBP，最大 {{ maxSizeMB }}MB</div>
+      <div class="upload-hint">{{ t('params.uploadHint') }}</div>
+      <div class="upload-desc">{{ t('params.uploadDesc').replace('{n}', maxSizeMB) }}</div>
       <input ref="fileInput" type="file" accept="image/*" class="hidden-input" @change="handleFileChange" />
     </div>
 
@@ -55,14 +58,14 @@
     <div v-else class="url-zone">
       <el-input
         v-model="urlInput"
-        placeholder="粘贴图片 URL（以 http:// 或 https:// 开头）"
+        :placeholder="t('params.urlPlaceholder')"
         @keydown.enter="handleUrlConfirm"
       >
         <template #append>
-          <el-button @click="handleUrlConfirm">确认</el-button>
+          <el-button @click="handleUrlConfirm">{{ t('common.confirm') }}</el-button>
         </template>
       </el-input>
-      <div class="url-hint">提示：某些服务端可能无法访问内网 URL</div>
+      <div class="url-hint">{{ t('params.urlHint') }}</div>
     </div>
   </div>
 </template>
@@ -71,6 +74,10 @@
 import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Delete, UploadFilled } from '@element-plus/icons-vue'
+// ------ 引入 i18n ------
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
 
 const props = defineProps({
   maxSizeMB: { type: Number, default: 10 },
@@ -104,11 +111,11 @@ function formatSize(bytes) {
 function validateFile(file) {
   const maxBytes = props.maxSizeMB * 1024 * 1024
   if (file.size > maxBytes) {
-    ElMessage.error(`图片过大，最大允许 ${props.maxSizeMB}MB`)
+    ElMessage.error(t('params.imageTooLarge').replace('{n}', props.maxSizeMB))
     return false
   }
   if (!file.type || !file.type.startsWith('image/')) {
-    ElMessage.error('请上传图片文件（PNG / JPG / WEBP）')
+    ElMessage.error(t('params.imageInvalid'))
     return false
   }
   return true
@@ -129,7 +136,7 @@ function fileToBase64(file) {
         source: 'file'
       })
     }
-    reader.onerror = () => reject(new Error('读取文件失败'))
+    reader.onerror = () => reject(new Error('read_failed'))
     reader.readAsDataURL(file)
   })
 }
@@ -142,7 +149,7 @@ async function handleFileChange(e) {
     currentFile.value = await fileToBase64(file)
     emit('change', currentFile.value)
   } catch (err) {
-    ElMessage.error('图片解析失败')
+    ElMessage.error(t('params.imageParseFailed'))
   }
   e.target.value = ''
 }
@@ -155,7 +162,7 @@ function handleDrop(e) {
     fileToBase64(file).then((info) => {
       currentFile.value = info
       emit('change', info)
-    }).catch(() => ElMessage.error('图片解析失败'))
+    }).catch(() => ElMessage.error(t('params.imageParseFailed')))
   }
 }
 
@@ -163,7 +170,7 @@ function handleUrlConfirm() {
   const url = urlInput.value.trim()
   if (!url) return
   if (!/^https?:\/\//i.test(url)) {
-    ElMessage.error('URL 必须以 http:// 或 https:// 开头')
+    ElMessage.error(t('params.urlInvalid'))
     return
   }
   currentFile.value = {

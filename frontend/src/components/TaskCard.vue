@@ -28,7 +28,7 @@
           {{ statusLabel }}
         </span>
         <span class="task-type-label">
-          {{ task.type === 'video' ? '视频' : '图片' }}
+          {{ task.type === 'video' ? t('taskStatus.video') : t('taskStatus.image') }}
         </span>
         <span class="task-time">{{ formatTime(task.createdAt) }}</span>
       </div>
@@ -50,24 +50,24 @@
       <!-- 成功状态：展示结果缩略图 -->
       <div v-else-if="task.status === 'success' && task.resultUrl" class="task-success">
         <span class="success-icon">✓</span>
-        <span class="success-text">生成完成 · {{ formatTime(task.updatedAt) }}</span>
+        <span class="success-text">{{ t('taskStatus.successText') }} · {{ formatTime(task.updatedAt) }}</span>
       </div>
 
       <!-- 失败状态：展示错误信息 -->
       <div v-else-if="task.status === 'failed'" class="task-failed">
         <span class="failed-icon">✗</span>
-        <span class="failed-text">{{ task.errorMessage || '生成失败' }}</span>
+        <span class="failed-text">{{ task.errorMessage || t('taskStatus.failedText') }}</span>
       </div>
 
       <!-- 已取消 -->
       <div v-else-if="task.status === 'cancelled'" class="task-cancelled">
         <span class="cancelled-icon">⊘</span>
-        <span class="cancelled-text">任务已取消</span>
+        <span class="cancelled-text">{{ t('taskStatus.cancelledText') }}</span>
       </div>
 
       <!-- 排队中 -->
       <div v-else-if="task.status === 'queued'" class="task-queued">
-        <span class="queued-text">等待创建任务...</span>
+        <span class="queued-text">{{ t('taskStatus.queuedText') }}</span>
       </div>
     </div>
 
@@ -76,33 +76,37 @@
       <button
         v-if="isRunning"
         class="action-btn cancel-btn"
-        title="取消任务"
+        :title="t('taskStatus.cancelTitle')"
         @click="handleCancel"
       >
-        取消
+        {{ t('taskStatus.cancel') }}
       </button>
       <button
         v-if="task.status === 'failed' || task.status === 'cancelled'"
         class="action-btn retry-btn"
-        title="重试"
+        :title="t('taskStatus.retryTitle')"
         @click="handleRetry"
       >
-        重试
+        {{ t('taskStatus.retry') }}
       </button>
       <button
         class="action-btn remove-btn"
-        title="从队列移除"
+        :title="t('taskStatus.removeTitle')"
         @click="handleRemove"
       >
-        移除
+        {{ t('taskStatus.remove') }}
       </button>
     </div>
   </div>
 </template>
 
 <script setup>
+// ------ 引入 i18n composable ------
 import { computed } from 'vue'
+import { useI18n } from '@/i18n'
 import { useTaskQueueStore } from '@/stores/taskQueue'
+
+const { t } = useI18n()
 
 const props = defineProps({
   task: {
@@ -127,14 +131,15 @@ const isRunning = computed(() => {
   return ['queued', 'pending', 'processing'].includes(props.task.status)
 })
 
+// ------ 状态标签国际化 ------
 const statusLabel = computed(() => {
   switch (props.task.status) {
-    case 'queued': return '排队中'
-    case 'pending': return '创建中'
-    case 'processing': return '生成中'
-    case 'success': return '完成'
-    case 'failed': return '失败'
-    case 'cancelled': return '已取消'
+    case 'queued': return t('taskStatus.queued')
+    case 'pending': return t('taskStatus.pending')
+    case 'processing': return t('taskStatus.processing')
+    case 'success': return t('taskStatus.success')
+    case 'failed': return t('taskStatus.failed')
+    case 'cancelled': return t('taskStatus.cancelled')
     default: return props.task.status
   }
 })

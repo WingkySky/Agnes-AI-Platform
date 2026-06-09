@@ -3,19 +3,13 @@
      模式：
        - 文生图 (text2image)
        - 图生图 (image2image)
-     关键交互：
-       - 左侧「生成图片」按钮始终可用（受并发数限制）
-       - 提交后自动选中新任务作为预览对象
-       - 右侧预览区显示「当前选中任务」（队列点击可切换）
-       - 正在进行的任务可在预览区内点击「中止」
+     - 所有 UI 文案通过 i18n.t() 调用实现多语言
      ===================================================== -->
 
 <template>
   <div class="image-view">
-    <h2 class="page-title">🎨 图片生成</h2>
-    <p class="page-desc">
-      根据文字描述或参考图生成 AI 图片。支持同时提交多个任务，点击右下「队列」可随时切换查看不同任务的状态。
-    </p>
+    <h2 class="page-title">🎨 {{ t('view.imageTitle') }}</h2>
+    <p class="page-desc">{{ t('view.imageDesc') }}</p>
 
     <el-row :gutter="24">
       <!-- 左侧：参数区 -->
@@ -23,7 +17,7 @@
         <el-card shadow="never">
           <template #header>
           <div class="card-header">
-            <span>生成参数</span>
+            <span>{{ t('params.title') }}</span>
           </div>
           </template>
 
@@ -31,14 +25,14 @@
           <el-tabs v-model="mode" class="mode-tabs">
               <el-tab-pane name="text2image">
                 <template #label>
-                  <span>📝 文生图</span>
-                  <span class="tab-sub">仅输入提示词，AI 从零生成图片</span>
+                  <span>{{ t('params.mode.text2image') }}</span>
+                  <span class="tab-sub">{{ t('params.mode.textOnly') }}</span>
                 </template>
               </el-tab-pane>
               <el-tab-pane name="image2image">
                 <template #label>
-                  <span>🖼 图生图</span>
-                  <span class="tab-sub">上传参考图 + 提示词，AI 基于参考图创作</span>
+                  <span>{{ t('params.mode.image2image') }}</span>
+                  <span class="tab-sub">{{ t('params.mode.imageOnly') }}</span>
                 </template>
               </el-tab-pane>
           </el-tabs>
@@ -53,12 +47,12 @@
 
           <!-- Prompt 输入 -->
           <el-form label-position="top" class="param-form">
-            <el-form-item label="提示词 (Prompt)">
+            <el-form-item :label="t('params.prompt')">
               <el-input
               v-model="prompt"
               type="textarea"
               :rows="4"
-              placeholder="请输入图片描述，例如：一只坐在月球上的小猫，超现实主义风格，高细节"
+              :placeholder="t('params.promptPlaceholder')"
               maxlength="2000"
               show-word-limit
             />
@@ -66,20 +60,20 @@
 
             <!-- 预设风格 -->
             <PromptTemplates
-              :templates="IMAGE_TEMPLATES"
+              :templates="imageTemplates"
               @select="appendStylePrompt"
             />
 
             <el-row :gutter="16">
               <el-col :span="12">
-                <el-form-item label="尺寸">
+                <el-form-item :label="t('params.size')">
                   <el-select v-model="size">
                     <el-option v-for="s in IMAGE_SIZES" :key="s" :label="s" :value="s" />
                   </el-select>
                 </el-form-item>
               </el-col>
               <el-col :span="12">
-                <el-form-item label="模型">
+                <el-form-item :label="t('params.model')">
                   <el-select v-model="model">
                     <el-option v-for="m in IMAGE_MODELS" :key="m" :label="m" :value="m" />
                   </el-select>
@@ -87,7 +81,7 @@
               </el-col>
             </el-row>
 
-            <!-- 生成按钮：始终可用（受并发数限制） -->
+            <!-- 生成按钮 -->
             <el-button
               type="primary"
               size="large"
@@ -95,11 +89,11 @@
               :disabled="!canSubmit"
               @click="handleGenerate">
               <el-icon><MagicStick /></el-icon>
-              <span>✨ 生成图片（加入队列）</span>
+              <span>{{ t('generate.imageBtn') }}</span>
             </el-button>
 
             <div class="queue-hint">
-              当前进行中: {{ queue.runningImageCount }} / 5 · 已提交任务: {{ taskCount }}
+              {{ t('generate.running') }}: {{ queue.runningImageCount }} / 5 · {{ t('generate.submitted') }}: {{ taskCount }}
             </div>
           </el-form>
         </el-card>
@@ -111,7 +105,7 @@
           <template #header>
           <div class="card-header">
             <div class="header-title">
-              <span>生成结果</span>
+              <span>{{ t('preview.resultTitle') }}</span>
               <span v-if="activeTask" class="task-pill" :class="'status-' + activeTask.status">
                 {{ statusLabel }}
               </span>
@@ -119,11 +113,11 @@
             <span v-if="resultUrl" class="header-actions">
               <el-button size="small" @click="downloadImage">
               <el-icon><Download /></el-icon>
-              下载
+              {{ t('preview.download') }}
               </el-button>
               <el-button size="small" type="primary" link @click="copyImageUrl">
               <el-icon><Link /></el-icon>
-              复制链接
+              {{ t('preview.copyLink') }}
               </el-button>
             </span>
           </div>
@@ -131,13 +125,13 @@
 
           <!-- 情况 A：有选中任务且正在进行中 -->
           <div v-if="activeTask && taskRunning" class="result-loading">
-            <div class="task-id-row">任务 ID: {{ activeTask.taskId }}</div>
+            <div class="task-id-row">{{ t('status.taskId') }}: {{ activeTask.taskId }}</div>
             <el-progress
               :percentage="taskProgress"
               :stroke-width="12"
               :color="progressColor" />
-            <div class="loading-text">{{ statusLabel }}中...</div>
-            <div class="loading-sub">已耗时 {{ taskElapsedSec }} 秒</div>
+            <div class="loading-text">{{ statusLabel }} ...</div>
+            <div class="loading-sub">{{ t('status.elapsedSeconds') }} {{ taskElapsedSec }} {{ t('common.seconds') }}</div>
             <div class="prompt-row">{{ activeTask.prompt }}</div>
             <el-button
               type="danger"
@@ -145,7 +139,7 @@
               class="cancel-btn-inline"
               @click="cancelActiveTask">
               <el-icon><CircleCloseFilled /></el-icon>
-              中止此任务
+              {{ t('status.cancelTask') }}
             </el-button>
           </div>
 
@@ -155,11 +149,11 @@
             <img v-else-if="activeTask.imageB64" :src="'data:image/png;base64,' + activeTask.imageB64" class="result-img" />
             <div class="result-meta">
               <div class="meta-row">
-              <span class="meta-label">提示词：</span>
+              <span class="meta-label">{{ t('params.prompt') }}：</span>
               <span class="meta-value">{{ activeTask.prompt }}</span>
               </div>
               <div class="meta-row">
-              <span class="meta-label">尺寸：</span>
+              <span class="meta-label">{{ t('params.size') }}：</span>
               <span class="meta-value">{{ size }}</span>
               </div>
             </div>
@@ -168,42 +162,42 @@
           <!-- 情况 C：任务失败 -->
           <div v-else-if="activeTask && activeTask.status === 'failed'" class="result-failed">
             <el-icon :size="48" color="#ff7b7b"><CircleCloseFilled /></el-icon>
-            <div class="failed-text">图片生成失败</div>
-            <div class="failed-sub">{{ activeTask.errorMessage || '未知错误，请重试' }}</div>
+            <div class="failed-text">{{ t('status.imageGenerateFailed') }}</div>
+            <div class="failed-sub">{{ activeTask.errorMessage || '' }}</div>
             <el-button type="primary" size="small" class="retry-btn" @click="retryActiveTask">
-              使用相同参数重试
+              {{ t('status.retryWithSame') }}
             </el-button>
           </div>
 
           <!-- 情况 D：已取消 -->
           <div v-else-if="activeTask && activeTask.status === 'cancelled'" class="result-failed">
             <el-icon :size="48" color="#ffb86b"><CircleCloseFilled /></el-icon>
-            <div class="failed-text">任务已取消</div>
-            <div class="failed-sub">该任务已停止，可重新提交新任务</div>
+            <div class="failed-text">{{ t('status.cancelled') }}</div>
+            <div class="failed-sub">{{ t('preview.wrongTypeHint') }}</div>
           </div>
 
           <!-- 情况 E：选中的是视频任务，不匹配当前视图 -->
           <div v-else-if="activeTaskIsOtherType" class="empty-state">
             <el-icon :size="48"><VideoPlay /></el-icon>
-            <p class="empty-text">当前选中的是视频任务</p>
-            <p class="empty-sub">请点击右下「队列」切换到图片任务，或前往视频生成页查看该任务</p>
+            <p class="empty-text">{{ t('preview.wrongTypeImage') }}</p>
+            <p class="empty-sub">{{ t('preview.switchPageHint') }}</p>
           </div>
 
           <!-- 情况 F：没有选中的任务 -->
           <div v-else class="empty-state">
             <el-icon :size="48"><PictureFilled /></el-icon>
-            <p class="empty-text">尚未选择任务预览</p>
-            <p class="empty-sub">提交新图片任务后，或点击右下「队列」中任一任务条目，此处将显示对应任务的状态和结果</p>
+            <p class="empty-text">{{ t('preview.notSelectable') }}</p>
+            <p class="empty-sub">{{ t('preview.emptyHint') }}</p>
           </div>
         </el-card>
 
         <!-- 使用技巧 -->
         <div class="tips-card">
-          <div class="tip-title">💡 使用技巧</div>
+          <div class="tip-title">{{ t('tips.title') }}</div>
           <ul>
-            <li>可同时提交多个图片任务（最多 5 个并发），无需等待当前任务完成</li>
-            <li>点击右下「队列」可随时查看、切换、中止任意任务</li>
-            <li>任务完成后在队列中保留约 20 分钟，超过可在「生成历史」查看</li>
+            <li>{{ t('tips.concurrentImage') }}</li>
+            <li>{{ t('tips.queueSwitch') }}</li>
+            <li>{{ t('tips.historyKeep') }}</li>
           </ul>
         </div>
       </el-col>
@@ -220,16 +214,21 @@ import {
 import PromptTemplates from '@/components/PromptTemplates.vue'
 import ImageUploader from '@/components/ImageUploader.vue'
 import { useTaskQueueStore } from '@/stores/taskQueue'
+import { useI18n } from '@/i18n'
 
-const IMAGE_TEMPLATES = [
-  { label: '超现实主义', prompt: '，超现实主义风格，梦幻，高细节' },
-  { label: '电影感', prompt: '，电影感，戏剧性光照，宽银幕' },
-  { label: '动漫风格', prompt: '，日式动漫风格，鲜艳色彩，细腻线条' },
-  { label: '油画风格', prompt: '，古典油画风格，厚重笔触，文艺复兴质感' },
-  { label: '写实摄影', prompt: '，专业摄影，8K 超高清，自然光照' },
-  { label: '赛博朋克', prompt: '，赛博朋克，霓虹光，未来都市感' },
-  { label: '水墨风格', prompt: '，中国水墨风格，留白艺术，意境悠远' },
-]
+const { t } = useI18n()
+
+// 预设风格：不同语言下显示不同的 label（prompt 本身保持原样，不随语言变化）
+// 注意：这里用 computed 动态读取当前语言下的显示名，避免语言切换后不同步
+const imageTemplates = computed(() => ([
+  { label: t('presets.surrealism'), prompt: '，超现实主义风格，梦幻，高细节' },
+  { label: t('presets.cinematic'), prompt: '，电影感，戏剧性光照，宽银幕' },
+  { label: t('presets.anime'), prompt: '，日式动漫风格，鲜艳色彩，细腻线条' },
+  { label: t('presets.oilPainting'), prompt: '，古典油画风格，厚重笔触，文艺复兴质感' },
+  { label: t('presets.realisticPhoto'), prompt: '，专业摄影，8K 超高清，自然光照' },
+  { label: t('presets.cyberpunk'), prompt: '，赛博朋克，霓虹光，未来都市感' },
+  { label: t('presets.inkStyle'), prompt: '，中国水墨风格，留白艺术，意境悠远' },
+]))
 
 const IMAGE_SIZES = [
   '1024x1024',
@@ -278,7 +277,7 @@ const taskRunning = computed(() => {
   return ['pending', 'queued', 'processing'].includes(activeTask.value.status)
 })
 
-// 进度、耗时（通过 queue._tick 驱动每秒响应式刷新）
+// 进度、耗时
 const taskProgress = computed(() => {
   if (!activeTask.value) return 0
   return Math.min(activeTask.value.progress || 0, 99)
@@ -287,7 +286,6 @@ const taskElapsedSec = computed(() => {
   if (!activeTask.value) return 0
   const created = activeTask.value.createdAt || 0
   if (!created) return 0
-  // 读取 queue._tick 让此 computed 随 tick 刷新
   queue._tick
   return Math.floor((Date.now() - created) / 1000)
 })
@@ -298,19 +296,14 @@ const resultUrl = computed(() => {
   return activeTask.value.resultUrl || activeTask.value.url || ''
 })
 
-// 状态标签（中文化）
+// 状态标签（使用 i18n 显示本地化名称）
 const statusLabel = computed(() => {
   if (!activeTask.value) return ''
   const s = activeTask.value.status
-  const map = {
-    queued: '排队',
-    pending: '等待中',
-    processing: '生成',
-    success: '已完成',
-    failed: '失败',
-    cancelled: '已取消',
-  }
-  return map[s] || s
+  const key = `status.${s}`
+  const localized = t(key)
+  // 若翻译值与 key 相同（未翻译），则原样返回
+  return localized === key ? s : localized
 })
 
 const progressColor = '#ff8c42'
@@ -328,9 +321,9 @@ const canSubmit = computed(() => {
   return true
 })
 
-function appendStylePrompt(t) {
-  if (!prompt.value.trim().endsWith(t)) {
-    prompt.value = prompt.value.trim() + t
+function appendStylePrompt(tpl) {
+  if (!prompt.value.trim().endsWith(tpl)) {
+    prompt.value = prompt.value.trim() + tpl
   }
 }
 
@@ -344,15 +337,15 @@ function handleImageClear() {
 // ---------- 提交任务 ----------
 async function handleGenerate() {
   if (!prompt.value.trim()) {
-    ElMessage.warning('请先填写提示词')
+    ElMessage.warning(t('message.pleaseFillPrompt'))
     return
   }
   if (mode.value === 'image2image' && !referenceFile.value) {
-    ElMessage.warning('请先上传参考图')
+    ElMessage.warning(t('message.pleaseUploadRefImage'))
     return
   }
   if (queue.runningImageCount >= 5) {
-    ElMessage.warning('已达 5 个图片并发上限，请等待任务完成')
+    ElMessage.warning(t('generate.concurrentImageLimit'))
     return
   }
 
@@ -368,11 +361,11 @@ async function handleGenerate() {
 
   try {
     const taskId = await queue.submitImageTask(params)
-    queue.setActiveTask(taskId)  // 提交后自动选中新任务 → 预览区立即显示
-    ElMessage.success('图片任务已提交，可点击右下「队列」查看所有任务')
+    queue.setActiveTask(taskId)
+    ElMessage.success(t('generate.imageSubmitted'))
   } catch (e) {
     console.error('[ImageView] 提交任务失败：', e)
-    ElMessage.error('创建图片任务失败：' + (e.message || '未知错误'))
+    ElMessage.error(t('generate.createTaskFailed') + (e.message || ''))
   }
 }
 
@@ -380,7 +373,7 @@ async function handleGenerate() {
 function cancelActiveTask() {
   if (!queue.activeTaskId) return
   queue.cancelTask(queue.activeTaskId)
-  ElMessage.info('已请求中止该任务')
+  ElMessage.info(t('status.taskCancelled'))
 }
 
 // ---------- 重试当前任务 ----------
@@ -389,20 +382,20 @@ function retryActiveTask() {
   const taskId = queue.retryTask(activeTask.value.taskId)
   if (taskId) {
     queue.setActiveTask(taskId)
-    ElMessage.success('已重新提交任务')
+    ElMessage.success(t('status.taskResubmitted'))
   } else {
-    ElMessage.warning('重试失败，请重新手动填写参数')
+    ElMessage.warning(t('status.retryFailed'))
   }
 }
 
 // ---------- 下载 / 复制 ----------
 async function downloadImage() {
   if (!resultUrl.value) {
-    ElMessage.warning('图片链接为空，无法下载')
+    ElMessage.warning(t('preview.imageEmpty'))
     return
   }
   try {
-    ElMessage.info('正在准备下载…')
+    ElMessage.info(t('preview.preparing'))
     const response = await fetch(resultUrl.value, { mode: 'cors' })
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     const blob = await response.blob()
@@ -414,23 +407,23 @@ async function downloadImage() {
     a.click()
     document.body.removeChild(a)
     setTimeout(() => URL.revokeObjectURL(blobUrl), 1000)
-    ElMessage.success('已开始下载图片')
+    ElMessage.success(t('preview.download'))
   } catch (err) {
     console.warn('[ImageView] fetch 下载失败：', err)
-    ElMessage.warning('跨域下载受限，已在新标签页打开。请右键图片选择「另存为」')
+    ElMessage.warning(t('preview.corsWarning'))
     window.open(resultUrl.value, '_blank', 'noopener,noreferrer')
   }
 }
 
 function copyImageUrl() {
   if (!resultUrl.value) {
-    ElMessage.warning('图片链接为空')
+    ElMessage.warning(t('preview.imageEmpty'))
     return
   }
   if (navigator.clipboard && window.isSecureContext) {
     navigator.clipboard.writeText(resultUrl.value)
-      .then(() => ElMessage.success('图片链接已复制'))
-      .catch(() => ElMessage.error('复制失败，请手动复制'))
+      .then(() => ElMessage.success(t('preview.copySuccess')))
+      .catch(() => ElMessage.error(t('preview.copyFailed')))
   } else {
     const ta = document.createElement('textarea')
     ta.value = resultUrl.value
@@ -438,7 +431,7 @@ function copyImageUrl() {
     ta.select()
     document.execCommand('copy')
     document.body.removeChild(ta)
-    ElMessage.success('图片链接已复制')
+    ElMessage.success(t('preview.copySuccess'))
   }
 }
 </script>
@@ -551,7 +544,7 @@ function copyImageUrl() {
   text-align: left;
 }
 .meta-row { font-size: 13px; padding: 4px 0; color: #d5e3f7; }
-.meta-label { color: #8ba3c9; margin-right: 6px; }
+.meta-label { color: #8ba3c9; margin-right: 8px; }
 .meta-value { word-break: break-word; }
 
 .result-failed {

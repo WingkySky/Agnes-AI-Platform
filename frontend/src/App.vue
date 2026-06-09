@@ -1,63 +1,78 @@
 <!-- =====================================================
      Agnes AI Platform 根组件
      - 提供主布局（左侧导航 + 右侧内容）
-     - 通过路由切换图片 / 视频 / 历史三个页面
+     - 通过 <el-config-provider> 响应式切换 Element Plus 语言
+     - 右上角 LanguageSwitcher 切换界面语言
      ===================================================== -->
 
 <template>
-  <div class="app-root">
-    <!-- 顶部栏 -->
-    <header class="app-header">
-      <div class="app-brand">
-        <span class="brand-icon">✨</span>
-        <div class="brand-text">
-          <h1>Agnes AI Platform</h1>
-          <p class="brand-sub">图片 & 视频生成平台</p>
+  <el-config-provider :locale="epLocale">
+    <div class="app-root">
+      <!-- 顶部栏 -->
+      <header class="app-header">
+        <div class="app-brand">
+          <span class="brand-icon">✨</span>
+          <div class="brand-text">
+            <h1>Agnes AI Platform</h1>
+            <p class="brand-sub">{{ t('app.title') }}</p>
+          </div>
         </div>
-      </div>
 
-      <nav class="app-nav">
-        <router-link to="/images" class="nav-item" active-class="active">
-          <el-icon><Picture /></el-icon>
-          <span>图片生成</span>
-        </router-link>
-        <router-link to="/videos" class="nav-item" active-class="active">
-          <el-icon><VideoPlay /></el-icon>
-          <span>视频生成</span>
-        </router-link>
-        <router-link to="/history" class="nav-item" active-class="active">
-          <el-icon><Clock /></el-icon>
-          <span>生成历史</span>
-        </router-link>
-      </nav>
+        <nav class="app-nav">
+          <router-link to="/images" class="nav-item" active-class="active">
+            <el-icon><Picture /></el-icon>
+            <span>{{ t('nav.images') }}</span>
+          </router-link>
+          <router-link to="/videos" class="nav-item" active-class="active">
+            <el-icon><VideoPlay /></el-icon>
+            <span>{{ t('nav.videos') }}</span>
+          </router-link>
+          <router-link to="/history" class="nav-item" active-class="active">
+            <el-icon><Clock /></el-icon>
+            <span>{{ t('nav.history') }}</span>
+          </router-link>
+        </nav>
 
-      <div class="app-version">
-        v1.0 · Vue 3 + FastAPI
-      </div>
-    </header>
+        <div class="app-header-right">
+          <LanguageSwitcher />
+        </div>
+      </header>
 
-    <!-- 主内容区 -->
-    <main class="app-main">
-      <router-view v-slot="{ Component }">
-        <transition name="fade" mode="out-in">
-          <component :is="Component" />
-        </transition>
-      </router-view>
-    </main>
+      <!-- 主内容区 -->
+      <main class="app-main">
+        <router-view v-slot="{ Component }">
+          <transition name="fade" mode="out-in">
+            <component :is="Component" />
+          </transition>
+        </router-view>
+      </main>
 
-    <!-- 全局任务队列悬浮面板（路由切换时不销毁） -->
-    <TaskQueuePanel />
+      <!-- 全局任务队列悬浮面板（路由切换时不销毁） -->
+      <TaskQueuePanel />
 
-    <!-- 页脚 -->
-    <footer class="app-footer">
-      <span>© Agnes AI Platform · 基于 Vue 3 + FastAPI 构建</span>
-    </footer>
-  </div>
+      <!-- 页脚 -->
+      <footer class="app-footer">
+        <span>{{ t('app.footer') }}</span>
+      </footer>
+    </div>
+  </el-config-provider>
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { Picture, VideoPlay, Clock } from '@element-plus/icons-vue'
 import TaskQueuePanel from './components/TaskQueuePanel.vue'
+import LanguageSwitcher from './components/LanguageSwitcher.vue'
+import { useI18n, getElementPlusLocale } from '@/i18n'
+
+const { t, locale } = useI18n()
+
+// 每当 locale 变化时返回对应的 Element Plus 语言对象
+const epLocale = computed(() => {
+  // 读取 locale.value 使 computed 与语言切换关联
+  const _ = locale.value // eslint-disable-line no-unused-vars
+  return getElementPlusLocale()
+})
 </script>
 
 <style scoped>
@@ -149,9 +164,9 @@ import TaskQueuePanel from './components/TaskQueuePanel.vue'
   box-shadow: 0 0 20px rgba(100, 150, 255, 0.18);
 }
 
-.app-version {
-  font-size: 12px;
-  color: #6b84aa;
+.app-header-right {
+  display: flex;
+  align-items: center;
 }
 
 /* ---- 主内容 ---- */
@@ -170,7 +185,7 @@ import TaskQueuePanel from './components/TaskQueuePanel.vue'
   text-align: center;
   font-size: 12px;
   color: #6b84aa;
-  border-top: 1px solid rgba(100, 150, 220, 0.1);
+  border-top: 1px solid rgba(120, 150, 225, 0.1);
 }
 
 /* ---- 过渡动画 ---- */

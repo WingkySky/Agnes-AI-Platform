@@ -1,32 +1,33 @@
 <!-- =====================================================
-     历史记录视图 HistoryView
+     历史记录视图 HistoryView（已接入 i18n 国际化）
      - 筛选：全部 / 图片 / 视频
      - 分页加载
      - 点击卡片弹出详情（可预览、下载、删除）
+     - 所有 UI 文案通过 t() 函数调用
      ===================================================== -->
 
 <template>
   <div class="history-view">
-    <h2 class="page-title">📜 生成历史</h2>
-    <p class="page-desc">查看你在本平台生成过的所有图片与视频。可按类型筛选。</p>
+    <h2 class="page-title">📜 {{ t('history.title') }}</h2>
+    <p class="page-desc">{{ t('history.desc') }}</p>
 
     <!-- 筛选 Tab -->
     <div class="filter-wrap">
       <el-radio-group v-model="filterType" @change="loadList(true)">
-        <el-radio-button value="all">全部 ({{ imageCount + videoCount }})</el-radio-button>
-        <el-radio-button value="image">图片 ({{ imageCount }})</el-radio-button>
-        <el-radio-button value="video">视频 ({{ videoCount }})</el-radio-button>
+        <el-radio-button value="all">{{ t('history.all') }} ({{ imageCount + videoCount }})</el-radio-button>
+        <el-radio-button value="image">{{ t('history.image') }} ({{ imageCount }})</el-radio-button>
+        <el-radio-button value="video">{{ t('history.video') }} ({{ videoCount }})</el-radio-button>
       </el-radio-group>
       <div class="filter-actions">
         <el-button type="primary" :icon="Refresh" :loading="loading" @click="loadList(true)">
-          刷新
+          {{ t('common.refresh') }}
         </el-button>
         <!-- 编辑模式切换按钮 -->
         <el-button
           :type="editMode ? 'warning' : 'default'"
-          :icon="editMode ? 'Close' : 'Edit'"
+          :icon="editMode ? CloseIcon : Edit"
           @click="toggleEditMode">
-          {{ editMode ? '退出编辑' : '编辑' }}
+          {{ editMode ? t('history.exitEdit') : t('history.edit') }}
         </el-button>
       </div>
     </div>
@@ -38,34 +39,34 @@
           v-model="isAllSelected"
           :indeterminate="isIndeterminate"
           @change="toggleSelectAll">
-          全选当前页
+          {{ t('history.selectAllPage') }}
         </el-checkbox>
         <span class="selection-info">
-          已选 <b class="selection-count">{{ selectedIds.length }}</b> 条
+          {{ t('history.selectedCount') }} <b class="selection-count">{{ selectedIds.length }}</b> {{ t('common.item') }}
         </span>
       </div>
       <div class="edit-right">
         <el-button
           type="danger"
-          :icon="Delete"
+          :icon="DeleteIcon"
           :disabled="selectedIds.length === 0"
           :loading="batchDeleting"
           @click="confirmBatchDelete">
-          删除选中 ({{ selectedIds.length }})
+          {{ t('history.deleteSelected') }} ({{ selectedIds.length }})
         </el-button>
       </div>
     </div>
 
     <!-- 加载中 -->
     <div v-if="loading && list.length === 0" class="loading-state">
-      <el-icon :size="32" class="spinner"><Loading /></el-icon>
-      <div>加载中...</div>
+      <el-icon :size="32" class="spinner"><LoadingIcon /></el-icon>
+      <div>{{ t('history.loading') }}</div>
     </div>
 
     <!-- 空状态 -->
     <div v-else-if="list.length === 0" class="empty-state">
       <el-icon :size="48"><Document /></el-icon>
-      <p class="empty-text">暂无历史记录，去「图片生成」或「视频生成」页面试试吧～</p>
+      <p class="empty-text">{{ t('history.emptyTip') }}</p>
     </div>
 
     <!-- 卡片网格 -->
@@ -84,7 +85,7 @@
           <img
             v-if="item.type === 'image'"
             :src="item.result_url"
-            alt="history thumbnail"
+            :alt="t('history.thumbnailAlt')"
             loading="lazy"
           />
           <!-- 视频卡片：首帧缩略图 + 悬停 GIF 预览 -->
@@ -98,20 +99,20 @@
             <img
               v-if="videoThumbnails[item.id]"
               :src="videoThumbnails[item.id]"
-              alt="video thumbnail"
+              :alt="t('history.videoThumbAlt')"
               class="video-thumb-img"
               loading="lazy"
             />
             <!-- 缩略图加载失败时的占位 -->
             <div v-else class="video-thumb-placeholder">
               <el-icon :size="44" class="play-icon"><VideoPlay /></el-icon>
-              <span class="video-thumb-label">点击播放</span>
+              <span class="video-thumb-label">{{ t('history.clickToPlay') }}</span>
             </div>
             <!-- 悬停时的 GIF 预览 -->
             <img
               v-if="hoveredVideoId === item.id && videoPreviews[item.id]"
               :src="videoPreviews[item.id]"
-              alt="video preview"
+              :alt="t('history.videoPreviewAlt')"
               class="video-preview-gif"
             />
             <!-- 播放图标蒙层 -->
@@ -120,7 +121,7 @@
             </div>
           </div>
           <div class="type-badge" :class="item.type">
-            {{ item.type === 'image' ? '图片' : '视频' }}
+            {{ item.type === 'image' ? t('history.image') : t('history.video') }}
           </div>
         </div>
         <div class="card-meta">
@@ -147,13 +148,13 @@
     <!-- 详情弹窗 -->
     <el-dialog
       v-model="detailVisible"
-      :title="detailItem ? (detailItem.type === 'image' ? '图片详情' : '视频详情') : '详情'"
+      :title="detailItem ? (detailItem.type === 'image' ? t('history.imageDetail') : t('history.videoDetail')) : t('history.detail')"
       width="70%"
       top="5vh"
       destroy-on-close>
       <div v-if="detailItem" class="detail-content">
         <div class="detail-media">
-          <img v-if="detailItem.type === 'image'" :src="detailItem.result_url" />
+          <img v-if="detailItem.type === 'image'" :src="detailItem.result_url" :alt="t('history.imageDetailAlt')" />
           <div v-else class="detail-video-wrap">
             <video
               v-if="detailItem.result_url"
@@ -171,62 +172,62 @@
             />
             <div v-else class="detail-video-empty">
               <el-icon :size="36" color="#ff9b9b"><CircleCloseFilled /></el-icon>
-              <div>此记录无有效视频链接</div>
+              <div>{{ t('history.videoUrlEmpty') }}</div>
             </div>
             <div v-if="detailVideoLoading" class="detail-video-status">
-              <el-icon :size="24" class="spinner"><Loading /></el-icon>
-              <span>视频加载中…</span>
+              <el-icon :size="24" class="spinner"><LoadingIcon /></el-icon>
+              <span>{{ t('history.videoLoading') }}</span>
             </div>
             <div v-if="detailVideoFailed" class="detail-video-status error">
               <el-icon :size="24"><CircleCloseFilled /></el-icon>
-              <span>视频无法播放，请尝试「下载」或「新标签页打开」</span>
+              <span>{{ t('history.videoCannotPlay') }}</span>
             </div>
           </div>
         </div>
         <div class="detail-info">
-          <div class="info-row"><span class="label">提示词：</span><span>{{ detailItem.prompt }}</span></div>
-          <div class="info-row"><span class="label">类型：</span><span>{{ detailItem.type === 'image' ? '图片' : '视频' }}</span></div>
-          <div class="info-row" v-if="detailItem.model"><span class="label">模型：</span><span>{{ detailItem.model }}</span></div>
-          <div class="info-row"><span class="label">状态：</span><span>{{ detailItem.status || 'success' }}</span></div>
-          <div class="info-row"><span class="label">创建时间：</span><span>{{ detailItem.created_at }}</span></div>
+          <div class="info-row"><span class="label">{{ t('history.promptLabel') }}：</span><span>{{ detailItem.prompt }}</span></div>
+          <div class="info-row"><span class="label">{{ t('history.typeLabel') }}：</span><span>{{ detailItem.type === 'image' ? t('history.image') : t('history.video') }}</span></div>
+          <div class="info-row" v-if="detailItem.model"><span class="label">{{ t('history.modelLabel') }}：</span><span>{{ detailItem.model }}</span></div>
+          <div class="info-row"><span class="label">{{ t('history.statusLabel') }}：</span><span>{{ detailItem.status || 'success' }}</span></div>
+          <div class="info-row"><span class="label">{{ t('history.createdAtLabel') }}：</span><span>{{ detailItem.created_at }}</span></div>
           <div class="info-row url-row">
-            <span class="label">链接：</span>
+            <span class="label">{{ t('history.linkLabel') }}：</span>
             <span class="url-value">{{ detailItem.result_url }}</span>
-            <el-button size="small" link type="primary" @click="copyLink(detailItem.result_url)">复制链接</el-button>
-            <el-button size="small" link type="primary" @click="downloadDetail">下载</el-button>
-            <el-button size="small" link type="primary" @click="openInNewTab">新标签页打开</el-button>
+            <el-button size="small" link type="primary" @click="copyLink(detailItem.result_url)">{{ t('history.copyLink') }}</el-button>
+            <el-button size="small" link type="primary" @click="downloadDetail">{{ t('history.download') }}</el-button>
+            <el-button size="small" link type="primary" @click="openInNewTab">{{ t('history.openNewTab') }}</el-button>
           </div>
         </div>
       </div>
       <template #footer>
-        <el-button @click="detailVisible = false">关闭</el-button>
-        <el-button type="danger" :icon="Delete" @click="confirmDelete">删除此记录</el-button>
+        <el-button @click="detailVisible = false">{{ t('common.close') }}</el-button>
+        <el-button type="danger" :icon="DeleteIcon" @click="confirmDelete">{{ t('history.deleteRecord') }}</el-button>
       </template>
     </el-dialog>
 
     <el-dialog
       v-model="deleteVisible"
-      title="确认删除"
+      :title="t('history.confirmDeleteTitle')"
       width="400px">
-      <div>确定要删除这条记录吗？此操作不可撤销。</div>
+      <div>{{ t('history.confirmDeleteMsg') }}</div>
       <template #footer>
-        <el-button @click="deleteVisible = false">取消</el-button>
-        <el-button type="danger" @click="doDelete">确认删除</el-button>
+        <el-button @click="deleteVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="danger" @click="doDelete">{{ t('common.confirm') }}</el-button>
       </template>
     </el-dialog>
 
     <!-- 批量删除确认弹窗 -->
     <el-dialog
       v-model="batchDeleteVisible"
-      title="确认批量删除"
+      :title="t('history.confirmBatchDeleteTitle')"
       width="460px">
       <div>
-        确定要删除已选中的 <b style="color:#ff9b9b">{{ selectedIds.length }}</b> 条记录吗？此操作不可撤销。
+        {{ t('history.confirmBatchDeleteMsg1') }} <b style="color:#ff9b9b">{{ selectedIds.length }}</b> {{ t('history.confirmBatchDeleteMsg2') }}
       </div>
       <template #footer>
-        <el-button @click="batchDeleteVisible = false">取消</el-button>
+        <el-button @click="batchDeleteVisible = false">{{ t('common.cancel') }}</el-button>
         <el-button type="danger" :loading="batchDeleting" @click="doBatchDelete">
-          确认删除 ({{ selectedIds.length }})
+          {{ t('history.confirmDelete') }} ({{ selectedIds.length }})
         </el-button>
       </template>
     </el-dialog>
@@ -238,6 +239,14 @@ import { ref, computed, onMounted, watch, nextTick, reactive } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, Loading, Document, Delete, VideoPlay, CircleCloseFilled, Edit, Close } from '@element-plus/icons-vue'
 import { getHistoryList, deleteHistoryRecord, batchDeleteHistory } from '@/api/history'
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
+
+// 图标别名：避免与本地方法同名
+const LoadingIcon = Loading
+const DeleteIcon = Delete
+const CloseIcon = Close
 
 const list = ref([])
 const loading = ref(false)
@@ -251,26 +260,23 @@ const filterType = ref('all')
 const detailVisible = ref(false)
 const deleteVisible = ref(false)
 const detailItem = ref(null)
-const detailVideoEl = ref(null)     // 详情弹窗中的 video 元素
-const detailPoster = ref('')         // 详情弹窗的视频首帧缩略图
-const detailVideoLoading = ref(false) // 视频加载中状态
-const detailVideoFailed = ref(false)  // 视频加载失败状态
+const detailVideoEl = ref(null)
+const detailPoster = ref('')
+const detailVideoLoading = ref(false)
+const detailVideoFailed = ref(false)
 
-// ---------- 视频缩略图 & 预览相关状态 ----------
-const videoThumbnails = reactive({})  // 视频首帧缩略图 URL 映射 { id: url }
-const videoPreviews = reactive({})    // 视频 GIF 预览 URL 映射 { id: url }
-const hoveredVideoId = ref(null)      // 当前鼠标悬停的视频卡片 ID
-const thumbnailLoading = reactive({}) // 缩略图加载中状态 { id: boolean }
-const previewLoading = reactive({})   // 预览 GIF 加载中状态 { id: boolean }
-const thumbnailFailed = reactive({})  // 缩略图加载失败 { id: boolean }
+const videoThumbnails = reactive({})
+const videoPreviews = reactive({})
+const hoveredVideoId = ref(null)
+const thumbnailLoading = reactive({})
+const previewLoading = reactive({})
+const thumbnailFailed = reactive({})
 
-// ---------- 编辑 / 多选删除相关状态 ----------
-const editMode = ref(false)              // 是否进入编辑模式
-const selectedIds = ref([])              // 当前已选中的记录 ID 列表
-const batchDeleteVisible = ref(false)    // 批量删除确认弹窗
-const batchDeleting = ref(false)         // 批量删除加载状态
+const editMode = ref(false)
+const selectedIds = ref([])
+const batchDeleteVisible = ref(false)
+const batchDeleting = ref(false)
 
-// 计算属性：当前页是否全选 / 是否半选
 const isAllSelected = computed(() => {
   if (!list.value.length) return false
   return list.value.every(item => selectedIds.value.includes(item.id))
@@ -282,41 +288,27 @@ const isIndeterminate = computed(() => {
   return selectedOnPage.length > 0 && selectedOnPage.length < pageIds.length
 })
 
-/**
- * 获取视频播放 URL：优先使用后端代理接口，解决 CORS 和 Range 请求问题
- */
 function getVideoStreamUrl(item) {
   if (item.type !== 'video' || !item.result_url) return ''
-  // 使用后端代理接口播放视频
   return `/api/history/video/${item.id}/stream`
 }
 
-// ---------- 视频缩略图 & 预览方法 ----------
-
-/**
- * 生成简单的哈希值（用于缓存破坏）
- */
 function simpleHash(str) {
   let hash = 0
   for (let i = 0; i < str.length; i++) {
     const char = str.charCodeAt(i)
     hash = ((hash << 5) - hash) + char
-    hash |= 0 // 转为 32 位整数
+    hash |= 0
   }
   return Math.abs(hash).toString(36)
 }
 
-/**
- * 加载视频首帧缩略图
- */
 async function loadVideoThumbnail(item) {
   if (videoThumbnails[item.id] || thumbnailLoading[item.id] || thumbnailFailed[item.id]) return
   thumbnailLoading[item.id] = true
   try {
-    // URL 中加入视频链接哈希作为缓存破坏参数，避免删除旧记录后新记录复用 ID 时命中浏览器缓存
     const urlHash = item.result_url ? simpleHash(item.result_url) : 'nourl'
     const url = `/api/history/video/${item.id}/thumbnail?v=${urlHash}`
-    // 用 Image 对象预加载，验证图片是否可用
     await new Promise((resolve, reject) => {
       const img = new Image()
       img.onload = resolve
@@ -325,24 +317,19 @@ async function loadVideoThumbnail(item) {
     })
     videoThumbnails[item.id] = url
   } catch (e) {
-    console.warn('[History] 视频缩略图加载失败 id=' + item.id, e)
+    console.warn('[History] ' + t('history.thumbLoadFail') + ' id=' + item.id, e)
     thumbnailFailed[item.id] = true
   } finally {
     thumbnailLoading[item.id] = false
   }
 }
 
-/**
- * 加载视频 GIF 预览
- */
 async function loadVideoPreview(item) {
   if (videoPreviews[item.id] || previewLoading[item.id]) return
   previewLoading[item.id] = true
   try {
-    // URL 中加入视频链接哈希作为缓存破坏参数
     const urlHash = item.result_url ? simpleHash(item.result_url) : 'nourl'
     const url = `/api/history/video/${item.id}/preview?v=${urlHash}`
-    // 用 Image 对象预加载 GIF
     await new Promise((resolve, reject) => {
       const img = new Image()
       img.onload = resolve
@@ -351,29 +338,21 @@ async function loadVideoPreview(item) {
     })
     videoPreviews[item.id] = url
   } catch (e) {
-    console.warn('[History] 视频预览 GIF 加载失败 id=' + item.id, e)
+    console.warn('[History] ' + t('history.gifLoadFail') + ' id=' + item.id, e)
   } finally {
     previewLoading[item.id] = false
   }
 }
 
-/**
- * 鼠标悬停视频卡片：显示 GIF 预览
- */
 function onVideoCardHover(item) {
   hoveredVideoId.value = item.id
-  // 延迟加载 GIF 预览（避免一进入页面就加载所有 GIF）
   loadVideoPreview(item)
 }
 
-/**
- * 鼠标离开视频卡片：隐藏 GIF 预览
- */
 function onVideoCardLeave(item) {
   hoveredVideoId.value = null
 }
 
-// 打开详情弹窗时重置视频状态
 watch(detailVisible, (val) => {
   if (val) {
     detailPoster.value = ''
@@ -382,7 +361,6 @@ watch(detailVisible, (val) => {
   }
 })
 
-// ---------- 加载列表 ----------
 async function loadList(resetPage = false) {
   if (resetPage) page.value = 1
   loading.value = true
@@ -394,15 +372,13 @@ async function loadList(resetPage = false) {
     })
     list.value = data.items || []
     totalCount.value = data.total || list.value.length
-    // 使用后端返回的全局类型计数（不受筛选条件和分页影响）
     imageCount.value = data.total_image_count ?? 0
     videoCount.value = data.total_video_count ?? 0
-    // 自动加载视频首帧缩略图（不阻塞列表渲染）
     list.value.filter(i => i.type === 'video').forEach(item => {
       loadVideoThumbnail(item)
     })
   } catch (e) {
-    console.error('[History] 加载失败：', e)
+    console.error('[History] ' + t('history.loadFail') + '：', e)
   } finally {
     loading.value = false
   }
@@ -418,7 +394,6 @@ function handleSizeChange(size) {
   loadList()
 }
 
-// ---------- 详情操作 ----------
 function showDetail(item) {
   detailItem.value = item
   detailPoster.value = ''
@@ -427,21 +402,13 @@ function showDetail(item) {
   detailVisible.value = true
 }
 
-// ---------- 编辑 / 多选删除方法 ----------
-/**
- * 切换编辑模式
- */
 function toggleEditMode() {
   editMode.value = !editMode.value
   if (!editMode.value) {
-    // 退出编辑模式时清空已选
     selectedIds.value = []
   }
 }
 
-/**
- * 卡片点击：编辑模式下切换选择，否则打开详情
- */
 function handleCardClick(item) {
   if (editMode.value) {
     toggleSelect(item.id)
@@ -450,9 +417,6 @@ function handleCardClick(item) {
   }
 }
 
-/**
- * 切换单条记录的选中状态
- */
 function toggleSelect(id) {
   const idx = selectedIds.value.indexOf(id)
   if (idx >= 0) {
@@ -462,47 +426,35 @@ function toggleSelect(id) {
   }
 }
 
-/**
- * 切换全选当前页
- */
 function toggleSelectAll(val) {
   if (val) {
-    // 全选：将当前页所有 ID 合并到 selectedIds
     const pageIds = list.value.map(item => item.id)
     const newSet = new Set(selectedIds.value)
     pageIds.forEach(id => newSet.add(id))
     selectedIds.value = Array.from(newSet)
   } else {
-    // 取消全选：从 selectedIds 中移除当前页所有 ID
     const pageIds = new Set(list.value.map(item => item.id))
     selectedIds.value = selectedIds.value.filter(id => !pageIds.has(id))
   }
 }
 
-/**
- * 打开批量删除确认弹窗
- */
 function confirmBatchDelete() {
   if (selectedIds.value.length === 0) {
-    ElMessage.warning('请至少选择一条记录')
+    ElMessage.warning(t('history.pleaseSelectOne'))
     return
   }
   batchDeleteVisible.value = true
 }
 
-/**
- * 执行批量删除
- */
 async function doBatchDelete() {
   if (selectedIds.value.length === 0) return
   batchDeleting.value = true
   try {
     const res = await batchDeleteHistory(selectedIds.value)
     const deletedCount = res?.deleted_count ?? selectedIds.value.length
-    ElMessage.success(`已成功删除 ${deletedCount} 条记录`)
+    ElMessage.success(t('history.batchDeleted').replace('{n}', deletedCount))
     batchDeleteVisible.value = false
     selectedIds.value = []
-    // 删除后重新加载列表
     loadList()
   } catch (e) {
     // 错误已在拦截器弹出
@@ -511,11 +463,6 @@ async function doBatchDelete() {
   }
 }
 
-// ---------- 详情其它操作 ----------
-
-/**
- * 通用复制文本到剪贴板（兼容非安全上下文降级方案）
- */
 function copyToClipboard(text) {
   if (!text) return Promise.resolve()
   if (navigator.clipboard && window.isSecureContext) {
@@ -536,26 +483,23 @@ function copyToClipboard(text) {
 
 function copyLink(url) {
   if (!url) {
-    ElMessage.warning('此记录无有效链接')
+    ElMessage.warning(t('history.noValidLink'))
     return
   }
   copyToClipboard(url)
-    .then(() => ElMessage.success('链接已复制到剪贴板'))
-    .catch(() => ElMessage.error('复制失败，请手动选择链接文本复制'))
+    .then(() => ElMessage.success(t('history.linkCopied')))
+    .catch(() => ElMessage.error(t('history.copyLinkFailed')))
 }
 
-/**
- * 下载资源：优先 fetch + Blob 下载（同源/带 CORS 头），失败回退为新标签页打开
- */
 async function downloadDetail() {
   if (!detailItem.value?.result_url) {
-    ElMessage.warning('此记录无有效资源链接')
+    ElMessage.warning(t('history.noValidResource'))
     return
   }
   const url = detailItem.value.result_url
   const type = detailItem.value.type
   try {
-    ElMessage.info('正在准备下载，请稍候…')
+    ElMessage.info(t('history.preparingDownload'))
     const response = await fetch(url, { mode: 'cors' })
     if (!response.ok) throw new Error('HTTP ' + response.status)
     const blob = await response.blob()
@@ -567,29 +511,23 @@ async function downloadDetail() {
     a.click()
     document.body.removeChild(a)
     setTimeout(() => URL.revokeObjectURL(blobUrl), 1000)
-    ElMessage.success('已开始下载')
+    ElMessage.success(t('history.downloadStarted'))
   } catch (err) {
-    console.warn('[History] fetch 下载失败，回退为新标签页打开：', err)
-    ElMessage.warning('跨域下载受限，已在新标签页打开。请右键并选择「另存为」。')
+    console.warn('[History] ' + t('history.downloadFallback') + '：', err)
+    ElMessage.warning(t('preview.videoCorsWarning'))
     window.open(url, '_blank', 'noopener,noreferrer')
   }
 }
 
-/**
- * 在新标签页直接打开资源链接
- */
 function openInNewTab() {
   if (!detailItem.value?.result_url) {
-    ElMessage.warning('此记录无有效资源链接')
+    ElMessage.warning(t('history.noValidResource'))
     return
   }
   window.open(detailItem.value.result_url, '_blank', 'noopener,noreferrer')
-  ElMessage.success('已在新标签页打开')
+  ElMessage.success(t('history.openedInNewTab'))
 }
 
-/**
- * 详情弹窗中视频 loadeddata：canvas 截取首帧作为 poster
- */
 function captureDetailPoster() {
   const el = detailVideoEl.value
   if (!el || !el.videoWidth || detailPoster.value) return
@@ -603,36 +541,27 @@ function captureDetailPoster() {
     ctx.drawImage(el, 0, 0, canvas.width, canvas.height)
     detailPoster.value = canvas.toDataURL('image/jpeg', 0.82)
   } catch (e) {
-    console.warn('[History] canvas 截图失败（可能跨域污染）：', e)
+    console.warn('[History] ' + t('history.canvasFailed') + '：', e)
   }
 }
 
-/**
- * 视频可以播放时清除加载状态
- */
 function onDetailVideoCanPlay() {
   detailVideoLoading.value = false
   detailVideoFailed.value = false
 }
 
-/**
- * 视频加载失败
- */
 function onDetailVideoError(e) {
-  console.error('[History] 视频加载/播放失败：', e)
+  console.error('[History] ' + t('history.videoPlayFail') + '：', e)
   detailVideoLoading.value = false
   detailVideoFailed.value = true
-  ElMessage.error('视频加载失败，请尝试「下载」或「新标签页打开」')
+  ElMessage.error(t('history.videoLoadFailed'))
 }
 
-/**
- * 视频加载被中止（通常是 Range 请求 206 失败或跨域问题）
- */
 function onDetailVideoAbort() {
-  console.warn('[History] 视频加载被中止，尝试重新加载')
+  console.warn('[History] ' + t('history.videoAborted'))
   detailVideoLoading.value = false
   detailVideoFailed.value = true
-  ElMessage.warning('视频播放受限，请尝试「下载」或「新标签页打开」')
+  ElMessage.warning(t('history.videoPlayRestricted'))
 }
 
 function confirmDelete() {
@@ -642,7 +571,7 @@ async function doDelete() {
   if (!detailItem.value) return
   try {
     await deleteHistoryRecord(detailItem.value.id)
-    ElMessage.success('已删除')
+    ElMessage.success(t('history.deleted'))
     deleteVisible.value = false
     detailVisible.value = false
     loadList()
@@ -651,7 +580,6 @@ async function doDelete() {
   }
 }
 
-// ---------- 工具函数 ----------
 function truncate(text, max) {
   if (!text) return ''
   return text.length > max ? text.slice(0, max) + '…' : text
@@ -680,14 +608,12 @@ onMounted(() => loadList())
   border: 1px solid rgba(120, 170, 255, 0.15);
 }
 
-/* 右侧动作按钮区域（刷新 + 编辑） */
 .filter-actions {
   display: flex;
   gap: 10px;
   align-items: center;
 }
 
-/* 编辑模式工具条 */
 .edit-toolbar {
   display: flex;
   justify-content: space-between;
@@ -740,13 +666,11 @@ onMounted(() => loadList())
   transition: all 0.2s ease;
   position: relative;
 }
-/* 编辑模式选中状态 */
 .history-card.is-selected {
   border-color: rgba(255, 155, 155, 0.75);
   box-shadow: 0 0 0 2px rgba(255, 155, 155, 0.4), 0 8px 24px rgba(100, 150, 255, 0.2);
   transform: translateY(-2px);
 }
-/* 卡片左上角的选择框 */
 .card-checkbox {
   position: absolute;
   top: 10px;
@@ -763,7 +687,6 @@ onMounted(() => loadList())
   box-shadow: 0 8px 32px rgba(100, 150, 255, 0.25);
   border-color: rgba(120, 170, 255, 0.4);
 }
-/* 编辑模式下的 hover 去掉位移，避免与选中效果冲突 */
 .history-card.is-selected:hover {
   transform: translateY(-2px);
 }
@@ -781,7 +704,6 @@ onMounted(() => loadList())
   object-fit: cover;
   display: block;
 }
-/* 视频卡片：首帧缩略图 + 悬停 GIF 预览 */
 .video-thumb {
   width: 100%;
   height: 100%;
@@ -789,7 +711,6 @@ onMounted(() => loadList())
   background: linear-gradient(135deg, #1a2744 0%, #0f1a30 100%);
   overflow: hidden;
 }
-/* 首帧缩略图 */
 .video-thumb-img {
   width: 100%;
   height: 100%;
@@ -797,7 +718,6 @@ onMounted(() => loadList())
   display: block;
   transition: opacity 0.3s ease;
 }
-/* 缩略图加载失败时的占位 */
 .video-thumb-placeholder {
   width: 100%;
   height: 100%;
@@ -816,7 +736,6 @@ onMounted(() => loadList())
   font-size: 13px;
   font-weight: 500;
 }
-/* 悬停时的 GIF 预览层 */
 .video-preview-gif {
   position: absolute;
   inset: 0;
@@ -825,7 +744,6 @@ onMounted(() => loadList())
   object-fit: cover;
   z-index: 1;
 }
-/* 播放图标蒙层 */
 .video-play-overlay {
   position: absolute;
   inset: 0;
@@ -840,7 +758,6 @@ onMounted(() => loadList())
 .video-play-overlay .el-icon {
   filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.5));
 }
-/* 悬停时隐藏播放蒙层，显示 GIF */
 .video-thumb:hover .video-play-overlay {
   opacity: 0;
 }
@@ -879,7 +796,6 @@ onMounted(() => loadList())
   text-align: center;
 }
 
-/* 详情弹窗 */
 .detail-content { display: flex; gap: 24px; flex-direction: column; align-items: center; }
 .detail-media { width: 100%; text-align: center; }
 .detail-media img {
@@ -929,14 +845,12 @@ onMounted(() => loadList())
   background: #000;
 }
 
-/* 视频容器（包含状态蒙层） */
 .detail-video-wrap {
   position: relative;
   width: 100%;
   max-width: 100%;
 }
 
-/* 无链接时的占位提示 */
 .detail-video-empty {
   padding: 40px 20px;
   background: #0a1220;
@@ -947,7 +861,6 @@ onMounted(() => loadList())
 }
 .detail-video-empty div { margin-top: 10px; }
 
-/* 视频状态蒙层（加载中/失败） */
 .detail-video-status {
   position: absolute;
   inset: 0;
@@ -965,7 +878,6 @@ onMounted(() => loadList())
   color: #ff9b9b;
 }
 
-/* 旋转加载图标 */
 .spinner {
   display: inline-block;
   animation: spin 1.2s linear infinite;

@@ -6,7 +6,8 @@
 
 <template>
   <div class="prompt-templates">
-    <div class="section-title">{{ title }}</div>
+    <!-- 标题已国际化（title prop 可选，默认为 i18n 文案） -->
+    <div class="section-title">{{ title || defaultTitle }}</div>
     <div class="tags-wrap">
       <el-tag
         v-for="(item, idx) in templates"
@@ -25,10 +26,16 @@
 </template>
 
 <script setup>
-defineProps({
+// ------ 引入 i18n ------
+import { computed } from 'vue'
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
+
+const props = defineProps({
   title: {
     type: String,
-    default: '预设风格（点击追加到提示词）'
+    default: ''
   },
   templates: {
     type: Array,
@@ -41,6 +48,9 @@ defineProps({
 })
 
 defineEmits(['select'])
+
+// ------ 标题默认值走 i18n ------
+const defaultTitle = computed(() => t('params.stylePresets'))
 </script>
 
 <style scoped>

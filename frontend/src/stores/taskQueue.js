@@ -140,7 +140,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
     submitImageTask(params) {
       if (this.runningImageCount >= MAX_CONCURRENT) {
         throw new Error(
-          `最多同时生成 ${MAX_CONCURRENT} 个图片任务，请等待部分任务完成后再试`,
+          `Maximum ${MAX_CONCURRENT} concurrent image tasks — please wait for some tasks to complete`,
         )
       }
       const taskId = uid()
@@ -183,7 +183,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         this._startPolling(taskId)
       } catch (err) {
         task.status = 'failed'
-        task.errorMessage = err.message || '创建任务失败'
+        task.errorMessage = err.message || 'Failed to create task'
         task.updatedAt = Date.now()
         this._notifyTaskUpdate(taskId)
         this._saveToStorage()
@@ -194,7 +194,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
     submitVideoTask(params) {
       if (this.runningVideoCount >= MAX_CONCURRENT) {
         throw new Error(
-          `最多同时生成 ${MAX_CONCURRENT} 个视频任务，请等待部分任务完成后再试`,
+          `Maximum ${MAX_CONCURRENT} concurrent video tasks — please wait for some tasks to complete`,
         )
       }
       const taskId = uid()
@@ -237,7 +237,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         this._startPolling(taskId)
       } catch (err) {
         task.status = 'failed'
-        task.errorMessage = err.message || '创建任务失败'
+        task.errorMessage = err.message || 'Failed to create task'
         task.updatedAt = Date.now()
         this._notifyTaskUpdate(taskId)
         this._saveToStorage()
@@ -278,7 +278,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
       }
       // 超时保护
       if (Date.now() - task.createdAt > POLL_TIMEOUT) {
-        this._markAsFailed(taskId, '任务超时（超过 10 分钟未完成）')
+        this._markAsFailed(taskId, 'Task timeout (exceeded 10 minutes)')
         return
       }
       const backendId = task.backendTaskId || taskId
@@ -323,7 +323,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
           this._saveToStorage()
         } else if (isFailed) {
           task.status = 'failed'
-          task.errorMessage = data.message || data.error || '生成失败'
+          task.errorMessage = data.message || data.error || 'Generation failed'
           this._stopPolling(taskId)
           this._saveToStorage()
         } else {

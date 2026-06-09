@@ -16,12 +16,12 @@
         <div class="panel-header">
           <div class="panel-title">
             <span class="title-icon">⚡</span>
-            <span>生成队列</span>
+            <span>{{ t('queue.title') }}</span>
             <span v-if="queue.runningCount > 0" class="running-badge">
-              {{ queue.runningCount }} 个进行中
+              {{ queue.runningCount }}{{ t('queue.runningBadge').replace('{n}', '') }}
             </span>
           </div>
-          <button class="close-btn" @click="queue.closePanel()" title="收起">
+          <button class="close-btn" @click="queue.closePanel()" :title="t('queue.collapse')">
             ✕
           </button>
         </div>
@@ -29,7 +29,7 @@
         <!-- Tab 切换 -->
         <div class="panel-tabs">
           <button
-            v-for="tab in tabs"
+            v-for="tab in tabList"
             :key="tab.key"
             class="tab-btn"
             :class="{ active: activeTab === tab.key }"
@@ -47,7 +47,7 @@
           <template v-if="filteredTasks.length === 0">
             <div class="empty-state">
               <div class="empty-icon">✨</div>
-              <div class="empty-text">暂无{{ activeTabLabel }}任务</div>
+              <div class="empty-text">{{ emptyLabel }}</div>
             </div>
           </template>
           <template v-else>
@@ -64,7 +64,7 @@
 
         <!-- 底部提示 -->
         <div class="panel-footer">
-          <span>任务状态实时更新 · 切换页面不丢失</span>
+          <span>{{ t('queue.footer') }}</span>
         </div>
       </div>
     </transition>
@@ -74,11 +74,11 @@
       class="floating-btn"
       :class="{ 'has-running': queue.runningCount > 0 }"
       @click="queue.togglePanel()"
-      :title="queue.panelOpen ? '收起队列' : '查看生成队列'"
+      :title="queue.panelOpen ? t('queue.collapse') : t('queue.expand')"
     >
       <span class="btn-icon">⚡</span>
       <span v-if="!queue.panelOpen" class="btn-text">
-        队列
+        {{ t('queue.queueShort') }}
       </span>
       <span v-if="queue.runningCount > 0 && !queue.panelOpen" class="btn-badge">
         {{ queue.runningCount }}
@@ -88,25 +88,34 @@
 </template>
 
 <script setup>
+// ------ 国际化：引入 i18n composable ------
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { useI18n } from '@/i18n'
 import TaskCard from './TaskCard.vue'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 
 const queue = useTaskQueueStore()
 const router = useRouter()
 const route = useRoute()
+const { t } = useI18n()
 const activeTab = ref('all')
 
-const tabs = [
-  { key: 'all', label: '全部' },
-  { key: 'running', label: '进行中' },
-  { key: 'done', label: '已完成' },
-]
+// ------ Tab 文案改为国际化 ------
+const tabList = computed(() => [
+  { key: 'all', label: t('queue.all') },
+  { key: 'running', label: t('queue.running') },
+  { key: 'done', label: t('queue.done') },
+])
 
 const activeTabLabel = computed(() => {
-  const t = tabs.find(tab => tab.key === activeTab.value)
-  return t ? t.label : ''
+  const found = tabList.value.find(tab => tab.key === activeTab.value)
+  return found ? found.label : ''
+})
+
+const emptyLabel = computed(() => {
+  if (activeTab.value === 'all') return t('queue.noTask')
+  return t('queue.emptyWithTab').replace('{type}', activeTabLabel.value)
 })
 
 const filteredTasks = computed(() => {

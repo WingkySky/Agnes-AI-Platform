@@ -2,48 +2,42 @@
      视频生成视图 VideoView（已接入全局任务队列 Store）
      模式：
        - 文生视频 (text2video)
-       - 图生图 (image2video)
+       - 图生视频 (image2video)
        - 关键帧动画 (keyframes)
-     关键交互：
-       - 左侧「生成视频」按钮始终可用（受并发数限制）
-       - 提交后自动选中新任务作为预览对象
-       - 右侧预览区显示「当前选中任务」（队列点击可切换）
-       - 正在进行的任务可在预览区内点击「中止」
+     - 所有 UI 文案通过 i18n.t() 调用实现多语言
      ===================================================== -->
 
 <template>
   <div class="video-view">
-    <h2 class="page-title">🎬 视频生成</h2>
-    <p class="page-desc">
-      根据文字描述或参考图生成短视频。支持同时提交多个任务，点击右下「队列」可随时切换查看不同任务的状态。
-    </p>
+    <h2 class="page-title">🎬 {{ t('view.videoTitle') }}</h2>
+    <p class="page-desc">{{ t('view.videoDesc') }}</p>
 
     <el-row :gutter="24">
       <!-- 左侧：参数 -->
       <el-col :xs="24" :md="11">
         <el-card shadow="never">
           <template #header>
-          <div class="card-header"><span>生成参数</span></div>
+          <div class="card-header"><span>{{ t('params.title') }}</span></div>
           </template>
 
           <!-- 模式切换 -->
           <el-tabs v-model="mode">
               <el-tab-pane name="text2video">
                 <template #label>
-                  <span>📝 文生视频</span>
-                  <span class="tab-sub">仅提示词</span>
+                  <span>{{ t('params.mode.text2video') }}</span>
+                  <span class="tab-sub">{{ t('params.promptLabelShort') }}</span>
                 </template>
               </el-tab-pane>
               <el-tab-pane name="image2video">
                 <template #label>
-                  <span>🖼 图生视频</span>
-                  <span class="tab-sub">参考图 + 提示词</span>
+                  <span>{{ t('params.mode.image2video') }}</span>
+                  <span class="tab-sub">{{ t('params.refImagePlusPrompt') }}</span>
                 </template>
               </el-tab-pane>
               <el-tab-pane name="keyframes">
                 <template #label>
-                  <span>🎞 关键帧动画</span>
-                  <span class="tab-sub">多张关键帧 + 提示词</span>
+                  <span>{{ t('params.mode.keyframes') }}</span>
+                  <span class="tab-sub">{{ t('params.keyframesHint') }}</span>
                 </template>
               </el-tab-pane>
           </el-tabs>
@@ -57,7 +51,7 @@
 
           <!-- 多图上传 -->
           <div v-if="mode === 'keyframes'" class="multi-upload">
-            <div class="section-title">上传关键帧</div>
+            <div class="section-title">{{ t('params.uploadKeyframes') }}</div>
             <ImageUploader
               v-for="(_, idx) in keyframes"
               :key="idx"
@@ -65,30 +59,34 @@
               @change="(f) => handleKeyframeChange(idx, f)"
               @clear="() => handleKeyframeClear(idx)"
             />
-            <el-button plain size="small" @click="addKeyframe">+ 再添加一张关键帧</el-button>
+            <el-button plain size="small" @click="addKeyframe">
+              {{ t('params.addKeyframe') }}
+            </el-button>
           </div>
 
           <el-form label-position="top">
-            <el-form-item label="提示词">
-              <el-input v-model="prompt" type="textarea" :rows="4" placeholder="描述视频内容与动态，例如：一位身穿飘逸长袍的剑客，在雨夜都市穿行，电影镜头感" maxlength="2000" show-word-limit />
+            <el-form-item :label="t('params.prompt')">
+              <el-input v-model="prompt" type="textarea" :rows="4"
+                :placeholder="t('params.videoPromptPlaceholder')" maxlength="2000" show-word-limit />
             </el-form-item>
 
-            <el-form-item label="负向提示词 (可选)">
-              <el-input v-model="negativePrompt" type="textarea" :rows="2" placeholder="描述不希望出现的元素（可选）" />
+            <el-form-item :label="t('params.negativePrompt')">
+              <el-input v-model="negativePrompt" type="textarea" :rows="2"
+                :placeholder="t('params.negativePromptPlaceholder')" />
             </el-form-item>
 
-            <PromptTemplates :templates="VIDEO_TEMPLATES" @select="appendStylePrompt" />
+            <PromptTemplates :templates="videoTemplates" @select="appendStylePrompt" />
 
             <el-row :gutter="16">
               <el-col :span="12">
-                <el-form-item label="总帧数">
+                <el-form-item :label="t('params.totalFrames')">
                   <el-select v-model="numFrames">
-                    <el-option v-for="n in FRAME_OPTIONS" :key="n" :label="n + '帧'" :value="n" />
+                    <el-option v-for="n in FRAME_OPTIONS" :key="n" :label="n + ' ' + t('params.framesUnit')" :value="n" />
                   </el-select>
                 </el-form-item>
               </el-col>
               <el-col :span="12">
-                <el-form-item label="帧率 (fps)">
+                <el-form-item :label="t('params.frameRate')">
                   <el-input-number v-model="frameRate" :min="1" :max="60" />
                 </el-form-item>
               </el-col>
@@ -96,12 +94,12 @@
 
             <el-row :gutter="16">
               <el-col :span="12">
-                <el-form-item label="宽度">
+                <el-form-item :label="t('params.width')">
                   <el-input-number v-model="width" :min="512" :max="2048" :step="64" />
                 </el-form-item>
               </el-col>
               <el-col :span="12">
-                <el-form-item label="高度">
+                <el-form-item :label="t('params.height')">
                   <el-input-number v-model="height" :min="512" :max="2048" :step="64" />
                 </el-form-item>
               </el-col>
@@ -109,13 +107,13 @@
 
             <el-row :gutter="16">
               <el-col :span="24">
-                <el-form-item label="随机种子 (可选)">
-                  <el-input v-model="seed" placeholder="留空自动生成" />
+                <el-form-item :label="t('params.randomSeed')">
+                  <el-input v-model="seed" :placeholder="t('params.seedPlaceholder')" />
                 </el-form-item>
               </el-col>
             </el-row>
 
-            <!-- 生成按钮：始终可用（不受当前是否有进行中任务限制） -->
+            <!-- 生成按钮 -->
             <el-button
               type="primary"
               size="large"
@@ -123,11 +121,11 @@
               :disabled="!canSubmit"
               @click="startGenerate">
               <el-icon><VideoPlay /></el-icon>
-              <span>✨ 生成视频（加入队列）</span>
+              <span>{{ t('generate.videoBtn') }}</span>
             </el-button>
 
             <div class="queue-hint">
-              当前进行中: {{ queue.runningVideoCount }} / 5 · 已提交任务: {{ queue.tasks && Object.keys(queue.tasks).length }}
+              {{ t('generate.running') }}: {{ queue.runningVideoCount }} / 5 · {{ t('generate.submitted') }}: {{ queue.tasks && Object.keys(queue.tasks).length }}
             </div>
           </el-form>
         </el-card>
@@ -139,7 +137,7 @@
           <template #header>
             <div class="card-header">
               <div class="header-title">
-                <span>生成结果</span>
+                <span>{{ t('preview.resultTitle') }}</span>
                 <span v-if="activeTask" class="task-pill" :class="'status-' + activeTask.status">
                   {{ statusLabel }}
                 </span>
@@ -147,7 +145,7 @@
               <span v-if="videoUrl" class="header-actions">
                 <el-button size="small" @click="downloadVideo">
                   <el-icon><Download /></el-icon>
-                  下载
+                  {{ t('preview.download') }}
                 </el-button>
               </span>
             </div>
@@ -155,13 +153,13 @@
 
           <!-- 情况 A：有选中任务且正在进行中 -->
           <div v-if="activeTask && taskRunning" class="result-loading">
-            <div class="task-id-row">任务 ID: {{ activeTask.taskId }}</div>
+            <div class="task-id-row">{{ t('status.taskId') }}: {{ activeTask.taskId }}</div>
             <el-progress
               :percentage="taskProgress"
               :stroke-width="12"
               :color="progressColor" />
-            <div class="loading-text">{{ statusLabel }}中...</div>
-            <div class="loading-sub">已耗时 {{ taskElapsedSec }} 秒</div>
+            <div class="loading-text">{{ statusLabel }} ...</div>
+            <div class="loading-sub">{{ t('status.elapsedSeconds') }} {{ taskElapsedSec }} {{ t('common.seconds') }}</div>
             <div class="prompt-row">{{ activeTask.prompt }}</div>
             <el-button
               type="danger"
@@ -169,7 +167,7 @@
               class="cancel-btn-inline"
               @click="cancelActiveTask">
               <el-icon><CircleCloseFilled /></el-icon>
-              中止此任务
+              {{ t('status.cancelTask') }}
             </el-button>
           </div>
 
@@ -192,8 +190,8 @@
               />
               <div v-else class="video-placeholder">
                 <el-icon :size="48" color="#ffd166"><VideoPlay /></el-icon>
-                <div class="placeholder-title">视频 URL 为空</div>
-                <div class="placeholder-sub">后端返回的视频链接为空</div>
+                <div class="placeholder-title">{{ t('preview.videoUrlEmptyTitle') }}</div>
+                <div class="placeholder-sub">{{ t('preview.videoEmpty') }}</div>
               </div>
             </div>
 
@@ -201,64 +199,64 @@
             <div class="action-row">
               <el-button type="primary" size="small" @click="downloadVideo">
                 <el-icon><Download /></el-icon>
-                下载视频
+                {{ t('preview.download') }}
               </el-button>
               <el-button size="small" @click="copyVideoUrl">
                 <el-icon><CopyDocument /></el-icon>
-                复制链接
+                {{ t('preview.copyLink') }}
               </el-button>
               <el-button size="small" @click="openInNewTab">
                 <el-icon><VideoPlay /></el-icon>
-                新标签页打开
+                {{ t('preview.openNewTab') }}
               </el-button>
             </div>
 
             <!-- 元信息 -->
             <div class="result-meta">
-              <div class="meta-row">提示词：{{ activeTask.prompt }}</div>
-              <div class="meta-row">状态：<span class="tag-success">success</span> · 耗时 {{ taskElapsedSec }}s</div>
-              <div v-if="activeTask.taskId" class="meta-row">Task ID：{{ activeTask.taskId }}</div>
+              <div class="meta-row">{{ t('params.prompt') }}: {{ activeTask.prompt }}</div>
+              <div class="meta-row">{{ t('status.label') }}: <span class="tag-success">{{ t('status.success') }}</span> · {{ t('status.elapsedSeconds') }} {{ taskElapsedSec }} {{ t('common.seconds') }}</div>
+              <div v-if="activeTask.taskId" class="meta-row">{{ t('status.taskId') }}: {{ activeTask.taskId }}</div>
             </div>
           </div>
 
           <!-- 情况 C：任务失败 -->
           <div v-else-if="activeTask && activeTask.status === 'failed'" class="result-failed">
             <el-icon :size="48" color="#ff7b7b"><CircleCloseFilled /></el-icon>
-            <div class="failed-text">视频生成失败</div>
-            <div class="failed-sub">{{ activeTask.errorMessage || '未知错误，请重试' }}</div>
+            <div class="failed-text">{{ t('status.videoGenerateFailed') }}</div>
+            <div class="failed-sub">{{ activeTask.errorMessage || '' }}</div>
             <el-button type="primary" size="small" class="retry-btn" @click="retryActiveTask">
-              使用相同参数重试
+              {{ t('status.retryWithSame') }}
             </el-button>
           </div>
 
           <!-- 情况 D：任务已取消 -->
           <div v-else-if="activeTask && activeTask.status === 'cancelled'" class="result-failed">
             <el-icon :size="48" color="#ffb86b"><CircleCloseFilled /></el-icon>
-            <div class="failed-text">任务已取消</div>
-            <div class="failed-sub">该任务已停止生成，可重新提交新任务</div>
+            <div class="failed-text">{{ t('status.cancelled') }}</div>
+            <div class="failed-sub">{{ t('preview.wrongTypeHint') }}</div>
           </div>
 
           <!-- 情况 E：选中的是图片任务，不匹配当前视图 -->
           <div v-else-if="activeTaskIsOtherType" class="empty-state">
             <el-icon :size="48"><MagicStick /></el-icon>
-            <p class="empty-text">当前选中的是图片任务</p>
-            <p class="empty-sub">请点击右下「队列」切换到视频任务，或前往图片生成页查看该任务</p>
+            <p class="empty-text">{{ t('preview.wrongTypeVideo') }}</p>
+            <p class="empty-sub">{{ t('preview.switchPageHint') }}</p>
           </div>
 
           <!-- 情况 F：没有选中的任务 -->
           <div v-else class="empty-state">
             <el-icon :size="48"><VideoCameraFilled /></el-icon>
-            <p class="empty-text">尚未选择任务预览</p>
-            <p class="empty-sub">提交新视频任务后，或点击右下「队列」中任一任务条目，此处将显示对应任务的状态和结果</p>
+            <p class="empty-text">{{ t('preview.notSelectable') }}</p>
+            <p class="empty-sub">{{ t('preview.emptyHint') }}</p>
           </div>
         </el-card>
 
         <div class="tips-card">
-          <div class="tip-title">💡 提示</div>
+          <div class="tip-title">{{ t('tips.title') }}</div>
           <ul>
-            <li>可同时提交多个视频任务（最多 5 个并发），无需等待当前任务完成</li>
-            <li>点击右下「队列」可随时查看、切换、中止任意任务</li>
-            <li>生成的视频在队列中保留约 20 分钟，超过可在「生成历史」查看</li>
+            <li>{{ t('tips.concurrentVideo') }}</li>
+            <li>{{ t('tips.queueSwitch') }}</li>
+            <li>{{ t('tips.historyKeep') }}</li>
           </ul>
         </div>
       </el-col>
@@ -275,15 +273,18 @@ import {
 import PromptTemplates from '@/components/PromptTemplates.vue'
 import ImageUploader from '@/components/ImageUploader.vue'
 import { useTaskQueueStore } from '@/stores/taskQueue'
+import { useI18n } from '@/i18n'
 
-const VIDEO_TEMPLATES = [
-  { label: '电影镜头', prompt: '，电影镜头感，缓慢平移，平滑 dolly-in，戏剧性光影' },
-  { label: '慢动作', prompt: '，慢动作，细腻细节，优雅节奏' },
-  { label: '手持跟拍', prompt: '，手持跟拍，真实感，纪实' },
-  { label: '霓虹夜景', prompt: '，霓虹夜景，水面反光，都市感' },
-  { label: '航拍', prompt: '，航拍大远景，缓慢扫镜，史诗感' },
-  { label: '丝滑过渡', prompt: '，丝滑电影感过渡，电影级调色' }
-]
+const { t } = useI18n()
+
+const videoTemplates = computed(() => ([
+  { label: t('presets.cinematicShot'), prompt: '，电影镜头感，缓慢平移，平滑 dolly-in，戏剧性光影' },
+  { label: t('presets.slowMotion'), prompt: '，慢动作，细腻细节，优雅节奏' },
+  { label: t('presets.handheldFollow'), prompt: '，手持跟拍，真实感，纪实' },
+  { label: t('presets.neonNight'), prompt: '，霓虹夜景，水面反光，都市感' },
+  { label: t('presets.aerialShot'), prompt: '，航拍大远景，缓慢扫镜，史诗感' },
+  { label: t('presets.smoothTransition'), prompt: '，丝滑电影感过渡，电影级调色' }
+]))
 
 const FRAME_OPTIONS = [9, 33, 49, 81, 121, 161, 241, 441]
 
@@ -307,7 +308,6 @@ const posterUrl = ref('')
 const queue = useTaskQueueStore()
 
 // 当前预览的任务 = Store 中的 activeTask，但仅当其是视频类型
-// （避免在视频视图中误显示图片任务）
 const activeTask = computed(() => {
   if (!queue.activeTaskId) return null
   const task = queue.tasks[queue.activeTaskId]
@@ -315,7 +315,7 @@ const activeTask = computed(() => {
   return task.type === 'video' ? task : null
 })
 
-// 选中任务是否为图片类型（在视频视图中不显示预览，仅提示）
+// 选中任务是否为图片类型
 const activeTaskIsOtherType = computed(() => {
   if (!queue.activeTaskId) return false
   const task = queue.tasks[queue.activeTaskId]
@@ -328,7 +328,7 @@ const taskRunning = computed(() => {
   return ['pending', 'queued', 'processing'].includes(activeTask.value.status)
 })
 
-// 从 Store 读取的进度和耗时（通过 queue._tick 驱动每秒响应式刷新）
+// 进度、耗时
 const taskProgress = computed(() => {
   if (!activeTask.value) return 0
   return Math.min(activeTask.value.progress || 0, 99)
@@ -337,58 +337,49 @@ const taskElapsedSec = computed(() => {
   if (!activeTask.value) return 0
   const created = activeTask.value.createdAt || 0
   if (!created) return 0
-  // 读取 queue._tick 让此 computed 随 tick 刷新
   queue._tick
   return Math.floor((Date.now() - created) / 1000)
 })
 
-// 视频 URL：使用后端代理接口，解决 Google Storage CORS 问题
+// 视频 URL：代理地址
 const videoUrl = computed(() => {
   if (!activeTask.value) return ''
-  // 优先使用后端代理接口播放视频（通过 task_id 代理，避免 CORS）
   const backendTaskId = activeTask.value.backendTaskId || activeTask.value.taskId
   const status = activeTask.value.status
   if (backendTaskId && status === 'success') {
     const proxyUrl = `/api/videos/${backendTaskId}/stream`
     return proxyUrl
   }
-  // 任务未完成时返回空（不使用直链）
   return ''
 })
 
-// 原始直链 URL（用于下载、复制链接等操作）
+// 原始直链 URL（下载、复制链接）
 const rawVideoUrl = computed(() => {
   if (!activeTask.value) return ''
   return activeTask.value.resultUrl || activeTask.value.url || ''
 })
 
-// 状态标签（中文化）
+// 状态标签（使用 i18n 显示本地化名称）
 const statusLabel = computed(() => {
   if (!activeTask.value) return ''
   const s = activeTask.value.status
-  const map = {
-    queued: '排队',
-    pending: '等待中',
-    processing: '生成',
-    success: '已完成',
-    failed: '失败',
-    cancelled: '已取消',
-  }
-  return map[s] || s
+  const key = `status.${s}`
+  const localized = t(key)
+  return localized === key ? s : localized
 })
 
 const progressColor = '#6b9cff'
 
-// 能否提交：只要提示词不为空 + 未达并发上限
+// 能否提交
 const canSubmit = computed(() => {
   if (!prompt.value.trim()) return false
   if (queue.runningVideoCount >= 5) return false
   return true
 })
 
-function appendStylePrompt(t) {
-  if (!prompt.value.trim().endsWith(t)) {
-    prompt.value = prompt.value.trim() + t
+function appendStylePrompt(tpl) {
+  if (!prompt.value.trim().endsWith(tpl)) {
+    prompt.value = prompt.value.trim() + tpl
   }
 }
 
@@ -397,7 +388,7 @@ function addKeyframe() {
   if (keyframes.value.length < 6) {
     keyframes.value.push(null)
   } else {
-    ElMessage.warning('最多添加 6 张关键帧')
+    ElMessage.warning(t('message.maxKeyframes'))
   }
 }
 function handleImageChange(file) {
@@ -413,18 +404,18 @@ function handleKeyframeClear(idx) {
   keyframes.value[idx] = null
 }
 
-// ---------- 开始生成（提交到队列，不阻塞） ----------
+// ---------- 开始生成 ----------
 async function startGenerate() {
   if (!prompt.value.trim()) {
-    ElMessage.warning('请先填写提示词')
+    ElMessage.warning(t('message.pleaseFillPrompt'))
     return
   }
   if (mode.value === 'image2video' && !referenceFile.value) {
-    ElMessage.warning('请先上传参考图')
+    ElMessage.warning(t('message.pleaseUploadRefImage'))
     return
   }
   if (queue.runningVideoCount >= 5) {
-    ElMessage.warning('已达 5 个视频并发上限，请等待任务完成')
+    ElMessage.warning(t('generate.concurrentVideoLimit'))
     return
   }
 
@@ -449,42 +440,41 @@ async function startGenerate() {
 
   try {
     const taskId = await queue.submitVideoTask(params)
-    queue.setActiveTask(taskId)  // 提交后自动选中新任务 → 预览区立即显示
-    ElMessage.success('视频任务已提交，可点击右下「队列」查看所有任务')
+    queue.setActiveTask(taskId)
+    ElMessage.success(t('generate.videoSubmitted'))
   } catch (e) {
     console.error('[VideoView] 提交任务失败：', e)
-    ElMessage.error('创建视频任务失败：' + (e.message || '未知错误'))
+    ElMessage.error(t('generate.createTaskFailed') + (e.message || ''))
   }
 }
 
-// ---------- 中止当前选中任务 ----------
+// ---------- 中止/重试 ----------
 function cancelActiveTask() {
   if (!queue.activeTaskId) return
   queue.cancelTask(queue.activeTaskId)
-  ElMessage.info('已请求中止该任务')
+  ElMessage.info(t('status.taskCancelled'))
 }
 
-// ---------- 重试当前任务 ----------
 function retryActiveTask() {
   if (!activeTask.value) return
   const taskId = queue.retryTask(activeTask.value.taskId)
   if (taskId) {
     queue.setActiveTask(taskId)
-    ElMessage.success('已重新提交任务')
+    ElMessage.success(t('status.taskResubmitted'))
   } else {
-    ElMessage.warning('重试失败，请重新手动填写参数')
+    ElMessage.warning(t('status.retryFailed'))
   }
 }
 
-// ---------- 下载/复制/新标签页 ----------
+// ---------- 下载 / 复制 / 新标签页 ----------
 async function downloadVideo() {
   const url = videoUrl.value || rawVideoUrl.value
   if (!url) {
-    ElMessage.warning('视频链接为空，无法下载')
+    ElMessage.warning(t('preview.videoEmpty'))
     return
   }
   try {
-    ElMessage.info('正在准备下载…')
+    ElMessage.info(t('preview.preparing'))
     const response = await fetch(url)
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     const blob = await response.blob()
@@ -496,27 +486,24 @@ async function downloadVideo() {
     a.click()
     document.body.removeChild(a)
     setTimeout(() => URL.revokeObjectURL(blobUrl), 1000)
-    ElMessage.success('已开始下载视频')
+    ElMessage.success(t('preview.download'))
   } catch (err) {
     console.warn('[VideoView] fetch 下载失败：', err)
-    // 回退：用原始直链在新标签页打开
-    const fallbackUrl = rawVideoUrl.value || url
-    ElMessage.warning('下载受限，已在新标签页打开。请右键视频选择「另存为」')
-    window.open(fallbackUrl, '_blank', 'noopener,noreferrer')
+    ElMessage.warning(t('preview.videoCorsWarning'))
+    window.open(rawVideoUrl.value || url, '_blank', 'noopener,noreferrer')
   }
 }
 
 function copyVideoUrl() {
-  // 复制原始直链（代理 URL 不适合分享）
   const url = rawVideoUrl.value || videoUrl.value
   if (!url) {
-    ElMessage.warning('视频链接为空')
+    ElMessage.warning(t('preview.imageUrlEmpty'))
     return
   }
   if (navigator.clipboard && window.isSecureContext) {
     navigator.clipboard.writeText(url)
-      .then(() => ElMessage.success('视频链接已复制'))
-      .catch(() => ElMessage.error('复制失败，请手动复制'))
+      .then(() => ElMessage.success(t('preview.copySuccess')))
+      .catch(() => ElMessage.error(t('preview.copyFailed')))
   } else {
     const ta = document.createElement('textarea')
     ta.value = url
@@ -524,19 +511,18 @@ function copyVideoUrl() {
     ta.select()
     document.execCommand('copy')
     document.body.removeChild(ta)
-    ElMessage.success('视频链接已复制')
+    ElMessage.success(t('preview.copySuccess'))
   }
 }
 
 function openInNewTab() {
-  // 新标签页使用原始直链（直链可直接播放，不受 CORS 限制）
   const url = rawVideoUrl.value || videoUrl.value
   if (!url) {
-    ElMessage.warning('视频链接为空，无法打开')
+    ElMessage.warning(t('preview.videoEmpty'))
     return
   }
   window.open(url, '_blank', 'noopener,noreferrer')
-  ElMessage.success('已在新标签页打开')
+  ElMessage.success(t('preview.openNewTab'))
 }
 
 // ---------- 视频事件 ----------
@@ -545,7 +531,7 @@ function capturePoster() {
   if (!el || !el.videoWidth) return
   try {
     const canvas = document.createElement('canvas')
-    const scale = Math.min(1, 640 / el.videoWidth)
+    const scale = Math.min(1, 720 / el.videoWidth)
     canvas.width = Math.floor(el.videoWidth * scale)
     canvas.height = Math.floor(el.videoHeight * scale)
     const ctx = canvas.getContext('2d')
@@ -553,15 +539,14 @@ function capturePoster() {
     ctx.drawImage(el, 0, 0, canvas.width, canvas.height)
     posterUrl.value = canvas.toDataURL('image/jpeg', 0.82)
   } catch (e) {
-    // 走代理后一般不会 CORS 失败，但保留兜底
     console.warn('[VideoView] canvas 截图失败：', e)
   }
 }
-function onVideoLoaded() { /* 视频元数据已加载 */ }
-function onVideoCanPlay() { /* 视频可播放 */ }
+function onVideoLoaded() { }
+function onVideoCanPlay() { }
 function handleVideoError(e) {
   console.error('[VideoView] 视频播放失败：', e)
-  ElMessage.error('视频加载失败，请尝试「下载」或「新标签页打开」')
+  ElMessage.error(t('preview.videoLoadFailed'))
 }
 </script>
 
@@ -659,9 +644,7 @@ function handleVideoError(e) {
   max-height: 80px;
   overflow: auto;
 }
-.cancel-btn-inline {
-  margin-top: 20px;
-}
+.cancel-btn-inline { margin-top: 20px; }
 .result-wrap { text-align: center; }
 
 .video-container {
