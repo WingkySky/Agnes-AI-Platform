@@ -150,6 +150,28 @@
                   <el-icon v-else-if="tc.status === 'done'" class="tool-done"><Check /></el-icon>
                 </div>
 
+                <!-- 用户上传的参考图附件（仅 role=user 显示） -->
+                <template v-if="msg.role === 'user' && msg.attachments && msg.attachments.length > 0">
+                  <div class="attachments-preview">
+                    <el-image
+                      v-for="(att, idx) in msg.attachments"
+                      :key="'att-' + idx"
+                      :src="att.url || att.base64"
+                      :preview-src-list="getAttachmentPreviewList(msg.attachments)"
+                      :initial-index="idx"
+                      fit="cover"
+                      class="attachment-thumb"
+                      :preview-teleported="true"
+                    >
+                      <template #error>
+                        <div class="attachment-thumb-fallback">
+                          <el-icon><WarningFilled /></el-icon>
+                        </div>
+                      </template>
+                    </el-image>
+                  </div>
+                </template>
+
                 <!-- 媒体内容（遍历 media_items 数组，支持多图/多视频） -->
                 <template v-if="msg.media_items && msg.media_items.length > 0">
                   <div
@@ -226,7 +248,43 @@
 
         <!-- 输入区 -->
         <div class="chat-input-area">
+          <!-- 待发送附件预览 -->
+          <div v-if="pendingAttachments.length > 0" class="pending-attachments">
+            <div
+              v-for="(att, idx) in pendingAttachments"
+              :key="'pending-' + idx"
+              class="pending-attachment"
+            >
+              <img :src="att.base64" :alt="att.name" class="pending-attachment-thumb" />
+              <el-button
+                type="danger"
+                size="small"
+                circle
+                icon="Close"
+                class="pending-attachment-remove"
+                @click="removePendingAttachment(idx)"
+              />
+            </div>
+          </div>
+
           <div class="input-wrapper">
+            <!-- 上传按钮 -->
+            <el-button
+              :icon="Picture"
+              class="upload-btn"
+              :disabled="chatStore.sending"
+              @click="$refs.fileInput.click()"
+              title="上传参考图"
+            />
+            <input
+              ref="fileInput"
+              type="file"
+              accept="image/*"
+              multiple
+              class="hidden-file-input"
+              @change="onAttachmentSelected"
+            />
+
             <el-input
               v-model="inputText"
               type="textarea"
@@ -235,17 +293,18 @@
               :disabled="chatStore.sending"
               @keydown.enter.exact="handleEnter"
               resize="none"
+              class="chat-input"
             />
             <el-button
               type="primary"
               :icon="Promotion"
               :loading="chatStore.sending"
-              :disabled="!inputText.trim()"
+              :disabled="!canSend"
               @click="handleSend"
               class="send-btn"
             />
           </div>
-          <p class="input-hint">{{ t('chat.inputHint') }}</p>
+          <p class="input-hint">{{ t('chat.inputHint') }} · 可上传参考图进行图生图/图生视频</p>
         </div>
       </template>
     </main>
@@ -260,7 +319,7 @@ import { ref, onMounted, onActivated, nextTick, watch, computed } from 'vue'
 import {
   Plus, Delete, User, Monitor, Picture, VideoPlay,
   Loading, Check, WarningFilled, Promotion, ChatDotRound,
-  Edit, MagicStick,
+  Edit, MagicStick, Close,
 } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { useChatStore } from '@/stores/chat'
@@ -273,6 +332,15 @@ const chatStore = useChatStore()
 const inputText = ref('')
 // 消息列表 DOM 引用
 const messagesRef = ref(null)
+// 隐藏的文件上传 input（用于触发文件选择）
+const fileInput = ref(null)
+// 待发送的附件列表（未发送消息时本地缓存）
+const pendingAttachments = ref([])
+// 是否允许发送（有文本 或 有待发附件）
+const canSend = computed(() => inputText.value.trim().length > 0 || pendingAttachments.value.length > 0)
+// 最大附件数与单文件大小限制（对应后端 Task 2 的校验）
+const MAX_ATTACHMENTS = 10
+const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB
 
 // 重命名会话相关
 const renameDialogVisible = ref(false)
@@ -381,14 +449,17 @@ async function handleAutoSummarize(sessionId) {
   }
 }
 
-/** 发送消息 */
+/** 发送消息（支持附件） */
 async function handleSend() {
   const content = inputText.value.trim()
-  if (!content || chatStore.sending) return
+  const attachments = pendingAttachments.value
+  if (!content && attachments.length === 0) return
+  if (chatStore.sending) return
 
   inputText.value = ''
+  pendingAttachments.value = []
   try {
-    await chatStore.sendMessage(content)
+    await chatStore.sendMessage(content, attachments)
   } catch (e) {
     ElMessage.error(e.message || t('chat.sendFailed'))
   }
@@ -399,6 +470,77 @@ function handleEnter(e) {
   if (e.shiftKey) return // Shift+Enter 换行
   e.preventDefault()
   handleSend()
+}
+
+// =====================================================
+// 附件（图片）上传相关
+// =====================================================
+/** 读取图片文件为 base64（data URL） */
+function readFileAsDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result)
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
+/** 从 data URL 提取 MIME 类型 */
+function extractMime(dataUrl) {
+  const m = dataUrl.match(/^data:([^;]+);/)
+  return m ? m[1] : 'image/png'
+}
+
+/** 文件选择回调：校验大小/数量，转为 base64 加入待发队列 */
+async function onAttachmentSelected(event) {
+  const files = Array.from(event.target.files || [])
+  // 重置 input value，便于重复选择同一文件触发 change
+  event.target.value = ''
+  if (files.length === 0) return
+
+  const remainingSlot = MAX_ATTACHMENTS - pendingAttachments.value.length
+  if (remainingSlot <= 0) {
+    ElMessage.warning(`最多上传 ${MAX_ATTACHMENTS} 张图片`)
+    return
+  }
+
+  const accepted = files.slice(0, remainingSlot)
+  const results = []
+  for (const file of accepted) {
+    if (!file.type.startsWith('image/')) {
+      ElMessage.warning(`不支持的文件类型：${file.name}`)
+      continue
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      ElMessage.warning(`图片 ${file.name} 超过 5MB`)
+      continue
+    }
+    try {
+      const dataUrl = await readFileAsDataURL(file)
+      results.push({
+        name: file.name,
+        base64: dataUrl,
+        size: file.size,
+        mime_type: extractMime(dataUrl),
+      })
+    } catch (err) {
+      console.error('[Chat] 读取文件失败:', err)
+      ElMessage.error(`读取 ${file.name} 失败`)
+    }
+  }
+
+  pendingAttachments.value.push(...results)
+}
+
+/** 移除某个待发送的附件 */
+function removePendingAttachment(idx) {
+  pendingAttachments.value.splice(idx, 1)
+}
+
+/** 获取附件预览列表（用于 el-image 组预览） */
+function getAttachmentPreviewList(attachments) {
+  if (!attachments || attachments.length === 0) return []
+  return attachments.map((a) => a.url || a.base64)
 }
 
 /** 快捷提示点击 */
@@ -900,6 +1042,88 @@ function getImageIndex(mediaItems, currentIdx) {
   width: 40px;
   border-radius: 10px;
   flex-shrink: 0;
+}
+
+/* --- 附件上传相关样式 --- */
+
+/** 图片上传按钮 */
+.upload-btn {
+  height: 40px;
+  width: 40px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+/** 隐藏的原生 file input */
+.hidden-file-input {
+  display: none;
+}
+
+/** 聊天输入框（显式加 class，便于与其他输入区分） */
+.chat-input {
+  flex: 1;
+}
+
+/** 待发送附件预览容器（位于输入框上方） */
+.pending-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+/** 单个待发送附件 */
+.pending-attachment {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(100, 150, 220, 0.25);
+  background: rgba(20, 30, 50, 0.4);
+}
+
+.pending-attachment-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.pending-attachment-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 20px !important;
+  height: 20px !important;
+  padding: 0 !important;
+  font-size: 12px;
+}
+
+/** 用户消息气泡中的附件缩略图 */
+.attachments-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.attachment-thumb {
+  width: 80px;
+  height: 80px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid rgba(100, 150, 220, 0.3);
+}
+
+.attachment-thumb-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 100, 100, 0.1);
+  color: #ff8080;
 }
 
 .input-hint {

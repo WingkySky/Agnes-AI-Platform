@@ -64,12 +64,19 @@ class ChatMessage(Base):
     - session_id: 所属会话 ID
     - role: 消息角色（user / assistant / system）
     - content: 文本内容
-    - media_items: 媒体项列表（JSON 数组），每项格式：
+    - media_items: AI 生成的输出媒体项列表（JSON 数组），每项格式：
         {
           "type": "image" | "video",
           "url": "https://...",       # 生成完成后的资源 URL
           "task_id": "img_xxx",       # 生成任务 ID（用于轮询状态）
           "status": "pending" | "processing" | "success" | "failed"
+        }
+    - attachments: 用户上传的输入参考图列表（JSON 数组），每项格式：
+        {
+          "name": "photo.jpg",
+          "base64_image": "data:image/jpeg;base64,/9j/...",
+          "size": 123456,
+          "mime_type": "image/jpeg"
         }
     - tool_calls: 工具调用信息（JSON 格式，记录 AI 发起的工具调用）
     - created_at: 创建时间
@@ -80,8 +87,10 @@ class ChatMessage(Base):
     session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=False, index=True)
     role = Column(String(20), nullable=False)  # user / assistant / system
     content = Column(Text, nullable=True, default="")
-    # 媒体项列表（支持多图/多视频）
+    # 媒体项列表（AI 生成的输出媒体：图片/视频）
     media_items = Column(JSON, nullable=True, default=list)
+    # 用户上传的参考附件（用于图生图/图生视频/关键帧视频）
+    attachments = Column(JSON, nullable=True, default=list)
     # 工具调用信息
     tool_calls = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -97,6 +106,7 @@ class ChatMessage(Base):
             "role": self.role,
             "content": self.content or "",
             "media_items": self.media_items or [],
+            "attachments": self.attachments or [],
             "tool_calls": self.tool_calls,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

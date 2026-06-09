@@ -56,8 +56,15 @@ class UpdateSessionRequest(BaseModel):
 
 
 class SendMessageRequest(BaseModel):
-    """发送消息请求"""
-    content: str = Field(..., min_length=1, description="消息内容")
+    """发送消息请求
+    - content: 消息文本（可为空字符串，此时以附件为主）
+    - attachments: 可选的参考图列表（单张 ≤ 5MB，总数 ≤ 10）
+    """
+    content: str = Field(default="", description="消息内容（可为空字符串）")
+    attachments: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="参考图列表，每项: {name, base64_image, size, mime_type"
+    )
 
 
 class MediaCallbackRequest(BaseModel):
@@ -345,11 +352,51 @@ async def send_message(
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
 
-    # 保存用户消息
+    # ── 附件校验与清洗（Task 2） ──
+    # 如果用户提供了 attachments，进行大小/数量/格式校验
+    MAX_ATTACHMENTS = 10
+    MAX_SIZE_PER_FILE = 5 * 1024 * 1024  # 5MB
+
+    validated_attachments = []
+    if req.attachments:
+        if len(req.attachments) > MAX_ATTACHMENTS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"最多上传 {MAX_ATTACHMENTS} 张参考图，当前 {len(req.attachments)} 张"
+            )
+        for att in req.attachments:
+            try:
+                size = int(att.get("size", 0))
+            except (TypeError, ValueError):
+                size = 0
+            if size > MAX_SIZE_PER_FILE:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"单张参考图大小超过 5MB 限制: {att.get('name', 'unknown')}"
+                )
+            base64_image = att.get("base64_image", "")
+            if not base64_image or not isinstance(base64_image, str) or not base64_image.startswith("data:image/"):
+                # 非法的 base64 或非图片 mime —— 跳过并记录警告，不阻塞整个请求
+                logger.warning("[Chat] 忽略非法的附件: name=%s mime=%s",
+                               att.get("name"), att.get("mime_type"))
+                continue
+            validated_attachments.append({
+                "name": att.get("name", "image.png"),
+                "base64_image": base64_image,
+                "size": size,
+                "mime_type": att.get("mime_type", "image/png"),
+            })
+
+    # 允许 content 为空但有附件（用户可以"只甩一张图说画图"）
+    if not req.content.strip() and not validated_attachments:
+        raise HTTPException(status_code=400, detail="消息内容不能为空")
+
+    # 保存用户消息（同时保存 attachments）
     user_msg = ChatMessage(
         session_id=session_id,
         role="user",
         content=req.content,
+        attachments=validated_attachments if validated_attachments else [],
     )
     db.add(user_msg)
 
@@ -435,7 +482,11 @@ async def send_message(
 
         # ── 流式生成主循环 ──
         try:
-            async for chunk in chat_service.chat_stream(chat_history, session_id):
+            async for chunk in chat_service.chat_stream(
+                chat_history,
+                session_id,
+                attachments=validated_attachments if validated_attachments else None,
+            ):
                 yield f"data: {chunk}\n\n"
 
                 # 解析事件，收集信息并增量写入数据库

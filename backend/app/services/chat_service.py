@@ -41,6 +41,9 @@ CHAT_TOOLS = [
                 "当用户想要生成、创建、绘制图片时调用此工具。"
                 "用户可能说'帮我画一张图'、'生成一张风景图'、'画一个猫咪'等。"
                 "请将用户的描述转化为详细的英文图片提示词。"
+                "重要：如果用户提供了 1 张或多张参考图片（对话上下文中有 attachments），"
+                "请考虑将 mode 设置为 'image2image' 以进行风格迁移或基于参考图的创作。"
+                "如果用户明确说'忽略图片，直接画图'，请将 use_reference_image 设置为 false。"
             ),
             "parameters": {
                 "type": "object",
@@ -53,6 +56,15 @@ CHAT_TOOLS = [
                         "type": "string",
                         "description": "图片尺寸，如 1024x1024、1024x768、768x1024",
                         "enum": ["1024x1024", "1024x768", "768x1024"],
+                    },
+                    "mode": {
+                        "type": "string",
+                        "description": "生成模式：text2image（纯文生图）或 image2image（基于参考图）",
+                        "enum": ["text2image", "image2image"],
+                    },
+                    "use_reference_image": {
+                        "type": "boolean",
+                        "description": "是否使用用户上传的参考图（有参考图时默认 true；若用户明确说忽略则设为 false）",
                     },
                 },
                 "required": ["prompt"],
@@ -67,6 +79,8 @@ CHAT_TOOLS = [
                 "当用户想要生成、创建视频时调用此工具。"
                 "用户可能说'帮我生成一段视频'、'创建一个短视频'、'做个视频'等。"
                 "请将用户的描述转化为详细的英文视频提示词。"
+                "重要：如果用户提供了 1 张参考图，请考虑将 mode 设置为 'image2video'；"
+                "如果用户提供了 2 张或多张参考图，请将 mode 设置为 'keyframes' 以制作过渡动画。"
             ),
             "parameters": {
                 "type": "object",
@@ -89,6 +103,11 @@ CHAT_TOOLS = [
                         "type": "integer",
                         "description": "视频高度",
                         "default": 768,
+                    },
+                    "mode": {
+                        "type": "string",
+                        "description": "生成模式：text2video（纯文生视频）/ image2video（基于单张参考图动起来）/ keyframes（基于多张参考图做过渡动画）",
+                        "enum": ["text2video", "image2video", "keyframes"],
                     },
                 },
                 "required": ["prompt"],
@@ -210,6 +229,7 @@ class ChatService:
         self,
         messages: List[Dict[str, str]],
         session_id: Optional[int] = None,
+        attachments: Optional[List[Dict[str, Any]]] = None,
     ) -> AsyncGenerator[str, None]:
         """
         流式聊天接口，通过 SSE 逐块返回结果。
@@ -223,9 +243,29 @@ class ChatService:
         Args:
             messages: 对话历史 [{"role": "user/assistant/system", "content": "..."}]
             session_id: 会话 ID（用于关联生成任务）
+            attachments: 可选的用户参考图列表（用于 System Prompt 上下文注入与工具执行）
         """
-        # 构建请求体（带工具定义）
-        request_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
+        # ── Task 3: 根据附件数量动态追加 System Prompt 上下文 ──
+        # 告知模型当前存在参考图，引导其合理选择 mode / keyframes 等工具参数
+        attachment_note = ""
+        att_count = len(attachments) if attachments else 0
+        if att_count == 1:
+            attachment_note = (
+                f"\n\n【参考图上下文】用户本轮上传了 1 张参考图片（附件），可用于：\n"
+                f"- 图片生成：将 generate_image.mode 设置为 'image2image' 以基于参考图创作（风格迁移、参考构图等）\n"
+                f"- 视频生成：将 generate_video.mode 设置为 'image2video' 以让这张图动起来\n"
+                f"如果用户明确说'忽略这张图'或'只按文字生成'，则设 use_reference_image=false 或 mode='text2image'。"
+            )
+        elif att_count >= 2:
+            attachment_note = (
+                f"\n\n【参考图上下文】用户本轮上传了 {att_count} 张参考图片（附件），可用于：\n"
+                f"- 图片生成：将 generate_image.mode 设置为 'image2image'（默认取第 1 张作为参考）\n"
+                f"- 视频生成：将 generate_video.mode 设置为 'keyframes'，以把多张参考图作为关键帧制作过渡动画"
+            )
+        # att_count == 0: 不注入
+
+        system_prompt = SYSTEM_PROMPT + attachment_note
+        request_messages = [{"role": "system", "content": system_prompt}] + messages
 
         body = {
             "model": self.model,
@@ -269,7 +309,7 @@ class ChatService:
                     "args": json.loads(tc["function"]["arguments"]) if isinstance(tc["function"]["arguments"], str) else tc["function"]["arguments"],
                 }, ensure_ascii=False)
 
-            # 执行每个工具调用
+            # 执行每个工具调用（传入 attachments 以支持 image2image / image2video / keyframes）
             tool_results = []
             for tc in tool_calls_list:
                 func_name = tc["function"]["name"]
@@ -277,7 +317,7 @@ class ChatService:
                 if isinstance(func_args, str):
                     func_args = json.loads(func_args)
 
-                result = await self._execute_tool(func_name, func_args, session_id)
+                result = await self._execute_tool(func_name, func_args, session_id, attachments=attachments)
                 tool_results.append({
                     "tool_call_id": tc.get("id", ""),
                     "role": "tool",
@@ -331,6 +371,7 @@ class ChatService:
         self,
         messages: List[Dict[str, str]],
         session_id: Optional[int] = None,
+        attachments: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         非流式聊天接口，返回完整结果。
@@ -342,7 +383,21 @@ class ChatService:
                 "tool_results": [...],  # 工具执行结果（如果有）
             }
         """
-        request_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
+        att_count = len(attachments) if attachments else 0
+        attachment_note = ""
+        if att_count == 1:
+            attachment_note = (
+                f"\n\n【参考图上下文】用户本轮上传了 1 张参考图片，"
+                f"可用于 generate_image.mode='image2image' 或 generate_video.mode='image2video'。"
+            )
+        elif att_count >= 2:
+            attachment_note = (
+                f"\n\n【参考图上下文】用户本轮上传了 {att_count} 张参考图片，"
+                f"可用于 generate_image.mode='image2image' 或 generate_video.mode='keyframes'。"
+            )
+
+        system_prompt = SYSTEM_PROMPT + attachment_note
+        request_messages = [{"role": "system", "content": system_prompt}] + messages
 
         body = {
             "model": self.model,
@@ -379,7 +434,7 @@ class ChatService:
                 })
 
                 # 执行工具
-                result = await self._execute_tool(func_name, func_args, session_id)
+                result = await self._execute_tool(func_name, func_args, session_id, attachments=attachments)
                 tool_results.append({
                     "tool_call_id": tc.get("id", ""),
                     "role": "tool",
@@ -517,21 +572,38 @@ class ChatService:
     # 【工具执行】—— 根据工具名调用对应的生成服务
     # =====================================================
     async def _execute_tool(
-        self, func_name: str, func_args: Dict, session_id: Optional[int] = None
+        self,
+        func_name: str,
+        func_args: Dict,
+        session_id: Optional[int] = None,
+        attachments: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         执行工具调用（generate_image / generate_video）。
         返回工具执行结果（包含任务 ID、状态等）。
         """
         if func_name == "generate_image":
-            return await self._execute_generate_image(func_args, session_id)
+            return await self._execute_generate_image(func_args, session_id, attachments)
         elif func_name == "generate_video":
-            return await self._execute_generate_video(func_args, session_id)
+            return await self._execute_generate_video(func_args, session_id, attachments)
         else:
             return {"status": "error", "message": f"未知工具: {func_name}"}
 
-    async def _execute_generate_image(self, args: Dict, session_id: Optional[int] = None) -> Dict[str, Any]:
-        """执行图片生成工具"""
+    async def _execute_generate_image(
+        self,
+        args: Dict,
+        session_id: Optional[int] = None,
+        attachments: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """
+        执行图片生成工具（支持 text2image 与 image2image 两种模式。
+
+        策略（Task 5 / FR-5）
+        - 显式 use_reference_image=False 或 mode=text2image → 文生图
+        - 显式 use_reference_image=True 或 mode=image2image + 有参考图 → 图生图
+        - 模型未指定 mode 但存在参考图 → 自动走 image2image 并打日志
+        - 模型未指定 mode 且无参考图 → 文生图
+        """
         from app.services.image_poller import image_poller_manager
 
         prompt = args.get("prompt", "")
@@ -540,18 +612,51 @@ class ChatService:
         if not prompt:
             return {"status": "error", "message": "提示词不能为空"}
 
+        # ── 解析 LLM 指定的模式参数
+        llm_mode = args.get("mode")
+        use_ref = args.get("use_reference_image")
+        att_count = len(attachments) if attachments else 0
+
+        # ── 决策最终模式
+        # 1) 显式拒绝使用参考图
+        if use_ref is False or llm_mode == "text2image":
+            final_mode = "text2image"
+            use_image = False
+        elif use_ref is True or llm_mode == "image2image":
+            final_mode = "image2image"
+            use_image = True if att_count > 0 else False
+            if not use_image:
+                logger.info("[Chat] generate_image: 模型要求 image2image，但用户未上传参考图，降级为 text2image")
+                final_mode = "text2image"
+        else:
+            # LLM 未指定：根据是否存在参考图自动纠正模式
+            if att_count > 0:
+                final_mode = "image2image"
+                use_image = True
+                logger.info("[Chat] generate_image: 存在参考图，自动切换为 image2image 模式")
+            else:
+                final_mode = "text2image"
+                use_image = False
+
         try:
             params = {
                 "model": "agnes-image-2.1-flash",
                 "size": size,
                 "response_format": "url",
-                "mode": "text2image",
+                "mode": final_mode,
             }
+
+            if use_image and attachments and len(attachments) > 0:
+                # image_poller._gen_loop 会从 params.base64_image 取值
+                ref_b64 = attachments[0].get("base64_image")
+                params["base64_image"] = ref_b64
+
             task = await image_poller_manager.create_task(
                 prompt=prompt,
                 params=params,
             )
-            logger.info("[Chat] 图片生成任务已创建: task_id=%s, prompt=%s", task.task_id, prompt[:50])
+            logger.info("[Chat] 图片生成任务已创建: task_id=%s, mode=%s, prompt=%s",
+                        task.task_id, final_mode, prompt[:50])
 
             return {
                 "status": "pending",
@@ -559,14 +664,29 @@ class ChatService:
                 "media_type": "image",
                 "prompt": prompt,
                 "size": size,
+                "mode": final_mode,
                 "message": "图片生成任务已提交，请稍候...",
             }
         except Exception as e:
             logger.error("[Chat] 图片生成失败: %s", e)
             return {"status": "error", "message": f"图片生成失败: {str(e)}"}
 
-    async def _execute_generate_video(self, args: Dict, session_id: Optional[int] = None) -> Dict[str, Any]:
-        """执行视频生成工具"""
+    async def _execute_generate_video(
+        self,
+        args: Dict,
+        session_id: Optional[int] = None,
+        attachments: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """
+        执行视频生成工具（支持 text2video / image2video / keyframes 三种模式）。
+
+        策略（Task 6 / FR-6 / FR-7）：
+        - LLM 显式 mode=keyframes 且附件≥2 → keyframes
+        - LLM 显式 mode=image2video 且附件≥1 → image2video
+        - LLM 显式 mode=text2video 或未指定+无附件 → text2video
+        - LLM 显式 text2video 但有 1 张参考图 → 自动纠正为 image2video 并记日志
+        - LLM 显式 text2video 但有 ≥2 张参考图 → 自动纠正为 keyframes 并记日志
+        """
         prompt = args.get("prompt", "")
         num_frames = args.get("num_frames", 121)
         width = args.get("width", 1152)
@@ -578,8 +698,44 @@ class ChatService:
         # 校验帧数
         valid_frames = [81, 121, 161, 241, 441]
         if num_frames not in valid_frames:
-            # 找最接近的有效值
             num_frames = min(valid_frames, key=lambda x: abs(x - num_frames))
+
+        llm_mode = args.get("mode")
+        att_count = len(attachments) if attachments else 0
+
+        # ── 模式决策
+        if llm_mode == "keyframes":
+            final_mode = "keyframes" if att_count >= 2 else ("image2video" if att_count == 1 else "text2video")
+        elif llm_mode == "image2video":
+            final_mode = "image2video" if att_count >= 1 else "text2video"
+        elif llm_mode == "text2video":
+            # LLM 明确选择纯文本，但后端根据参考图纠正（FR-7）
+            if att_count >= 2:
+                final_mode = "keyframes"
+                logger.info("[Chat] generate_video: LLM 选择 text2video，但存在 %d 张参考图，自动纠正为 keyframes", att_count)
+            elif att_count == 1:
+                final_mode = "image2video"
+                logger.info("[Chat] generate_video: LLM 选择 text2video，但存在 1 张参考图，自动纠正为 image2video")
+            else:
+                final_mode = "text2video"
+        else:
+            # LLM 未指定 mode：根据附件数推断
+            if att_count >= 2:
+                final_mode = "keyframes"
+                logger.info("[Chat] generate_video: 存在 %d 张参考图，自动选择 keyframes 模式", att_count)
+            elif att_count == 1:
+                final_mode = "image2video"
+                logger.info("[Chat] generate_video: 存在 1 张参考图，自动选择 image2video 模式")
+            else:
+                final_mode = "text2video"
+
+        # ── 根据 final_mode 准备调用参数
+        image_param = None
+        images_param = None
+        if final_mode == "image2video":
+            image_param = attachments[0].get("base64_image")
+        elif final_mode == "keyframes":
+            images_param = [a.get("base64_image") for a in attachments if a.get("base64_image")]
 
         try:
             result = await agnes_client.create_video_task(
@@ -589,7 +745,9 @@ class ChatService:
                 frame_rate=24,
                 width=width,
                 height=height,
-                mode="text2video",
+                mode=final_mode,
+                image=image_param,
+                images=images_param,
             )
 
             video_id = result.get("video_id") or (
@@ -609,7 +767,7 @@ class ChatService:
                 "frame_rate": 24,
                 "width": width,
                 "height": height,
-                "mode": "text2video",
+                "mode": final_mode,
             }
             await poller_manager.start_polling(
                 task_id=task_id,
@@ -618,7 +776,7 @@ class ChatService:
                 params=params,
             )
 
-            logger.info("[Chat] 视频生成任务已创建: task_id=%s, video_id=%s", task_id, video_id)
+            logger.info("[Chat] 视频生成任务已创建: task_id=%s, video_id=%s, mode=%s", task_id, video_id, final_mode)
 
             return {
                 "status": "pending",
@@ -627,6 +785,7 @@ class ChatService:
                 "media_type": "video",
                 "prompt": prompt,
                 "num_frames": num_frames,
+                "mode": final_mode,
                 "message": "视频生成任务已提交，通常需要 1-3 分钟...",
             }
         except Exception as e:

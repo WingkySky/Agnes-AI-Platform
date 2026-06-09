@@ -198,13 +198,16 @@ class AgnesAIClient:
         if seed is not None:
             body["seed"] = seed
 
+        # 关键帧动画模式：将图片直接放在顶层字段，与 image2video 保持一致
+        # 重要：不使用 extra_body 嵌套 —— Agnes AI API 期望图片在请求体顶层
         if mode == "image2video" and image:
             body["image"] = image
         elif mode == "keyframes" and images and len(images) > 0:
-            body["extra_body"] = {
-                "image": images,
-                "mode": "keyframes",
-            }
+            # 过滤空值/None，确保仅保留有效图片
+            valid_images = [img for img in images if img and isinstance(img, str) and img.strip()]
+            if valid_images:
+                body["image"] = valid_images  # 使用 image 字段 (数组) 与 API 对齐
+                body["mode"] = "keyframes"
 
         logger.info(
             f"[视频生成] 创建任务: prompt={prompt[:60]}...  "

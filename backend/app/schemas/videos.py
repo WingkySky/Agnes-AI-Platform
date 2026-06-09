@@ -60,12 +60,16 @@ class VideoGenerationRequest(BaseModel):
         """
         根据 mode 校验必填字段：
         - image2video 必须有 image 字段
-        - keyframes 必须有 images 数组且至少 1 张
+        - keyframes 必须有 images 数组且至少 1 张有效图片（过滤空值后）
         """
         if self.mode == "image2video" and not self.image and (not self.images or len(self.images) == 0):
             raise ValueError("image2video 模式需提供参考图（image 字段）")
-        if self.mode == "keyframes" and (not self.images or len(self.images) < 1):
-            raise ValueError("keyframes 模式需提供至少 1 张关键帧图片（images 字段）")
+        if self.mode == "keyframes":
+            # 先过滤 images 中的空值/None/空字符串
+            if self.images:
+                self.images = [img for img in self.images if img and isinstance(img, str) and img.strip()]
+            if not self.images or len(self.images) < 1:
+                raise ValueError("keyframes 模式需提供至少 1 张关键帧图片（images 字段，过滤空值后无有效图片）")
         return self
 
 

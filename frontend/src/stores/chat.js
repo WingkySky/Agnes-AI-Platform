@@ -223,13 +223,14 @@ export const useChatStore = defineStore('chat', {
     // =====================================================
 
     /** 发送消息并处理流式响应 */
-    async sendMessage(content) {
+    async sendMessage(content, attachments = []) {
       if (!this.activeSessionId) {
         // 自动创建新会话（标题用默认的"新对话"，等 AI 回复完成后自动总结）
         await this.newSession()
       }
 
-      if (!content.trim()) return
+      // 允许文本或附件（二者任一）
+      if (!content.trim() && (!attachments || attachments.length === 0)) return
 
       // 添加用户消息到列表（乐观更新）
       const userMsg = {
@@ -237,6 +238,7 @@ export const useChatStore = defineStore('chat', {
         session_id: this.activeSessionId,
         role: 'user',
         content: content,
+        attachments: attachments || [],
         media_items: [],
         created_at: new Date().toISOString(),
       }
@@ -268,6 +270,7 @@ export const useChatStore = defineStore('chat', {
         await sendMessageStream(
           this.activeSessionId,
           content,
+          attachments,
           (event) => this._handleSSEEvent(event),
           this._abortController.signal,
         )

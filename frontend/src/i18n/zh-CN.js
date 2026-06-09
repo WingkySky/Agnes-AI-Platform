@@ -305,6 +305,7 @@ export default {
   message: {
     pleaseFillPrompt: '请先填写提示词',
     pleaseUploadRefImage: '请先上传参考图',
+    pleaseUploadKeyframeImages: '请至少上传一张关键帧图片',
     maxKeyframes: '最多添加 6 张关键帧',
   },
 

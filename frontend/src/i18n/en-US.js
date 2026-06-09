@@ -304,6 +304,7 @@ export default {
   message: {
     pleaseFillPrompt: 'Please fill in the prompt first',
     pleaseUploadRefImage: 'Please upload a reference image first',
+    pleaseUploadKeyframeImages: 'Please upload at least one keyframe image',
     maxKeyframes: 'Maximum 6 keyframes allowed',
   },
 

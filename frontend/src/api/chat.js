@@ -83,21 +83,33 @@ export function getChatMessages(sessionId) {
  * 不使用 axios，直接用 fetch API 处理 SSE
  *
  * @param {number} sessionId
- * @param {string} content - 消息内容
+ * @param {string} content - 消息文本内容
+ * @param {Array<{name:string, base64:string, size:number, mime_type:string}>} [attachments] - 可选附件列表
  * @param {Function} onEvent - 事件回调 (event: {type, ...}) => void
  * @param {AbortSignal} [signal] - 可选的 AbortSignal，用于取消请求
  * @returns {Promise<void>}
  */
-export async function sendMessageStream(sessionId, content, onEvent, signal) {
+export async function sendMessageStream(sessionId, content, attachments, onEvent, signal) {
   const baseURL = import.meta.env.VITE_API_BASE_URL || ''
   const url = `${baseURL}/api/chat/sessions/${sessionId}/messages`
+
+  // 构造请求体（带附件字段，符合 Task 2 的 routes/chat.py 定义）
+  const body = { content }
+  if (attachments && attachments.length > 0) {
+    body.attachments = attachments.map((a) => ({
+      name: a.name || 'image.png',
+      base64_image: a.base64,
+      size: a.size || 0,
+      mime_type: a.mime_type || 'image/png',
+    }))
+  }
 
   const response = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify(body),
     signal,
   })
 

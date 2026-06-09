@@ -434,8 +434,17 @@ async function startGenerate() {
     params.image = referenceFile.value.base64 || referenceFile.value.url
   }
   if (mode.value === 'keyframes') {
-    const imgs = keyframes.value.filter(Boolean).map(f => f.base64 || f.url)
-    if (imgs.length > 0) params.images = imgs
+    // 关键帧动画：过滤空卡片和无效图片，确保仅保留有效 base64/URL
+    // 问题场景：用户添加了多个卡片但某些卡片没上传图片
+    const imgs = keyframes.value
+      .filter(Boolean)                              // 过滤 null/undefined 空卡片
+      .map(f => (f.base64 || f.url || '').trim()) // 提取有效图片数据
+      .filter(img => img.length > 0)               // 过滤空字符串
+    if (imgs.length === 0) {
+      ElMessage.warning(t('message.pleaseUploadKeyframeImages'))
+      return
+    }
+    params.images = imgs
   }
 
   try {
