@@ -42,12 +42,12 @@
         </div>
       </header>
 
-      <!-- 主内容区 -->
+      <!-- 主内容区（keep-alive 保持组件状态，切换标签页时不丢失流式输出等内容） -->
       <main class="app-main">
         <router-view v-slot="{ Component }">
-          <transition name="fade" mode="out-in">
+          <keep-alive :include="cachedViews">
             <component :is="Component" />
-          </transition>
+          </keep-alive>
         </router-view>
       </main>
 
@@ -70,6 +70,9 @@ import LanguageSwitcher from './components/LanguageSwitcher.vue'
 import { useI18n, getElementPlusLocale } from '@/i18n'
 
 const { t, locale } = useI18n()
+
+// keep-alive 缓存的路由组件名称（切换标签页时保持状态不销毁）
+const cachedViews = ['ChatView', 'ImageView', 'VideoView', 'HistoryView']
 
 // 每当 locale 变化时返回对应的 Element Plus 语言对象
 const epLocale = computed(() => {

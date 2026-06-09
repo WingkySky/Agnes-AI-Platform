@@ -30,7 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import desc, func
 
-from app.core.database import get_async_db
+from app.core.database import get_async_db, async_session
 from app.core.config import settings
 from app.models.chat import ChatSession, ChatMessage
 from app.services.chat_service import chat_service
@@ -306,7 +306,17 @@ async def send_message(
 
     # SSE 流式生成器
     async def event_generator():
-        """SSE 事件生成器"""
+        """
+        SSE 事件生成器。
+
+        关键设计（参考 AgnesAI-main 的可靠性模式）：
+          - 流式开始前就创建 assistant 消息（占位）并写入数据库，
+            这样即使客户端中途断开/切换页面，已生成的内容也不会丢失。
+          - 每收到一个 text / tool_result 事件就增量更新数据库，
+            保证切换页面后从数据库能恢复最新状态。
+          - 使用 async_session() 创建独立的数据库连接，
+            避免与外层请求 db 的事务边界冲突。
+        """
         # 先发送用户消息确认
         yield f"data: {json.dumps({'type': 'user_message', 'message': user_msg.to_dict()}, ensure_ascii=False)}\n\n"
 
@@ -316,19 +326,58 @@ async def send_message(
         media_items = []
         tool_calls_info = []
 
+        # ── 流式开始前：先在数据库里创建一条 assistant 消息（占位） ──
+        #    这样即使客户端中途断开，已经推送给用户的内容也能被恢复。
+        assistant_msg_id = None
+        try:
+            async with async_session() as db_write:
+                assistant_msg = ChatMessage(
+                    session_id=session_id,
+                    role="assistant",
+                    content="",
+                    media_items=[],
+                    tool_calls=None,
+                )
+                db_write.add(assistant_msg)
+                # 同时更新会话时间
+                session_result_w = await db_write.execute(
+                    select(ChatSession).filter(ChatSession.id == session_id)
+                )
+                session_obj_w = session_result_w.scalar_one_or_none()
+                if session_obj_w:
+                    session_obj_w.updated_at = datetime.utcnow()
+                await db_write.commit()
+                await db_write.refresh(assistant_msg)
+                assistant_msg_id = assistant_msg.id
+        except Exception as e:
+            logger.error("[Chat] 创建 assistant 占位消息失败: %s", e)
+
+        # 发送刚创建的 assistant_message_created（含真实 DB ID）
+        # 这样前端一上来就拿到真实 message_id，media_callback 随时可以回写
+        if assistant_msg_id:
+            try:
+                async with async_session() as db_read:
+                    first_msg = await db_read.get(ChatMessage, assistant_msg_id)
+                    if first_msg:
+                        yield f"data: {json.dumps({'type': 'assistant_message_created', 'message': first_msg.to_dict()}, ensure_ascii=False)}\n\n"
+            except Exception as e:
+                logger.warning("[Chat] 读取刚创建的 assistant 消息失败: %s", e)
+
+        # ── 流式生成主循环 ──
         try:
             async for chunk in chat_service.chat_stream(chat_history, session_id):
                 yield f"data: {chunk}\n\n"
 
-                # 解析事件，收集信息用于保存
+                # 解析事件，收集信息并增量写入数据库
                 try:
                     event = json.loads(chunk)
+                    changed = False
                     if event.get("type") == "text":
                         assistant_content += event.get("content", "")
+                        changed = True
                     elif event.get("type") == "tool_result":
                         result_data = event.get("result", {})
                         tool_name = event.get("tool", "")
-                        # 为每个工具调用结果创建一个 media_item
                         if result_data.get("media_type") and result_data.get("status") != "error":
                             media_item = {
                                 "type": result_data.get("media_type"),
@@ -336,11 +385,33 @@ async def send_message(
                                 "task_id": result_data.get("task_id") or result_data.get("video_id", ""),
                                 "status": result_data.get("status", "pending"),
                             }
-                            media_items.append(media_item)
+                            # 避免重复添加同一个 task_id
+                            if not any(m.get("task_id") == media_item["task_id"] for m in media_items):
+                                media_items.append(media_item)
                         tool_calls_info.append({
                             "tool": tool_name,
                             "result": result_data,
                         })
+                        changed = True
+
+                    # 增量更新数据库（只有当有变化且 assistant_msg_id 存在时才更新）
+                    if changed and assistant_msg_id:
+                        try:
+                            async with async_session() as db_upd:
+                                msg_upd = await db_upd.get(ChatMessage, assistant_msg_id)
+                                if msg_upd:
+                                    msg_upd.content = assistant_content
+                                    msg_upd.media_items = list(media_items) if media_items else []
+                                    msg_upd.tool_calls = tool_calls_info if tool_calls_info else None
+                                    session_result_upd = await db_upd.execute(
+                                        select(ChatSession).filter(ChatSession.id == session_id)
+                                    )
+                                    session_obj_upd = session_result_upd.scalar_one_or_none()
+                                    if session_obj_upd:
+                                        session_obj_upd.updated_at = datetime.utcnow()
+                                    await db_upd.commit()
+                        except Exception as inner_e:
+                            logger.warning("[Chat] 增量更新消息失败: %s", inner_e)
                 except (json.JSONDecodeError, KeyError):
                     pass
 
@@ -348,31 +419,15 @@ async def send_message(
             logger.error("[Chat] SSE 生成异常: %s", e)
             yield f"data: {json.dumps({'type': 'error', 'content': str(e)}, ensure_ascii=False)}\n\n"
 
-        # 保存 AI 回复到数据库
-        try:
-            async with get_async_db() as db_new:
-                assistant_msg = ChatMessage(
-                    session_id=session_id,
-                    role="assistant",
-                    content=assistant_content,
-                    media_items=media_items if media_items else [],
-                    tool_calls=tool_calls_info if tool_calls_info else None,
-                )
-                db_new.add(assistant_msg)
-                # 更新会话时间
-                session_result = await db_new.execute(
-                    select(ChatSession).filter(ChatSession.id == session_id)
-                )
-                session_obj = session_result.scalar_one_or_none()
-                if session_obj:
-                    session_obj.updated_at = datetime.utcnow()
-                await db_new.commit()
-                await db_new.refresh(assistant_msg)
-
-                # 发送保存确认
-                yield f"data: {json.dumps({'type': 'assistant_message', 'message': assistant_msg.to_dict()}, ensure_ascii=False)}\n\n"
-        except Exception as e:
-            logger.error("[Chat] 保存 AI 回复异常: %s", e)
+        # ── 流结束：发送最终的 assistant_message 事件（供前端更新最终状态） ──
+        if assistant_msg_id:
+            try:
+                async with async_session() as db_final:
+                    final_msg = await db_final.get(ChatMessage, assistant_msg_id)
+                    if final_msg:
+                        yield f"data: {json.dumps({'type': 'assistant_message', 'message': final_msg.to_dict()}, ensure_ascii=False)}\n\n"
+            except Exception as e:
+                logger.error("[Chat] 读取最终 AI 消息失败: %s", e)
 
         yield "data: [DONE]\n\n"
 

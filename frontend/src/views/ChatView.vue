@@ -210,7 +210,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick, watch, computed } from 'vue'
+// 组件名称（供 keep-alive 缓存识别）
+defineOptions({ name: 'ChatView' })
+
+import { ref, onMounted, onActivated, nextTick, watch, computed } from 'vue'
 import {
   Plus, Delete, User, Monitor, Picture, VideoPlay,
   Loading, Check, WarningFilled, Promotion, ChatDotRound,
@@ -240,6 +243,11 @@ const quickTips = computed(() => [
 onMounted(async () => {
   // 使用 init() 初始化（从 localStorage 恢复 + 从数据库加载消息）
   await chatStore.init()
+})
+
+// 配合 keep-alive：从其他标签页切回时恢复滚动位置（保留在后台累积的流式内容可见）
+onActivated(() => {
+  scrollToBottom()
 })
 
 // 监听消息变化，自动滚动到底部

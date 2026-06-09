@@ -60,6 +60,11 @@ export const useChatStore = defineStore('chat', {
     mediaTaskToMessageId: {},
     // AbortController（用于取消流式请求）
     _abortController: null,
+    // 是否已完成初始化（配合 keep-alive 防止重复加载消息覆盖内存状态）
+    _initialized: false,
+    // 会话状态缓存（切换会话时保留当前会话的消息，回来时从缓存恢复，避免丢失流式内容）
+    // 格式：{ [sessionId]: { messages, streamingContent, streamingToolCalls, sending } }
+    _sessionCache: {},
   }),
 
   getters: {
@@ -106,20 +111,25 @@ export const useChatStore = defineStore('chat', {
 
     /** 切换活跃会话 */
     async switchSession(sessionId) {
-      // 取消当前流式请求
+      if (sessionId === this.activeSessionId) return
+
+      // ── 切换前：中止当前流式请求和媒体轮询 ──
+      //    后端已经把已生成的内容增量写入数据库了，
+      //    所以即使客户端断开，切回来也能从数据库恢复最新状态。
       this._abortStream()
-      // 停止旧会话的所有媒体轮询，避免切换后继续调用旧 message.id（临时 ID）
       this.stopAllMediaPolls()
-      // 清空临时 ID 映射
       this.mediaTaskToMessageId = {}
 
       this.activeSessionId = sessionId
+
+      // ── 切换后：永远从数据库加载最新状态 ──
+      //    参考 AgnesAI-main 的模式：数据库是唯一可信源（Single Source of Truth）。
+      //    不再依赖内存缓存，避免缓存与数据库不同步导致内容丢失/重复。
       this.messages = []
       this.streamingContent = ''
       this.streamingToolCalls = []
-
-      // 加载消息（从数据库恢复，包含 media_items）
       await this.loadMessages(sessionId)
+
       this._saveToStorage()
     },
 
@@ -128,6 +138,8 @@ export const useChatStore = defineStore('chat', {
       try {
         await deleteChatSession(sessionId)
         this.sessions = this.sessions.filter(s => s.id !== sessionId)
+        // 清除对应的缓存
+        delete this._sessionCache[sessionId]
 
         // 如果删除的是当前会话，切换到其他会话或清空
         if (this.activeSessionId === sessionId) {
@@ -252,6 +264,28 @@ export const useChatStore = defineStore('chat', {
             }
           }
           break
+
+        case 'assistant_message_created': {
+          // 后端在流式开始前就创建了 assistant 消息并写入数据库，
+          // 这里把前端的临时 ID / _tempId 标记替换为真实 DB ID，
+          // 这样媒体轮询一回车就能直接回写（不需要等到整个流结束）。
+          if (event.message) {
+            const lastMsg = this.messages[this.messages.length - 1]
+            if (lastMsg && lastMsg.role === 'assistant') {
+              lastMsg.id = event.message.id
+              lastMsg._tempId = false // 已拿到真实 ID，清除临时标记
+              // 更新 mediaTaskToMessageId 映射（已存在的 media item 也能立即回写）
+              if (lastMsg.media_items && Array.isArray(lastMsg.media_items)) {
+                for (const item of lastMsg.media_items) {
+                  if (item.task_id) {
+                    this.mediaTaskToMessageId[item.task_id] = event.message.id
+                  }
+                }
+              }
+            }
+          }
+          break
+        }
 
         case 'text':
           // AI 文本增量
@@ -635,8 +669,12 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    /** 初始化 — 应用启动时调用 */
+    /** 初始化 — 应用启动时调用（仅首次生效，配合 keep-alive 防止重复加载） */
     async init() {
+      // 防止重复初始化覆盖内存中的消息状态（配合 keep-alive）
+      if (this._initialized) return
+      this._initialized = true
+
       // 从 localStorage 恢复
       this._restoreFromStorage()
 
