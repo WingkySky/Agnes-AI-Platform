@@ -415,11 +415,17 @@ async def send_message(
     )
     all_messages = result.scalars().all()
 
-    # 构建对话历史（只取 role 和 content，过滤掉系统消息）
+    # 构建对话历史（包含附件上下文标注，帮助 AI 区分不同轮次的参考图）
     chat_history = []
     for msg in all_messages:
         if msg.role in ("user", "assistant"):
-            chat_history.append({"role": msg.role, "content": msg.content or ""})
+            content = msg.content or ""
+            # 如果用户消息有附件，在内容中标注（帮助 AI 区分不同轮次的参考图）
+            if msg.role == "user" and msg.attachments and len(msg.attachments) > 0:
+                att_count = len(msg.attachments)
+                att_note = f"\n[用户在本轮上传了 {att_count} 张参考图片]"
+                content = (content + att_note) if content else att_note.strip()
+            chat_history.append({"role": msg.role, "content": content})
 
     # SSE 流式生成器
     async def event_generator():

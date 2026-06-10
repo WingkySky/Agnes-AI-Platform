@@ -198,16 +198,21 @@ class AgnesAIClient:
         if seed is not None:
             body["seed"] = seed
 
-        # 关键帧动画模式：将图片直接放在顶层字段，与 image2video 保持一致
-        # 重要：不使用 extra_body 嵌套 —— Agnes AI API 期望图片在请求体顶层
+        # 图生视频模式：单张参考图放在顶层 image 字段
         if mode == "image2video" and image:
             body["image"] = image
-        elif mode == "keyframes" and images and len(images) > 0:
+
+        # 关键帧动画模式：多张图片和 mode 必须放在 extra_body 中
+        # Agnes AI API 要求关键帧的 image 数组和 mode 放在 extra_body 嵌套对象内，
+        # 放在顶层会导致 400 错误（与图生图 extra_body.image 规则一致）
+        if mode == "keyframes" and images and len(images) > 0:
             # 过滤空值/None，确保仅保留有效图片
             valid_images = [img for img in images if img and isinstance(img, str) and img.strip()]
             if valid_images:
-                body["image"] = valid_images  # 使用 image 字段 (数组) 与 API 对齐
-                body["mode"] = "keyframes"
+                body["extra_body"] = {
+                    "image": valid_images,   # 关键帧图片数组
+                    "mode": "keyframes",     # 显式声明关键帧模式
+                }
 
         logger.info(
             f"[视频生成] 创建任务: prompt={prompt[:60]}...  "

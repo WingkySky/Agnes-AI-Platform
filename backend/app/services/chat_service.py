@@ -245,20 +245,31 @@ class ChatService:
             session_id: 会话 ID（用于关联生成任务）
             attachments: 可选的用户参考图列表（用于 System Prompt 上下文注入与工具执行）
         """
-        # ── Task 3: 根据附件数量动态追加 System Prompt 上下文 ──
+        # ── 根据附件数量动态追加 System Prompt 上下文 ──
         # 告知模型当前存在参考图，引导其合理选择 mode / keyframes 等工具参数
+        # 关键改进：明确区分"本轮附件"与"历史附件"，防止 AI 复用旧提示词
         attachment_note = ""
         att_count = len(attachments) if attachments else 0
         if att_count == 1:
             attachment_note = (
-                f"\n\n【参考图上下文】用户本轮上传了 1 张参考图片（附件），可用于：\n"
+                f"\n\n【参考图上下文】用户【本轮】上传了 1 张【新的】参考图片（附件）。\n"
+                f"重要提示：\n"
+                f"- 请基于【本轮】上传的参考图生成内容，不要复用之前对话中的旧提示词\n"
+                f"- 如果之前的对话中也有参考图，本轮的参考图是【全新的、不同的】图片\n"
+                f"- 生成提示词时，请根据本轮参考图的视觉内容重新描述\n"
+                f"可用模式：\n"
                 f"- 图片生成：将 generate_image.mode 设置为 'image2image' 以基于参考图创作（风格迁移、参考构图等）\n"
                 f"- 视频生成：将 generate_video.mode 设置为 'image2video' 以让这张图动起来\n"
                 f"如果用户明确说'忽略这张图'或'只按文字生成'，则设 use_reference_image=false 或 mode='text2image'。"
             )
         elif att_count >= 2:
             attachment_note = (
-                f"\n\n【参考图上下文】用户本轮上传了 {att_count} 张参考图片（附件），可用于：\n"
+                f"\n\n【参考图上下文】用户【本轮】上传了 {att_count} 张【新的】参考图片（附件）。\n"
+                f"重要提示：\n"
+                f"- 请基于【本轮】上传的参考图生成内容，不要复用之前对话中的旧提示词\n"
+                f"- 如果之前的对话中也有参考图，本轮的参考图是【全新的、不同的】图片\n"
+                f"- 生成提示词时，请根据本轮参考图的视觉内容重新描述\n"
+                f"可用模式：\n"
                 f"- 图片生成：将 generate_image.mode 设置为 'image2image'（默认取第 1 张作为参考）\n"
                 f"- 视频生成：将 generate_video.mode 设置为 'keyframes'，以把多张参考图作为关键帧制作过渡动画"
             )
@@ -266,6 +277,35 @@ class ChatService:
 
         system_prompt = SYSTEM_PROMPT + attachment_note
         request_messages = [{"role": "system", "content": system_prompt}] + messages
+
+        # ── 将当前附件以多模态格式注入最后一条用户消息 ──
+        # 让 AI 模型真正"看到"图片内容，而不是仅靠 system prompt 文字描述猜测
+        # 这样 AI 能根据图片实际内容生成准确的提示词，避免复用历史提示词
+        if attachments:
+            for i in range(len(request_messages) - 1, -1, -1):
+                if request_messages[i]["role"] == "user":
+                    original_content = request_messages[i]["content"]
+                    # 构建多模态消息内容（文本 + 图片）
+                    multi_content = []
+                    if isinstance(original_content, str) and original_content.strip():
+                        multi_content.append({"type": "text", "text": original_content})
+                    elif isinstance(original_content, list):
+                        # 已经是多模态格式，保留原有文本部分
+                        for part in original_content:
+                            if isinstance(part, dict) and part.get("type") == "text":
+                                multi_content.append(part)
+                    for att in attachments:
+                        if att.get("base64_image"):
+                            multi_content.append({
+                                "type": "image_url",
+                                "image_url": {"url": att["base64_image"]}
+                            })
+                    if multi_content:
+                        request_messages[i] = {
+                            "role": "user",
+                            "content": multi_content,
+                        }
+                    break
 
         body = {
             "model": self.model,
@@ -387,17 +427,44 @@ class ChatService:
         attachment_note = ""
         if att_count == 1:
             attachment_note = (
-                f"\n\n【参考图上下文】用户本轮上传了 1 张参考图片，"
+                f"\n\n【参考图上下文】用户【本轮】上传了 1 张【新的】参考图片。\n"
+                f"重要：请基于本轮参考图生成内容，不要复用历史提示词。\n"
                 f"可用于 generate_image.mode='image2image' 或 generate_video.mode='image2video'。"
             )
         elif att_count >= 2:
             attachment_note = (
-                f"\n\n【参考图上下文】用户本轮上传了 {att_count} 张参考图片，"
+                f"\n\n【参考图上下文】用户【本轮】上传了 {att_count} 张【新的】参考图片。\n"
+                f"重要：请基于本轮参考图生成内容，不要复用历史提示词。\n"
                 f"可用于 generate_image.mode='image2image' 或 generate_video.mode='keyframes'。"
             )
 
         system_prompt = SYSTEM_PROMPT + attachment_note
         request_messages = [{"role": "system", "content": system_prompt}] + messages
+
+        # 将当前附件以多模态格式注入最后一条用户消息（与流式方法一致）
+        if attachments:
+            for i in range(len(request_messages) - 1, -1, -1):
+                if request_messages[i]["role"] == "user":
+                    original_content = request_messages[i]["content"]
+                    multi_content = []
+                    if isinstance(original_content, str) and original_content.strip():
+                        multi_content.append({"type": "text", "text": original_content})
+                    elif isinstance(original_content, list):
+                        for part in original_content:
+                            if isinstance(part, dict) and part.get("type") == "text":
+                                multi_content.append(part)
+                    for att in attachments:
+                        if att.get("base64_image"):
+                            multi_content.append({
+                                "type": "image_url",
+                                "image_url": {"url": att["base64_image"]}
+                            })
+                    if multi_content:
+                        request_messages[i] = {
+                            "role": "user",
+                            "content": multi_content,
+                        }
+                    break
 
         body = {
             "model": self.model,
