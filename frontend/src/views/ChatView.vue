@@ -104,6 +104,29 @@
           </el-button>
         </template>
       </el-dialog>
+      <!-- URL 图片链接输入对话框 -->
+      <el-dialog
+        v-model="urlDialogVisible"
+        title="添加图片链接"
+        width="450px"
+        :close-on-click-modal="false"
+      >
+        <el-input
+          v-model="urlInput"
+          placeholder="请输入图片 URL 地址（如 https://example.com/image.jpg）"
+          clearable
+          @keyup.enter="confirmUrlAttachment"
+        />
+        <p style="margin-top: 8px; font-size: 12px; color: #999;">
+          支持公网可访问的图片链接，AI 将根据链接内容和你的意图决定下一步操作
+        </p>
+        <template #footer>
+          <el-button @click="urlDialogVisible = false">取消</el-button>
+          <el-button type="primary" :disabled="!urlInput.trim()" @click="confirmUrlAttachment">
+            添加
+          </el-button>
+        </template>
+      </el-dialog>
       <!-- 无会话时的欢迎页 -->
       <div v-if="!chatStore.hasActiveSession" class="chat-welcome">
         <div class="welcome-icon">💬</div>
@@ -268,7 +291,13 @@
               :key="'pending-' + idx"
               class="pending-attachment"
             >
-              <img :src="att.base64" :alt="att.name" class="pending-attachment-thumb" />
+              <!-- base64 上传图片预览 -->
+              <img v-if="att.base64" :src="att.base64" :alt="att.name" class="pending-attachment-thumb" />
+              <!-- URL 链接图片预览 -->
+              <div v-else-if="att.url" class="pending-attachment-url">
+                <el-icon :size="20"><Link /></el-icon>
+                <span class="url-text" :title="att.url">{{ att.url }}</span>
+              </div>
               <el-button
                 type="danger"
                 size="small"
@@ -297,6 +326,14 @@
               class="hidden-file-input"
               @change="onAttachmentSelected"
             />
+            <!-- URL 输入按钮 -->
+            <el-button
+              :icon="Link"
+              class="upload-btn"
+              :disabled="chatStore.sending"
+              @click="showUrlDialog"
+              title="输入图片链接"
+            />
 
             <el-input
               v-model="inputText"
@@ -317,7 +354,7 @@
               class="send-btn"
             />
           </div>
-          <p class="input-hint">{{ t('chat.inputHint') }} · 可上传参考图进行图生图/图生视频</p>
+          <p class="input-hint">{{ t('chat.inputHint') }} · 可上传图片或输入链接作为参考图</p>
         </div>
       </template>
     </main>
@@ -332,7 +369,7 @@ import { ref, onMounted, onActivated, nextTick, watch, computed } from 'vue'
 import {
   Plus, Delete, User, Monitor, Picture, VideoPlay,
   Loading, Check, WarningFilled, Promotion, ChatDotRound,
-  Edit, MagicStick, Close,
+  Edit, MagicStick, Close, Link,
 } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { useChatStore } from '@/stores/chat'
@@ -361,6 +398,10 @@ const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB
 const renameDialogVisible = ref(false)
 const renameInput = ref('')
 const renamingSessionId = ref(null)
+
+// URL 图片链接输入相关
+const urlDialogVisible = ref(false)
+const urlInput = ref('')
 
 // 快捷提示
 const quickTips = computed(() => [
@@ -550,6 +591,45 @@ async function onAttachmentSelected(event) {
 /** 移除某个待发送的附件 */
 function removePendingAttachment(idx) {
   pendingAttachments.value.splice(idx, 1)
+}
+
+// =====================================================
+// URL 图片链接输入相关
+// =====================================================
+/** 打开 URL 输入对话框 */
+function showUrlDialog() {
+  urlInput.value = ''
+  urlDialogVisible.value = true
+}
+
+/** 确认添加 URL 附件 */
+function confirmUrlAttachment() {
+  const url = urlInput.value.trim()
+  if (!url) return
+
+  // 校验 URL 格式
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    ElMessage.warning('请输入有效的 HTTP/HTTPS 链接')
+    return
+  }
+
+  if (pendingAttachments.value.length >= MAX_ATTACHMENTS) {
+    ElMessage.warning(`最多添加 ${MAX_ATTACHMENTS} 张图片`)
+    return
+  }
+
+  // 添加为 URL 类型附件
+  pendingAttachments.value.push({
+    name: 'url_image',
+    base64: null,
+    url: url,
+    size: 0,
+    mime_type: 'image/url',
+    source: 'url',
+  })
+
+  urlDialogVisible.value = false
+  urlInput.value = ''
 }
 
 // =====================================================
@@ -1205,6 +1285,27 @@ function getImageIndex(mediaItems, currentIdx) {
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+/* URL 类型附件预览 */
+.pending-attachment-url {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: rgba(80, 140, 255, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.pending-attachment-url .url-text {
+  font-size: 11px;
+  color: #a0c4ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pending-attachment-remove {

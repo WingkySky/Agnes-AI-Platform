@@ -498,24 +498,21 @@ async function downloadDetail() {
   }
   const url = detailItem.value.result_url
   const type = detailItem.value.type
+  const recordId = detailItem.value.id
   try {
-    ElMessage.info(t('history.preparingDownload'))
-    const response = await fetch(url, { mode: 'cors' })
-    if (!response.ok) throw new Error('HTTP ' + response.status)
-    const blob = await response.blob()
-    const blobUrl = URL.createObjectURL(blob)
+    // 通过后端代理下载（使用 record_id 端点），强制浏览器保存文件
+    const baseURL = import.meta.env.VITE_API_BASE_URL || ''
+    const downloadUrl = `${baseURL}/api/history/${recordId}/download`
     const a = document.createElement('a')
-    a.href = blobUrl
-    a.download = 'agnes-' + type + '-' + (detailItem.value.id || Date.now())
+    a.href = downloadUrl
+    a.download = ''  // 让后端 Content-Disposition 控制文件名
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 1000)
     ElMessage.success(t('history.downloadStarted'))
   } catch (err) {
-    console.warn('[History] ' + t('history.downloadFallback') + '：', err)
+    console.warn('[History] 下载失败：', err)
     ElMessage.warning(t('preview.videoCorsWarning'))
-    window.open(url, '_blank', 'noopener,noreferrer')
   }
 }
 

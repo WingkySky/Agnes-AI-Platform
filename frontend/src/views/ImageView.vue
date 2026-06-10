@@ -402,23 +402,19 @@ async function downloadImage() {
     return
   }
   try {
-    ElMessage.info(t('preview.preparing'))
-    const response = await fetch(resultUrl.value, { mode: 'cors' })
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    const blob = await response.blob()
-    const blobUrl = URL.createObjectURL(blob)
+    // 通过后端代理下载，设置 Content-Disposition: attachment 强制浏览器保存文件
+    const baseURL = import.meta.env.VITE_API_BASE_URL || ''
+    const downloadUrl = `${baseURL}/api/download?url=${encodeURIComponent(resultUrl.value)}&type=image`
     const a = document.createElement('a')
-    a.href = blobUrl
-    a.download = `agnes-image-${Date.now()}.png`
+    a.href = downloadUrl
+    a.download = ''  // 让后端 Content-Disposition 控制文件名
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 1000)
     ElMessage.success(t('preview.download'))
   } catch (err) {
-    console.warn('[ImageView] fetch 下载失败：', err)
+    console.warn('[ImageView] 下载失败：', err)
     ElMessage.warning(t('preview.corsWarning'))
-    window.open(resultUrl.value, '_blank', 'noopener,noreferrer')
   }
 }
 

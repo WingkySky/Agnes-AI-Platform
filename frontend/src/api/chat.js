@@ -93,15 +93,27 @@ export async function sendMessageStream(sessionId, content, attachments, onEvent
   const baseURL = import.meta.env.VITE_API_BASE_URL || ''
   const url = `${baseURL}/api/chat/sessions/${sessionId}/messages`
 
-  // 构造请求体（带附件字段，符合 Task 2 的 routes/chat.py 定义）
+  // 构造请求体（带附件字段，支持 base64 上传和 URL 链接两种格式）
   const body = { content }
   if (attachments && attachments.length > 0) {
-    body.attachments = attachments.map((a) => ({
-      name: a.name || 'image.png',
-      base64_image: a.base64,
-      size: a.size || 0,
-      mime_type: a.mime_type || 'image/png',
-    }))
+    body.attachments = attachments.map((a) => {
+      if (a.source === 'url' && a.url) {
+        // URL 链接图片：传 image_url 字段
+        return {
+          name: a.name || 'url_image',
+          image_url: a.url,
+          size: 0,
+          mime_type: 'image/url',
+        }
+      }
+      // base64 上传图片：传 base64_image 字段
+      return {
+        name: a.name || 'image.png',
+        base64_image: a.base64,
+        size: a.size || 0,
+        mime_type: a.mime_type || 'image/png',
+      }
+    })
   }
 
   const response = await fetch(url, {

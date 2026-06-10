@@ -3,6 +3,7 @@
 # GET    /api/history           - 获取历史列表（分页 + 按类型筛选）
 # DELETE /api/history/{id}      - 删除单条记录
 # DELETE /api/history/batch     - 批量删除多条记录（按 ID 列表）
+# GET    /api/history/{id}/download         - 下载文件（图片/视频，强制浏览器保存到本地）
 # GET    /api/history/video/{id}/stream    - 视频流代理（支持 Range 请求 + CORS）
 # GET    /api/history/video/{id}/thumbnail - 视频首帧缩略图提取
 # GET    /api/history/video/{id}/preview   - 视频预览片段（悬停 GIF 效果）
@@ -172,6 +173,176 @@ async def batch_delete_history(
         await db.rollback()
         logger.exception("[历史记录] 批量删除失败: %s", e)
         raise HTTPException(status_code=500, detail=f"批量删除失败: {e}")
+
+
+# =====================================================
+# 文件下载代理接口
+# 用途：通过后端代理下载图片/视频，设置 Content-Disposition: attachment
+#       强制浏览器弹出保存对话框，而非在新标签页中打开
+# =====================================================
+
+
+@router.get("/history/{record_id}/download", summary="下载文件（图片/视频，强制保存到本地）")
+async def download_file(record_id: int, db: AsyncSession = Depends(get_async_db)):
+    """
+    通过后端代理下载图片或视频文件。
+
+    解决的问题：
+    - 前端直接 fetch 远程 URL 会因 CORS 被拦截
+    - window.open() 只会在新标签页打开，不会下载
+    - 后端代理下载并设置 Content-Disposition: attachment，强制浏览器保存文件
+
+    支持的文件类型：
+    - 图片（image）：下载为 .png 文件
+    - 视频（video）：下载为 .mp4 文件
+    """
+    # 查询记录
+    result = await db.execute(
+        select(Generation).filter(Generation.id == record_id)
+    )
+    record = result.scalar_one_or_none()
+
+    if not record:
+        raise HTTPException(status_code=404, detail="未找到对应记录")
+
+    if not record.result_url:
+        raise HTTPException(status_code=400, detail="该记录没有可下载的资源")
+
+    file_url = record.result_url
+    file_type = record.type  # "image" 或 "video"
+
+    # 根据类型确定文件扩展名和 MIME 类型
+    if file_type == "video":
+        ext = ".mp4"
+        content_type = "video/mp4"
+    else:
+        ext = ".png"
+        content_type = "image/png"
+
+    # 生成文件名
+    filename = f"agnes-{file_type}-{record_id}{ext}"
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+            response = await client.get(file_url, headers={"User-Agent": "Agnes-Platform-Download"})
+
+            if response.status_code != 200:
+                raise HTTPException(status_code=502, detail=f"下载源文件失败 (HTTP {response.status_code})")
+
+            # 从响应中获取实际 Content-Type（如果有的话）
+            actual_ct = response.headers.get("content-type", "")
+            if actual_ct and actual_ct != "application/octet-stream":
+                content_type = actual_ct
+
+            # 从 URL 路径中尝试提取更准确的扩展名
+            from urllib.parse import urlparse
+            parsed = urlparse(file_url)
+            url_path = parsed.path.lower()
+            if url_path.endswith(".jpg") or url_path.endswith(".jpeg"):
+                ext = ".jpg"
+                filename = f"agnes-{file_type}-{record_id}{ext}"
+                if file_type != "video":
+                    content_type = "image/jpeg"
+            elif url_path.endswith(".webp"):
+                ext = ".webp"
+                filename = f"agnes-{file_type}-{record_id}{ext}"
+                if file_type != "video":
+                    content_type = "image/webp"
+
+            return FastAPIResponse(
+                content=response.content,
+                media_type=content_type,
+                headers={
+                    "Content-Disposition": f'attachment; filename="{filename}"',
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Expose-Headers": "Content-Disposition",
+                },
+            )
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="下载源文件超时")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("[历史记录] 下载代理失败: %s", e)
+        raise HTTPException(status_code=500, detail=f"下载失败: {str(e)}")
+
+
+@router.get("/download", summary="通过 URL 代理下载文件（强制保存到本地）")
+async def download_by_url(
+    url: str,
+    type: str = Query("image", description="文件类型：image 或 video"),
+):
+    """
+    通过 URL 代理下载文件。
+
+    用于图片/视频预览页面的下载功能，这些页面只有远程 URL 而没有 record_id。
+    后端代理下载并设置 Content-Disposition: attachment，强制浏览器保存文件。
+
+    参数：
+    - url: 远程文件的公网 URL
+    - type: 文件类型（image 或 video），用于确定文件扩展名
+    """
+    if not url:
+        raise HTTPException(status_code=400, detail="缺少 url 参数")
+
+    if not url.startswith("http://") and not url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="url 必须是 HTTP/HTTPS 链接")
+
+    # 根据类型确定默认扩展名和 MIME 类型
+    if type == "video":
+        ext = ".mp4"
+        content_type = "video/mp4"
+    else:
+        ext = ".png"
+        content_type = "image/png"
+
+    # 从 URL 路径中尝试提取更准确的扩展名
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    url_path = parsed.path.lower()
+    if url_path.endswith(".jpg") or url_path.endswith(".jpeg"):
+        ext = ".jpg"
+        content_type = "image/jpeg"
+    elif url_path.endswith(".webp"):
+        ext = ".webp"
+        content_type = "image/webp"
+    elif url_path.endswith(".gif"):
+        ext = ".gif"
+        content_type = "image/gif"
+    elif url_path.endswith(".mp4"):
+        ext = ".mp4"
+        content_type = "video/mp4"
+
+    filename = f"agnes-{type}-{int(asyncio.get_event_loop().time())}{ext}"
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+            response = await client.get(url, headers={"User-Agent": "Agnes-Platform-Download"})
+
+            if response.status_code != 200:
+                raise HTTPException(status_code=502, detail=f"下载源文件失败 (HTTP {response.status_code})")
+
+            # 从响应中获取实际 Content-Type
+            actual_ct = response.headers.get("content-type", "")
+            if actual_ct and actual_ct != "application/octet-stream":
+                content_type = actual_ct
+
+            return FastAPIResponse(
+                content=response.content,
+                media_type=content_type,
+                headers={
+                    "Content-Disposition": f'attachment; filename="{filename}"',
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Expose-Headers": "Content-Disposition",
+                },
+            )
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="下载源文件超时")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("[下载代理] URL 下载失败: %s", e)
+        raise HTTPException(status_code=500, detail=f"下载失败: {str(e)}")
 
 
 # =====================================================

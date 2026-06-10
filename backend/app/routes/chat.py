@@ -374,18 +374,34 @@ async def send_message(
                     status_code=413,
                     detail=f"单张参考图大小超过 5MB 限制: {att.get('name', 'unknown')}"
                 )
+
+            # 支持两种附件格式：base64 data URI 和 URL 链接
             base64_image = att.get("base64_image", "")
-            if not base64_image or not isinstance(base64_image, str) or not base64_image.startswith("data:image/"):
-                # 非法的 base64 或非图片 mime —— 跳过并记录警告，不阻塞整个请求
+            image_url = att.get("image_url", "")
+
+            if base64_image and isinstance(base64_image, str) and base64_image.startswith("data:image/"):
+                # base64 上传图片
+                validated_attachments.append({
+                    "name": att.get("name", "image.png"),
+                    "base64_image": base64_image,
+                    "size": size,
+                    "mime_type": att.get("mime_type", "image/png"),
+                })
+            elif image_url and isinstance(image_url, str) and (image_url.startswith("http://") or image_url.startswith("https://")):
+                # URL 链接图片
+                validated_attachments.append({
+                    "name": att.get("name", "url_image"),
+                    "base64_image": "",  # base64 为空，由 chat_service 区分处理
+                    "image_url": image_url,
+                    "size": 0,
+                    "mime_type": "image/url",
+                    "source": "url",
+                })
+            else:
+                # 非法格式 —— 跳过并记录警告，不阻塞整个请求
                 logger.warning("[Chat] 忽略非法的附件: name=%s mime=%s",
                                att.get("name"), att.get("mime_type"))
                 continue
-            validated_attachments.append({
-                "name": att.get("name", "image.png"),
-                "base64_image": base64_image,
-                "size": size,
-                "mime_type": att.get("mime_type", "image/png"),
-            })
 
     # 允许 content 为空但有附件（用户可以"只甩一张图说画图"）
     if not req.content.strip() and not validated_attachments:
@@ -423,7 +439,14 @@ async def send_message(
             # 如果用户消息有附件，在内容中标注（帮助 AI 区分不同轮次的参考图）
             if msg.role == "user" and msg.attachments and len(msg.attachments) > 0:
                 att_count = len(msg.attachments)
-                att_note = f"\n[用户在本轮上传了 {att_count} 张参考图片]"
+                # 区分上传图片和 URL 链接
+                url_count = sum(1 for a in msg.attachments if a.get("source") == "url" or a.get("image_url"))
+                if url_count > 0 and url_count < att_count:
+                    att_note = f"\n[用户在本轮提供了 {att_count} 张参考图片（含 {url_count} 张链接图片）]"
+                elif url_count == att_count:
+                    att_note = f"\n[用户在本轮提供了 {att_count} 张链接图片]"
+                else:
+                    att_note = f"\n[用户在本轮上传了 {att_count} 张参考图片]"
                 content = (content + att_note) if content else att_note.strip()
             # 如果 assistant 消息包含已生成的媒体项，注入上下文信息
             # 让 AI 知道之前生成了什么图片/视频，以便后续对话中正确引用
