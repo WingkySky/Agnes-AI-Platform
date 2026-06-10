@@ -111,8 +111,21 @@
 
       <!-- 聊天消息区 -->
       <template v-else>
-        <!-- 消息列表 -->
-        <div class="chat-messages" ref="messagesRef">
+        <!-- 消息列表（支持拖拽文件上传） -->
+        <div
+          class="chat-messages"
+          ref="messagesRef"
+          @dragover.prevent="onDragOver"
+          @dragleave.prevent="onDragLeave"
+          @drop.prevent="onDrop"
+        >
+          <!-- 拖拽覆盖提示 -->
+          <div v-if="isDragging" class="drag-overlay">
+            <div class="drag-overlay-content">
+              <el-icon :size="48"><Picture /></el-icon>
+              <p>释放以添加图片</p>
+            </div>
+          </div>
           <div
             v-for="msg in chatStore.messages"
             :key="msg.id"
@@ -125,7 +138,26 @@
                 <el-icon :size="18"><User /></el-icon>
               </div>
               <div class="message-content">
-                <p>{{ msg.content }}</p>
+                <!-- 用户上传的参考图附件 -->
+                <div v-if="msg.attachments && msg.attachments.length > 0" class="attachments-preview">
+                  <el-image
+                    v-for="(att, idx) in msg.attachments"
+                    :key="'att-' + idx"
+                    :src="att.url || att.base64 || att.base64_image"
+                    :preview-src-list="getAttachmentPreviewList(msg.attachments)"
+                    :initial-index="idx"
+                    fit="cover"
+                    class="attachment-thumb"
+                    :preview-teleported="true"
+                  >
+                    <template #error>
+                      <div class="attachment-thumb-fallback">
+                        <el-icon><WarningFilled /></el-icon>
+                      </div>
+                    </template>
+                  </el-image>
+                </div>
+                <p v-if="msg.content">{{ msg.content }}</p>
               </div>
             </div>
 
@@ -149,28 +181,6 @@
                   <el-icon v-if="tc.status === 'calling'" class="is-loading"><Loading /></el-icon>
                   <el-icon v-else-if="tc.status === 'done'" class="tool-done"><Check /></el-icon>
                 </div>
-
-                <!-- 用户上传的参考图附件（仅 role=user 显示） -->
-                <template v-if="msg.role === 'user' && msg.attachments && msg.attachments.length > 0">
-                  <div class="attachments-preview">
-                    <el-image
-                      v-for="(att, idx) in msg.attachments"
-                      :key="'att-' + idx"
-                      :src="att.url || att.base64"
-                      :preview-src-list="getAttachmentPreviewList(msg.attachments)"
-                      :initial-index="idx"
-                      fit="cover"
-                      class="attachment-thumb"
-                      :preview-teleported="true"
-                    >
-                      <template #error>
-                        <div class="attachment-thumb-fallback">
-                          <el-icon><WarningFilled /></el-icon>
-                        </div>
-                      </template>
-                    </el-image>
-                  </div>
-                </template>
 
                 <!-- 媒体内容（遍历 media_items 数组，支持多图/多视频） -->
                 <template v-if="msg.media_items && msg.media_items.length > 0">
@@ -268,9 +278,9 @@
           </div>
 
           <div class="input-wrapper">
-            <!-- 上传按钮 -->
+            <!-- 上传按钮（加号图标） -->
             <el-button
-              :icon="Picture"
+              :icon="Plus"
               class="upload-btn"
               :disabled="chatStore.sending"
               @click="$refs.fileInput.click()"
@@ -336,6 +346,8 @@ const messagesRef = ref(null)
 const fileInput = ref(null)
 // 待发送的附件列表（未发送消息时本地缓存）
 const pendingAttachments = ref([])
+// 拖拽状态
+const isDragging = ref(false)
 // 是否允许发送（有文本 或 有待发附件）
 const canSend = computed(() => inputText.value.trim().length > 0 || pendingAttachments.value.length > 0)
 // 最大附件数与单文件大小限制（对应后端 Task 2 的校验）
@@ -537,10 +549,63 @@ function removePendingAttachment(idx) {
   pendingAttachments.value.splice(idx, 1)
 }
 
+// =====================================================
+// 拖拽文件上传
+// =====================================================
+/** 拖拽进入/经过 */
+function onDragOver(e) {
+  isDragging.value = true
+}
+
+/** 拖拽离开 */
+function onDragLeave(e) {
+  // 只有离开消息区域时才取消拖拽状态
+  isDragging.value = false
+}
+
+/** 拖拽释放：处理文件 */
+async function onDrop(e) {
+  isDragging.value = false
+  const files = Array.from(e.dataTransfer?.files || [])
+  if (files.length === 0) return
+
+  const remainingSlot = MAX_ATTACHMENTS - pendingAttachments.value.length
+  if (remainingSlot <= 0) {
+    ElMessage.warning(`最多上传 ${MAX_ATTACHMENTS} 张图片`)
+    return
+  }
+
+  const accepted = files.slice(0, remainingSlot)
+  const results = []
+  for (const file of accepted) {
+    if (!file.type.startsWith('image/')) {
+      ElMessage.warning(`不支持的文件类型：${file.name}`)
+      continue
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      ElMessage.warning(`图片 ${file.name} 超过 5MB`)
+      continue
+    }
+    try {
+      const dataUrl = await readFileAsDataURL(file)
+      results.push({
+        name: file.name,
+        base64: dataUrl,
+        size: file.size,
+        mime_type: extractMime(dataUrl),
+      })
+    } catch (err) {
+      console.error('[Chat] 读取拖拽文件失败:', err)
+      ElMessage.error(`读取 ${file.name} 失败`)
+    }
+  }
+  pendingAttachments.value.push(...results)
+}
+
 /** 获取附件预览列表（用于 el-image 组预览） */
 function getAttachmentPreviewList(attachments) {
   if (!attachments || attachments.length === 0) return []
-  return attachments.map((a) => a.url || a.base64)
+  return attachments.map((a) => a.url || a.base64 || a.base64_image)
 }
 
 /** 快捷提示点击 */
@@ -835,6 +900,32 @@ function getImageIndex(mediaItems, currentIdx) {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  position: relative;
+}
+
+/* 拖拽覆盖层 */
+.drag-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 20, 40, 0.85);
+  border: 2px dashed rgba(100, 180, 255, 0.5);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.drag-overlay-content {
+  text-align: center;
+  color: #a0d4ff;
+}
+
+.drag-overlay-content p {
+  margin: 12px 0 0;
+  font-size: 16px;
+  font-weight: 500;
 }
 
 .message-item {
