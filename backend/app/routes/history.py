@@ -4,6 +4,8 @@
 # DELETE /api/history/{id}      - 删除单条记录
 # DELETE /api/history/batch     - 批量删除多条记录（按 ID 列表）
 # GET    /api/history/{id}/download         - 下载文件（图片/视频，强制浏览器保存到本地）
+# GET    /api/history/batch-download         - 批量下载文件（打包为 zip）
+# GET    /api/download                        - 通过 URL 代理下载文件
 # GET    /api/history/video/{id}/stream    - 视频流代理（支持 Range 请求 + CORS）
 # GET    /api/history/video/{id}/thumbnail - 视频首帧缩略图提取
 # GET    /api/history/video/{id}/preview   - 视频预览片段（悬停 GIF 效果）
@@ -16,6 +18,8 @@ import tempfile
 import asyncio
 import httpx
 import glob as glob_module
+import zipfile
+import io
 from typing import Optional, List
 
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
@@ -176,7 +180,107 @@ async def batch_delete_history(
 
 
 # =====================================================
-# 文件下载代理接口
+# 批量下载接口（必须在 /history/{record_id}/download 之前注册，避免路由冲突）
+# 用途：将多个图片/视频打包为 zip 文件下载
+# =====================================================
+
+
+@router.get("/history/batch-download", summary="批量下载文件（打包为 zip）")
+async def batch_download_files(
+    ids: str = Query(..., description="记录 ID 列表，逗号分隔"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """
+    批量下载图片/视频，打包为 zip 文件。
+
+    参数：
+    - ids: 逗号分隔的记录 ID 列表（如 "1,2,3"）
+
+    返回：
+    - zip 文件流，包含所有选中记录的图片/视频文件
+    """
+    if not ids:
+        raise HTTPException(status_code=400, detail="缺少 ids 参数")
+
+    try:
+        id_list = [int(i.strip()) for i in ids.split(",") if i.strip()]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="ids 格式错误，应为逗号分隔的数字")
+
+    if not id_list:
+        raise HTTPException(status_code=400, detail="ids 不能为空")
+
+    if len(id_list) > 100:
+        raise HTTPException(status_code=400, detail="单次最多下载 100 个文件")
+
+    # 查询所有选中记录
+    result = await db.execute(
+        select(Generation).filter(Generation.id.in_(id_list))
+    )
+    records = result.scalars().all()
+
+    if not records:
+        raise HTTPException(status_code=404, detail="未找到对应记录")
+
+    # 在内存中构建 zip 文件
+    zip_buffer = io.BytesIO()
+
+    async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for record in records:
+                if not record.result_url:
+                    continue
+
+                # 确定文件扩展名
+                if record.type == "video":
+                    ext = ".mp4"
+                else:
+                    ext = ".png"
+
+                # 从 URL 路径中尝试提取更准确的扩展名
+                from urllib.parse import urlparse
+                parsed = urlparse(record.result_url)
+                url_path = parsed.path.lower()
+                if url_path.endswith(".jpg") or url_path.endswith(".jpeg"):
+                    ext = ".jpg"
+                elif url_path.endswith(".webp"):
+                    ext = ".webp"
+                elif url_path.endswith(".gif"):
+                    ext = ".gif"
+                elif url_path.endswith(".mp4"):
+                    ext = ".mp4"
+
+                filename = f"agnes-{record.type}-{record.id}{ext}"
+
+                try:
+                    response = await client.get(
+                        record.result_url,
+                        headers={"User-Agent": "Agnes-Platform-Download"}
+                    )
+                    if response.status_code == 200:
+                        zf.writestr(filename, response.content)
+                    else:
+                        logger.warning("[批量下载] 跳过失败文件: id=%s, status=%s",
+                                       record.id, response.status_code)
+                except Exception as e:
+                    logger.warning("[批量下载] 跳过异常文件: id=%s, error=%s", record.id, e)
+
+    zip_buffer.seek(0)
+    zip_filename = f"agnes-batch-{int(asyncio.get_event_loop().time())}.zip"
+
+    return FastAPIResponse(
+        content=zip_buffer.read(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{zip_filename}"',
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Expose-Headers": "Content-Disposition",
+        },
+    )
+
+
+# =====================================================
+# 单文件下载代理接口
 # 用途：通过后端代理下载图片/视频，设置 Content-Disposition: attachment
 #       强制浏览器弹出保存对话框，而非在新标签页中打开
 # =====================================================

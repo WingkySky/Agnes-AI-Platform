@@ -22,17 +22,17 @@
         <el-button type="primary" :icon="Refresh" :loading="loading" @click="loadList(true)">
           {{ t('common.refresh') }}
         </el-button>
-        <!-- 编辑模式切换按钮 -->
+        <!-- 批量处理模式切换按钮 -->
         <el-button
           :type="editMode ? 'warning' : 'default'"
           :icon="editMode ? CloseIcon : Edit"
           @click="toggleEditMode">
-          {{ editMode ? t('history.exitEdit') : t('history.edit') }}
+          {{ editMode ? t('history.exitEdit') : t('history.batchManage') }}
         </el-button>
       </div>
     </div>
 
-    <!-- 编辑模式操作栏（全选 + 批量删除） -->
+    <!-- 批量处理模式操作栏（全选 + 批量下载 + 批量删除） -->
     <div v-if="editMode && list.length > 0" class="edit-toolbar">
       <div class="edit-left">
         <el-checkbox
@@ -46,6 +46,14 @@
         </span>
       </div>
       <div class="edit-right">
+        <el-button
+          type="primary"
+          :icon="Download"
+          :disabled="selectedIds.length === 0"
+          :loading="batchDownloading"
+          @click="batchDownload">
+          {{ t('history.downloadSelected') }} ({{ selectedIds.length }})
+        </el-button>
         <el-button
           type="danger"
           :icon="DeleteIcon"
@@ -122,6 +130,10 @@
           </div>
           <div class="type-badge" :class="item.type">
             {{ item.type === 'image' ? t('history.image') : t('history.video') }}
+          </div>
+          <!-- 下载快捷按钮（非编辑模式下显示） -->
+          <div v-if="!editMode" class="card-download" @click.stop="downloadItem(item)" :title="t('history.download')">
+            <el-icon :size="16"><Download /></el-icon>
           </div>
         </div>
         <div class="card-meta">
@@ -237,7 +249,7 @@
 <script setup>
 import { ref, computed, onMounted, watch, nextTick, reactive } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Refresh, Loading, Document, Delete, VideoPlay, CircleCloseFilled, Edit, Close } from '@element-plus/icons-vue'
+import { Refresh, Loading, Document, Delete, VideoPlay, CircleCloseFilled, Edit, Close, Download } from '@element-plus/icons-vue'
 import { getHistoryList, deleteHistoryRecord, batchDeleteHistory } from '@/api/history'
 import { useI18n } from '@/i18n'
 
@@ -276,6 +288,7 @@ const editMode = ref(false)
 const selectedIds = ref([])
 const batchDeleteVisible = ref(false)
 const batchDeleting = ref(false)
+const batchDownloading = ref(false)
 
 const isAllSelected = computed(() => {
   if (!list.value.length) return false
@@ -438,6 +451,45 @@ function toggleSelectAll(val) {
   }
 }
 
+/** 批量下载选中项（单图直接下载，多图打包为 zip） */
+async function batchDownload() {
+  if (selectedIds.value.length === 0) {
+    ElMessage.warning(t('history.pleaseSelectOne'))
+    return
+  }
+  batchDownloading.value = true
+  try {
+    const baseURL = import.meta.env.VITE_API_BASE_URL || ''
+
+    if (selectedIds.value.length === 1) {
+      // 单图：复用已有的单文件下载逻辑，直接下载
+      const downloadUrl = `${baseURL}/api/history/${selectedIds.value[0]}/download`
+      const a = document.createElement('a')
+      a.href = downloadUrl
+      a.download = ''
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+    } else {
+      // 多图：打包为 zip 下载
+      const ids = selectedIds.value.join(',')
+      const downloadUrl = `${baseURL}/api/history/batch-download?ids=${ids}`
+      const a = document.createElement('a')
+      a.href = downloadUrl
+      a.download = ''
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+    }
+    ElMessage.success(t('history.downloadStarted'))
+  } catch (err) {
+    console.warn('[History] 批量下载失败：', err)
+    ElMessage.warning(t('preview.videoCorsWarning'))
+  } finally {
+    batchDownloading.value = false
+  }
+}
+
 function confirmBatchDelete() {
   if (selectedIds.value.length === 0) {
     ElMessage.warning(t('history.pleaseSelectOne'))
@@ -489,6 +541,23 @@ function copyLink(url) {
   copyToClipboard(url)
     .then(() => ElMessage.success(t('history.linkCopied')))
     .catch(() => ElMessage.error(t('history.copyLinkFailed')))
+}
+
+/** 卡片快捷下载（列表中直接点击下载图标） */
+function downloadItem(item) {
+  if (!item?.result_url) {
+    ElMessage.warning(t('history.noValidResource'))
+    return
+  }
+  const baseURL = import.meta.env.VITE_API_BASE_URL || ''
+  const downloadUrl = `${baseURL}/api/history/${item.id}/download`
+  const a = document.createElement('a')
+  a.href = downloadUrl
+  a.download = ''
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  ElMessage.success(t('history.downloadStarted'))
 }
 
 async function downloadDetail() {
@@ -774,6 +843,35 @@ onMounted(() => loadList())
 }
 .type-badge.image { color: #8bb4ff; border: 1px solid rgba(139, 180, 255, 0.5); }
 .type-badge.video { color: #c4a7ff; border: 1px solid rgba(196, 167, 255, 0.5); }
+
+/* 卡片下载快捷按钮 */
+.card-download {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  z-index: 3;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 24, 42, 0.75);
+  backdrop-filter: blur(4px);
+  border-radius: 8px;
+  border: 1px solid rgba(120, 170, 255, 0.25);
+  color: #a0c4ff;
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.2s ease;
+}
+.history-card:hover .card-download {
+  opacity: 1;
+}
+.card-download:hover {
+  background: rgba(80, 140, 255, 0.3);
+  border-color: rgba(120, 170, 255, 0.5);
+  color: #fff;
+}
 .card-meta { padding: 12px 14px; }
 .card-prompt {
   font-size: 13px;
