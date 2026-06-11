@@ -75,6 +75,80 @@ class MediaCallbackRequest(BaseModel):
     status: str = Field(default="success", description="状态：success / failed")
 
 
+async def _refresh_message_media_items(messages: List[ChatMessage], db: AsyncSession) -> None:
+    """
+    将消息里的 pending/processing 媒体项刷新为最新状态。
+
+    发送下一轮聊天前也必须做这件事，否则用户虽然已经在前端看到图片完成，
+    但后端构建上下文时仍可能只看到 pending，导致无法把上一张图作为 image2image 参考图。
+    """
+    for msg in messages:
+        if not msg.media_items:
+            continue
+
+        updated = False
+        refreshed_items = []
+        for original_item in msg.media_items:
+            item = dict(original_item)
+            if item.get("status") not in ("pending", "processing") or not item.get("task_id"):
+                refreshed_items.append(item)
+                continue
+
+            task_id = item["task_id"]
+            result_url = None
+            new_status = None
+
+            img_task = await image_poller_manager.get_status(task_id)
+            if img_task:
+                d = img_task.to_dict()
+                if d.get("status") in ("success", "completed", "done"):
+                    result_url = d.get("result_url") or d.get("url")
+                    new_status = "success"
+                elif d.get("status") in ("failed", "error"):
+                    new_status = "failed"
+
+            if not result_url and not new_status:
+                vid_task = await video_poller_manager.get_status(task_id=task_id)
+                if not vid_task:
+                    vid_task = await video_poller_manager.get_status(video_id=task_id)
+                if vid_task:
+                    d = vid_task.to_dict()
+                    if d.get("status") in ("success", "completed", "done"):
+                        result_url = d.get("video_url") or d.get("url")
+                        new_status = "success"
+                    elif d.get("status") in ("failed", "error"):
+                        new_status = "failed"
+
+            if not result_url and not new_status:
+                try:
+                    from app.models.generation import Generation
+                    gen_result = await db.execute(
+                        select(Generation).filter(Generation.task_id == task_id)
+                    )
+                    gen_record = gen_result.scalar_one_or_none()
+                    if gen_record:
+                        if gen_record.status == "success":
+                            result_url = gen_record.result_url
+                            new_status = "success"
+                        elif gen_record.status == "failed":
+                            new_status = "failed"
+                except Exception:
+                    pass
+
+            if result_url or new_status:
+                if result_url:
+                    item["url"] = result_url
+                if new_status:
+                    item["status"] = new_status
+                updated = True
+            refreshed_items.append(item)
+
+        if updated:
+            msg.media_items = refreshed_items
+
+    await db.commit()
+
+
 # =====================================================
 # 会话管理接口
 # =====================================================
@@ -252,70 +326,7 @@ async def get_messages(
     )
     messages = result.scalars().all()
 
-    # 对每条消息，检查 media_items 中 pending 状态的任务是否已完成
-    # 如果已完成，更新 media_items 中的 url 和 status
-    for msg in messages:
-        if msg.media_items:
-            updated = False
-            for item in msg.media_items:
-                if item.get("status") in ("pending", "processing") and item.get("task_id"):
-                    # 查询任务状态
-                    task_id = item["task_id"]
-                    result_url = None
-                    new_status = None
-
-                    # 尝试图片任务
-                    img_task = await image_poller_manager.get_status(task_id)
-                    if img_task:
-                        d = img_task.to_dict()
-                        if d.get("status") in ("success", "completed", "done"):
-                            result_url = d.get("result_url") or d.get("url")
-                            new_status = "success"
-                        elif d.get("status") in ("failed", "error"):
-                            new_status = "failed"
-
-                    # 尝试视频任务
-                    if not result_url and not new_status:
-                        vid_task = await video_poller_manager.get_status(task_id=task_id)
-                        if not vid_task:
-                            vid_task = await video_poller_manager.get_status(video_id=task_id)
-                        if vid_task:
-                            d = vid_task.to_dict()
-                            if d.get("status") in ("success", "completed", "done"):
-                                result_url = d.get("video_url") or d.get("url")
-                                new_status = "success"
-                            elif d.get("status") in ("failed", "error"):
-                                new_status = "failed"
-
-                    # 回退查数据库
-                    if not result_url and not new_status:
-                        try:
-                            from app.models.generation import Generation
-                            gen_result = await db.execute(
-                                select(Generation).filter(Generation.task_id == task_id)
-                            )
-                            gen_record = gen_result.scalar_one_or_none()
-                            if gen_record:
-                                if gen_record.status == "success":
-                                    result_url = gen_record.result_url
-                                    new_status = "success"
-                                elif gen_record.status == "failed":
-                                    new_status = "failed"
-                        except Exception:
-                            pass
-
-                    # 更新 media_item
-                    if result_url or new_status:
-                        if result_url:
-                            item["url"] = result_url
-                        if new_status:
-                            item["status"] = new_status
-                        updated = True
-
-            # 如果有更新，写回数据库
-            if updated:
-                msg.media_items = list(msg.media_items)  # 触发 SQLAlchemy 检测变更
-                await db.commit()
+    await _refresh_message_media_items(messages, db)
 
     return {"items": [m.to_dict() for m in messages]}
 
@@ -460,6 +471,7 @@ async def send_message(
         .order_by(ChatMessage.id)
     )
     all_messages = result.scalars().all()
+    await _refresh_message_media_items(all_messages, db)
 
     # 构建对话历史（包含附件上下文标注，帮助 AI 区分不同轮次的参考图/视频/文档）
     chat_history = []
@@ -502,26 +514,11 @@ async def send_message(
                 else:
                     att_note = f"\n[用户在本轮提供了 {att_count} 个参考附件]"
                     content = (content + att_note) if content else att_note.strip()
-            # 如果 assistant 消息包含已生成的媒体项，注入上下文信息
-            # 让 AI 知道之前生成了什么图片/视频，以便后续对话中正确引用
-            if msg.role == "assistant" and msg.media_items and len(msg.media_items) > 0:
-                media_notes = []
-                for idx, mi in enumerate(msg.media_items):
-                    mi_type = mi.get("type", "unknown")
-                    mi_status = mi.get("status", "unknown")
-                    mi_url = mi.get("url", "")
-                    if mi_status in ("success", "completed", "done"):
-                        media_notes.append(
-                            f"  [{idx+1}] 类型: {mi_type}, 状态: 已完成, URL: {mi_url}"
-                        )
-                    elif mi_status in ("pending", "processing"):
-                        media_notes.append(
-                            f"  [{idx+1}] 类型: {mi_type}, 状态: 生成中"
-                        )
-                if media_notes:
-                    media_context = "\n[本轮生成的媒体内容]\n" + "\n".join(media_notes)
-                    content = (content + media_context) if content else media_context.strip()
-            chat_history.append({"role": msg.role, "content": content})
+            # 如果 assistant 消息包含已生成的媒体项，传结构化 media_items 到消息对象
+            # 【核心改动】不再在 content 中注入文本格式的媒体 URL（防止 AI 引用后输出链接给用户）
+            # 而是把 media_items 作为消息对象的字段，供 chat_service 在工具执行时自动识别
+            media_items_for_history = msg.media_items if (msg.role == "assistant" and msg.media_items and len(msg.media_items) > 0) else None
+            chat_history.append({"role": msg.role, "content": content, "media_items": media_items_for_history})
 
     # SSE 流式生成器
     async def event_generator():
