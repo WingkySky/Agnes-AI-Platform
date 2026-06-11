@@ -21,18 +21,28 @@
           </div>
           </template>
 
-          <!-- 模式切换 -->
+          <!-- 模式切换：图标 + 标题 + 短副标签 -->
           <el-tabs v-model="mode" class="mode-tabs">
               <el-tab-pane name="text2image">
                 <template #label>
-                  <span>{{ t('params.mode.text2image') }}</span>
-                  <span class="tab-sub">{{ t('params.mode.textOnly') }}</span>
+                  <span class="mode-label">
+                    <span class="mode-icon">✍️</span>
+                    <span class="mode-text">
+                      <span class="mode-title">{{ t('params.mode.text2image') }}</span>
+                      <span class="mode-sub">{{ t('params.mode.textOnly') }}</span>
+                    </span>
+                  </span>
                 </template>
               </el-tab-pane>
               <el-tab-pane name="image2image">
                 <template #label>
-                  <span>{{ t('params.mode.image2image') }}</span>
-                  <span class="tab-sub">{{ t('params.mode.imageOnly') }}</span>
+                  <span class="mode-label">
+                    <span class="mode-icon">🖼️</span>
+                    <span class="mode-text">
+                      <span class="mode-title">{{ t('params.mode.image2image') }}</span>
+                      <span class="mode-sub">{{ t('params.mode.imageOnly') }}</span>
+                    </span>
+                  </span>
                 </template>
               </el-tab-pane>
           </el-tabs>
@@ -480,6 +490,60 @@ function copyImageUrl() {
   color: #ffb86b;
 }
 .tab-sub { font-size: 12px; color: #8ba3c9; margin-left: 6px; }
+/* 模式切换：图标 + 标题 + 短副标签 */
+.mode-tabs :deep(.el-tabs__nav) {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(107, 126, 156, 0.2);
+}
+.mode-tabs :deep(.el-tabs__item) {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  padding: 14px 16px;
+  height: auto;
+  line-height: 1.4;
+}
+.mode-tabs :deep(.el-tabs__active-bar) {
+  height: 3px;
+  background: linear-gradient(90deg, #6b9cff, #8bb0ff);
+  border-radius: 3px 3px 0 0;
+}
+.mode-tabs .mode-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+}
+.mode-tabs .mode-icon {
+  font-size: 22px;
+  flex-shrink: 0;
+}
+.mode-tabs .mode-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  line-height: 1.3;
+}
+.mode-tabs .mode-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #d5e3f7;
+  white-space: nowrap;
+}
+.mode-tabs :deep(.is-active) .mode-title,
+.mode-tabs :deep(.is-active) .mode-icon {
+  color: #8bb0ff;
+}
+.mode-tabs .mode-sub {
+  font-size: 12px;
+  color: #8ba3c9;
+  margin-top: 2px;
+  white-space: nowrap;
+}
 .mode-tabs { margin-bottom: 12px; }
 .param-form { margin-top: 12px; }
 .generate-btn {

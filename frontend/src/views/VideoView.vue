@@ -20,24 +20,39 @@
           <div class="card-header"><span>{{ t('params.title') }}</span></div>
           </template>
 
-          <!-- 模式切换 -->
-          <el-tabs v-model="mode">
+          <!-- 模式切换：三选一，图标 + 标题 + 短副标签，一眼分辨 -->
+          <el-tabs v-model="mode" class="mode-tabs">
               <el-tab-pane name="text2video">
                 <template #label>
-                  <span>{{ t('params.mode.text2video') }}</span>
-                  <span class="tab-sub">{{ t('params.promptLabelShort') }}</span>
+                  <span class="mode-label">
+                    <span class="mode-icon">✍️</span>
+                    <span class="mode-text">
+                      <span class="mode-title">{{ t('params.mode.text2video') }}</span>
+                      <span class="mode-sub">{{ t('params.mode.textOnly') }}</span>
+                    </span>
+                  </span>
                 </template>
               </el-tab-pane>
               <el-tab-pane name="image2video">
                 <template #label>
-                  <span>{{ t('params.mode.image2video') }}</span>
-                  <span class="tab-sub">{{ t('params.refImagePlusPrompt') }}</span>
+                  <span class="mode-label">
+                    <span class="mode-icon">🖼</span>
+                    <span class="mode-text">
+                      <span class="mode-title">{{ t('params.mode.image2video') }}</span>
+                      <span class="mode-sub">{{ t('params.mode.imageOnly') }}</span>
+                    </span>
+                  </span>
                 </template>
               </el-tab-pane>
               <el-tab-pane name="keyframes">
                 <template #label>
-                  <span>{{ t('params.mode.keyframes') }}</span>
-                  <span class="tab-sub">{{ t('params.keyframesHint') }}</span>
+                  <span class="mode-label">
+                    <span class="mode-icon">🎞️</span>
+                    <span class="mode-text">
+                      <span class="mode-title">{{ t('params.mode.keyframes') }}</span>
+                      <span class="mode-sub">{{ t('params.mode.keyframesHint') }}</span>
+                    </span>
+                  </span>
                 </template>
               </el-tab-pane>
           </el-tabs>
@@ -596,6 +611,60 @@ function handleVideoError(e) {
   color: #ffb86b;
 }
 .tab-sub { font-size: 12px; color: #8ba3c9; margin-left: 6px; }
+/* 模式切换：图标 + 标题 + 短副标签，三行结构，让三个功能一眼可辨 */
+.mode-tabs :deep(.el-tabs__nav) {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(107, 126, 156, 0.2);
+}
+.mode-tabs :deep(.el-tabs__item) {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  padding: 14px 16px;
+  height: auto;
+  line-height: 1.4;
+}
+.mode-tabs :deep(.el-tabs__active-bar) {
+  height: 3px;
+  background: linear-gradient(90deg, #6b9cff, #8bb0ff);
+  border-radius: 3px 3px 0 0;
+}
+.mode-tabs .mode-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+}
+.mode-tabs .mode-icon {
+  font-size: 22px;
+  flex-shrink: 0;
+}
+.mode-tabs .mode-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  line-height: 1.3;
+}
+.mode-tabs .mode-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #d5e3f7;
+  white-space: nowrap;
+}
+.mode-tabs :deep(.is-active) .mode-title,
+.mode-tabs :deep(.is-active) .mode-icon {
+  color: #8bb0ff;
+}
+.mode-tabs .mode-sub {
+  font-size: 12px;
+  color: #8ba3c9;
+  margin-top: 2px;
+  white-space: nowrap;
+}
 .generate-btn {
   width: 100%;
   height: 48px;
