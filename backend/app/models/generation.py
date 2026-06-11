@@ -33,6 +33,7 @@ class Generation(Base):
     prompt = Column(Text, nullable=False)                       # 提示词
     model = Column(String(100), nullable=True)                  # 使用的模型名
     params = Column(JSON, nullable=True)                        # JSON 参数
+    mode = Column(String(30), nullable=True)                    # 生成模式：text2image / image2image / text2video / image2video / keyframes
     image_input = Column(Text, nullable=True)                   # base64 输入图片（可选）
     result_url = Column(Text, nullable=True)                    # 生成结果 URL
     status = Column(String(20), default="success")              # 任务状态

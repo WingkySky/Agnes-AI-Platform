@@ -206,6 +206,7 @@ export default {
     promptLabel: 'Prompt',
     typeLabel: 'Type',
     modelLabel: 'Model',
+    modeLabel: 'Generation Mode',
     statusLabel: 'Status',
     createdAtLabel: 'Created At',
     linkLabel: 'Link',

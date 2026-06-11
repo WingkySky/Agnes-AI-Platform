@@ -207,6 +207,7 @@ export default {
     promptLabel: '提示词',
     typeLabel: '类型',
     modelLabel: '模型',
+    modeLabel: '生成模式',
     statusLabel: '状态',
     createdAtLabel: '创建时间',
     linkLabel: '链接',

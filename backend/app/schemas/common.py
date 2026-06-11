@@ -62,6 +62,7 @@ class GenerationRecord(BaseModel):
     prompt: str
     model: Optional[str] = None
     params: Optional[Dict[str, Any]] = None
+    mode: Optional[str] = None     # 'text2image' | 'image2image' | 'text2video' | 'image2video' | 'keyframes'
     result_url: Optional[str] = None
     status: str
     task_id: Optional[str] = None

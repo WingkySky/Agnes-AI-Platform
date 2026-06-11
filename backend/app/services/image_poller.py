@@ -234,6 +234,7 @@ class ImagePollerManager:
                         k: v for k, v in task.params.items()
                         if k not in ("base64_image", "image_url")  # 不保存大的 base64 和 URL 参数
                     },
+                    mode=task.params.get("mode"),
                     result_url=task.result_url or "(base64)",
                     status=task.status,
                     task_id=task.task_id,

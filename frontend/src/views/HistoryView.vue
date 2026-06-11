@@ -131,6 +131,10 @@
           <div class="type-badge" :class="item.type">
             {{ item.type === 'image' ? t('history.image') : t('history.video') }}
           </div>
+          <!-- 生成模式标签（文生图 / 图生图 / 文生视频 / 图生视频 / 关键帧） -->
+          <div v-if="item.mode" class="mode-badge" :class="'mode-' + item.type">
+            {{ t('params.mode.' + item.mode) || item.mode }}
+          </div>
           <!-- 下载快捷按钮（非编辑模式下显示） -->
           <div v-if="!editMode" class="card-download" @click.stop="downloadItem(item)" :title="t('history.download')">
             <el-icon :size="16"><Download /></el-icon>
@@ -200,6 +204,7 @@
           <div class="info-row"><span class="label">{{ t('history.promptLabel') }}：</span><span>{{ detailItem.prompt }}</span></div>
           <div class="info-row"><span class="label">{{ t('history.typeLabel') }}：</span><span>{{ detailItem.type === 'image' ? t('history.image') : t('history.video') }}</span></div>
           <div class="info-row" v-if="detailItem.model"><span class="label">{{ t('history.modelLabel') }}：</span><span>{{ detailItem.model }}</span></div>
+          <div class="info-row" v-if="detailItem.mode"><span class="label">{{ t('history.modeLabel') }}：</span><span class="mode-text">{{ t('params.mode.' + detailItem.mode) || detailItem.mode }}</span></div>
           <div class="info-row"><span class="label">{{ t('history.statusLabel') }}：</span><span>{{ detailItem.status || 'success' }}</span></div>
           <div class="info-row"><span class="label">{{ t('history.createdAtLabel') }}：</span><span>{{ detailItem.created_at }}</span></div>
           <div class="info-row url-row">
@@ -843,6 +848,31 @@ onMounted(() => loadList())
 }
 .type-badge.image { color: #8bb4ff; border: 1px solid rgba(139, 180, 255, 0.5); }
 .type-badge.video { color: #c4a7ff; border: 1px solid rgba(196, 167, 255, 0.5); }
+
+/* 生成模式标签（文生图 / 图生图 等） */
+.mode-badge {
+  position: absolute;
+  top: 10px;
+  left: 90px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(15, 24, 42, 0.75);
+  backdrop-filter: blur(4px);
+}
+.mode-badge.mode-image {
+  color: #ffd98b;
+  border: 1px solid rgba(255, 217, 139, 0.5);
+}
+.mode-badge.mode-video {
+  color: #8be9d0;
+  border: 1px solid rgba(139, 233, 208, 0.5);
+}
+.mode-text {
+  color: #ffd98b;
+  font-weight: 600;
+}
 
 /* 卡片下载快捷按钮 */
 .card-download {

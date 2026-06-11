@@ -78,12 +78,17 @@ async def get_history(
     # 转换为响应对象
     records = []
     for item in items:
+        # 向后兼容：新字段 mode 可能为空（老记录），从 params.mode 回退获取
+        mode = item.mode
+        if not mode and isinstance(item.params, dict):
+            mode = item.params.get("mode") if isinstance(item.params, dict) else None
         records.append(GenerationRecord(
             id=item.id,
             type=item.type,
             prompt=item.prompt,
             model=item.model,
             params=item.params,
+            mode=mode,
             result_url=item.result_url,
             status=item.status,
             task_id=item.task_id,

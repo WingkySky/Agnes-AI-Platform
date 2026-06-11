@@ -208,6 +208,7 @@ async def create_image_generation(req: ImageGenerationRequest, db: AsyncSession 
             prompt=req.prompt,
             model=req.model,
             params=params,
+            mode=params["mode"],
             result_url=output_url or "(base64)",
             status="success",
         )

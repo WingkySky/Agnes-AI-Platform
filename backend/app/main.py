@@ -65,7 +65,7 @@ def _auto_migrate_missing_columns():
     自动检测并添加模型中定义但数据库表中缺失的列。
     仅支持 ALTER TABLE ADD COLUMN（新增列），不支持修改列类型或删除列。
     """
-    from sqlalchemy import inspect as sa_inspect
+    from sqlalchemy import inspect as sa_inspect, text
     insp = sa_inspect(engine)
     for table_name, table_obj in Base.metadata.tables.items():
         if not insp.has_table(table_name):
@@ -87,7 +87,7 @@ def _auto_migrate_missing_columns():
             sql = f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type}{default_val}"
             try:
                 with engine.connect() as conn:
-                    conn.execute(sql)
+                    conn.execute(text(sql))  # SQLAlchemy 2.x 必须用 text() 包装字符串 SQL
                     conn.commit()
                 logger.info("✓ 自动迁移: 已添加列 %s.%s", table_name, col_name)
             except Exception as e:

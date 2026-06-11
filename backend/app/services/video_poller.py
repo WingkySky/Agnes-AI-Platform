@@ -246,6 +246,7 @@ class VideoPollerManager:
                     prompt=task.prompt,
                     model=task.params.get("model", "agnes-video-v2.0"),
                     params=task.params,
+                    mode=task.params.get("mode"),
                     result_url=task.video_url,
                     status=task.status,
                     task_id=task.task_id or task.video_id,
