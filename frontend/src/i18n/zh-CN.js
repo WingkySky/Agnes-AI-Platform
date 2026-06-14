@@ -48,11 +48,11 @@ export default {
 
   // ------ 通用视图 ------
   view: {
-    imageTitle: '🎨 图片生成',
+    imageTitle: '图片生成',
     imageDesc: '根据文字描述或参考图生成 AI 图片。支持同时提交多个任务，点击右下「队列」可随时切换查看不同任务的状态。',
-    videoTitle: '🎬 视频生成',
+    videoTitle: '视频生成',
     videoDesc: '根据文字描述或参考图生成短视频。支持同时提交多个任务，点击右下「队列」可随时切换查看不同任务的状态。',
-    historyTitle: '📜 生成历史',
+    historyTitle: '生成历史',
     historyDesc: '查看你在本平台生成过的所有图片与视频。可按类型筛选。',
   },
 

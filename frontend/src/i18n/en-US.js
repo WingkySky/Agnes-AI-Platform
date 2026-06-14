@@ -47,11 +47,11 @@ export default {
 
   // ------ Views ------
   view: {
-    imageTitle: '🎨 Image Generation',
+    imageTitle: 'Image Generation',
     imageDesc: 'Generate AI images from text or reference images. Multiple tasks are supported — use the queue panel at the bottom-right to switch between tasks.',
-    videoTitle: '🎬 Video Generation',
+    videoTitle: 'Video Generation',
     videoDesc: 'Generate short videos from text or reference images. Multiple tasks are supported — use the queue panel at the bottom-right to switch between tasks.',
-    historyTitle: '📜 Generation History',
+    historyTitle: 'Generation History',
     historyDesc: 'Review all images and videos you have generated on this platform. Filter by type.',
   },
 
