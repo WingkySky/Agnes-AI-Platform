@@ -35,6 +35,10 @@
             <el-icon><Clock /></el-icon>
             <span>{{ t('nav.history') }}</span>
           </router-link>
+          <router-link to="/canvas" class="nav-item" active-class="active">
+            <el-icon><Grid /></el-icon>
+            <span>{{ t('nav.canvas') }}</span>
+          </router-link>
         </nav>
 
         <div class="app-header-right">
@@ -64,7 +68,7 @@
 
 <script setup>
 import { computed } from 'vue'
-import { Picture, VideoPlay, Clock, ChatDotRound } from '@element-plus/icons-vue'
+import { Picture, VideoPlay, Clock, ChatDotRound, Grid } from '@element-plus/icons-vue'
 import TaskQueuePanel from './components/TaskQueuePanel.vue'
 import LanguageSwitcher from './components/LanguageSwitcher.vue'
 import { useI18n, getElementPlusLocale } from '@/i18n'
@@ -72,7 +76,7 @@ import { useI18n, getElementPlusLocale } from '@/i18n'
 const { t, locale } = useI18n()
 
 // keep-alive 缓存的路由组件名称（切换标签页时保持状态不销毁）
-const cachedViews = ['ChatView', 'ImageView', 'VideoView', 'HistoryView']
+const cachedViews = ['ChatView', 'ImageView', 'VideoView', 'HistoryView', 'CanvasView']
 
 // 每当 locale 变化时返回对应的 Element Plus 语言对象
 const epLocale = computed(() => {

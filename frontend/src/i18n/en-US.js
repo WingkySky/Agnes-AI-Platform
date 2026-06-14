@@ -43,6 +43,7 @@ export default {
     images: 'Image Generation',
     videos: 'Video Generation',
     history: 'Generation History',
+    canvas: 'Infinite Canvas',
   },
 
   // ------ Views ------
@@ -321,6 +322,7 @@ export default {
     images: 'Image Generation',
     videos: 'Video Generation',
     history: 'Generation History',
+    canvas: 'Infinite Canvas',
   },
 
   // ------ Chat interface ------
@@ -360,6 +362,31 @@ export default {
     summarizing: 'AI is analyzing the conversation to generate a title...',
     summarizeSuccess: 'Title auto-generated',
     summarizeFailed: 'Auto-summarize failed, please enter manually',
+  },
+
+  // ------ Infinite Canvas ------
+  canvas: {
+    sidebarTitle: 'Canvas Management',
+    newCanvas: 'New Canvas',
+    noCanvas: 'No canvas yet, click + to create one',
+    canvas: 'Canvas',
+    confirmDelete: 'Are you sure you want to delete this canvas?',
+    addPanel: 'Add Panel',
+    undo: 'Undo',
+    redo: 'Redo',
+    resetView: 'Reset View',
+    panels: 'panels',
+    zoomIn: 'Zoom In',
+    zoomOut: 'Zoom Out',
+    textPlaceholder: 'Double-click to type...',
+    enterUrl: 'Enter URL',
+    enterPrompt: 'Enter prompt...',
+    genTypeImage: 'Image',
+    genTypeVideo: 'Video',
+    generate: 'Generate',
+    dragOrClick: 'Drag file or click to upload',
+    uploadHint: 'Images/Videos supported',
+    customPlaceholder: 'Double-click for custom content',
   },
 
   // ------ First-page loading ------

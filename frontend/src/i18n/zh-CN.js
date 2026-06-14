@@ -44,6 +44,7 @@ export default {
     images: '图片生成',
     videos: '视频生成',
     history: '生成历史',
+    canvas: '无限画布',
   },
 
   // ------ 通用视图 ------
@@ -322,6 +323,7 @@ export default {
     images: '图片生成',
     videos: '视频生成',
     history: '生成历史',
+    canvas: '无限画布',
   },
 
   // ------ 聊天界面 ------
@@ -361,6 +363,31 @@ export default {
     summarizing: 'AI 正在分析对话内容，生成标题...',
     summarizeSuccess: '已自动生成标题',
     summarizeFailed: '自动总结失败，请手动输入',
+  },
+
+  // ------ 无限画布 ------
+  canvas: {
+    sidebarTitle: '画布管理',
+    newCanvas: '新建画布',
+    noCanvas: '还没有画布，点击上方 + 创建',
+    canvas: '画布',
+    confirmDelete: '确定要删除这个画布吗？',
+    addPanel: '添加面板',
+    undo: '撤销',
+    redo: '重做',
+    resetView: '重置视图',
+    panels: '个面板',
+    zoomIn: '放大',
+    zoomOut: '缩小',
+    textPlaceholder: '双击输入文字...',
+    enterUrl: '输入 URL 地址',
+    enterPrompt: '输入提示词...',
+    genTypeImage: '图片',
+    genTypeVideo: '视频',
+    generate: '生成',
+    dragOrClick: '拖拽文件或点击上传',
+    uploadHint: '支持图片/视频格式',
+    customPlaceholder: '双击自定义内容',
   },
 
   // ------ 首页加载 ------

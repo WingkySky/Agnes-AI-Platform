@@ -36,6 +36,12 @@ const routes = [
     component: () => import('@/views/HistoryView.vue'),
     meta: { titleKey: 'router.history' }
   },
+  {
+    path: '/canvas',
+    name: 'canvas',
+    component: () => import('@/views/CanvasView.vue'),
+    meta: { titleKey: 'router.canvas' }
+  },
   // 兜底路由
   {
     path: '/:pathMatch(.*)*',
