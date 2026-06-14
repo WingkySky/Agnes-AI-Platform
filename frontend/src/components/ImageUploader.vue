@@ -1,14 +1,16 @@
 <!-- =====================================================
      ImageUploader 图片上传组件（多图版）
      - 支持拖拽上传 / 选择文件 / 粘贴图片 URL
-     - 将本地文件转换为 base64（不含 data:image/... 前缀
+     - 将本地文件转换为 base64（不含 data:image/... 前缀）
+     - 自动去除内部空白 + 补齐 '=' padding，确保 base64 长度是 4 的倍数
      - 事件：@change(fileInfoList)        // 返回数组
              @clear
      fileInfo 格式:
        {
          name: 'xxx.png',
-         base64: '...',    // 不带前缀的纯 base64 字符串
+         base64: '...',    // 不带前缀的纯 base64 字符串（已清理+已 padding）
          previewUrl: 'data:image/png;base64,...',
+         mimeType: 'image/png',  // 原始图片 MIME 类型
          size: 1024000,
          source: 'file' | 'url'
        }
@@ -162,9 +164,12 @@ function validateFile(file) {
   return true
 }
 
-// File -> base64（返回 { name, base64(纯), previewUrl, size, source }
+// File -> base64（返回 { name, base64(纯), previewUrl, mimeType, size, source }
 // 【修复】使用 indexOf + slice 替代 split，以兼容某些浏览器返回的带参数的 data URI
 // （例如 data:image/jpeg;name=test.jpg;base64,xxxx），避免 split 取到 undefined 导致上传失败
+// 【修复】提取纯 base64 后：去除内部空白字符 + 补齐末尾 '=' padding
+//   - 某些浏览器 readAsDataURL 可能省略 padding 或插入换行符
+//   - 不补齐会导致后端→Agnes API 解码失败（Invalid base64-encoded string: length % 4 != 0）
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -172,15 +177,29 @@ function fileToBase64(file) {
       const fullBase64 = reader.result
       const marker = ';base64,'
       const markerIndex = fullBase64.indexOf(marker)
-      // markerIndex + marker.length 后就是纯 base64 内容；
-      // 若找不到标记则退化为返回完整字符串（保险兜底）
-      const pureBase64 = markerIndex >= 0
+      // 提取 MIME 类型（用于后端正确识别图片格式）
+      let mimeType = 'image/png'
+      if (markerIndex >= 0) {
+        const prefixPart = fullBase64.slice(0, markerIndex) // "data:image/jpeg"
+        const mimeMatch = prefixPart.match(/^data:(image\/[a-zA-Z0-9.+-]+)/)
+        if (mimeMatch) mimeType = mimeMatch[1]
+      }
+      // markerIndex + marker.length 后就是纯 base64 内容
+      let pureBase64 = markerIndex >= 0
         ? fullBase64.slice(markerIndex + marker.length)
         : fullBase64
+      // 【关键修复】去除所有空白字符（换行/回车/空格），某些浏览器会在 base64 中插入换行
+      pureBase64 = pureBase64.replace(/\s/g, '')
+      // 【关键修复】补齐 base64 padding（'='），确保长度是 4 的倍数
+      const padNeeded = pureBase64.length % 4
+      if (padNeeded) {
+        pureBase64 += '='.repeat(4 - padNeeded)
+      }
       resolve({
         name: file.name,
         base64: pureBase64,
         previewUrl: fullBase64,
+        mimeType,           // 保留原始 MIME 类型，供后端使用
         size: file.size,
         source: 'file',
       })

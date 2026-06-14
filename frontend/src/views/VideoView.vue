@@ -456,22 +456,33 @@ async function startGenerate() {
     seed: seed.value ? Number(seed.value) : undefined,
   }
   if (mode.value === 'image2video' && referenceFile.value) {
-    // 优先使用 previewUrl（完整 Data URI，含前缀），避免后端手动补 base64 padding
-    // fallback 到 base64 或 url
-    params.image = referenceFile.value.previewUrl || referenceFile.value.base64 || referenceFile.value.url
+    // 【修复】优先使用纯 base64（不含 Data URI 前缀），由后端统一归一化添加前缀 + 补全 padding
+    // 与图生图（ImageView）行为保持一致，避免 Data URI 在前端→后端→Agnes API 多层传递中出现编码兼容性问题
+    // fallback: url（公网地址）→ previewUrl（完整 Data URI，兜底）
+    params.image = referenceFile.value.base64 || referenceFile.value.url || referenceFile.value.previewUrl
+    // 传递原始 MIME 类型，后端据此构建正确的 Data URI 前缀（而非统一用 image/png）
+    if (referenceFile.value.mimeType) {
+      params.image_mime_type = referenceFile.value.mimeType
+    }
   }
   if (mode.value === 'keyframes') {
     // 关键帧动画：过滤空卡片和无效图片，确保仅保留有效 base64/URL
     // 问题场景：用户添加了多个卡片但某些卡片没上传图片
+    // 【修复】优先使用纯 base64，与图生图行为一致，由后端统一归一化
     const imgs = keyframes.value
       .filter(Boolean)                              // 过滤 null/undefined 空卡片
-      .map(f => (f.previewUrl || f.base64 || f.url || '').trim()) // 优先用完整 Data URI
+      .map(f => (f.base64 || f.url || f.previewUrl || '').trim()) // 优先纯 base64 → url → Data URI 兜底
       .filter(img => img.length > 0)               // 过滤空字符串
+    // 收集每张图片的 MIME 类型
+    const mimeTypes = keyframes.value
+      .filter(Boolean)
+      .map(f => f.mimeType || 'image/png')
     if (imgs.length === 0) {
       ElMessage.warning(t('message.pleaseUploadKeyframeImages'))
       return
     }
     params.images = imgs
+    params.image_mime_types = mimeTypes
   }
 
   try {

@@ -125,6 +125,49 @@ class AgnesAIClient:
         return data
 
     # =====================================================
+    # 【base64 工具方法】
+    # 用于图片/视频生成时对 base64 数据进行清理和归一化
+    # =====================================================
+
+    @staticmethod
+    def _clean_and_pad_base64(b64_str: str) -> str:
+        """
+        清理纯 base64 字符串并补齐 padding。
+        - 去除所有空白字符（换行/回车/空格），某些浏览器 readAsDataURL 会插入换行
+        - 去除末尾多余的 '=' 后重新补齐，避免重复 padding
+        - 补齐 '=' padding，确保长度是 4 的倍数
+        """
+        import re
+        # 去除所有空白字符
+        b64 = re.sub(r'\s', '', b64_str)
+        # 去除末尾已有的 padding（避免重复添加）
+        b64 = b64.rstrip('=')
+        # 重新补齐 padding
+        pad = len(b64) % 4
+        if pad:
+            b64 += '=' * (4 - pad)
+        return b64
+
+    @staticmethod
+    def _normalize_data_uri(data_uri: str) -> str:
+        """
+        归一化 Data URI（data:image/xxx;base64,xxxx）：
+        - 提取前缀和 base64 内容
+        - 清理 base64 内容中的空白字符
+        - 补齐 base64 padding
+        - 重构完整的 Data URI
+        """
+        comma_idx = data_uri.rfind(',')
+        if comma_idx < 0:
+            # 没有逗号（异常情况），原样返回
+            return data_uri
+        prefix = data_uri[:comma_idx + 1]  # "data:image/...;base64,"
+        b64_content = data_uri[comma_idx + 1:]
+        # 清理 + 补齐 padding
+        b64_content = AgnesAIClient._clean_and_pad_base64(b64_content)
+        return f"{prefix}{b64_content}"
+
+    # =====================================================
     # 【第二层：API 方法】
     # =====================================================
 
@@ -186,20 +229,22 @@ class AgnesAIClient:
 
         if ref_images:
             # 【图生图模式】将参考图数组放在 extra_body 中（agnes-image-2.1-flash 规范）
-            # 对每个参考图进行归一化处理：
-            #   - 已经是完整 Data URI（data:image/xxx;base64,xxx）→ 直接使用
+            # 对每个参考图进行归一化处理（与 create_video_task 使用相同的工具方法）：
             #   - 公网 URL（http:// / https://）→ 直接使用
-            #   - 纯 base64 字符串 → 补全 Data URI 前缀（默认 image/png）
+            #   - 完整 Data URI（data:image/xxx;base64,xxx）→ 清理空白 + 补齐 padding + 重构
+            #   - 纯 base64 字符串 → 清理空白 + 补齐 padding + 补全 Data URI 前缀（默认 image/png）
             normalized = []
             for img in ref_images:
                 lowered = img.strip().lower()
-                if lowered.startswith("data:"):
-                    normalized.append(img.strip())  # 完整 Data URI，直接使用
-                elif lowered.startswith("http://") or lowered.startswith("https://"):
+                if lowered.startswith("http://") or lowered.startswith("https://"):
                     normalized.append(img.strip())  # 公网 URL
+                elif lowered.startswith("data:"):
+                    # 完整 Data URI → 清理 + 补齐 padding + 重构
+                    normalized.append(self._normalize_data_uri(img.strip()))
                 else:
-                    # 纯 base64 → 补上 Data URI 前缀（image/png 兼容性最好）
-                    normalized.append(f"data:image/png;base64,{img.strip()}")
+                    # 纯 base64 → 清理 + 补齐 padding + 补上 Data URI 前缀
+                    b64 = self._clean_and_pad_base64(img.strip())
+                    normalized.append(f"data:image/png;base64,{b64}")
 
             body["extra_body"] = {
                 "image": normalized,
@@ -237,6 +282,8 @@ class AgnesAIClient:
         mode: str = "text2video",
         image: Optional[str] = None,
         images: Optional[list] = None,
+        image_mime_type: Optional[str] = None,
+        image_mime_types: Optional[list] = None,
         seed: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
@@ -267,62 +314,72 @@ class AgnesAIClient:
         #   - 文生视频：不传 image/image_end（仅 prompt）
         #   - 图生视频（单张）：extra_body.image = 起始帧图片 URL 或 Data URI Base64
         #   - 图生视频（首尾帧）：extra_body.image + extra_body.image_end
-        #   - 纯 base64 字符串必须补全 Data URI 前缀（`data:image/png;base64,xxx`）
+        #   - 纯 base64 字符串必须补全 Data URI 前缀（`data:image/xxx;base64,xxx`）
         #
-        # 前端 image2video 模式：params.image = 单张参考图（base64 或 URL）
+        # 前端 image2video 模式：params.image = 单张参考图（纯 base64 或 URL）
         # 前端 keyframes 模式：params.images = 图片数组
         # 统一处理逻辑：收集所有有效图片，第一张 → extra_body.image，第二张及以后 → extra_body.image_end（仅最后一张）
 
-        # 收集有效图片（从 image 字段和 images 数组）
+        # 收集有效图片（从 image 字段和 images 数组），同时记录每张图对应的 MIME 类型
         ref_images_all = []
+        mime_types_all = []  # 与 ref_images_all 一一对应的 MIME 类型
+
         if image and image.strip():
             ref_images_all.append(image.strip())
+            mime_types_all.append(image_mime_type or "image/png")
             logger.info(
-                "[视频生成] 收到 image: type=%s len=%d preview=%s",
+                "[视频生成] 收到 image: type=%s len=%d mime=%s preview=%s",
                 "data_uri" if image.strip().lower().startswith("data:") else
                 "url" if image.strip().lower().startswith(("http://", "https://")) else
                 "base64",
                 len(image.strip()),
+                image_mime_type or "image/png",
                 image.strip()[:100],
             )
         if images and len(images) > 0:
-            for img in images:
+            for idx, img in enumerate(images):
                 if img and isinstance(img, str) and img.strip():
                     ref_images_all.append(img.strip())
+                    # 从 image_mime_types 取对应索引的 MIME，没有则默认 image/png
+                    mime = (
+                        image_mime_types[idx]
+                        if image_mime_types and idx < len(image_mime_types)
+                        else "image/png"
+                    )
+                    mime_types_all.append(mime)
 
         if ref_images_all and len(ref_images_all) > 0:
-            # 对每个参考图进行归一化处理，统一补全 Data URI 前缀或保留原格式：
-            #   - 已经是完整 Data URI（data:image/xxx;base64,xxx）→ 直接使用
+            # 对每个参考图进行归一化处理：
             #   - 公网 URL（http:// / https://）→ 直接使用
-            #   - 纯 base64 字符串 → 补全 Data URI 前缀（默认 image/png）
+            #   - 完整 Data URI（data:image/xxx;base64,xxx）→ 清理空白 + 补齐 padding + 重构
+            #   - 纯 base64 字符串 → 清理空白 + 补齐 padding + 补全 Data URI 前缀（使用前端传入的 MIME 类型）
             normalized = []
-            for img in ref_images_all:
-                lowered = img.strip().lower()
-                if lowered.startswith("data:"):
-                    # 完整 Data URI → 提取 base64 部分，补齐 padding 后再重构
-                    # 浏览器 FileReader.readAsDataURL 有时省略末尾 '=' padding
-                    comma_idx = img.strip().rfind(',')
-                    if comma_idx >= 0:
-                        prefix = img.strip()[:comma_idx + 1]  # "data:image/...;base64,"
-                        b64_content = img.strip()[comma_idx + 1:]
-                    else:
-                        # 没有逗号（异常情况），原样使用
-                        normalized.append(img.strip())
-                        continue
-                    # 补齐 base64 padding
-                    pad = len(b64_content) % 4
-                    if pad:
-                        b64_content += '=' * (4 - pad)
-                    normalized.append(f"{prefix}{b64_content}")
-                elif lowered.startswith("http://") or lowered.startswith("https://"):
-                    normalized.append(img.strip())  # 公网 URL
+            for i, img in enumerate(ref_images_all):
+                lowered = img.lower()
+                if lowered.startswith("http://") or lowered.startswith("https://"):
+                    # 公网 URL → 直接使用
+                    normalized.append(img)
+                elif lowered.startswith("data:"):
+                    # 完整 Data URI → 提取 base64 部分，清理 + 补齐 padding 后重构
+                    result_uri = self._normalize_data_uri(img)
+                    # 调试日志：输出归一化后的 base64 长度和 padding 状态
+                    comma_idx = result_uri.rfind(',')
+                    b64_part = result_uri[comma_idx + 1:] if comma_idx >= 0 else result_uri
+                    logger.info(
+                        "[视频生成] Data URI 归一化: 原始长度=%d, 归一化后base64长度=%d, %%4=%d, 前20字符=%s",
+                        len(img), len(b64_part), len(b64_part) % 4, b64_part[:20],
+                    )
+                    normalized.append(result_uri)
                 else:
-                    # 纯 base64 → 补齐 padding 后再补上 Data URI 前缀
-                    b64 = img.strip()
-                    pad = len(b64) % 4
-                    if pad:
-                        b64 += '=' * (4 - pad)
-                    normalized.append(f"data:image/png;base64,{b64}")
+                    # 纯 base64 → 清理空白 + 补齐 padding + 补上 Data URI 前缀
+                    b64 = self._clean_and_pad_base64(img)
+                    mime = mime_types_all[i] if i < len(mime_types_all) else "image/png"
+                    result_uri = f"data:{mime};base64,{b64}"
+                    logger.info(
+                        "[视频生成] 纯base64归一化: 原始长度=%d, 清理后base64长度=%d, %%4=%d, MIME=%s",
+                        len(img), len(b64), len(b64) % 4, mime,
+                    )
+                    normalized.append(result_uri)
 
             # 根据图片张数构造 extra_body（Agnes Video V2.0 规范）：
             #   - 1 张：extra_body = {"image": 第一张} （图生视频，单张起始帧）
@@ -342,8 +399,9 @@ class AgnesAIClient:
         self, video_id: Optional[str] = None, task_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        查询视频任务状态。优先使用 video_id 走 agnesapi 路径，
-        否则回退到 /videos/generations/{task_id}。
+        查询视频任务状态。
+        优先使用 video_id 走 agnesapi 路径（直接返回视频结果对象，含公开可访问的 remixed_from_video_id），
+        否则回退到 /video/generations/{task_id} 路径。
         """
         if video_id:
             try:
@@ -396,40 +454,72 @@ class AgnesAIClient:
     def _normalize_video_status(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
         将 Agnes AI 的视频状态响应标准化，便于上层业务逻辑处理。
-        """
-        first_item = None
-        if isinstance(data.get("data"), list) and data["data"]:
-            first_item = data["data"][0]
-        elif isinstance(data.get("data"), dict):
-            first_item = data["data"]
 
+        Agnes API 响应结构（两轮询路径）：
+          - /v1/video/generations/{id} 路径返回：
+            {
+              "code": "success",
+              "data": {
+                "status": "SUCCESS" | "NOT_START" | "RUNNING",
+                "result_url": "https://...",          ← 需认证，可能 401
+                "progress": "100%",
+                "data": {                              ← 内层视频生成详情
+                  "status": "completed" | "queued",
+                  "remixed_from_video_id": "https://...",  ← 公开可访问
+                  "progress": 100,
+                }
+              }
+            }
+          - /agnesapi?video_id=... 路径直接返回视频结果对象：
+            {
+              "status": "completed",
+              "progress": 100,
+              "remixed_from_video_id": "https://...",  ← 公开可访问
+              "error": null,
+            }
+
+        提取策略：
+          - 状态：按优先级检查根级别 → 外层 data → 内层 data.data
+          - 视频 URL：优先 remixed_from_video_id（公开可访问），其次 url/result_url
+          - 进度：优先数字 progress，其次字符串 progress（如 "100%"）
+        """
+        outer = data.get("data")
+        inner = outer if isinstance(outer, dict) else None
+        if isinstance(outer, dict) and "data" in outer:
+            inner = outer["data"]
+
+        # 状态提取：根级别 → 外层 → 内层
         raw_status = (
             data.get("status")
-            or (isinstance(first_item, dict) and first_item.get("status"))
+            or (isinstance(outer, dict) and outer.get("status"))
             or data.get("state")
-            or (isinstance(first_item, dict) and first_item.get("state"))
+            or (isinstance(outer, dict) and outer.get("state"))
+            or (isinstance(inner, dict) and inner.get("status"))
+            or (isinstance(inner, dict) and inner.get("state"))
             or "unknown"
         )
 
         status = str(raw_status).lower()
-        if status == "succeeded":
+        if status in ("succeeded", "success", "completed", "done", "finished"):
             status = "success"
-        elif status in ("pending", "queued", "running"):
+        elif status in ("pending", "queued", "running", "not_start", "notstart", "in_progress", "inprogress"):
             status = "processing"
 
-        if data.get("video_url") or (isinstance(first_item, dict) and first_item.get("url")):
-            if status not in ("completed", "success"):
-                status = "completed"
-
         # 视频 URL 提取：按优先级检查多种可能字段
-        # Agnes API 实际把视频 URL 存储在 remixed_from_video_id 字段中
+        # 优先使用 remixed_from_video_id（公开可访问），其次是 url/result_url
+        # 检查范围：根级别 → 外层 data → 内层 data.data
         video_url = (
-            data.get("video_url")
-            or data.get("remixed_from_video_id")  # Agnes API 实际使用的字段
-            or (isinstance(first_item, dict) and first_item.get("video_url"))
-            or (isinstance(first_item, dict) and first_item.get("remixed_from_video_id"))
-            or (isinstance(first_item, dict) and first_item.get("url"))
-            or data.get("url")
+            data.get("remixed_from_video_id")           # 根级别（agnesapi 路径）
+            or data.get("url")                          # 根级别 url
+            or data.get("result_url")                   # 根级别 result_url
+            or data.get("video_url")                    # 根级别 video_url
+            or (isinstance(outer, dict) and outer.get("remixed_from_video_id"))  # 外层
+            or (isinstance(outer, dict) and outer.get("url"))          # 外层 url
+            or (isinstance(outer, dict) and outer.get("result_url"))   # 外层 result_url
+            or (isinstance(outer, dict) and outer.get("video_url"))    # 外层 video_url
+            or (isinstance(inner, dict) and inner.get("remixed_from_video_id"))  # 内层
+            or (isinstance(inner, dict) and inner.get("url"))         # 内层 url
+            or (isinstance(inner, dict) and inner.get("video_url"))   # 内层 video_url
             or None
         )
 
@@ -437,16 +527,34 @@ class AgnesAIClient:
         if video_url and isinstance(video_url, str) and not video_url.startswith("http"):
             video_url = None
 
-        progress = data.get("progress")
-        if not isinstance(progress, (int, float)):
-            progress = None
+        # 进度提取：优先数字，其次字符串百分比
+        progress = None
+        for src in (data, outer, inner):
+            if src is None:
+                continue
+            if isinstance(src.get("progress"), (int, float)):
+                progress = src["progress"]
+                break
+            elif isinstance(src.get("progress"), str):
+                try:
+                    progress = int(src["progress"].replace("%", ""))
+                except (ValueError, AttributeError):
+                    pass
 
+        # 错误消息提取
         error_msg = None
         if status in ("failed", "error"):
             error_msg = (
                 (isinstance(data.get("error"), dict) and data["error"].get("message"))
-                or (isinstance(first_item, dict) and isinstance(first_item.get("error"), dict) and first_item["error"].get("message"))
-                or (isinstance(first_item, dict) and first_item.get("error"))
+                or (isinstance(outer, dict) and isinstance(outer.get("error"), dict) and outer["error"].get("message"))
+                or (isinstance(inner, dict) and isinstance(inner.get("error"), dict) and inner["error"].get("message"))
+                or (isinstance(data.get("error"), str) and data["error"])
+                or (isinstance(outer, dict) and isinstance(outer.get("error"), str) and outer["error"])
+                or (isinstance(inner, dict) and isinstance(inner.get("error"), str) and inner["error"])
+                or (isinstance(outer, dict) and outer.get("fail_reason"))
+                or (isinstance(outer, dict) and outer.get("error"))
+                or (isinstance(inner, dict) and inner.get("error"))
+                or (isinstance(data.get("error"), dict) and data["error"].get("message"))
                 or data.get("error_message")
                 or data.get("message")
                 or "未知错误"

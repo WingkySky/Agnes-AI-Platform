@@ -59,6 +59,8 @@ async def create_video_task(req: VideoGenerationRequest):
             mode=req.mode,
             image=req.image,
             images=req.images,
+            image_mime_type=req.image_mime_type,
+            image_mime_types=req.image_mime_types,
             seed=req.seed,
         )
     except Exception as e:

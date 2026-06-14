@@ -30,6 +30,9 @@ class VideoGenerationRequest(BaseModel):
     mode: Optional[str] = Field(default="text2video", description="模式: text2video | image2video | keyframes")
     image: Optional[str] = Field(default=None, description="图生视频时的参考图（base64 或 URL）")
     images: Optional[List[str]] = Field(default=None, description="关键帧动画时的图片列表")
+    # MIME 类型（前端传递，用于构建正确的 Data URI 前缀，避免统一用 image/png 导致格式不匹配）
+    image_mime_type: Optional[str] = Field(default=None, description="image2video 参考图的 MIME 类型（如 image/jpeg）")
+    image_mime_types: Optional[List[str]] = Field(default=None, description="keyframes 各图片的 MIME 类型列表")
 
     # 种子（可选）
     seed: Optional[int] = Field(default=None, description="随机种子，不传则由 API 自动生成")
