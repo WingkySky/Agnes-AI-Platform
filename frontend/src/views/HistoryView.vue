@@ -256,9 +256,13 @@ import { ref, computed, onMounted, watch, nextTick, reactive } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, Loading, Document, Delete, VideoPlay, CircleCloseFilled, Edit, Close, Download } from '@element-plus/icons-vue'
 import { getHistoryList, deleteHistoryRecord, batchDeleteHistory } from '@/api/history'
+import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useI18n } from '@/i18n'
 
 const { t } = useI18n()
+
+// 监听全局任务队列的刷新信号，实现生成按钮点击后自动刷新历史列表
+const queue = useTaskQueueStore()
 
 // 图标别名：避免与本地方法同名
 const LoadingIcon = Loading
@@ -661,6 +665,19 @@ function formatTime(t) {
   if (isNaN(d.getTime())) return String(t).slice(0, 19)
   return d.toLocaleString()
 }
+
+// 【历史自动刷新】每当有新任务完成/失败/取消时，自动刷新历史列表
+// 使用 watch 监听全局 taskQueue store 的 historyRefreshSignal，避免手动点击刷新按钮
+watch(
+  () => queue.historyRefreshSignal,
+  (newVal, oldVal) => {
+    if (oldVal === 0 && newVal === 0) return
+    // 稍微延迟一点，确保后端数据已写入（任务可能需要几百毫秒入库）
+    setTimeout(() => {
+      loadList()
+    }, 500)
+  },
+)
 
 onMounted(() => loadList())
 </script>

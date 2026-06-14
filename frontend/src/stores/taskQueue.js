@@ -53,6 +53,9 @@ export const useTaskQueueStore = defineStore('taskQueue', {
     _tick: 0,
     // 已初始化标志
     _initialized: false,
+    // 【历史刷新信号】—— 每当有任务（图片/视频）完成/取消/失败时递增
+    // HistoryView 监听此信号，实现点击生成按钮后历史列表的自动刷新
+    historyRefreshSignal: 0,
   }),
 
   getters: {
@@ -371,6 +374,8 @@ export const useTaskQueueStore = defineStore('taskQueue', {
           await cancelImageTask(task.backendTaskId)
         }
       } catch (_) {}
+      // 【历史自动刷新】任务取消 → 触发刷新信号
+      this.historyRefreshSignal++
       this._saveToStorage()
     },
 
@@ -470,6 +475,8 @@ export const useTaskQueueStore = defineStore('taskQueue', {
       task.status = 'failed'
       task.errorMessage = message
       task.updatedAt = Date.now()
+      // 【历史自动刷新】任务失败 → 同样触发刷新信号
+      this.historyRefreshSignal++
       this._saveToStorage()
     },
 
@@ -479,6 +486,8 @@ export const useTaskQueueStore = defineStore('taskQueue', {
 
     _notifyTaskComplete(task) {
       this._cleanupOldHistory()
+      // 【历史自动刷新】任务完成 → 递增信号，通知 HistoryView 刷新列表
+      this.historyRefreshSignal++
     },
 
     _handleVisibilityChange() {
