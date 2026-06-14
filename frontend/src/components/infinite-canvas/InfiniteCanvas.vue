@@ -77,7 +77,7 @@ function handlePointerMove(e) {
 
   const dx = e.clientX - panStart.x
   const dy = e.clientY - panStart.y
-  store.pan(dx, dy)
+  store.panByScreenDelta(dx, dy)
   throttleViewportUpdate()
 }
 
@@ -96,9 +96,8 @@ function handleWheel(e) {
     return
   }
 
-  // 仅滚轮：平移（纵向）
-  const dy = e.deltaY / store.viewport.zoom
-  store.pan(0, -dy)
+  // 仅滚轮：平移（纵向，原始像素位移）
+  store.panByScreenDelta(0, -e.deltaY)
 }
 
 onBeforeUnmount(() => {

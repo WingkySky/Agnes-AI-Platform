@@ -6,7 +6,6 @@
  * ===================================================== */
 
 import { defineStore } from 'pinia'
-import { v4 as uuidv4 } from 'uuid'
 
 // ---------- 常量 ----------
 const STORAGE_KEY = 'agnes_canvas_v1'
@@ -196,11 +195,18 @@ export const useCanvasStore = defineStore('canvas', {
 
     // ==================== 视口操作 ====================
 
-    /** 平移画布 */
+    /** 平移画布（接收世界坐标系位移） */
     pan(deltaX, deltaY) {
       this.pushSnapshot()
       this.viewport.x += deltaX
       this.viewport.y += deltaY
+    },
+
+    /** 平移画布（接收屏幕坐标系像素位移，自动按 zoom 补偿） */
+    panByScreenDelta(dx, dy) {
+      const zoom = this.viewport.zoom
+      this.viewport.x += dx / zoom
+      this.viewport.y += dy / zoom
     },
 
     /** 缩放画布（以指定中心点为准） */

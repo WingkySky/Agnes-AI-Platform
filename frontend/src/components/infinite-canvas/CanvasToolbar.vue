@@ -113,7 +113,6 @@ const panelTypes = [
 ]
 
 function handleAddPanel(type) {
-  // 默认在视口中心位置创建
   const defaultSizes = {
     image: { width: 400, height: 300 },
     video: { width: 560, height: 315 },
@@ -125,8 +124,14 @@ function handleAddPanel(type) {
   }
 
   const size = defaultSizes[type] || { width: 300, height: 200 }
-  const centerX = -store.viewport.x / store.viewport.zoom
-  const centerY = -store.viewport.y / store.viewport.zoom
+
+  // 以视口可见区域中心为基准（扣除左侧栏 220px 宽度）
+  const sidebarWidth = 220
+  const viewWidth = window.innerWidth - sidebarWidth
+  const viewHeight = window.innerHeight - 48 // 工具栏高度约 48px
+
+  const centerX = -store.viewport.x / store.viewport.zoom + viewWidth / store.viewport.zoom / 2
+  const centerY = -store.viewport.y / store.viewport.zoom + viewHeight / store.viewport.zoom / 2
 
   store.addPanel({
     type,
