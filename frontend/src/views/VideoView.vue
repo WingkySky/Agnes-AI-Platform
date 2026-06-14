@@ -57,26 +57,42 @@
               </el-tab-pane>
           </el-tabs>
 
-          <!-- 单图上传 -->
+          <!-- 图生视频：单张参考图（限制1张，URL/文件混用） -->
           <ImageUploader
             v-if="mode === 'image2video'"
+            :max-count="1"
+            :title="t('params.startFrameImage')"
             @change="handleImageChange"
             @clear="handleImageClear"
           />
 
-          <!-- 多图上传 -->
-          <div v-if="mode === 'keyframes'" class="multi-upload">
-            <div class="section-title">{{ t('params.uploadKeyframes') }}</div>
-            <ImageUploader
-              v-for="(_, idx) in keyframes"
-              :key="idx"
-              :optional="false"
-              @change="(f) => handleKeyframeChange(idx, f)"
-              @clear="() => handleKeyframeClear(idx)"
-            />
-            <el-button plain size="small" @click="addKeyframe">
-              {{ t('params.addKeyframe') }}
-            </el-button>
+          <!-- 首尾帧模式：起始帧 + 结束帧（上下排列，各1张，URL/文件混用） -->
+          <div v-if="mode === 'keyframes'" class="frame-upload">
+            <div class="frame-section frame-section-start">
+              <ImageUploader
+                :max-count="1"
+                :title="t('params.startFrameImage')"
+                @change="(f) => handleFrameChange('start', f)"
+                @clear="() => handleFrameClear('start')"
+              />
+            </div>
+
+            <!-- 连接指示线：起始帧 → 结束帧 -->
+            <div class="frame-connector">
+              <div class="connector-line"></div>
+              <div class="connector-arrow">↓</div>
+              <div class="connector-line"></div>
+            </div>
+
+            <div class="frame-section frame-section-end">
+              <ImageUploader
+                :max-count="1"
+                :title="t('params.endFrameImage')"
+                :optional="true"
+                @change="(f) => handleFrameChange('end', f)"
+                @clear="() => handleFrameClear('end')"
+              />
+            </div>
           </div>
 
           <el-form label-position="top">
@@ -312,8 +328,11 @@ const frameRate = ref(24)
 const width = ref(1152)
 const height = ref(768)
 const seed = ref('')
-const referenceFile = ref(null)
-const keyframes = ref([null])
+
+// ---------- 图片状态（图生视频：单张；首尾帧：起始帧+结束帧）----------
+const referenceFile = ref(null)         // image2video 模式的参考图
+const startFrameFile = ref(null)        // keyframes 模式的起始帧
+const endFrameFile = ref(null)          // keyframes 模式的结束帧
 
 // ---------- 视频播放状态 ----------
 const videoEl = ref(null)
@@ -398,35 +417,32 @@ function appendStylePrompt(tpl) {
   }
 }
 
-// ---------- 关键帧管理 ----------
-function addKeyframe() {
-  if (keyframes.value.length < 6) {
-    keyframes.value.push(null)
-  } else {
-    ElMessage.warning(t('message.maxKeyframes'))
-  }
-}
+// ---------- 图片管理（图生视频 + 首尾帧）----------
+// 图生视频：单张参考图
 function handleImageChange(files) {
   if (!files || !files.length) {
     referenceFile.value = null
     return
   }
-  // ImageUploader emit 的是数组，image2video 只需取第一张
   referenceFile.value = files[0]
 }
 function handleImageClear() {
   referenceFile.value = null
 }
-function handleKeyframeChange(idx, files) {
+
+// 首尾帧模式：起始帧 / 结束帧
+function handleFrameChange(frameType, files) {
   if (!files || !files.length) {
-    keyframes.value[idx] = null
+    if (frameType === 'start') startFrameFile.value = null
+    else endFrameFile.value = null
     return
   }
-  // ImageUploader emit 的是数组，取第一张
-  keyframes.value[idx] = files[0]
+  if (frameType === 'start') startFrameFile.value = files[0]
+  else endFrameFile.value = files[0]
 }
-function handleKeyframeClear(idx) {
-  keyframes.value[idx] = null
+function handleFrameClear(frameType) {
+  if (frameType === 'start') startFrameFile.value = null
+  else endFrameFile.value = null
 }
 
 // ---------- 开始生成 ----------
@@ -456,29 +472,40 @@ async function startGenerate() {
     seed: seed.value ? Number(seed.value) : undefined,
   }
   if (mode.value === 'image2video' && referenceFile.value) {
-    // 【修复】优先使用纯 base64（不含 Data URI 前缀），由后端统一归一化添加前缀 + 补全 padding
-    // 与图生图（ImageView）行为保持一致，避免 Data URI 在前端→后端→Agnes API 多层传递中出现编码兼容性问题
-    // fallback: url（公网地址）→ previewUrl（完整 Data URI，兜底）
+    // 图生视频：单张参考图（优先纯 base64 → url → Data URI 兜底）
     params.image = referenceFile.value.base64 || referenceFile.value.url || referenceFile.value.previewUrl
-    // 传递原始 MIME 类型，后端据此构建正确的 Data URI 前缀（而非统一用 image/png）
     if (referenceFile.value.mimeType) {
       params.image_mime_type = referenceFile.value.mimeType
     }
   }
   if (mode.value === 'keyframes') {
-    // 关键帧动画：过滤空卡片和无效图片，确保仅保留有效 base64/URL
-    // 问题场景：用户添加了多个卡片但某些卡片没上传图片
-    // 【修复】优先使用纯 base64，与图生图行为一致，由后端统一归一化
-    const imgs = keyframes.value
-      .filter(Boolean)                              // 过滤 null/undefined 空卡片
-      .map(f => (f.base64 || f.url || f.previewUrl || '').trim()) // 优先纯 base64 → url → Data URI 兜底
-      .filter(img => img.length > 0)               // 过滤空字符串
-    // 收集每张图片的 MIME 类型
-    const mimeTypes = keyframes.value
-      .filter(Boolean)
-      .map(f => f.mimeType || 'image/png')
+    // 首尾帧模式：起始帧必填，结束帧可选
+    if (!startFrameFile.value) {
+      ElMessage.warning(t('message.pleaseUploadStartFrame'))
+      return
+    }
+    // 收集起始帧和结束帧为 images 数组（后端统一处理）
+    const imgs = []
+    const mimeTypes = []
+
+    // 起始帧
+    const startImg = startFrameFile.value.base64 || startFrameFile.value.url || startFrameFile.value.previewUrl
+    if (startImg) {
+      imgs.push(startImg.trim())
+      mimeTypes.push(startFrameFile.value.mimeType || 'image/png')
+    }
+
+    // 结束帧（可选）
+    if (endFrameFile.value) {
+      const endImg = endFrameFile.value.base64 || endFrameFile.value.url || endFrameFile.value.previewUrl
+      if (endImg) {
+        imgs.push(endImg.trim())
+        mimeTypes.push(endFrameFile.value.mimeType || 'image/png')
+      }
+    }
+
     if (imgs.length === 0) {
-      ElMessage.warning(t('message.pleaseUploadKeyframeImages'))
+      ElMessage.warning(t('message.pleaseUploadStartFrame'))
       return
     }
     params.images = imgs
@@ -823,5 +850,39 @@ function handleVideoError(e) {
 }
 .tip-title { font-weight: 600; color: #d5e3f7; margin-bottom: 8px; }
 .tips-card ul { margin: 0; padding-left: 20px; line-height: 1.8; }
-.multi-upload .el-button { margin-top: 8px; }
+/* 首尾帧上传布局（上下排列） */
+.frame-upload {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.frame-section {
+  width: 100%;
+}
+.frame-section-start .image-uploader,
+.frame-section-end .image-uploader {
+  margin-bottom: 0;
+}
+
+/* 连接线：起始帧 → 结束帧 */
+.frame-connector {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  gap: 2px;
+}
+.connector-line {
+  width: 2px;
+  height: 8px;
+  background: linear-gradient(to bottom, #6b9cff, #4a7ad9);
+  border-radius: 2px;
+}
+.connector-arrow {
+  font-size: 14px;
+  color: #6b9cff;
+  font-weight: bold;
+}
 </style>

@@ -12,8 +12,8 @@ class VideoGenerationRequest(BaseModel):
 
     模式说明:
     - text2video: 只需 prompt + 视频参数
-    - image2video: 额外提供 image 字段（单张参考图）
-    - keyframes: 额外提供 images 数组（多张关键帧）
+    - image2video: 额外提供 image 字段（单张参考图，起始帧）
+    - keyframes: 额外提供 images 数组（首尾帧，起始帧必填 + 结束帧可选，最多2张）
     """
 
     prompt: str = Field(..., min_length=1, max_length=2000, description="提示词")
@@ -26,10 +26,10 @@ class VideoGenerationRequest(BaseModel):
     width: int = Field(default=1152, description="视频宽度")
     height: int = Field(default=768, description="视频高度")
 
-    # 参考图 / 关键帧
+    # 参考图 / 首尾帧
     mode: Optional[str] = Field(default="text2video", description="模式: text2video | image2video | keyframes")
     image: Optional[str] = Field(default=None, description="图生视频时的参考图（base64 或 URL）")
-    images: Optional[List[str]] = Field(default=None, description="关键帧动画时的图片列表")
+    images: Optional[List[str]] = Field(default=None, description="首尾帧模式时的图片列表（最多2张：起始帧+结束帧）")
     # MIME 类型（前端传递，用于构建正确的 Data URI 前缀，避免统一用 image/png 导致格式不匹配）
     image_mime_type: Optional[str] = Field(default=None, description="image2video 参考图的 MIME 类型（如 image/jpeg）")
     image_mime_types: Optional[List[str]] = Field(default=None, description="keyframes 各图片的 MIME 类型列表")
@@ -63,7 +63,7 @@ class VideoGenerationRequest(BaseModel):
         """
         根据 mode 校验必填字段：
         - image2video 必须有 image 字段且非空
-        - keyframes 必须有 images 数组且至少 1 张有效图片（过滤空值后）
+        - keyframes 必须有 images 数组且至少 1 张有效图片（最多 2 张：起始帧+结束帧）
         """
         if self.mode == "image2video":
             if not self.image or not self.image.strip():
@@ -73,7 +73,9 @@ class VideoGenerationRequest(BaseModel):
             if self.images:
                 self.images = [img for img in self.images if img and isinstance(img, str) and img.strip()]
             if not self.images or len(self.images) < 1:
-                raise ValueError("keyframes 模式需提供至少 1 张关键帧图片（images 字段，过滤空值后无有效图片）")
+                raise ValueError("keyframes 模式需提供至少 1 张起始帧图片（images 字段，过滤空值后无有效图片）")
+            if len(self.images) > 2:
+                raise ValueError("keyframes 模式最多提供 2 张图片（起始帧 + 结束帧）")
         return self
 
 

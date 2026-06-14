@@ -96,11 +96,13 @@ export default {
       image2image: '图生图',
       text2video: '文生视频',
       image2video: '图生视频',
-      keyframes: '关键帧动画',
+      keyframes: '首尾帧生成',
       textOnly: '纯提示',
       imageOnly: '加参考图',
-      keyframesHint: '加多图',
+      keyframesHint: '首帧+尾帧',
     },
+    startFrameImage: '起始帧图片',
+    endFrameImage: '结束帧图片',
   },
 
   // ------ 生成按钮 / 队列 ------
@@ -309,6 +311,7 @@ export default {
   message: {
     pleaseFillPrompt: '请先填写提示词',
     pleaseUploadRefImage: '请先上传参考图',
+    pleaseUploadStartFrame: '请上传起始帧图片',
     pleaseUploadKeyframeImages: '请至少上传一张关键帧图片',
     maxKeyframes: '最多添加 6 张关键帧',
   },

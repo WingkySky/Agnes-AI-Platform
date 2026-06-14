@@ -38,17 +38,24 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.database import Base, engine, async_engine
+from app.core.logging import setup_logging
+from app.middleware.request_id import RequestIdMiddleware
 from app.routes import images, videos, history as history_route, config as config_route, chat as chat_route
+from app.routes import logs as logs_route
 from app.services.video_poller import poller_manager
 from app.services.image_poller import image_poller_manager
 from app.services.agnes_client import agnes_client
 
-# ---------- 日志配置 ----------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+# ---------- 日志配置（替换原 logging.basicConfig）----------
+# 使用自定义日志系统：控制台 + 文件轮转 + JSON 错误日志 + Request ID 追踪
+logger = setup_logging(
+    log_level=settings.log_level,
+    log_file_enabled=settings.log_file_enabled,
+    log_dir=settings.log_dir,
+    log_max_bytes=settings.log_max_bytes,
+    log_backup_count=settings.log_backup_count,
+    log_json_enabled=settings.log_json_enabled,
 )
-logger = logging.getLogger("agnes_platform")
 
 
 # =====================================================
@@ -169,6 +176,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ---------- Request ID 中间件（必须在 CORS 之后注册）----------
+# 为每个请求分配唯一 ID，注入日志上下文，实现请求链路追踪
+app.add_middleware(RequestIdMiddleware)
+
 # ---------- 全局异常处理 ----------
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
@@ -192,6 +203,7 @@ app.include_router(images.router, prefix="/api", tags=["图片生成"])
 app.include_router(videos.router, prefix="/api", tags=["视频生成"])
 app.include_router(history_route.router, prefix="/api", tags=["生成历史"])
 app.include_router(chat_route.router, prefix="/api", tags=["AI 聊天"])
+app.include_router(logs_route.router, prefix="/api", tags=["日志查询"])
 
 
 # ---------- 健康检查 ----------

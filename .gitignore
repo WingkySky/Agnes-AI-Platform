@@ -26,6 +26,7 @@ dist/
 
 # 日志
 *.log
+backend/logs/
 
 #设计文档
 .trae/

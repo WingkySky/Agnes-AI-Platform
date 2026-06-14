@@ -95,11 +95,13 @@ export default {
       image2image: 'Image to Image',
       text2video: 'Text to Video',
       image2video: 'Image to Video',
-      keyframes: 'Keyframes',
+      keyframes: 'Start-End Frame',
       textOnly: 'Prompt only',
       imageOnly: 'Plus image',
-      keyframesHint: 'Plus keyframes',
+      keyframesHint: 'Start+End',
     },
+    startFrameImage: 'Start Frame Image',
+    endFrameImage: 'End Frame Image',
   },
 
   // ------ Generate button / queue ------
@@ -308,6 +310,7 @@ export default {
   message: {
     pleaseFillPrompt: 'Please fill in the prompt first',
     pleaseUploadRefImage: 'Please upload a reference image first',
+    pleaseUploadStartFrame: 'Please upload a start frame image',
     pleaseUploadKeyframeImages: 'Please upload at least one keyframe image',
     maxKeyframes: 'Maximum 6 keyframes allowed',
   },

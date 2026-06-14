@@ -58,6 +58,32 @@ class Settings(BaseSettings):
     video_poll_interval_sec: int = Field(default=5, description="视频任务轮询间隔（秒）")
     video_poll_timeout_sec: int = Field(default=600, description="视频任务轮询超时（秒）")
 
+    # ---------- 日志配置 ----------
+    log_level: str = Field(
+        default="INFO",
+        description="全局日志级别（DEBUG/INFO/WARNING/ERROR/CRITICAL）",
+    )
+    log_file_enabled: bool = Field(
+        default=True,
+        description="是否启用文件日志（生产环境建议开启）",
+    )
+    log_dir: str = Field(
+        default="./logs",
+        description="日志文件存储目录",
+    )
+    log_max_bytes: int = Field(
+        default=10_485_760,
+        description="单个日志文件最大字节数（默认 10MB）",
+    )
+    log_backup_count: int = Field(
+        default=5,
+        description="日志文件轮转备份数量",
+    )
+    log_json_enabled: bool = Field(
+        default=True,
+        description="是否启用 JSON 格式错误日志（WARNING 及以上输出 JSON，便于 Agent 解析）",
+    )
+
     @field_validator("frontend_origins", mode="before")
     @classmethod
     def parse_origins(cls, v):
