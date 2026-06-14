@@ -88,9 +88,38 @@ class AgnesAIClient:
     # =====================================================
     async def _post(self, url: str, body: Dict[str, Any]) -> Dict[str, Any]:
         """
-        发送 POST 请求到 Agnes AI API（使用连接池）
+        发送 POST 请求到 Agnes AI API（使用连接池）。
+        为了避免把超长 base64 整段打进日志，这里对 extra_body.image / image 做摘要处理：
+        只记录其前 120 字符与总长。
         """
-        logger.info("[AgnesAIClient] POST %s body=%s", url, body)
+        # ---------- 构造可安全打日志的摘要 body ----------
+        safe_body: Dict[str, Any] = {}
+        for k, v in body.items():
+            if k == "extra_body" and isinstance(v, dict):
+                safe_extra: Dict[str, Any] = {}
+                for ek, ev in v.items():
+                    if ek in ("image", "image_end") and isinstance(ev, str):
+                        safe_extra[ek] = f"<str len={len(ev)}> {ev[:120]}..."
+                    elif ek == "image" and isinstance(ev, list):
+                        safe_extra[ek] = [
+                            f"<str len={len(x)}> {x[:120]}..." if isinstance(x, str) else x
+                            for x in ev
+                        ]
+                    else:
+                        safe_extra[ek] = ev
+                safe_body[k] = safe_extra
+            elif k in ("image", "images") and isinstance(v, (list, str)):
+                if isinstance(v, str):
+                    safe_body[k] = f"<str len={len(v)}> {v[:120]}..."
+                else:
+                    safe_body[k] = [
+                        f"<str len={len(x)}> {x[:120]}..." if isinstance(x, str) else x
+                        for x in v
+                    ]
+            else:
+                safe_body[k] = v
+
+        logger.info("[AgnesAIClient] POST %s body=%s", url, safe_body)
         response = await self.client.post(url, json=body, headers=self._headers)
         return self._parse_response(response)
 
@@ -125,47 +154,113 @@ class AgnesAIClient:
         return data
 
     # =====================================================
-    # 【base64 工具方法】
-    # 用于图片/视频生成时对 base64 数据进行清理和归一化
+    # 【图像输入归一化】
+    # 图生图 / 图生视频 共用同一套处理逻辑：
+    #   - 公网 URL（http:// / https://）→ 返回 (url, None)
+    #   - Data URI（data:image/xxx;base64,xxxx）→ 清理 base64 段 + 补齐 padding
+    #   - 纯 base64 → 清理空白 + 补齐 padding + 按 mime 拼成 Data URI
+    # 返回: (normalized_value, size)，size 为 (width, height) 或 None
+    # 额外辅助方法 _detect_image_size 负责从 base64/Data URI 里读取 JPEG/PNG 头
     # =====================================================
 
     @staticmethod
     def _clean_and_pad_base64(b64_str: str) -> str:
-        """
-        清理纯 base64 字符串并补齐 padding。
-        - 去除所有空白字符（换行/回车/空格），某些浏览器 readAsDataURL 会插入换行
-        - 去除末尾多余的 '=' 后重新补齐，避免重复 padding
-        - 补齐 '=' padding，确保长度是 4 的倍数
-        """
+        """清理纯 base64 字符串中的空白并补齐 padding（长度为 4 的倍数）。"""
         import re
-        # 去除所有空白字符
-        b64 = re.sub(r'\s', '', b64_str)
-        # 去除末尾已有的 padding（避免重复添加）
-        b64 = b64.rstrip('=')
-        # 重新补齐 padding
+        b64 = re.sub(r'\s', '', b64_str).rstrip('=')
         pad = len(b64) % 4
         if pad:
             b64 += '=' * (4 - pad)
         return b64
 
-    @staticmethod
-    def _normalize_data_uri(data_uri: str) -> str:
+    @classmethod
+    def _detect_image_size(cls, data_uri_or_b64: str) -> Optional[tuple]:
         """
-        归一化 Data URI（data:image/xxx;base64,xxxx）：
-        - 提取前缀和 base64 内容
-        - 清理 base64 内容中的空白字符
-        - 补齐 base64 padding
-        - 重构完整的 Data URI
+        从 Data URI / 纯 base64 中解码头部，识别图片的真实宽高。
+        支持 JPEG（SOF0/SOF1/SOF2 marker）和 PNG（IHDR chunk）。
+        失败时返回 None（不影响任务提交）。
         """
-        comma_idx = data_uri.rfind(',')
-        if comma_idx < 0:
-            # 没有逗号（异常情况），原样返回
-            return data_uri
-        prefix = data_uri[:comma_idx + 1]  # "data:image/...;base64,"
-        b64_content = data_uri[comma_idx + 1:]
-        # 清理 + 补齐 padding
-        b64_content = AgnesAIClient._clean_and_pad_base64(b64_content)
-        return f"{prefix}{b64_content}"
+        try:
+            s = data_uri_or_b64.strip()
+            if s.lower().startswith("data:"):
+                idx = s.rfind(',')
+                if idx < 0:
+                    return None
+                s = s[idx + 1:]
+            # 只需要文件头部的一小段就能拿到宽高（PNG 前 24 字节，JPEG 前几百字节）
+            head_b64 = s[:2048]
+            # 补齐为 4 的倍数，避免 binascii.Error
+            pad_needed = (-len(head_b64)) % 4
+            if pad_needed:
+                head_b64 += '=' * pad_needed
+            try:
+                import base64
+                raw = base64.b64decode(head_b64, validate=False)
+            except Exception:
+                return None
+
+            if len(raw) < 8:
+                return None
+            import struct
+            # PNG: 89 50 4E 47 0D 0A 1A 0A + length(4) + 'IHDR' + width(4) + height(4)
+            if raw[:8] == b'\x89PNG\r\n\x1a\n':
+                if len(raw) >= 24 and raw[12:16] == b'IHDR':
+                    w, h = struct.unpack('>II', raw[16:24])
+                    return (int(w), int(h))
+            # JPEG: FF D8 ... SOF marker (FF C0/C1/C2) 后 16 位长度 + 8 位精度 + 16 位 height + 16 位 width
+            if raw[:2] == b'\xff\xd8':
+                i = 2
+                while i < len(raw) - 9:
+                    if raw[i] != 0xFF:
+                        i += 1
+                        continue
+                    marker = raw[i + 1]
+                    # 独立/差分帧起始（SOF0/SOF1/SOF2），SOI/EOI/DHT 等跳过，DNL 不处理
+                    if marker in (0xC0, 0xC1, 0xC2):
+                        h, w = struct.unpack('>HH', raw[i + 5:i + 9])
+                        return (int(w), int(h))
+                    if marker == 0xD9:  # EOI，文件结束
+                        break
+                    # 该 segment 的长度（包含这 2 字节本身）
+                    if i + 3 < len(raw):
+                        seg_len = struct.unpack('>H', raw[i + 2:i + 4])[0]
+                        i += 2 + seg_len
+                    else:
+                        break
+            return None
+        except Exception:
+            return None
+
+    @classmethod
+    def _normalize_image_input(
+        cls, raw: str, default_mime: str = "image/png"
+    ) -> tuple:
+        """
+        统一归一化图像输入：URL / Data URI / 纯 base64 都走这个入口。
+        返回 (normalized_value, size)，size 为 (width, height) 或 None（URL 无法本地解码）。
+        """
+        if not raw or not isinstance(raw, str):
+            return ("", None)
+        s = raw.strip()
+        lowered = s.lower()
+        if lowered.startswith(("http://", "https://")):
+            # URL 分支：不做尺寸检测（避免额外网络请求），size=None
+            return (s, None)
+        if lowered.startswith("data:"):
+            comma_idx = s.rfind(',')
+            if comma_idx < 0:
+                # 异常 Data URI：退化为纯 base64 分支
+                b64 = cls._clean_and_pad_base64(s)
+                out = f"data:{default_mime};base64,{b64}"
+                return (out, cls._detect_image_size(b64))
+            prefix = s[:comma_idx + 1]
+            b64 = cls._clean_and_pad_base64(s[comma_idx + 1:])
+            out = f"{prefix}{b64}"
+            return (out, cls._detect_image_size(b64))
+        # 纯 base64
+        b64 = cls._clean_and_pad_base64(s)
+        out = f"data:{default_mime};base64,{b64}"
+        return (out, cls._detect_image_size(b64))
 
     # =====================================================
     # 【第二层：API 方法】
@@ -228,23 +323,13 @@ class AgnesAIClient:
         }
 
         if ref_images:
-            # 【图生图模式】将参考图数组放在 extra_body 中（agnes-image-2.1-flash 规范）
-            # 对每个参考图进行归一化处理（与 create_video_task 使用相同的工具方法）：
-            #   - 公网 URL（http:// / https://）→ 直接使用
-            #   - 完整 Data URI（data:image/xxx;base64,xxx）→ 清理空白 + 补齐 padding + 重构
-            #   - 纯 base64 字符串 → 清理空白 + 补齐 padding + 补全 Data URI 前缀（默认 image/png）
+            # 【图生图模式】按官方规范将参考图数组放在 extra_body.image 中
+            # 每张图统一走 _normalize_image_input: URL/Data URI/纯 base64 都可
             normalized = []
             for img in ref_images:
-                lowered = img.strip().lower()
-                if lowered.startswith("http://") or lowered.startswith("https://"):
-                    normalized.append(img.strip())  # 公网 URL
-                elif lowered.startswith("data:"):
-                    # 完整 Data URI → 清理 + 补齐 padding + 重构
-                    normalized.append(self._normalize_data_uri(img.strip()))
-                else:
-                    # 纯 base64 → 清理 + 补齐 padding + 补上 Data URI 前缀
-                    b64 = self._clean_and_pad_base64(img.strip())
-                    normalized.append(f"data:image/png;base64,{b64}")
+                uri, _size = self._normalize_image_input(img)
+                if uri:
+                    normalized.append(uri)
 
             body["extra_body"] = {
                 "image": normalized,
@@ -298,6 +383,56 @@ class AgnesAIClient:
         aspect_ratio = self._aspect_ratio(width, height)
         duration = max(1, round(num_frames / frame_rate))
 
+        # ── 图生视频模式 / 关键帧动画处理（核心修正）
+        # 经实测 Agnes `video/generations` 对非平台托管 URL 均失败：
+        #   - 外部公开图 URL（维基/示例） -> FAILURE ("Invalid image")
+        #   - base64 Data URI -> 永远 NOT_START 不会启动
+        # 仅接受 Agnes 自己平台返回的 URL（形如 https://platform-outputs.agnes-ai.space/...jpg）
+        # 因此：
+        #   1) 先归一化 base64 / Data URI（_normalize_image_input）
+        #   2) 把非 Agnes-URL 的图调用一次 images/generations 做 pass-through，拿到平台托管 URL
+        #   3) 用该 URL 调 video/generations
+        # 同时用第一张参考图的真实宽高修正 aspect_ratio，避免与请求值不一致导致 Internal generation failed
+
+        refs_with_mime: list = []
+        if image and isinstance(image, str) and image.strip():
+            refs_with_mime.append((image.strip(), image_mime_type or "image/png"))
+        if images and isinstance(images, (list, tuple)):
+            for idx, img in enumerate(images):
+                if img and isinstance(img, str) and img.strip():
+                    mime = (
+                        image_mime_types[idx]
+                        if image_mime_types and idx < len(image_mime_types)
+                        else "image/png"
+                    )
+                    refs_with_mime.append((img.strip(), mime or "image/png"))
+
+        pairs: list = []  # [(要写入 body 的 uri, 真实宽高 or None)]
+        if refs_with_mime:
+            for raw, _mime in refs_with_mime:
+                _uri, _size = self._normalize_image_input(raw, default_mime=_mime)
+                if not _uri:
+                    continue
+                try:
+                    final_uri = await self._to_agnes_url(_uri)
+                except Exception as e:
+                    # 即使转换失败，也继续用归一化的 uri（不阻断任务）
+                    logger.warning("[视频生成] 参考图转 Agnes URL 失败: %s", e)
+                    final_uri = _uri
+                pairs.append((final_uri, _size))
+
+            if pairs and pairs[0][1]:
+                w, h = pairs[0][1]
+                from math import gcd
+                _g = gcd(w, h)
+                detected = f"{w // _g}:{h // _g}"
+                if detected != aspect_ratio:
+                    logger.info(
+                        "[视频生成] 图片真实宽高比 %s（%dx%d）与请求 aspect_ratio=%s 不一致，已自动覆盖",
+                        detected, w, h, aspect_ratio,
+                    )
+                    aspect_ratio = detected
+
         body = {
             "model": model,
             "prompt": prompt,
@@ -309,90 +444,105 @@ class AgnesAIClient:
         if seed is not None:
             body["seed"] = seed
 
-        # ── 图生视频模式 / 关键帧动画处理 ──
-        # Agnes Video V2.0 官方规范 (agnes-ai-docs.md / Agnes Video V2.0):
-        #   - 文生视频：不传 image/image_end（仅 prompt）
-        #   - 图生视频（单张）：extra_body.image = 起始帧图片 URL 或 Data URI Base64
-        #   - 图生视频（首尾帧）：extra_body.image + extra_body.image_end
-        #   - 纯 base64 字符串必须补全 Data URI 前缀（`data:image/xxx;base64,xxx`）
-        #
-        # 前端 image2video 模式：params.image = 单张参考图（纯 base64 或 URL）
-        # 前端 keyframes 模式：params.images = 图片数组
-        # 统一处理逻辑：收集所有有效图片，第一张 → extra_body.image，第二张及以后 → extra_body.image_end（仅最后一张）
-
-        # 收集有效图片（从 image 字段和 images 数组），同时记录每张图对应的 MIME 类型
-        ref_images_all = []
-        mime_types_all = []  # 与 ref_images_all 一一对应的 MIME 类型
-
-        if image and image.strip():
-            ref_images_all.append(image.strip())
-            mime_types_all.append(image_mime_type or "image/png")
+        if pairs:
+            extra_body: Dict[str, Any] = {"image": pairs[0][0]}
+            if len(pairs) >= 2:
+                extra_body["image_end"] = pairs[-1][0]
+            body["extra_body"] = extra_body
             logger.info(
-                "[视频生成] 收到 image: type=%s len=%d mime=%s preview=%s",
-                "data_uri" if image.strip().lower().startswith("data:") else
-                "url" if image.strip().lower().startswith(("http://", "https://")) else
-                "base64",
-                len(image.strip()),
-                image_mime_type or "image/png",
-                image.strip()[:100],
+                "[视频生成] 图生视频模式: model=%s, image_count=%d, "
+                "duration=%ss, aspect_ratio=%s, fps=%d, prompt=%s",
+                model, len(pairs), duration, aspect_ratio, frame_rate, prompt[:80],
             )
-        if images and len(images) > 0:
-            for idx, img in enumerate(images):
-                if img and isinstance(img, str) and img.strip():
-                    ref_images_all.append(img.strip())
-                    # 从 image_mime_types 取对应索引的 MIME，没有则默认 image/png
-                    mime = (
-                        image_mime_types[idx]
-                        if image_mime_types and idx < len(image_mime_types)
-                        else "image/png"
-                    )
-                    mime_types_all.append(mime)
 
-        if ref_images_all and len(ref_images_all) > 0:
-            # 对每个参考图进行归一化处理：
-            #   - 公网 URL（http:// / https://）→ 直接使用
-            #   - 完整 Data URI（data:image/xxx;base64,xxx）→ 清理空白 + 补齐 padding + 重构
-            #   - 纯 base64 字符串 → 清理空白 + 补齐 padding + 补全 Data URI 前缀（使用前端传入的 MIME 类型）
-            normalized = []
-            for i, img in enumerate(ref_images_all):
-                lowered = img.lower()
-                if lowered.startswith("http://") or lowered.startswith("https://"):
-                    # 公网 URL → 直接使用
-                    normalized.append(img)
-                elif lowered.startswith("data:"):
-                    # 完整 Data URI → 提取 base64 部分，清理 + 补齐 padding 后重构
-                    result_uri = self._normalize_data_uri(img)
-                    # 调试日志：输出归一化后的 base64 长度和 padding 状态
-                    comma_idx = result_uri.rfind(',')
-                    b64_part = result_uri[comma_idx + 1:] if comma_idx >= 0 else result_uri
-                    logger.info(
-                        "[视频生成] Data URI 归一化: 原始长度=%d, 归一化后base64长度=%d, %%4=%d, 前20字符=%s",
-                        len(img), len(b64_part), len(b64_part) % 4, b64_part[:20],
-                    )
-                    normalized.append(result_uri)
-                else:
-                    # 纯 base64 → 清理空白 + 补齐 padding + 补上 Data URI 前缀
-                    b64 = self._clean_and_pad_base64(img)
-                    mime = mime_types_all[i] if i < len(mime_types_all) else "image/png"
-                    result_uri = f"data:{mime};base64,{b64}"
-                    logger.info(
-                        "[视频生成] 纯base64归一化: 原始长度=%d, 清理后base64长度=%d, %%4=%d, MIME=%s",
-                        len(img), len(b64), len(b64) % 4, mime,
-                    )
-                    normalized.append(result_uri)
-
-            # 根据图片张数构造 extra_body（Agnes Video V2.0 规范）：
-            #   - 1 张：extra_body = {"image": 第一张} （图生视频，单张起始帧）
-            #   - 2+ 张：extra_body = {"image": 第一张, "image_end": 最后一张} （首尾帧图生视频）
-            body["extra_body"] = {"image": normalized[0]}
-            if len(normalized) >= 2:
-                body["extra_body"]["image_end"] = normalized[-1]
+        # 额外打印一次真正发出去的 body（避免 safe_body 只看前 120 字符造成误判）
+        if "extra_body" in body and isinstance(body["extra_body"].get("image"), str):
+            img = body["extra_body"]["image"]
+            logger.info(
+                "[视频生成] 上游请求体摘要: aspect_ratio=%s, image_type=%s, image_len=%d, image_head=%s",
+                aspect_ratio,
+                "agnes_url" if "platform-outputs.agnes-ai.space" in img else ("url" if img.lower().startswith("http") else "data_uri"),
+                len(img),
+                img[:160],
+            )
 
         logger.info(
-            f"[视频生成] 创建任务: prompt={prompt[:60]}...  "
-            f"mode={mode}  duration={duration}s  aspect_ratio={aspect_ratio}  fps={frame_rate}"
+            "[视频生成] 创建任务: prompt=%s, mode=%s, duration=%ss, "
+            "aspect_ratio=%s, fps=%d, seed=%s",
+            prompt[:60], mode, duration, aspect_ratio, frame_rate, seed,
         )
         return await self._post(url, body)
+
+    async def _to_agnes_url(self, uri: str) -> str:
+        """
+        把任意参考图转换成 Agnes 平台托管的 URL。
+        - 若是 Agnes 平台 URL (https://platform-outputs.agnes-ai.space/...)，直接返回
+        - 否则调用一次 Agnes Image 2.1 Flash 图生图做 pass-through，拿到平台托管 URL
+        """
+        if not isinstance(uri, str) or not uri.strip():
+            return uri
+        lowered = uri.strip().lower()
+        if lowered.startswith("https://platform-outputs.agnes-ai.space"):
+            return uri
+        # 如果是其他 Agnes 子域也放过（避免循环）
+        if lowered.startswith("https://") and "agnes-ai.space" in lowered:
+            return uri
+
+        # 检测原图宽高，决定生成 size（与原图比例一致）
+        try:
+            _, size = self._normalize_image_input(uri)
+            if size:
+                w, h = size
+                size_str = f"{w}x{h}"
+            else:
+                size_str = "1024x1024"
+        except Exception:
+            size_str = "1024x1024"
+
+        logger.info(
+            "[视频生成] 参考图先转 Agnes 图片任务：type=%s size=%s",
+            "url" if lowered.startswith("http") else "data_uri",
+            size_str,
+        )
+        try:
+            # 区分 base64 / URL 传参
+            if lowered.startswith("http"):
+                resp = await self.create_image(
+                    prompt="reproduce reference image as is to get its hosted url",
+                    model="agnes-image-2.1-flash",
+                    size=size_str,
+                    response_format="url",
+                    image_urls=[uri],
+                )
+            else:
+                resp = await self.create_image(
+                    prompt="reproduce reference image as is to get its hosted url",
+                    model="agnes-image-2.1-flash",
+                    size=size_str,
+                    response_format="url",
+                    base64_images=[uri],
+                )
+            out = None
+            try:
+                data = resp.get("data", [])
+                if isinstance(data, list) and data:
+                    out = data[0].get("url")
+                if not out and isinstance(resp.get("url"), str):
+                    out = resp["url"]
+                if not out and resp.get("image"):
+                    out = resp["image"]
+            except Exception as e:
+                logger.warning("[视频生成] 解析图片任务返回失败: %s, 原始返回: %s", e, str(resp)[:200])
+            if not out:
+                raise RuntimeError(
+                    f"参考图转 Agnes 平台 URL 失败，原始返回: {str(resp)[:200]}"
+                )
+            logger.info("[视频生成] 参考图已转 Agnes URL: %s", out[:160])
+            return out
+        except Exception as e:
+            logger.exception("[视频生成] 参考图转 Agnes 平台 URL 失败: %s", e)
+            # 失败时回退：把原始 uri 返回（避免阻断前端提交）
+            return uri
 
     # ---------- 视频任务轮询 ----------
     async def poll_video_status(

@@ -34,18 +34,76 @@ logger = logging.getLogger("agnes_platform")
 router = APIRouter()
 
 
+# ---------- 工具：判断输入是 URL / Data URI / 纯 base64 ----------
+# 仅用于日志打标签；真正的归一化在 agnes_client._normalize_image_input 里统一做
+def _classify_image(s: str) -> str:
+    if not s or not isinstance(s, str):
+        return "empty"
+    lowered = s.strip().lower()
+    if lowered.startswith(("http://", "https://")):
+        return "url"
+    if lowered.startswith("data:"):
+        return "data_uri"
+    return "base64"
+
+
+# ---------- 工具：校验单张参考图的大小（base64 / data_uri 都会折算为原始字节数）----------
+def _validate_image_size(raw: str, label: str) -> None:
+    if not raw or not isinstance(raw, str):
+        return
+    if raw.strip().lower().startswith(("http://", "https://")):
+        return  # URL 不走本地 size 校验
+    body = raw.split(",")[-1] if "," in raw else raw
+    body = body.strip().replace("=", "")
+    approx_bytes = len(body) * 3 / 4
+    if approx_bytes > settings.max_upload_bytes:
+        mb = round(approx_bytes / 1024 / 1024, 2)
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"{label} 过大（约 {mb}MB，最大允许 {settings.max_upload_size_mb}MB），"
+                "请更换更小的图片或改用公网 URL 方式。"
+            ),
+        )
+
+
 @router.post("/videos", response_model=VideoTaskCreatedResponse, summary="创建视频生成任务")
 async def create_video_task(req: VideoGenerationRequest):
     """
     创建视频生成异步任务。
-    返回 task_id/video_id，前端可立即释放，不阻塞用户操作。
-    实际视频生成轮询在后台独立 asyncio.Task 中运行，不影响其他请求。
+    - text2video：只传 prompt
+    - image2video: 额外传 image 字段
+    - keyframes: 额外传 images 数组（1-2 张）
     """
     if not settings.agnes_api_key or settings.agnes_api_key.startswith("sk-your"):
         raise HTTPException(
             status_code=401,
             detail="Agnes AI API Key 未配置，请在 backend/.env 中设置 AGNES_API_KEY",
         )
+
+    # ---------- 参考图 size 校验 + 类型日志（便于排查本地图/URL 是否混传）----------
+    if req.mode == "image2video" and req.image:
+        _validate_image_size(req.image, "image")
+        logger.info(
+            "[视频生成][image2video] image: type=%s, length=%d, mime=%s, preview=%s",
+            _classify_image(req.image),
+            len(req.image or ""),
+            req.image_mime_type or "image/png",
+            (req.image or "")[:100],
+        )
+    if req.mode == "keyframes" and req.images:
+        for idx, img in enumerate(req.images):
+            if not img:
+                continue
+            _validate_image_size(img, f"images[{idx}]")
+            logger.info(
+                "[视频生成][keyframes] images[%d]: type=%s, length=%d, mime=%s, preview=%s",
+                idx,
+                _classify_image(img),
+                len(img),
+                (req.image_mime_types[idx] if req.image_mime_types and idx < len(req.image_mime_types) else "image/png"),
+                img[:100],
+            )
 
     try:
         result = await agnes_client.create_video_task(
@@ -64,7 +122,7 @@ async def create_video_task(req: VideoGenerationRequest):
             seed=req.seed,
         )
     except Exception as e:
-        logger.error("[视频生成] 创建任务失败: %s", e)
+        logger.exception("[视频生成] 创建任务失败（上游 Agnes 响应异常）: %s", e)
         raise HTTPException(status_code=502, detail=str(e))
 
     result_data = result.get("data")
