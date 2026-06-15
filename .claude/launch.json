@@ -3,8 +3,9 @@
   "configurations": [
     {
       "name": "frontend-dev",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite"],
+      "port": 3000,
       "autoPort": true,
       "cwd": "frontend"
     }

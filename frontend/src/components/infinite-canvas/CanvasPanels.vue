@@ -1,7 +1,7 @@
 /* =====================================================
  * 面板容器
- * - 渲染所有面板（带 z-index 排序）
- * - 视口裁剪（visiblePanels getter 仅渲染可见面板）
+ * - 使用 visiblePanels getter 仅渲染可见面板
+ * - 按 z-index 排序
  * ===================================================== */
 
 <template>
@@ -21,9 +21,12 @@ import PanelWrapper from '@/components/infinite-canvas/PanelWrapper.vue'
 
 const store = useCanvasStore()
 
+// 仅渲染视口内的可见面板（性能优化）
+const visiblePanels = computed(() => store.visiblePanels)
+
 // 按 zIndex 排序
 const sortedPanels = computed(() =>
-  [...store.panels].sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0)),
+  [...visiblePanels.value].sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0)),
 )
 </script>
 

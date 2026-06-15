@@ -5,7 +5,7 @@ import { fileURLToPath, URL } from 'node:url'
 // =====================================================
 // Agnes AI Platform 前端 Vite 配置
 // - 将 /api 请求代理到后端 http://localhost:8000
-// - 开发模式下端口 5173
+// - 开发模式下端口 5174
 // =====================================================
 
 export default defineConfig({
@@ -21,7 +21,7 @@ export default defineConfig({
   // 开发服务器配置
   server: {
     host: '0.0.0.0',
-    port: 5173,
+    port: 5174,
     open: true,
     proxy: {
       // 所有 /api 请求转发给后端 FastAPI

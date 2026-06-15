@@ -388,6 +388,25 @@ export default {
     dragOrClick: '拖拽文件或点击上传',
     uploadHint: '支持图片/视频格式',
     customPlaceholder: '双击自定义内容',
+    // 鼠标模式
+    modeSelect: '选择模式（Select）',
+    modePan: '平移模式（Pan）',
+    modeConnect: '连线模式（Connect）',
+    // 右键菜单
+    copyPanel: '复制面板',
+    deletePanel: '删除面板',
+    selectPanel: '选中面板',
+    lockPanel: '锁定面板',
+    deleteConnection: '删除连线',
+    disconnect: '断开连接',
+    selectAll: '全选面板',
+    paste: '粘贴',
+    centerView: '居中视图',
+    clearCanvas: '清空画布',
+    // 交互提示
+    interactionHint: '按住 Space + 拖动可平移画布，滚轮缩放',
+    panModeHint: '当前是平移模式，点击或拖动空白处可平移画布',
+    spacePanningHint: '已临时进入平移模式，松开 Space 退出',
   },
 
   // ------ 首页加载 ------

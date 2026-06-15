@@ -72,13 +72,20 @@ export const useCanvasStore = defineStore('canvas', {
       connections: [],
       selectedPanelId: null,
       selectedConnectionId: null,
+      mouseMode: 'select',  // 'select' | 'pan' | 'connect'
 
       // 历史记录（撤销/重做）
       history: { past: [], future: [] },
 
       // 拖拽状态（不持久化）
-      _dragging: null,
+      _dragging: null,        // { type: 'panel' | 'resize', ... }
       _resizing: null,
+      _connecting: null,       // { sourcePanelId, anchorType: 'input'|'output', worldX, worldY }
+
+      // 交互护栏：拖动面板期间，画布绝对不能平移
+      _isDraggingPanel: false,
+      // 空格键按下状态：临时进入平移模式
+      _isSpacePressed: false,
 
       // 同步状态
       syncing: false,
@@ -97,12 +104,17 @@ export const useCanvasStore = defineStore('canvas', {
       return state.panels.find((p) => p.id === state.selectedPanelId) ?? null
     },
 
+    /** 当前鼠标模式 */
+    mouseMode(state) {
+      return state.mouseMode
+    },
+
     /** 视口内的可见面板（性能优化） */
     visiblePanels(state) {
       const { x, y, zoom } = state.viewport
-      // 假设视口大小为 1920x1080（实际使用时可按需传入）
-      const viewWidth = 1920
-      const viewHeight = 1080
+      // 使用实际视口尺寸（从 window 获取）
+      const viewWidth = window.innerWidth
+      const viewHeight = window.innerHeight
       const left = -x / zoom
       const top = -y / zoom
       const right = left + viewWidth / zoom
@@ -122,10 +134,78 @@ export const useCanvasStore = defineStore('canvas', {
           (c) => c.source_panel_id === panelId || c.target_panel_id === panelId,
         )
     },
+
+    /** 所有面板的边界矩形（用于 Minimap） */
+    canvasBounds(state) {
+      // 修复：bounds 合并所有面板 + 当前视口的可见范围，
+      // 这样无论视口移到哪，视口框始终在 minimap 内可见
+      let minX = -Infinity, minY = -Infinity
+      let maxX = Infinity, maxY = Infinity
+
+      // 面板边界
+      if (state.panels.length > 0) {
+        minX = Infinity; minY = Infinity
+        maxX = -Infinity; maxY = -Infinity
+        for (const p of state.panels) {
+          minX = Math.min(minX, p.x)
+          minY = Math.min(minY, p.y)
+          maxX = Math.max(maxX, p.x + p.width)
+          maxY = Math.max(maxY, p.y + p.height)
+        }
+      }
+
+      // 视口在世界坐标中的范围
+      const { x, y, zoom } = state.viewport
+      const viewWidth = window.innerWidth
+      const viewHeight = window.innerHeight
+      const vpLeft = -x / zoom
+      const vpTop = -y / zoom
+      const vpRight = vpLeft + viewWidth / zoom
+      const vpBottom = vpTop + viewHeight / zoom
+
+      minX = Math.min(minX, vpLeft)
+      minY = Math.min(minY, vpTop)
+      maxX = Math.max(maxX, vpRight)
+      maxY = Math.max(maxY, vpBottom)
+
+      // 防止 NaN/Infinity
+      if (!isFinite(minX)) {
+        return { left: -500, top: -500, width: 1000, height: 1000 }
+      }
+
+      // 扩展 200px 边距，让空白区域也有意义
+      const padding = 200
+      return {
+        left: minX - padding,
+        top: minY - padding,
+        width: (maxX - minX) + padding * 2,
+        height: (maxY - minY) + padding * 2,
+      }
+    },
+
+    /** 当前视口在画布中的矩形（用于 Minimap 高亮） */
+    viewportRect(state) {
+      const { x, y, zoom } = state.viewport
+      const viewWidth = window.innerWidth
+      const viewHeight = window.innerHeight
+      return {
+        x: -x / zoom,
+        y: -y / zoom,
+        width: viewWidth / zoom,
+        height: viewHeight / zoom,
+      }
+    },
   },
 
   actions: {
     // ==================== 画布管理 ====================
+
+    /** 设置鼠标模式 */
+    setMouseMode(mode) {
+      if (['select', 'pan', 'connect'].includes(mode)) {
+        this.mouseMode = mode
+      }
+    },
 
     /** 创建新画布 */
     createWorkspace(name) {
@@ -268,6 +348,17 @@ export const useCanvasStore = defineStore('canvas', {
       }
     },
 
+    /**
+     * 直接更新面板（不压入历史快照）
+     * 用于拖拽/缩放过程中的高频更新，由调用方在操作开始时压入一次快照
+     */
+    _updatePanelDirect(id, changes) {
+      const panel = this.panels.find((p) => p.id === id)
+      if (panel) {
+        Object.assign(panel, changes, { updated_at: new Date().toISOString() })
+      }
+    },
+
     /** 删除面板 */
     deletePanel(id) {
       this.pushSnapshot()
@@ -277,6 +368,16 @@ export const useCanvasStore = defineStore('canvas', {
       )
       this.panels = this.panels.filter((p) => p.id !== id)
       if (this.selectedPanelId === id) this.selectedPanelId = null
+    },
+
+    /** 一次性清空所有面板（只压一次快照） */
+    clearAllPanels() {
+      if (this.panels.length === 0) return
+      this.pushSnapshot()
+      this.connections = []
+      this.panels = []
+      this.selectedPanelId = null
+      this.selectedConnectionId = null
     },
 
     /** 复制面板 */
@@ -300,6 +401,12 @@ export const useCanvasStore = defineStore('canvas', {
       if (panel) {
         panel.zIndex = Math.max(...this.panels.map((p) => p.zIndex || 0), 0) + 1
       }
+    },
+
+    /** 选中连线 */
+    selectConnection(id) {
+      this.selectedConnectionId = id
+      this.selectedPanelId = null
     },
 
     /** 将面板提到最前 */
@@ -347,6 +454,86 @@ export const useCanvasStore = defineStore('canvas', {
         target_anchor: 'top-left',
       })
       return this.connections[this.connections.length - 1]
+    },
+
+    // ==================== 连线交互 ====================
+
+    /** 开始连线拖拽 */
+    startConnecting(panelId, anchorType) {
+      this._connecting = {
+        sourcePanelId: panelId,
+        anchorType,
+        worldX: 0,
+        worldY: 0,
+      }
+    },
+
+    /** 更新连线拖拽目标位置（屏幕坐标 → 世界坐标） */
+    updateConnecting(screenX, screenY) {
+      if (!this._connecting) return
+      const world = this.screenToWorld(screenX, screenY)
+      this._connecting.worldX = world.x
+      this._connecting.worldY = world.y
+    },
+
+    /** 结束连线拖拽，如果命中目标锚点则创建连线 */
+    endConnecting(targetPanelId, targetAnchorType) {
+      if (!this._connecting) return null
+      const { sourcePanelId, anchorType } = this._connecting
+
+      // 不能连接到自身
+      if (targetPanelId === sourcePanelId) {
+        this._connecting = null
+        return null
+      }
+
+      // 确定 source → target 方向：output 侧面板作为源，input 侧面板作为目标
+      const connectingTargetAnchor = anchorType === 'output' ? 'input' : 'output'
+
+      // 如果命中了目标锚点，检查方向是否正确
+      if (targetAnchorType === 'input' || targetAnchorType === 'output') {
+        if (targetAnchorType !== connectingTargetAnchor) {
+          this._connecting = null
+          return null
+        }
+      }
+
+      let sourceId, targetId
+      if (anchorType === 'output') {
+        sourceId = sourcePanelId
+        targetId = targetPanelId
+      } else {
+        sourceId = targetPanelId
+        targetId = sourcePanelId
+      }
+
+      // 检查是否已存在
+      const exists = this.connections.find(
+        (c) =>
+          c.source_panel_id === sourceId &&
+          c.target_panel_id === targetId,
+      )
+      if (exists) {
+        this._connecting = null
+        return null
+      }
+
+      this.addConnection({
+        source_panel_id: sourceId,
+        target_panel_id: targetId,
+        type: 'manual',
+        source_anchor: 'bottom-right',
+        target_anchor: 'top-left',
+      })
+
+      const conn = this.connections[this.connections.length - 1]
+      this._connecting = null
+      return conn
+    },
+
+    /** 取消连线拖拽 */
+    cancelConnecting() {
+      this._connecting = null
     },
 
     // ==================== 撤销/重做 ====================

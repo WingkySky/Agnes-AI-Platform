@@ -11,11 +11,13 @@
 <template>
   <div
     ref="panelRef"
-    :data-canvas-target="panel.type === 'placeholder' ? 'panel' : 'panel'"
+    data-canvas-target="panel"
+    :data-panel-id="panel.id"
     :class="['canvas-panel', { selected: isSelected, dragging: isDragging }]"
     :style="panelStyle"
     @pointerdown="handlePointerDown"
     @click.stop="store.selectPanel(panel.id)"
+    @contextmenu.stop="handleContextMenu"
   >
     <!-- 面板头部（拖拽手柄） -->
     <div class="panel-header" @pointerdown.stop="startDrag">
@@ -46,7 +48,8 @@
         :key="handle.dir"
         class="resize-handle"
         :class="`handle-${handle.dir}`"
-        @pointerdown.stop="startResize(handle.dir)"
+        :data-canvas-target="'control'"
+        @pointerdown.stop="(e) => startResize(handle.dir, e)"
       />
     </template>
 
@@ -54,6 +57,7 @@
     <div
       v-if="panel.type !== 'placeholder'"
       class="anchor-point anchor-output"
+      data-canvas-target="anchor"
       @pointerdown.stop="startConnectionDrag"
     />
 
@@ -61,6 +65,7 @@
     <div
       v-if="panel.type !== 'placeholder'"
       class="anchor-point anchor-input"
+      data-canvas-target="anchor"
       @pointerdown.stop="startConnectionDrag"
     />
   </div>
@@ -130,39 +135,39 @@ const resizeHandles = [
   { dir: 'sw' }, { dir: 's' }, { dir: 'se' },
 ]
 
-let isPanning = false
-let isResizing = false
-let dragStart = { x: 0, y: 0 }
-let panelStart = { x: 0, y: 0 }
-let resizeDir = ''
-let resizeStart = {}
-
-/** 面板拖拽 */
+/** 面板拖拽（选中面板体区域） */
 function handlePointerDown(e) {
   if (e.button !== 0) return
+  // 忽略手柄和按钮区域
   if (e.target.classList.contains('resize-handle') ||
-      e.target.classList.contains('action-icon') ||
-      e.target.closest('.panel-header')?.dragHandled) {
+      e.target.classList.contains('action-icon')) {
     return
   }
   store.selectPanel(props.panel.id)
 }
 
-/** 开始拖拽移动 */
+/** 开始拖拽移动（通过头部拖拽手柄） */
 function startDrag(e) {
   e.preventDefault()
   isDragging.value = true
-  const rect = panelRef.value.getBoundingClientRect()
-  const worldPos = store.screenToWorld(rect.left, rect.top)
-  dragStart = { x: e.clientX, y: e.clientY }
-  panelStart = { x: props.panel.x, y: props.panel.y }
 
-  panelRef.value.setPointerCapture(e.pointerId)
+  const el = panelRef.value
+  const dragStart = { x: e.clientX, y: e.clientY }
+  const panelStart = { x: props.panel.x, y: props.panel.y }
+
+  // 护栏：拖动面板期间，画布绝对不能平移
+  store._isDraggingPanel = true
+  // 仅在拖拽开始时压入一次快照，避免每帧都污染历史栈
+  store.pushSnapshot()
+
+  // 使用 setPointerCapture + 元素级别监听，不会泄漏
+  el.setPointerCapture(e.pointerId)
 
   const onMove = (ev) => {
+    // 用 _updatePanelDirect 绕过 pushSnapshot，提升拖拽性能
     const dx = (ev.clientX - dragStart.x) / store.viewport.zoom
     const dy = (ev.clientY - dragStart.y) / store.viewport.zoom
-    store.updatePanel(props.panel.id, {
+    store._updatePanelDirect(props.panel.id, {
       x: panelStart.x + dx,
       y: panelStart.y + dy,
     })
@@ -170,62 +175,138 @@ function startDrag(e) {
 
   const onUp = () => {
     isDragging.value = false
-    panelRef.value?.releasePointerCapture(e.pointerId)
-    window.removeEventListener('pointermove', onMove)
-    window.removeEventListener('pointerup', onUp)
+    store._isDraggingPanel = false
+    el.releasePointerCapture(e.pointerId)
+    el.removeEventListener('pointermove', onMove)
+    el.removeEventListener('pointerup', onUp)
   }
 
-  window.addEventListener('pointermove', onMove)
-  window.addEventListener('pointerup', onUp)
+  // 在 captured element 上监听，而非 window
+  el.addEventListener('pointermove', onMove)
+  el.addEventListener('pointerup', onUp)
 }
 
 /** 开始缩放 */
-function startResize(dir) {
-  resizeDir = dir
-  resizeStart = {
+function startResize(dir, e) {
+  e.preventDefault()
+  e.stopPropagation()
+
+  const el = panelRef.value
+  const resizeDir = dir
+  const resizeStart = {
+    dir,
     x: props.panel.x,
     y: props.panel.y,
     w: props.panel.width,
     h: props.panel.height,
-    sx: 0,
-    sy: 0,
+    sx: e.clientX,  // 修复：用真实事件坐标初始化
+    sy: e.clientY,  // 修复：用真实事件坐标初始化
   }
-  // 需要获取面板的屏幕坐标
-  const rect = panelRef.value.getBoundingClientRect()
-  // 这里用事件位置初始化
+
+  // 护栏：缩放期间画布不能平移
+  store._isDraggingPanel = true
+  // 仅在缩放开始时压入一次快照
+  store.pushSnapshot()
+
+  el.setPointerCapture(e.pointerId)
+
   const onMove = (ev) => {
     const dx = (ev.clientX - resizeStart.sx) / store.viewport.zoom
     const dy = (ev.clientY - resizeStart.sy) / store.viewport.zoom
 
     let { x, y, w, h } = { ...resizeStart }
 
-    if (dir.includes('e')) w = Math.max(150, resizeStart.w + dx)
-    if (dir.includes('w')) {
+    if (resizeDir.includes('e')) w = Math.max(150, resizeStart.w + dx)
+    if (resizeDir.includes('w')) {
       w = Math.max(150, resizeStart.w - dx)
       if (w > 150) x = resizeStart.x + dx
     }
-    if (dir.includes('s')) h = Math.max(100, resizeStart.h + dy)
-    if (dir.includes('n')) {
+    if (resizeDir.includes('s')) h = Math.max(100, resizeStart.h + dy)
+    if (resizeDir.includes('n')) {
       h = Math.max(100, resizeStart.h - dy)
       if (h > 100) y = resizeStart.y + dy
     }
 
-    store.updatePanel(props.panel.id, { x, y, w, h })
+    // 拖拽过程中直接更新，绕过 pushSnapshot
+    store._updatePanelDirect(props.panel.id, { x, y, w, h })
   }
 
   const onUp = () => {
-    resizeDir = ''
-    window.removeEventListener('pointermove', onMove)
-    window.removeEventListener('pointerup', onUp)
+    store._isDraggingPanel = false
+    el.releasePointerCapture(e.pointerId)
+    el.removeEventListener('pointermove', onMove)
+    el.removeEventListener('pointerup', onUp)
   }
 
-  window.addEventListener('pointermove', onMove)
-  window.addEventListener('pointerup', onUp)
+  el.addEventListener('pointermove', onMove)
+  el.addEventListener('pointerup', onUp)
 }
 
 /** 连线拖拽 */
 function startConnectionDrag(e) {
-  // TODO: 实现连线拖拽交互（Phase 4）
+  e.preventDefault()
+  e.stopPropagation()
+
+  // 判断是输入锚点（左上角，class 包含 anchor-input）还是输出锚点（右下角）
+  const isInput = e.target.classList.contains('anchor-input')
+  const anchorType = isInput ? 'input' : 'output'
+
+  store.startConnecting(props.panel.id, anchorType)
+  isDragging.value = true  // 防止面板被拖动
+
+  const onMove = (ev) => {
+    store.updateConnecting(ev.clientX, ev.clientY)
+  }
+
+  const onUp = (ev) => {
+    // 查找鼠标释放位置是否命中目标锚点
+    const target = document.elementFromPoint(ev.clientX, ev.clientY)
+    const targetAnchor = target?.closest?.('[data-canvas-target="anchor"]')
+    let targetPanelId = null
+    let targetAnchorType = null
+
+    if (targetAnchor) {
+      const panelEl = targetAnchor.closest('[data-canvas-target="panel"]')
+      targetPanelId = store.panels.find(
+        (p) => p.id === panelEl?.getAttribute('data-panel-id'),
+      )?.id
+      targetAnchorType = targetAnchor.classList.contains('anchor-input') ? 'input' : 'output'
+    } else {
+      // 未命中锚点，尝试看是否命中面板
+      const panelEl = target?.closest?.('[data-canvas-target="panel"]')
+      targetPanelId = store.panels.find(
+        (p) => p.id === panelEl?.getAttribute('data-panel-id'),
+      )?.id
+      if (targetPanelId) {
+        targetAnchorType = anchorType === 'output' ? 'input' : 'output'
+      }
+    }
+
+    if (targetPanelId && targetAnchorType) {
+      store.endConnecting(targetPanelId, targetAnchorType)
+    } else {
+      store.cancelConnecting()
+    }
+
+    isDragging.value = false
+  }
+
+  // 连线拖拽使用 window 级监听，因为临时虚线需要跟随鼠标到整个画布区域
+  // 但通过 store._connecting 状态控制生命周期，确保不会泄漏
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', onUp)
+}
+
+/** 右键菜单 */
+function handleContextMenu(e) {
+  e.preventDefault()
+  store.selectPanel(props.panel.id)
+  // 发出事件让父级处理菜单显示
+  emit('contextmenu', {
+    event: e,
+    panelId: props.panel.id,
+    targetType: 'panel',
+  })
 }
 
 function handleUpdate(changes) {
@@ -239,6 +320,8 @@ function handleDuplicate() {
 function handleDelete() {
   store.deletePanel(props.panel.id)
 }
+
+const emit = defineEmits(['contextmenu'])
 </script>
 
 <style scoped>
@@ -364,6 +447,16 @@ function handleDelete() {
 .canvas-panel:hover .anchor-point,
 .canvas-panel.selected .anchor-point {
   opacity: 1;
+}
+
+/* 连线模式下锚点始终可见 */
+.connecting-mode .anchor-point {
+  opacity: 0.7;
+}
+
+.connecting-mode .anchor-point:hover {
+  opacity: 1;
+  transform: scale(1.3);
 }
 
 .anchor-point:hover {

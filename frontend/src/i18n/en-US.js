@@ -387,6 +387,25 @@ export default {
     dragOrClick: 'Drag file or click to upload',
     uploadHint: 'Images/Videos supported',
     customPlaceholder: 'Double-click for custom content',
+    // Mouse modes
+    modeSelect: 'Select Mode (Select)',
+    modePan: 'Pan Mode (Pan)',
+    modeConnect: 'Connect Mode (Connect)',
+    // Context menu
+    copyPanel: 'Copy Panel',
+    deletePanel: 'Delete Panel',
+    selectPanel: 'Select Panel',
+    lockPanel: 'Lock Panel',
+    deleteConnection: 'Delete Connection',
+    disconnect: 'Disconnect',
+    selectAll: 'Select All Panels',
+    paste: 'Paste',
+    centerView: 'Center View',
+    clearCanvas: 'Clear Canvas',
+    // Interaction hints
+    interactionHint: 'Hold Space + drag to pan, scroll to zoom',
+    panModeHint: 'Pan Mode active — click and drag empty area to pan canvas',
+    spacePanningHint: 'Temporary pan mode — release Space to exit',
   },
 
   // ------ First-page loading ------

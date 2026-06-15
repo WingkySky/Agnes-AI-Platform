@@ -3,10 +3,13 @@
  * - 左侧栏：多画布管理
  * - 中间：无限画布主体
  * - 顶部：工具栏
+ * - 全局快捷键处理器
+ * - 右键上下文菜单
+ * - Minimap 小地图
  * ===================================================== */
 
 <template>
-  <div class="canvas-view">
+  <div class="canvas-view" @contextmenu.prevent="handleContextMenu">
     <!-- 左侧栏 -->
     <CanvasSidebar />
 
@@ -16,26 +19,175 @@
       <CanvasToolbar />
 
       <!-- 无限画布 -->
-      <InfiniteCanvas />
+      <InfiniteCanvas ref="infiniteCanvasRef" />
+
+      <!-- Minimap 小地图 -->
+      <CanvasMinimap />
     </div>
+
+    <!-- 右键菜单 -->
+    <CanvasContextMenu ref="contextMenuRef" />
   </div>
 </template>
 
 <script setup>
-import { onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
+import { useCanvasStore } from '@/stores/canvas'
 import CanvasSidebar from '@/components/infinite-canvas/CanvasSidebar.vue'
 import CanvasToolbar from '@/components/infinite-canvas/CanvasToolbar.vue'
 import InfiniteCanvas from '@/components/infinite-canvas/InfiniteCanvas.vue'
+import CanvasContextMenu from '@/components/infinite-canvas/CanvasContextMenu.vue'
+import CanvasMinimap from '@/components/infinite-canvas/CanvasMinimap.vue'
 import { useI18n } from '@/i18n'
 
 const { t } = useI18n()
+const store = useCanvasStore()
+const contextMenuRef = ref(null)
+const infiniteCanvasRef = ref(null)
+
+/** 右键菜单处理 */
+function handleContextMenu(e) {
+  const target = e.target
+
+  // 检查是否点击了面板
+  const panelEl = target.closest('[data-canvas-target="panel"]')
+  if (panelEl) {
+    contextMenuRef.value?.show(e, {
+      target: 'panel',
+      data: { panelId: panelEl.getAttribute('data-panel-id') },
+    })
+    return
+  }
+
+  // 检查是否点击了连线（SVG path）
+  if (target.classList.contains('connection-path')) {
+    const connGroup = target.closest('.connection-group')
+    const connId = connGroup?.dataset?.connId
+    contextMenuRef.value?.show(e, {
+      target: 'connection',
+      data: { connectionId: connId },
+    })
+    return
+  }
+
+  // 背景右键
+  contextMenuRef.value?.show(e, { target: 'background' })
+}
+
+/** 全局点击关闭菜单 */
+function handleClick() {
+  contextMenuRef.value?.hide()
+}
+
+/** 全局快捷键处理 */
+function handleKeydown(e) {
+  // 忽略在表单元素中的按键
+  const tag = (e.target?.tagName || '').toLowerCase()
+  if (['input', 'textarea', 'select'].includes(tag) || e.target?.isContentEditable) {
+    return
+  }
+
+  const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
+  const mod = isMac ? e.metaKey : e.ctrlKey
+
+  // Space 键：临时进入平移模式（按下时显示抓手指针，可拖动画布）
+  if (e.code === 'Space' && !e.repeat) {
+    e.preventDefault()
+    store._isSpacePressed = true
+    return
+  }
+
+  // Escape：关闭右键菜单 + 取消选中
+  if (e.key === 'Escape') {
+    contextMenuRef.value?.hide()
+    store.selectedPanelId = null
+    store.selectedConnectionId = null
+    return
+  }
+
+  // Delete / Backspace：删除选中的面板或连线
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    if (store.selectedPanelId) {
+      e.preventDefault()
+      store.deletePanel(store.selectedPanelId)
+    } else if (store.selectedConnectionId) {
+      e.preventDefault()
+      store.deleteConnection(store.selectedConnectionId)
+    }
+    return
+  }
+
+  // Ctrl+Z / Cmd+Z：撤销
+  if (e.key === 'z' && mod && !e.shiftKey) {
+    e.preventDefault()
+    store.undo()
+    return
+  }
+
+  // Ctrl+Shift+Z / Cmd+Shift+Z：重做
+  if (e.key === 'z' && mod && e.shiftKey) {
+    e.preventDefault()
+    store.redo()
+    return
+  }
+
+  // Ctrl+D / Cmd+D：复制选中面板
+  if (e.key === 'd' && mod) {
+    e.preventDefault()
+    if (store.selectedPanelId) {
+      store.duplicatePanel(store.selectedPanelId)
+    }
+    return
+  }
+
+  // Ctrl+A / Cmd+A：全选面板（选中第一个）
+  if (e.key === 'a' && mod && !store._connecting) {
+    e.preventDefault()
+    if (store.panels.length > 0) {
+      store.selectPanel(store.panels[0].id)
+    }
+    return
+  }
+
+  // 方向键：微调面板位置
+  const nudgeAmount = e.shiftKey ? 10 : 1
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key) && store.selectedPanelId) {
+    e.preventDefault()
+    const panel = store.panels.find((p) => p.id === store.selectedPanelId)
+    if (!panel) return
+
+    let dx = 0, dy = 0
+    if (e.key === 'ArrowUp') dy = -nudgeAmount
+    else if (e.key === 'ArrowDown') dy = nudgeAmount
+    else if (e.key === 'ArrowLeft') dx = -nudgeAmount
+    else if (e.key === 'ArrowRight') dx = nudgeAmount
+
+    store.updatePanel(panel.id, { x: panel.x + dx, y: panel.y + dy })
+  }
+}
+
+/** 全局按键释放处理（用于 Space 键松开） */
+function handleKeyup(e) {
+  if (e.code === 'Space') {
+    store._isSpacePressed = false
+  }
+}
 
 onMounted(() => {
   document.title = `${t('router.canvas')} · Agnes AI Platform`
+  window.addEventListener('keydown', handleKeydown)
+  window.addEventListener('keyup', handleKeyup)
+  // 点击其他地方关闭右键菜单
+  window.addEventListener('click', handleClick)
 })
 
 onUnmounted(() => {
   document.title = 'Agnes AI Platform'
+  window.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener('keyup', handleKeyup)
+  window.removeEventListener('click', handleClick)
+  // 离开时清掉 Space 状态
+  store._isSpacePressed = false
 })
 </script>
 
