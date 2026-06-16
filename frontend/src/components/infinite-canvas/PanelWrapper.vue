@@ -19,6 +19,13 @@
     @click.stop="store.selectPanel(panel.id)"
     @contextmenu.stop="handleContextMenu"
   >
+    <!-- 颜色标签条（左侧 4px 宽） -->
+    <div
+      v-if="colorBarVisible"
+      class="color-bar"
+      :style="{ background: colorBarColor }"
+    />
+
     <!-- 面板头部（拖拽手柄） -->
     <div class="panel-header" @pointerdown.stop="startDrag">
       <span class="panel-title">{{ panelTitle }}</span>
@@ -113,8 +120,21 @@ const panelTypeLabels = {
   placeholder: '占位面板',
 }
 
+const COLOR_MAP = {
+  blue: 'rgba(80, 140, 255, 0.85)',
+  green: 'rgba(80, 200, 160, 0.85)',
+  orange: 'rgba(255, 180, 80, 0.85)',
+  red: 'rgba(255, 120, 120, 0.85)',
+  purple: 'rgba(160, 120, 255, 0.85)',
+}
+
+const colorBarColor = computed(() => COLOR_MAP[props.panel.content?.color] || 'transparent')
+const colorBarVisible = computed(() => !!props.panel.content?.color)
+
 const panelTitle = computed(() => {
   const base = panelTypeLabels[props.panel.type]
+  // 优先显示用户自定义的 name
+  if (props.panel.content?.name) return props.panel.content.name
   if (props.panel.type === 'text' && props.panel.content?.text) {
     const text = props.panel.content.text
     return text.length > 15 ? text.slice(0, 15) + '...' : text
@@ -252,7 +272,6 @@ function startConnectionDrag(e) {
   const anchorType = isInput ? 'input' : 'output'
 
   store.startConnecting(props.panel.id, anchorType)
-  isDragging.value = true  // 防止面板被拖动
 
   const onMove = (ev) => {
     store.updateConnecting(ev.clientX, ev.clientY)
@@ -288,11 +307,12 @@ function startConnectionDrag(e) {
       store.cancelConnecting()
     }
 
-    isDragging.value = false
+    // 修复：连线结束后必须清理 window 级监听器，避免多次操作后状态错乱
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
   }
 
   // 连线拖拽使用 window 级监听，因为临时虚线需要跟随鼠标到整个画布区域
-  // 但通过 store._connecting 状态控制生命周期，确保不会泄漏
   window.addEventListener('pointermove', onMove)
   window.addEventListener('pointerup', onUp)
 }
@@ -338,6 +358,18 @@ const emit = defineEmits(['contextmenu'])
   transition: box-shadow 0.15s ease, border-color 0.15s ease;
   min-width: 150px;
   min-height: 100px;
+  contain: layout style paint;  /* 性能优化：隔离渲染 */
+}
+
+/* 颜色标签条 */
+.color-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 100%;
+  z-index: 1;
+  pointer-events: none;
 }
 
 .canvas-panel:hover {
@@ -433,15 +465,16 @@ const emit = defineEmits(['contextmenu'])
 /* 连线锚点 */
 .anchor-point {
   position: absolute;
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   background: #508cff;
   border: 2px solid #fff;
   border-radius: 50%;
   cursor: crosshair;
   z-index: 5;
   opacity: 0;
-  transition: opacity 0.15s, transform 0.15s;
+  transition: opacity 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: 0 0 0 0 rgba(80, 140, 255, 0);
 }
 
 .canvas-panel:hover .anchor-point,
@@ -449,27 +482,46 @@ const emit = defineEmits(['contextmenu'])
   opacity: 1;
 }
 
-/* 连线模式下锚点始终可见 */
+/* 连线模式下锚点始终可见，并带脉冲呼吸效果 */
 .connecting-mode .anchor-point {
-  opacity: 0.7;
+  opacity: 0.9;
+  box-shadow: 0 0 0 4px rgba(80, 140, 255, 0.15);
+  animation: anchor-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes anchor-pulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(80, 140, 255, 0.15); }
+  50% { box-shadow: 0 0 0 8px rgba(80, 140, 255, 0.05); }
 }
 
 .connecting-mode .anchor-point:hover {
   opacity: 1;
-  transform: scale(1.3);
+  transform: scale(1.4);
+  box-shadow: 0 0 0 6px rgba(80, 140, 255, 0.3);
 }
 
 .anchor-point:hover {
-  transform: scale(1.3);
+  transform: scale(1.4);
+  box-shadow: 0 0 8px rgba(80, 140, 255, 0.6);
 }
 
+.anchor-point:active {
+  transform: scale(1.2);
+}
+
+/* 区分输入/输出锚点颜色 */
 .anchor-output {
-  bottom: -6px;
-  right: -6px;
+  bottom: -7px;
+  right: -7px;
 }
 
 .anchor-input {
-  top: -6px;
-  left: -6px;
+  top: -7px;
+  left: -7px;
+  background: #a078ff;  /* 紫色区分输入侧 */
+}
+
+.connecting-mode .anchor-input {
+  background: #a078ff;
 }
 </style>

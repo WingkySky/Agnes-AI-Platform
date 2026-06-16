@@ -1,8 +1,8 @@
-/* =====================================================
- * 图片预览面板
- * - 展示 Agnes 生成的图片
- * - 支持点击放大预览
- * ===================================================== */
+<!-- =====================================================
+     图片预览面板
+     - 展示 Agnes 生成的图片
+     - 支持点击放大预览（Element Plus el-image viewer）
+     ===================================================== -->
 
 <template>
   <div class="image-panel">
@@ -10,17 +10,24 @@
       v-if="imageUrl"
       :src="imageUrl"
       alt="预览图片"
-      @click="$emit('preview', imageUrl)"
+      @click="handlePreview"
     />
     <div v-else class="image-placeholder">
       <el-icon :size="32"><PictureFilled /></el-icon>
       <p>等待图片...</p>
     </div>
+
+    <!-- 点击图片时弹出 Element Plus 图片预览器（带遮罩 + 缩放/旋转/翻页） -->
+    <el-image-viewer
+      v-if="previewVisible"
+      :url-list="[imageUrl]"
+      @close="previewVisible = false"
+    />
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { PictureFilled } from '@element-plus/icons-vue'
 
 const props = defineProps({
@@ -28,12 +35,19 @@ const props = defineProps({
 })
 
 const imageUrl = computed(() => {
-  // 如果有 task_id，后续从 API 获取
-  if (props.panel.taskId) return null
+  // 优先使用 panel.content.imageUrl；如果绑定了 taskId 后续可在此处异步获取
+  if (props.panel.task_id || props.panel.taskId) return null
   return props.panel.content?.imageUrl ?? null
 })
 
-defineEmits(['preview'])
+const previewVisible = ref(false)
+
+/** 点击图片 → 弹出全屏预览（前提是图片已经加载完成） */
+function handlePreview() {
+  if (imageUrl.value) {
+    previewVisible.value = true
+  }
+}
 </script>
 
 <style scoped>
@@ -53,6 +67,11 @@ defineEmits(['preview'])
   max-height: 100%;
   object-fit: contain;
   border-radius: 6px;
+  transition: transform 0.2s ease;
+}
+
+.image-panel img:hover {
+  transform: scale(1.02);
 }
 
 .image-placeholder {

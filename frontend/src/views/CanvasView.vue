@@ -1,12 +1,13 @@
-/* =====================================================
- * 无限画布页面
- * - 左侧栏：多画布管理
- * - 中间：无限画布主体
- * - 顶部：工具栏
- * - 全局快捷键处理器
- * - 右键上下文菜单
- * - Minimap 小地图
- * ===================================================== */
+<!-- =====================================================
+     无限画布页面
+     - 左侧栏：多画布管理
+     - 中间：无限画布主体
+     - 顶部：工具栏（含导入/导出按钮）
+     - 右侧：选中面板/连线的属性编辑面板
+     - 全局快捷键处理器
+     - 右键上下文菜单
+     - Minimap 小地图
+     ===================================================== -->
 
 <template>
   <div class="canvas-view" @contextmenu.prevent="handleContextMenu">
@@ -16,7 +17,7 @@
     <!-- 主内容区 -->
     <div class="canvas-main">
       <!-- 顶部工具栏 -->
-      <CanvasToolbar />
+      <CanvasToolbar @export-json="handleExportJson" @import-json="triggerImport" />
 
       <!-- 无限画布 -->
       <InfiniteCanvas ref="infiniteCanvasRef" />
@@ -25,25 +26,40 @@
       <CanvasMinimap />
     </div>
 
+    <!-- 右侧属性面板 -->
+    <CanvasRightPanel />
+
     <!-- 右键菜单 -->
     <CanvasContextMenu ref="contextMenuRef" />
+
+    <!-- 隐藏的文件 input 用于导入 JSON -->
+    <input
+      ref="importInputRef"
+      type="file"
+      accept=".json,application/json"
+      style="display: none"
+      @change="handleImportFile"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
+import { ElMessage } from 'element-plus'
 import { useCanvasStore } from '@/stores/canvas'
 import CanvasSidebar from '@/components/infinite-canvas/CanvasSidebar.vue'
 import CanvasToolbar from '@/components/infinite-canvas/CanvasToolbar.vue'
 import InfiniteCanvas from '@/components/infinite-canvas/InfiniteCanvas.vue'
 import CanvasContextMenu from '@/components/infinite-canvas/CanvasContextMenu.vue'
 import CanvasMinimap from '@/components/infinite-canvas/CanvasMinimap.vue'
+import CanvasRightPanel from '@/components/infinite-canvas/CanvasRightPanel.vue'
 import { useI18n } from '@/i18n'
 
 const { t } = useI18n()
 const store = useCanvasStore()
 const contextMenuRef = ref(null)
 const infiniteCanvasRef = ref(null)
+const importInputRef = ref(null)
 
 /** 右键菜单处理 */
 function handleContextMenu(e) {
@@ -149,6 +165,13 @@ function handleKeydown(e) {
     return
   }
 
+  // Ctrl+S / Cmd+S：导出当前画布为 JSON（防止浏览器默认保存网页）
+  if (e.key === 's' && mod) {
+    e.preventDefault()
+    handleExportJson()
+    return
+  }
+
   // 方向键：微调面板位置
   const nudgeAmount = e.shiftKey ? 10 : 1
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key) && store.selectedPanelId) {
@@ -171,6 +194,54 @@ function handleKeyup(e) {
   if (e.code === 'Space') {
     store._isSpacePressed = false
   }
+}
+
+/** 导出当前画布为 JSON 文件下载 */
+function handleExportJson() {
+  if (store.panels.length === 0 && store.connections.length === 0) {
+    ElMessage.warning('画布为空，无需导出')
+    return
+  }
+  const json = store.exportJSON()
+  const blob = new Blob([json], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  const wsName = store.activeWorkspace?.name || 'canvas'
+  a.href = url
+  a.download = `${wsName}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+  ElMessage.success(t('canvas.exportSuccess'))
+}
+
+/** 触发文件选择对话框 */
+function triggerImport() {
+  importInputRef.value?.click()
+}
+
+/** 处理选择的 JSON 文件 */
+function handleImportFile(e) {
+  const file = e.target.files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = (ev) => {
+    try {
+      const result = store.importJSON(ev.target.result)
+      ElMessage.success(
+        t('canvas.importSuccess', { n: result.panels, m: result.connections }),
+      )
+    } catch (err) {
+      ElMessage.error(t('canvas.importFailed', { msg: err.message }))
+    }
+  }
+  reader.onerror = () => {
+    ElMessage.error(t('canvas.importFailed', { msg: '文件读取失败' }))
+  }
+  reader.readAsText(file)
+  // 清空 input.value 允许同名文件重复选择
+  e.target.value = ''
 }
 
 onMounted(() => {

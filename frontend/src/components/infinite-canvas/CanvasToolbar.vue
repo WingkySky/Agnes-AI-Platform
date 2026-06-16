@@ -84,6 +84,20 @@
 
     <!-- 右侧：操作按钮 -->
     <div class="toolbar-right">
+      <el-tooltip :content="t('canvas.importJson')" placement="bottom">
+        <el-icon class="tool-btn" @click="emit('import-json')">
+          <Upload />
+        </el-icon>
+      </el-tooltip>
+
+      <el-tooltip :content="t('canvas.exportJson')" placement="bottom">
+        <el-icon class="tool-btn" @click="emit('export-json')">
+          <Download />
+        </el-icon>
+      </el-tooltip>
+
+      <el-divider direction="vertical" />
+
       <el-tooltip :content="t('canvas.undo')" placement="bottom">
         <el-icon
           class="tool-btn"
@@ -120,6 +134,10 @@
       <el-icon><CaretRight /></el-icon>
       {{ t('canvas.panModeHint') }}
     </div>
+    <div v-else-if="store.mouseMode === 'connect'" class="mode-badge connect-badge">
+      <el-icon><Connection /></el-icon>
+      {{ t('canvas.connectModeHint') }}
+    </div>
     <div v-else-if="store._isSpacePressed" class="mode-badge space-badge">
       <el-icon><CaretRight /></el-icon>
       {{ t('canvas.spacePanningHint') }}
@@ -137,11 +155,12 @@ import { useCanvasStore } from '@/stores/canvas'
 import { useI18n } from '@/i18n'
 import {
   Plus, ZoomIn, ZoomOut, RefreshLeft, RefreshRight, FullScreen,
-  Pointer, CaretRight, Connection,
+  Pointer, CaretRight, Connection, Upload, Download,
 } from '@element-plus/icons-vue'
 
 const { t } = useI18n()
 const store = useCanvasStore()
+const emit = defineEmits(['export-json', 'import-json'])
 
 const zoomPercent = computed({
   get: () => Math.round(store.viewport.zoom * 100),
@@ -353,6 +372,16 @@ function handleAddPanel(type) {
   background: rgba(80, 140, 255, 0.15);
   border-color: rgba(80, 140, 255, 0.4);
   color: #a0d4ff;
+}
+
+.connect-badge {
+  background: rgba(160, 120, 255, 0.15);
+  border-color: rgba(160, 120, 255, 0.4);
+  color: #d4b6ff;
+  max-width: 90%;
+  text-align: center;
+  line-height: 1.4;
+  padding: 6px 14px;
 }
 
 .space-badge {

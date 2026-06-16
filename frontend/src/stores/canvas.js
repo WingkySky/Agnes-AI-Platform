@@ -456,6 +456,48 @@ export const useCanvasStore = defineStore('canvas', {
       return this.connections[this.connections.length - 1]
     },
 
+    // ==================== 导入/导出 ====================
+
+    /** 导出当前画布为 JSON 字符串（包含当前激活 workspace 的完整状态） */
+    exportJSON() {
+      const data = {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        workspace: {
+          id: this.activeWorkspaceId,
+          name: this.activeWorkspace?.name ?? 'untitled',
+          viewport: { ...this.viewport },
+          panels: JSON.parse(JSON.stringify(this.panels)),
+          connections: JSON.parse(JSON.stringify(this.connections)),
+        },
+      }
+      return JSON.stringify(data, null, 2)
+    },
+
+    /** 从 JSON 导入画布（会替换当前画布的 panels/connections/viewport） */
+    importJSON(jsonStr) {
+      let data
+      try {
+        data = JSON.parse(jsonStr)
+      } catch (e) {
+        throw new Error('JSON 解析失败: ' + e.message)
+      }
+      const ws = data?.workspace
+      if (!ws || !Array.isArray(ws.panels) || !Array.isArray(ws.connections)) {
+        throw new Error('JSON 结构不合法（缺少 workspace.panels 或 workspace.connections）')
+      }
+      this.pushSnapshot()
+      this.viewport = { ...(ws.viewport || { x: 0, y: 0, zoom: 1 }) }
+      this.panels = JSON.parse(JSON.stringify(ws.panels))
+      this.connections = JSON.parse(JSON.stringify(ws.connections))
+      this.selectedPanelId = null
+      this.selectedConnectionId = null
+      return {
+        panels: this.panels.length,
+        connections: this.connections.length,
+      }
+    },
+
     // ==================== 连线交互 ====================
 
     /** 开始连线拖拽 */
