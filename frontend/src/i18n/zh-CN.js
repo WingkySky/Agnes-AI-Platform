@@ -372,6 +372,7 @@ export default {
     noCanvas: '还没有画布，点击上方 + 创建',
     canvas: '画布',
     confirmDelete: '确定要删除这个画布吗？',
+    renamePlaceholder: '输入画布名称',
     addPanel: '添加面板',
     undo: '撤销',
     redo: '重做',
@@ -392,6 +393,14 @@ export default {
     modeSelect: '选择模式（Select）',
     modePan: '平移模式（Pan）',
     modeConnect: '连线模式（Connect）',
+    // 背景模式
+    backgroundMode: '切换背景（点阵 / 网格 / 空白）',
+    backgroundDot: '点阵',
+    backgroundGrid: '网格',
+    backgroundBlank: '空白',
+    // 网格吸附
+    toggleGrid: '网格吸附',
+    gridSize: '网格大小',
     // 右键菜单
     copyPanel: '复制面板',
     deletePanel: '删除面板',
@@ -437,6 +446,147 @@ export default {
     importSuccess: '画布导入成功（{n} 个面板，{m} 条连线）',
     importFailed: '画布导入失败：{msg}',
     clearCanvasConfirm: '确定要清空当前画布吗？此操作可通过 Ctrl+Z 撤销。',
+    // 拖线到空白弹菜单
+    createMenuTitle: '创建新节点',
+    createNodeImage: '图片生成',
+    createNodeVideo: '视频生成',
+    createNodeText: '文本生成',
+    createNodeConfig: '配置节点',
+    // 节点悬浮工具栏
+    toolbar: {
+      edit: '编辑',
+      generate: '生图',
+      generateVideo: '生视频',
+      crop: '裁剪',
+      duplicate: '复制',
+      delete: '删除',
+      rewrite: '改写',
+      fontUp: '放大字号',
+      fontDown: '缩小字号',
+      info: '查看信息',
+      upload: '上传文件',
+      lock: '锁定',
+      unlock: '解锁',
+      // 任务 3：节点操作深度
+      split: '拆分',
+      rotate: '旋转',
+      inferPrompt: '反推提示词',
+      addToAssets: '加入素材库',
+      extractFirstFrame: '提取首帧',
+      // 任务 3：搜索 + 类型筛选
+      searchPlaceholder: '搜索节点...',
+      searchClear: '清空',
+      searchShortcutHint: '按 / 搜索',
+      filterTypes: '类型筛选',
+      filterAll: '全选',
+      filterNone: '全不选',
+      filterActive: '已选 {n} 种',
+    },
+    pendingFeature: '该功能待接入',
+    // 任务 3：图片裁剪弹窗
+    cropDialog: {
+      title: '裁剪图片',
+      confirm: '确认裁剪',
+      cancel: '取消',
+      reset: '重置选区',
+      hint: '拖动选框调整裁剪区域',
+      preview: '裁剪预览',
+      empty: '暂无可裁剪的图片',
+    },
+    // 任务 3：异步 API 通用提示
+    apiFailed: '操作失败：{msg}',
+    addedToAssets: '已加入素材库',
+    // 锁定状态提示
+    lockedHint: '节点已锁定，请先解锁',
+    lockMultiSelectHint: '多选时无法一键锁定，请逐个操作',
+    // 节点对话面板（任务 1：PromptPanel）
+    promptPanel: {
+      title: '节点对话',
+      placeholder: '输入消息，按 Enter 发送...',
+      send: '发送',
+      close: '关闭',
+      empty: '还没有对话，向 AI 提问开始吧',
+      loading: '思考中...',
+      upstream: '上游引用',
+      openPanel: '展开对话',
+    },
+    // 多选 / 框选
+    marqueeHint: '按住 Ctrl/Cmd 在空白处拖动以框选',
+    selectedCount: '已选 {n} 项',
+    // Frame 分组框（任务 5）
+    addFrame: '添加分组框',
+    addFrameHint: '在视口中心新建一个 Frame 分组框，自动收编中心点落在框内的节点',
+    backToParent: '返回上级',
+    frameTitlePlaceholder: '分组框',
+    frameCountUnit: '项',
+    // 图层面板
+    layers: {
+      title: '图层',
+      stats: '共 {total} 个节点（隐藏 {hidden} · 锁定 {locked}）',
+      empty: '画布为空',
+      rename: '重命名',
+      show: '显示',
+      hide: '隐藏',
+      lock: '锁定',
+      unlock: '解锁',
+    },
+    notesTab: '备注',
+    notesEmpty: '备注 Tab（待实现）',
+    // 备注 Tab（Task 9）
+    notes: {
+      tab: '备注',
+      empty: '选中单个节点以编辑备注',
+      placeholder: '为节点添加上下文说明（可选）',
+      tip: '备注支持任意文本，会随画布一起保存',
+    },
+    // 任务 3：搜索结果
+    searchNoResult: '未找到匹配节点',
+    // 任务 3 / 5：Frame 分组框类型（用于筛选标签）
+    frame: '分组框',
+    // 任务 2：助手面板
+    assistant: {
+      tab: '助手',
+      empty: '请先选中一个或多个节点',
+      contextTitle: '当前上下文',
+      placeholder: '向助手提问...',
+      send: '发送',
+      insert: '插入画布',
+      loading: '思考中...',
+      noReply: '(无回复)',
+      insertedSuccess: '已插入到画布',
+      requestFailed: '请求失败: {msg}',
+    },
+    // 任务 4：提示词库 / 素材库 Drawer
+    drawer: {
+      prompts: '提示词库',
+      assets: '素材库',
+      search: '搜索...',
+      tabMine: '我的素材',
+      tabServer: '服务器素材库',
+      empty: '暂无数据',
+      dropHint: '拖到画布即可创建节点',
+    },
+    // 任务 7：批量生图叠卡预览
+    batchPreview: {
+      expand: '展开',
+      collapse: '折叠',
+      count: '{n} 张',
+      expandBatch: '展开批量',
+      collapseBatch: '收起批量',
+      batchChild: '子图',
+      addBatchChild: '添加子图',
+    },
+    // 任务 8：配置节点（驱动批量生图）
+    configPanel: {
+      title: '配置节点',
+      model: '模型',
+      size: '尺寸',
+      count: '数量',
+      batchMode: '批处理模式',
+      apply: '批量生图',
+      noUpstream: '请先连接上游节点',
+      applied: '已生成 {n} 个子图',
+    },
   },
 
   // ------ 首页加载 ------

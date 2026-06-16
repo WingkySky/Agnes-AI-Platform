@@ -371,6 +371,7 @@ export default {
     noCanvas: 'No canvas yet, click + to create one',
     canvas: 'Canvas',
     confirmDelete: 'Are you sure you want to delete this canvas?',
+    renamePlaceholder: 'Enter canvas name',
     addPanel: 'Add Panel',
     undo: 'Undo',
     redo: 'Redo',
@@ -391,6 +392,14 @@ export default {
     modeSelect: 'Select Mode (Select)',
     modePan: 'Pan Mode (Pan)',
     modeConnect: 'Connect Mode (Connect)',
+    // Background mode
+    backgroundMode: 'Switch background (Dot / Grid / Blank)',
+    backgroundDot: 'Dot',
+    backgroundGrid: 'Grid',
+    backgroundBlank: 'Blank',
+    // Snap to grid
+    toggleGrid: 'Snap to grid',
+    gridSize: 'Grid size',
     // Context menu
     copyPanel: 'Copy Panel',
     deletePanel: 'Delete Panel',
@@ -436,6 +445,147 @@ export default {
     importSuccess: 'Canvas imported ({n} panels, {m} connections)',
     importFailed: 'Canvas import failed: {msg}',
     clearCanvasConfirm: 'Clear the current canvas? You can undo with Ctrl+Z.',
+    // Drop-to-create node menu
+    createMenuTitle: 'Create New Node',
+    createNodeImage: 'Image Generation',
+    createNodeVideo: 'Video Generation',
+    createNodeText: 'Text Generation',
+    createNodeConfig: 'Config Node',
+    // Node hover toolbar
+    toolbar: {
+      edit: 'Edit',
+      generate: 'Generate Image',
+      generateVideo: 'Generate Video',
+      crop: 'Crop',
+      duplicate: 'Duplicate',
+      delete: 'Delete',
+      rewrite: 'Rewrite',
+      fontUp: 'Increase Font Size',
+      fontDown: 'Decrease Font Size',
+      info: 'View Info',
+      upload: 'Upload File',
+      lock: 'Lock',
+      unlock: 'Unlock',
+      // Task 3: Node action depth
+      split: 'Split',
+      rotate: 'Rotate',
+      inferPrompt: 'Infer Prompt',
+      addToAssets: 'Add to Assets',
+      extractFirstFrame: 'Extract First Frame',
+      // Task 3: Search + type filter
+      searchPlaceholder: 'Search nodes...',
+      searchClear: 'Clear',
+      searchShortcutHint: 'Press / to search',
+      filterTypes: 'Filter types',
+      filterAll: 'All',
+      filterNone: 'None',
+      filterActive: '{n} selected',
+    },
+    pendingFeature: 'This feature is not yet available',
+    // Task 3: Image crop dialog
+    cropDialog: {
+      title: 'Crop Image',
+      confirm: 'Apply Crop',
+      cancel: 'Cancel',
+      reset: 'Reset Selection',
+      hint: 'Drag the selection box to adjust the crop area',
+      preview: 'Crop Preview',
+      empty: 'No image to crop',
+    },
+    // Task 3: Async API common messages
+    apiFailed: 'Operation failed: {msg}',
+    addedToAssets: 'Added to assets',
+    // Lock state hints
+    lockedHint: 'Node is locked, please unlock first',
+    lockMultiSelectHint: 'Cannot lock multiple nodes at once',
+    // Node chat panel (Task 1: PromptPanel)
+    promptPanel: {
+      title: 'Node Chat',
+      placeholder: 'Type a message, press Enter to send...',
+      send: 'Send',
+      close: 'Close',
+      empty: 'No messages yet — ask the AI to get started',
+      loading: 'Thinking...',
+      upstream: 'Upstream',
+      openPanel: 'Open Chat',
+    },
+    // Multi-select / Marquee
+    marqueeHint: 'Hold Ctrl/Cmd and drag in empty area to box-select',
+    selectedCount: '{n} selected',
+    // Frame grouping (Task 5)
+    addFrame: 'Add Frame',
+    addFrameHint: 'Create a new Frame at the viewport center — nodes whose center falls inside are auto-grouped',
+    backToParent: 'Back to parent',
+    frameTitlePlaceholder: 'Frame',
+    frameCountUnit: 'items',
+    // Layers panel
+    layers: {
+      title: 'Layers',
+      stats: '{total} nodes ({hidden} hidden · {locked} locked)',
+      empty: 'Canvas is empty',
+      rename: 'Rename',
+      show: 'Show',
+      hide: 'Hide',
+      lock: 'Lock',
+      unlock: 'Unlock',
+    },
+    notesTab: 'Notes',
+    notesEmpty: 'Notes tab (coming soon)',
+    // Notes tab (Task 9)
+    notes: {
+      tab: 'Notes',
+      empty: 'Select a single node to edit notes',
+      placeholder: 'Add context for this node (optional)',
+      tip: 'Notes support any text and are saved with the canvas',
+    },
+    // Task 3: Search result
+    searchNoResult: 'No matching nodes',
+    // Task 3 / 5: Frame type label (used by filter)
+    frame: 'Frame',
+    // Task 2: Assistant panel
+    assistant: {
+      tab: 'Assistant',
+      empty: 'Please select one or more nodes first',
+      contextTitle: 'Current context',
+      placeholder: 'Ask the assistant...',
+      send: 'Send',
+      insert: 'Insert to canvas',
+      loading: 'Thinking...',
+      noReply: '(no reply)',
+      insertedSuccess: 'Inserted to canvas',
+      requestFailed: 'Request failed: {msg}',
+    },
+    // Task 4: Prompt library / Asset library Drawers
+    drawer: {
+      prompts: 'Prompt Library',
+      assets: 'Asset Library',
+      search: 'Search...',
+      tabMine: 'My Assets',
+      tabServer: 'Server Library',
+      empty: 'No data',
+      dropHint: 'Drag onto the canvas to create a node',
+    },
+    // Task 7: Batch generation stacked-card preview
+    batchPreview: {
+      expand: 'Expand',
+      collapse: 'Collapse',
+      count: '{n} images',
+      expandBatch: 'Expand batch',
+      collapseBatch: 'Collapse batch',
+      batchChild: 'Child',
+      addBatchChild: 'Add child image',
+    },
+    // Task 8: Config node (drives batch generation)
+    configPanel: {
+      title: 'Config Node',
+      model: 'Model',
+      size: 'Size',
+      count: 'Count',
+      batchMode: 'Batch Mode',
+      apply: 'Generate Batch',
+      noUpstream: 'Please connect upstream nodes first',
+      applied: 'Generated {n} child images',
+    },
   },
 
   // ------ First-page loading ------

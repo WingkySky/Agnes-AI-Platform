@@ -1,8 +1,9 @@
 /* =====================================================
  * 左侧栏：多画布管理
  * - 画布列表展示
- * - 新建/删除画布按钮
+ * - 新建/重命名/删除画布按钮
  * - 选中高亮
+ * - 点击不同画布切换保存好的编排
  * ===================================================== */
 
 <template>
@@ -21,10 +22,32 @@
         v-for="ws in workspaces"
         :key="ws.id"
         :class="['sidebar-item', { active: ws.id === store.activeWorkspaceId }]"
-        @click="store.switchWorkspace(ws.id)"
+        @click="handleSwitch(ws.id)"
       >
         <el-icon><Monitor /></el-icon>
-        <span class="sidebar-item-name">{{ ws.name }}</span>
+        <!-- 画布名称：支持双击重命名 -->
+        <input
+          v-if="renamingId === ws.id"
+          v-model="renamingName"
+          class="sidebar-item-input"
+          :placeholder="t('canvas.renamePlaceholder')"
+          @click.stop
+          @keyup.enter="commitRename"
+          @keyup.esc="cancelRename"
+          @blur="commitRename"
+          :ref="(el) => { if (el) renameInputEl = el }"
+        />
+        <span v-else class="sidebar-item-name" @dblclick.stop="startRename(ws)">
+          {{ ws.name }}
+        </span>
+        <!-- 编辑（重命名）按钮 -->
+        <el-icon
+          class="sidebar-item-edit"
+          @click.stop="startRename(ws)"
+        >
+          <Edit />
+        </el-icon>
+        <!-- 删除按钮 -->
         <el-icon
           v-if="workspaces.length > 1"
           class="sidebar-item-delete"
@@ -43,9 +66,9 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { ElMessageBox } from 'element-plus'
-import { Plus, Delete, Monitor } from '@element-plus/icons-vue'
+import { Plus, Delete, Edit, Monitor } from '@element-plus/icons-vue'
 import { useCanvasStore } from '@/stores/canvas'
 import { useI18n } from '@/i18n'
 
@@ -53,9 +76,23 @@ const { t } = useI18n()
 const store = useCanvasStore()
 const workspaces = computed(() => store.workspaces)
 
+// 重命名状态：renamingId 标记当前正在重命名的画布 id
+const renamingId = ref(null)
+const renamingName = ref('')
+const renameInputEl = ref(null)
+
 function handleCreate() {
   const name = `${t('canvas.canvas')} ${workspaces.value.length + 1}`
   store.createWorkspace(name)
+}
+
+/** 切换画布：切换前会由 store 自动保存当前画布编排 */
+function handleSwitch(id) {
+  // 正在重命名时，先提交重命名再切换，避免 input 失焦与切换冲突
+  if (renamingId.value !== null) {
+    commitRename()
+  }
+  store.switchWorkspace(id)
 }
 
 async function handleDelete(id) {
@@ -65,6 +102,33 @@ async function handleDelete(id) {
     { type: 'warning' },
   )
   store.deleteWorkspace(id)
+}
+
+/** 进入重命名模式 */
+function startRename(ws) {
+  renamingId.value = ws.id
+  renamingName.value = ws.name
+  nextTick(() => {
+    renameInputEl.value?.focus()
+    renameInputEl.value?.select?.()
+  })
+}
+
+/** 提交重命名 */
+function commitRename() {
+  if (renamingId.value === null) return
+  const newName = renamingName.value.trim()
+  if (newName) {
+    store.renameWorkspace(renamingId.value, newName)
+  }
+  renamingId.value = null
+  renamingName.value = ''
+}
+
+/** 取消重命名 */
+function cancelRename() {
+  renamingId.value = null
+  renamingName.value = ''
 }
 </script>
 
@@ -147,15 +211,34 @@ async function handleDelete(id) {
   white-space: nowrap;
 }
 
+.sidebar-item-input {
+  flex: 1;
+  min-width: 0;
+  background: rgba(15, 22, 38, 0.9);
+  border: 1px solid rgba(80, 140, 255, 0.5);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 13px;
+  padding: 2px 6px;
+  outline: none;
+}
+
+.sidebar-item-edit,
 .sidebar-item-delete {
   font-size: 14px;
   color: #6b84aa;
   opacity: 0;
   transition: all 0.15s;
+  flex-shrink: 0;
 }
 
+.sidebar-item:hover .sidebar-item-edit,
 .sidebar-item:hover .sidebar-item-delete {
   opacity: 1;
+}
+
+.sidebar-item-edit:hover {
+  color: #508cff;
 }
 
 .sidebar-item-delete:hover {

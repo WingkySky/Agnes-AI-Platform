@@ -18,7 +18,7 @@
         v-for="conn in connections"
         :key="conn.id"
         :d="getMinimapConnectionD(conn)"
-        stroke="rgba(100, 150, 220, 0.15)"
+        :stroke="theme.connection.muted"
         stroke-width="1"
         fill="none"
       />
@@ -44,7 +44,7 @@
         :height="viewportRect.height"
         rx="4"
         fill="none"
-        stroke="rgba(80, 140, 255, 0.8)"
+        :stroke="theme.connection.active"
         stroke-width="2"
         stroke-dasharray="4 2"
       />
@@ -69,6 +69,7 @@ import { Close, ZoomIn } from '@element-plus/icons-vue'
 const store = useCanvasStore()
 const svgRef = ref(null)
 const visible = ref(true)
+const theme = computed(() => store.canvasTheme)
 
 const panels = computed(() => store.panels)
 const connections = computed(() => store.connections)
@@ -77,18 +78,10 @@ const viewportRect = computed(() => store.viewportRect)
 const selectedPanelId = computed(() => store.selectedPanelId)
 const viewport = computed(() => store.viewport)
 
-/** 根据面板类型返回颜色 */
+/** 根据面板类型返回颜色（从画布主题 token 读取） */
 function getPanelColor(type) {
-  const colors = {
-    image: 'rgba(80, 140, 255, 0.5)',
-    video: 'rgba(160, 120, 255, 0.5)',
-    text: 'rgba(80, 200, 160, 0.5)',
-    url: 'rgba(255, 180, 80, 0.5)',
-    'quick-generate': 'rgba(255, 120, 120, 0.5)',
-    'file-upload': 'rgba(120, 200, 255, 0.5)',
-    placeholder: 'rgba(150, 150, 180, 0.3)',
-  }
-  return colors[type] || 'rgba(150, 150, 180, 0.4)'
+  const colors = theme.value.minimap?.panelColors ?? {}
+  return colors[type] || colors.default || 'rgba(150, 150, 180, 0.4)'
 }
 
 /** 小地图中的连线路径（直线连接锚点） */
@@ -145,8 +138,8 @@ function toggleVisible() {
   right: 16px;
   width: 200px;
   height: 140px;
-  background: rgba(15, 22, 38, 0.9);
-  border: 1px solid rgba(100, 150, 220, 0.2);
+  background: var(--canvas-panel-bg);
+  border: 1px solid var(--canvas-node-border);
   border-radius: 8px;
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
   backdrop-filter: blur(12px);
@@ -173,19 +166,19 @@ function toggleVisible() {
   align-items: center;
   gap: 4px;
   font-size: 10px;
-  color: rgba(139, 163, 201, 0.7);
+  color: var(--canvas-node-muted-text);
   pointer-events: none;
 }
 
 .minimap-toggle {
   font-size: 12px;
-  color: rgba(139, 163, 201, 0.7);
+  color: var(--canvas-node-muted-text);
   cursor: pointer;
   pointer-events: all;
   transition: color 0.15s;
 }
 
 .minimap-toggle:hover {
-  color: #a0d4ff;
+  color: var(--canvas-connection-active);
 }
 </style>

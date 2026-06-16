@@ -2,6 +2,7 @@
      图片预览面板
      - 展示 Agnes 生成的图片
      - 支持点击放大预览（Element Plus el-image viewer）
+     - 任务 7：当父节点自身无图、且有 batchChildIds 时，回退到第一张子图
      ===================================================== -->
 
 <template>
@@ -29,15 +30,22 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { PictureFilled } from '@element-plus/icons-vue'
+import { useCanvasStore } from '@/stores/canvas'
 
 const props = defineProps({
   panel: { type: Object, required: true },
 })
+const store = useCanvasStore()
 
+/** 图片 URL：父节点自身 imageUrl > 第一张批量子图 > null */
 const imageUrl = computed(() => {
-  // 优先使用 panel.content.imageUrl；如果绑定了 taskId 后续可在此处异步获取
   if (props.panel.task_id || props.panel.taskId) return null
-  return props.panel.content?.imageUrl ?? null
+  const own = props.panel.content?.imageUrl
+  if (own) return own
+  // 任务 7：父图无图时回退到第一张子图
+  const children = store.batchChildPanels?.(props.panel.id) ?? []
+  const first = children[0]
+  return first?.content?.imageUrl ?? first?.content?.image ?? null
 })
 
 const previewVisible = ref(false)
