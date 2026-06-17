@@ -979,6 +979,87 @@ export const useCanvasStore = defineStore('canvas', {
       return this.connections[this.connections.length - 1]
     },
 
+    /**
+     * 任务 9：流程落地 —— 把上游面板的产出回填到直接相连的下游面板
+     * - 当前仅处理 source = quick-generate / image，target = image 的情况
+     * - 回填字段：target.content.imageUrl = payload.imageUrl
+     * - 多个下游 ImagePanel 都会被回填（单条连线场景下通常只有一个）
+     * - 不压栈（这是产出回填，不是用户主动编辑；如需可回滚由调用方在生成前压栈）
+     * @param {string} sourcePanelId - 产出方 panel id
+     * @param {{ imageUrl: string }} payload - 产出内容
+     */
+    propagateResultToDownstream(sourcePanelId, payload) {
+      if (!sourcePanelId || !payload) return
+      // 找到所有 source → target 的连线
+      const downstreamConns = this.connections.filter(
+        (c) => c.source_panel_id === sourcePanelId,
+      )
+      if (downstreamConns.length === 0) return
+      for (const conn of downstreamConns) {
+        const target = this.panels.find((p) => p.id === conn.target_panel_id)
+        if (!target) continue
+        // 图片产出 → 回填 image / quick-generate 面板
+        if (payload.imageUrl) {
+          if (target.type !== 'image' && target.type !== 'quick-generate') continue
+          this._updatePanelDirect(target.id, {
+            content: {
+              ...(target.content || {}),
+              imageUrl: payload.imageUrl,
+              sourceFrom: sourcePanelId,
+            },
+          })
+        }
+        // 视频产出 → 回填 video 面板
+        if (payload.videoUrl) {
+          if (target.type !== 'video') continue
+          this._updatePanelDirect(target.id, {
+            content: {
+              ...(target.content || {}),
+              videoUrl: payload.videoUrl,
+              taskStatus: 'success',
+              sourceFrom: sourcePanelId,
+            },
+          })
+        }
+      }
+    },
+
+    /**
+     * 任务 9：流程落地 —— 收集指定面板的所有上游输入
+     * - 扫描 connections 中 target_panel_id === panelId 的所有连线
+     * - 按上游面板类型收集：
+     *   · image / quick-generate → 取 content.imageUrl（图生图/图生视频的参考图）
+     *   · video                  → 取 content.videoUrl（理论上可作为关键帧，当前仅收集不强制使用）
+     *   · text                   → 取 content.text（拼接到下游 prompt）
+     * - 返回 { images: string[], texts: string[] }
+     *   images: 上游图片 URL 数组（已过滤空值）
+     *   texts:  上游文本数组（已过滤空值）
+     * - 调用方（QuickGeneratePanel / VideoPanel）在用户点"生成"时实时调用，
+     *   不做缓存，保证连线变化后立即生效
+     */
+    collectUpstreamInputs(panelId) {
+      const result = { images: [], texts: [] }
+      if (!panelId) return result
+      const upstreamConns = this.connections.filter(
+        (c) => c.target_panel_id === panelId,
+      )
+      if (upstreamConns.length === 0) return result
+      for (const conn of upstreamConns) {
+        const src = this.panels.find((p) => p.id === conn.source_panel_id)
+        if (!src) continue
+        const content = src.content || {}
+        if (src.type === 'image' || src.type === 'quick-generate') {
+          if (content.imageUrl) result.images.push(content.imageUrl)
+        } else if (src.type === 'video') {
+          if (content.videoUrl) result.images.push(content.videoUrl)
+        } else if (src.type === 'text') {
+          const text = (content.text || '').trim()
+          if (text) result.texts.push(text)
+        }
+      }
+      return result
+    },
+
     // ==================== 导入/导出 ====================
 
     /** 导出当前画布为 JSON 字符串（包含当前激活 workspace 的完整状态） */
