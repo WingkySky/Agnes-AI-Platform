@@ -1,12 +1,13 @@
 /* =====================================================
  * 无限画布容器
  * - Pointer Events 处理（背景平移、滚轮缩放）
- * - 交互模型：
- *    · select 模式：单击空白处取消选中；按住拖动空白处平移画布
- *    · pan 模式 / Space 键 + 拖动：平移画布
+ * - 交互模型（统一交互，无模式切换）：
+ *    · 单击空白处取消选中；按住拖动空白处平移画布
+ *    · Space 键 + 拖动：平移画布
  *    · 拖动面板时画布绝对不动
  *    · 滚轮始终缩放，不再平移
  *    · Ctrl/Cmd + 拖动空白处：进入框选模式（多选）
+ *    · 锚点在 hover/选中时显示，从锚点拖出即可连线
  * - 任务 4：HTML5 拖放支持
  *    · 监听根节点 dragover / drop
  *    · 解析 PromptLibraryDrawer / AssetPickerDrawer 拖入的数据
@@ -18,8 +19,6 @@
     ref="canvasRef"
     class="infinite-canvas"
     :class="{
-      'connecting-mode': store.mouseMode === 'connect',
-      'pan-mode': shouldPan,
       'space-panning': store._isSpacePressed,
       'marquee-active': marqueeStart !== null,
     }"
@@ -65,12 +64,12 @@ let panningPointerId = null
 let marqueeStart = null
 
 // select 模式下记录"按下空白处"的起点
-// 仅在 select 模式、未按住 Space、且命中空白时记录
+// 仅在未按住 Space、且命中空白时记录
 // 用于区分"单击空白（取消选中）"与"按住拖动空白（平移）"
 let selectDownAt = null  // { x, y } 屏幕坐标
 
-/** 是否应该平移：pan 模式 或 Space 键按下 */
-const shouldPan = computed(() => store.mouseMode === 'pan' || store._isSpacePressed)
+/** 是否应该平移：Space 键按下时 */
+const shouldPan = computed(() => store._isSpacePressed)
 
 /** 节流更新视口（用于 60fps 渲染优化） */
 function scheduleRender() {
@@ -80,7 +79,7 @@ function scheduleRender() {
   })
 }
 
-/** 启动平移（pan 模式 / Space 键 / select 拖动到位） */
+/** 启动平移（Space 键 / select 拖动到位） */
 function startPan(e) {
   isPanning = true
   panningPointerId = e.pointerId
@@ -120,21 +119,14 @@ function handlePointerDown(e) {
   // 4) 命中面板/锚点/控件 → 让子组件自己处理（不启动画布平移）
   if (closestPanel || closestAnchor || closestControl) return
 
-  // 5) connect 模式下空白处不做任何事（避免误平移）
-  if (store.mouseMode === 'connect') {
-    // connect 模式点空白处可以取消连线（如果有）
-    if (store._connecting) store.cancelConnecting()
-    return
-  }
-
-  // 6) select 模式下点空白处：先记录起点，等 pointermove 决定是单击还是拖动
-  if (store.mouseMode === 'select' && !store._isSpacePressed) {
+  // 5) 未按 Space 时点空白处：先记录起点，等 pointermove 决定是单击还是拖动
+  if (!store._isSpacePressed) {
     selectDownAt = { x: e.clientX, y: e.clientY }
     // 不立即 return，让后续 pointermove 监听位移动作
     return
   }
 
-  // 7) pan 模式 或 Space 键按下 → 直接平移画布
+  // 6) Space 键按下 → 直接平移画布
   if (shouldPan.value) {
     startPan(e)
   }
@@ -325,17 +317,15 @@ const emit = defineEmits(['panel-edit'])
 }
 
 /* 选中态面板被 hover/操作时不变光标 */
-.infinite-canvas:not(.pan-mode):not(.space-panning):not(.marquee-active) {
+.infinite-canvas:not(.space-panning):not(.marquee-active) {
   cursor: default;
 }
 
-/* 平移模式 / Space 键按下时显示抓手指针 */
-.infinite-canvas.pan-mode,
+/* Space 键按下时显示抓手指针 */
 .infinite-canvas.space-panning {
   cursor: grab;
 }
 
-.infinite-canvas.pan-mode:active,
 .infinite-canvas.space-panning:active {
   cursor: grabbing;
 }

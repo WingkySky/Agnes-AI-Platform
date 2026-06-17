@@ -5,7 +5,9 @@
      - 顶部：工具栏（含导入/导出按钮、搜索/筛选）
      - 右侧：选中面板/连线的属性编辑面板
      - 全局快捷键处理器（含 / 聚焦搜索框）
-     - 右键上下文菜单
+     - 右键上下文菜单（含节点级操作：编辑/裁剪/分割/旋转/反推/改写/字号/生成/提取首帧/锁定/粘贴等）
+     - 节点编辑弹窗 PanelEditDialog（由右键菜单"编辑"触发）
+     - 图片裁剪弹窗 ImageCropDialog（由右键菜单"裁剪"触发）
      - Minimap 小地图
      ===================================================== -->
 
@@ -33,11 +35,25 @@
     <!-- 右侧属性面板 -->
     <CanvasRightPanel />
 
-    <!-- 右键菜单 -->
-    <CanvasContextMenu ref="contextMenuRef" />
+    <!-- 右键菜单（监听 panel-action 事件以处理节点级操作） -->
+    <CanvasContextMenu ref="contextMenuRef" @panel-action="handlePanelAction" />
 
     <!-- 拖线到空白弹出的"创建新节点"菜单 -->
     <ConnectionCreateMenu />
+
+    <!-- 节点编辑弹窗：由右键菜单"编辑"动作触发，按节点类型渲染不同表单 -->
+    <PanelEditDialog
+      v-model="editDialogVisible"
+      :panel="editDialogPanel"
+      @confirm="handleEditConfirm"
+    />
+
+    <!-- 图片裁剪弹窗：由右键菜单"裁剪"动作触发 -->
+    <ImageCropDialog
+      v-model="cropDialogVisible"
+      :image-src="cropImageSrc"
+      @confirm="onCropConfirm"
+    />
 
     <!-- 隐藏的文件 input 用于导入 JSON -->
     <input
@@ -51,7 +67,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useCanvasStore } from '@/stores/canvas'
 import CanvasSidebar from '@/components/infinite-canvas/CanvasSidebar.vue'
@@ -61,6 +77,8 @@ import CanvasContextMenu from '@/components/infinite-canvas/CanvasContextMenu.vu
 import CanvasMinimap from '@/components/infinite-canvas/CanvasMinimap.vue'
 import CanvasRightPanel from '@/components/infinite-canvas/CanvasRightPanel.vue'
 import ConnectionCreateMenu from '@/components/infinite-canvas/ConnectionCreateMenu.vue'
+import PanelEditDialog from '@/components/infinite-canvas/PanelEditDialog.vue'
+import ImageCropDialog from '@/components/infinite-canvas/ImageCropDialog.vue'
 import { useI18n } from '@/i18n'
 
 const { t } = useI18n()
@@ -70,16 +88,32 @@ const infiniteCanvasRef = ref(null)
 const importInputRef = ref(null)
 const canvasToolbarRef = ref(null)
 
-/** 右键菜单处理 */
+// 节点编辑弹窗状态：editDialogPanel 为当前编辑的面板对象
+const editDialogVisible = ref(false)
+const editDialogPanel = ref(null)
+// 图片裁剪弹窗状态：cropTargetPanel 为当前裁剪的面板对象
+const cropDialogVisible = ref(false)
+const cropTargetPanel = ref(null)
+// 裁剪弹窗要显示的图片源（优先 imageUrl，其次 image，兼容旧数据）
+const cropImageSrc = computed(() => {
+  const c = cropTargetPanel.value?.content || {}
+  return c.imageUrl || c.image || c.url || ''
+})
+// 节点级异步动作的 loading 状态集合（防止重复触发）
+const loadingActions = reactive({})
+
+/** 右键菜单处理：把 panel 对象一并传给 CanvasContextMenu，支持按类型渲染节点级操作 */
 function handleContextMenu(e) {
   const target = e.target
 
   // 检查是否点击了面板
   const panelEl = target.closest('[data-canvas-target="panel"]')
   if (panelEl) {
+    const panelId = panelEl.getAttribute('data-panel-id')
+    const panel = store.panels.find((p) => p.id === panelId) || null
     contextMenuRef.value?.show(e, {
       target: 'panel',
-      data: { panelId: panelEl.getAttribute('data-panel-id') },
+      data: { panelId, panel },
     })
     return
   }
@@ -286,11 +320,201 @@ function triggerImport() {
   importInputRef.value?.click()
 }
 
-/** 处理面板编辑事件（来自 NodeHoverToolbar 的 edit 动作）
- *  - 暂用 ElMessage.info 提示"该功能待接入"（占位）
- *  - 后续会接入具体编辑弹窗（图片/视频/文本/URL 等） */
+/** 处理面板编辑事件（来自 InfiniteCanvas 的 panel-edit 或右键菜单的 edit 动作）
+ *  - 打开 PanelEditDialog，按节点类型渲染对应编辑表单 */
 function handlePanelEdit(panel) {
-  ElMessage.info(t('canvas.pendingFeature'))
+  if (!panel) return
+  editDialogPanel.value = panel
+  editDialogVisible.value = true
+}
+
+/** PanelEditDialog 确认回调：把 changes 写回 store.updatePanel */
+function handleEditConfirm({ panel, changes }) {
+  if (!panel || !changes) return
+  store.updatePanel(panel.id, changes)
+  ElMessage.success(t('canvas.editDialog.saved'))
+}
+
+/** 图片裁剪确认回调
+ *  - 把 base64 写回 panel.content.image / imageUrl
+ *  - 按裁剪比例调整 width / height，保持原节点中心位置不变
+ */
+function onCropConfirm({ width: cw, height: ch, base64 }) {
+  const panel = cropTargetPanel.value
+  if (!panel || !cw || !ch) return
+  const ratio = cw / ch
+  const oldW = panel.width || 1
+  const oldH = panel.height || 1
+  // 维持节点中心位置不变，按原宽度回算新高度（宽度优先保持）
+  const newH = Math.max(60, oldW / ratio)
+  const cx = panel.x + oldW / 2
+  const cy = panel.y + oldH / 2
+  const newX = cx - oldW / 2
+  const newY = cy - newH / 2
+  const c = panel.content || {}
+  store.updatePanel(panel.id, {
+    x: newX, y: newY, width: oldW, height: newH,
+    content: { ...c, image: base64, imageUrl: base64 },
+  })
+  ElMessage.success(t('canvas.cropDialog.confirm'))
+}
+
+/**
+ * 处理右键菜单抛出的节点级动作
+ * - edit: 打开 PanelEditDialog
+ * - crop: 打开 ImageCropDialog
+ * - split / rotate: 直接调 store
+ * - inferPrompt / addToAssets / rewrite / extractFirstFrame: 调 canvas API
+ * - fontUp / fontDown: 直接更新 content.fontSize
+ * - generate / generateVideo: 调任务队列（占位提示，待接入具体生成流程）
+ * - info: 显示节点信息
+ * - upload: 提示用户在编辑弹窗中上传
+ */
+function handlePanelAction({ type, panel }) {
+  if (!panel) return
+  switch (type) {
+    case 'edit':
+      handlePanelEdit(panel)
+      break
+    case 'crop':
+      // 仅图片节点可裁剪，且需要有图片源
+      if (panel.type !== 'image') {
+        ElMessage.warning(t('canvas.cropDialog.empty'))
+        return
+      }
+      // 直接检查 panel 自身的图片源（优先 imageUrl，其次 image，兼容旧数据）
+      if (!panel.content?.imageUrl && !panel.content?.image) {
+        ElMessage.warning(t('canvas.cropDialog.empty'))
+        return
+      }
+      cropTargetPanel.value = panel
+      cropDialogVisible.value = true
+      break
+    case 'split':
+      store.splitImagePanel(panel.id, 4)
+      break
+    case 'rotate': {
+      const cur = panel.content?.rotation || 0
+      const next = (cur + 90) % 360
+      store.setPanelRotation(panel.id, next)
+      break
+    }
+    case 'inferPrompt':
+      inferPrompt(panel)
+      break
+    case 'addToAssets':
+      addToAssets(panel)
+      break
+    case 'rewrite':
+      rewriteText(panel)
+      break
+    case 'extractFirstFrame':
+      extractFirstFrame(panel)
+      break
+    case 'fontUp':
+      adjustFont(panel, +1)
+      break
+    case 'fontDown':
+      adjustFont(panel, -1)
+      break
+    case 'generate':
+      ElMessage.info(t('canvas.editDialog.generateHint'))
+      break
+    case 'generateVideo':
+      ElMessage.info(t('canvas.editDialog.generateVideoHint'))
+      break
+    case 'info':
+      showPanelInfo(panel)
+      break
+    case 'upload':
+      // 文件上传节点：打开编辑弹窗让用户重新上传
+      handlePanelEdit(panel)
+      break
+    default:
+      ElMessage.info(t('canvas.toolbar.edit'))
+  }
+}
+
+/** 节点级异步动作：调用 /api/canvas/{actionType} 接口
+ *  - loadingActions 记录每个动作的 loading 状态，防止重复触发
+ *  - 失败时统一提示 */
+async function callCanvasApi(actionType, body) {
+  if (loadingActions[actionType]) return null
+  loadingActions[actionType] = true
+  try {
+    const resp = await fetch(`/api/canvas/${actionType}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    return await resp.json()
+  } catch (err) {
+    ElMessage.error(t('canvas.apiFailed', { msg: err.message || String(err) }))
+    return null
+  } finally {
+    loadingActions[actionType] = false
+  }
+}
+
+/** 反推提示词：把图片/视频 URL 传给后端，返回的 prompt 写入 panel.content.prompt */
+async function inferPrompt(panel) {
+  const c = panel.content || {}
+  const data = await callCanvasApi('infer-prompt', { url: c.imageUrl || c.image || c.videoUrl || c.url || '', type: panel.type })
+  if (data?.prompt) store.updatePanel(panel.id, { content: { ...c, prompt: data.prompt } })
+}
+
+/** 加入素材库：把图片 URL 传给后端 */
+async function addToAssets(panel) {
+  const c = panel.content || {}
+  await callCanvasApi('assets', { url: c.imageUrl || c.image || '', name: c.name || panel.id })
+  ElMessage.success(t('canvas.addedToAssets'))
+}
+
+/** 改写文本：把文本传给后端，返回的改写后文本写回 panel.content.text */
+async function rewriteText(panel) {
+  const c = panel.content || {}
+  const data = await callCanvasApi('rewrite', { text: c.text || '' })
+  if (data?.text) store.updatePanel(panel.id, { content: { ...c, text: data.text } })
+}
+
+/** 提取视频首帧：返回的图片在原节点下方新增一个 image 子节点 */
+async function extractFirstFrame(panel) {
+  const c = panel.content || {}
+  const data = await callCanvasApi('extract-first-frame', { url: c.videoUrl || c.url || '' })
+  if (data?.image) {
+    store.addPanel({
+      type: 'image',
+      x: (panel.x ?? 0),
+      y: (panel.y ?? 0) + (panel.height ?? 0) + 20,
+      width: 320, height: 200,
+      content: { image: data.image, imageUrl: data.image, sourceFrom: panel.id },
+    })
+  }
+}
+
+/** 调整文本字号：delta 为 +1 / -1，实际步进 2px，下限 8px */
+function adjustFont(panel, delta) {
+  const c = panel.content || {}
+  const cur = Number(c.fontSize) || 14
+  store.updatePanel(panel.id, { content: { ...c, fontSize: Math.max(8, cur + delta * 2) } })
+}
+
+/** 显示节点信息：用 ElMessage 简要展示节点类型、尺寸、内容关键字段 */
+function showPanelInfo(panel) {
+  const c = panel.content || {}
+  const fields = []
+  if (c.imageUrl) fields.push(`imageUrl: ${c.imageUrl.slice(0, 40)}...`)
+  if (c.videoUrl) fields.push(`videoUrl: ${c.videoUrl.slice(0, 40)}...`)
+  if (c.text) fields.push(`text: ${c.text.slice(0, 30)}...`)
+  if (c.url) fields.push(`url: ${c.url}`)
+  if (c.prompt) fields.push(`prompt: ${c.prompt.slice(0, 30)}...`)
+  const info = [
+    `type: ${panel.type}`,
+    `size: ${panel.width}×${panel.height}`,
+    ...(fields.length ? fields : ['content: (空)']),
+  ].join(' | ')
+  ElMessage.info({ message: info, duration: 4000 })
 }
 
 /** 处理选择的 JSON 文件 */

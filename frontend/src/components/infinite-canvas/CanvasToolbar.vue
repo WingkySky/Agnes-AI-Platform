@@ -1,6 +1,5 @@
 /* =====================================================
  * 顶部工具栏
- * - 鼠标模式切换（选择/平移/连线）
  * - 添加面板下拉菜单（7 种类型）
  * - 搜索框 + 类型筛选下拉（任务 3：节点搜索 / 类型筛选）
  * - 缩放显示/控制（+/- 按钮、缩放滑杆、百分比）
@@ -12,56 +11,26 @@
 
 <template>
   <div class="canvas-toolbar">
-    <!-- 左侧：鼠标模式切换 -->
+    <!-- 左侧：添加面板菜单 -->
     <div class="toolbar-left">
-      <el-tooltip :content="t('canvas.modeSelect')" placement="bottom">
-        <el-icon
-          class="mode-btn"
-          :class="{ active: store.mouseMode === 'select' }"
-          @click="store.setMouseMode('select')"
-        >
-          <Pointer />
-        </el-icon>
-      </el-tooltip>
-      <el-tooltip :content="t('canvas.modePan')" placement="bottom">
-        <el-icon
-          class="mode-btn"
-          :class="{ active: store.mouseMode === 'pan' }"
-          @click="store.setMouseMode('pan')"
-        >
-          <CaretRight />
-        </el-icon>
-      </el-tooltip>
-      <el-tooltip :content="t('canvas.modeConnect')" placement="bottom">
-        <el-icon
-          class="mode-btn"
-          :class="{ active: store.mouseMode === 'connect' }"
-          @click="store.setMouseMode('connect')"
-        >
-          <Connection />
-        </el-icon>
-      </el-tooltip>
-      <el-divider direction="vertical" />
+      <el-dropdown trigger="click" @command="handleAddPanel">
+        <el-button size="small" type="primary" plain>
+          <el-icon><Plus /></el-icon>
+          {{ t('canvas.addPanel') }}
+        </el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item
+              v-for="opt in panelTypes"
+              :key="opt.value"
+              :command="opt.value"
+            >
+              {{ opt.label }}
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
     </div>
-
-    <!-- 左中：添加面板菜单 -->
-    <el-dropdown trigger="click" @command="handleAddPanel">
-      <el-button size="small" type="primary" plain>
-        <el-icon><Plus /></el-icon>
-        {{ t('canvas.addPanel') }}
-      </el-button>
-      <template #dropdown>
-        <el-dropdown-menu>
-          <el-dropdown-item
-            v-for="opt in panelTypes"
-            :key="opt.value"
-            :command="opt.value"
-          >
-            {{ opt.label }}
-          </el-dropdown-item>
-        </el-dropdown-menu>
-      </template>
-    </el-dropdown>
 
     <!-- 搜索 + 类型筛选（任务 3） -->
     <div class="toolbar-search-group">
@@ -254,16 +223,8 @@
       <span class="panel-count">{{ store.panels.length }} {{ t('canvas.panels') }}</span>
     </div>
 
-    <!-- 交互提示徽章（pan 模式 / Space 键时显示） -->
-    <div v-if="store.mouseMode === 'pan'" class="mode-badge pan-badge">
-      <el-icon><CaretRight /></el-icon>
-      {{ t('canvas.panModeHint') }}
-    </div>
-    <div v-else-if="store.mouseMode === 'connect'" class="mode-badge connect-badge">
-      <el-icon><Connection /></el-icon>
-      {{ t('canvas.connectModeHint') }}
-    </div>
-    <div v-else-if="store._isSpacePressed" class="mode-badge space-badge">
+    <!-- 交互提示徽章（Space 键时显示平移提示，否则显示默认操作提示） -->
+    <div v-if="store._isSpacePressed" class="mode-badge space-badge">
       <el-icon><CaretRight /></el-icon>
       {{ t('canvas.spacePanningHint') }}
     </div>
@@ -280,7 +241,7 @@ import { useCanvasStore } from '@/stores/canvas'
 import { useI18n } from '@/i18n'
 import {
   Plus, ZoomIn, ZoomOut, RefreshLeft, RefreshRight, FullScreen,
-  Pointer, CaretRight, Connection, Upload, Download, Grid, Files, Back,
+  Pointer, CaretRight, Upload, Download, Grid, Files, Back,
   Search, Filter,
 } from '@element-plus/icons-vue'
 
@@ -516,25 +477,6 @@ function handleAddFrame() {
   gap: 4px;
 }
 
-.mode-btn {
-  font-size: 16px;
-  color: #6b84aa;
-  cursor: pointer;
-  padding: 4px;
-  border-radius: 4px;
-  transition: all 0.15s;
-}
-
-.mode-btn:hover {
-  color: #a0d4ff;
-  background: rgba(80, 140, 255, 0.1);
-}
-
-.mode-btn.active {
-  color: #508cff;
-  background: rgba(80, 140, 255, 0.15);
-}
-
 .toolbar-center {
   display: flex;
   align-items: center;
@@ -676,22 +618,6 @@ function handleAddFrame() {
 
 .mode-badge .el-icon {
   font-size: 12px;
-}
-
-.pan-badge {
-  background: rgba(80, 140, 255, 0.15);
-  border-color: rgba(80, 140, 255, 0.4);
-  color: #a0d4ff;
-}
-
-.connect-badge {
-  background: rgba(160, 120, 255, 0.15);
-  border-color: rgba(160, 120, 255, 0.4);
-  color: #d4b6ff;
-  max-width: 90%;
-  text-align: center;
-  line-height: 1.4;
-  padding: 6px 14px;
 }
 
 .space-badge {

@@ -89,7 +89,6 @@ export const useCanvasStore = defineStore('canvas', {
       selectedConnectionId: null,
       // 框选矩形（世界坐标），用于 Ctrl/Cmd + 拖动框选可视化
       selectionBox: null,
-      mouseMode: 'select',  // 'select' | 'pan' | 'connect'
       // 画布背景模式：'dot' | 'grid' | 'blank'（不持久化，刷新后回默认）
       backgroundMode: 'dot',
 
@@ -148,6 +147,10 @@ export const useCanvasStore = defineStore('canvas', {
       // - 记录每个 config / batch 父节点的展开/折叠状态
       // - 不持久化，刷新后回默认（折叠）
       batchExpanded: {},
+
+      // 右键菜单剪贴板：存放复制的 panel 深拷贝数组（不持久化）
+      // - copyToClipboard 时写入；pastePanel 时读取并基于屏幕坐标创建副本
+      clipboard: [],
     }
   },
 
@@ -456,13 +459,6 @@ export const useCanvasStore = defineStore('canvas', {
   actions: {
     // ==================== 画布管理 ====================
 
-    /** 设置鼠标模式 */
-    setMouseMode(mode) {
-      if (['select', 'pan', 'connect'].includes(mode)) {
-        this.mouseMode = mode
-      }
-    },
-
     /** 切换画布主题模式：'dark' | 'light' */
     setThemeMode(mode) {
       if (mode === 'dark' || mode === 'light') {
@@ -751,6 +747,60 @@ export const useCanvasStore = defineStore('canvas', {
         content: { ...orig.content },
       })
       // addPanel 内部已 saveCanvas
+    },
+
+    /**
+     * 复制面板到剪贴板（不立即创建新面板）
+     * - 支持单选（传 id）或多选（不传 id 时用 selectedPanelIds）
+     * - 深拷贝存入 state.clipboard，paste 时基于鼠标位置创建副本
+     */
+    copyToClipboard(id) {
+      const ids = id ? [id] : [...this.selectedPanelIds]
+      if (ids.length === 0) return
+      const copies = this.panels
+        .filter((p) => ids.includes(p.id))
+        .map((p) => JSON.parse(JSON.stringify(p)))
+      this.clipboard = copies
+    },
+
+    /**
+     * 粘贴剪贴板内容到指定屏幕坐标
+     * @param {number} screenX - 右键位置的屏幕 x
+     * @param {number} screenY - 右键位置的屏幕 y
+     * - 以剪贴板中第一个面板的左上角为锚点，对齐到屏幕坐标对应的世界坐标
+     * - 其余面板按相对偏移放置
+     * - 一次性 pushSnapshot，避免多次粘贴污染历史栈
+     */
+    pastePanel(screenX, screenY) {
+      if (!Array.isArray(this.clipboard) || this.clipboard.length === 0) return
+      // 屏幕坐标 → 世界坐标（扣除画布容器偏移由调用方在 world 转换中处理）
+      const world = this.screenToWorld(screenX, screenY)
+      // 以第一个面板为锚点计算偏移
+      const anchor = this.clipboard[0]
+      const offsetX = world.x - (anchor.x || 0)
+      const offsetY = world.y - (anchor.y || 0)
+      this.pushSnapshot()
+      const newIds = []
+      for (const item of this.clipboard) {
+        const newId = uid()
+        newIds.push(newId)
+        const copy = {
+          ...JSON.parse(JSON.stringify(item)),
+          id: newId,
+          x: (item.x || 0) + offsetX,
+          y: (item.y || 0) + offsetY,
+          workspace_id: this.activeWorkspaceId,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          zIndex: this.panels.length + 1,
+        }
+        this.panels.push(copy)
+      }
+      // 选中粘贴出来的新面板
+      this.selectedPanelIds = newIds
+      this.selectedPanelId = newIds[0] ?? null
+      this.selectedConnectionId = null
+      saveCanvas(this)
     },
 
     /** 选中面板
