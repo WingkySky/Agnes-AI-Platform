@@ -316,10 +316,13 @@ class AgnesAIClient:
         #   - 图生图：image 放在 extra_body 中（2.1-flash 规范）
         #   - 文生图 Base64 输出：顶层参数 return_base64: true
         #   - response_format → 必须放在 extra_body 中（放顶层会 400）
+        #   - seed → 随机种子，避免相同 prompt 生成相同图片
+        import random
         body = {
             "model": model,
             "prompt": prompt,
             "size": size,
+            "seed": random.randint(1, 2147483647),  # 随机 seed，确保每次请求不同
         }
 
         if ref_images:

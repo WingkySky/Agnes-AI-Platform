@@ -13,7 +13,9 @@
  * ===================================================== */
 
 <template>
-  <svg class="canvas-connections">
+  <!-- viewBox 让 SVG 直接理解世界坐标范围（-50000 到 +50000），内部 path 可以直接使用 panel.x/panel.y 等世界坐标。
+       不再使用 CSS transform translate(-50000, -50000)，避免世界坐标与 SVG 内部坐标的双重平移导致连线不可见。 -->
+  <svg class="canvas-connections" viewBox="-50000 -50000 100000 100000">
     <defs>
       <!-- 蓝色箭头（任务流） -->
       <marker
@@ -110,7 +112,7 @@
 
     <!-- 对齐参考线（Task 6）：根据 store.alignmentGuides 渲染
          - 放在所有连线之后（DOM 顺序即 z-order），保证绘制在最上层
-         - 线段端点 ±50000 对应世界坐标全画布范围（与容器 translate(-50000px, -50000px) 配套）
+         - 线段端点 ±50000 对应世界坐标全画布范围（与 SVG viewBox="-50000 -50000 100000 100000" 配套）
          - pointer-events="none" 不阻挡节点拖动 -->
     <g v-if="hasAlignmentGuides" class="alignment-guides" pointer-events="none">
       <!-- 垂直线：沿 x 坐标的竖线（对齐 left/center/right） -->
@@ -288,11 +290,13 @@ watch(() => store.pendingAutoConnect, (pending) => {
 <style scoped>
 .canvas-connections {
   position: absolute;
-  top: 0;
-  left: 0;
+  /* SVG 左上角放在 (-50000, -50000)，配合 viewBox="-50000 -50000 100000 100000"，
+     使 SVG 内容坐标系与世界坐标完全对齐：世界坐标 (wx, wy) 的 path 绘制到父元素 (wx, wy) 位置。
+     不再使用 CSS transform translate(-50000px, -50000px)，因为 path 已是世界坐标，再平移会导致双重偏移而不可见。 */
+  left: -50000px;
+  top: -50000px;
   width: 100000px;
   height: 100000px;
-  transform: translate(-50000px, -50000px);
   /* SVG 根元素禁用指针事件，避免 10万×10万 的巨大 SVG 拦截锚点/面板的 pointerdown。
      需要交互的子元素（连线 hit area、删除按钮）显式设置 pointer-events: auto/all。 */
   pointer-events: none;
