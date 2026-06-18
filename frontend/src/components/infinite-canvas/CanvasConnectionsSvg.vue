@@ -17,6 +17,28 @@
        不再使用 CSS transform translate(-50000, -50000)，避免世界坐标与 SVG 内部坐标的双重平移导致连线不可见。 -->
   <svg class="canvas-connections" viewBox="-50000 -50000 100000 100000">
     <defs>
+      <!-- 蓝色发光：SVG 原生高斯模糊 + 叠加，产生沿曲线的发光效果
+           - filterUnits="userSpaceOnUse": 使用 SVG 用户坐标空间，避免基于 path bounding box
+             的百分比计算对细长曲线（y 方向高度很小）导致 filter 区域不足的问题
+           - x/y/width/height: 足够大的区域（-10000 到 +10000），覆盖所有可见的连线
+           - feGaussianBlur: 产生柔和的模糊边缘（发光）
+           - feMerge: 先放模糊层，再放原始清晰线，形成"线+外围发光"效果
+           - 光影严格跟随线的贝塞尔路径，而不是元素外框阴影 -->
+      <filter id="conn-glow-blue" filterUnits="userSpaceOnUse" x="-10000" y="-10000" width="20000" height="20000">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur" />
+        <feMerge>
+          <feMergeNode in="blur" />
+          <feMergeNode in="SourceGraphic" />
+        </feMerge>
+      </filter>
+      <!-- 紫色发光：用于 accent 色（同上） -->
+      <filter id="conn-glow-purple" filterUnits="userSpaceOnUse" x="-10000" y="-10000" width="20000" height="20000">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur" />
+        <feMerge>
+          <feMergeNode in="blur" />
+          <feMergeNode in="SourceGraphic" />
+        </feMerge>
+      </filter>
       <!-- 蓝色箭头（任务流） -->
       <marker
         id="arrow-blue"
@@ -59,14 +81,16 @@
         pointer-events="stroke"
         class="connection-hit"
       />
-      <!-- 可见曲线 -->
+      <!-- 可见曲线：fill 必须是 "none"（静态属性，不要用 :fill 动态绑定）
+           否则 SVG 默认填充为黑色，形成"一条粗黑带"而不是一条线
+           filter：高亮时用 SVG 原生高斯模糊产生沿曲线的发光，光影跟随线的形态 -->
       <path
         :d="getPathD(conn)"
-        :fill="none"
+        fill="none"
         :stroke="getStrokeColor(conn)"
         :stroke-width="getStrokeWidth(conn)"
         :marker-end="getMarker(conn)"
-        :style="{ filter: getFilter(conn) }"
+        :filter="getFilter(conn)"
         pointer-events="none"
         class="connection-path"
       />
@@ -156,19 +180,56 @@ const relatedConnections = computed(() => {
   return store.relatedHighlight(store.selectedPanelId).connections
 })
 
-/** 起点 = source 锚点（右侧中点），终点 = target 锚点（左侧中点） */
+/** 起点 = source 锚点，终点 = target 锚点
+ *  根据 source 和 target 的相对位置自动选择锚点在节点的哪一侧：
+ *  - source 在左，target 在右：source 锚点在右边缘，target 锚点在左边缘
+ *  - source 在右，target 在左：source 锚点在左边缘，target 锚点在右边缘
+ *  - 否则（重叠或纵向排列）：退化为右→左边缘
+ *  控制点方向：始终从锚点出发向"两个节点之间的外侧"延伸，
+ *  避免控制点超出节点范围导致曲线绕大圈或在中间消失 */
 function getAnchorPoints(source, target) {
-  const sx = source.x + source.width
+  const sourceRight = source.x + source.width
+  const targetLeft = target.x
+  const sourceLeft = source.x
+  const targetRight = target.x + target.width
   const sy = source.y + source.height / 2
-  const tx = target.x
   const ty = target.y + target.height / 2
-  // 水平流动贝塞尔曲线：控制点水平延伸，最小 50 避免短距离过陡
-  const curvature = Math.max(Math.abs(tx - sx) * 0.5, 50)
+
+  // 判断水平方向：source 在 target 的左侧还是右侧
+  const sourceIsLeft = sourceRight <= targetLeft
+  const sourceIsRight = sourceLeft >= targetRight
+
+  let sx, tx, c1x, c2x
+
+  if (sourceIsLeft) {
+    // 正常水平流动：source 左 → target 右
+    sx = sourceRight       // source 右边缘
+    tx = targetLeft        // target 左边缘
+    const curvature = Math.max(Math.abs(tx - sx) * 0.5, 50)
+    c1x = sx + curvature   // 控制点向右延伸
+    c2x = tx - curvature   // 控制点向左延伸
+  } else if (sourceIsRight) {
+    // 反向流动：source 在右 → target 在左
+    // 锚点选在"靠近对方"的一侧，曲线走最短路径，避免在中间消失
+    sx = sourceLeft        // source 左边缘（靠近 target 的一侧）
+    tx = targetRight       // target 右边缘（靠近 source 的一侧）
+    const curvature = Math.max(Math.abs(tx - sx) * 0.5, 50)
+    c1x = sx - curvature   // 控制点向左延伸
+    c2x = tx + curvature   // 控制点向右延伸
+  } else {
+    // 重叠或纵向排列：退化为右→左
+    sx = sourceRight
+    tx = targetLeft
+    const curvature = Math.max(Math.abs(tx - sx) * 0.5, 50)
+    c1x = sx + curvature
+    c2x = tx - curvature
+  }
+
   return {
     sx, sy, tx, ty,
-    c1x: sx + curvature,
+    c1x,
     c1y: sy,
-    c2x: tx - curvature,
+    c2x,
     c2y: ty,
   }
 }
@@ -230,19 +291,24 @@ function isHighlightedConn(conn) {
 }
 
 function getStrokeColor(conn) {
+  // 直接使用 theme 的实际颜色值，避免 CSS 变量与 SVG filter 不兼容
+  // （SVG filter 的 SourceGraphic 需要解析到实际颜色才能正确模糊）
   return isHighlightedConn(conn)
-    ? 'var(--canvas-connection-active)'
-    : 'var(--canvas-connection-muted)'
+    ? theme.value.connection.active
+    : theme.value.connection.muted
 }
 
 function getStrokeWidth(conn) {
+  // 高亮时线更粗，光影沿曲线发散——保持跟线一致
   return isHighlightedConn(conn) ? 3 : 2
 }
 
+/** 高亮时的发光：使用 SVG 原生 filter，让光影严格沿路径发散，
+ *  而不是 CSS drop-shadow（对元素整体外框做阴影，跟线形态不一致） */
 function getFilter(conn) {
   return isHighlightedConn(conn)
-    ? 'drop-shadow(0 0 8px var(--canvas-connection-active))'
-    : 'none'
+    ? 'url(#conn-glow-blue)'
+    : ''
 }
 
 function getMarker(conn) {
