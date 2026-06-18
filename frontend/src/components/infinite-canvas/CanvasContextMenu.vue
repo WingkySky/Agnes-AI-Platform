@@ -4,9 +4,15 @@
  * - payload: { target: 'background'|'panel'|'connection', data: { panelId?, panel?, connectionId? } }
  * - 根据 target 渲染不同菜单项：
  *   · background: 全选 / 粘贴 / 居中视图 / 清空画布（popconfirm 确认）/ 添加分组框
- *   · panel: 通用（编辑/复制/删除/锁定/隐藏）+ 按 panel.type 显示节点级操作
+ *   · panel: 通用（编辑/复制/删除/锁定/隐藏/查看信息）+ 按 panel.type 显示节点级操作
+ *     - image: 裁剪/拆分/旋转/反推提示词/加入素材库
+ *     - video: 反推提示词/提取首帧
+ *     - text: 改写/放大字号/缩小字号
+ *     - config: 合并生成/生成视频
+ *     - file-upload: 上传文件
  *   · connection: 删除连线
  * - 点击菜单项后 emit('panel-action', { type, panel? }) 并自动 hide
+ * - 菜单关闭：点击外部 / Esc
  * ===================================================== */
 
 <template>
@@ -86,6 +92,12 @@
           <el-icon><Hide /></el-icon>
           <span>隐藏</span>
         </div>
+        <div class="context-menu-divider" />
+        <!-- 查看信息 -->
+        <div class="context-menu-item" @click="handleAction('info')">
+          <el-icon><InfoFilled /></el-icon>
+          <span>查看信息</span>
+        </div>
 
         <!-- 图片节点：裁剪 / 拆分 / 旋转 / 反推提示词 / 加入素材库 -->
         <template v-if="panelType === 'image'">
@@ -142,12 +154,25 @@
           </div>
         </template>
 
-        <!-- 配置节点：合并生成 -->
+        <!-- 配置节点：合并生成 / 生成视频 -->
         <template v-else-if="panelType === 'config'">
           <div class="context-menu-divider" />
           <div class="context-menu-item" @click="handleAction('generate')">
             <el-icon><MagicStick /></el-icon>
             <span>合并生成</span>
+          </div>
+          <div class="context-menu-item" @click="handleAction('generateVideo')">
+            <el-icon><VideoCamera /></el-icon>
+            <span>生成视频</span>
+          </div>
+        </template>
+
+        <!-- 文件上传节点：上传文件 -->
+        <template v-else-if="panelType === 'file-upload'">
+          <div class="context-menu-divider" />
+          <div class="context-menu-item" @click="handleAction('uploadFile')">
+            <el-icon><Upload /></el-icon>
+            <span>上传文件</span>
           </div>
         </template>
       </template>
@@ -164,11 +189,12 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useCanvasStore } from '@/stores/canvas'
 import {
   Edit, CopyDocument, Delete, Select, Lock, Unlock, Hide, DocumentCopy, FullScreen, Grid,
   Crop, Scissor, RefreshRight, MagicStick, FolderAdd, Refresh, ZoomIn, ZoomOut, PictureFilled,
+  VideoCamera, InfoFilled, Upload,
 } from '@element-plus/icons-vue'
 
 const store = useCanvasStore()
@@ -233,6 +259,33 @@ function handleHide() {
   const panelId = contextData.value.panelId
   if (panelId) store.setPanelHidden(panelId, true)
 }
+
+/* ===== 菜单关闭：点击外部 / Esc ===== */
+/** 点击菜单外部时关闭 */
+function handleOutsideClick(e) {
+  if (!visible.value) return
+  const menu = document.querySelector('.context-menu')
+  if (menu && !menu.contains(e.target)) {
+    hide()
+  }
+}
+
+/** 按 Esc 关闭 */
+function handleEsc(e) {
+  if (e.key === 'Escape' && visible.value) {
+    hide()
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('mousedown', handleOutsideClick)
+  document.addEventListener('keydown', handleEsc)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('mousedown', handleOutsideClick)
+  document.removeEventListener('keydown', handleEsc)
+})
 
 defineExpose({ show, hide })
 </script>

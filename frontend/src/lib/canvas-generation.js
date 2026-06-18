@@ -16,6 +16,7 @@
  * ===================================================== */
 
 import { createImageTask, getImageTaskStatus } from '@/api/images'
+import { createVideoTask, getVideoStatus } from '@/api/videos'
 
 // ---------- 常量 ----------
 
@@ -519,4 +520,194 @@ function normalizeSize(size) {
     '2:3': '683x1024',
   }
   return ratioMap[size] || '1024x1024'
+}
+
+// ---------- 视频合并生成 ----------
+
+/**
+ * 创建视频生成任务（调用 /api/videos）
+ * - 根据是否有参考图自动选择 text2video / image2video 模式
+ * - 参考图：取第一张作为 image（image2video 模式）
+ *
+ * @param {Object} ctx - 生成上下文 { prompt, referenceImages }
+ * @param {Object} config - Config 节点配置 { model, seconds }
+ * @returns {Promise<{ task_id: string }>}
+ */
+export async function createVideoGenerationTask(ctx, config) {
+  const { prompt, referenceImages } = ctx
+  const { base64Images, imageUrls } = classifyImages(referenceImages || [])
+
+  const params = {
+    prompt,
+    model: config.model || 'seedance-1-lite',
+    mode: referenceImages && referenceImages.length > 0 ? 'image2video' : 'text2video',
+  }
+
+  // 视频时长（秒）
+  if (config.seconds) {
+    params.seconds = config.seconds
+  }
+
+  // image2video 模式：取第一张参考图
+  if (params.mode === 'image2video') {
+    if (imageUrls.length > 0) {
+      params.image = imageUrls[0]
+    } else if (base64Images.length > 0) {
+      params.image = base64Images[0]
+    }
+  }
+
+  const resp = await createVideoTask(params)
+  if (!resp || !resp.task_id) {
+    throw new Error('创建视频任务失败：未返回 task_id')
+  }
+  return resp
+}
+
+/**
+ * 轮询视频任务状态直到完成
+ * - 间隔 5 秒，超时 10 分钟
+ * - onProgress 回调用于更新 UI 进度
+ *
+ * @param {string} taskId - 任务 ID
+ * @param {Function} onProgress - 进度回调 (status, data) => void
+ * @param {number} timeout - 超时时间（毫秒），默认 600000（10分钟）
+ * @returns {Promise<{ status: string, videoUrl: string }>}
+ */
+export async function pollVideoTask(taskId, onProgress, timeout = 600000) {
+  const startTime = Date.now()
+  const interval = 5000
+
+  while (true) {
+    if (Date.now() - startTime > timeout) {
+      throw new Error('视频生成任务超时（超过 10 分钟未完成）')
+    }
+
+    const data = await getVideoStatus(taskId)
+    if (!data) {
+      throw new Error('查询视频任务状态失败')
+    }
+
+    const status = data.status || 'pending'
+    if (onProgress) onProgress(status, data)
+
+    // 完成
+    if (status === 'success' || status === 'done' || status === 'completed') {
+      const videoUrl = data.video_url || data.url || data.result_url || ''
+      if (!videoUrl) {
+        throw new Error('视频生成完成但未返回视频 URL')
+      }
+      return { status: 'success', videoUrl }
+    }
+
+    // 失败
+    if (status === 'failed' || status === 'error') {
+      throw new Error(data.message || data.error || '视频生成失败')
+    }
+
+    // 取消
+    if (status === 'cancelled') {
+      throw new Error('视频任务已取消')
+    }
+
+    // 继续等待
+    await new Promise((resolve) => setTimeout(resolve, interval))
+  }
+}
+
+/**
+ * 执行完整的视频合并生成流程
+ * 1. 构建生成上下文（收集上游资源 + 解析 @[node:xxx]）
+ * 2. 创建视频任务
+ * 3. 轮询任务状态
+ * 4. 回填结果到画布新 video 节点
+ *
+ * @param {string} configId - Config 节点 ID
+ * @param {Object} store - Pinia canvas store
+ * @param {Object} options - { onProgress }
+ * @returns {Promise<string>} 创建的结果节点 ID
+ */
+export async function executeMergeVideoGeneration(configId, store, options = {}) {
+  const { onProgress } = options
+
+  // 1. 查找 Config 节点
+  const configNode = store.panels.find((p) => p.id === configId)
+  if (!configNode || configNode.type !== 'config') {
+    throw new Error('未找到 Config 节点')
+  }
+
+  // 2. 构建生成上下文（复用图片生成的上下文构建逻辑）
+  const ctx = buildGenerationContext(configNode, store.panels, store.connections)
+  if (!ctx) {
+    throw new Error('构建生成上下文失败')
+  }
+
+  if (!ctx.prompt || !ctx.prompt.trim()) {
+    throw new Error('提示词为空，请填写 composerContent 或 prompt')
+  }
+
+  if (onProgress) onProgress('building', { inputSummary: ctx.inputSummary })
+
+  const config = {
+    model: configNode.content?.model || 'seedance-1-lite',
+    seconds: configNode.content?.seconds || 5,
+  }
+
+  // 3. 创建视频任务
+  if (onProgress) onProgress('creating', { index: 0, total: 1 })
+  const taskResp = await createVideoGenerationTask(ctx, config)
+  const taskId = taskResp.task_id
+
+  // 4. 轮询任务状态
+  if (onProgress) onProgress('polling', { index: 0, taskId })
+  const result = await pollVideoTask(taskId, (status, data) => {
+    if (onProgress) onProgress('generating', { index: 0, status, progress: data.progress })
+  })
+
+  // 5. 回填结果到画布新 video 节点
+  const newNodeId = addVideoResultNode(store, configNode, result.videoUrl)
+
+  if (onProgress) onProgress('done', { resultNodeIds: [newNodeId] })
+  return newNodeId
+}
+
+/**
+ * 把视频生成结果回填到画布：在 Config 节点右侧创建新 video 节点并连线
+ *
+ * @param {Object} store - Pinia canvas store
+ * @param {Object} configNode - Config 节点
+ * @param {string} videoUrl - 生成结果的视频 URL
+ * @returns {string} 新节点 ID
+ */
+function addVideoResultNode(store, configNode, videoUrl) {
+  const nodeWidth = 320
+  const nodeHeight = 200
+
+  const newPanel = {
+    type: 'video',
+    x: (configNode.x ?? 0) + (configNode.width ?? 320) + 40,
+    y: configNode.y ?? 0,
+    width: nodeWidth,
+    height: nodeHeight,
+    content: {
+      videoUrl,
+      sourceFrom: configNode.id,
+      status: 'success',
+    },
+  }
+
+  const newId = store.addPanel(newPanel)
+
+  // 创建连线：Config → 新节点
+  if (newId) {
+    store.addConnection({
+      source_panel_id: configNode.id,
+      target_panel_id: newId,
+      type: 'auto',
+      source_anchor: 'right-middle',
+      target_anchor: 'left-middle',
+    })
+  }
+
+  return newId
 }

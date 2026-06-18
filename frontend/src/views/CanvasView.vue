@@ -101,7 +101,7 @@ import CanvasRightPanel from '@/components/infinite-canvas/CanvasRightPanel.vue'
 import ConnectionCreateMenu from '@/components/infinite-canvas/ConnectionCreateMenu.vue'
 import PanelEditDialog from '@/components/infinite-canvas/PanelEditDialog.vue'
 import ImageCropDialog from '@/components/infinite-canvas/ImageCropDialog.vue'
-import { executeMergeGeneration } from '@/lib/canvas-generation'
+import { executeMergeGeneration, executeMergeVideoGeneration } from '@/lib/canvas-generation'
 import { useI18n } from '@/i18n'
 
 const { t } = useI18n()
@@ -482,7 +482,7 @@ function handlePanelAction({ type, panel }) {
       handleMergeGenerate(panel)
       break
     case 'generateVideo':
-      ElMessage.info(t('canvas.editDialog.generateVideoHint'))
+      handleMergeVideoGenerate(panel)
       break
     case 'info':
       showPanelInfo(panel)
@@ -537,6 +537,47 @@ async function handleMergeGenerate(panel) {
     ElMessage.error(`合并生成失败：${err.message || String(err)}`)
   } finally {
     loadingActions[`generate-${panel.id}`] = false
+  }
+}
+
+/** 视频合并生成：调用 executeMergeVideoGeneration 收集上游资源 + 创建视频任务 + 轮询 + 回填
+ *  - 仅支持 Config 节点
+ *  - 生成过程中显示进度提示
+ *  - 成功后自动创建 video 结果节点并连线
+ */
+async function handleMergeVideoGenerate(panel) {
+  if (panel.type !== 'config') {
+    ElMessage.info('该节点类型暂不支持视频生成，请使用 Config 节点')
+    return
+  }
+  if (loadingActions[`generateVideo-${panel.id}`]) {
+    ElMessage.warning('正在生成视频中，请稍候...')
+    return
+  }
+  loadingActions[`generateVideo-${panel.id}`] = true
+  const loadingMsg = ElMessage.info({ message: '开始视频合并生成...', duration: 0 })
+  try {
+    await executeMergeVideoGeneration(panel.id, store, {
+      onProgress: (stage, data) => {
+        const messages = {
+          building: `正在收集上游资源（${data?.inputSummary?.total || 0} 个）...`,
+          creating: '正在创建视频生成任务...',
+          polling: '等待视频生成结果...',
+          generating: `视频生成中... ${data?.progress ? Math.round(data.progress * 100) + '%' : ''}`,
+          done: '视频生成完成，已创建结果节点',
+        }
+        if (messages[stage]) {
+          loadingMsg.message = messages[stage]
+        }
+      },
+    })
+    loadingMsg.close()
+    ElMessage.success('视频合并生成完成')
+  } catch (err) {
+    loadingMsg.close()
+    ElMessage.error(`视频生成失败：${err.message || String(err)}`)
+  } finally {
+    loadingActions[`generateVideo-${panel.id}`] = false
   }
 }
 

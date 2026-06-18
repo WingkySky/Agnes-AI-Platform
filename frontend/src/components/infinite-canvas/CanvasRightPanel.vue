@@ -3,8 +3,9 @@
      - 宽度 260px，背景使用 var(--canvas-panel-bg)，左侧边框
      - 顶部双 Tab：属性 | 备注
      - 属性 Tab：
-       · 未选中：提示"未选中任何面板"
-       · 选中单个面板：名称(可编辑)、类型/位置/尺寸(只读)、
+       · 未选中：显示画布属性（背景模式切换、网格大小、主题切换）
+       · 选中单个面板：名称(可编辑)、类型(只读)、位置 x/y(可编辑)、
+         尺寸 width/height(可编辑)、内容字段(text/imageUrl/videoUrl/prompt)、
          锁定/隐藏/复制/删除按钮、创建与更新时间
        · 选中连线：source → target 信息 + 删除按钮
      - 备注 Tab：
@@ -37,16 +38,52 @@
           <div class="form-section">
             <label class="form-label">位置</label>
             <div class="info-row">
-              <div class="info-cell"><span class="info-key">X</span><span class="info-val">{{ Math.round(selectedPanel.x) }}</span></div>
-              <div class="info-cell"><span class="info-key">Y</span><span class="info-val">{{ Math.round(selectedPanel.y) }}</span></div>
+              <div class="info-cell">
+                <span class="info-key">X</span>
+                <el-input v-model.number="posXDraft" size="small" class="num-input" @change="onPosChange" />
+              </div>
+              <div class="info-cell">
+                <span class="info-key">Y</span>
+                <el-input v-model.number="posYDraft" size="small" class="num-input" @change="onPosChange" />
+              </div>
             </div>
           </div>
 
           <div class="form-section">
             <label class="form-label">尺寸</label>
             <div class="info-row">
-              <div class="info-cell"><span class="info-key">W</span><span class="info-val">{{ Math.round(selectedPanel.width) }}</span></div>
-              <div class="info-cell"><span class="info-key">H</span><span class="info-val">{{ Math.round(selectedPanel.height) }}</span></div>
+              <div class="info-cell">
+                <span class="info-key">W</span>
+                <el-input v-model.number="widthDraft" size="small" class="num-input" @change="onSizeChange" />
+              </div>
+              <div class="info-cell">
+                <span class="info-key">H</span>
+                <el-input v-model.number="heightDraft" size="small" class="num-input" @change="onSizeChange" />
+              </div>
+            </div>
+          </div>
+
+          <!-- 内容字段：按节点类型显示 text/imageUrl/videoUrl/prompt -->
+          <div v-if="contentFields.length" class="form-section">
+            <label class="form-label">内容</label>
+            <div v-for="field in contentFields" :key="field.key" class="content-field">
+              <label class="field-label">{{ field.label }}</label>
+              <el-input
+                v-if="field.type === 'text'"
+                v-model="contentDraft[field.key]"
+                type="textarea"
+                :rows="field.rows || 3"
+                size="small"
+                :placeholder="field.placeholder || ''"
+                @change="onContentChange"
+              />
+              <el-input
+                v-else
+                v-model="contentDraft[field.key]"
+                size="small"
+                :placeholder="field.placeholder || ''"
+                @change="onContentChange"
+              />
             </div>
           </div>
 
@@ -86,9 +123,40 @@
           <el-button size="small" type="danger" plain @click="deleteSelectedConn">删除连线</el-button>
         </div>
 
-        <!-- 未选中任何对象 -->
-        <div v-else class="placeholder">
-          <p>未选中任何面板</p>
+        <!-- 未选中任何对象：显示画布属性 -->
+        <div v-else class="canvas-props">
+          <div class="form-section">
+            <label class="form-label">背景模式</label>
+            <el-radio-group v-model="bgMode" size="small" @change="onBgModeChange">
+              <el-radio-button label="dot">点阵</el-radio-button>
+              <el-radio-button label="grid">网格</el-radio-button>
+              <el-radio-button label="blank">空白</el-radio-button>
+            </el-radio-group>
+          </div>
+
+          <div class="form-section">
+            <label class="form-label">网格大小</label>
+            <div class="grid-row">
+              <el-input-number
+                v-model="gridDraft"
+                size="small"
+                :min="4"
+                :max="128"
+                :step="4"
+                controls-position="right"
+                @change="onGridSizeChange"
+              />
+              <span class="grid-unit">px</span>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <label class="form-label">主题</label>
+            <el-radio-group v-model="themeDraft" size="small" @change="onThemeChange">
+              <el-radio-button label="dark">深色</el-radio-button>
+              <el-radio-button label="light">浅色</el-radio-button>
+            </el-radio-group>
+          </div>
         </div>
       </el-tab-pane>
 
@@ -112,7 +180,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, reactive, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useCanvasStore } from '@/stores/canvas'
 
@@ -155,14 +223,80 @@ const isHidden = computed(() => {
 // 名称与备注的本地草稿，跟随选中面板切换同步
 const nameDraft = ref('')
 const noteDraft = ref('')
+// 位置 / 尺寸本地草稿
+const posXDraft = ref(0)
+const posYDraft = ref(0)
+const widthDraft = ref(0)
+const heightDraft = ref(0)
+// 内容字段本地草稿（按节点类型动态填充）
+const contentDraft = reactive({})
+// 画布属性草稿
+const bgMode = ref(store.backgroundMode)
+const gridDraft = ref(store.gridSize)
+const themeDraft = ref(store.themeMode)
+
+/**
+ * 按节点类型返回需要展示的内容字段配置
+ * - text: text(文本内容)
+ * - image: imageUrl(图片地址)、prompt(提示词)
+ * - video: videoUrl(视频地址)、prompt(提示词)
+ * - config / quick-generate: prompt(提示词)
+ */
+const contentFields = computed(() => {
+  const p = selectedPanel.value
+  if (!p) return []
+  switch (p.type) {
+    case 'text':
+      return [{ key: 'text', label: '文本内容', type: 'text', rows: 4, placeholder: '请输入文本内容' }]
+    case 'image':
+      return [
+        { key: 'imageUrl', label: '图片地址', type: 'input', placeholder: '请输入图片 URL' },
+        { key: 'prompt', label: '提示词', type: 'text', rows: 3, placeholder: '请输入提示词' },
+      ]
+    case 'video':
+      return [
+        { key: 'videoUrl', label: '视频地址', type: 'input', placeholder: '请输入视频 URL' },
+        { key: 'prompt', label: '提示词', type: 'text', rows: 3, placeholder: '请输入提示词' },
+      ]
+    case 'config':
+    case 'quick-generate':
+      return [{ key: 'prompt', label: '提示词', type: 'text', rows: 4, placeholder: '请输入提示词' }]
+    default:
+      return []
+  }
+})
+
 watch(
   () => selectedPanel.value?.id,
   () => {
     const p = selectedPanel.value
     nameDraft.value = p?.content?.name ?? ''
     noteDraft.value = p?.content?.note ?? ''
+    posXDraft.value = Math.round(p?.x ?? 0)
+    posYDraft.value = Math.round(p?.y ?? 0)
+    widthDraft.value = Math.round(p?.width ?? 0)
+    heightDraft.value = Math.round(p?.height ?? 0)
+    // 重置内容草稿并按当前节点类型填充
+    Object.keys(contentDraft).forEach((k) => delete contentDraft[k])
+    for (const field of contentFields.value) {
+      contentDraft[field.key] = p?.content?.[field.key] ?? ''
+    }
   },
   { immediate: true },
+)
+
+// 同步画布属性草稿（store 外部变更时跟随）
+watch(
+  () => store.backgroundMode,
+  (v) => { bgMode.value = v },
+)
+watch(
+  () => store.gridSize,
+  (v) => { gridDraft.value = v },
+)
+watch(
+  () => store.themeMode,
+  (v) => { themeDraft.value = v },
 )
 
 /** 节点类型 → 中文标签 */
@@ -185,6 +319,49 @@ function onNameChange() {
   store.updatePanel(p.id, {
     content: { ...(p.content ?? {}), name: nameDraft.value },
   })
+}
+
+/** 位置变更：双向绑定到 store.updatePanel */
+function onPosChange() {
+  const p = selectedPanel.value
+  if (!p) return
+  store.updatePanel(p.id, {
+    x: Number(posXDraft.value) || 0,
+    y: Number(posYDraft.value) || 0,
+  })
+}
+
+/** 尺寸变更：双向绑定到 store.updatePanel */
+function onSizeChange() {
+  const p = selectedPanel.value
+  if (!p) return
+  const w = Math.max(20, Number(widthDraft.value) || 20)
+  const h = Math.max(20, Number(heightDraft.value) || 20)
+  store.updatePanel(p.id, { width: w, height: h })
+}
+
+/** 内容字段变更：合并写入 panel.content */
+function onContentChange() {
+  const p = selectedPanel.value
+  if (!p) return
+  store.updatePanel(p.id, {
+    content: { ...(p.content ?? {}), ...contentDraft },
+  })
+}
+
+/** 背景模式切换 */
+function onBgModeChange(mode) {
+  store.setBackgroundMode(mode)
+}
+
+/** 网格大小变更 */
+function onGridSizeChange(val) {
+  store.setGridSize(val)
+}
+
+/** 主题切换 */
+function onThemeChange(mode) {
+  store.setThemeMode(mode)
 }
 
 /** 备注变更：调 store.updateNote */
@@ -303,10 +480,50 @@ function formatDate(iso) {
 
 .info-key {
   color: var(--canvas-node-muted-text, #8ba3c9);
+  flex-shrink: 0;
 }
 
 .info-val {
   color: var(--canvas-node-title-text, #e8eef7);
+}
+
+/* 数字输入框：紧凑宽度 */
+.num-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.num-input :deep(.el-input__inner) {
+  padding: 0 6px;
+  text-align: right;
+}
+
+/* 内容字段区 */
+.content-field {
+  margin-bottom: 10px;
+}
+
+.field-label {
+  display: block;
+  font-size: 11px;
+  color: var(--canvas-node-muted-text, #8ba3c9);
+  margin-bottom: 4px;
+}
+
+/* 画布属性区 */
+.canvas-props {
+  padding: 4px 0;
+}
+
+.grid-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.grid-unit {
+  font-size: 12px;
+  color: var(--canvas-node-muted-text, #8ba3c9);
 }
 
 .action-row {

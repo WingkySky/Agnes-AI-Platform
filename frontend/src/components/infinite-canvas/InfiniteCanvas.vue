@@ -1,250 +1,432 @@
 <!-- =====================================================
-     无限画布主组件
-     - 负责视口平移 / 缩放交互（滚轮缩放，Space + 拖动或空白拖动平移）
-     - 负责 Ctrl/Cmd + 拖动框选（世界坐标矩形写入 store.selectionBox）
-     - 组装背景网格（CanvasGrid）、变换容器（CanvasViewport）、
-       面板容器（CanvasPanels）、连线 SVG（CanvasConnectionsSvg）、
-       框选矩形（SelectionBox）
-     - 事件命中检测：pointerdown 在面板 / 连线 / 锚点上时不触发画布平移/框选
-     - 空格键按下时整个容器切换为"平移优先"光标（grab / grabbing）
+     InfiniteCanvas 无限画布主体
+     - 视口变换（CSS transform：translate + scale）
+     - 背景渲染（点阵 / 网格 / 空白，根据 store.backgroundMode）
+     - 节点渲染（委托给 CanvasNode.vue）
+     - 连线渲染（委托给 CanvasConnectionsSvg.vue）
+     - 画布级鼠标事件：平移（Space/中键）、框选、滚轮缩放
+     - 节点级事件转发：拖拽移动、四角缩放、锚点连线
+     - emit panel-edit / panel-action 给父组件
      ===================================================== -->
 
 <template>
-  <!-- 画布容器：fill parent，作为滚轮/指针事件的根节点
-       - tabindex 允许接收键盘聚焦，但真正快捷键由全局 keydown 处理
-       - data-canvas-root 作为 CSS 选择器供事件委托使用 -->
   <div
-    ref="rootRef"
-    class="infinite-canvas"
-    :class="{
-      'is-space-pressed': store._isSpacePressed,
-      'is-panning': isPanning,
-    }"
-    @contextmenu.prevent="handleContextMenu"
-    @wheel.prevent="handleWheel"
-    @pointerdown="handlePointerDown"
-    @pointermove="handlePointerMove"
-    @pointerup="handlePointerUp"
-    @pointercancel="handlePointerUp"
+    ref="containerRef"
+    class="infinite-canvas-container"
+    @mousedown="onCanvasMouseDown"
+    @mousemove="onCanvasMouseMove"
+    @mouseup="onCanvasMouseUp"
+    @wheel.prevent="onWheel"
+    @contextmenu.prevent
   >
-    <!-- 背景网格（屏幕坐标系，不跟随 transform，由自身样式响应 viewport 变化） -->
-    <CanvasGrid />
+    <!-- 画布世界层（应用视口 transform） -->
+    <div class="canvas-world" :style="worldStyle">
+      <!-- 背景层（点阵 / 网格 / 空白） -->
+      <div class="canvas-bg" :class="`bg-${store.backgroundMode}`"></div>
 
-    <!-- 变换容器：子节点全部位于世界坐标系，由 viewport 的 translate+scale 统一变换 -->
-    <CanvasViewport>
-      <!-- 连线层：必须放在面板层之前（z-index 更低），避免遮挡节点交互 -->
-      <CanvasConnectionsSvg />
-
-      <!-- 面板容器：按 zIndex 排序渲染可见面板 -->
-      <CanvasPanels
-        @panel-edit="(panel) => emit('panel-edit', panel)"
-        @panel-action="(payload) => emit('panel-action', payload)"
+      <!-- 连线 SVG 层 -->
+      <CanvasConnectionsSvg
+        @connect-start="onConnectStart"
+        @connect-end="onConnectEnd"
+        @select-connection="onSelectConnection"
       />
-    </CanvasViewport>
 
-    <!-- 框选矩形（屏幕坐标，跟随 store.selectionBox） -->
-    <SelectionBox
-      :box="store.selectionBox"
-      :zoom="store.viewport.zoom"
-      :viewport="{ x: store.viewport.x, y: store.viewport.y }"
-    />
+      <!-- 节点层 -->
+      <CanvasNode
+        v-for="panel in renderPanels"
+        :key="panel.id"
+        :panel="panel"
+        @edit="onPanelEdit"
+        @action="onPanelAction"
+        @drag-start="onNodeDragStart"
+        @resize-start="onNodeResizeStart"
+        @connect-start="onConnectStart"
+      />
+    </div>
+
+    <!-- 框选矩形（屏幕坐标层，不参与 world transform） -->
+    <div
+      v-if="store.selectionBox"
+      class="selection-box"
+      :style="selectionBoxStyle"
+    ></div>
   </div>
 </template>
 
 <script setup>
-import { ref, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useCanvasStore } from '@/stores/canvas'
-import CanvasGrid from '@/components/infinite-canvas/CanvasGrid.vue'
-import CanvasViewport from '@/components/infinite-canvas/CanvasViewport.vue'
-import CanvasPanels from '@/components/infinite-canvas/CanvasPanels.vue'
-import CanvasConnectionsSvg from '@/components/infinite-canvas/CanvasConnectionsSvg.vue'
-import SelectionBox from '@/components/infinite-canvas/SelectionBox.vue'
+import CanvasNode from './CanvasNode.vue'
+import CanvasConnectionsSvg from './CanvasConnectionsSvg.vue'
 
-// ===== 模块依赖 =====
 const store = useCanvasStore()
-const rootRef = ref(null)
+const containerRef = ref(null)
 
-// emit 声明：对外向上抛出 panel-edit（由 CanvasPanels → PanelWrapper → BaseNode 逐层抛出）
+// 拖拽状态（不持久化）
+const dragState = ref(null) // { type: 'pan'|'select'|'node'|'resize', ... }
+
+// 视口 transform 样式
+const worldStyle = computed(() => ({
+  transform: `translate(${store.viewport.x}px, ${store.viewport.y}px) scale(${store.viewport.zoom})`,
+  transformOrigin: '0 0',
+}))
+
+// 渲染的面板列表（应用搜索/筛选/隐藏过滤）
+const renderPanels = computed(() => {
+  let list = store.visiblePanels
+  // 隐藏过滤
+  if (store.hiddenIds.length > 0) {
+    const hiddenSet = new Set(store.hiddenIds)
+    list = list.filter((p) => !hiddenSet.has(p.id))
+  }
+  // 类型筛选
+  if (store.filterTypes.length > 0) {
+    const typeSet = new Set(store.filterTypes)
+    list = list.filter((p) => typeSet.has(p.type))
+  }
+  return list
+})
+
+// 框选矩形样式（屏幕坐标）
+const selectionBoxStyle = computed(() => {
+  if (!store.selectionBox) return {}
+  const { startScreen, endScreen } = store.selectionBox
+  const left = Math.min(startScreen.x, endScreen.x)
+  const top = Math.min(startScreen.y, endScreen.y)
+  const width = Math.abs(endScreen.x - startScreen.x)
+  const height = Math.abs(endScreen.y - startScreen.y)
+  return {
+    left: `${left}px`,
+    top: `${top}px`,
+    width: `${width}px`,
+    height: `${height}px`,
+  }
+})
+
+// ---------- 坐标转换 ----------
+
+/** 屏幕坐标 → 世界坐标（基于容器） */
+function screenToWorld(clientX, clientY) {
+  const rect = containerRef.value?.getBoundingClientRect()
+  if (!rect) return { x: 0, y: 0 }
+  return store.screenToWorld(clientX - rect.left, clientY - rect.top)
+}
+
+// ---------- 画布级鼠标事件 ----------
+
+/** 画布 mousedown：判断是平移、框选还是节点拖拽 */
+function onCanvasMouseDown(e) {
+  // 中键或 Space 按下 → 平移模式
+  if (e.button === 1 || store._isSpacePressed) {
+    e.preventDefault()
+    dragState.value = {
+      type: 'pan',
+      startX: e.clientX,
+      startY: e.clientY,
+      originVx: store.viewport.x,
+      originVy: store.viewport.y,
+    }
+    return
+  }
+
+  // 左键点击空白 → 框选
+  if (e.button === 0 && e.target === e.currentTarget) {
+    const rect = containerRef.value.getBoundingClientRect()
+    const startScreen = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+    const startWorld = store.screenToWorld(startScreen.x, startScreen.y)
+    dragState.value = {
+      type: 'select',
+      startScreen,
+      startWorld,
+    }
+    store.selectionBox = {
+      startScreen,
+      endScreen: { ...startScreen },
+      startWorld,
+      endWorld: { ...startWorld },
+    }
+    // 清除选中
+    store.selectedPanelIds = []
+    store.selectedPanelId = null
+    store.selectedConnectionId = null
+  }
+}
+
+/** 画布 mousemove：更新平移/框选/节点拖拽 */
+function onCanvasMouseMove(e) {
+  if (!dragState.value) {
+    // 更新连线拖拽位置
+    if (store._connecting) {
+      store.updateConnecting(e.clientX, e.clientY)
+    }
+    return
+  }
+
+  const ds = dragState.value
+
+  if (ds.type === 'pan') {
+    const dx = e.clientX - ds.startX
+    const dy = e.clientY - ds.startY
+    store.viewport.x = ds.originVx + dx
+    store.viewport.y = ds.originVy + dy
+    return
+  }
+
+  if (ds.type === 'select') {
+    const rect = containerRef.value.getBoundingClientRect()
+    const endScreen = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+    const endWorld = store.screenToWorld(endScreen.x, endScreen.y)
+    store.selectionBox = {
+      ...store.selectionBox,
+      endScreen,
+      endWorld,
+    }
+    return
+  }
+
+  if (ds.type === 'node') {
+    const world = screenToWorld(e.clientX, e.clientY)
+    const dx = world.x - ds.startWorld.x
+    const dy = world.y - ds.startWorld.y
+    // 高频更新，不压栈
+    for (const item of ds.panels) {
+      store._updatePanelDirect(item.id, {
+        x: item.origX + dx,
+        y: item.origY + dy,
+      })
+    }
+    return
+  }
+
+  if (ds.type === 'resize') {
+    const world = screenToWorld(e.clientX, e.clientY)
+    const panel = store.panels.find((p) => p.id === ds.panelId)
+    if (!panel) return
+    let newW = ds.origW
+    let newH = ds.origH
+    let newX = ds.origX
+    let newY = ds.origY
+    const dx = world.x - ds.startWorld.x
+    const dy = world.y - ds.startWorld.y
+    // 根据 handle 方向计算新尺寸
+    if (ds.handle.includes('e')) newW = Math.max(60, ds.origW + dx)
+    if (ds.handle.includes('s')) newH = Math.max(40, ds.origH + dy)
+    if (ds.handle.includes('w')) {
+      newW = Math.max(60, ds.origW - dx)
+      newX = ds.origX + (ds.origW - newW)
+    }
+    if (ds.handle.includes('n')) {
+      newH = Math.max(40, ds.origH - dy)
+      newY = ds.origY + (ds.origH - newH)
+    }
+    // 图片节点保持比例（按 shift 强制自由变形）
+    if (ds.keepRatio && !ds.freeResize) {
+      // 简化：按宽度等比缩放高度
+      const ratio = ds.origH / ds.origW
+      newH = newW * ratio
+    }
+    store._updatePanelDirect(ds.panelId, {
+      x: newX, y: newY, width: newW, height: newH,
+    })
+    return
+  }
+}
+
+/** 画布 mouseup：结束所有拖拽 */
+function onCanvasMouseUp(e) {
+  if (!dragState.value) {
+    // 结束连线拖拽
+    if (store._connecting) {
+      // 未命中目标锚点 → 检查是否拖到空白
+      const world = screenToWorld(e.clientX, e.clientY)
+      store.setPendingConnectionCreate({
+        sourcePanelId: store._connecting.sourcePanelId,
+        anchorType: store._connecting.anchorType,
+        worldX: world.x,
+        worldY: world.y,
+      })
+      store.cancelConnecting()
+    }
+    return
+  }
+
+  const ds = dragState.value
+
+  if (ds.type === 'select') {
+    // 计算框选范围内的面板
+    if (store.selectionBox) {
+      const { startWorld, endWorld } = store.selectionBox
+      store.selectPanelsInRect({ startWorld, endWorld })
+    }
+    store.selectionBox = null
+  }
+
+  if (ds.type === 'node' || ds.type === 'resize') {
+    // 拖拽结束保存一次
+    store.saveCanvas?.(store)
+  }
+
+  dragState.value = null
+}
+
+// ---------- 滚轮缩放 ----------
+
+function onWheel(e) {
+  const rect = containerRef.value.getBoundingClientRect()
+  const center = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+  const delta = e.deltaY > 0 ? 0.9 : 1.1
+  const newZoom = Math.min(3, Math.max(0.1, store.viewport.zoom * delta))
+  store.setZoom(newZoom, center)
+}
+
+// ---------- 节点事件转发 ----------
+
+/** 节点开始拖拽 */
+function onNodeDragStart({ panelId, e }) {
+  // 选中该节点
+  if (!store.selectedPanelIds.includes(panelId)) {
+    if (e.shiftKey) {
+      store.selectedPanelIds = [...store.selectedPanelIds, panelId]
+    } else {
+      store.selectedPanelIds = [panelId]
+    }
+    store.selectedPanelId = panelId
+  }
+  // 收集所有选中节点
+  const panels = store.selectedPanelIds
+    .map((id) => store.panels.find((p) => p.id === id))
+    .filter(Boolean)
+  store.pushSnapshot()
+  dragState.value = {
+    type: 'node',
+    startWorld: screenToWorld(e.clientX, e.clientY),
+    panels: panels.map((p) => ({
+      id: p.id,
+      origX: p.x,
+      origY: p.y,
+    })),
+  }
+}
+
+/** 节点开始缩放 */
+function onNodeResizeStart({ panelId, handle, e }) {
+  const panel = store.panels.find((p) => p.id === panelId)
+  if (!panel) return
+  store.pushSnapshot()
+  const keepRatio = panel.type === 'image' && !panel.content?.freeResize
+  dragState.value = {
+    type: 'resize',
+    panelId,
+    handle,
+    startWorld: screenToWorld(e.clientX, e.clientY),
+    origX: panel.x,
+    origY: panel.y,
+    origW: panel.width,
+    origH: panel.height,
+    keepRatio,
+    freeResize: panel.content?.freeResize,
+  }
+}
+
+/** 连线开始 */
+function onConnectStart({ panelId, anchorType }) {
+  store.startConnecting(panelId, anchorType)
+}
+
+/** 连线结束（命中目标锚点） */
+function onConnectEnd({ panelId, anchorType }) {
+  store.endConnecting(panelId, anchorType)
+}
+
+/** 选中连线 */
+function onSelectConnection(connId) {
+  store.selectedConnectionId = connId
+  store.selectedPanelIds = []
+  store.selectedPanelId = null
+}
+
+/** 节点编辑事件 */
+function onPanelEdit(panel) {
+  emit('panel-edit', panel)
+}
+
+/** 节点动作事件 */
+function onPanelAction(payload) {
+  emit('panel-action', payload)
+}
+
+// ---------- 生命周期 ----------
+
 const emit = defineEmits(['panel-edit', 'panel-action'])
 
-// ===== 交互状态 =====
-// 平移状态：{ active, startX, startY, initX, initY }，只存在于本次 pointer 序列内
-const panState = ref(null)
-// 是否正在平移中（用于 CSS 切换 grabbing 光标）
-const isPanning = ref(false)
-// 框选状态：{ active, startScreenX, startScreenY }
-const selectionState = ref(null)
+onMounted(() => {
+  // 全局 mouseup 监听（防止鼠标移出容器后拖拽不结束）
+  window.addEventListener('mouseup', onCanvasMouseUp)
+})
 
-/** 计算 pointerdown 时命中的元素类型，用于决定是否触发画布级操作 */
-function hitCanvasBackground(event) {
-  const target = event.target
-  if (!(target instanceof Element)) return false
-  // 如果命中节点/连线/锚点/工具栏/浮层，则不是"画布背景"
-  if (target.closest('[data-canvas-target="panel"]')) return false
-  if (target.closest('.connection-group')) return false
-  if (target.closest('[data-anchor]')) return false
-  if (target.closest('.connection-create-menu')) return false
-  return true
-}
-
-/** 滚轮缩放：以鼠标位置为中心；按住 Ctrl/Cmd 微调缩放速度 */
-function handleWheel(event) {
-  // 命中节点输入内容时不缩放（虽然 preventDefault 会阻止滚动，但为了安全仍做判断）
-  const target = event.target
-  if (target && target.closest('[data-canvas-no-zoom]')) return
-
-  const factor = Math.pow(1.0015, -event.deltaY)
-  // 以鼠标相对画布容器的位置为缩放中心
-  const rect = rootRef.value?.getBoundingClientRect()
-  if (!rect) return
-  const centerX = event.clientX - rect.left
-  const centerY = event.clientY - rect.top
-  store.zoom(factor, { x: centerX, y: centerY })
-}
-
-/** 指针按下：区分"平移 / 框选 / 普通点击" */
-function handlePointerDown(event) {
-  // 只处理主按钮（左键）或中键
-  const isMiddle = event.button === 1
-  const isLeft = event.button === 0
-  if (!isLeft && !isMiddle) return
-
-  const target = event.target
-  const isBackground = hitCanvasBackground(event)
-
-  // Ctrl/Cmd + 左键 + 背景命中：框选模式
-  if (isLeft && (event.ctrlKey || event.metaKey) && isBackground) {
-    selectionState.value = {
-      startScreenX: event.clientX,
-      startScreenY: event.clientY,
-    }
-    // 尝试捕获指针，避免拖到浏览器外部时丢失 move/up
-    try { rootRef.value?.setPointerCapture(event.pointerId) } catch { /* noop */ }
-    return
-  }
-
-  // 中键 或 (空格按下且左键且背景)：进入平移
-  const spacePan = isLeft && store._isSpacePressed && isBackground
-  const bgPan = isLeft && isBackground
-  if (isMiddle || spacePan || bgPan) {
-    panState.value = {
-      startX: event.clientX,
-      startY: event.clientY,
-      initX: store.viewport.x,
-      initY: store.viewport.y,
-    }
-    isPanning.value = true
-    try { rootRef.value?.setPointerCapture(event.pointerId) } catch { /* noop */ }
-    return
-  }
-
-  // 命中背景 + 普通左键：清空当前选中（已由 CanvasPanels/BaseNode 处理节点选中，
-  // 这里只负责"点到空白 → 取消选中"）
-  if (isLeft && isBackground) {
-    // 如果之前有选中节点/连线，则清空；否则什么都不做，允许继续传递事件
-    if (store.selectedPanelIds.length > 0 || store.selectedConnectionId) {
-      store.clearSelection()
-    }
-  }
-}
-
-/** 指针移动：根据当前状态（平移 / 框选）执行对应更新 */
-function handlePointerMove(event) {
-  // 平移进行中
-  if (panState.value) {
-    const dx = event.clientX - panState.value.startX
-    const dy = event.clientY - panState.value.startY
-    // viewport.x/y 直接是屏幕偏移量（像素），不需要除 zoom
-    store.viewport.x = panState.value.initX + dx
-    store.viewport.y = panState.value.initY + dy
-    return
-  }
-
-  // 框选进行中：屏幕坐标 → 世界坐标，写入 store.selectionBox
-  if (selectionState.value) {
-    const rect = rootRef.value?.getBoundingClientRect()
-    if (!rect) return
-    const sx = selectionState.value.startScreenX - rect.left
-    const sy = selectionState.value.startScreenY - rect.top
-    const ex = event.clientX - rect.left
-    const ey = event.clientY - rect.top
-    // 屏幕坐标 → 世界坐标：(x - viewport.x) / zoom
-    const z = store.viewport.zoom
-    const startWorld = { x: (sx - store.viewport.x) / z, y: (sy - store.viewport.y) / z }
-    const endWorld = { x: (ex - store.viewport.x) / z, y: (ey - store.viewport.y) / z }
-    store.setSelectionBox({ startWorld, endWorld })
-    return
-  }
-}
-
-/** 指针松开：结束平移/框选，并在框选时触发 selectPanelsInRect */
-function handlePointerUp(event) {
-  // 结束平移
-  if (panState.value) {
-    panState.value = null
-    isPanning.value = false
-    try { rootRef.value?.releasePointerCapture(event.pointerId) } catch { /* noop */ }
-    return
-  }
-
-  // 结束框选：用当前 selectionBox 触发选中（追加模式由 Shift 控制）
-  if (selectionState.value) {
-    const box = store.selectionBox
-    selectionState.value = null
-    try { rootRef.value?.releasePointerCapture(event.pointerId) } catch { /* noop */ }
-    if (box) {
-      // Shift：与已有选中叠加；否则替换
-      const append = event.shiftKey
-      store.selectPanelsInRect(box, { append })
-      store.clearSelectionBox()
-    }
-    return
-  }
-}
-
-/** 画布上右键（被 @contextmenu.prevent 拦截） → 抛给上层 CanvasView 统一处理 */
-function handleContextMenu(event) {
-  // 此处不直接打开菜单，由上层 CanvasView 监听全局 contextmenu 事件来处理
-  // 保留钩子以便未来做"画布级"右键菜单项
-  return false
-}
-
-onBeforeUnmount(() => {
-  // 组件卸载时清理交互状态
-  panState.value = null
-  selectionState.value = null
-  isPanning.value = false
+onUnmounted(() => {
+  window.removeEventListener('mouseup', onCanvasMouseUp)
 })
 </script>
 
 <style scoped>
-.infinite-canvas {
+.infinite-canvas-container {
   position: relative;
   flex: 1;
-  min-width: 0;
-  min-height: 0;
-  width: 100%;
-  height: 100%;
   overflow: hidden;
-  /* 默认光标：指针；平移时切换为 grab */
   cursor: default;
-  /* 避免文本选中影响拖动体验 */
-  user-select: none;
-  -webkit-user-select: none;
-  /* 触摸设备：允许非被动的滚轮处理（禁止滚动页面） */
-  touch-action: none;
+  background: var(--canvas-bg);
 }
 
-/* 空格键按下：整画布显示 grab 光标，提示用户可以拖动画布 */
-.infinite-canvas.is-space-pressed {
-  cursor: grab;
+.infinite-canvas-container:active {
+  cursor: inherit;
 }
 
-/* 平移中：显示 grabbing 光标 */
-.infinite-canvas.is-panning {
-  cursor: grabbing;
+.canvas-world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
 }
 
-/* 正在框选时：显示 crosshair（这里在 selectionState 存在时由 pointerdown 已决定，
-   因此这里不用额外 class；保留以防未来需要） */
+/* 背景层：覆盖一个超大区域，随 world transform 缩放 */
+.canvas-bg {
+  position: absolute;
+  top: -100000px;
+  left: -100000px;
+  width: 200000px;
+  height: 200000px;
+  pointer-events: none;
+}
+
+/* 点阵背景 */
+.canvas-bg.bg-dot {
+  background-image: radial-gradient(
+    var(--canvas-grid-dot) 1px,
+    transparent 1px
+  );
+  background-size: 24px 24px;
+}
+
+/* 网格背景 */
+.canvas-bg.bg-grid {
+  background-image: linear-gradient(var(--canvas-grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--canvas-grid-line) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* 空白背景 */
+.canvas-bg.bg-blank {
+  background: transparent;
+}
+
+/* 框选矩形 */
+.selection-box {
+  position: absolute;
+  background: var(--canvas-selection-fill);
+  border: 1px solid var(--canvas-selection-stroke);
+  pointer-events: none;
+  z-index: 9999;
+}
 </style>
