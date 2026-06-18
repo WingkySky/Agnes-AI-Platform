@@ -1,254 +1,354 @@
-/* =====================================================
- * 左侧栏：多画布管理
- * - 画布列表展示
- * - 新建/重命名/删除画布按钮
- * - 选中高亮
- * - 点击不同画布切换保存好的编排
- * ===================================================== */
+<!-- =====================================================
+     CanvasSidebar 左侧栏：多画布管理
+     - 顶部标题"画布管理" + 新建画布按钮
+     - 画布列表：点击切换 / 双击重命名 / 删除确认（el-popconfirm）
+     - 当前激活画布高亮
+     - 底部主题切换（深色 / 浅色）
+     - 直接操作 useCanvasStore，不对外 emit
+     ===================================================== -->
 
 <template>
-  <div class="canvas-sidebar">
+  <aside class="canvas-sidebar">
+    <!-- 顶部标题 + 新建按钮 -->
     <div class="sidebar-header">
-      <h3>{{ t('canvas.sidebarTitle') }}</h3>
-      <el-tooltip :content="t('canvas.newCanvas')" placement="right">
-        <el-icon class="add-icon" @click="handleCreate">
-          <Plus />
-        </el-icon>
-      </el-tooltip>
+      <span class="sidebar-title">{{ t('canvas.sidebarTitle') }}</span>
+      <button class="icon-btn" :title="t('canvas.newCanvas')" @click="handleNewCanvas">
+        <el-icon><Plus /></el-icon>
+      </button>
     </div>
 
-    <div class="sidebar-list">
+    <!-- 画布列表（可滚动） -->
+    <div class="workspace-list">
+      <div v-if="store.workspaces.length === 0" class="empty-hint">
+        {{ t('canvas.noCanvas') }}
+      </div>
+
       <div
-        v-for="ws in workspaces"
+        v-for="ws in store.workspaces"
         :key="ws.id"
-        :class="['sidebar-item', { active: ws.id === store.activeWorkspaceId }]"
+        class="workspace-item"
+        :class="{ active: ws.id === store.activeWorkspaceId }"
         @click="handleSwitch(ws.id)"
+        @dblclick="startRename(ws)"
       >
-        <el-icon><Monitor /></el-icon>
-        <!-- 画布名称：支持双击重命名 -->
-        <input
-          v-if="renamingId === ws.id"
-          v-model="renamingName"
-          class="sidebar-item-input"
-          :placeholder="t('canvas.renamePlaceholder')"
-          @click.stop
-          @keyup.enter="commitRename"
-          @keyup.esc="cancelRename"
-          @blur="commitRename"
-          :ref="(el) => { if (el) renameInputEl = el }"
-        />
-        <span v-else class="sidebar-item-name" @dblclick.stop="startRename(ws)">
-          {{ ws.name }}
-        </span>
-        <!-- 编辑（重命名）按钮 -->
-        <el-icon
-          class="sidebar-item-edit"
-          @click.stop="startRename(ws)"
-        >
-          <Edit />
-        </el-icon>
-        <!-- 删除按钮 -->
-        <el-icon
-          v-if="workspaces.length > 1"
-          class="sidebar-item-delete"
-          @click.stop="handleDelete(ws.id)"
-        >
-          <Delete />
-        </el-icon>
-      </div>
+        <!-- 名称行：重命名时显示 el-input，否则显示文本 -->
+        <div class="ws-name-row">
+          <el-input
+            v-if="renameState.id === ws.id"
+            ref="renameInputRef"
+            v-model="renameState.value"
+            size="small"
+            :placeholder="t('canvas.renamePlaceholder')"
+            @keyup.enter="confirmRename"
+            @keyup.escape="cancelRename"
+            @blur="confirmRename"
+            @click.stop
+          />
+          <span v-else class="ws-name" :title="ws.name">{{ ws.name }}</span>
 
-      <!-- 空状态 -->
-      <div v-if="workspaces.length === 0" class="sidebar-empty">
-        <p>{{ t('canvas.noCanvas') }}</p>
+          <!-- 删除按钮（el-popconfirm 确认） -->
+          <el-popconfirm
+            :title="t('canvas.confirmDelete')"
+            confirm-button-text="确定"
+            cancel-button-text="取消"
+            @confirm="store.deleteWorkspace(ws.id)"
+          >
+            <template #reference>
+              <button class="delete-btn" :title="t('canvas.toolbar.delete')" @click.stop>
+                <el-icon><Delete /></el-icon>
+              </button>
+            </template>
+          </el-popconfirm>
+        </div>
+
+        <!-- 元信息：创建时间 + 面板数量 -->
+        <div v-if="renameState.id !== ws.id" class="ws-meta">
+          <span class="ws-date">{{ formatDate(ws.created_at) }}</span>
+          <span class="ws-count">{{ getPanelCount(ws) }} {{ t('canvas.panels') }}</span>
+        </div>
       </div>
     </div>
-  </div>
+
+    <!-- 底部主题切换 -->
+    <div class="sidebar-footer">
+      <div class="theme-toggle">
+        <button
+          class="theme-btn"
+          :class="{ active: store.themeMode === 'dark' }"
+          @click="store.setThemeMode('dark')"
+        >
+          深色
+        </button>
+        <button
+          class="theme-btn"
+          :class="{ active: store.themeMode === 'light' }"
+          @click="store.setThemeMode('light')"
+        >
+          浅色
+        </button>
+      </div>
+    </div>
+  </aside>
 </template>
 
 <script setup>
-import { computed, nextTick, ref } from 'vue'
-import { ElMessageBox } from 'element-plus'
-import { Plus, Delete, Edit, Monitor } from '@element-plus/icons-vue'
+// ------ 模块依赖 ------
+import { reactive, ref, nextTick } from 'vue'
 import { useCanvasStore } from '@/stores/canvas'
 import { useI18n } from '@/i18n'
 
-const { t } = useI18n()
 const store = useCanvasStore()
-const workspaces = computed(() => store.workspaces)
+const { t } = useI18n()
 
-// 重命名状态：renamingId 标记当前正在重命名的画布 id
-const renamingId = ref(null)
-const renamingName = ref('')
-const renameInputEl = ref(null)
+// ------ 重命名状态 ------
+// renameState.id 为正在重命名的 workspace id，null 表示不在重命名
+const renameState = reactive({ id: null, value: '' })
+const renameInputRef = ref(null)
 
-function handleCreate() {
-  const name = `${t('canvas.canvas')} ${workspaces.value.length + 1}`
+// ------ 新建画布 ------
+function handleNewCanvas() {
+  const name = `画布 ${store.workspaces.length + 1}`
   store.createWorkspace(name)
 }
 
-/** 切换画布：切换前会由 store 自动保存当前画布编排 */
+// ------ 切换画布 ------
 function handleSwitch(id) {
-  // 正在重命名时，先提交重命名再切换，避免 input 失焦与切换冲突
-  if (renamingId.value !== null) {
-    commitRename()
+  if (id !== store.activeWorkspaceId) {
+    store.switchWorkspace(id)
   }
-  store.switchWorkspace(id)
 }
 
-async function handleDelete(id) {
-  await ElMessageBox.confirm(
-    t('canvas.confirmDelete'),
-    t('common.confirm'),
-    { type: 'warning' },
-  )
-  store.deleteWorkspace(id)
+// ------ 开始重命名 ------
+async function startRename(ws) {
+  renameState.id = ws.id
+  renameState.value = ws.name
+  await nextTick()
+  // ref 在 v-for 内可能是数组，取第一个
+  const el = Array.isArray(renameInputRef.value)
+    ? renameInputRef.value[0]
+    : renameInputRef.value
+  el?.focus?.()
+  el?.select?.()
 }
 
-/** 进入重命名模式 */
-function startRename(ws) {
-  renamingId.value = ws.id
-  renamingName.value = ws.name
-  nextTick(() => {
-    renameInputEl.value?.focus()
-    renameInputEl.value?.select?.()
-  })
-}
-
-/** 提交重命名 */
-function commitRename() {
-  if (renamingId.value === null) return
-  const newName = renamingName.value.trim()
-  if (newName) {
-    store.renameWorkspace(renamingId.value, newName)
+// ------ 确认重命名 ------
+function confirmRename() {
+  if (renameState.id) {
+    store.renameWorkspace(renameState.id, renameState.value)
+    renameState.id = null
   }
-  renamingId.value = null
-  renamingName.value = ''
 }
 
-/** 取消重命名 */
+// ------ 取消重命名 ------
 function cancelRename() {
-  renamingId.value = null
-  renamingName.value = ''
+  renameState.id = null
+}
+
+// ------ 面板数量：激活画布用 store.panels，其余用 workspace.panels ------
+function getPanelCount(ws) {
+  if (ws.id === store.activeWorkspaceId) return store.panels.length
+  return ws.panels?.length ?? 0
+}
+
+// ------ 日期格式化：MM-DD HH:mm ------
+function formatDate(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mi = String(d.getMinutes()).padStart(2, '0')
+  return `${mm}-${dd} ${hh}:${mi}`
 }
 </script>
 
 <style scoped>
+/* 左侧栏容器：220px 宽，全高，右侧分隔线 */
 .canvas-sidebar {
   width: 220px;
-  min-width: 220px;
-  background: rgba(15, 22, 38, 0.75);
-  border-right: 1px solid rgba(100, 150, 220, 0.12);
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  user-select: none;
+  background: var(--canvas-panel-bg);
+  border-right: 1px solid var(--canvas-node-border);
   backdrop-filter: blur(12px);
+  user-select: none;
 }
 
+/* 顶部标题栏 */
 .sidebar-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 14px 10px;
-  border-bottom: 1px solid rgba(100, 150, 220, 0.08);
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--canvas-node-border);
 }
 
-.sidebar-header h3 {
-  margin: 0;
+.sidebar-title {
   font-size: 13px;
   font-weight: 600;
-  color: #a0b4d6;
+  color: var(--canvas-node-title-text);
+  letter-spacing: 0.5px;
 }
 
-.add-icon {
-  font-size: 18px;
-  color: #508cff;
-  cursor: pointer;
-  padding: 4px;
+/* 极简扁平图标按钮 */
+.icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
   border-radius: 6px;
-  transition: background 0.15s;
+  background: transparent;
+  color: var(--canvas-node-muted-text);
+  cursor: pointer;
+  transition: all 0.15s ease;
 }
 
-.add-icon:hover {
-  background: rgba(80, 140, 255, 0.12);
+.icon-btn:hover {
+  background: var(--canvas-node-border);
+  color: var(--canvas-node-title-text);
 }
 
-.sidebar-list {
+/* 画布列表（可滚动区域） */
+.workspace-list {
   flex: 1;
   overflow-y: auto;
   padding: 8px;
 }
 
-.sidebar-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
+.workspace-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.workspace-list::-webkit-scrollbar-thumb {
+  background: var(--canvas-node-border);
+  border-radius: 2px;
+}
+
+/* 空状态提示 */
+.empty-hint {
+  padding: 24px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--canvas-node-muted-text);
+  line-height: 1.6;
+}
+
+/* 单个画布卡片 */
+.workspace-item {
+  padding: 10px 12px;
   border-radius: 8px;
   cursor: pointer;
-  font-size: 13px;
-  color: #8ba3c9;
-  transition: all 0.15s;
+  margin-bottom: 4px;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
 }
 
-.sidebar-item:hover {
-  background: rgba(120, 170, 255, 0.06);
-  color: #c0d4f6;
+.workspace-item:hover {
+  background: var(--canvas-node-border);
 }
 
-.sidebar-item.active {
-  background: linear-gradient(135deg, rgba(80, 140, 255, 0.2) 0%, rgba(160, 120, 255, 0.2) 100%);
-  color: #fff;
+.workspace-item.active {
+  background: var(--canvas-node-border);
+  border-color: var(--canvas-node-active-border);
 }
 
-.sidebar-item-icon {
-  font-size: 15px;
+/* 名称行：名称 + 删除按钮 */
+.ws-name-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
-.sidebar-item-name {
+.ws-name {
   flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--canvas-node-title-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.sidebar-item-input {
-  flex: 1;
-  min-width: 0;
-  background: rgba(15, 22, 38, 0.9);
-  border: 1px solid rgba(80, 140, 255, 0.5);
+/* 删除按钮：默认隐藏，hover 时显示 */
+.delete-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
   border-radius: 4px;
-  color: #fff;
-  font-size: 13px;
-  padding: 2px 6px;
-  outline: none;
-}
-
-.sidebar-item-edit,
-.sidebar-item-delete {
-  font-size: 14px;
-  color: #6b84aa;
+  background: transparent;
+  color: var(--canvas-node-muted-text);
+  cursor: pointer;
   opacity: 0;
-  transition: all 0.15s;
+  transition: all 0.15s ease;
   flex-shrink: 0;
 }
 
-.sidebar-item:hover .sidebar-item-edit,
-.sidebar-item:hover .sidebar-item-delete {
+.workspace-item:hover .delete-btn {
   opacity: 1;
 }
 
-.sidebar-item-edit:hover {
-  color: #508cff;
+.delete-btn:hover {
+  background: rgba(248, 113, 113, 0.15);
+  color: #f87171;
 }
 
-.sidebar-item-delete:hover {
-  color: #ff6b6b;
+/* 元信息行 */
+.ws-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--canvas-node-muted-text);
 }
 
-.sidebar-empty {
-  padding: 20px;
-  text-align: center;
-  color: #6b84aa;
-  font-size: 13px;
+.ws-date {
+  font-variant-numeric: tabular-nums;
+}
+
+.ws-count {
+  margin-left: auto;
+}
+
+/* 底部主题切换 */
+.sidebar-footer {
+  padding: 12px 16px;
+  border-top: 1px solid var(--canvas-node-border);
+}
+
+.theme-toggle {
+  display: flex;
+  gap: 4px;
+  background: var(--canvas-node-border);
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.theme-btn {
+  flex: 1;
+  padding: 6px 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--canvas-node-muted-text);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.theme-btn.active {
+  background: var(--canvas-panel-bg);
+  color: var(--canvas-node-title-text);
+  font-weight: 500;
+}
+
+.theme-btn:not(.active):hover {
+  color: var(--canvas-node-title-text);
 }
 </style>

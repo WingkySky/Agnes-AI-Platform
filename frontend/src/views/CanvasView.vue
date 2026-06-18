@@ -26,10 +26,29 @@
       />
 
       <!-- 无限画布 -->
-      <InfiniteCanvas ref="infiniteCanvasRef" @panel-edit="handlePanelEdit" />
+      <InfiniteCanvas ref="infiniteCanvasRef" @panel-edit="handlePanelEdit" @panel-action="handlePanelAction" />
 
       <!-- Minimap 小地图 -->
-      <CanvasMinimap />
+      <CanvasMinimap v-if="isMinimapOpen" />
+
+      <!-- 底部浮动快捷工具栏 -->
+      <CanvasQuickToolbar />
+
+      <!-- 左下角缩放控制面板 -->
+      <CanvasZoomControls
+        :is-minimap-open="isMinimapOpen"
+        @toggle-minimap="toggleMinimap"
+      />
+
+      <!-- 节点悬停工具栏 -->
+      <CanvasNodeHoverToolbar
+        v-if="hoveredPanel"
+        :panel="hoveredPanel"
+        :visible="showHoverToolbar"
+        @action="handleHoverToolbarAction"
+        @enter="handleHoverToolbarEnter"
+        @leave="handleHoverToolbarLeave"
+      />
     </div>
 
     <!-- 右侧属性面板 -->
@@ -75,10 +94,14 @@ import CanvasToolbar from '@/components/infinite-canvas/CanvasToolbar.vue'
 import InfiniteCanvas from '@/components/infinite-canvas/InfiniteCanvas.vue'
 import CanvasContextMenu from '@/components/infinite-canvas/CanvasContextMenu.vue'
 import CanvasMinimap from '@/components/infinite-canvas/CanvasMinimap.vue'
+import CanvasQuickToolbar from '@/components/infinite-canvas/CanvasQuickToolbar.vue'
+import CanvasNodeHoverToolbar from '@/components/infinite-canvas/CanvasNodeHoverToolbar.vue'
+import CanvasZoomControls from '@/components/infinite-canvas/CanvasZoomControls.vue'
 import CanvasRightPanel from '@/components/infinite-canvas/CanvasRightPanel.vue'
 import ConnectionCreateMenu from '@/components/infinite-canvas/ConnectionCreateMenu.vue'
 import PanelEditDialog from '@/components/infinite-canvas/PanelEditDialog.vue'
 import ImageCropDialog from '@/components/infinite-canvas/ImageCropDialog.vue'
+import { executeMergeGeneration } from '@/lib/canvas-generation'
 import { useI18n } from '@/i18n'
 
 const { t } = useI18n()
@@ -101,6 +124,44 @@ const cropImageSrc = computed(() => {
 })
 // 节点级异步动作的 loading 状态集合（防止重复触发）
 const loadingActions = reactive({})
+
+// 小地图显示状态
+const isMinimapOpen = ref(true)
+
+// 节点悬停工具栏状态
+const hoveredPanel = ref(null)
+const showHoverToolbar = ref(false)
+const hoverToolbarTimer = ref(null)
+
+/** 切换小地图显示 */
+function toggleMinimap() {
+  isMinimapOpen.value = !isMinimapOpen.value
+}
+
+/** 处理节点悬停工具栏动作 */
+function handleHoverToolbarAction({ type, panel }) {
+  // 复用现有的 handlePanelAction 逻辑
+  handlePanelAction({ type, panel })
+  showHoverToolbar.value = false
+  hoveredPanel.value = null
+}
+
+/** 鼠标进入悬停工具栏 */
+function handleHoverToolbarEnter() {
+  if (hoverToolbarTimer.value) {
+    clearTimeout(hoverToolbarTimer.value)
+    hoverToolbarTimer.value = null
+  }
+  showHoverToolbar.value = true
+}
+
+/** 鼠标离开悬停工具栏 */
+function handleHoverToolbarLeave() {
+  hoverToolbarTimer.value = setTimeout(() => {
+    showHoverToolbar.value = false
+    hoveredPanel.value = null
+  }, 300)
+}
 
 /** 右键菜单处理：把 panel 对象一并传给 CanvasContextMenu，支持按类型渲染节点级操作 */
 function handleContextMenu(e) {
@@ -418,7 +479,7 @@ function handlePanelAction({ type, panel }) {
       adjustFont(panel, -1)
       break
     case 'generate':
-      ElMessage.info(t('canvas.editDialog.generateHint'))
+      handleMergeGenerate(panel)
       break
     case 'generateVideo':
       ElMessage.info(t('canvas.editDialog.generateVideoHint'))
@@ -432,6 +493,50 @@ function handlePanelAction({ type, panel }) {
       break
     default:
       ElMessage.info(t('canvas.toolbar.edit'))
+  }
+}
+
+/** 合并生成：调用 executeMergeGeneration 收集上游资源 + 解析 @[node:xxx] + 调用 AI 接口 + 回填结果
+ *  - 仅支持 Config 节点（quick-generate 节点走简单生成流程）
+ *  - 生成过程中显示进度提示
+ *  - 成功后自动创建结果节点并连线
+ */
+async function handleMergeGenerate(panel) {
+  // 仅 Config 节点支持合并生成
+  if (panel.type !== 'config') {
+    ElMessage.info('该节点类型暂不支持合并生成，请使用 Config 节点')
+    return
+  }
+  if (loadingActions[`generate-${panel.id}`]) {
+    ElMessage.warning('正在生成中，请稍候...')
+    return
+  }
+  loadingActions[`generate-${panel.id}`] = true
+  const loadingMsg = ElMessage.info({ message: '开始合并生成...', duration: 0 })
+  try {
+    const count = Math.max(1, Number(panel.content?.count) || 1)
+    await executeMergeGeneration(panel.id, store, {
+      count,
+      onProgress: (stage, data) => {
+        const messages = {
+          building: `正在收集上游资源（${data?.inputSummary?.total || 0} 个）...`,
+          creating: `正在创建生成任务（${(data?.index || 0) + 1}/${data?.total || count}）...`,
+          polling: `等待生成结果（${(data?.index || 0) + 1}/${data?.total || count}）...`,
+          generating: `生成中... ${data?.progress ? Math.round(data.progress * 100) + '%' : ''}`,
+          done: `生成完成，已创建 ${data?.resultNodeIds?.length || 0} 个结果节点`,
+        }
+        if (messages[stage]) {
+          loadingMsg.message = messages[stage]
+        }
+      },
+    })
+    loadingMsg.close()
+    ElMessage.success('合并生成完成')
+  } catch (err) {
+    loadingMsg.close()
+    ElMessage.error(`合并生成失败：${err.message || String(err)}`)
+  } finally {
+    loadingActions[`generate-${panel.id}`] = false
   }
 }
 

@@ -110,7 +110,7 @@
 
     <!-- 对齐参考线（Task 6）：根据 store.alignmentGuides 渲染
          - 放在所有连线之后（DOM 顺序即 z-order），保证绘制在最上层
-         - 线段端点 ±50000 对应世界坐标全画布范围（SVG 已 overflow:visible，不会被裁剪）
+         - 线段端点 ±50000 对应世界坐标全画布范围（与容器 translate(-50000px, -50000px) 配套）
          - pointer-events="none" 不阻挡节点拖动 -->
     <g v-if="hasAlignmentGuides" class="alignment-guides" pointer-events="none">
       <!-- 垂直线：沿 x 坐标的竖线（对齐 left/center/right） -->
@@ -286,20 +286,14 @@ watch(() => store.pendingAutoConnect, (pending) => {
 </script>
 
 <style scoped>
-/* 连线 SVG 层定位说明：
-   - SVG 自身坐标 (0,0) 必须对齐世界坐标原点，path 才能用世界坐标正确绘制。
-   - 因此 SVG 尺寸设为 1px×1px + overflow: visible，让超出部分照常显示，
-     既不会裁剪连线/参考线，也不会用巨大尺寸拦截面板/锚点的指针事件。
-   - 严禁再加 translate(-50000,-50000) 之类的偏移：外层 CanvasViewport
-     已经做了世界→屏幕变换，SVG 再偏移会导致所有连线画到视野外（历史 bug）。 */
 .canvas-connections {
   position: absolute;
   top: 0;
   left: 0;
-  width: 1px;
-  height: 1px;
-  overflow: visible;
-  /* SVG 根元素禁用指针事件，避免拦截锚点/面板的 pointerdown。
+  width: 100000px;
+  height: 100000px;
+  transform: translate(-50000px, -50000px);
+  /* SVG 根元素禁用指针事件，避免 10万×10万 的巨大 SVG 拦截锚点/面板的 pointerdown。
      需要交互的子元素（连线 hit area、删除按钮）显式设置 pointer-events: auto/all。 */
   pointer-events: none;
 }

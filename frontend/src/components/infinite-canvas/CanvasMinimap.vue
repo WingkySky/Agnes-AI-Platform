@@ -1,184 +1,197 @@
-/* =====================================================
- * Minimap 小地图
- * - 右下角固定位置
- * - 显示所有面板的缩略位置
- * - 显示当前视口区域（高亮矩形）
- * - 点击小地图跳转到对应区域
- * ===================================================== */
+<!-- =====================================================
+     CanvasMinimap 右下角小地图
+     - 固定定位 200x150px，右下角 20px 边距
+     - SVG 渲染：所有面板按 type 颜色画小矩形
+     - 当前视口框高亮显示
+     - 点击 / 拖动小地图可平移画布（把点击位置居中到视口）
+     - 面板颜色来自 canvasThemes.minimap.panelColors
+       image 蓝 / video 紫 / text 绿 / config 橙 / frame 灰
+     ===================================================== -->
 
 <template>
-  <div class="minimap" @click.self="handleMinimapClick">
+  <div class="canvas-minimap">
     <svg
-      ref="svgRef"
+      ref="minimapRef"
       class="minimap-svg"
-      :viewBox="`${bounds.left} ${bounds.top} ${bounds.width} ${bounds.height}`"
+      width="200"
+      height="150"
+      :class="{ dragging: isDragging }"
+      @mousedown="handleMouseDown"
     >
-      <!-- 连线 -->
-      <path
-        v-for="conn in connections"
-        :key="conn.id"
-        :d="getMinimapConnectionD(conn)"
-        :stroke="theme.connection.muted"
-        stroke-width="1"
-        fill="none"
-      />
-
-      <!-- 面板缩略图 -->
+      <!-- 面板矩形：按 type 颜色区分 -->
       <rect
-        v-for="panel in panels"
+        v-for="panel in store.panels"
         :key="panel.id"
-        :x="panel.x"
-        :y="panel.y"
-        :width="panel.width"
-        :height="panel.height"
-        :rx="4"
-        :fill="getPanelColor(panel.type)"
-        :opacity="panel.id === selectedPanelId ? 0.9 : 0.6"
+        :x="worldToMiniX(panel.x)"
+        :y="worldToMiniY(panel.y)"
+        :width="Math.max(2, panel.width * transform.scale)"
+        :height="Math.max(2, panel.height * transform.scale)"
+        :rx="1"
+        :fill="panelColor(panel.type)"
+        pointer-events="none"
       />
 
-      <!-- 当前视口高亮矩形 -->
+      <!-- 当前视口框（高亮边框） -->
       <rect
-        :x="viewportRect.x"
-        :y="viewportRect.y"
-        :width="viewportRect.width"
-        :height="viewportRect.height"
-        rx="4"
-        fill="none"
-        :stroke="theme.connection.active"
-        stroke-width="2"
-        stroke-dasharray="4 2"
+        :x="worldToMiniX(store.viewportRect.x)"
+        :y="worldToMiniY(store.viewportRect.y)"
+        :width="Math.max(2, store.viewportRect.width * transform.scale)"
+        :height="Math.max(2, store.viewportRect.height * transform.scale)"
+        class="viewport-rect"
+        pointer-events="none"
       />
     </svg>
-
-    <!-- 缩放提示 -->
-    <div class="minimap-hint">
-      <span>{{ Math.round(viewport.zoom * 100) }}%</span>
-      <el-icon class="minimap-toggle" @click="toggleVisible">
-        <Close v-if="visible" />
-        <ZoomIn v-else />
-      </el-icon>
-    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+// ------ 模块依赖 ------
+import { ref, computed, onUnmounted } from 'vue'
 import { useCanvasStore } from '@/stores/canvas'
-import { Close, ZoomIn } from '@element-plus/icons-vue'
 
 const store = useCanvasStore()
-const svgRef = ref(null)
-const visible = ref(true)
-const theme = computed(() => store.canvasTheme)
 
-const panels = computed(() => store.panels)
-const connections = computed(() => store.connections)
-const bounds = computed(() => store.canvasBounds)
-const viewportRect = computed(() => store.viewportRect)
-const selectedPanelId = computed(() => store.selectedPanelId)
-const viewport = computed(() => store.viewport)
+// ------ 小地图尺寸常量 ------
+const MINI_W = 200
+const MINI_H = 150
+const PADDING = 6 // 内边距，避免内容贴边
 
-/** 根据面板类型返回颜色（从画布主题 token 读取） */
-function getPanelColor(type) {
-  const colors = theme.value.minimap?.panelColors ?? {}
+// ------ SVG 元素 ref ------
+const minimapRef = ref(null)
+
+// ------ 拖拽状态 ------
+const isDragging = ref(false)
+
+// ------ 缩放变换计算：根据 canvasBounds 计算 scale 和 offset ------
+const transform = computed(() => {
+  const bounds = store.canvasBounds
+  // 取宽高方向较小的缩放比，保证内容完整显示在小地图内
+  const scaleX = (MINI_W - PADDING * 2) / bounds.width
+  const scaleY = (MINI_H - PADDING * 2) / bounds.height
+  const scale = Math.min(scaleX, scaleY)
+
+  // 居中偏移
+  const contentW = bounds.width * scale
+  const contentH = bounds.height * scale
+  const offsetX = (MINI_W - contentW) / 2
+  const offsetY = (MINI_H - contentH) / 2
+
+  return { scale, offsetX, offsetY, bounds }
+})
+
+// ------ 世界坐标 → 小地图坐标 ------
+function worldToMiniX(worldX) {
+  const { scale, offsetX, bounds } = transform.value
+  return offsetX + (worldX - bounds.left) * scale
+}
+
+function worldToMiniY(worldY) {
+  const { scale, offsetY, bounds } = transform.value
+  return offsetY + (worldY - bounds.top) * scale
+}
+
+// ------ 小地图坐标 → 世界坐标 ------
+function miniToWorldX(miniX) {
+  const { scale, offsetX, bounds } = transform.value
+  return (miniX - offsetX) / scale + bounds.left
+}
+
+function miniToWorldY(miniY) {
+  const { scale, offsetY, bounds } = transform.value
+  return (miniY - offsetY) / scale + bounds.top
+}
+
+// ------ 面板颜色映射：来自 canvasThemes.minimap.panelColors ------
+// 任务要求：config 用橙色（映射自 url 色），frame 用灰色
+function panelColor(type) {
+  const colors = store.canvasTheme.minimap?.panelColors || {}
+  if (type === 'config') return colors.url || 'rgba(255, 180, 80, 0.5)'
+  if (type === 'frame') return 'rgba(150, 150, 180, 0.4)'
   return colors[type] || colors.default || 'rgba(150, 150, 180, 0.4)'
 }
 
-/** 小地图中的连线路径（直线连接锚点） */
-function getMinimapConnectionD(conn) {
-  const source = store.panels.find((p) => p.id === conn.source_panel_id)
-  const target = store.panels.find((p) => p.id === conn.target_panel_id)
-  if (!source || !target) return ''
-
-  const sx = source.x + source.width
-  const sy = source.y + source.height
-  const tx = target.x
-  const ty = target.y
-
-  return `M ${sx} ${sy} L ${tx} ${ty}`
+// ------ 把指定世界坐标居中到视口 ------
+// 直接修改 viewport.x/y，不压历史快照（与 centerOnPanel 同算法）
+function centerOnWorld(worldX, worldY) {
+  const { zoom } = store.viewport
+  store.viewport.x = window.innerWidth / 2 - worldX * zoom
+  store.viewport.y = window.innerHeight / 2 - worldY * zoom
 }
 
-/** 点击小地图跳转到对应区域 */
-function handleMinimapClick(e) {
-  if (!visible.value) return
+// ------ 鼠标按下：开始拖拽并立即居中到点击位置 ------
+function handleMouseDown(e) {
+  isDragging.value = true
+  centerOnMouse(e)
+  window.addEventListener('mousemove', handleMouseMove)
+  window.addEventListener('mouseup', handleMouseUp)
+}
 
-  const svg = svgRef.value
+// ------ 鼠标移动：拖拽中持续平移 ------
+function handleMouseMove(e) {
+  if (!isDragging.value) return
+  centerOnMouse(e)
+}
+
+// ------ 鼠标释放：结束拖拽 ------
+function handleMouseUp() {
+  isDragging.value = false
+  window.removeEventListener('mousemove', handleMouseMove)
+  window.removeEventListener('mouseup', handleMouseUp)
+}
+
+// ------ 把鼠标位置转换为世界坐标并居中 ------
+function centerOnMouse(e) {
+  const svg = minimapRef.value
   if (!svg) return
-
   const rect = svg.getBoundingClientRect()
-  const vb = svg.viewBox.baseVal
-
-  // 计算点击位置在世界坐标中的位置
-  const clickWorldX = vb.x + ((e.clientX - rect.left) / rect.width) * vb.width
-  const clickWorldY = vb.y + ((e.clientY - rect.top) / rect.height) * vb.height
-
-  // 将点击位置转换为视口中心
-  const viewWidth = window.innerWidth
-  const viewHeight = window.innerHeight
-
-  // 新的视口中心应该是点击位置
-  // 反向计算 viewport.x/y
-  const newX = -clickWorldX * viewport.value.zoom + viewWidth / 2 * viewport.value.zoom
-  const newY = -clickWorldY * viewport.value.zoom + viewHeight / 2 * viewport.value.zoom
-
-  store.viewport.x = newX
-  store.viewport.y = newY
+  const miniX = e.clientX - rect.left
+  const miniY = e.clientY - rect.top
+  const worldX = miniToWorldX(miniX)
+  const worldY = miniToWorldY(miniY)
+  centerOnWorld(worldX, worldY)
 }
 
-/** 切换显示/隐藏 */
-function toggleVisible() {
-  visible.value = !visible.value
-}
+// ------ 组件卸载时清理事件监听 ------
+onUnmounted(() => {
+  window.removeEventListener('mousemove', handleMouseMove)
+  window.removeEventListener('mouseup', handleMouseUp)
+})
 </script>
 
 <style scoped>
-.minimap {
-  position: absolute;
-  bottom: 16px;
-  right: 16px;
+/* 小地图容器：固定定位右下角 */
+.canvas-minimap {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
   width: 200px;
-  height: 140px;
+  height: 150px;
   background: var(--canvas-panel-bg);
   border: 1px solid var(--canvas-node-border);
   border-radius: 8px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(12px);
   overflow: hidden;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
   z-index: 100;
-  transition: opacity 0.2s;
+  user-select: none;
 }
 
+/* SVG 填满容器 */
 .minimap-svg {
+  display: block;
   width: 100%;
   height: 100%;
-  cursor: grab;
+  cursor: crosshair;
 }
 
-.minimap-svg:active {
+.minimap-svg.dragging {
   cursor: grabbing;
 }
 
-.minimap-hint {
-  position: absolute;
-  bottom: 4px;
-  left: 4px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 10px;
-  color: var(--canvas-node-muted-text);
-  pointer-events: none;
-}
-
-.minimap-toggle {
-  font-size: 12px;
-  color: var(--canvas-node-muted-text);
-  cursor: pointer;
-  pointer-events: all;
-  transition: color 0.15s;
-}
-
-.minimap-toggle:hover {
-  color: var(--canvas-connection-active);
+/* 视口高亮框 */
+.viewport-rect {
+  fill: rgba(100, 150, 255, 0.08);
+  stroke: var(--canvas-node-active-border);
+  stroke-width: 1.5;
 }
 </style>

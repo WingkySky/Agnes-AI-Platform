@@ -37,15 +37,10 @@ const props = defineProps({
 })
 const store = useCanvasStore()
 
-/** 图片 URL：父节点自身 imageUrl > 第一张批量子图 > null
- *  - task_id 检查放在 content 里（与 QuickGeneratePanel 写入位置一致），
- *    避免顶层 panel.task_id 误判挡掉回填的 imageUrl
- *  - 当 content.taskStatus 为 'pending' 时返回 null（生成中不显示旧图） */
+/** 图片 URL：父节点自身 imageUrl > 第一张批量子图 > null */
 const imageUrl = computed(() => {
-  const content = props.panel.content || {}
-  // 生成中：不显示旧图，留给 placeholder
-  if (content.taskStatus === 'pending') return null
-  const own = content.imageUrl
+  if (props.panel.task_id || props.panel.taskId) return null
+  const own = props.panel.content?.imageUrl
   if (own) return own
   // 任务 7：父图无图时回退到第一张子图
   const children = store.batchChildPanels?.(props.panel.id) ?? []
