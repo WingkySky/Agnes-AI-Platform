@@ -72,6 +72,7 @@
               <ImageUploader
                 :max-count="1"
                 :title="t('params.startFrameImage')"
+                :disable-global-paste="true"
                 @change="(f) => handleFrameChange('start', f)"
                 @clear="() => handleFrameClear('start')"
               />
@@ -89,6 +90,7 @@
                 :max-count="1"
                 :title="t('params.endFrameImage')"
                 :optional="true"
+                :disable-global-paste="true"
                 @change="(f) => handleFrameChange('end', f)"
                 @clear="() => handleFrameClear('end')"
               />

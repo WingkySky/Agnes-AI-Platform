@@ -11,7 +11,9 @@
 #   - 所有 API 方法均为 async，配合 FastAPI 异步路由，图片/视频任务互不阻塞
 # =====================================================
 
+import asyncio
 import logging
+import time
 from typing import List, Optional, Dict, Any
 
 import httpx
@@ -19,6 +21,27 @@ import httpx
 from app.core.config import settings
 
 logger = logging.getLogger("agnes_platform")
+
+# ---------- 重试与超时配置（集中在一处，便于调参） ----------
+# 单次请求超时（包含连接 + 读取，AI 生成本身就慢，默认 300s 更稳）
+REQUEST_TIMEOUT_SEC = 300.0
+# 仅连接阶段的超时（防止 DNS/握手卡死）
+CONNECT_TIMEOUT_SEC = 30.0
+# 最大重试次数（第一次成功就不重试）
+MAX_RETRIES = 3
+# 首次失败后的等待时间（秒，之后指数退避 ×2）
+RETRY_INITIAL_BACKOFF = 2.0
+# 对哪些异常/状态码重试（只对"很可能是暂时的"情况重试，避免把坏请求重复打到上游）
+RETRYABLE_EXCEPTIONS = (
+    httpx.ReadTimeout,
+    httpx.ConnectTimeout,
+    httpx.ConnectError,
+    httpx.WriteError,
+    httpx.PoolTimeout,
+    httpx.NetworkError,
+    # 下面这些其实是上游返回了错误响应，需要更细判断，由 _post 内部单独判断
+)
+RETRYABLE_STATUS_CODES = (502, 503, 504, 520, 521, 522, 523, 524)
 
 
 # =====================================================
@@ -56,11 +79,14 @@ class AgnesAIClient:
         """
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
-                timeout=httpx.Timeout(120.0, connect=30.0),
+                timeout=httpx.Timeout(REQUEST_TIMEOUT_SEC, connect=CONNECT_TIMEOUT_SEC),
                 limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
                 http2=False,
             )
-            logger.info("[AgnesAIClient] HTTP 连接池已初始化")
+            logger.info(
+                "[AgnesAIClient] HTTP 连接池已初始化 (timeout=%ss, connect=%ss, retries=%s)",
+                REQUEST_TIMEOUT_SEC, CONNECT_TIMEOUT_SEC, MAX_RETRIES,
+            )
 
     async def shutdown(self):
         """
@@ -78,10 +104,28 @@ class AgnesAIClient:
             # 兜底：如果 start() 未被调用，则临时创建一个（不推荐）
             logger.warning("[AgnesAIClient] client 未初始化，正在临时创建")
             self._client = httpx.AsyncClient(
-                timeout=httpx.Timeout(120.0, connect=30.0),
+                timeout=httpx.Timeout(REQUEST_TIMEOUT_SEC, connect=CONNECT_TIMEOUT_SEC),
                 limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
             )
         return self._client
+
+    # ---------- 统一的错误翻译：把网络异常转成中文可读消息 ----------
+    @staticmethod
+    def _human_readable_error(exc: BaseException) -> str:
+        """把底层 httpx/httpcore 异常翻译成一句话可读错误。"""
+        if isinstance(exc, httpx.ReadTimeout):
+            return "Agnes AI 响应超时（上游生成较慢或网络抖动），可稍后重试"
+        if isinstance(exc, httpx.ConnectTimeout):
+            return "无法连接到 Agnes AI（连接超时），请检查网络或稍后重试"
+        if isinstance(exc, httpx.ConnectError):
+            return "无法连接到 Agnes AI（网络不可达或域名解析失败）"
+        if isinstance(exc, httpx.PoolTimeout):
+            return "连接池等待超时（并发过高），请稍后重试"
+        if isinstance(exc, httpx.WriteError):
+            return "请求发送过程中连接断开，请稍后重试"
+        if isinstance(exc, httpx.NetworkError):
+            return "网络异常，无法访问 Agnes AI，请检查网络"
+        return f"调用 Agnes AI 失败: {exc.__class__.__name__}: {exc}"
 
     # =====================================================
     # 【第一层：基础 HTTP 工具】
@@ -120,26 +164,107 @@ class AgnesAIClient:
                 safe_body[k] = v
 
         logger.info("[AgnesAIClient] POST %s body=%s", url, safe_body)
-        response = await self.client.post(url, json=body, headers=self._headers)
-        return self._parse_response(response)
+
+        # ---------- 自动重试循环（指数退避）----------
+        last_exc: Optional[BaseException] = None
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                response = await self.client.post(url, json=body, headers=self._headers)
+            except RETRYABLE_EXCEPTIONS as e:
+                last_exc = e
+                if attempt >= MAX_RETRIES:
+                    raise RuntimeError(self._human_readable_error(e)) from e
+                wait = RETRY_INITIAL_BACKOFF * (2 ** (attempt - 1))
+                logger.warning(
+                    "[AgnesAIClient] POST 第 %s/%s 次网络异常: %s, %ss 后重试",
+                    attempt, MAX_RETRIES, self._human_readable_error(e), wait,
+                )
+                import asyncio
+                await asyncio.sleep(wait)
+                continue
+            except Exception as e:  # 其他异常（如参数错误、鉴权失败）不重试
+                raise RuntimeError(self._human_readable_error(e)) from e
+
+            # 对 5xx 网关类错误也做有限次重试（上游抖动常见）
+            if response.status_code in RETRYABLE_STATUS_CODES and attempt < MAX_RETRIES:
+                wait = RETRY_INITIAL_BACKOFF * (2 ** (attempt - 1))
+                preview = (response.text or "")[:120].strip().replace("\n", " ")
+                logger.warning(
+                    "[AgnesAIClient] POST 第 %s/%s 次返回 HTTP %s，%ss 后重试 (resp=%s)",
+                    attempt, MAX_RETRIES, response.status_code, wait, preview,
+                )
+                import asyncio
+                await asyncio.sleep(wait)
+                continue
+
+            # 到这里就是最终响应（不管成功还是失败的业务错误码）
+            return self._parse_response(response)
+
+        # 理论上到不了这里（最后一次要么抛要么返回）
+        if last_exc is not None:
+            raise RuntimeError(self._human_readable_error(last_exc)) from last_exc
+        raise RuntimeError("调用 Agnes AI 失败：未知错误")
 
     async def _get(self, url: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
-        发送 GET 请求到 Agnes AI API（使用连接池）
+        发送 GET 请求到 Agnes AI API（使用连接池）。
+        与 POST 一样做自动重试 + 中文错误信息。
         """
-        response = await self.client.get(url, params=params or {}, headers=self._headers)
-        return self._parse_response(response)
+        last_exc: Optional[BaseException] = None
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                response = await self.client.get(url, params=params or {}, headers=self._headers)
+            except RETRYABLE_EXCEPTIONS as e:
+                last_exc = e
+                if attempt >= MAX_RETRIES:
+                    raise RuntimeError(self._human_readable_error(e)) from e
+                wait = RETRY_INITIAL_BACKOFF * (2 ** (attempt - 1))
+                logger.warning(
+                    "[AgnesAIClient] GET 第 %s/%s 次网络异常: %s, %ss 后重试",
+                    attempt, MAX_RETRIES, self._human_readable_error(e), wait,
+                )
+                import asyncio
+                await asyncio.sleep(wait)
+                continue
+            except Exception as e:
+                raise RuntimeError(self._human_readable_error(e)) from e
+
+            if response.status_code in RETRYABLE_STATUS_CODES and attempt < MAX_RETRIES:
+                wait = RETRY_INITIAL_BACKOFF * (2 ** (attempt - 1))
+                logger.warning(
+                    "[AgnesAIClient] GET 第 %s/%s 次返回 HTTP %s，%ss 后重试",
+                    attempt, MAX_RETRIES, response.status_code, wait,
+                )
+                import asyncio
+                await asyncio.sleep(wait)
+                continue
+
+            return self._parse_response(response)
+
+        if last_exc is not None:
+            raise RuntimeError(self._human_readable_error(last_exc)) from last_exc
+        raise RuntimeError("调用 Agnes AI 失败：未知错误")
 
     def _parse_response(self, response: httpx.Response) -> Dict[str, Any]:
         """
-        统一处理响应：解析 JSON，处理错误（同步解析，不阻塞 I/O）
+        统一处理响应：解析 JSON，处理错误（同步解析，不阻塞 I/O）。
+        对 5xx / 非 JSON 响应给出更可读的中文错误。
         """
         try:
             data = response.json()
         except Exception:
-            text = response.text
+            text = (response.text or "")[:200].strip().replace("\n", " ")
+            # 常见 502/504 是 Cloudflare/上游返回 HTML，给用户一个人话
+            if response.status_code in (502, 503, 504):
+                raise RuntimeError(
+                    f"Agnes AI 上游暂时不可用（HTTP {response.status_code}），请稍后重试"
+                )
+            if 400 <= response.status_code < 500:
+                raise RuntimeError(
+                    f"Agnes AI 拒绝了请求（HTTP {response.status_code}）：{text}"
+                )
             raise RuntimeError(
-                f"Agnes AI 返回非 JSON 响应 (HTTP {response.status_code}): {text[:200]}"
+                f"Agnes AI 返回非 JSON 响应（HTTP {response.status_code}）：{text}"
             )
 
         if not response.is_success:

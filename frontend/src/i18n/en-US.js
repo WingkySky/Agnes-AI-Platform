@@ -80,6 +80,11 @@ export default {
     pasteUrl: '🔗 Paste image URL',
     uploadHint: 'Click or drag an image here',
     uploadDesc: 'Supports PNG / JPG / WEBP, up to {n} MB',
+    // Unified upload area text
+    uploadHintUnified: 'Click, drag or paste an image here',
+    uploadDescUnified: 'Supports PNG / JPG / WEBP, up to {n} MB',
+    pasteHint: 'Press Ctrl+V to paste a screenshot or image URL',
+    orDivider: 'or enter image URL manually',
     urlPlaceholder: 'Paste an image URL (must start with http:// or https://)',
     urlHint: 'Note: some servers may not be able to reach internal URLs',
     addKeyframe: '+ Add another keyframe',

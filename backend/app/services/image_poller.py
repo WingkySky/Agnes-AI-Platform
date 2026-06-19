@@ -207,7 +207,8 @@ class ImagePollerManager:
 
         except Exception as e:
             task.status = "failed"
-            task.error_message = str(e)
+            # agnes_client 里已把网络异常/5xx 转成中文 RuntimeError，直接用即可
+            task.error_message = str(e) or "生成失败，请稍后重试"
             task.last_updated = time.time()
             logger.error(
                 "[图片任务器] 任务失败: task_id=%s error=%s",

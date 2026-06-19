@@ -81,6 +81,11 @@ export default {
     pasteUrl: '🔗 粘贴图片 URL',
     uploadHint: '点击或拖拽图片到此处',
     uploadDesc: '支持 PNG / JPG / WEBP，最大 {n}MB',
+    // 统一上传区域文案
+    uploadHintUnified: '点击、拖拽或粘贴图片到此处',
+    uploadDescUnified: '支持 PNG / JPG / WEBP，最大 {n}MB',
+    pasteHint: '可直接 Ctrl+V 粘贴截图或图片 URL',
+    orDivider: '或手动输入图片 URL',
     urlPlaceholder: '粘贴图片 URL（以 http:// 或 https:// 开头）',
     urlHint: '提示：某些服务端可能无法访问内网 URL',
     addKeyframe: '+ 再添加一张关键帧',

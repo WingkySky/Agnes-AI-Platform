@@ -1,6 +1,10 @@
 <!-- =====================================================
-     ImageUploader 图片上传组件（支持 URL / 本地文件，Tab 模式切换）
-     - Tab 切换「上传本地图片」 / 「粘贴URL」，避免两种方式同时显示造成拥挤
+     ImageUploader 图片上传组件（统一输入区）
+     - 单一上传区域，统一支持：
+       1) 点击 / 拖拽 上传本地图片
+       2) 全局粘贴图片（截图直接 Ctrl+V）
+       3) 全局粘贴图片 URL（自动识别 http(s) 链接）
+       4) 下方 URL 输入框作为辅助手动输入
      - 已上传的图片预览始终显示在顶部
      - 支持 maxCount 限制上传数量（默认不限）
      - 事件：@change(fileInfoList)
@@ -18,7 +22,7 @@
      ===================================================== -->
 
 <template>
-  <div class="image-uploader">
+  <div class="image-uploader" ref="uploaderRef">
     <!-- 标题 -->
     <div class="uploader-header">
       <span class="uploader-title">{{ title || t('params.refImage') }}{{ optional ? '（' + t('common.optional') + '）' : '' }}</span>
@@ -61,69 +65,32 @@
 
     <!-- 添加图片区域（未达上限时显示） -->
     <div v-if="!maxCount || fileList.length < maxCount" class="add-area">
-      <!-- 模式切换 Tab -->
-      <div class="mode-tabs">
-        <button
-          class="mode-tab"
-          :class="{ active: uploadMode === 'file' }"
-          @click="uploadMode = 'file'"
-        >
-          <span class="mode-icon">📁</span>
-          <span>上传本地图片</span>
-        </button>
-        <button
-          class="mode-tab"
-          :class="{ active: uploadMode === 'url' }"
-          @click="uploadMode = 'url'"
-        >
-          <span class="mode-icon">🔗</span>
-          <span>粘贴图片 URL</span>
-        </button>
-      </div>
-
-      <!-- 文件上传模式 -->
-      <div v-if="uploadMode === 'file'" class="input-panel file-panel">
-        <div
-          class="upload-zone"
-          @dragover.prevent="isDragOver = true"
-          @dragleave.prevent="isDragOver = false"
-          @drop.prevent="handleDrop"
-          @click="$refs.fileInput.click()"
-          :class="{ 'drag-over': isDragOver }"
-        >
-          <el-icon :size="32" class="upload-icon"><UploadFilled /></el-icon>
-          <div class="upload-hint">{{ t('params.uploadHint') }}</div>
-          <div class="upload-desc">{{ t('params.uploadDesc').replace('{n}', maxSizeMB) }}</div>
-          <input
-            ref="fileInput"
-            type="file"
-            accept="image/*"
-            :multiple="!maxCount || maxCount > 1"
-            class="hidden-input"
-            @change="handleFilesChange"
-          />
+      <!-- 统一上传区域：点击 / 拖拽 / 粘贴 -->
+      <div
+        class="upload-zone"
+        @dragover.prevent="isDragOver = true"
+        @dragleave.prevent="isDragOver = false"
+        @drop.prevent="handleDrop"
+        @click="$refs.fileInput.click()"
+        :class="{ 'drag-over': isDragOver, 'paste-active': pasteHighlight }"
+      >
+        <el-icon :size="32" class="upload-icon"><UploadFilled /></el-icon>
+        <div class="upload-hint">{{ t('params.uploadHintUnified') }}</div>
+        <div class="upload-desc">{{ t('params.uploadDescUnified').replace('{n}', maxSizeMB) }}</div>
+        <div class="paste-hint">
+          <el-icon><Document /></el-icon>
+          <span>{{ t('params.pasteHint') }}</span>
         </div>
+        <input
+          ref="fileInput"
+          type="file"
+          accept="image/*"
+          :multiple="!maxCount || maxCount > 1"
+          class="hidden-input"
+          @change="handleFilesChange"
+        />
       </div>
 
-      <!-- URL 输入模式 -->
-      <div v-if="uploadMode === 'url'" class="input-panel url-panel">
-        <el-input
-          v-model="urlInput"
-          :placeholder="t('params.urlPlaceholder')"
-          size="large"
-          clearable
-          class="url-input"
-          @keydown.enter="handleUrlConfirm"
-        />
-        <el-button
-          type="primary"
-          size="large"
-          class="url-confirm-btn"
-          @click="handleUrlConfirm"
-        >
-          添加
-        </el-button>
-      </div>
     </div>
 
     <!-- 已达上限提示 -->
@@ -134,9 +101,9 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Delete, UploadFilled } from '@element-plus/icons-vue'
+import { Delete, UploadFilled, Document } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 
 const { t } = useI18n()
@@ -146,15 +113,16 @@ const props = defineProps({
   optional: { type: Boolean, default: false },
   maxCount: { type: Number, default: 0 },      // 0 表示不限制
   title: { type: String, default: '' },         // 自定义标题
+  disableGlobalPaste: { type: Boolean, default: false }, // 多实例场景（如首尾帧）禁用全局粘贴，避免冲突
 })
 
 const emit = defineEmits(['change', 'clear'])
 
-const uploadMode = ref('file')   // 'file' | 'url'
-const urlInput = ref('')
 const fileList = ref([])
 const isDragOver = ref(false)
 const fileInput = ref(null)
+const uploaderRef = ref(null)
+const pasteHighlight = ref(false)  // 粘贴时的高亮反馈
 
 // =====================================================
 // 对外暴露（父组件调用）
@@ -167,6 +135,68 @@ defineExpose({
     emit('change', null)
   },
 })
+
+// =====================================================
+// 全局粘贴事件监听
+// 智能识别剪贴板内容：
+//   - 图片类型（截图）→ 直接添加为本地文件
+//   - 文本类型 → 检查是否为 URL，是则添加为 URL 模式
+//   - 焦点在 input/textarea/contenteditable 中时不拦截文本粘贴
+// =====================================================
+let pasteTimer = null
+
+function handleGlobalPaste(e) {
+  // 多实例场景（如首尾帧）禁用全局粘贴，避免一次粘贴同时进入多个实例
+  if (props.disableGlobalPaste) return
+
+  const clipboard = e.clipboardData || window.clipboardData
+  if (!clipboard) return
+
+  // 1) 优先检查剪贴板中是否有图片
+  const items = clipboard.items || []
+  let hasImage = false
+  for (const item of items) {
+    if (item.type && item.type.startsWith('image/')) {
+      hasImage = true
+      const file = item.getAsFile()
+      if (file) {
+        // 拦截事件，避免图片被插入到其他输入框
+        e.preventDefault()
+        addPastedImageFile(file)
+      }
+    }
+  }
+  if (hasImage) return
+
+  // 2) 检查剪贴板文本是否为图片 URL
+  //    仅当焦点不在输入框中时拦截，避免影响用户在 prompt 等输入框中粘贴文本
+  const activeEl = document.activeElement
+  const isEditingText =
+    activeEl &&
+    (activeEl.tagName === 'INPUT' ||
+      activeEl.tagName === 'TEXTAREA' ||
+      activeEl.isContentEditable === true)
+
+  if (isEditingText) return
+
+  const text = (clipboard.getData('text') || '').trim()
+  if (!text) return
+
+  // 简单识别 http(s) URL
+  if (/^https?:\/\//i.test(text)) {
+    e.preventDefault()
+    addPastedUrl(text)
+  }
+}
+
+// 触发粘贴高亮反馈
+function triggerPasteHighlight() {
+  pasteHighlight.value = true
+  if (pasteTimer) clearTimeout(pasteTimer)
+  pasteTimer = setTimeout(() => {
+    pasteHighlight.value = false
+  }, 600)
+}
 
 // =====================================================
 // 工具函数
@@ -235,6 +265,48 @@ function fileToBase64(file) {
 
 function emitChange() {
   emit('change', fileList.value.length ? fileList.value : null)
+}
+
+// 检查是否已达上限
+function checkLimit() {
+  if (props.maxCount && fileList.value.length >= props.maxCount) {
+    ElMessage.warning(`已达上传上限（${props.maxCount} 张）`)
+    return false
+  }
+  return true
+}
+
+// =====================================================
+// 添加图片（统一入口）
+// =====================================================
+async function addPastedImageFile(file) {
+  if (!checkLimit()) return
+  if (!validateFile(file)) return
+  try {
+    const info = await fileToBase64(file)
+    fileList.value.push(info)
+    ElMessage.success(`已粘贴图片（共 ${fileList.value.length} 张）`)
+    triggerPasteHighlight()
+    emitChange()
+  } catch {
+    ElMessage.error(t('params.imageParseFailed'))
+  }
+}
+
+function addPastedUrl(url) {
+  if (!checkLimit()) return
+  fileList.value.push({
+    name: url.split('/').pop() || 'image',
+    base64: null,
+    previewUrl: url,
+    size: null,
+    source: 'url',
+    url,
+    mimeType: 'image/png',
+  })
+  ElMessage.success(`已粘贴 URL 图片（共 ${fileList.value.length} 张）`)
+  triggerPasteHighlight()
+  emitChange()
 }
 
 // =====================================================
@@ -307,34 +379,6 @@ async function handleDrop(e) {
 }
 
 // =====================================================
-// URL 添加
-// =====================================================
-function handleUrlConfirm() {
-  const url = urlInput.value.trim()
-  if (!url) return
-  if (!/^https?:\/\//i.test(url)) {
-    ElMessage.error(t('params.urlInvalid'))
-    return
-  }
-  if (props.maxCount && fileList.value.length >= props.maxCount) {
-    ElMessage.warning(`已达上传上限（${props.maxCount} 张）`)
-    return
-  }
-  fileList.value.push({
-    name: url.split('/').pop() || 'image',
-    base64: null,
-    previewUrl: url,
-    size: null,
-    source: 'url',
-    url,
-    mimeType: 'image/png',
-  })
-  urlInput.value = ''
-  ElMessage.success(`已添加 URL 图片（共 ${fileList.value.length} 张）`)
-  emitChange()
-}
-
-// =====================================================
 // 单张删除
 // =====================================================
 function removeFile(index) {
@@ -360,6 +404,18 @@ function openPreview(url) {
     console.warn('[ImageUploader] 预览打开失败', e)
   }
 }
+
+// =====================================================
+// 生命周期：挂载/卸载全局 paste 监听
+// =====================================================
+onMounted(() => {
+  window.addEventListener('paste', handleGlobalPaste)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('paste', handleGlobalPaste)
+  if (pasteTimer) clearTimeout(pasteTimer)
+})
 </script>
 
 <style scoped>
@@ -444,62 +500,32 @@ function openPreview(url) {
   padding: 14px;
 }
 
-/* Tab 切换 */
-.mode-tabs {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-.mode-tab {
-  flex: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 10px 16px;
-  background: rgba(15, 24, 42, 0.5);
-  border: 1px solid rgba(120, 170, 255, 0.2);
-  border-radius: 8px;
-  color: #8ba3c9;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-.mode-tab:hover {
-  border-color: rgba(107, 156, 255, 0.4);
-  color: #a8bce0;
-}
-.mode-tab.active {
-  background: rgba(107, 156, 255, 0.12);
-  border-color: #6b9cff;
-  color: #6b9cff;
-  font-weight: 500;
-}
-.mode-icon {
-  font-size: 16px;
-}
-
-/* 输入面板 */
-.input-panel {
+/* 统一上传区域 */
+.upload-zone {
   width: 100%;
-}
-
-/* 文件上传 */
-.file-panel .upload-zone {
-  width: 100%;
-  min-height: 120px;
+  min-height: 140px;
   border: 2px dashed rgba(120, 170, 255, 0.35);
   border-radius: 10px;
-  padding: 24px 20px;
+  padding: 20px 20px 14px;
   text-align: center;
   background: rgba(10, 18, 34, 0.4);
   cursor: pointer;
   transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
-.file-panel .upload-zone:hover,
-.file-panel .upload-zone.drag-over {
+.upload-zone:hover,
+.upload-zone.drag-over {
   border-color: #6b9cff;
   background: rgba(90, 134, 255, 0.1);
+}
+/* 粘贴高亮反馈 */
+.upload-zone.paste-active {
+  border-color: #2ee58c;
+  background: rgba(46, 229, 140, 0.12);
+  box-shadow: 0 0 0 3px rgba(46, 229, 140, 0.15);
 }
 .upload-icon {
   color: #6b9cff;
@@ -515,19 +541,20 @@ function openPreview(url) {
   color: #6b84aa;
   font-size: 12px;
 }
-
-/* URL 输入 */
-.url-panel {
-  display: flex;
-  gap: 10px;
+.paste-hint {
+  margin-top: 10px;
+  display: inline-flex;
   align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: rgba(107, 156, 255, 0.1);
+  border: 1px solid rgba(107, 156, 255, 0.25);
+  border-radius: 12px;
+  color: #8bb0ff;
+  font-size: 12px;
 }
-.url-input {
-  flex: 1;
-}
-.url-confirm-btn {
-  flex-shrink: 0;
-  min-width: 80px;
+.paste-hint .el-icon {
+  font-size: 13px;
 }
 
 /* 隐藏的 file input */
