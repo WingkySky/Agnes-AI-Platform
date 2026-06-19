@@ -135,9 +135,31 @@
           <div v-if="item.mode" class="mode-badge" :class="'mode-' + item.type">
             {{ t('params.mode.' + item.mode) || item.mode }}
           </div>
-          <!-- 下载快捷按钮（非编辑模式下显示） -->
-          <div v-if="!editMode" class="card-download" @click.stop="downloadItem(item)" :title="t('history.download')">
-            <el-icon :size="16"><Download /></el-icon>
+          <!-- 快捷操作按钮组（非编辑模式下显示）：放大 / 下载 / 删除，分别调用不同模块 -->
+          <!-- 放在 card-preview 内，z-index 足够高以确保不被其他蒙层遮挡 -->
+          <div v-if="!editMode" class="card-actions">
+            <!-- 放大：调用 ImageViewer 图片查看器模块 -->
+            <div
+              v-if="item.type === 'image'"
+              class="card-action-btn"
+              @click.stop="openImageViewer(item)"
+              :title="t('imageViewer.title')">
+              <el-icon size="16"><ZoomIn /></el-icon>
+            </div>
+            <!-- 下载：调用后端代理下载模块 -->
+            <div
+              class="card-action-btn"
+              @click.stop="downloadItem(item)"
+              :title="t('history.download')">
+              <el-icon size="16"><Download /></el-icon>
+            </div>
+            <!-- 删除：调用历史记录删除模块（带确认弹窗） -->
+            <div
+              class="card-action-btn card-action-delete"
+              @click.stop="quickDelete(item)"
+              :title="t('history.delete')">
+              <el-icon size="16"><Delete /></el-icon>
+            </div>
           </div>
         </div>
         <div class="card-meta">
@@ -267,7 +289,7 @@
 <script setup>
 import { ref, computed, onMounted, watch, nextTick, reactive } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Refresh, Loading, Document, Delete, VideoPlay, CircleCloseFilled, Edit, Close, Download } from '@element-plus/icons-vue'
+import { Refresh, Loading, Document, Delete, VideoPlay, CircleCloseFilled, Edit, Close, Download, ZoomIn } from '@element-plus/icons-vue'
 import ImageViewer from '@/components/ImageViewer.vue'
 import { getHistoryList, deleteHistoryRecord, batchDeleteHistory } from '@/api/history'
 import { useTaskQueueStore } from '@/stores/taskQueue'
@@ -595,6 +617,14 @@ function downloadItem(item) {
   ElMessage.success(t('history.downloadStarted'))
 }
 
+/** 卡片快捷删除（列表中直接点击删除图标）——调用历史记录删除模块 */
+async function quickDelete(item) {
+  if (!item?.id) return
+  // 复用详情弹窗中的 confirmDelete 逻辑，先设置当前项再弹出确认
+  detailItem.value = item
+  confirmDelete()
+}
+
 async function downloadDetail() {
   if (!detailItem.value?.result_url) {
     ElMessage.warning(t('history.noValidResource'))
@@ -917,12 +947,16 @@ onMounted(() => loadList())
   font-weight: 600;
 }
 
-/* 卡片下载快捷按钮 */
-.card-download {
+/* 卡片快捷操作按钮组（放大 / 下载 / 删除）—— 放在 card-preview 内部，z-index 足够高以确保不被内部 overlay 遮挡 */
+.card-actions {
   position: absolute;
   bottom: 10px;
   right: 10px;
-  z-index: 3;
+  z-index: 100;
+  display: flex;
+  gap: 6px;
+}
+.card-action-btn {
   width: 32px;
   height: 32px;
   display: flex;
@@ -931,18 +965,30 @@ onMounted(() => loadList())
   background: rgba(15, 24, 42, 0.75);
   backdrop-filter: blur(4px);
   border-radius: 8px;
-  border: 1px solid rgba(120, 170, 255, 0.25);
+  border: 1px solid rgba(120, 170, 255, 0.35);
   color: #a0c4ff;
   cursor: pointer;
   opacity: 0;
+  pointer-events: none;
   transition: all 0.2s ease;
 }
-.history-card:hover .card-download {
+.history-card:hover .card-action-btn {
   opacity: 1;
+  pointer-events: auto;
 }
-.card-download:hover {
-  background: rgba(80, 140, 255, 0.3);
-  border-color: rgba(120, 170, 255, 0.5);
+.card-action-btn:hover {
+  background: rgba(80, 140, 255, 0.35);
+  border-color: rgba(120, 170, 255, 0.6);
+  color: #fff;
+}
+/* 删除按钮：独立的危险色样式，区别于放大/下载 */
+.card-action-btn.card-action-delete {
+  color: #ff9b9b;
+  border-color: rgba(255, 155, 155, 0.35);
+}
+.card-action-btn.card-action-delete:hover {
+  background: rgba(255, 80, 80, 0.35);
+  border-color: rgba(255, 155, 155, 0.6);
   color: #fff;
 }
 .card-meta { padding: 12px 14px; }

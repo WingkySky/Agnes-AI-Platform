@@ -78,21 +78,10 @@
       </div>
     </aside>
 
-    <!-- 右侧：聊天区（拖拽覆盖整个区域） -->
+    <!-- 右侧：聊天区 -->
     <main
       class="chat-main"
-      @dragover.prevent="onDragOver"
-      @dragenter.prevent="onDragEnter"
-      @dragleave.prevent="onDragLeave"
-      @drop.prevent="onDrop"
     >
-      <!-- 拖拽覆盖提示（覆盖整个聊天区域，包括输入栏） -->
-      <div v-if="isDragging" class="drag-overlay">
-        <div class="drag-overlay-content">
-          <el-icon :size="56"><Picture /></el-icon>
-          <p>释放以添加图片</p>
-        </div>
-      </div>
       <!-- 重命名会话对话框 -->
       <el-dialog
         v-model="renameDialogVisible"
@@ -111,29 +100,6 @@
           <el-button @click="renameDialogVisible = false">{{ t('common.cancel') }}</el-button>
           <el-button type="primary" :disabled="!renameInput.trim()" @click="confirmRename">
             {{ t('common.confirm') }}
-          </el-button>
-        </template>
-      </el-dialog>
-      <!-- URL 图片链接输入对话框 -->
-      <el-dialog
-        v-model="urlDialogVisible"
-        title="添加图片链接"
-        width="450px"
-        :close-on-click-modal="false"
-      >
-        <el-input
-          v-model="urlInput"
-          placeholder="请输入图片 URL 地址（如 https://example.com/image.jpg）"
-          clearable
-          @keyup.enter="confirmUrlAttachment"
-        />
-        <p style="margin-top: 8px; font-size: 12px; color: #999;">
-          支持公网可访问的图片链接，AI 将根据链接内容和你的意图决定下一步操作
-        </p>
-        <template #footer>
-          <el-button @click="urlDialogVisible = false">取消</el-button>
-          <el-button type="primary" :disabled="!urlInput.trim()" @click="confirmUrlAttachment">
-            添加
           </el-button>
         </template>
       </el-dialog>
@@ -321,21 +287,21 @@
           </div>
         </div>
 
-        <!-- 输入区 -->
+        <!-- 输入区（豆包式简洁设计：小"+"按钮 + 输入框 + 无感粘贴） -->
         <div class="chat-input-area">
-          <!-- 待发送附件预览 -->
+          <!-- 待发送附件预览（小缩略图，可删除） -->
           <div v-if="pendingAttachments.length > 0" class="pending-attachments">
             <div
               v-for="(att, idx) in pendingAttachments"
               :key="'pending-' + idx"
               class="pending-attachment"
             >
-              <!-- base64 上传图片预览 -->
+              <!-- 本地图片缩略图 -->
               <img v-if="att.base64" :src="att.base64" :alt="att.name" class="pending-attachment-thumb" />
-              <!-- URL 链接图片预览 -->
+              <!-- URL 图片链接预览 -->
               <div v-else-if="att.url" class="pending-attachment-url">
-                <el-icon :size="20"><Link /></el-icon>
-                <span class="url-text" :title="att.url">{{ att.url }}</span>
+                <el-icon :size="18"><Document /></el-icon>
+                <span class="url-text" :title="att.url">{{ truncateUrl(att.url) }}</span>
               </div>
               <el-button
                 type="danger"
@@ -349,13 +315,13 @@
           </div>
 
           <div class="input-wrapper">
-            <!-- 上传按钮（加号图标） -->
+            <!-- 上传按钮：小"+"图标，点击后选择文件 -->
             <el-button
               :icon="Plus"
               class="upload-btn"
               :disabled="chatStore.sending"
               @click="$refs.fileInput.click()"
-              title="上传参考图"
+              title="上传图片"
             />
             <input
               ref="fileInput"
@@ -363,15 +329,7 @@
               accept="image/*"
               multiple
               class="hidden-file-input"
-              @change="onAttachmentSelected"
-            />
-            <!-- URL 输入按钮 -->
-            <el-button
-              :icon="Link"
-              class="upload-btn"
-              :disabled="chatStore.sending"
-              @click="showUrlDialog"
-              title="输入图片链接"
+              @change="onFileSelected"
             />
 
             <el-input
@@ -393,7 +351,7 @@
               class="send-btn"
             />
           </div>
-          <p class="input-hint">{{ t('chat.inputHint') }} · 可上传图片或输入链接作为参考图</p>
+          <p class="input-hint">按 Enter 发送，Shift+Enter 换行 · 粘贴图片或图片链接自动识别</p>
         </div>
       </template>
     </main>
@@ -404,11 +362,11 @@
 // 组件名称（供 keep-alive 缓存识别）
 defineOptions({ name: 'ChatView' })
 
-import { ref, onMounted, onActivated, nextTick, watch, computed } from 'vue'
+import { ref, onMounted, onActivated, onBeforeUnmount, nextTick, watch, computed } from 'vue'
 import {
   Plus, Delete, User, Monitor, Picture, VideoPlay,
   Loading, Check, WarningFilled, Promotion, ChatDotRound,
-  Edit, MagicStick, Close, Link, MoreFilled, Document,
+  Edit, MagicStick, Close, MoreFilled, Document,
 } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { useChatStore } from '@/stores/chat'
@@ -421,26 +379,17 @@ const chatStore = useChatStore()
 const inputText = ref('')
 // 消息列表 DOM 引用
 const messagesRef = ref(null)
-// 隐藏的文件上传 input（用于触发文件选择）
+// 隐藏的文件上传 input（点击"+"按钮触发）
 const fileInput = ref(null)
-// 待发送的附件列表（未发送消息时本地缓存）
+// 待发送附件列表（粘贴/上传后加入，发送时清空）
 const pendingAttachments = ref([])
-// 拖拽状态
-const isDragging = ref(false)
 // 是否允许发送（有文本 或 有待发附件）
 const canSend = computed(() => inputText.value.trim().length > 0 || pendingAttachments.value.length > 0)
-// 最大附件数与单文件大小限制（对应后端 Task 2 的校验）
-const MAX_ATTACHMENTS = 10
-const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB
 
 // 重命名会话相关
 const renameDialogVisible = ref(false)
 const renameInput = ref('')
 const renamingSessionId = ref(null)
-
-// URL 图片链接输入相关
-const urlDialogVisible = ref(false)
-const urlInput = ref('')
 
 // 快捷提示
 const quickTips = computed(() => [
@@ -455,6 +404,12 @@ const quickTips = computed(() => [
 onMounted(async () => {
   // 使用 init() 初始化（从 localStorage 恢复 + 从数据库加载消息）
   await chatStore.init()
+  // 全局粘贴监听：聊天框任意位置 Ctrl+V 自动识别图片/图片 URL（无感）
+  window.addEventListener('paste', handleGlobalPaste)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('paste', handleGlobalPaste)
 })
 
 // 配合 keep-alive：从其他标签页切回时恢复滚动位置（保留在后台累积的流式内容可见）
@@ -559,27 +514,17 @@ async function handleAutoSummarize(sessionId) {
   }
 }
 
-/** 发送消息（支持附件 + 文本中自动识别 URL） */
+/** 发送消息（使用 pendingAttachments：粘贴/上传得到的附件） */
 async function handleSend() {
   const content = inputText.value.trim()
-  // =====================================================
-  // 自动从文本中识别 URL 并作为附件
-  //   识别规则：
-  //   - 图片扩展名 → image_url 附件（传给 AI 多模态）
-  //   - 视频扩展名 → video_url 附件（展示用，AI 不看视频）
-  //   - 文档扩展名 → doc_url 附件（展示用，AI 不读文档）
-  //   - 其他 URL  → 不加入附件，保留在文本中
-  // =====================================================
-  const urlAtts = extractUrlsAsAttachments(content)
-  const attachments = [...pendingAttachments.value, ...urlAtts]
+  // 从待发送附件列表取（粘贴/上传的图片、识别到的 URL）
+  const attachments = [...pendingAttachments.value]
+  // 从文本中自动识别 URL 作为附件（与粘贴识别互补）
+  const textUrlAtts = extractUrlsAsAttachments(content)
+  attachments.push(...textUrlAtts)
+
   if (!content && attachments.length === 0) return
   if (chatStore.sending) return
-
-  // 总数限制（防止超出后端 MAX_ATTACHMENTS）
-  if (attachments.length > MAX_ATTACHMENTS) {
-    ElMessage.warning(`最多发送 ${MAX_ATTACHMENTS} 个附件`)
-    return
-  }
 
   inputText.value = ''
   pendingAttachments.value = []
@@ -590,18 +535,85 @@ async function handleSend() {
   }
 }
 
-/** 回车发送（Shift+Enter 换行） */
-function handleEnter(e) {
-  if (e.shiftKey) return // Shift+Enter 换行
-  e.preventDefault()
-  handleSend()
+/** 处理全局 Ctrl+V 粘贴事件：自动识别图片（二进制）/ 图片 URL */
+function handleGlobalPaste(e) {
+  // 仅在当前组件可见时处理（防止其他页面也触发）
+  if (chatStore.sending) return
+
+  const items = e.clipboardData?.items
+  let handled = false
+
+  // 1) 优先识别二进制图片（截图、图片文件复制）
+  if (items) {
+    for (const item of items) {
+      if (item.type.indexOf('image') !== -1) {
+        const file = item.getAsFile()
+        if (file) {
+          fileToBase64(file).then(base64 => {
+            pendingAttachments.value.push({
+              name: file.name || 'pasted-image.png',
+              base64,
+              url: null,
+              size: file.size,
+              mime_type: file.type || 'image/png',
+            })
+          })
+          handled = true
+          break
+        }
+      }
+    }
+  }
+
+  // 2) 如果没有图片，检查纯文本是否是图片 URL
+  if (!handled) {
+    const text = e.clipboardData?.getData('text')
+    if (text && isImageUrl(text.trim())) {
+      const url = text.trim()
+      pendingAttachments.value.push({
+        name: url.split('/').pop() || 'image',
+        base64: null,
+        url,
+        size: 0,
+        mime_type: 'image/url',
+        source: 'url',
+      })
+      handled = true
+    }
+  }
+
+  if (handled) {
+    e.preventDefault() // 阻止默认粘贴行为（否则输入框会出现文本）
+  }
 }
 
-// =====================================================
-// 附件（图片）上传相关
-// =====================================================
-/** 读取图片文件为 base64（data URL） */
-function readFileAsDataURL(file) {
+/** 点击"+"选择本地文件后加入待发送列表 */
+function onFileSelected(e) {
+  const files = e.target.files
+  if (!files || files.length === 0) return
+  for (const file of files) {
+    if (!file.type.startsWith('image/')) continue
+    fileToBase64(file).then(base64 => {
+      pendingAttachments.value.push({
+        name: file.name,
+        base64,
+        url: null,
+        size: file.size,
+        mime_type: file.type,
+      })
+    })
+  }
+  // 重置：允许重复选择同一文件
+  e.target.value = ''
+}
+
+/** 删除待发送附件 */
+function removePendingAttachment(index) {
+  pendingAttachments.value.splice(index, 1)
+}
+
+/** File → base64（异步） */
+function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => resolve(reader.result)
@@ -610,163 +622,27 @@ function readFileAsDataURL(file) {
   })
 }
 
-/** 从 data URL 提取 MIME 类型 */
-function extractMime(dataUrl) {
-  const m = dataUrl.match(/^data:([^;]+);/)
-  return m ? m[1] : 'image/png'
+/** 判断字符串是否为图片 URL（http/https 开头，且路径后缀或域名像图片） */
+function isImageUrl(text) {
+  if (!text) return false
+  if (!/^https?:\/\//i.test(text)) return false
+  // 检查是否是常见的图片扩展名
+  const lower = text.toLowerCase().split('?')[0]
+  return /\.(png|jpe?g|gif|webp|bmp|svg|avif)$/i.test(lower)
 }
 
-/** 文件选择回调：校验大小/数量，转为 base64 加入待发队列 */
-async function onAttachmentSelected(event) {
-  const files = Array.from(event.target.files || [])
-  // 重置 input value，便于重复选择同一文件触发 change
-  event.target.value = ''
-  if (files.length === 0) return
-
-  const remainingSlot = MAX_ATTACHMENTS - pendingAttachments.value.length
-  if (remainingSlot <= 0) {
-    ElMessage.warning(`最多上传 ${MAX_ATTACHMENTS} 张图片`)
-    return
-  }
-
-  const accepted = files.slice(0, remainingSlot)
-  const results = []
-  for (const file of accepted) {
-    if (!file.type.startsWith('image/')) {
-      ElMessage.warning(`不支持的文件类型：${file.name}`)
-      continue
-    }
-    if (file.size > MAX_FILE_SIZE) {
-      ElMessage.warning(`图片 ${file.name} 超过 5MB`)
-      continue
-    }
-    try {
-      const dataUrl = await readFileAsDataURL(file)
-      results.push({
-        name: file.name,
-        base64: dataUrl,
-        size: file.size,
-        mime_type: extractMime(dataUrl),
-      })
-    } catch (err) {
-      console.error('[Chat] 读取文件失败:', err)
-      ElMessage.error(`读取 ${file.name} 失败`)
-    }
-  }
-
-  pendingAttachments.value.push(...results)
+/** URL 截断显示（缩略图旁边的 URL 文案） */
+function truncateUrl(url) {
+  if (!url) return ''
+  if (url.length <= 50) return url
+  return url.slice(0, 47) + '...'
 }
 
-/** 移除某个待发送的附件 */
-function removePendingAttachment(idx) {
-  pendingAttachments.value.splice(idx, 1)
-}
-
-// =====================================================
-// URL 图片链接输入相关
-// =====================================================
-/** 打开 URL 输入对话框 */
-function showUrlDialog() {
-  urlInput.value = ''
-  urlDialogVisible.value = true
-}
-
-/** 确认添加 URL 附件 */
-function confirmUrlAttachment() {
-  const url = urlInput.value.trim()
-  if (!url) return
-
-  // 校验 URL 格式
-  if (!url.startsWith('http://') && !url.startsWith('https://')) {
-    ElMessage.warning('请输入有效的 HTTP/HTTPS 链接')
-    return
-  }
-
-  if (pendingAttachments.value.length >= MAX_ATTACHMENTS) {
-    ElMessage.warning(`最多添加 ${MAX_ATTACHMENTS} 张图片`)
-    return
-  }
-
-  // 添加为 URL 类型附件
-  pendingAttachments.value.push({
-    name: 'url_image',
-    base64: null,
-    url: url,
-    size: 0,
-    mime_type: 'image/url',
-    source: 'url',
-  })
-
-  urlDialogVisible.value = false
-  urlInput.value = ''
-}
-
-// =====================================================
-// 拖拽文件上传
-// =====================================================
-// 拖拽计数器：解决 dragleave 子元素冒泡导致覆盖层闪烁的问题
-let dragCounter = 0
-
-/** 拖拽进入 */
-function onDragOver(e) {
-  if (!isDragging.value) {
-    isDragging.value = true
-  }
-}
-
-/** 拖拽进入时计数+1 */
-function onDragEnter(e) {
-  dragCounter++
-  isDragging.value = true
-}
-
-/** 拖拽离开时计数-1，归零才关闭覆盖层 */
-function onDragLeave(e) {
-  dragCounter--
-  if (dragCounter <= 0) {
-    dragCounter = 0
-    isDragging.value = false
-  }
-}
-
-/** 拖拽释放：处理文件 */
-async function onDrop(e) {
-  isDragging.value = false
-  dragCounter = 0
-  const files = Array.from(e.dataTransfer?.files || [])
-  if (files.length === 0) return
-
-  const remainingSlot = MAX_ATTACHMENTS - pendingAttachments.value.length
-  if (remainingSlot <= 0) {
-    ElMessage.warning(`最多上传 ${MAX_ATTACHMENTS} 张图片`)
-    return
-  }
-
-  const accepted = files.slice(0, remainingSlot)
-  const results = []
-  for (const file of accepted) {
-    if (!file.type.startsWith('image/')) {
-      ElMessage.warning(`不支持的文件类型：${file.name}`)
-      continue
-    }
-    if (file.size > MAX_FILE_SIZE) {
-      ElMessage.warning(`图片 ${file.name} 超过 5MB`)
-      continue
-    }
-    try {
-      const dataUrl = await readFileAsDataURL(file)
-      results.push({
-        name: file.name,
-        base64: dataUrl,
-        size: file.size,
-        mime_type: extractMime(dataUrl),
-      })
-    } catch (err) {
-      console.error('[Chat] 读取拖拽文件失败:', err)
-      ElMessage.error(`读取 ${file.name} 失败`)
-    }
-  }
-  pendingAttachments.value.push(...results)
+/** 回车发送（Shift+Enter 换行） */
+function handleEnter(e) {
+  if (e.shiftKey) return // Shift+Enter 换行
+  e.preventDefault()
+  handleSend()
 }
 
 /** 快捷提示点击 */
