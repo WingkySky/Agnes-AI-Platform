@@ -24,23 +24,13 @@
       <!-- 背景层（点阵 / 网格 / 空白） -->
       <div class="canvas-bg" :class="`bg-${store.backgroundMode}`"></div>
 
-      <!-- 连线 SVG 层 -->
-      <CanvasConnectionsSvg
+      <!-- 连线 SVG 层（由 CanvasConnectionsLayer 统一渲染） -->
+      <CanvasConnectionsLayer />
+
+      <!-- 节点层（由 CanvasNodesLayer 统一渲染：内部根据 panel.type 动态选择内容组件） -->
+      <CanvasNodesLayer
         @connect-start="onConnectStart"
         @connect-end="onConnectEnd"
-        @select-connection="onSelectConnection"
-      />
-
-      <!-- 节点层 -->
-      <CanvasNode
-        v-for="panel in renderPanels"
-        :key="panel.id"
-        :panel="panel"
-        @edit="onPanelEdit"
-        @action="onPanelAction"
-        @drag-start="onNodeDragStart"
-        @resize-start="onNodeResizeStart"
-        @connect-start="onConnectStart"
       />
     </div>
 
@@ -56,8 +46,8 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useCanvasStore } from '@/stores/canvas'
-import CanvasNode from './CanvasNode.vue'
-import CanvasConnectionsSvg from './CanvasConnectionsSvg.vue'
+import CanvasNodesLayer from '@/components/canvas/CanvasNodesLayer.vue'
+import CanvasConnectionsLayer from '@/components/canvas/CanvasConnectionsLayer.vue'
 
 const store = useCanvasStore()
 const containerRef = ref(null)
@@ -155,9 +145,13 @@ function onCanvasMouseDown(e) {
 /** 画布 mousemove：更新平移/框选/节点拖拽 */
 function onCanvasMouseMove(e) {
   if (!dragState.value) {
-    // 更新连线拖拽位置
+    // 更新连线拖拽位置（把浏览器 client 坐标换算为相对于容器的坐标，再传给 store
+    // store.screenToWorld 期望相对于画布容器的坐标，不包含容器在页面中的偏移）
     if (store._connecting) {
-      store.updateConnecting(e.clientX, e.clientY)
+      const rect = containerRef.value?.getBoundingClientRect()
+      const relX = rect ? e.clientX - rect.left : e.clientX
+      const relY = rect ? e.clientY - rect.top : e.clientY
+      store.updateConnecting(relX, relY)
     }
     return
   }

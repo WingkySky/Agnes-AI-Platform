@@ -14,6 +14,58 @@ import { loadCanvas, saveCanvas, migrateFromV1, isStorageReady } from '@/lib/can
 const V1_STORAGE_KEY = 'agnes_canvas_v1'
 const MAX_HISTORY = 50
 
+/** 节点类型定义：每种类型的默认尺寸、标题、图标 key
+ *  - 供 addNode() 快速创建对应类型面板
+ *  - 供 UI 层（节点库、属性面板）统一展示
+ */
+const nodeTypes = {
+  text: {
+    label: '文本',
+    width: 320,
+    height: 240,
+    defaultContent: { text: '', prompt: '' },
+  },
+  image: {
+    label: '图片生成',
+    width: 420,
+    height: 320,
+    defaultContent: { prompt: '', model: 'sdxl', size: '1:1', resultUrl: '' },
+  },
+  video: {
+    label: '视频生成',
+    width: 560,
+    height: 340,
+    defaultContent: { prompt: '', imageUrl: '', resultUrl: '' },
+  },
+  chat: {
+    label: '对话',
+    width: 380,
+    height: 300,
+    defaultContent: { messages: [], lastReply: '' },
+  },
+  config: {
+    label: '配置/批量',
+    width: 260,
+    height: 200,
+    defaultContent: {
+      model: 'sdxl',
+      size: '1:1',
+      count: 4,
+      batchMode: true,
+      batchChildIds: [],
+    },
+  },
+  frame: {
+    label: '分组框',
+    width: 400,
+    height: 300,
+    defaultContent: { children: [] },
+  },
+}
+
+/** 受支持的类型集合（用于运行时校验） */
+const SUPPORTED_NODE_TYPES = Object.keys(nodeTypes)
+
 // ---------- 工具函数 ----------
 
 /** 生成唯一 ID */
@@ -63,6 +115,26 @@ async function restoreFromStorage() {
  */
 function saveToStorage(state) {
   saveCanvas(state)
+}
+
+/**
+ * 简易深合并（仅合并普通对象；数组与基本类型用右侧值覆盖）
+ *  - 供 updatePanel 的 content 深度合并使用
+ *  - 目标：对 { prompt, resultUrl } 部分更新时不会丢失其他 content 字段
+ */
+function deepMerge(target, source) {
+  if (!source || typeof source !== 'object') return target ?? source
+  if (!target || typeof target !== 'object') return JSON.parse(JSON.stringify(source))
+  const out = JSON.parse(JSON.stringify(target))
+  for (const key of Object.keys(source)) {
+    const sv = source[key]
+    if (sv && typeof sv === 'object' && !Array.isArray(sv)) {
+      out[key] = deepMerge(out[key], sv)
+    } else {
+      out[key] = Array.isArray(sv) ? [...sv] : sv
+    }
+  }
+  return out
 }
 
 export const useCanvasStore = defineStore('canvas', {
@@ -692,11 +764,20 @@ export const useCanvasStore = defineStore('canvas', {
       return panel.id
     },
 
-    /** 更新面板 */
+    /** 更新面板
+     *  - 顶层字段使用浅合并（Object.assign）
+     *  - content 字段做深度合并，避免覆盖未变更的 content 子字段（如 resultUrl、prompt 等）
+     */
     updatePanel(id, changes) {
       this.pushSnapshot()
       const panel = this.panels.find((p) => p.id === id)
       if (panel) {
+        // 深度合并 content：changes.content 与 panel.content 递归合并
+        if (changes?.content && typeof changes.content === 'object') {
+          const merged = deepMerge(panel.content ?? {}, changes.content)
+          // eslint-disable-next-line no-param-reassign
+          changes = { ...changes, content: merged }
+        }
         Object.assign(panel, changes, { updated_at: new Date().toISOString() })
         saveCanvas(this)
       }
@@ -1747,6 +1828,130 @@ export const useCanvasStore = defineStore('canvas', {
         newIds.push(newPanel.id)
       }
       return newIds
+    },
+
+    // ===== Task 1a: 统一节点快捷创建 + 上下游数据流 =====
+
+    /**
+     * 快捷创建指定类型的节点
+     * - type 必须属于 nodeTypes 中的 key
+     * - 自动使用该类型的默认尺寸与 defaultContent
+     * - 可选传入 overrides 覆盖尺寸、content 的任何字段
+     */
+    addNode(type, { x = 0, y = 0, overrides } = {}) {
+      const spec = nodeTypes[type]
+      if (!spec) {
+        // eslint-disable-next-line no-console
+        console.warn(`[canvas] 未知节点类型: ${type}`)
+        return null
+      }
+      const panel = {
+        type,
+        x: Number(x) || 0,
+        y: Number(y) || 0,
+        width: overrides?.width ?? spec.width,
+        height: overrides?.height ?? spec.height,
+        content: JSON.parse(JSON.stringify({ ...spec.defaultContent, ...(overrides?.content ?? {}) })),
+      }
+      return this.addPanel(panel)
+    },
+
+    /**
+     * 返回节点的类型元信息（包含 label、默认尺寸）
+     * - 找不到时返回 null，避免上层读取 undefined.label 时抛错
+     */
+    getNodeTypeMeta(type) {
+      return nodeTypes[type] ?? null
+    },
+
+    /**
+     * 根据连线查找上游节点并返回其输出（供节点在渲染/生成时使用）
+     * - 规则：source_panel_id → target_panel_id 即"上游 → 下游"
+     * - 返回数组：每项包含 { panel, output }，output 提取自 panel.content 的核心产出字段
+     *   · image 节点 → { resultUrl, prompt }
+     *   · text 节点 → { text, prompt }
+     *   · video 节点 → { resultUrl, prompt, imageUrl }
+     *   · chat 节点 → { lastReply }
+     *   · config 节点 → { model, size, count }
+     *   · 其他 → { ...panel.content }
+     */
+    getUpstreamOutput(panelId) {
+      const upstreamIds = this.connections
+        .filter((c) => c.target_panel_id === panelId)
+        .map((c) => c.source_panel_id)
+        .filter(Boolean)
+
+      return upstreamIds
+        .map((pid) => {
+          const panel = this.panels.find((p) => p.id === pid)
+          if (!panel) return null
+          const content = panel.content ?? {}
+          let output
+          switch (panel.type) {
+            case 'image':
+              output = {
+                resultUrl: content.resultUrl,
+                prompt: content.prompt,
+                model: content.model,
+                size: content.size,
+              }
+              break
+            case 'video':
+              output = {
+                resultUrl: content.resultUrl,
+                prompt: content.prompt,
+                imageUrl: content.imageUrl,
+              }
+              break
+            case 'text':
+              output = { text: content.text, prompt: content.prompt }
+              break
+            case 'chat':
+              output = { lastReply: content.lastReply, messages: content.messages ?? [] }
+              break
+            case 'config':
+              output = {
+                model: content.model,
+                size: content.size,
+                count: content.count,
+                batchMode: content.batchMode,
+              }
+              break
+            default:
+              output = { ...content }
+          }
+          return { panel, output }
+        })
+        .filter(Boolean)
+    },
+
+    /**
+     * 返回指定节点的下游节点列表（反向查找：谁把我当作 source）
+     * - 用于节点删除时联动提示、或者"批量影响下游"场景
+     */
+    getDownstreamPanels(panelId) {
+      const downstreamIds = this.connections
+        .filter((c) => c.source_panel_id === panelId)
+        .map((c) => c.target_panel_id)
+        .filter(Boolean)
+      return this.panels.filter((p) => downstreamIds.includes(p.id))
+    },
+
+    /**
+     * 把上游输出合并到目标节点的 content（由组件层在"重新渲染/生成前"显式调用）
+     * - 返回合并后的 content（不直接写回 panel，避免意外覆盖用户输入）
+     */
+    resolveInputs(panelId) {
+      const panel = this.panels.find((p) => p.id === panelId)
+      if (!panel) return null
+      const upstream = this.getUpstreamOutput(panelId)
+      if (upstream.length === 0) return panel.content ?? {}
+      // 把上游 outputs 合并到当前 content，保留用户已填写的字段
+      const merged = JSON.parse(JSON.stringify(panel.content ?? {}))
+      for (const item of upstream) {
+        Object.assign(merged, item.output)
+      }
+      return merged
     },
   },
 })
