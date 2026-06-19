@@ -155,8 +155,22 @@
 
           <!-- 情况 B：有选中任务且已成功 -->
           <div v-else-if="activeTask && activeTask.status === 'success'" class="result-wrap">
-            <img v-if="resultUrl" :src="resultUrl" class="result-img" alt="generated" />
-            <img v-else-if="activeTask.imageB64" :src="'data:image/png;base64,' + activeTask.imageB64" class="result-img" />
+            <img
+              v-if="resultUrl"
+              :src="resultUrl"
+              class="result-img"
+              alt="generated"
+              @click="openViewerWithUrl(resultUrl)"
+              :title="t('imageViewer.title')"
+            />
+            <img
+              v-else-if="activeTask.imageB64"
+              :src="'data:image/png;base64,' + activeTask.imageB64"
+              class="result-img"
+              alt="generated"
+              @click="openViewerWithUrl('data:image/png;base64,' + activeTask.imageB64)"
+              :title="t('imageViewer.title')"
+            />
             <div class="result-meta">
               <div class="meta-row">
               <span class="meta-label">{{ t('params.prompt') }}：</span>
@@ -210,6 +224,13 @@
             <li>{{ t('tips.historyKeep') }}</li>
           </ul>
         </div>
+
+        <!-- 独立图片查看器：点击生成结果图片后弹出，支持缩放/平移/旋转/下载 -->
+        <ImageViewer
+          v-model:visible="viewerVisible"
+          :url="viewerUrl"
+          :download-url="viewerDownloadUrl"
+        />
       </el-col>
     </el-row>
   </div>
@@ -223,10 +244,22 @@ import {
 } from '@element-plus/icons-vue'
 import PromptTemplates from '@/components/PromptTemplates.vue'
 import ImageUploader from '@/components/ImageUploader.vue'
+import ImageViewer from '@/components/ImageViewer.vue'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useI18n } from '@/i18n'
 
 const { t } = useI18n()
+
+// ---------- 图片查看器：点击预览图片弹出 ----------
+const viewerVisible = ref(false)
+const viewerUrl = ref('')
+const viewerDownloadUrl = ref('')
+function openViewerWithUrl(url) {
+  if (!url) return
+  viewerUrl.value = url
+  viewerDownloadUrl.value = url
+  viewerVisible.value = true
+}
 
 // 预设风格：不同语言下显示不同的 label（prompt 本身保持原样，不随语言变化）
 // 注意：这里用 computed 动态读取当前语言下的显示名，避免语言切换后不同步

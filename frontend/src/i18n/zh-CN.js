@@ -630,6 +630,26 @@ export default {
     },
   },
 
+  // ------ 图片查看器（图片放大/缩小、旋转、翻转、下载） ------
+  imageViewer: {
+    title: '图片查看器',
+    closeHint: '关闭查看器（ESC 键）',
+    zoomIn: '放大（+ / =）',
+    zoomOut: '缩小（- / _）',
+    rotateLeft: '向左旋转 90°',
+    rotateRight: '向右旋转 90°',
+    flipH: '水平翻转',
+    flipV: '垂直翻转',
+    reset: '重置视图（0）',
+    openInNewTab: '在新标签页打开',
+    download: '下载图片',
+    downloadStarted: '已开始下载',
+    openedInNewTab: '已在新标签页打开',
+    emptyUrl: '图片地址为空，无法下载',
+    loadFailed: '图片加载失败，请稍后重试',
+    hintShort: '滚轮缩放 · 拖动平移 · 双击放大/还原',
+  },
+
   // ------ 首页加载 ------
   loading: 'Agnes AI Platform 加载中...',
 }

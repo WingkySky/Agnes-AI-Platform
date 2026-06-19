@@ -629,6 +629,26 @@ export default {
     },
   },
 
+  // ------ Image Viewer (Zoom / Rotate / Flip / Download) ------
+  imageViewer: {
+    title: 'Image Viewer',
+    closeHint: 'Close (ESC)',
+    zoomIn: 'Zoom In (+ / =)',
+    zoomOut: 'Zoom Out (- / _)',
+    rotateLeft: 'Rotate Left 90°',
+    rotateRight: 'Rotate Right 90°',
+    flipH: 'Flip Horizontal',
+    flipV: 'Flip Vertical',
+    reset: 'Reset View (0)',
+    openInNewTab: 'Open in New Tab',
+    download: 'Download',
+    downloadStarted: 'Download started',
+    openedInNewTab: 'Opened in new tab',
+    emptyUrl: 'Image URL is empty — cannot download',
+    loadFailed: 'Image failed to load. Please try again later.',
+    hintShort: 'Wheel to zoom · Drag to pan · Double-click to zoom',
+  },
+
   // ------ First-page loading ------
   loading: 'Agnes AI Platform Loading...',
 }

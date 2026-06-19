@@ -170,7 +170,13 @@
       destroy-on-close>
       <div v-if="detailItem" class="detail-content">
         <div class="detail-media">
-          <img v-if="detailItem.type === 'image'" :src="detailItem.result_url" :alt="t('history.imageDetailAlt')" />
+          <img
+            v-if="detailItem.type === 'image'"
+            :src="detailItem.result_url"
+            :alt="t('history.imageDetailAlt')"
+            @click="openImageViewer(detailItem)"
+            class="detail-image"
+          />
           <div v-else class="detail-video-wrap">
             <video
               v-if="detailItem.result_url"
@@ -248,6 +254,13 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 独立图片查看器：点击历史图片后弹出，支持缩放/平移/旋转/下载 -->
+    <ImageViewer
+      v-model:visible="viewerVisible"
+      :url="viewerUrl"
+      :download-url="viewerDownloadUrl"
+    />
   </div>
 </template>
 
@@ -255,11 +268,24 @@
 import { ref, computed, onMounted, watch, nextTick, reactive } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, Loading, Document, Delete, VideoPlay, CircleCloseFilled, Edit, Close, Download } from '@element-plus/icons-vue'
+import ImageViewer from '@/components/ImageViewer.vue'
 import { getHistoryList, deleteHistoryRecord, batchDeleteHistory } from '@/api/history'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useI18n } from '@/i18n'
 
 const { t } = useI18n()
+
+// ---------- 图片查看器：历史记录图片点击后弹出，支持缩放/平移/旋转/下载 ----------
+const viewerVisible = ref(false)
+const viewerUrl = ref('')
+const viewerDownloadUrl = ref('')
+function openImageViewer(item) {
+  if (!item || item.type !== 'image' || !item.result_url) return
+  viewerUrl.value = item.result_url
+  // 下载时优先走代理下载接口，确保可以下载
+  viewerDownloadUrl.value = '/api/history/' + item.id + '/download'
+  viewerVisible.value = true
+}
 
 // 监听全局任务队列的刷新信号，实现生成按钮点击后自动刷新历史列表
 const queue = useTaskQueueStore()

@@ -83,7 +83,13 @@
     <!-- 预览区（优先显示 taskQueue 中最新结果，其次 panel 自身的 resultUrl） -->
     <div class="image-node-preview">
       <div v-if="finalImageUrl" class="image-preview-wrap">
-        <img :src="finalImageUrl" alt="图片预览" class="image-preview-img" />
+        <img
+          :src="finalImageUrl"
+          alt="图片预览"
+          class="image-preview-img"
+          @click="viewerVisible = true"
+          :title="打开图片查看器（缩放/平移/旋转/下载）"
+        />
       </div>
       <div v-else-if="isRunning" class="image-preview-empty">
         <el-icon :size="28"><Loading /></el-icon>
@@ -97,6 +103,15 @@
         <el-icon :size="28"><PictureFilled /></el-icon>
         <span>暂无图片 · 填写提示词后生成</span>
       </div>
+    </div>
+  </div>
+
+      <!-- 独立图片查看器：点击节点内的预览图片后弹出，支持缩放/平移/旋转/下载 -->
+      <ImageViewer
+        v-model:visible="viewerVisible"
+        :url="finalImageUrl"
+        :download-url="finalImageUrl"
+      />
     </div>
   </div>
 </template>
@@ -121,8 +136,12 @@ import {
   PictureFilled,
   Link,
 } from '@element-plus/icons-vue'
+import ImageViewer from '@/components/ImageViewer.vue'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useCanvasStore } from '@/stores/canvas'
+
+// ---------- 图片查看器：节点内图片可点击放大查看 ----------
+const viewerVisible = ref(false)
 
 /* ---------- Props / Emits ---------- */
 const props = defineProps({
