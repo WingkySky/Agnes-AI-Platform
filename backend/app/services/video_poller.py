@@ -195,11 +195,10 @@ class VideoPollerManager:
                         task.status = "failed"
                         task.error_message = status_data.get("error") or "生成失败"
                         logger.warning(
-                            "[视频轮询器] 任务失败: task_id=%s error=%s",
+                            "[视频轮询器] 任务失败: task_id=%s error=%s（不写入历史）",
                             task.task_id,
                             task.error_message,
                         )
-                        await self._persist_result(task)
                         return
 
                     elif status == "cancelled":
@@ -236,9 +235,17 @@ class VideoPollerManager:
     # ---------- 异步写入数据库 ----------
     async def _persist_result(self, task: VideoTask):
         """
-        视频任务完成/失败后，异步写入数据库。
+        视频任务完成后，异步写入数据库。
+        仅在成功状态下写入，失败任务不进历史。
         使用 AsyncSession，完全异步 I/O，不阻塞事件循环。
         """
+        if task.status != "success":
+            logger.info(
+                "[视频轮询器] 跳过写入历史: task_id=%s status=%s",
+                task.task_id,
+                task.status,
+            )
+            return
         try:
             async with new_async_session() as session:
                 record = Generation(

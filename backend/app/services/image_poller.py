@@ -183,8 +183,7 @@ class ImagePollerManager:
             if not output_url and not output_b64:
                 task.status = "failed"
                 task.error_message = "Agnes AI 返回异常，未找到图片数据"
-                logger.warning("[图片任务器] 无结果数据: task_id=%s", task_id)
-                await self._persist_result(task)
+                logger.warning("[图片任务器] 无结果数据: task_id=%s（不写入历史）", task_id)
                 return
 
             task.status = "success"
@@ -211,22 +210,26 @@ class ImagePollerManager:
             task.error_message = str(e) or "生成失败，请稍后重试"
             task.last_updated = time.time()
             logger.error(
-                "[图片任务器] 任务失败: task_id=%s error=%s",
+                "[图片任务器] 任务失败: task_id=%s error=%s（不写入历史）",
                 task_id,
                 str(e),
                 exc_info=True,
             )
-            try:
-                await self._persist_result(task)
-            except Exception as persist_err:
-                logger.error("[图片任务器] 写入数据库失败: %s", persist_err)
 
     # ---------- 异步写入数据库 ----------
     async def _persist_result(self, task: ImageTask):
         """
-        图片任务完成/失败后，异步写入数据库。
+        图片任务完成后，异步写入数据库。
+        仅在成功状态下写入，失败任务不进历史。
         使用 AsyncSession，完全异步 I/O，不阻塞事件循环。
         """
+        if task.status != "success":
+            logger.info(
+                "[图片任务器] 跳过写入历史: task_id=%s status=%s",
+                task.task_id,
+                task.status,
+            )
+            return
         try:
             async with new_async_session() as session:
                 record = Generation(
