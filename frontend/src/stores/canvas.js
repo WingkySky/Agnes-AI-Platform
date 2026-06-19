@@ -83,6 +83,10 @@ export const useCanvasStore = defineStore('canvas', {
     selectedPanelId: null,
     selectedConnectionId: null,
 
+    // ---------- 文本编辑（外部触发节点进入编辑模式） ----------
+    // 当值等于某 panel.id 时，对应 CanvasNode 自动进入文本编辑态
+    editingPanelId: null,
+
     // ---------- 背景 ----------
     backgroundMode: 'dots',
 

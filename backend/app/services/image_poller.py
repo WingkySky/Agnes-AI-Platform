@@ -158,6 +158,8 @@ class ImagePollerManager:
                 image_url=task.params.get("image_url"),
                 base64_images=task.params.get("base64_images"),
                 image_urls=task.params.get("image_urls"),
+                # 【局部编辑】透传 mask 参数
+                mask=task.params.get("mask"),
             )
 
             # 解析结果
@@ -239,7 +241,7 @@ class ImagePollerManager:
                     params={
                         k: v for k, v in task.params.items()
                         # 不保存大的 base64 / URL 数组，避免数据库膨胀
-                        if k not in ("base64_image", "image_url", "base64_images", "image_urls")
+                        if k not in ("base64_image", "image_url", "base64_images", "image_urls", "mask")
                     },
                     mode=task.params.get("mode"),
                     result_url=task.result_url or "(base64)",

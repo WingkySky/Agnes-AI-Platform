@@ -108,33 +108,28 @@
 
             <PromptTemplates :templates="videoTemplates" @select="appendStylePrompt" />
 
-            <el-row :gutter="16">
-              <el-col :span="12">
-                <el-form-item :label="t('params.totalFrames')">
-                  <el-select v-model="numFrames">
-                    <el-option v-for="n in FRAME_OPTIONS" :key="n" :label="n + ' ' + t('params.framesUnit')" :value="n" />
-                  </el-select>
-                </el-form-item>
-              </el-col>
-              <el-col :span="12">
-                <el-form-item :label="t('params.frameRate')">
-                  <el-input-number v-model="frameRate" :min="1" :max="60" />
-                </el-form-item>
-              </el-col>
-            </el-row>
+            <!-- 图形化画面比例选择：直观矩形代替数字宽高输入 -->
+            <el-form-item :label="t('params.aspectRatio')">
+              <RatioPicker v-model="aspectRatio" mode="video" :per-row="5" />
+            </el-form-item>
 
-            <el-row :gutter="16">
-              <el-col :span="12">
-                <el-form-item :label="t('params.width')">
-                  <el-input-number v-model="width" :min="512" :max="2048" :step="64" />
-                </el-form-item>
-              </el-col>
-              <el-col :span="12">
-                <el-form-item :label="t('params.height')">
-                  <el-input-number v-model="height" :min="512" :max="2048" :step="64" />
-                </el-form-item>
-              </el-col>
-            </el-row>
+            <!-- 时长快捷选择：按钮代替帧数输入 -->
+            <el-form-item :label="t('params.duration')">
+              <div class="duration-btns">
+                <button
+                  v-for="sec in DURATION_OPTIONS"
+                  :key="sec"
+                  type="button"
+                  class="duration-btn"
+                  :class="{ 'duration-btn--active': seconds === sec }"
+                  @click="seconds = sec"
+                >{{ sec }}s</button>
+              </div>
+            </el-form-item>
+
+            <el-form-item :label="t('params.frameRate')">
+              <el-input-number v-model="frameRate" :min="1" :max="60" />
+            </el-form-item>
 
             <el-row :gutter="16">
               <el-col :span="24">
@@ -303,6 +298,7 @@ import {
 } from '@element-plus/icons-vue'
 import PromptTemplates from '@/components/PromptTemplates.vue'
 import ImageUploader from '@/components/ImageUploader.vue'
+import RatioPicker from '@/components/RatioPicker.vue'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useI18n } from '@/i18n'
 
@@ -317,16 +313,16 @@ const videoTemplates = computed(() => ([
   { label: t('presets.smoothTransition'), prompt: '，丝滑电影感过渡，电影级调色' }
 ]))
 
-const FRAME_OPTIONS = [9, 33, 49, 81, 121, 161, 241, 441]
+// 视频时长可选档（单位：秒）
+const DURATION_OPTIONS = [3, 5, 7, 10, 15]
 
 // ---------- 表单参数 ----------
 const mode = ref('text2video')
 const prompt = ref('')
 const negativePrompt = ref('')
-const numFrames = ref(121)
+const aspectRatio = ref('16:9')   // 画面比例（官方规范）
+const seconds = ref(5)            // 视频时长（秒）
 const frameRate = ref(24)
-const width = ref(1152)
-const height = ref(768)
 const seed = ref('')
 
 // ---------- 图片状态（图生视频：单张；首尾帧：起始帧+结束帧）----------
@@ -464,10 +460,9 @@ async function startGenerate() {
     prompt: prompt.value.trim(),
     negative_prompt: negativePrompt.value.trim() || undefined,
     model: 'agnes-video-v2.0',
-    num_frames: numFrames.value,
+    aspect_ratio: aspectRatio.value,   // 直接传比例字符串，后端会映射为官方 aspect_ratio
+    seconds: seconds.value,             // 直接传时长（秒），后端会转换为 duration
     frame_rate: frameRate.value,
-    width: width.value,
-    height: height.value,
     mode: mode.value,
     seed: seed.value ? Number(seed.value) : undefined,
   }
@@ -715,12 +710,61 @@ function handleVideoError(e) {
   margin-top: 2px;
   white-space: nowrap;
 }
+
+/* 统一表单标签：更醒目、更有视觉层级 */
+.video-view :deep(.el-form-item__label) {
+  color: #c5d3ea !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  padding-bottom: 6px !important;
+  letter-spacing: 0.3px;
+}
+
+/* 统一输入/下拉控件：贴合深色主题 */
+.video-view :deep(.el-input__wrapper),
+.video-view :deep(.el-textarea__inner),
+.video-view :deep(.el-input-number) {
+  background: rgba(18, 27, 50, 0.55) !important;
+  border-color: rgba(107, 126, 156, 0.25) !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+  color: #e8eef7 !important;
+}
+
+.video-view :deep(.el-textarea__inner) {
+  padding: 12px !important;
+  font-size: 14px !important;
+  line-height: 1.55 !important;
+}
+
+.video-view :deep(.el-input__wrapper:hover),
+.video-view :deep(.el-textarea__inner:hover) {
+  border-color: rgba(139, 176, 255, 0.55) !important;
+}
+
+.video-view :deep(.el-input-number__decrease),
+.video-view :deep(.el-input-number__increase) {
+  background: rgba(18, 27, 50, 0.55) !important;
+  color: #c5d3ea !important;
+  border-color: rgba(107, 126, 156, 0.25) !important;
+}
+
+.video-view :deep(.el-input__inner) {
+  color: #e8eef7 !important;
+  font-size: 14px !important;
+}
+
+.video-view :deep(.el-input__placeholder) {
+  color: #7c94b8 !important;
+}
+
 .generate-btn {
   width: 100%;
   height: 48px;
   font-size: 16px;
   font-weight: 600;
   margin-top: 8px;
+  border-radius: 12px !important;
 }
 .queue-hint {
   margin-top: 8px;
@@ -884,5 +928,46 @@ function handleVideoError(e) {
   font-size: 14px;
   color: #6b9cff;
   font-weight: bold;
+}
+
+/* 时长快捷按钮：与 RatioPicker 风格保持一致 */
+.duration-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.duration-btn {
+  min-width: 44px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(107, 126, 156, 0.25);
+  background: rgba(18, 27, 50, 0.55);
+  color: #c5d3ea;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 500;
+  transition: all 0.18s ease;
+  font-family: inherit;
+  letter-spacing: 0.2px;
+}
+
+.duration-btn:hover {
+  border-color: rgba(139, 176, 255, 0.55);
+  background: rgba(26, 40, 72, 0.7);
+  color: #fff;
+}
+
+.duration-btn--active {
+  border-color: #8bb0ff;
+  background: linear-gradient(
+    180deg,
+    rgba(107, 156, 255, 0.22) 0%,
+    rgba(107, 156, 255, 0.06) 100%
+  );
+  color: #fff;
+  box-shadow: 0 0 0 1px rgba(107, 156, 255, 0.35),
+              0 2px 10px rgba(107, 156, 255, 0.2);
 }
 </style>

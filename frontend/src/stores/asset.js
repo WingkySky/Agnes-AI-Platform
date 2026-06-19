@@ -149,7 +149,10 @@ export const useAssetStore = defineStore('asset', {
     async _persist() {
       try {
         const store = await getAssetStore()
-        await store.setItem(INDEX_KEY, this.assets)
+        // 关键：this.assets 是 Pinia Proxy 响应式数组，IndexedDB 无法结构化克隆 Proxy。
+        // 必须先 JSON 序列化剥离 Proxy，转成纯数组后再写入，否则会抛 DataCloneError。
+        const plain = JSON.parse(JSON.stringify(this.assets))
+        await store.setItem(INDEX_KEY, plain)
       } catch (e) {
         // eslint-disable-next-line no-console
         console.warn('[asset] 持久化失败:', e)

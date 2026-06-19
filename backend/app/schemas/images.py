@@ -12,6 +12,7 @@ class ImageGenerationRequest(BaseModel):
 
     - 文生图模式：只需填写 prompt 和可选的 size
     - 图生图模式：提供 base64_images / image_urls（多图，推荐），或旧字段 base64_image / image_url（兼容）
+    - 局部编辑模式：图生图基础上额外提供 mask（黑白图，白色为编辑区域）
     """
 
     prompt: str = Field(..., min_length=1, max_length=2000, description="提示词")
@@ -41,6 +42,12 @@ class ImageGenerationRequest(BaseModel):
     image_url: Optional[str] = Field(
         default=None,
         description="【旧字段，兼容用】单张参考图片 URL；新代码请使用 image_urls",
+    )
+
+    # ── 蒙版局部编辑（inpainting）：黑白图 base64，白色为编辑区域 ──
+    mask: Optional[str] = Field(
+        default=None,
+        description="蒙版图 base64 data URI（黑白图，白色为编辑区域），用于局部编辑",
     )
 
     @property

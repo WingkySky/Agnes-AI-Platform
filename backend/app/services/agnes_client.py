@@ -402,6 +402,7 @@ class AgnesAIClient:
         image_url: Optional[str] = None,               # 保留：向后兼容（单图）
         base64_images: Optional[List[str]] = None,     # 【新增】多图 base64 数组
         image_urls: Optional[List[str]] = None,        # 【新增】多图 URL 数组
+        mask: Optional[str] = None,                    # 【新增】蒙版图 base64，用于局部编辑
     ) -> Dict[str, Any]:
         """
         调用 Agnes AI 生成图片（异步等待，不阻塞其他请求的事件循环）。
@@ -413,6 +414,7 @@ class AgnesAIClient:
           - extra_body.response_format: "url" | "b64_json" → 输出格式（放顶层会 400）
           - 文生图：不传入 image 字段
           - 图生图：image 放在 extra_body.image 中
+          - 局部编辑：mask 放在 extra_body.mask 中（黑白图，白色为编辑区域）
 
         【多图参考改造】：
           - 参数优先级：base64_images / image_urls（新字段，数组）→ base64_image / image_url（旧字段，单值）
@@ -459,13 +461,22 @@ class AgnesAIClient:
                 if uri:
                     normalized.append(uri)
 
-            body["extra_body"] = {
+            extra_body = {
                 "image": normalized,
                 "response_format": response_format,
             }
+
+            # 【局部编辑模式】mask 归一化后放入 extra_body.mask
+            if mask and mask.strip():
+                mask_uri, _ = self._normalize_image_input(mask)
+                if mask_uri:
+                    extra_body["mask"] = mask_uri
+                    logger.info("[图片生成] 局部编辑模式: 已附加 mask")
+
+            body["extra_body"] = extra_body
             logger.info(
-                "[图片生成] 图生图模式: model=%s, size=%s, ref_images=%d 张, format=%s, prompt=%s",
-                model, size, len(normalized), response_format, prompt[:80],
+                "[图片生成] 图生图模式: model=%s, size=%s, ref_images=%d 张, format=%s, mask=%s, prompt=%s",
+                model, size, len(normalized), response_format, "yes" if mask and mask.strip() else "no", prompt[:80],
             )
         elif response_format == "b64_json":
             # 【文生图 + Base64 输出】使用顶层参数 return_base64（文档规范）

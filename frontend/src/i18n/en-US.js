@@ -65,6 +65,8 @@ export default {
     negativePrompt: 'Negative Prompt (optional)',
     negativePromptPlaceholder: 'Describe elements you do not want to appear (optional)',
     size: 'Size',
+    aspectRatio: 'Aspect Ratio',
+    duration: 'Duration',
     model: 'Model',
     totalFrames: 'Total Frames',
     framesUnit: 'frames',

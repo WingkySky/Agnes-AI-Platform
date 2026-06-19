@@ -104,6 +104,7 @@
           @view-image="handleViewImage"
           @edit-text="(text) => handleNodeEditText(panel.id, text)"
           @generate-image="handleNodeGenerateImage"
+          @generate="handleConfigGenerate"
           @retry="handleNodeRetry"
           @upload="(p) => handleNodeUpload(p)"
         />
@@ -214,6 +215,26 @@
         @close="contextMenu.open = false"
       />
 
+      <!-- ============ 素材库浮动面板 ============ -->
+      <CanvasAssetLibrary
+        v-if="showAssetLibrary"
+        :theme="store.canvasTheme"
+        @close="showAssetLibrary = false"
+        @use-asset="handleUseAsset"
+        @delete-asset="handleDeleteAsset"
+        @upload-asset="handleUploadAssetFiles"
+      />
+
+      <!-- ============ 蒙版编辑对话框 ============ -->
+      <MaskEditDialog
+        v-if="maskEditState.visible"
+        :visible="maskEditState.visible"
+        :image-url="maskEditState.imageUrl"
+        :theme="store.canvasTheme"
+        @confirm="handleMaskConfirm"
+        @cancel="maskEditState.visible = false"
+      />
+
       <!-- ============ 图片预览弹窗 ============ -->
       <div v-if="previewImage" class="preview-overlay" @click="previewImage = null">
         <img :src="previewImage" class="preview-img" @click.stop />
@@ -276,6 +297,8 @@ import CanvasZoomControls from '@/components/canvas/CanvasZoomControls.vue'
 import CanvasMinimap from '@/components/canvas/CanvasMinimap.vue'
 import CanvasNodeHoverToolbar from '@/components/canvas/CanvasNodeHoverToolbar.vue'
 import CanvasContextMenu from '@/components/canvas/CanvasContextMenu.vue'
+import CanvasAssetLibrary from '@/components/canvas/CanvasAssetLibrary.vue'
+import MaskEditDialog from '@/components/canvas/MaskEditDialog.vue'
 
 const store = useCanvasStore()
 
@@ -636,16 +659,120 @@ function handleNodeEditText(panelId, text) {
   store.updatePanel(panelId, { content: { content: text } })
 }
 
-// 从文本节点生图（简化为提示）
-function handleNodeGenerateImage(panel) {
-  ElMessage.info('生图功能开发中')
-  console.log('[canvas] generate-image from panel:', panel.id)
+// 从文本节点生图：读取文本内容作为 prompt，在源节点旁创建 image 节点并连线
+async function handleNodeGenerateImage(panel) {
+  const prompt = panel.content?.content || panel.content?.prompt || ''
+  if (!prompt.trim()) {
+    ElMessage.warning('文本节点内容为空')
+    return
+  }
+  await generateImageFromPrompt(panel, prompt)
 }
 
-// 重试生成
-function handleNodeRetry(panel) {
-  ElMessage.info('重试功能开发中')
-  console.log('[canvas] retry panel:', panel.id)
+// 重试生成：查找上游 config 节点重新生成，或用节点自身 prompt 重新生成
+async function handleNodeRetry(panel) {
+  await retryGeneration(panel)
+}
+
+// 通用：从 prompt 生成图片，在源节点旁创建 image 节点并连线
+// - sourcePanel: 源节点（文本节点或重试时的图片节点）
+// - prompt: 提示词
+// - targetPanelId: 可选，若提供则更新该节点而不是创建新节点（用于重试场景）
+async function generateImageFromPrompt(sourcePanel, prompt, targetPanelId = null) {
+  let newPanelId = targetPanelId
+
+  if (!targetPanelId) {
+    // 在源节点右侧创建 image 节点（loading 状态）
+    // 注意：store.addPanel 返回的是新节点 ID 字符串
+    newPanelId = store.addPanel({
+      type: 'image',
+      x: sourcePanel.x + sourcePanel.width + 60,
+      y: sourcePanel.y,
+      width: 340,
+      height: 240,
+      content: { content: '', status: 'loading', prompt },
+    })
+    // 连线：源节点 → 新图片节点
+    store.addConnection({ source_panel_id: sourcePanel.id, target_panel_id: newPanelId })
+    store.pushSnapshot()
+  } else {
+    // 重试场景：更新已有节点为 loading 状态
+    store.updatePanel(targetPanelId, { content: { content: '', status: 'loading', errorDetails: null } })
+  }
+
+  try {
+    // 调用图片生成 API
+    const { createImageTask, getImageTaskStatus } = await import('@/api/images')
+    const resp = await createImageTask({ prompt, model: 'agnes-image-2.1-flash', size: '1024x1024' })
+    const taskId = resp.task_id
+
+    // 轮询任务状态（间隔 2 秒，最多 150 次 ≈ 5 分钟）
+    const maxAttempts = 150
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise((r) => setTimeout(r, 2000))
+      const status = await getImageTaskStatus(taskId)
+      if (status.status === 'completed' || status.status === 'succeeded' || status.status === 'success' || status.status === 'done') {
+        const imageUrl = status.result_url || status.image_url || status.url || status.data?.[0]?.url
+        store.updatePanel(newPanelId, { content: { content: imageUrl, status: 'success' } })
+        store.pushSnapshot()
+        ElMessage.success('图片生成完成')
+        return
+      }
+      if (status.status === 'failed' || status.status === 'error') {
+        const errMsg = status.message || status.error || '生成失败'
+        store.updatePanel(newPanelId, { content: { status: 'error', errorDetails: errMsg } })
+        ElMessage.error('图片生成失败: ' + errMsg)
+        return
+      }
+    }
+    // 超时
+    store.updatePanel(newPanelId, { content: { status: 'error', errorDetails: '生成超时' } })
+    ElMessage.warning('生成超时')
+  } catch (err) {
+    console.error('[canvas] generate image error:', err)
+    store.updatePanel(newPanelId, { content: { status: 'error', errorDetails: err.message } })
+    ElMessage.error('生成失败: ' + err.message)
+  }
+}
+
+// 通用：重试生成
+// - 查找上游 config 节点，重新执行合并生成
+// - 没有上游 config 节点时，用节点自身 prompt 重新生成（直接更新当前节点）
+async function retryGeneration(panel) {
+  // 查找上游 config 节点
+  const upstreamConnections = store.connections.filter((c) => c.target_panel_id === panel.id)
+  const configConn = upstreamConnections.find((c) => {
+    const source = store.panels.find((p) => p.id === c.source_panel_id)
+    return source?.type === 'config'
+  })
+
+  if (configConn) {
+    // 有上游 config 节点，重新执行合并生成
+    const configNode = store.panels.find((p) => p.id === configConn.source_panel_id)
+    try {
+      const { executeMergeGeneration, executeMergeVideoGeneration } = await import('@/lib/canvas-generation')
+      const isVideo = panel.type === 'video'
+      const fn = isVideo ? executeMergeVideoGeneration : executeMergeGeneration
+      ElMessage.info('正在重新生成...')
+      await fn(configNode.id, store, {
+        onProgress: (stage) => {
+          if (stage === 'done') {
+            ElMessage.success('重新生成完成')
+          }
+        },
+      })
+    } catch (err) {
+      ElMessage.error('重试失败: ' + err.message)
+    }
+  } else {
+    // 没有上游 config 节点，用节点自身的 prompt 重新生成（直接更新当前节点）
+    const prompt = panel.content?.prompt || panel.content?.content || ''
+    if (!prompt.trim()) {
+      ElMessage.warning('无法重试：未找到提示词')
+      return
+    }
+    await generateImageFromPrompt(panel, prompt, panel.id)
+  }
 }
 
 // 节点上传文件
@@ -655,11 +782,65 @@ function handleNodeUpload(panel) {
   }
 }
 
+// 配置节点：点击生成按钮，根据模式调用图片或视频合并生成流程
+async function handleConfigGenerate(panel) {
+  const mode = panel.content?.mode || 'text2image'
+  const isVideo = mode.includes('video')
+
+  // 校验提示词
+  const prompt = panel.content?.prompt || panel.content?.composerContent || ''
+  if (!prompt.trim()) {
+    ElMessage.warning('请先输入提示词')
+    return
+  }
+
+  // 设置生成中状态
+  store.updatePanel(panel.id, { content: { generating: true, progress: 0, progressText: '准备中...' } })
+
+  try {
+    const { executeMergeGeneration, executeMergeVideoGeneration } = await import('@/lib/canvas-generation')
+    const fn = isVideo ? executeMergeVideoGeneration : executeMergeGeneration
+
+    await fn(panel.id, store, {
+      onProgress: (stage) => {
+        // 按阶段更新进度条与文字
+        const stageMap = {
+          building: { progress: 10, text: '构建上下文...' },
+          creating: { progress: 25, text: '创建任务...' },
+          polling: { progress: 40, text: '等待生成...' },
+          generating: { progress: 60, text: '生成中...' },
+          done: { progress: 100, text: '完成' },
+        }
+        const info = stageMap[stage]
+        if (info) {
+          store.updatePanel(panel.id, { content: { progress: info.progress, progressText: info.text } })
+        }
+        if (stage === 'done') {
+          ElMessage.success(isVideo ? '视频生成完成' : '图片生成完成')
+        }
+      },
+    })
+  } catch (err) {
+    console.error('[canvas] config generate error:', err)
+    ElMessage.error('生成失败: ' + err.message)
+  } finally {
+    // 无论成功或失败，重置生成状态
+    store.updatePanel(panel.id, { content: { generating: false, progress: 0, progressText: '' } })
+  }
+}
+
 // ==================== 悬停工具栏 ====================
 
 const hoveredPanelId = ref(null)
 const showHoverToolbar = ref(false)
 let hoverHideTimer = null
+
+// 蒙版编辑对话框状态
+const maskEditState = reactive({
+  visible: false,
+  panelId: null,
+  imageUrl: '',
+})
 
 const hoveredPanel = computed(() => {
   if (!hoveredPanelId.value) return null
@@ -722,12 +903,39 @@ function handleHoverDelete() {
   hoveredPanelId.value = null
 }
 
-function handleHoverRetry() {
-  ElMessage.info('重试功能开发中')
+// 悬停工具栏：重试
+async function handleHoverRetry() {
+  const panel = hoveredPanel.value
+  if (!panel) return
+  await retryGeneration(panel)
 }
 
-function handleHoverSaveAsset() {
-  ElMessage.info('存素材功能开发中')
+// 悬停工具栏：存素材到素材库
+async function handleHoverSaveAsset() {
+  const panel = hoveredPanel.value
+  if (!panel) return
+
+  const content = panel.content || {}
+  const url = content.content || content.url
+  if (!url) {
+    ElMessage.warning('节点没有可保存的内容')
+    return
+  }
+
+  try {
+    const { useAssetStore } = await import('@/stores/asset')
+    const assetStore = useAssetStore()
+    assetStore.registerAsset({
+      type: panel.type, // 'image' | 'video' | 'audio'
+      url: url,
+      prompt: content.prompt || '',
+      name: panel.name || `${panel.type}-${panel.id.slice(0, 8)}`,
+      sourceNodeId: panel.id,
+    })
+    ElMessage.success('已保存到素材库')
+  } catch (err) {
+    ElMessage.error('保存失败: ' + (err.message || err))
+  }
 }
 
 function handleHoverDownload() {
@@ -740,16 +948,57 @@ function handleHoverDownload() {
   }
 }
 
+// 悬停工具栏：通用编辑（按节点类型分发）
 function handleHoverEdit() {
-  ElMessage.info('编辑功能开发中')
+  const panel = hoveredPanel.value
+  if (!panel) return
+
+  switch (panel.type) {
+    case 'text':
+      handleHoverEditText()
+      break
+    case 'image':
+      // 触发替换图片
+      triggerFileUpload(panel.id, 'image/*')
+      break
+    case 'video':
+      triggerFileUpload(panel.id, 'video/*')
+      break
+    case 'audio':
+      triggerFileUpload(panel.id, 'audio/*')
+      break
+    case 'config':
+      // 聚焦到配置节点，提示用户在节点内编辑
+      store.selectPanel(panel.id, { append: false })
+      ElMessage.info('请在配置节点中编辑生成参数')
+      break
+    default:
+      ElMessage.info('不支持编辑此类型节点')
+  }
 }
 
+// 悬停工具栏：编辑文字（通过 store.editingPanelId 触发 CanvasNode 进入编辑模式）
 function handleHoverEditText() {
-  ElMessage.info('编辑文字功能开发中')
+  const panel = hoveredPanel.value
+  if (!panel || panel.type !== 'text') return
+
+  store.selectPanel(panel.id, { append: false })
+  // 使用 nextTick 确保 CanvasNode 已渲染并响应
+  nextTick(() => {
+    store.editingPanelId = panel.id
+  })
 }
 
-function handleHoverGenerateImage() {
-  ElMessage.info('生图功能开发中')
+// 悬停工具栏：生图
+async function handleHoverGenerateImage() {
+  const panel = hoveredPanel.value
+  if (!panel) return
+  const prompt = panel.content?.content || panel.content?.prompt || ''
+  if (!prompt.trim()) {
+    ElMessage.warning('文本内容为空')
+    return
+  }
+  await generateImageFromPrompt(panel, prompt)
 }
 
 function handleHoverFontSizeDown() {
@@ -789,8 +1038,71 @@ function handleHoverCopyPrompt() {
   })
 }
 
-function handleHoverDescribe() {
-  ElMessage.info('反推提示词功能开发中')
+// 悬停工具栏：反推提示词（图生文）—— 将当前 hover 图片发给 AI，生成适合 AI 绘画的英文 prompt，写入节点 prompt 字段
+async function handleHoverDescribe() {
+  const panel = hoveredPanel.value
+  if (!panel) return
+
+  // 取图片地址：优先 content.content，兼容 content.url
+  const imageUrl = panel.content?.content || panel.content?.url
+  if (!imageUrl) {
+    ElMessage.warning('节点没有图片内容')
+    return
+  }
+
+  // 设置节点为 loading 状态（updatePanel 对 content 深合并，不会覆盖图片地址）
+  store.updatePanel(panel.id, { content: { describing: true } })
+
+  try {
+    const { createChatSession, sendMessageStream, deleteChatSession } = await import('@/api/chat')
+
+    // 创建临时会话
+    const session = await createChatSession({ title: '图片反推' })
+    const sessionId = session.id || session.session_id
+
+    // 反推指令：让 AI 描述图片并输出适合 AI 绘画的英文提示词
+    const prompt = '请详细描述这张图片的内容、风格、构图、色彩等，生成一段适合 AI 绘画的英文提示词（prompt），只输出提示词本身，不要其他解释。'
+    // attachments 格式：{ source: 'url', url } —— sendMessageStream 内部会转成后端 image_url 格式
+    const attachments = [{ source: 'url', url: imageUrl }]
+
+    let resultText = ''
+
+    // SSE 流式接收：text 事件携带 event.content 增量文本
+    await sendMessageStream(
+      sessionId,
+      prompt,
+      attachments,
+      (event) => {
+        if (event.type === 'text' && event.content) {
+          resultText += event.content
+          // 实时更新节点 prompt（saveCanvas 已防抖，频繁更新安全）
+          store.updatePanel(panel.id, { content: { prompt: resultText } })
+        }
+        // done / 其他事件类型无需额外处理
+      }
+    )
+
+    // 最终写入 prompt 并清除 loading 状态
+    store.updatePanel(panel.id, {
+      content: {
+        prompt: resultText.trim(),
+        describing: false,
+      },
+    })
+    store.pushSnapshot()
+    ElMessage.success('提示词已生成')
+
+    // 删除临时会话（失败可忽略）
+    try {
+      await deleteChatSession(sessionId)
+    } catch (e) {
+      // 忽略删除失败
+    }
+  } catch (err) {
+    console.error('[canvas] describe error:', err)
+    store.updatePanel(panel.id, { content: { describing: false } })
+    ElMessage.error('反推失败: ' + (err.message || err))
+  }
 }
 
 function handleHoverReplaceImage() {
@@ -806,27 +1118,226 @@ function handleHoverToggleRatio() {
 }
 
 function handleHoverMaskEdit() {
-  ElMessage.info('蒙版编辑功能开发中')
+  const panel = hoveredPanel.value
+  if (!panel) return
+  const imageUrl = panel.content?.content || panel.content?.url
+  if (!imageUrl) {
+    ElMessage.warning('节点没有图片内容')
+    return
+  }
+  maskEditState.visible = true
+  maskEditState.panelId = panel.id
+  maskEditState.imageUrl = imageUrl
 }
 
-function handleHoverCrop() {
-  ElMessage.info('裁剪功能开发中')
+// 蒙版编辑确认：调用 image2image 局部编辑
+async function handleMaskConfirm({ mask, prompt }) {
+  const panelId = maskEditState.panelId
+  const panel = store.panels.find(p => p.id === panelId)
+  if (!panel) return
+
+  const imageUrl = panel.content?.content || panel.content?.url
+  maskEditState.visible = false
+
+  // 设置节点为 loading 状态
+  store.updatePanel(panelId, { content: { status: 'loading' } })
+
+  try {
+    const { createImageTask, getImageTaskStatus } = await import('@/api/images')
+
+    // 将图片转为 base64（如果还不是 base64）
+    let base64Image = imageUrl
+    if (!imageUrl.startsWith('data:')) {
+      // URL 模式，需要先获取图片 base64
+      const response = await fetch(imageUrl)
+      const blob = await response.blob()
+      base64Image = await new Promise((resolve) => {
+        const reader = new FileReader()
+        reader.onloadend = () => resolve(reader.result)
+        reader.readAsDataURL(blob)
+      })
+    }
+
+    // 创建 image2image 任务（带 mask 局部编辑）
+    const resp = await createImageTask({
+      prompt,
+      model: 'agnes-image-2.1-flash',
+      size: '1024x1024',
+      base64_image: base64Image,
+      mask: mask,
+    })
+
+    const taskId = resp.task_id
+
+    // 轮询任务状态
+    for (let i = 0; i < 150; i++) {
+      await new Promise(r => setTimeout(r, 2000))
+      const status = await getImageTaskStatus(taskId)
+      if (status.status === 'completed' || status.status === 'succeeded' || status.status === 'success' || status.status === 'done') {
+        const resultUrl = status.result_url || status.image_url || status.url || status.data?.[0]?.url
+        store.updatePanel(panelId, { content: { content: resultUrl, status: 'success' } })
+        store.pushSnapshot()
+        ElMessage.success('局部编辑完成')
+        return
+      }
+      if (status.status === 'failed' || status.status === 'error') {
+        const errMsg = status.message || status.error || '编辑失败'
+        store.updatePanel(panelId, { content: { status: 'error', errorDetails: errMsg } })
+        ElMessage.error('编辑失败: ' + errMsg)
+        return
+      }
+    }
+    ElMessage.warning('编辑超时')
+    store.updatePanel(panelId, { content: { status: 'error', errorDetails: '超时' } })
+  } catch (err) {
+    console.error('[canvas] mask edit error:', err)
+    store.updatePanel(panelId, { content: { status: 'error', errorDetails: err.message } })
+    ElMessage.error('编辑失败: ' + err.message)
+  }
 }
 
-function handleHoverSplit() {
-  ElMessage.info('拆分功能开发中')
+// 图片裁剪：弹出比例选择，按比例居中裁剪
+async function handleHoverCrop() {
+  const panel = hoveredPanel.value
+  if (!panel?.content?.content) return
+  const imageUrl = panel.content.content
+
+  try {
+    // 弹出比例选择
+    const { value } = await ElMessageBox.prompt('选择裁剪比例（输入如 1:1, 4:3, 16:9, 3:4）', '裁剪图片', {
+      inputValue: '1:1',
+      inputPattern: /^\d+:\d+$/,
+      inputErrorMessage: '请输入正确的比例格式，如 1:1',
+    })
+    const [rw, rh] = value.split(':').map(Number)
+
+    ElMessage.info('正在裁剪...')
+    const { cropImage, getImageSize } = await import('@/lib/canvas-image-ops')
+    const { width, height } = await getImageSize(imageUrl)
+    // 计算居中裁剪区域
+    const targetRatio = rw / rh
+    const currentRatio = width / height
+    let cropX, cropY, cropW, cropH
+    if (currentRatio > targetRatio) {
+      cropH = height
+      cropW = height * targetRatio
+      cropX = (width - cropW) / 2
+      cropY = 0
+    } else {
+      cropW = width
+      cropH = width / targetRatio
+      cropX = 0
+      cropY = (height - cropH) / 2
+    }
+    const result = await cropImage(imageUrl, { x: cropX, y: cropY, width: cropW, height: cropH })
+    store.updatePanel(panel.id, { content: { content: result } })
+    store.pushSnapshot()
+    ElMessage.success('裁剪完成')
+  } catch (err) {
+    if (err !== 'cancel' && err?.message !== 'cancel') {
+      ElMessage.error('裁剪失败: ' + (err.message || err))
+    }
+  }
 }
 
-function handleHoverUpscale() {
-  ElMessage.info('放大功能开发中')
+// 图片拆分：2x2 拆分为 4 份，创建新节点并连线
+async function handleHoverSplit() {
+  const panel = hoveredPanel.value
+  if (!panel?.content?.content) return
+  const imageUrl = panel.content.content
+
+  try {
+    ElMessage.info('正在拆分图片...')
+    const { splitImage } = await import('@/lib/canvas-image-ops')
+    const pieces = await splitImage(imageUrl, 4) // 2x2 拆分为 4 份
+    // store.splitImagePanel 不接受 pieces 数组，手动创建 4 个新节点并连线
+    pieces.forEach((piece, i) => {
+      const newId = store.addPanel({
+        type: panel.type,
+        name: (panel.name || '图片') + ' (拆分 ' + (i + 1) + ')',
+        x: panel.x + panel.width + 40 + i * 20,
+        y: panel.y + i * 20,
+        width: panel.width,
+        height: panel.height,
+        content: { ...panel.content, content: piece },
+        meta: {},
+        is_locked: false,
+        is_hidden: false,
+      })
+      store.addConnection({
+        source_panel_id: panel.id,
+        target_panel_id: newId,
+        type: 'flow',
+      })
+    })
+    store.pushSnapshot()
+    ElMessage.success('已拆分为 4 张图片')
+  } catch (err) {
+    ElMessage.error('拆分失败: ' + (err.message || err))
+  }
 }
 
-function handleHoverSuperResolution() {
-  ElMessage.info('超分功能开发中')
+// 图片放大：等比放大 2 倍
+async function handleHoverUpscale() {
+  const panel = hoveredPanel.value
+  if (!panel?.content?.content) return
+  const imageUrl = panel.content.content
+
+  try {
+    ElMessage.info('正在放大 2x...')
+    const { upscaleImage } = await import('@/lib/canvas-image-ops')
+    const result = await upscaleImage(imageUrl, 2)
+    store.updatePanel(panel.id, { content: { content: result } })
+    store.pushSnapshot()
+    ElMessage.success('放大完成')
+  } catch (err) {
+    ElMessage.error('放大失败: ' + (err.message || err))
+  }
 }
 
-function handleHoverAngle() {
-  ElMessage.info('角度调整功能开发中')
+// 图片超分：等比放大 4 倍
+async function handleHoverSuperResolution() {
+  const panel = hoveredPanel.value
+  if (!panel?.content?.content) return
+  const imageUrl = panel.content.content
+
+  try {
+    ElMessage.info('正在超分辨率放大 4x...')
+    const { upscaleImage } = await import('@/lib/canvas-image-ops')
+    const result = await upscaleImage(imageUrl, 4)
+    store.updatePanel(panel.id, { content: { content: result } })
+    store.pushSnapshot()
+    ElMessage.success('超分完成')
+  } catch (err) {
+    ElMessage.error('超分失败: ' + (err.message || err))
+  }
+}
+
+// 角度调整：弹出输入框，支持 90/180/270 度旋转
+async function handleHoverAngle() {
+  const panel = hoveredPanel.value
+  if (!panel?.content?.content) return
+  const imageUrl = panel.content.content
+
+  try {
+    const { value } = await ElMessageBox.prompt('请输入旋转角度（90/180/270）', '角度调整', {
+      inputValue: '90',
+      inputPattern: /^(90|180|270)$/,
+      inputErrorMessage: '请输入 90、180 或 270',
+    })
+    const degrees = Number(value)
+
+    ElMessage.info(`正在旋转 ${degrees}°...`)
+    const { rotateImage } = await import('@/lib/canvas-image-ops')
+    const result = await rotateImage(imageUrl, degrees)
+    store.updatePanel(panel.id, { content: { content: result } })
+    store.pushSnapshot()
+    ElMessage.success('旋转完成')
+  } catch (err) {
+    if (err !== 'cancel' && err?.message !== 'cancel') {
+      ElMessage.error('旋转失败: ' + (err.message || err))
+    }
+  }
 }
 
 function handleHoverViewLarge() {
@@ -837,6 +1348,8 @@ function handleHoverViewLarge() {
 // ==================== 底部工具栏事件 ====================
 
 const showAppearancePanel = ref(false)
+// 素材库面板显示开关
+const showAssetLibrary = ref(false)
 
 // 选择/移动工具
 function handleSelectTool() {
@@ -853,9 +1366,70 @@ function handleUploadAsset() {
   triggerFileUpload(null, 'image/*,video/*,audio/*')
 }
 
-// 打开素材库
+// 打开素材库（切换显示）
 function handleOpenAssetLibrary() {
-  ElMessage.info('素材库功能开发中')
+  showAssetLibrary.value = !showAssetLibrary.value
+}
+
+// 使用素材：在画布中央创建对应类型的节点
+async function handleUseAsset(asset) {
+  if (!asset?.type || !asset?.url) return
+  const id = createNodeAtCenter(asset.type)
+  // 历史记录的视频用后端流式接口，避免直接加载完整文件
+  const nodeUrl = asset.source === 'history' && asset.type === 'video'
+    ? `/api/history/video/${asset.id}/stream`
+    : asset.url
+  store.updatePanel(id, {
+    content: {
+      content: nodeUrl,
+      status: 'success',
+      prompt: asset.prompt || '',
+    },
+  })
+  if (asset.name) {
+    store.updatePanel(id, { name: asset.name })
+  }
+  ElMessage.success('已创建节点')
+}
+
+// 删除素材：从素材库移除
+async function handleDeleteAsset(id) {
+  if (!id) return
+  try {
+    const { useAssetStore } = await import('@/stores/asset')
+    const assetStore = useAssetStore()
+    await assetStore.removeAsset(id)
+    ElMessage.success('已删除素材')
+  } catch (err) {
+    ElMessage.error('删除失败: ' + (err.message || err))
+  }
+}
+
+// 素材库上传：将用户选择的文件注册为本地素材
+async function handleUploadAssetFiles(files) {
+  if (!files || files.length === 0) return
+  try {
+    const { useAssetStore } = await import('@/stores/asset')
+    const assetStore = useAssetStore()
+    let count = 0
+    for (const file of files) {
+      const url = URL.createObjectURL(file)
+      const type = file.type.startsWith('image/') ? 'image'
+        : file.type.startsWith('video/') ? 'video'
+        : file.type.startsWith('audio/') ? 'audio'
+        : 'image'
+      await assetStore.registerAsset({
+        type,
+        url,
+        name: file.name,
+        prompt: '',
+      })
+      count++
+    }
+    ElMessage.success(`已上传 ${count} 个素材`)
+  } catch (err) {
+    ElMessage.error('上传失败: ' + (err.message || err))
+  }
 }
 
 // 删除选中节点

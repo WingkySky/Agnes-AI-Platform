@@ -65,16 +65,21 @@ export function saveCanvas(state) {
     saveTimer = null
     await ensureReady()
     try {
-      await canvasStore.setItem(STORAGE_KEY, {
+      // 关键：Pinia state 是 Proxy 响应式对象，IndexedDB 无法结构化克隆 Proxy。
+      // 必须先 JSON 序列化剥离 Proxy，转成纯对象后再写入，否则会抛 DataCloneError。
+      const plain = JSON.parse(JSON.stringify({
         workspaces: state.workspaces,
         activeWorkspaceId: state.activeWorkspaceId,
         themeMode: state.themeMode,
         viewport: state.viewport,
         panels: state.panels,
         connections: state.connections,
-      })
-    } catch {
-      // 静默失败：持久化失败不应阻塞画布交互
+      }))
+      await canvasStore.setItem(STORAGE_KEY, plain)
+    } catch (err) {
+      // 持久化失败不应阻塞画布交互，仅打印警告便于排查
+      // eslint-disable-next-line no-console
+      console.warn('[canvas-storage] saveCanvas failed:', err)
     }
   }, SAVE_DEBOUNCE_MS)
 }

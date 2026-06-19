@@ -66,6 +66,8 @@ export default {
     negativePrompt: '负向提示词 (可选)',
     negativePromptPlaceholder: '描述不希望出现的元素（可选）',
     size: '尺寸',
+    aspectRatio: '画面比例',
+    duration: '时长',
     model: '模型',
     totalFrames: '总帧数',
     framesUnit: '帧',

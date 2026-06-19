@@ -74,22 +74,16 @@
               @select="appendStylePrompt"
             />
 
-            <el-row :gutter="16">
-              <el-col :span="12">
-                <el-form-item :label="t('params.size')">
-                  <el-select v-model="size">
-                    <el-option v-for="s in IMAGE_SIZES" :key="s" :label="s" :value="s" />
-                  </el-select>
-                </el-form-item>
-              </el-col>
-              <el-col :span="12">
-                <el-form-item :label="t('params.model')">
-                  <el-select v-model="model">
-                    <el-option v-for="m in IMAGE_MODELS" :key="m" :label="m" :value="m" />
-                  </el-select>
-                </el-form-item>
-              </el-col>
-            </el-row>
+            <!-- 图形化尺寸/比例选择：直观矩形代替下拉数字 -->
+            <el-form-item :label="t('params.size')">
+              <RatioPicker v-model="size" mode="image" />
+            </el-form-item>
+
+            <el-form-item :label="t('params.model')">
+              <el-select v-model="model">
+                <el-option v-for="m in IMAGE_MODELS" :key="m" :label="m" :value="m" />
+              </el-select>
+            </el-form-item>
 
             <!-- 生成按钮 -->
             <el-button
@@ -245,6 +239,7 @@ import {
 import PromptTemplates from '@/components/PromptTemplates.vue'
 import ImageUploader from '@/components/ImageUploader.vue'
 import ImageViewer from '@/components/ImageViewer.vue'
+import RatioPicker from '@/components/RatioPicker.vue'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useI18n } from '@/i18n'
 
@@ -292,7 +287,7 @@ const IMAGE_MODELS = [
 // ---------- 表单参数 ----------
 const mode = ref('text2image')
 const prompt = ref('')
-const size = ref('1024x1024')
+const size = ref('1280x720')   // 默认横板 16:9，视觉上更通用
 const model = ref('agnes-image-2.1-flash')
 const referenceFileList = ref([])   // 【多图】数组
 
@@ -581,12 +576,65 @@ function copyImageUrl() {
 }
 .mode-tabs { margin-bottom: 12px; }
 .param-form { margin-top: 12px; }
+
+/* 统一表单标签：更醒目、更有视觉层级 */
+.param-form :deep(.el-form-item__label) {
+  color: #c5d3ea !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  padding-bottom: 6px !important;
+  letter-spacing: 0.3px;
+}
+
+/* 统一输入/下拉控件：贴合深色主题 */
+.param-form :deep(.el-input__wrapper),
+.param-form :deep(.el-textarea__inner),
+.param-form :deep(.el-select) {
+  background: rgba(18, 27, 50, 0.55) !important;
+  border-color: rgba(107, 126, 156, 0.25) !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+  color: #e8eef7 !important;
+}
+
+.param-form :deep(.el-textarea__inner) {
+  padding: 12px !important;
+  font-size: 14px !important;
+  line-height: 1.55 !important;
+}
+
+.param-form :deep(.el-input__wrapper:hover),
+.param-form :deep(.el-textarea__inner:hover),
+.param-form :deep(.el-select .el-select__wrapper:hover) {
+  border-color: rgba(139, 176, 255, 0.55) !important;
+}
+
+.param-form :deep(.el-select .el-select__wrapper) {
+  box-shadow: none !important;
+  background: rgba(18, 27, 50, 0.55) !important;
+  border-radius: 10px !important;
+  min-height: 36px !important;
+}
+
+.param-form :deep(.el-input__inner),
+.param-form :deep(.el-select__placeholder),
+.param-form :deep(.el-select__selected-item) {
+  color: #e8eef7 !important;
+  font-size: 14px !important;
+}
+
+.param-form :deep(.el-input__placeholder),
+.param-form :deep(.el-select__placeholder) {
+  color: #7c94b8 !important;
+}
+
 .generate-btn {
   width: 100%;
   height: 48px;
   font-size: 16px;
   font-weight: 600;
   margin-top: 8px;
+  border-radius: 12px !important;
 }
 .queue-hint {
   margin-top: 8px;

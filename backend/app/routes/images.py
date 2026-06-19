@@ -73,9 +73,12 @@ async def create_image_task_async(req: ImageGenerationRequest):
             params["base64_images"] = b64_imgs
         if url_imgs:
             params["image_urls"] = url_imgs
+        # 【局部编辑】透传 mask 参数（黑白图 base64，白色为编辑区域）
+        if req.mask and req.mask.strip():
+            params["mask"] = req.mask
         logger.info(
-            "[图片API] 异步图生图任务创建: ref_images=%d 张 (b64=%d, url=%d), size=%s, model=%s",
-            len(ref_imgs), len(b64_imgs), len(url_imgs), size, req.model,
+            "[图片API] 异步图生图任务创建: ref_images=%d 张 (b64=%d, url=%d), mask=%s, size=%s, model=%s",
+            len(ref_imgs), len(b64_imgs), len(url_imgs), "yes" if req.mask and req.mask.strip() else "no", size, req.model,
         )
 
     task = await image_poller_manager.create_task(
@@ -188,11 +191,12 @@ async def create_image_generation(req: ImageGenerationRequest, db: AsyncSession 
             response_format=req.response_format,
             base64_images=b64_imgs or None,
             image_urls=url_imgs or None,
+            mask=req.mask,
         )
         if ref_imgs:
             logger.info(
-                "[图片API] 同步图生图请求完成: ref_images=%d 张 (b64=%d, url=%d)",
-                len(ref_imgs), len(b64_imgs), len(url_imgs),
+                "[图片API] 同步图生图请求完成: ref_images=%d 张 (b64=%d, url=%d), mask=%s",
+                len(ref_imgs), len(b64_imgs), len(url_imgs), "yes" if req.mask and req.mask.strip() else "no",
             )
     except Exception as e:
         logger.error("[图片生成] Agnes AI 调用失败: %s", e)

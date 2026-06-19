@@ -167,13 +167,85 @@
           </div>
         </div>
 
-        <!-- 配置节点：占位 UI（生成模式切换 + 模型选择 + 参数 + 生成按钮） -->
+        <!-- 配置节点：生成配置面板（模式切换 + 模型选择 + 参数 + 提示词 + 生成按钮） -->
         <div v-else-if="panel.type === 'config'" class="config-content">
-          <div
-            class="config-placeholder"
-            :style="{ color: theme.node.placeholder }"
+          <!-- 生成模式切换 -->
+          <div class="config-mode-tabs">
+            <button
+              v-for="m in configModes"
+              :key="m.value"
+              type="button"
+              :class="['config-mode-tab', { active: configContent.mode === m.value }]"
+              @click="updateConfigContent('mode', m.value)"
+              @mousedown.stop
+            >
+              {{ m.label }}
+            </button>
+          </div>
+
+          <!-- 模型选择 -->
+          <select
+            class="config-select"
+            :value="configContent.model"
+            @change="updateConfigContent('model', $event.target.value)"
+            @mousedown.stop
           >
-            配置节点
+            <option v-for="m in availableModels" :key="m" :value="m">{{ m }}</option>
+          </select>
+
+          <!-- 尺寸选择（图片模式） -->
+          <select
+            v-if="isImageMode"
+            class="config-select"
+            :value="configContent.size"
+            @change="updateConfigContent('size', $event.target.value)"
+            @mousedown.stop
+          >
+            <option v-for="s in availableSizes" :key="s" :value="s">{{ s }}</option>
+          </select>
+
+          <!-- 视频参数（视频模式）：比例 + 时长 -->
+          <div v-if="isVideoMode" class="config-video-params">
+            <select
+              class="config-select"
+              :value="configContent.aspect_ratio"
+              @change="updateConfigContent('aspect_ratio', $event.target.value)"
+              @mousedown.stop
+            >
+              <option v-for="r in ['16:9','9:16','1:1','4:3']" :key="r" :value="r">{{ r }}</option>
+            </select>
+            <select
+              class="config-select"
+              :value="configContent.seconds"
+              @change="updateConfigContent('seconds', $event.target.value)"
+              @mousedown.stop
+            >
+              <option v-for="s in [3,5,8,10]" :key="s" :value="s">{{ s }}秒</option>
+            </select>
+          </div>
+
+          <!-- 提示词输入 -->
+          <textarea
+            class="config-prompt"
+            v-model="configPrompt"
+            placeholder="输入提示词，可用 @[node:xxx] 引用上游节点"
+            @mousedown.stop
+            @wheel.stop
+          />
+
+          <!-- 生成按钮 + 进度 -->
+          <button
+            v-if="!configContent.generating"
+            type="button"
+            class="config-generate-btn"
+            @click="handleConfigGenerate"
+            @mousedown.stop
+          >
+            {{ isVideoMode ? '生成视频' : '生成图片' }}
+          </button>
+          <div v-else class="config-progress">
+            <div class="config-progress-bar" :style="{ width: (configContent.progress || 0) + '%' }" />
+            <span class="config-progress-text">{{ configContent.progressText || '生成中...' }}</span>
           </div>
         </div>
 
@@ -247,8 +319,9 @@
  *   - content.freeResize：是否自由缩放（不保持比例）
  * ===================================================== */
 
-import { computed, ref, nextTick, onMounted, onUnmounted } from 'vue'
+import { computed, ref, nextTick, watch, onMounted, onUnmounted } from 'vue'
 import { Image as ImageIcon, Video, Music2, RefreshCw } from 'lucide-vue-next'
+import { useCanvasStore } from '@/stores/canvas'
 
 /* ---------- Props 定义 ---------- */
 const props = defineProps({
@@ -276,6 +349,7 @@ const emit = defineEmits([
   'view-image', // (imageUrl)
   'edit-text', // (text)
   'generate-image', // 从 text 节点生图
+  'generate', // 从 config 节点触发合并生成
   'retry', // 重试生成
   'upload', // 上传文件
 ])
@@ -284,6 +358,22 @@ const emit = defineEmits([
 const SELECTION_BLUE = '#2f80ff' // 选中态蓝色
 const MIN_WIDTH = 220 // 最小宽度
 const MIN_HEIGHT = 160 // 最小高度
+
+/* ---------- Store 实例（供 config 节点直接更新面板内容） ---------- */
+const store = useCanvasStore()
+
+/* ---------- 配置节点常量 ---------- */
+// 生成模式：文生图 / 图生图 / 文生视频 / 图生视频
+const configModes = [
+  { value: 'text2image', label: '文生图' },
+  { value: 'image2image', label: '图生图' },
+  { value: 'text2video', label: '文生视频' },
+  { value: 'image2video', label: '图生视频' },
+]
+// 可用模型列表
+const availableModels = ['agnes-image-2.1-flash', 'agnes-image-2.1', 'agnes-video-v2.0']
+// 可用图片尺寸
+const availableSizes = ['1024x1024', '768x1024', '1024x768', '768x768']
 
 /* ---------- 响应式状态 ---------- */
 const hovered = ref(false) // 是否悬停
@@ -417,6 +507,33 @@ const imageInfoHeight = computed(
 
 /** 图片信息：文件大小（格式化） */
 const imageInfoSize = computed(() => formatBytes(metadata.value.bytes || 0))
+
+/* ---------- 配置节点计算属性 ---------- */
+
+/** 配置节点内容（从 panel.content 读取，带默认值） */
+const configContent = computed(() => ({
+  mode: 'text2image',
+  model: 'agnes-image-2.1-flash',
+  size: '1024x1024',
+  prompt: '',
+  generating: false,
+  progress: 0,
+  ...(props.panel.content || {}),
+}))
+
+/** 是否为图片模式（含 text2image / image2image，且非视频） */
+const isImageMode = computed(
+  () => configContent.value.mode?.includes('image') && !configContent.value.mode?.includes('video'),
+)
+
+/** 是否为视频模式（含 text2video / image2video） */
+const isVideoMode = computed(() => configContent.value.mode?.includes('video'))
+
+/** 提示词双向绑定：get 读 configContent.prompt，set 调 updateConfigContent */
+const configPrompt = computed({
+  get: () => configContent.value.prompt || '',
+  set: (val) => updateConfigContent('prompt', val),
+})
 
 /* ---------- 工具函数 ---------- */
 
@@ -591,6 +708,26 @@ function stopEditing() {
   isEditingContent.value = false
 }
 
+/* ---------- 外部触发文本编辑（通过 store.editingPanelId） ---------- */
+// 当 store.editingPanelId 等于本节点 id 时，自动进入文本编辑模式
+watch(
+  () => store.editingPanelId,
+  (newId) => {
+    if (newId === props.panel.id && props.panel.type === 'text') {
+      isEditingContent.value = true
+      nextTick(() => {
+        const textarea = textareaRef.value
+        if (textarea) {
+          textarea.focus()
+          textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+        }
+      })
+      // 触发后清空，避免重复触发
+      store.editingPanelId = null
+    }
+  },
+)
+
 /* ---------- 交互：生图 / 重试 ---------- */
 
 /** 点击生图按钮 */
@@ -601,6 +738,18 @@ function handleGenerateImage() {
 /** 点击重试按钮 */
 function handleRetry() {
   emit('retry', props.panel)
+}
+
+/* ---------- 交互：配置节点 ---------- */
+
+/** 更新配置节点内容字段（直接调用 store 更新） */
+function updateConfigContent(key, value) {
+  store.updatePanel(props.panel.id, { content: { [key]: value } })
+}
+
+/** 点击配置节点的生成按钮：emit generate 事件交由父组件执行生成流程 */
+function handleConfigGenerate() {
+  emit('generate', props.panel)
 }
 
 /* ---------- 交互：hover / 右键菜单 ---------- */
@@ -874,17 +1023,143 @@ onUnmounted(() => {
   width: 100%;
 }
 
-/* ===== 配置节点（占位 UI） ===== */
+/* ===== 配置节点：生成配置面板 ===== */
 .config-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   width: 100%;
   height: 100%;
+  padding: 12px;
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+
+/* 生成模式切换标签栏 */
+.config-mode-tabs {
   display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.config-mode-tab {
+  flex: 1;
+  min-width: 60px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(120, 170, 230, 0.2);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 500;
+  color: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  white-space: nowrap;
+}
+
+.config-mode-tab:hover {
+  background: rgba(120, 170, 255, 0.1);
+}
+
+.config-mode-tab.active {
+  background: rgba(107, 156, 255, 0.2);
+  border-color: #6b9cff;
+  color: #6b9cff;
+}
+
+/* 下拉选择框 */
+.config-select {
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(120, 170, 230, 0.2);
+  background: rgba(15, 22, 38, 0.6);
+  font-size: 12px;
+  color: inherit;
+  cursor: pointer;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.config-select:focus {
+  border-color: #6b9cff;
+}
+
+/* 视频参数行：比例 + 时长并排 */
+.config-video-params {
+  display: flex;
+  gap: 8px;
+}
+
+.config-video-params .config-select {
+  flex: 1;
+}
+
+/* 提示词输入框 */
+.config-prompt {
+  flex: 1;
+  min-height: 60px;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(120, 170, 230, 0.2);
+  background: rgba(15, 22, 38, 0.6);
+  font-size: 12px;
+  font-family: monospace;
+  color: inherit;
+  resize: none;
+  outline: none;
+  box-sizing: border-box;
+  line-height: 1.5;
+}
+
+.config-prompt:focus {
+  border-color: #6b9cff;
+}
+
+.config-prompt::placeholder {
+  color: rgba(107, 132, 170, 0.6);
+}
+
+/* 生成按钮 */
+.config-generate-btn {
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid #6b9cff;
+  background: rgba(107, 156, 255, 0.2);
+  font-size: 13px;
+  font-weight: 600;
+  color: #6b9cff;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.config-generate-btn:hover {
+  background: rgba(107, 156, 255, 0.35);
+  transform: scale(1.01);
+}
+
+/* 生成进度条 */
+.config-progress {
+  display: flex;
+  flex-direction: column;
   align-items: center;
+  gap: 6px;
+  height: 34px;
   justify-content: center;
 }
 
-.config-placeholder {
-  font-size: 14px;
+.config-progress-bar {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: #6b9cff;
+  transition: width 0.3s ease;
+}
+
+.config-progress-text {
+  font-size: 11px;
+  color: rgba(107, 132, 170, 0.8);
 }
 
 /* ===== 未知节点 ===== */
