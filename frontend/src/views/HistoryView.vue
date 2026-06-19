@@ -971,6 +971,13 @@ onMounted(() => loadList())
   max-height: 400px;
   border-radius: 10px;
   object-fit: contain;
+  cursor: zoom-in;
+  transition: opacity 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+.detail-media img:hover {
+  opacity: 0.92;
+  transform: scale(1.008);
+  box-shadow: 0 8px 28px rgba(120, 170, 255, 0.25);
 }
 .detail-media video {
   max-width: 100%;

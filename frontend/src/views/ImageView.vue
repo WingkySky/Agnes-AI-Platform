@@ -637,6 +637,12 @@ function copyImageUrl() {
   border-radius: 12px;
   background: #000;
   display: block;
+  cursor: zoom-in;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.result-img:hover {
+  opacity: 0.92;
+  transform: scale(1.005);
 }
 .result-meta {
   margin-top: 16px;

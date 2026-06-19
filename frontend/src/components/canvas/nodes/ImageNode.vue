@@ -418,6 +418,12 @@ watch(
   display: block;
   max-height: 260px;
   object-fit: contain;
+  cursor: zoom-in;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.image-preview-img:hover {
+  opacity: 0.9;
+  transform: scale(1.01);
 }
 
 .image-preview-empty {
