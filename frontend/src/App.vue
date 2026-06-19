@@ -47,7 +47,8 @@
       </header>
 
       <!-- 主内容区（keep-alive 保持组件状态，切换标签页时不丢失流式输出等内容） -->
-      <main class="app-main">
+      <!-- canvas 路由时去掉 padding/max-width，让画布全屏工作 -->
+      <main class="app-main" :class="{ 'canvas-mode': isCanvasRoute }">
         <router-view v-slot="{ Component }">
           <keep-alive :include="cachedViews">
             <component :is="Component" />
@@ -68,12 +69,17 @@
 
 <script setup>
 import { computed } from 'vue'
+import { useRoute } from 'vue-router'
 import { Picture, VideoPlay, Clock, ChatDotRound, Grid } from '@element-plus/icons-vue'
 import TaskQueuePanel from './components/TaskQueuePanel.vue'
 import LanguageSwitcher from './components/LanguageSwitcher.vue'
 import { useI18n, getElementPlusLocale } from '@/i18n'
 
 const { t, locale } = useI18n()
+const route = useRoute()
+
+// canvas 路由时 app-main 全屏无边距
+const isCanvasRoute = computed(() => route.name === 'canvas')
 
 // keep-alive 缓存的路由组件名称（切换标签页时保持状态不销毁）
 const cachedViews = ['ChatView', 'ImageView', 'VideoView', 'HistoryView', 'CanvasView']
@@ -188,6 +194,16 @@ const epLocale = computed(() => {
   width: 100%;
   margin: 0 auto;
   box-sizing: border-box;
+}
+
+/* canvas 路由：全屏工作区，去掉 padding 和 max-width */
+.app-main.canvas-mode {
+  padding: 0;
+  max-width: none;
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* ---- 页脚 ---- */

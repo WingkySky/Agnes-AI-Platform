@@ -75,6 +75,9 @@ export const useCanvasStore = defineStore('canvas', {
     // ---------- 视口 ----------
     viewport: { x: 0, y: 0, zoom: 1 },
 
+    // ---------- 画布容器在屏幕中的位置偏移（用于坐标转换） ----------
+    canvasRect: { left: 0, top: 0 },
+
     // ---------- 选中 ----------
     selectedPanelIds: [],
     selectedPanelId: null,
@@ -461,19 +464,27 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /** 屏幕坐标 → 世界坐标 */
+    /** 屏幕坐标(clientX/clientY) → 世界坐标，自动减去画布容器偏移 */
     screenToWorld(sx, sy) {
+      const lx = sx - this.canvasRect.left
+      const ly = sy - this.canvasRect.top
       return {
-        x: (sx - this.viewport.x) / this.viewport.zoom,
-        y: (sy - this.viewport.y) / this.viewport.zoom,
+        x: (lx - this.viewport.x) / this.viewport.zoom,
+        y: (ly - this.viewport.y) / this.viewport.zoom,
       }
     },
 
-    /** 世界坐标 → 屏幕坐标 */
+    /** 世界坐标 → 屏幕坐标(clientX/clientY)，自动加上画布容器偏移 */
     worldToScreen(wx, wy) {
       return {
-        x: wx * this.viewport.zoom + this.viewport.x,
-        y: wy * this.viewport.zoom + this.viewport.y,
+        x: wx * this.viewport.zoom + this.viewport.x + this.canvasRect.left,
+        y: wy * this.viewport.zoom + this.viewport.y + this.canvasRect.top,
       }
+    },
+
+    /** 更新画布容器在屏幕中的位置偏移（由 InfiniteCanvas 组件调用） */
+    setCanvasRect(rect) {
+      this.canvasRect = { left: rect.left, top: rect.top }
     },
 
     // ==================== 节点操作 ====================

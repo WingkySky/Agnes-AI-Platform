@@ -1,6 +1,6 @@
 <!-- =====================================================
-     无限画布主视图（1:1 复刻参考项目布局）
-     - 顶部栏：菜单下拉 + 可编辑标题 + Agent 按钮
+     无限画布主视图（融合项目全局导航风格）
+     - 画布标题栏：浮动在画布左上角（标题编辑 + 画布管理按钮）
      - 画布主体：InfiniteCanvas（连线层 + 节点层）+ 框选覆盖层
      - 底部浮动工具栏：节点创建 / 撤销重做 / 外观面板 / 删除清空
      - 左下角缩放控件 + 小地图
@@ -12,61 +12,13 @@
 
 <template>
   <div class="canvas-view" :data-theme="store.themeMode">
-    <!-- ============ 顶部栏：菜单 + 标题 + Agent ============ -->
-    <header class="top-bar">
-      <!-- 左侧：菜单按钮 + 画布标题 -->
-      <div class="top-bar-left">
-        <!-- 菜单按钮 + 下拉 -->
-        <div class="menu-wrap">
-          <button class="icon-btn" title="菜单" @click="toggleMenu">
-            <Menu :size="20" />
-          </button>
-          <!-- 菜单下拉面板 -->
-          <div v-if="menuOpen" class="menu-dropdown" :style="menuDropdownStyle" @click.stop>
-            <button class="menu-item" @click="menuGoHome">
-              <Home :size="16" />
-              <span>主页</span>
-            </button>
-            <button class="menu-item" @click="menuGoDocs">
-              <BookOpen :size="16" />
-              <span>文档</span>
-            </button>
-            <button class="menu-item" @click="menuShowProjects">
-              <Images :size="16" />
-              <span>我的画布</span>
-            </button>
-            <div class="menu-divider" />
-            <button class="menu-item" @click="menuNewCanvas">
-              <Plus :size="16" />
-              <span>新建画布</span>
-            </button>
-            <button class="menu-item danger" @click="menuDeleteCanvas">
-              <Trash2 :size="16" />
-              <span>删除当前画布</span>
-            </button>
-            <div class="menu-divider" />
-            <button class="menu-item" @click="menuImport">
-              <Upload :size="16" />
-              <span>导入 JSON</span>
-            </button>
-            <button class="menu-item" @click="handleExportJson">
-              <Upload :size="16" :style="{ transform: 'rotate(180deg)' }" />
-              <span>导出 JSON</span>
-            </button>
-            <div class="menu-divider" />
-            <button class="menu-item" :disabled="store.history.past.length === 0" @click="menuUndo">
-              <Undo2 :size="16" />
-              <span>撤销</span>
-            </button>
-            <button class="menu-item" :disabled="store.history.future.length === 0" @click="menuRedo">
-              <Redo2 :size="16" />
-              <span>重做</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- 画布标题（双击可编辑） -->
+    <!-- ============ 画布主体 ============ -->
+    <main class="canvas-main">
+      <!-- 画布标题栏：浮动在画布左上角 -->
+      <div class="canvas-title-bar" :style="titleBarStyle">
+        <!-- 画布选择器（下拉切换） + 改名输入 -->
         <div class="title-wrap">
+          <!-- 改名输入模式 -->
           <input
             v-if="editingTitle"
             ref="titleInputRef"
@@ -77,26 +29,48 @@
             @keydown.escape="cancelTitle"
             @blur="saveTitle"
           />
-          <span
-            v-else
-            class="title-text"
-            :style="{ color: store.canvasTheme.node.text }"
-            @dblclick="startEditTitle"
-          >{{ activeWorkspaceName }}</span>
+          <!-- 画布下拉选择器 -->
+          <el-dropdown v-else trigger="click" @command="onSwitchCanvas">
+            <span class="canvas-selector" :style="{ color: store.canvasTheme.node.text }">
+              {{ activeWorkspaceName }}
+              <ChevronDown :size="14" style="margin-left: 4px; opacity: 0.6;" />
+            </span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item
+                  v-for="ws in store.workspaces"
+                  :key="ws.id"
+                  :command="ws.id"
+                  :class="{ 'is-active': ws.id === store.activeWorkspaceId }"
+                >
+                  {{ ws.name }}
+                </el-dropdown-item>
+                <el-dropdown-item v-if="store.workspaces.length === 0" disabled>暂无画布</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
+
+        <!-- 画布管理按钮组 -->
+        <div class="title-actions">
+          <button class="title-btn" :style="titleBtnStyle" title="重命名" @click="startEditTitle">
+            <Pencil :size="15" />
+          </button>
+          <button class="title-btn" :style="titleBtnStyle" title="新建画布" @click="newCanvas">
+            <Plus :size="16" />
+          </button>
+          <button class="title-btn" :style="titleBtnStyle" title="删除当前画布" @click="deleteCanvas">
+            <Trash2 :size="16" />
+          </button>
+          <button class="title-btn" :style="titleBtnStyle" title="导入 JSON" @click="importJson">
+            <Upload :size="16" />
+          </button>
+          <button class="title-btn" :style="titleBtnStyle" title="导出 JSON" @click="handleExportJson">
+            <Download :size="16" />
+          </button>
         </div>
       </div>
 
-      <!-- 右侧：Agent 按钮 -->
-      <div class="top-bar-right">
-        <button class="agent-btn" :style="agentBtnStyle" @click="handleAgent">
-          <Bot :size="18" />
-          <span>Agent</span>
-        </button>
-      </div>
-    </header>
-
-    <!-- ============ 画布主体 ============ -->
-    <main class="canvas-main">
       <!-- 无限画布（背景网格 + 视口变换 + 连线层 + 节点层） -->
       <InfiniteCanvas
         ref="canvasRef"
@@ -291,9 +265,8 @@
  * ===================================================== */
 
 import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Menu, Bot, Home, BookOpen, Images, Plus, Trash2, Upload, Undo2, Redo2 } from 'lucide-vue-next'
+import { Plus, Trash2, Upload, Download, Pencil, ChevronDown } from 'lucide-vue-next'
 import { useCanvasStore } from '@/stores/canvas'
 import InfiniteCanvas from '@/components/canvas/InfiniteCanvas.vue'
 import CanvasConnectionsLayer from '@/components/canvas/CanvasConnectionsLayer.vue'
@@ -304,7 +277,6 @@ import CanvasMinimap from '@/components/canvas/CanvasMinimap.vue'
 import CanvasNodeHoverToolbar from '@/components/canvas/CanvasNodeHoverToolbar.vue'
 import CanvasContextMenu from '@/components/canvas/CanvasContextMenu.vue'
 
-const router = useRouter()
 const store = useCanvasStore()
 
 // ---------- 节点默认尺寸（对齐参考项目） ----------
@@ -325,43 +297,32 @@ const NODE_NAMES = {
   config: '配置节点',
 }
 
-// ==================== 顶部栏：菜单 ====================
+// ==================== 画布标题栏 ====================
 
-const menuOpen = ref(false)
-const menuDropdownStyle = computed(() => ({
+// 画布标题栏容器样式
+const titleBarStyle = computed(() => ({
   background: store.canvasTheme.toolbar.panel,
   borderColor: store.canvasTheme.toolbar.border,
-  color: store.canvasTheme.node.text,
 }))
 
-function toggleMenu() {
-  menuOpen.value = !menuOpen.value
-}
+// 标题栏按钮样式
+const titleBtnStyle = computed(() => ({
+  color: store.canvasTheme.toolbar.item,
+}))
 
-function closeMenu() {
-  menuOpen.value = false
-}
-
-// 菜单命令处理
-function menuGoHome() {
-  closeMenu()
-  router.push('/')
-}
-function menuGoDocs() {
-  closeMenu()
-  ElMessage.info('文档功能开发中')
-}
-function menuShowProjects() {
-  closeMenu()
-  ElMessage.info('画布列表功能开发中')
-}
-function menuNewCanvas() {
-  closeMenu()
+// 画布管理操作
+function newCanvas() {
   store.createWorkspace('画布 ' + (store.workspaces.length + 1))
   ElMessage.success('已创建新画布')
 }
-function menuDeleteCanvas() {
-  closeMenu()
+
+function onSwitchCanvas(id) {
+  if (id !== store.activeWorkspaceId) {
+    store.switchWorkspace(id)
+  }
+}
+
+function deleteCanvas() {
   if (!store.activeWorkspaceId) {
     ElMessage.warning('当前没有画布')
     return
@@ -373,20 +334,12 @@ function menuDeleteCanvas() {
     })
     .catch(() => {})
 }
-function menuImport() {
-  closeMenu()
+
+function importJson() {
   triggerFileUpload(null, '.json')
 }
-function menuUndo() {
-  closeMenu()
-  store.undo()
-}
-function menuRedo() {
-  closeMenu()
-  store.redo()
-}
 
-// ==================== 顶部栏：标题编辑 ====================
+// ==================== 标题编辑 ====================
 
 const editingTitle = ref(false)
 const titleInput = ref('')
@@ -418,18 +371,6 @@ function cancelTitle() {
   editingTitle.value = false
 }
 
-// ==================== 顶部栏：Agent ====================
-
-const agentBtnStyle = computed(() => ({
-  background: store.canvasTheme.toolbar.panel,
-  borderColor: store.canvasTheme.toolbar.border,
-  color: store.canvasTheme.node.text,
-}))
-
-function handleAgent() {
-  ElMessage.info('Agent 面板开发中')
-}
-
 // ==================== 画布主体引用 ====================
 
 const canvasRef = ref(null)
@@ -439,7 +380,6 @@ const canvasRef = ref(null)
 function handleBackgroundClick() {
   // InfiniteCanvas 在无 props 时已自动清空选中
   showAppearancePanel.value = false
-  closeMenu()
 }
 
 // ==================== 框选（Ctrl/Cmd + 拖动背景） ====================
@@ -454,8 +394,11 @@ const selectionBox = reactive({
 
 const selectionBoxStyle = computed(() => {
   if (!selectionBox.active) return {}
-  const left = Math.min(selectionBox.startScreenX, selectionBox.endScreenX)
-  const top = Math.min(selectionBox.startScreenY, selectionBox.endScreenY)
+  // 减去画布容器偏移，转为相对于 canvas-main 的坐标
+  const offsetX = store.canvasRect.left
+  const offsetY = store.canvasRect.top
+  const left = Math.min(selectionBox.startScreenX, selectionBox.endScreenX) - offsetX
+  const top = Math.min(selectionBox.startScreenY, selectionBox.endScreenY) - offsetY
   const width = Math.abs(selectionBox.endScreenX - selectionBox.startScreenX)
   const height = Math.abs(selectionBox.endScreenY - selectionBox.startScreenY)
   return {
@@ -655,8 +598,9 @@ function handleNodeContextMenu(event) {
   const nodeEl = event.target instanceof Element ? event.target.closest('[data-node-id]') : null
   const targetId = nodeEl?.getAttribute('data-node-id') ?? null
   contextMenu.open = true
-  contextMenu.x = event.clientX
-  contextMenu.y = event.clientY
+  // 减去画布容器偏移，转为相对于 canvas-main 的坐标
+  contextMenu.x = event.clientX - store.canvasRect.left
+  contextMenu.y = event.clientY - store.canvasRect.top
   contextMenu.targetType = 'node'
   contextMenu.targetId = targetId
 }
@@ -726,10 +670,11 @@ const hoveredPanel = computed(() => {
 const hoverToolbarStyle = computed(() => {
   const panel = hoveredPanel.value
   if (!panel) return { display: 'none' }
+  // worldToScreen 返回屏幕坐标，减去画布偏移转为相对于 canvas-main 的坐标
   const screen = store.worldToScreen(panel.x + panel.width / 2, panel.y)
   return {
-    left: screen.x + 'px',
-    top: (screen.y - 8) + 'px',
+    left: (screen.x - store.canvasRect.left) + 'px',
+    top: (screen.y - store.canvasRect.top - 8) + 'px',
     transform: 'translate(-50%, -100%)',
   }
 })
@@ -1056,7 +1001,6 @@ const previewImage = ref(null)
 // ==================== 导出 JSON ====================
 
 function handleExportJson() {
-  closeMenu()
   const json = store.exportJSON()
   const blob = new Blob([json], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
@@ -1094,7 +1038,6 @@ function handleKeyDown(event) {
   if (event.key === 'Escape') {
     if (store.connecting) store.cancelConnecting()
     else if (contextMenu.open) contextMenu.open = false
-    else if (menuOpen.value) menuOpen.value = false
     else if (showAppearancePanel.value) showAppearancePanel.value = false
     else if (showHelp.value) showHelp.value = false
     else store.clearSelection()
@@ -1168,10 +1111,6 @@ function handleKeyUp(event) {
 
 function handleGlobalClick(event) {
   const target = event.target instanceof Element ? event.target : null
-  // 关闭菜单
-  if (menuOpen.value && !target?.closest?.('.menu-wrap')) {
-    menuOpen.value = false
-  }
   // 关闭右键菜单
   if (contextMenu.open && !target?.closest?.('.context-menu')) {
     contextMenu.open = false
@@ -1209,110 +1148,30 @@ onBeforeUnmount(() => {
 
 <style scoped>
 /* ==================== 画布主容器 ==================== */
-/* 使用 fixed 全屏覆盖，避免被 App.vue 的 app-main padding/max-width 限制 */
+/* 在 app-main 内占满可用空间（App.vue canvas-mode 已设 position:relative） */
 .canvas-view {
-  position: fixed;
+  position: absolute;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 200; /* 高于 App.vue 的 app-header(z-index:100) */
   overflow: hidden;
 }
 
-/* ==================== 顶部栏 ==================== */
-.top-bar {
+/* ==================== 画布标题栏（浮动在画布左上角） ==================== */
+.canvas-title-bar {
   position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
+  top: 16px;
+  left: 16px;
   z-index: 50;
-  height: 64px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 16px;
-  pointer-events: none;
-}
-
-.top-bar-left,
-.top-bar-right {
   display: flex;
   align-items: center;
   gap: 8px;
-  pointer-events: auto;
-}
-
-/* ---- 菜单按钮 ---- */
-.icon-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  cursor: pointer;
-  color: inherit;
-  transition: background 0.15s;
-}
-
-.icon-btn:hover {
-  background: rgba(128, 128, 128, 0.15);
-}
-
-/* ---- 菜单下拉面板 ---- */
-.menu-wrap {
-  position: relative;
-}
-
-.menu-dropdown {
-  position: absolute;
-  top: 44px;
-  left: 0;
-  min-width: 180px;
+  padding: 6px 8px 6px 14px;
   border: 1px solid;
-  border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-  padding: 4px;
+  border-radius: 10px;
   backdrop-filter: blur(12px);
-  z-index: 100;
-}
-
-.menu-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 12px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  cursor: pointer;
-  color: inherit;
-  font-size: 14px;
-  text-align: left;
-  transition: background 0.12s;
-}
-
-.menu-item:hover:not(:disabled) {
-  background: rgba(128, 128, 128, 0.15);
-}
-
-.menu-item:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.menu-item.danger {
-  color: #ef4444;
-}
-
-.menu-divider {
-  height: 1px;
-  margin: 4px 8px;
-  background: rgba(128, 128, 128, 0.2);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
 }
 
 /* ---- 画布标题 ---- */
@@ -1322,49 +1181,57 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
-.title-text {
-  font-size: 15px;
+/* 画布下拉选择器 */
+.canvas-selector {
+  display: flex;
+  align-items: center;
+  font-size: 14px;
   font-weight: 500;
   padding: 4px 8px;
   border-radius: 6px;
-  cursor: text;
+  cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 300px;
+  max-width: 200px;
+  outline: none;
 }
 
-.title-text:hover {
+.canvas-selector:hover {
   background: rgba(128, 128, 128, 0.1);
 }
 
 .title-input {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 500;
   padding: 4px 8px;
   border: 1px solid;
   border-radius: 6px;
   outline: none;
-  max-width: 300px;
+  max-width: 200px;
 }
 
-/* ---- Agent 按钮 ---- */
-.agent-btn {
+/* ---- 标题栏按钮组 ---- */
+.title-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  border: 1px solid;
-  border-radius: 8px;
+  gap: 2px;
+}
+
+.title-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 6px;
   background: transparent;
   cursor: pointer;
-  color: inherit;
-  font-size: 14px;
-  font-weight: 500;
   transition: background 0.15s;
 }
 
-.agent-btn:hover {
+.title-btn:hover {
   background: rgba(128, 128, 128, 0.15);
 }
 

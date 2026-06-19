@@ -253,11 +253,20 @@ const worldTransform = computed(
 // ---------- 生命周期 ----------
 let wheelTarget = null
 
+// 更新画布容器在屏幕中的位置偏移（用于 screenToWorld 坐标转换）
+function updateCanvasRect() {
+  const rect = containerRef.value?.getBoundingClientRect()
+  if (rect) store.setCanvasRect(rect)
+}
+
 onMounted(() => {
   window.addEventListener('pointermove', handlePointerMove)
   window.addEventListener('pointerup', handlePointerUp)
   window.addEventListener('keydown', handleKeyDown)
   window.addEventListener('keyup', handleKeyUp)
+  // 容器位置变化时更新偏移（header 高度、窗口 resize 等）
+  window.addEventListener('resize', updateCanvasRect)
+  updateCanvasRect()
 
   // 在容器上注册 wheel 监听器（passive: false 以便阻止默认滚动）
   wheelTarget = containerRef.value
@@ -269,6 +278,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointerup', handlePointerUp)
   window.removeEventListener('keydown', handleKeyDown)
   window.removeEventListener('keyup', handleKeyUp)
+  window.removeEventListener('resize', updateCanvasRect)
   wheelTarget?.removeEventListener('wheel', handleWheel)
   document.body.style.cursor = ''
   // 重置 store 的 Space 状态，避免遗留
