@@ -22,7 +22,13 @@
      ===================================================== -->
 
 <template>
-  <div class="image-uploader" ref="uploaderRef">
+  <div
+    class="image-uploader"
+    ref="uploaderRef"
+    :class="{ 'is-active': isActive }"
+    @mouseenter="registerAsActive"
+    @mouseleave="unregisterAsActive"
+  >
     <!-- 标题 -->
     <div class="uploader-header">
       <span class="uploader-title">{{ title || t('params.refImage') }}{{ optional ? '（' + t('common.optional') + '）' : '' }}</span>
@@ -101,7 +107,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Delete, UploadFilled, Document } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
@@ -113,7 +119,6 @@ const props = defineProps({
   optional: { type: Boolean, default: false },
   maxCount: { type: Number, default: 0 },      // 0 表示不限制
   title: { type: String, default: '' },         // 自定义标题
-  disableGlobalPaste: { type: Boolean, default: false }, // 多实例场景（如首尾帧）禁用全局粘贴，避免冲突
 })
 
 const emit = defineEmits(['change', 'clear'])
@@ -122,7 +127,30 @@ const fileList = ref([])
 const isDragOver = ref(false)
 const fileInput = ref(null)
 const uploaderRef = ref(null)
-const pasteHighlight = ref(false)  // 粘贴时的高亮反馈
+const pasteHighlight = ref(false)  // 粘贴成功时的高亮反馈
+const isActive = ref(false)         // 当前悬停激活状态 → 控制"鼠标在哪粘贴到哪"的视觉反馈
+
+// =====================================================
+// 多实例粘贴仲裁（解决：多个 ImageUploader 共存时谁接收粘贴）
+// 策略：鼠标悬停在哪一个上传区，哪一个就是"当前激活目标"
+//       只有激活目标才响应全局 paste 事件（鼠标在哪就粘贴到哪）
+// =====================================================
+// 模块级共享变量：所有 ImageUploader 实例共用（ES module 单例）
+let activeUploaderEl = null       // 当前悬停的上传区 DOM 元素
+
+function registerAsActive() {
+  // 注册自己为"当前激活目标"
+  activeUploaderEl = uploaderRef.value
+  isActive.value = true
+}
+
+function unregisterAsActive() {
+  // 只有当"自己就是当前激活目标"时才注销（防止误覆盖其他实例）
+  if (activeUploaderEl === uploaderRef.value) {
+    activeUploaderEl = null
+  }
+  isActive.value = false
+}
 
 // =====================================================
 // 对外暴露（父组件调用）
@@ -137,17 +165,16 @@ defineExpose({
 })
 
 // =====================================================
-// 全局粘贴事件监听
-// 智能识别剪贴板内容：
-//   - 图片类型（截图）→ 直接添加为本地文件
-//   - 文本类型 → 检查是否为 URL，是则添加为 URL 模式
-//   - 焦点在 input/textarea/contenteditable 中时不拦截文本粘贴
+// 全局粘贴事件监听（解决多实例共存冲突）
+// 关键机制：只有"当前鼠标悬停的那个上传区"才响应 paste 事件
+//   - 用户鼠标在哪 → 就粘贴到哪
+//   - 焦点在输入框中时不拦截（不影响 prompt 等文本粘贴）
 // =====================================================
 let pasteTimer = null
 
 function handleGlobalPaste(e) {
-  // 多实例场景（如首尾帧）禁用全局粘贴，避免一次粘贴同时进入多个实例
-  if (props.disableGlobalPaste) return
+  // 只有"我是当前激活目标"才处理 —— 其他实例检查到自己不是激活目标就 return
+  if (activeUploaderEl !== uploaderRef.value) return
 
   const clipboard = e.clipboardData || window.clipboardData
   if (!clipboard) return
@@ -421,6 +448,15 @@ onBeforeUnmount(() => {
 <style scoped>
 .image-uploader {
   margin-bottom: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 2px dashed transparent;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+/* 鼠标悬停时（激活目标）：强调边框和背景 —— 让用户一眼知道：这里就是要粘贴的框 */
+.image-uploader.is-active {
+  border-color: rgba(107, 156, 255, 0.45);
+  background: rgba(107, 156, 255, 0.08);
 }
 
 /* 标题区 */
