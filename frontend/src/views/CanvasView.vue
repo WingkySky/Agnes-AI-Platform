@@ -1,765 +1,1520 @@
 <!-- =====================================================
-     无限画布页面
-     - 左侧栏：多画布管理
-     - 中间：无限画布主体
-     - 顶部：工具栏（含导入/导出按钮、搜索/筛选）
-     - 右侧：选中面板/连线的属性编辑面板
-     - 全局快捷键处理器（含 / 聚焦搜索框）
-     - 右键上下文菜单（含节点级操作：编辑/裁剪/分割/旋转/反推/改写/字号/生成/提取首帧/锁定/粘贴等）
-     - 节点编辑弹窗 PanelEditDialog（由右键菜单"编辑"触发）
-     - 图片裁剪弹窗 ImageCropDialog（由右键菜单"裁剪"触发）
-     - Minimap 小地图
+     无限画布主视图（1:1 复刻参考项目布局）
+     - 顶部栏：菜单下拉 + 可编辑标题 + Agent 按钮
+     - 画布主体：InfiniteCanvas（连线层 + 节点层）+ 框选覆盖层
+     - 底部浮动工具栏：节点创建 / 撤销重做 / 外观面板 / 删除清空
+     - 左下角缩放控件 + 小地图
+     - 节点悬停工具栏（浮动定位）
+     - 右键菜单（仅节点）
+     - 图片预览弹窗 + 快捷键帮助弹窗
+     - 全局快捷键：Escape / Delete / Ctrl+Z / Ctrl+Shift+Z / Ctrl+D / Ctrl+A / Ctrl+S / Ctrl+L
      ===================================================== -->
 
 <template>
-  <div class="canvas-view" :data-theme="store.themeMode" @contextmenu.prevent="handleContextMenu">
-    <!-- 左侧栏 -->
-    <CanvasSidebar />
+  <div class="canvas-view" :data-theme="store.themeMode">
+    <!-- ============ 顶部栏：菜单 + 标题 + Agent ============ -->
+    <header class="top-bar">
+      <!-- 左侧：菜单按钮 + 画布标题 -->
+      <div class="top-bar-left">
+        <!-- 菜单按钮 + 下拉 -->
+        <div class="menu-wrap">
+          <button class="icon-btn" title="菜单" @click="toggleMenu">
+            <Menu :size="20" />
+          </button>
+          <!-- 菜单下拉面板 -->
+          <div v-if="menuOpen" class="menu-dropdown" :style="menuDropdownStyle" @click.stop>
+            <button class="menu-item" @click="menuGoHome">
+              <Home :size="16" />
+              <span>主页</span>
+            </button>
+            <button class="menu-item" @click="menuGoDocs">
+              <BookOpen :size="16" />
+              <span>文档</span>
+            </button>
+            <button class="menu-item" @click="menuShowProjects">
+              <Images :size="16" />
+              <span>我的画布</span>
+            </button>
+            <div class="menu-divider" />
+            <button class="menu-item" @click="menuNewCanvas">
+              <Plus :size="16" />
+              <span>新建画布</span>
+            </button>
+            <button class="menu-item danger" @click="menuDeleteCanvas">
+              <Trash2 :size="16" />
+              <span>删除当前画布</span>
+            </button>
+            <div class="menu-divider" />
+            <button class="menu-item" @click="menuImport">
+              <Upload :size="16" />
+              <span>导入 JSON</span>
+            </button>
+            <button class="menu-item" @click="handleExportJson">
+              <Upload :size="16" :style="{ transform: 'rotate(180deg)' }" />
+              <span>导出 JSON</span>
+            </button>
+            <div class="menu-divider" />
+            <button class="menu-item" :disabled="store.history.past.length === 0" @click="menuUndo">
+              <Undo2 :size="16" />
+              <span>撤销</span>
+            </button>
+            <button class="menu-item" :disabled="store.history.future.length === 0" @click="menuRedo">
+              <Redo2 :size="16" />
+              <span>重做</span>
+            </button>
+          </div>
+        </div>
 
-    <!-- 主内容区 -->
-    <div class="canvas-main">
-      <!-- 顶部工具栏（暴露 ref 以便全局 / 快捷键聚焦搜索框） -->
+        <!-- 画布标题（双击可编辑） -->
+        <div class="title-wrap">
+          <input
+            v-if="editingTitle"
+            ref="titleInputRef"
+            v-model="titleInput"
+            class="title-input"
+            :style="titleInputStyle"
+            @keydown.enter="saveTitle"
+            @keydown.escape="cancelTitle"
+            @blur="saveTitle"
+          />
+          <span
+            v-else
+            class="title-text"
+            :style="{ color: store.canvasTheme.node.text }"
+            @dblclick="startEditTitle"
+          >{{ activeWorkspaceName }}</span>
+        </div>
+      </div>
+
+      <!-- 右侧：Agent 按钮 -->
+      <div class="top-bar-right">
+        <button class="agent-btn" :style="agentBtnStyle" @click="handleAgent">
+          <Bot :size="18" />
+          <span>Agent</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- ============ 画布主体 ============ -->
+    <main class="canvas-main">
+      <!-- 无限画布（背景网格 + 视口变换 + 连线层 + 节点层） -->
+      <InfiniteCanvas
+        ref="canvasRef"
+        @background-click="handleBackgroundClick"
+        @pointerdown="handleCanvasPointerDown"
+      >
+        <!-- 连线层（不传 props 时自动使用 store 数据） -->
+        <CanvasConnectionsLayer />
+
+        <!-- 节点层：遍历所有面板渲染节点 -->
+        <CanvasNode
+          v-for="panel in store.panels"
+          :key="panel.id"
+          :panel="panel"
+          :selected="store.selectedPanelIds.includes(panel.id)"
+          :is-connecting="!!store.connecting"
+          :show-image-info="store.showImageInfo"
+          :theme="store.canvasTheme"
+          :viewport="store.viewport"
+          @select="handleNodeSelect"
+          @drag-start="handleNodeDragStart"
+          @drag="handleNodeDrag"
+          @drag-end="handleNodeDragEnd"
+          @resize-start="handleNodeResizeStart"
+          @resize="handleNodeResize"
+          @resize-end="handleNodeResizeEnd"
+          @start-connecting="(anchorType) => handleNodeStartConnecting(panel.id, anchorType)"
+          @context-menu="handleNodeContextMenu"
+          @hover-enter="handleNodeHoverEnter"
+          @hover-leave="handleNodeHoverLeave"
+          @view-image="handleViewImage"
+          @edit-text="(text) => handleNodeEditText(panel.id, text)"
+          @generate-image="handleNodeGenerateImage"
+          @retry="handleNodeRetry"
+          @upload="(p) => handleNodeUpload(p)"
+        />
+      </InfiniteCanvas>
+
+      <!-- 框选矩形（屏幕坐标覆盖层，不受画布变换影响） -->
+      <div
+        v-if="selectionBox.active"
+        class="selection-box"
+        :style="selectionBoxStyle"
+      />
+
+      <!-- ============ 底部浮动工具栏 ============ -->
       <CanvasToolbar
-        ref="canvasToolbarRef"
-        @export-json="handleExportJson"
-        @import-json="triggerImport"
+        class="bottom-toolbar"
+        :theme="store.canvasTheme"
+        :has-selection="store.selectedPanelIds.length > 0"
+        :can-undo="store.history.past.length > 0"
+        :can-redo="store.history.future.length > 0"
+        :show-appearance-panel="showAppearancePanel"
+        :theme-mode="store.themeMode"
+        :background-mode="store.backgroundMode"
+        :show-image-info="store.showImageInfo"
+        @select-tool="handleSelectTool"
+        @undo="store.undo()"
+        @redo="store.redo()"
+        @add-node="handleAddNode"
+        @upload-asset="handleUploadAsset"
+        @open-asset-library="handleOpenAssetLibrary"
+        @toggle-appearance-panel="showAppearancePanel = !showAppearancePanel"
+        @delete-selected="handleDeleteSelected"
+        @clear-canvas="handleClearCanvas"
+        @set-theme="(mode) => store.setThemeMode(mode)"
+        @set-background="(mode) => store.setBackgroundMode(mode)"
+        @toggle-image-info="(val) => handleToggleImageInfo(val)"
       />
 
-      <!-- 无限画布 -->
-      <InfiniteCanvas ref="infiniteCanvasRef" @panel-edit="handlePanelEdit" @panel-action="handlePanelAction" />
-
-      <!-- Minimap 小地图 -->
-      <CanvasMinimap v-if="isMinimapOpen" />
-
-      <!-- 底部浮动快捷工具栏 -->
-      <CanvasQuickToolbar />
-
-      <!-- 左下角缩放控制面板 -->
+      <!-- ============ 左下角缩放控件 ============ -->
       <CanvasZoomControls
-        :is-minimap-open="isMinimapOpen"
-        @toggle-minimap="toggleMinimap"
+        class="zoom-controls"
+        :theme="store.canvasTheme"
+        :zoom="store.viewport.zoom"
+        :minimap-visible="minimapVisible"
+        @toggle-minimap="minimapVisible = !minimapVisible"
+        @reset-view="store.resetView()"
+        @zoom-change="(z) => store.setZoom(z)"
+        @show-help="showHelp = true"
       />
 
-      <!-- 节点悬停工具栏 -->
-      <CanvasNodeHoverToolbar
-        v-if="hoveredPanel"
-        :panel="hoveredPanel"
-        :visible="showHoverToolbar"
-        @action="handleHoverToolbarAction"
-        @enter="handleHoverToolbarEnter"
-        @leave="handleHoverToolbarLeave"
+      <!-- ============ 小地图（条件渲染） ============ -->
+      <CanvasMinimap
+        v-if="minimapVisible"
+        class="minimap"
+        :theme="store.canvasTheme"
+        :panels="store.panels"
+        :viewport="store.viewport"
+        :canvas-size="canvasSize"
+        @locate="handleMinimapLocate"
       />
-    </div>
 
-    <!-- 右侧属性面板 -->
-    <CanvasRightPanel />
+      <!-- ============ 节点悬停工具栏（浮动定位在节点上方） ============ -->
+      <div
+        v-if="hoveredPanel && showHoverToolbar"
+        class="hover-toolbar-wrap"
+        :style="hoverToolbarStyle"
+        @mouseenter="cancelHoverHide"
+        @mouseleave="scheduleHoverHide"
+      >
+        <CanvasNodeHoverToolbar
+          :panel="hoveredPanel"
+          :theme="store.canvasTheme"
+          @info="handleHoverInfo"
+          @delete="handleHoverDelete"
+          @retry="handleHoverRetry"
+          @save-asset="handleHoverSaveAsset"
+          @download="handleHoverDownload"
+          @edit="handleHoverEdit"
+          @edit-text="handleHoverEditText"
+          @generate-image="handleHoverGenerateImage"
+          @font-size-down="handleHoverFontSizeDown"
+          @font-size-up="handleHoverFontSizeUp"
+          @upload-image="handleHoverUploadImage"
+          @upload-video="handleHoverUploadVideo"
+          @upload-audio="handleHoverUploadAudio"
+          @copy-prompt="handleHoverCopyPrompt"
+          @describe="handleHoverDescribe"
+          @replace-image="handleHoverReplaceImage"
+          @toggle-ratio="handleHoverToggleRatio"
+          @mask-edit="handleHoverMaskEdit"
+          @crop="handleHoverCrop"
+          @split="handleHoverSplit"
+          @upscale="handleHoverUpscale"
+          @super-resolution="handleHoverSuperResolution"
+          @angle="handleHoverAngle"
+          @view-large="handleHoverViewLarge"
+        />
+      </div>
 
-    <!-- 右键菜单（监听 panel-action 事件以处理节点级操作） -->
-    <CanvasContextMenu ref="contextMenuRef" @panel-action="handlePanelAction" />
+      <!-- ============ 右键菜单（仅节点） ============ -->
+      <CanvasContextMenu
+        v-if="contextMenu.open"
+        :x="contextMenu.x"
+        :y="contextMenu.y"
+        :target-type="contextMenu.targetType"
+        :theme="store.canvasTheme"
+        @duplicate="handleContextDuplicate"
+        @delete="handleContextDelete"
+        @close="contextMenu.open = false"
+      />
 
-    <!-- 拖线到空白弹出的"创建新节点"菜单 -->
-    <ConnectionCreateMenu />
+      <!-- ============ 图片预览弹窗 ============ -->
+      <div v-if="previewImage" class="preview-overlay" @click="previewImage = null">
+        <img :src="previewImage" class="preview-img" @click.stop />
+        <button class="preview-close" @click="previewImage = null">×</button>
+      </div>
 
-    <!-- 节点编辑弹窗：由右键菜单"编辑"动作触发，按节点类型渲染不同表单 -->
-    <PanelEditDialog
-      v-model="editDialogVisible"
-      :panel="editDialogPanel"
-      @confirm="handleEditConfirm"
-    />
+      <!-- ============ 快捷键帮助弹窗 ============ -->
+      <div v-if="showHelp" class="help-overlay" @click="showHelp = false">
+        <div class="help-modal" :style="helpModalStyle" @click.stop>
+          <h3 class="help-title">快捷键</h3>
+          <ul class="help-list">
+            <li><kbd>Space</kbd> + 拖动 / 中键拖动：平移画布</li>
+            <li><kbd>Ctrl</kbd> + 滚轮：缩放画布</li>
+            <li><kbd>Ctrl</kbd> + 拖动背景：框选节点</li>
+            <li><kbd>Ctrl</kbd> + 点击节点：多选</li>
+            <li><kbd>Ctrl</kbd> + <kbd>Z</kbd>：撤销</li>
+            <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd>：重做</li>
+            <li><kbd>Ctrl</kbd> + <kbd>D</kbd>：复制选中节点</li>
+            <li><kbd>Ctrl</kbd> + <kbd>A</kbd>：全选节点</li>
+            <li><kbd>Ctrl</kbd> + <kbd>S</kbd>：保存画布</li>
+            <li><kbd>Ctrl</kbd> + <kbd>L</kbd>：编辑画布标题</li>
+            <li><kbd>Delete</kbd> / <kbd>Backspace</kbd>：删除选中</li>
+            <li><kbd>Escape</kbd>：取消选中 / 取消连线 / 关闭菜单</li>
+          </ul>
+          <button class="help-close-btn" @click="showHelp = false">关闭</button>
+        </div>
+      </div>
 
-    <!-- 图片裁剪弹窗：由右键菜单"裁剪"动作触发 -->
-    <ImageCropDialog
-      v-model="cropDialogVisible"
-      :image-src="cropImageSrc"
-      @confirm="onCropConfirm"
-    />
-
-    <!-- 隐藏的文件 input 用于导入 JSON -->
-    <input
-      ref="importInputRef"
-      type="file"
-      accept=".json,application/json"
-      style="display: none"
-      @change="handleImportFile"
-    />
+      <!-- ============ 隐藏的文件输入（用于上传素材 / 导入 JSON） ============ -->
+      <input
+        ref="fileInputRef"
+        type="file"
+        class="hidden-file-input"
+        :accept="fileAccept"
+        @change="handleFileSelect"
+      />
+    </main>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
-import { ElMessage } from 'element-plus'
+/* =====================================================
+ * CanvasView 无限画布主视图
+ * - 整合 9 个子组件：InfiniteCanvas / CanvasConnectionsLayer /
+ *   CanvasNode / CanvasToolbar / CanvasZoomControls / CanvasMinimap /
+ *   CanvasNodeHoverToolbar / CanvasContextMenu / CanvasAppearancePanel（内嵌于 Toolbar）
+ * - 接入 useCanvasStore：panels / connections / viewport / history
+ * - 处理节点创建/拖拽/缩放/删除、连线创建/删除、框选、撤销/重做、快捷键
+ * ===================================================== */
+
+import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Menu, Bot, Home, BookOpen, Images, Plus, Trash2, Upload, Undo2, Redo2 } from 'lucide-vue-next'
 import { useCanvasStore } from '@/stores/canvas'
-import CanvasSidebar from '@/components/infinite-canvas/CanvasSidebar.vue'
-import CanvasToolbar from '@/components/infinite-canvas/CanvasToolbar.vue'
-import InfiniteCanvas from '@/components/infinite-canvas/InfiniteCanvas.vue'
-import CanvasContextMenu from '@/components/infinite-canvas/CanvasContextMenu.vue'
-import CanvasMinimap from '@/components/infinite-canvas/CanvasMinimap.vue'
-import CanvasQuickToolbar from '@/components/infinite-canvas/CanvasQuickToolbar.vue'
-import CanvasNodeHoverToolbar from '@/components/infinite-canvas/CanvasNodeHoverToolbar.vue'
-import CanvasZoomControls from '@/components/infinite-canvas/CanvasZoomControls.vue'
-import CanvasRightPanel from '@/components/infinite-canvas/CanvasRightPanel.vue'
-import ConnectionCreateMenu from '@/components/infinite-canvas/ConnectionCreateMenu.vue'
-import PanelEditDialog from '@/components/infinite-canvas/PanelEditDialog.vue'
-import ImageCropDialog from '@/components/infinite-canvas/ImageCropDialog.vue'
-import { executeMergeGeneration, executeMergeVideoGeneration } from '@/lib/canvas-generation'
-import { useI18n } from '@/i18n'
+import InfiniteCanvas from '@/components/canvas/InfiniteCanvas.vue'
+import CanvasConnectionsLayer from '@/components/canvas/CanvasConnectionsLayer.vue'
+import CanvasNode from '@/components/canvas/CanvasNode.vue'
+import CanvasToolbar from '@/components/canvas/CanvasToolbar.vue'
+import CanvasZoomControls from '@/components/canvas/CanvasZoomControls.vue'
+import CanvasMinimap from '@/components/canvas/CanvasMinimap.vue'
+import CanvasNodeHoverToolbar from '@/components/canvas/CanvasNodeHoverToolbar.vue'
+import CanvasContextMenu from '@/components/canvas/CanvasContextMenu.vue'
 
-const { t } = useI18n()
+const router = useRouter()
 const store = useCanvasStore()
-const contextMenuRef = ref(null)
-const infiniteCanvasRef = ref(null)
-const importInputRef = ref(null)
-const canvasToolbarRef = ref(null)
 
-// 节点编辑弹窗状态：editDialogPanel 为当前编辑的面板对象
-const editDialogVisible = ref(false)
-const editDialogPanel = ref(null)
-// 图片裁剪弹窗状态：cropTargetPanel 为当前裁剪的面板对象
-const cropDialogVisible = ref(false)
-const cropTargetPanel = ref(null)
-// 裁剪弹窗要显示的图片源（优先 imageUrl，其次 image，兼容旧数据）
-const cropImageSrc = computed(() => {
-  const c = cropTargetPanel.value?.content || {}
-  return c.imageUrl || c.image || c.url || ''
-})
-// 节点级异步动作的 loading 状态集合（防止重复触发）
-const loadingActions = reactive({})
-
-// 小地图显示状态
-const isMinimapOpen = ref(true)
-
-// 节点悬停工具栏状态
-const hoveredPanel = ref(null)
-const showHoverToolbar = ref(false)
-const hoverToolbarTimer = ref(null)
-
-/** 切换小地图显示 */
-function toggleMinimap() {
-  isMinimapOpen.value = !isMinimapOpen.value
+// ---------- 节点默认尺寸（对齐参考项目） ----------
+const NODE_DEFAULT_SIZES = {
+  text: { width: 340, height: 240 },
+  image: { width: 340, height: 240 },
+  video: { width: 420, height: 236 },
+  audio: { width: 340, height: 120 },
+  config: { width: 340, height: 240 },
 }
 
-/** 处理节点悬停工具栏动作 */
-function handleHoverToolbarAction({ type, panel }) {
-  // 复用现有的 handlePanelAction 逻辑
-  handlePanelAction({ type, panel })
-  showHoverToolbar.value = false
-  hoveredPanel.value = null
+// ---------- 节点类型中文名 ----------
+const NODE_NAMES = {
+  text: '文本节点',
+  image: '图片节点',
+  video: '视频节点',
+  audio: '音频节点',
+  config: '配置节点',
 }
 
-/** 鼠标进入悬停工具栏 */
-function handleHoverToolbarEnter() {
-  if (hoverToolbarTimer.value) {
-    clearTimeout(hoverToolbarTimer.value)
-    hoverToolbarTimer.value = null
+// ==================== 顶部栏：菜单 ====================
+
+const menuOpen = ref(false)
+const menuDropdownStyle = computed(() => ({
+  background: store.canvasTheme.toolbar.panel,
+  borderColor: store.canvasTheme.toolbar.border,
+  color: store.canvasTheme.node.text,
+}))
+
+function toggleMenu() {
+  menuOpen.value = !menuOpen.value
+}
+
+function closeMenu() {
+  menuOpen.value = false
+}
+
+// 菜单命令处理
+function menuGoHome() {
+  closeMenu()
+  router.push('/')
+}
+function menuGoDocs() {
+  closeMenu()
+  ElMessage.info('文档功能开发中')
+}
+function menuShowProjects() {
+  closeMenu()
+  ElMessage.info('画布列表功能开发中')
+}
+function menuNewCanvas() {
+  closeMenu()
+  store.createWorkspace('画布 ' + (store.workspaces.length + 1))
+  ElMessage.success('已创建新画布')
+}
+function menuDeleteCanvas() {
+  closeMenu()
+  if (!store.activeWorkspaceId) {
+    ElMessage.warning('当前没有画布')
+    return
   }
+  ElMessageBox.confirm('确定删除当前画布吗？此操作不可撤销。', '提示', { type: 'warning' })
+    .then(() => {
+      store.deleteWorkspace(store.activeWorkspaceId)
+      ElMessage.success('画布已删除')
+    })
+    .catch(() => {})
+}
+function menuImport() {
+  closeMenu()
+  triggerFileUpload(null, '.json')
+}
+function menuUndo() {
+  closeMenu()
+  store.undo()
+}
+function menuRedo() {
+  closeMenu()
+  store.redo()
+}
+
+// ==================== 顶部栏：标题编辑 ====================
+
+const editingTitle = ref(false)
+const titleInput = ref('')
+const titleInputRef = ref(null)
+const activeWorkspaceName = computed(() => store.activeWorkspace?.name ?? '未命名画布')
+
+const titleInputStyle = computed(() => ({
+  background: store.canvasTheme.node.panel,
+  borderColor: store.canvasTheme.node.stroke,
+  color: store.canvasTheme.node.text,
+}))
+
+function startEditTitle() {
+  titleInput.value = activeWorkspaceName.value
+  editingTitle.value = true
+  nextTick(() => titleInputRef.value?.focus())
+}
+
+function saveTitle() {
+  if (!editingTitle.value) return
+  const name = titleInput.value.trim()
+  if (name && store.activeWorkspaceId) {
+    store.renameWorkspace(store.activeWorkspaceId, name)
+  }
+  editingTitle.value = false
+}
+
+function cancelTitle() {
+  editingTitle.value = false
+}
+
+// ==================== 顶部栏：Agent ====================
+
+const agentBtnStyle = computed(() => ({
+  background: store.canvasTheme.toolbar.panel,
+  borderColor: store.canvasTheme.toolbar.border,
+  color: store.canvasTheme.node.text,
+}))
+
+function handleAgent() {
+  ElMessage.info('Agent 面板开发中')
+}
+
+// ==================== 画布主体引用 ====================
+
+const canvasRef = ref(null)
+
+// ==================== 背景点击处理 ====================
+
+function handleBackgroundClick() {
+  // InfiniteCanvas 在无 props 时已自动清空选中
+  showAppearancePanel.value = false
+  closeMenu()
+}
+
+// ==================== 框选（Ctrl/Cmd + 拖动背景） ====================
+
+const selectionBox = reactive({
+  active: false,
+  startScreenX: 0,
+  startScreenY: 0,
+  endScreenX: 0,
+  endScreenY: 0,
+})
+
+const selectionBoxStyle = computed(() => {
+  if (!selectionBox.active) return {}
+  const left = Math.min(selectionBox.startScreenX, selectionBox.endScreenX)
+  const top = Math.min(selectionBox.startScreenY, selectionBox.endScreenY)
+  const width = Math.abs(selectionBox.endScreenX - selectionBox.startScreenX)
+  const height = Math.abs(selectionBox.endScreenY - selectionBox.startScreenY)
+  return {
+    left: left + 'px',
+    top: top + 'px',
+    width: width + 'px',
+    height: height + 'px',
+    borderColor: store.canvasTheme.canvas.selectionStroke,
+    backgroundColor: store.canvasTheme.canvas.selectionFill,
+  }
+})
+
+// 画布指针按下：检测 Ctrl/Cmd + 背景点击，启动框选
+function handleCanvasPointerDown(event) {
+  if (event.button !== 0) return
+  if (!(event.ctrlKey || event.metaKey)) return
+  // 检查是否点击在背景上（非节点、非连线）
+  const target = event.target instanceof Element ? event.target : null
+  if (target?.closest?.('[data-node-id],[data-connection-id]')) return
+
+  selectionBox.active = true
+  selectionBox.startScreenX = event.clientX
+  selectionBox.startScreenY = event.clientY
+  selectionBox.endScreenX = event.clientX
+  selectionBox.endScreenY = event.clientY
+
+  window.addEventListener('pointermove', handleSelectionMove)
+  window.addEventListener('pointerup', handleSelectionUp)
+}
+
+// 框选拖动：实时更新框选矩形并选中范围内节点
+function handleSelectionMove(event) {
+  if (!selectionBox.active) return
+  selectionBox.endScreenX = event.clientX
+  selectionBox.endScreenY = event.clientY
+  const startWorld = store.screenToWorld(selectionBox.startScreenX, selectionBox.startScreenY)
+  const endWorld = store.screenToWorld(event.clientX, event.clientY)
+  store.selectPanelsInRect({ startWorld, endWorld }, { append: event.shiftKey })
+}
+
+// 框选结束
+function handleSelectionUp() {
+  selectionBox.active = false
+  window.removeEventListener('pointermove', handleSelectionMove)
+  window.removeEventListener('pointerup', handleSelectionUp)
+}
+
+// ==================== 节点交互：选中 ====================
+
+// 跟踪 Ctrl/Cmd 按键状态（用于多选判断）
+const ctrlPressed = ref(false)
+
+function handleNodeSelect(panelId) {
+  store.selectPanel(panelId, { append: ctrlPressed.value })
+}
+
+// ==================== 节点交互：拖拽移动 ====================
+
+const dragState = reactive({
+  active: false,
+  draggedId: null,
+  initialPositions: {}, // { panelId: { x, y } }
+  hasMoved: false,
+})
+
+// 节点拖拽开始：记录所有选中节点的初始位置
+function handleNodeDragStart({ id, event }) {
+  // 如果拖拽的节点不在选中列表中，只选中它
+  if (!store.selectedPanelIds.includes(id)) {
+    store.selectPanel(id, { append: false })
+  }
+  dragState.active = true
+  dragState.draggedId = id
+  dragState.hasMoved = false
+  dragState.initialPositions = {}
+  for (const pid of store.selectedPanelIds) {
+    const p = store.panels.find((pp) => pp.id === pid)
+    if (p) dragState.initialPositions[pid] = { x: p.x, y: p.y }
+  }
+}
+
+// 节点拖拽中：第一次移动时压入快照，之后同步移动所有选中节点
+function handleNodeDrag({ id, x, y }) {
+  if (!dragState.active) return
+  if (!dragState.hasMoved) {
+    store.pushSnapshot()
+    dragState.hasMoved = true
+  }
+  const initial = dragState.initialPositions[id]
+  if (!initial) return
+  const dx = x - initial.x
+  const dy = y - initial.y
+  // 应用增量到所有选中节点
+  for (const pid of store.selectedPanelIds) {
+    const init = dragState.initialPositions[pid]
+    if (!init) continue
+    store._updatePanelDirect(pid, { x: init.x + dx, y: init.y + dy })
+  }
+}
+
+// 节点拖拽结束：触发一次保存
+function handleNodeDragEnd({ id }) {
+  if (!dragState.active) return
+  if (dragState.hasMoved) {
+    const panel = store.panels.find((p) => p.id === id)
+    if (panel) store.updatePanel(id, { x: panel.x, y: panel.y })
+  }
+  dragState.active = false
+  dragState.draggedId = null
+  dragState.initialPositions = {}
+}
+
+// ==================== 节点交互：缩放 ====================
+
+const resizeState = reactive({
+  active: false,
+  panelId: null,
+  hasMoved: false,
+})
+
+// 节点缩放开始：压入快照
+function handleNodeResizeStart({ id }) {
+  resizeState.active = true
+  resizeState.panelId = id
+  resizeState.hasMoved = false
+  store.pushSnapshot()
+}
+
+// 节点缩放中：直接更新节点尺寸
+function handleNodeResize({ id, width, height, x, y }) {
+  store._updatePanelDirect(id, { width, height, x, y })
+  resizeState.hasMoved = true
+}
+
+// 节点缩放结束：触发一次保存
+function handleNodeResizeEnd({ id }) {
+  if (resizeState.hasMoved) {
+    const panel = store.panels.find((p) => p.id === id)
+    if (panel) {
+      store.updatePanel(id, {
+        width: panel.width,
+        height: panel.height,
+        x: panel.x,
+        y: panel.y,
+      })
+    }
+  }
+  resizeState.active = false
+  resizeState.panelId = null
+}
+
+// ==================== 连线交互 ====================
+
+// 节点开始连线：启动全局 pointermove/pointerup 监听
+function handleNodeStartConnecting(panelId, anchorType) {
+  store.startConnecting(panelId, anchorType)
+  window.addEventListener('pointermove', handleConnectingMove)
+  window.addEventListener('pointerup', handleConnectingUp)
+}
+
+// 连线拖拽中：更新临时连线终点
+function handleConnectingMove(event) {
+  if (!store.connecting) return
+  const world = store.screenToWorld(event.clientX, event.clientY)
+  store.updateConnecting(world.x, world.y)
+}
+
+// 连线结束：检测是否释放在节点上
+function handleConnectingUp(event) {
+  window.removeEventListener('pointermove', handleConnectingMove)
+  window.removeEventListener('pointerup', handleConnectingUp)
+  if (!store.connecting) return
+  const el = document.elementFromPoint(event.clientX, event.clientY)
+  const nodeEl = el?.closest?.('[data-node-id]')
+  if (nodeEl) {
+    const targetId = nodeEl.getAttribute('data-node-id')
+    store.endConnecting(targetId, 'target')
+  } else {
+    store.cancelConnecting()
+  }
+}
+
+// ==================== 节点交互：右键菜单 ====================
+
+const contextMenu = reactive({
+  open: false,
+  x: 0,
+  y: 0,
+  targetType: 'node',
+  targetId: null,
+})
+
+// 节点右键：打开菜单
+function handleNodeContextMenu(event) {
+  event.preventDefault()
+  event.stopPropagation()
+  const nodeEl = event.target instanceof Element ? event.target.closest('[data-node-id]') : null
+  const targetId = nodeEl?.getAttribute('data-node-id') ?? null
+  contextMenu.open = true
+  contextMenu.x = event.clientX
+  contextMenu.y = event.clientY
+  contextMenu.targetType = 'node'
+  contextMenu.targetId = targetId
+}
+
+// 右键菜单：复制
+function handleContextDuplicate() {
+  if (contextMenu.targetId) {
+    store.pushSnapshot()
+    store.duplicatePanel(contextMenu.targetId)
+  }
+  contextMenu.open = false
+}
+
+// 右键菜单：删除
+function handleContextDelete() {
+  if (contextMenu.targetId) {
+    store.pushSnapshot()
+    store.deletePanel(contextMenu.targetId)
+  }
+  contextMenu.open = false
+}
+
+// ==================== 节点交互：其他事件 ====================
+
+// 查看图片大图
+function handleViewImage(imageUrl) {
+  if (imageUrl) previewImage.value = imageUrl
+}
+
+// 编辑文本节点内容
+function handleNodeEditText(panelId, text) {
+  store.pushSnapshot()
+  store.updatePanel(panelId, { content: { content: text } })
+}
+
+// 从文本节点生图（简化为提示）
+function handleNodeGenerateImage(panel) {
+  ElMessage.info('生图功能开发中')
+  console.log('[canvas] generate-image from panel:', panel.id)
+}
+
+// 重试生成
+function handleNodeRetry(panel) {
+  ElMessage.info('重试功能开发中')
+  console.log('[canvas] retry panel:', panel.id)
+}
+
+// 节点上传文件
+function handleNodeUpload(panel) {
+  if (panel) {
+    triggerFileUpload(panel.id)
+  }
+}
+
+// ==================== 悬停工具栏 ====================
+
+const hoveredPanelId = ref(null)
+const showHoverToolbar = ref(false)
+let hoverHideTimer = null
+
+const hoveredPanel = computed(() => {
+  if (!hoveredPanelId.value) return null
+  return store.panels.find((p) => p.id === hoveredPanelId.value) ?? null
+})
+
+// 悬停工具栏定位：节点上方居中
+const hoverToolbarStyle = computed(() => {
+  const panel = hoveredPanel.value
+  if (!panel) return { display: 'none' }
+  const screen = store.worldToScreen(panel.x + panel.width / 2, panel.y)
+  return {
+    left: screen.x + 'px',
+    top: (screen.y - 8) + 'px',
+    transform: 'translate(-50%, -100%)',
+  }
+})
+
+// 节点 hover 进入
+function handleNodeHoverEnter(panelId) {
+  cancelHoverHide()
+  hoveredPanelId.value = panelId
   showHoverToolbar.value = true
 }
 
-/** 鼠标离开悬停工具栏 */
-function handleHoverToolbarLeave() {
-  hoverToolbarTimer.value = setTimeout(() => {
+// 节点 hover 离开：延迟隐藏（允许鼠标移到工具栏上）
+function handleNodeHoverLeave() {
+  scheduleHoverHide()
+}
+
+function scheduleHoverHide() {
+  cancelHoverHide()
+  hoverHideTimer = setTimeout(() => {
     showHoverToolbar.value = false
-    hoveredPanel.value = null
-  }, 300)
+    hoveredPanelId.value = null
+  }, 200)
 }
 
-/** 右键菜单处理：把 panel 对象一并传给 CanvasContextMenu，支持按类型渲染节点级操作 */
-function handleContextMenu(e) {
-  const target = e.target
-
-  // 检查是否点击了面板
-  const panelEl = target.closest('[data-canvas-target="panel"]')
-  if (panelEl) {
-    const panelId = panelEl.getAttribute('data-panel-id')
-    const panel = store.panels.find((p) => p.id === panelId) || null
-    contextMenuRef.value?.show(e, {
-      target: 'panel',
-      data: { panelId, panel },
-    })
-    return
+function cancelHoverHide() {
+  if (hoverHideTimer) {
+    clearTimeout(hoverHideTimer)
+    hoverHideTimer = null
   }
-
-  // 检查是否点击了连线（SVG path）
-  if (target.classList.contains('connection-path')) {
-    const connGroup = target.closest('.connection-group')
-    const connId = connGroup?.dataset?.connId
-    contextMenuRef.value?.show(e, {
-      target: 'connection',
-      data: { connectionId: connId },
-    })
-    return
-  }
-
-  // 背景右键
-  contextMenuRef.value?.show(e, { target: 'background' })
 }
 
-/** 全局点击关闭菜单 */
-function handleClick() {
-  contextMenuRef.value?.hide()
+// ---- 悬停工具栏事件处理（复杂功能简化为 ElMessage 提示） ----
+
+function handleHoverInfo() {
+  const p = hoveredPanel.value
+  if (p) ElMessage.info(`节点类型: ${NODE_NAMES[p.type] || p.type} | ID: ${p.id}`)
 }
 
-/** 全局快捷键处理 */
-function handleKeydown(e) {
-  // 忽略在表单元素中的按键
-  const tag = (e.target?.tagName || '').toLowerCase()
-  if (['input', 'textarea', 'select'].includes(tag) || e.target?.isContentEditable) {
-    return
-  }
-
-  const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
-  const mod = isMac ? e.metaKey : e.ctrlKey
-
-  // Space 键：临时进入平移模式（按下时显示抓手指针，可拖动画布）
-  if (e.code === 'Space' && !e.repeat) {
-    e.preventDefault()
-    store._isSpacePressed = true
-    return
-  }
-
-  // / 键：聚焦工具栏搜索框（任务 3 节点搜索）
-  // - 不与现有 Ctrl/Cmd + 字母组合冲突
-  // - 表单元素中的 / 已被前置 guard 拦截
-  if (e.key === '/') {
-    e.preventDefault()
-    canvasToolbarRef.value?.focusSearch?.()
-    return
-  }
-
-  // Escape：关闭右键菜单 + 取消选中；优先退出 Frame 内部模式
-  if (e.key === 'Escape') {
-    contextMenuRef.value?.hide()
-    // 优先退出 Frame 内部模式（双击进入后用 Esc 返回上级）
-    if (store.enteredFrameId) {
-      store.exitFrame()
-      return
-    }
-    // 关闭拖线空白处弹出的"创建新节点"菜单
-    if (store.pendingConnectionCreate) {
-      store.clearPendingConnectionCreate()
-      return
-    }
-    store.clearSelection()
-    return
-  }
-
-  // Delete / Backspace：删除选中的面板（多选支持）或连线；锁定节点会被过滤
-  if (e.key === 'Delete' || e.key === 'Backspace') {
-    if (store.selectedPanelIds.length > 0) {
-      e.preventDefault()
-      // 过滤掉 locked 节点，避免误删
-      const deletableIds = store.selectedPanelIds.filter(
-        (id) => !store.panels.find((p) => p.id === id)?.content?.locked
-      )
-      if (deletableIds.length === 0) {
-        ElMessage.warning(t('canvas.lockedHint'))
-        return
-      }
-      // 重新设置选中集合为可删除的，再触发删除
-      store.selectedPanelIds = deletableIds
-      store.selectedPanelId = deletableIds[0] ?? null
-      store.deleteSelectedPanels()
-    } else if (store.selectedConnectionId) {
-      e.preventDefault()
-      store.deleteConnection(store.selectedConnectionId)
-    }
-    return
-  }
-
-  // Ctrl+Z / Cmd+Z：撤销
-  if (e.key === 'z' && mod && !e.shiftKey) {
-    e.preventDefault()
-    store.undo()
-    return
-  }
-
-  // Ctrl+Shift+Z / Cmd+Shift+Z：重做
-  if (e.key === 'z' && mod && e.shiftKey) {
-    e.preventDefault()
-    store.redo()
-    return
-  }
-
-  // Ctrl+D / Cmd+D：复制选中面板（多选支持）
-  if (e.key === 'd' && mod) {
-    if (store.selectedPanelIds.length > 0) {
-      e.preventDefault()
-      store.duplicateSelectedPanels()
-    } else if (store.selectedPanelId) {
-      // 兼容旧单选
-      e.preventDefault()
-      store.duplicatePanel(store.selectedPanelId)
-    }
-    return
-  }
-
-  // Ctrl+A / Cmd+A：全选所有面板（多选）
-  if (e.key === 'a' && mod && !store._connecting) {
-    e.preventDefault()
-    if (store.panels.length > 0) {
-      // 用无限矩形一次性框选全部面板
-      store.selectPanelsInRect({
-        startWorld: { x: -Infinity, y: -Infinity },
-        endWorld: { x: Infinity, y: Infinity },
-      })
-    }
-    return
-  }
-
-  // Ctrl+L / Cmd+L：切换当前选中节点的锁定状态（仅支持单选）
-  if (e.key === 'l' && mod && !e.shiftKey && !e.altKey) {
-    e.preventDefault()
-    if (store.selectedPanelIds.length === 1) {
-      store.toggleLock(store.selectedPanelIds[0])
-    } else if (store.selectedPanelIds.length > 1) {
-      ElMessage.info(t('canvas.lockMultiSelectHint'))
-    }
-    return
-  }
-
-  // Ctrl+S / Cmd+S：导出当前画布为 JSON（防止浏览器默认保存网页）
-  if (e.key === 's' && mod) {
-    e.preventDefault()
-    handleExportJson()
-    return
-  }
-
-  // 方向键：微调选中面板位置（多选支持，只压一次快照）
-  const nudgeAmount = e.shiftKey ? 10 : 1
-  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key) && store.selectedPanelIds.length > 0) {
-    e.preventDefault()
-
-    let dx = 0, dy = 0
-    if (e.key === 'ArrowUp') dy = -nudgeAmount
-    else if (e.key === 'ArrowDown') dy = nudgeAmount
-    else if (e.key === 'ArrowLeft') dx = -nudgeAmount
-    else if (e.key === 'ArrowRight') dx = nudgeAmount
-
-    // 一次 pushSnapshot：多选微调视为一次操作
+function handleHoverDelete() {
+  if (hoveredPanelId.value) {
     store.pushSnapshot()
-    const ids = [...store.selectedPanelIds]
-    for (const id of ids) {
-      const panel = store.panels.find((p) => p.id === id)
-      if (!panel) continue
-      store._updatePanelDirect(id, {
-        x: panel.x + dx,
-        y: panel.y + dy,
-      })
+    store.deletePanel(hoveredPanelId.value)
+  }
+  showHoverToolbar.value = false
+  hoveredPanelId.value = null
+}
+
+function handleHoverRetry() {
+  ElMessage.info('重试功能开发中')
+}
+
+function handleHoverSaveAsset() {
+  ElMessage.info('存素材功能开发中')
+}
+
+function handleHoverDownload() {
+  const p = hoveredPanel.value
+  if (p?.content?.content) {
+    const a = document.createElement('a')
+    a.href = p.content.content
+    a.download = `download-${Date.now()}`
+    a.click()
+  }
+}
+
+function handleHoverEdit() {
+  ElMessage.info('编辑功能开发中')
+}
+
+function handleHoverEditText() {
+  ElMessage.info('编辑文字功能开发中')
+}
+
+function handleHoverGenerateImage() {
+  ElMessage.info('生图功能开发中')
+}
+
+function handleHoverFontSizeDown() {
+  if (!hoveredPanelId.value) return
+  const p = store.panels.find((pp) => pp.id === hoveredPanelId.value)
+  const cur = p?.content?.fontSize ?? 16
+  store.updatePanel(hoveredPanelId.value, { content: { fontSize: Math.max(10, cur - 2) } })
+}
+
+function handleHoverFontSizeUp() {
+  if (!hoveredPanelId.value) return
+  const p = store.panels.find((pp) => pp.id === hoveredPanelId.value)
+  const cur = p?.content?.fontSize ?? 16
+  store.updatePanel(hoveredPanelId.value, { content: { fontSize: Math.min(48, cur + 2) } })
+}
+
+function handleHoverUploadImage() {
+  triggerFileUpload(hoveredPanelId.value, 'image/*')
+}
+
+function handleHoverUploadVideo() {
+  triggerFileUpload(hoveredPanelId.value, 'video/*')
+}
+
+function handleHoverUploadAudio() {
+  triggerFileUpload(hoveredPanelId.value, 'audio/*')
+}
+
+function handleHoverCopyPrompt() {
+  if (!hoveredPanelId.value) return
+  const p = store.panels.find((pp) => pp.id === hoveredPanelId.value)
+  const prompt = p?.content?.prompt ?? ''
+  navigator.clipboard?.writeText(prompt).then(() => {
+    ElMessage.success('已复制提示词')
+  }).catch(() => {
+    ElMessage.warning('复制失败')
+  })
+}
+
+function handleHoverDescribe() {
+  ElMessage.info('反推提示词功能开发中')
+}
+
+function handleHoverReplaceImage() {
+  triggerFileUpload(hoveredPanelId.value, 'image/*')
+}
+
+function handleHoverToggleRatio() {
+  if (!hoveredPanelId.value) return
+  const p = store.panels.find((pp) => pp.id === hoveredPanelId.value)
+  const cur = p?.content?.freeResize ?? false
+  store.updatePanel(hoveredPanelId.value, { content: { freeResize: !cur } })
+  ElMessage.success(cur ? '已切换为锁定比例' : '已切换为自由比例')
+}
+
+function handleHoverMaskEdit() {
+  ElMessage.info('蒙版编辑功能开发中')
+}
+
+function handleHoverCrop() {
+  ElMessage.info('裁剪功能开发中')
+}
+
+function handleHoverSplit() {
+  ElMessage.info('拆分功能开发中')
+}
+
+function handleHoverUpscale() {
+  ElMessage.info('放大功能开发中')
+}
+
+function handleHoverSuperResolution() {
+  ElMessage.info('超分功能开发中')
+}
+
+function handleHoverAngle() {
+  ElMessage.info('角度调整功能开发中')
+}
+
+function handleHoverViewLarge() {
+  const p = hoveredPanel.value
+  if (p?.content?.content) previewImage.value = p.content.content
+}
+
+// ==================== 底部工具栏事件 ====================
+
+const showAppearancePanel = ref(false)
+
+// 选择/移动工具
+function handleSelectTool() {
+  // 无需特殊处理，默认即为选择模式
+}
+
+// 工具栏添加节点
+function handleAddNode(type) {
+  createNodeAtCenter(type)
+}
+
+// 工具栏上传素材
+function handleUploadAsset() {
+  triggerFileUpload(null, 'image/*,video/*,audio/*')
+}
+
+// 打开素材库
+function handleOpenAssetLibrary() {
+  ElMessage.info('素材库功能开发中')
+}
+
+// 删除选中节点
+function handleDeleteSelected() {
+  if (store.selectedPanelIds.length === 0) return
+  store.pushSnapshot()
+  const ids = [...store.selectedPanelIds]
+  for (const id of ids) {
+    store.deletePanel(id)
+  }
+}
+
+// 清空画布
+function handleClearCanvas() {
+  if (store.panels.length === 0) return
+  ElMessageBox.confirm('确定清空当前画布的所有节点吗？', '提示', { type: 'warning' })
+    .then(() => {
+      store.pushSnapshot()
+      store.clearAllPanels()
+      ElMessage.success('画布已清空')
+    })
+    .catch(() => {})
+}
+
+// 切换图片信息显示
+function handleToggleImageInfo(val) {
+  if (val !== store.showImageInfo) store.toggleImageInfo()
+}
+
+// ==================== 缩放控件 + 小地图 ====================
+
+const minimapVisible = ref(false)
+const showHelp = ref(false)
+const canvasSize = computed(() => ({
+  width: window.innerWidth,
+  height: window.innerHeight,
+}))
+
+const helpModalStyle = computed(() => ({
+  background: store.canvasTheme.toolbar.panel,
+  borderColor: store.canvasTheme.toolbar.border,
+  color: store.canvasTheme.node.text,
+}))
+
+// 小地图定位：将视口中心移动到指定世界坐标
+function handleMinimapLocate(worldX, worldY) {
+  const { zoom } = store.viewport
+  store.viewport.x = window.innerWidth / 2 - worldX * zoom
+  store.viewport.y = window.innerHeight / 2 - worldY * zoom
+}
+
+// ==================== 节点创建 ====================
+
+// 在视口中心创建节点
+function createNodeAtCenter(type) {
+  const size = NODE_DEFAULT_SIZES[type] ?? NODE_DEFAULT_SIZES.text
+  const cx = (window.innerWidth / 2 - store.viewport.x) / store.viewport.zoom
+  const cy = (window.innerHeight / 2 - store.viewport.y) / store.viewport.zoom
+  store.pushSnapshot()
+  const id = store.addPanel({
+    type,
+    name: NODE_NAMES[type] ?? '节点',
+    x: cx - size.width / 2,
+    y: cy - size.height / 2,
+    width: size.width,
+    height: size.height,
+    content: {},
+  })
+  store.selectPanel(id, { append: false })
+  return id
+}
+
+// ==================== 文件上传 / 导入 ====================
+
+const fileInputRef = ref(null)
+const uploadTargetPanelId = ref(null)
+const fileAccept = ref('*')
+
+// 触发文件选择对话框
+function triggerFileUpload(panelId, accept = '*') {
+  uploadTargetPanelId.value = panelId
+  fileAccept.value = accept
+  if (fileInputRef.value) {
+    fileInputRef.value.value = ''
+    fileInputRef.value.click()
+  }
+}
+
+// 文件选择回调
+function handleFileSelect(event) {
+  const file = event.target.files?.[0]
+  if (!file) return
+
+  // JSON 导入
+  if (file.name.endsWith('.json')) {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      try {
+        store.importJSON(e.target.result)
+        ElMessage.success('导入成功')
+      } catch (err) {
+        ElMessage.error('导入失败：' + err.message)
+      }
     }
-  }
-}
-
-/** 全局按键释放处理（用于 Space 键松开） */
-function handleKeyup(e) {
-  if (e.code === 'Space') {
-    store._isSpacePressed = false
-  }
-}
-
-/** 导出当前画布为 JSON 文件下载 */
-function handleExportJson() {
-  if (store.panels.length === 0 && store.connections.length === 0) {
-    ElMessage.warning('画布为空，无需导出')
+    reader.readAsText(file)
     return
   }
+
+  // 文件上传到节点
+  const url = URL.createObjectURL(file)
+  const targetId = uploadTargetPanelId.value
+
+  if (targetId) {
+    // 更新现有节点内容
+    store.pushSnapshot()
+    store.updatePanel(targetId, {
+      content: {
+        content: url,
+        status: 'success',
+      },
+    })
+    ElMessage.success('文件已加载到节点')
+  } else {
+    // 创建新节点
+    const type = file.type.startsWith('image/') ? 'image'
+      : file.type.startsWith('video/') ? 'video'
+      : file.type.startsWith('audio/') ? 'audio'
+      : 'text'
+    const id = createNodeAtCenter(type)
+    store.updatePanel(id, {
+      content: { content: url, status: 'success' },
+    })
+    ElMessage.success('节点已创建')
+  }
+
+  uploadTargetPanelId.value = null
+}
+
+// ==================== 图片预览弹窗 ====================
+
+const previewImage = ref(null)
+
+// ==================== 导出 JSON ====================
+
+function handleExportJson() {
+  closeMenu()
   const json = store.exportJSON()
   const blob = new Blob([json], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
-  const wsName = store.activeWorkspace?.name || 'canvas'
   a.href = url
-  a.download = `${wsName}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`
-  document.body.appendChild(a)
+  a.download = `canvas-${Date.now()}.json`
   a.click()
-  document.body.removeChild(a)
   URL.revokeObjectURL(url)
-  ElMessage.success(t('canvas.exportSuccess'))
+  ElMessage.success('已导出 JSON')
 }
 
-/** 触发文件选择对话框 */
-function triggerImport() {
-  importInputRef.value?.click()
-}
+// ==================== 全局快捷键 ====================
 
-/** 处理面板编辑事件（来自 InfiniteCanvas 的 panel-edit 或右键菜单的 edit 动作）
- *  - 打开 PanelEditDialog，按节点类型渲染对应编辑表单 */
-function handlePanelEdit(panel) {
-  if (!panel) return
-  editDialogPanel.value = panel
-  editDialogVisible.value = true
-}
+function handleKeyDown(event) {
+  // 跟踪 Ctrl/Cmd 状态
+  if (event.ctrlKey || event.metaKey) {
+    ctrlPressed.value = true
+  }
 
-/** PanelEditDialog 确认回调：把 changes 写回 store.updatePanel */
-function handleEditConfirm({ panel, changes }) {
-  if (!panel || !changes) return
-  store.updatePanel(panel.id, changes)
-  ElMessage.success(t('canvas.editDialog.saved'))
-}
+  // 输入框内不响应快捷键（Escape 除外）
+  const isInput = event.target instanceof HTMLInputElement
+    || event.target instanceof HTMLTextAreaElement
+    || event.target?.isContentEditable
 
-/** 图片裁剪确认回调
- *  - 把 base64 写回 panel.content.image / imageUrl
- *  - 按裁剪比例调整 width / height，保持原节点中心位置不变
- */
-function onCropConfirm({ width: cw, height: ch, base64 }) {
-  const panel = cropTargetPanel.value
-  if (!panel || !cw || !ch) return
-  const ratio = cw / ch
-  const oldW = panel.width || 1
-  const oldH = panel.height || 1
-  // 维持节点中心位置不变，按原宽度回算新高度（宽度优先保持）
-  const newH = Math.max(60, oldW / ratio)
-  const cx = panel.x + oldW / 2
-  const cy = panel.y + oldH / 2
-  const newX = cx - oldW / 2
-  const newY = cy - newH / 2
-  const c = panel.content || {}
-  store.updatePanel(panel.id, {
-    x: newX, y: newY, width: oldW, height: newH,
-    content: { ...c, image: base64, imageUrl: base64 },
-  })
-  ElMessage.success(t('canvas.cropDialog.confirm'))
-}
-
-/**
- * 处理右键菜单抛出的节点级动作
- * - edit: 打开 PanelEditDialog
- * - crop: 打开 ImageCropDialog
- * - split / rotate: 直接调 store
- * - inferPrompt / addToAssets / rewrite / extractFirstFrame: 调 canvas API
- * - fontUp / fontDown: 直接更新 content.fontSize
- * - generate / generateVideo: 调任务队列（占位提示，待接入具体生成流程）
- * - info: 显示节点信息
- * - upload: 提示用户在编辑弹窗中上传
- */
-function handlePanelAction({ type, panel }) {
-  if (!panel) return
-  switch (type) {
-    case 'edit':
-      handlePanelEdit(panel)
-      break
-    case 'crop':
-      // 仅图片节点可裁剪，且需要有图片源
-      if (panel.type !== 'image') {
-        ElMessage.warning(t('canvas.cropDialog.empty'))
-        return
-      }
-      // 直接检查 panel 自身的图片源（优先 imageUrl，其次 image，兼容旧数据）
-      if (!panel.content?.imageUrl && !panel.content?.image) {
-        ElMessage.warning(t('canvas.cropDialog.empty'))
-        return
-      }
-      cropTargetPanel.value = panel
-      cropDialogVisible.value = true
-      break
-    case 'split':
-      store.splitImagePanel(panel.id, 4)
-      break
-    case 'rotate': {
-      const cur = panel.content?.rotation || 0
-      const next = (cur + 90) % 360
-      store.setPanelRotation(panel.id, next)
-      break
+  if (isInput) {
+    if (event.key === 'Escape') {
+      event.target.blur()
     }
-    case 'inferPrompt':
-      inferPrompt(panel)
-      break
-    case 'addToAssets':
-      addToAssets(panel)
-      break
-    case 'rewrite':
-      rewriteText(panel)
-      break
-    case 'extractFirstFrame':
-      extractFirstFrame(panel)
-      break
-    case 'fontUp':
-      adjustFont(panel, +1)
-      break
-    case 'fontDown':
-      adjustFont(panel, -1)
-      break
-    case 'generate':
-      handleMergeGenerate(panel)
-      break
-    case 'generateVideo':
-      handleMergeVideoGenerate(panel)
-      break
-    case 'info':
-      showPanelInfo(panel)
-      break
-    case 'upload':
-      // 文件上传节点：打开编辑弹窗让用户重新上传
-      handlePanelEdit(panel)
-      break
-    default:
-      ElMessage.info(t('canvas.toolbar.edit'))
-  }
-}
-
-/** 合并生成：调用 executeMergeGeneration 收集上游资源 + 解析 @[node:xxx] + 调用 AI 接口 + 回填结果
- *  - 仅支持 Config 节点（quick-generate 节点走简单生成流程）
- *  - 生成过程中显示进度提示
- *  - 成功后自动创建结果节点并连线
- */
-async function handleMergeGenerate(panel) {
-  // 仅 Config 节点支持合并生成
-  if (panel.type !== 'config') {
-    ElMessage.info('该节点类型暂不支持合并生成，请使用 Config 节点')
     return
   }
-  if (loadingActions[`generate-${panel.id}`]) {
-    ElMessage.warning('正在生成中，请稍候...')
+
+  const ctrl = event.ctrlKey || event.metaKey
+
+  // Escape：取消连线 / 关闭菜单 / 清空选中
+  if (event.key === 'Escape') {
+    if (store.connecting) store.cancelConnecting()
+    else if (contextMenu.open) contextMenu.open = false
+    else if (menuOpen.value) menuOpen.value = false
+    else if (showAppearancePanel.value) showAppearancePanel.value = false
+    else if (showHelp.value) showHelp.value = false
+    else store.clearSelection()
     return
   }
-  loadingActions[`generate-${panel.id}`] = true
-  const loadingMsg = ElMessage.info({ message: '开始合并生成...', duration: 0 })
-  try {
-    const count = Math.max(1, Number(panel.content?.count) || 1)
-    await executeMergeGeneration(panel.id, store, {
-      count,
-      onProgress: (stage, data) => {
-        const messages = {
-          building: `正在收集上游资源（${data?.inputSummary?.total || 0} 个）...`,
-          creating: `正在创建生成任务（${(data?.index || 0) + 1}/${data?.total || count}）...`,
-          polling: `等待生成结果（${(data?.index || 0) + 1}/${data?.total || count}）...`,
-          generating: `生成中... ${data?.progress ? Math.round(data.progress * 100) + '%' : ''}`,
-          done: `生成完成，已创建 ${data?.resultNodeIds?.length || 0} 个结果节点`,
-        }
-        if (messages[stage]) {
-          loadingMsg.message = messages[stage]
-        }
-      },
-    })
-    loadingMsg.close()
-    ElMessage.success('合并生成完成')
-  } catch (err) {
-    loadingMsg.close()
-    ElMessage.error(`合并生成失败：${err.message || String(err)}`)
-  } finally {
-    loadingActions[`generate-${panel.id}`] = false
-  }
-}
 
-/** 视频合并生成：调用 executeMergeVideoGeneration 收集上游资源 + 创建视频任务 + 轮询 + 回填
- *  - 仅支持 Config 节点
- *  - 生成过程中显示进度提示
- *  - 成功后自动创建 video 结果节点并连线
- */
-async function handleMergeVideoGenerate(panel) {
-  if (panel.type !== 'config') {
-    ElMessage.info('该节点类型暂不支持视频生成，请使用 Config 节点')
-    return
-  }
-  if (loadingActions[`generateVideo-${panel.id}`]) {
-    ElMessage.warning('正在生成视频中，请稍候...')
-    return
-  }
-  loadingActions[`generateVideo-${panel.id}`] = true
-  const loadingMsg = ElMessage.info({ message: '开始视频合并生成...', duration: 0 })
-  try {
-    await executeMergeVideoGeneration(panel.id, store, {
-      onProgress: (stage, data) => {
-        const messages = {
-          building: `正在收集上游资源（${data?.inputSummary?.total || 0} 个）...`,
-          creating: '正在创建视频生成任务...',
-          polling: '等待视频生成结果...',
-          generating: `视频生成中... ${data?.progress ? Math.round(data.progress * 100) + '%' : ''}`,
-          done: '视频生成完成，已创建结果节点',
-        }
-        if (messages[stage]) {
-          loadingMsg.message = messages[stage]
-        }
-      },
-    })
-    loadingMsg.close()
-    ElMessage.success('视频合并生成完成')
-  } catch (err) {
-    loadingMsg.close()
-    ElMessage.error(`视频生成失败：${err.message || String(err)}`)
-  } finally {
-    loadingActions[`generateVideo-${panel.id}`] = false
-  }
-}
-
-/** 节点级异步动作：调用 /api/canvas/{actionType} 接口
- *  - loadingActions 记录每个动作的 loading 状态，防止重复触发
- *  - 失败时统一提示 */
-async function callCanvasApi(actionType, body) {
-  if (loadingActions[actionType]) return null
-  loadingActions[actionType] = true
-  try {
-    const resp = await fetch(`/api/canvas/${actionType}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-    return await resp.json()
-  } catch (err) {
-    ElMessage.error(t('canvas.apiFailed', { msg: err.message || String(err) }))
-    return null
-  } finally {
-    loadingActions[actionType] = false
-  }
-}
-
-/** 反推提示词：把图片/视频 URL 传给后端，返回的 prompt 写入 panel.content.prompt */
-async function inferPrompt(panel) {
-  const c = panel.content || {}
-  const data = await callCanvasApi('infer-prompt', { url: c.imageUrl || c.image || c.videoUrl || c.url || '', type: panel.type })
-  if (data?.prompt) store.updatePanel(panel.id, { content: { ...c, prompt: data.prompt } })
-}
-
-/** 加入素材库：把图片 URL 传给后端 */
-async function addToAssets(panel) {
-  const c = panel.content || {}
-  await callCanvasApi('assets', { url: c.imageUrl || c.image || '', name: c.name || panel.id })
-  ElMessage.success(t('canvas.addedToAssets'))
-}
-
-/** 改写文本：把文本传给后端，返回的改写后文本写回 panel.content.text */
-async function rewriteText(panel) {
-  const c = panel.content || {}
-  const data = await callCanvasApi('rewrite', { text: c.text || '' })
-  if (data?.text) store.updatePanel(panel.id, { content: { ...c, text: data.text } })
-}
-
-/** 提取视频首帧：返回的图片在原节点下方新增一个 image 子节点 */
-async function extractFirstFrame(panel) {
-  const c = panel.content || {}
-  const data = await callCanvasApi('extract-first-frame', { url: c.videoUrl || c.url || '' })
-  if (data?.image) {
-    store.addPanel({
-      type: 'image',
-      x: (panel.x ?? 0),
-      y: (panel.y ?? 0) + (panel.height ?? 0) + 20,
-      width: 320, height: 200,
-      content: { image: data.image, imageUrl: data.image, sourceFrom: panel.id },
-    })
-  }
-}
-
-/** 调整文本字号：delta 为 +1 / -1，实际步进 2px，下限 8px */
-function adjustFont(panel, delta) {
-  const c = panel.content || {}
-  const cur = Number(c.fontSize) || 14
-  store.updatePanel(panel.id, { content: { ...c, fontSize: Math.max(8, cur + delta * 2) } })
-}
-
-/** 显示节点信息：用 ElMessage 简要展示节点类型、尺寸、内容关键字段 */
-function showPanelInfo(panel) {
-  const c = panel.content || {}
-  const fields = []
-  if (c.imageUrl) fields.push(`imageUrl: ${c.imageUrl.slice(0, 40)}...`)
-  if (c.videoUrl) fields.push(`videoUrl: ${c.videoUrl.slice(0, 40)}...`)
-  if (c.text) fields.push(`text: ${c.text.slice(0, 30)}...`)
-  if (c.url) fields.push(`url: ${c.url}`)
-  if (c.prompt) fields.push(`prompt: ${c.prompt.slice(0, 30)}...`)
-  const info = [
-    `type: ${panel.type}`,
-    `size: ${panel.width}×${panel.height}`,
-    ...(fields.length ? fields : ['content: (空)']),
-  ].join(' | ')
-  ElMessage.info({ message: info, duration: 4000 })
-}
-
-/** 处理选择的 JSON 文件 */
-function handleImportFile(e) {
-  const file = e.target.files?.[0]
-  if (!file) return
-  const reader = new FileReader()
-  reader.onload = (ev) => {
-    try {
-      const result = store.importJSON(ev.target.result)
-      ElMessage.success(
-        t('canvas.importSuccess', { n: result.panels, m: result.connections }),
-      )
-    } catch (err) {
-      ElMessage.error(t('canvas.importFailed', { msg: err.message }))
+  // Delete / Backspace：删除选中节点
+  if (event.key === 'Delete' || event.key === 'Backspace') {
+    if (store.selectedPanelIds.length > 0) {
+      event.preventDefault()
+      handleDeleteSelected()
     }
+    return
   }
-  reader.onerror = () => {
-    ElMessage.error(t('canvas.importFailed', { msg: '文件读取失败' }))
+
+  // Ctrl+Z：撤销
+  if (ctrl && event.key === 'z' && !event.shiftKey) {
+    event.preventDefault()
+    store.undo()
+    return
   }
-  reader.readAsText(file)
-  // 清空 input.value 允许同名文件重复选择
-  e.target.value = ''
+
+  // Ctrl+Shift+Z / Ctrl+Y：重做
+  if ((ctrl && event.key === 'z' && event.shiftKey) || (ctrl && event.key === 'y')) {
+    event.preventDefault()
+    store.redo()
+    return
+  }
+
+  // Ctrl+D：复制选中节点
+  if (ctrl && event.key === 'd') {
+    event.preventDefault()
+    if (store.selectedPanelIds.length > 0) {
+      store.pushSnapshot()
+      store.duplicateSelectedPanels()
+    }
+    return
+  }
+
+  // Ctrl+A：全选
+  if (ctrl && event.key === 'a') {
+    event.preventDefault()
+    store.selectedPanelIds = store.panels.map((p) => p.id)
+    store.selectedPanelId = store.selectedPanelIds[0] ?? null
+    return
+  }
+
+  // Ctrl+S：保存（阻止浏览器默认保存，提示已自动保存）
+  if (ctrl && event.key === 's') {
+    event.preventDefault()
+    ElMessage.success('画布已自动保存')
+    return
+  }
+
+  // Ctrl+L：编辑画布标题
+  if (ctrl && event.key === 'l') {
+    event.preventDefault()
+    startEditTitle()
+    return
+  }
 }
 
-onMounted(() => {
-  document.title = `${t('router.canvas')} · Agnes AI Platform`
-  window.addEventListener('keydown', handleKeydown)
-  window.addEventListener('keyup', handleKeyup)
-  // 点击其他地方关闭右键菜单
-  window.addEventListener('click', handleClick)
-  // Task 5: 异步从 localforage 恢复完整画布状态（panels / connections / viewport）
-  // - 仅触发一次，store 内部有 _storageReady 幂等保护
-  // - fire-and-forget：hydrate 是异步后台任务，不阻塞 onMounted
-  store._hydrateFromStorage()
+// 按键释放：重置 Ctrl/Cmd 状态
+function handleKeyUp(event) {
+  if (!event.ctrlKey && !event.metaKey) {
+    ctrlPressed.value = false
+  }
+}
+
+// ==================== 全局点击：关闭弹出层 ====================
+
+function handleGlobalClick(event) {
+  const target = event.target instanceof Element ? event.target : null
+  // 关闭菜单
+  if (menuOpen.value && !target?.closest?.('.menu-wrap')) {
+    menuOpen.value = false
+  }
+  // 关闭右键菜单
+  if (contextMenu.open && !target?.closest?.('.context-menu')) {
+    contextMenu.open = false
+  }
+}
+
+// ==================== 生命周期 ====================
+
+onMounted(async () => {
+  // 从 localforage 加载持久化数据
+  await store._hydrateFromStorage()
+  // 如果没有工作区，创建默认画布
+  if (!store.activeWorkspaceId && store.workspaces.length === 0) {
+    store.createWorkspace('画布 1')
+  }
+  // 注册全局事件监听
+  window.addEventListener('keydown', handleKeyDown)
+  window.addEventListener('keyup', handleKeyUp)
+  window.addEventListener('click', handleGlobalClick)
 })
 
-onUnmounted(() => {
-  document.title = 'Agnes AI Platform'
-  window.removeEventListener('keydown', handleKeydown)
-  window.removeEventListener('keyup', handleKeyup)
-  window.removeEventListener('click', handleClick)
-  // 离开时清掉 Space 状态
-  store._isSpacePressed = false
+onBeforeUnmount(() => {
+  // 移除全局事件监听
+  window.removeEventListener('keydown', handleKeyDown)
+  window.removeEventListener('keyup', handleKeyUp)
+  window.removeEventListener('click', handleGlobalClick)
+  window.removeEventListener('pointermove', handleSelectionMove)
+  window.removeEventListener('pointerup', handleSelectionUp)
+  window.removeEventListener('pointermove', handleConnectingMove)
+  window.removeEventListener('pointerup', handleConnectingUp)
+  // 清理 hover 定时器
+  cancelHoverHide()
 })
 </script>
 
 <style scoped>
+/* ==================== 画布主容器 ==================== */
+/* 使用 fixed 全屏覆盖，避免被 App.vue 的 app-main padding/max-width 限制 */
 .canvas-view {
-  display: flex;
-  height: calc(100vh - 76px); /* 减去顶部栏高度 */
-  background: var(--canvas-bg);
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 200; /* 高于 App.vue 的 app-header(z-index:100) */
   overflow: hidden;
-
-  /* 深色主题 token 映射（默认值） */
-  &[data-theme="dark"] {
-    --canvas-bg: linear-gradient(135deg, #0b0f1a 0%, #101827 50%, #0b0f1a 100%);
-    --canvas-panel-bg: rgba(22, 32, 54, 0.7);
-    --canvas-grid-dot: rgba(245, 245, 244, 0.24);
-    --canvas-grid-line: rgba(245, 245, 244, 0.10);
-    --canvas-node-border: rgba(120, 170, 230, 0.2);
-    --canvas-node-active-border: #85b2ff;
-    --canvas-node-glow: rgba(100, 150, 255, 0.35);
-    --canvas-node-title-text: #ffffff;
-    --canvas-node-muted-text: #8ba3c9;
-    --canvas-connection-active: rgba(80, 140, 255, 0.6);
-    --canvas-connection-muted: rgba(150, 150, 180, 0.3);
-    --canvas-anchor-fill: #6b9cff;
-    --canvas-anchor-input: #6b9cff;
-    --canvas-anchor-output: #a78bff;
-    --canvas-selection-fill: rgba(100, 150, 255, 0.15);
-    --canvas-selection-stroke: #6b9cff;
-  }
-
-  /* 浅色主题 token 映射 */
-  &[data-theme="light"] {
-    --canvas-bg: #f5f7fa;
-    --canvas-panel-bg: rgba(255, 255, 255, 0.95);
-    --canvas-grid-dot: rgba(68, 64, 60, 0.28);
-    --canvas-grid-line: rgba(68, 64, 60, 0.12);
-    --canvas-node-border: rgba(0, 0, 0, 0.1);
-    --canvas-node-active-border: #1d4ed8;
-    --canvas-node-glow: rgba(37, 99, 235, 0.25);
-    --canvas-node-title-text: #1f2937;
-    --canvas-node-muted-text: #6b7280;
-    --canvas-connection-active: #2563eb;
-    --canvas-connection-muted: rgba(120, 113, 108, 0.5);
-    --canvas-anchor-fill: #1d4ed8;
-    --canvas-anchor-input: #1d4ed8;
-    --canvas-anchor-output: #7c3aed;
-    --canvas-selection-fill: rgba(37, 99, 235, 0.1);
-    --canvas-selection-stroke: #2563eb;
-  }
 }
 
-.canvas-main {
-  flex: 1;
+/* ==================== 顶部栏 ==================== */
+.top-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 50;
+  height: 64px;
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  pointer-events: none;
+}
+
+.top-bar-left,
+.top-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+/* ---- 菜单按钮 ---- */
+.icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  color: inherit;
+  transition: background 0.15s;
+}
+
+.icon-btn:hover {
+  background: rgba(128, 128, 128, 0.15);
+}
+
+/* ---- 菜单下拉面板 ---- */
+.menu-wrap {
+  position: relative;
+}
+
+.menu-dropdown {
+  position: absolute;
+  top: 44px;
+  left: 0;
+  min-width: 180px;
+  border: 1px solid;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  padding: 4px;
+  backdrop-filter: blur(12px);
+  z-index: 100;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  color: inherit;
+  font-size: 14px;
+  text-align: left;
+  transition: background 0.12s;
+}
+
+.menu-item:hover:not(:disabled) {
+  background: rgba(128, 128, 128, 0.15);
+}
+
+.menu-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.menu-item.danger {
+  color: #ef4444;
+}
+
+.menu-divider {
+  height: 1px;
+  margin: 4px 8px;
+  background: rgba(128, 128, 128, 0.2);
+}
+
+/* ---- 画布标题 ---- */
+.title-wrap {
+  display: flex;
+  align-items: center;
   min-width: 0;
+}
+
+.title-text {
+  font-size: 15px;
+  font-weight: 500;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: text;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 300px;
+}
+
+.title-text:hover {
+  background: rgba(128, 128, 128, 0.1);
+}
+
+.title-input {
+  font-size: 15px;
+  font-weight: 500;
+  padding: 4px 8px;
+  border: 1px solid;
+  border-radius: 6px;
+  outline: none;
+  max-width: 300px;
+}
+
+/* ---- Agent 按钮 ---- */
+.agent-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 1px solid;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  color: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background 0.15s;
+}
+
+.agent-btn:hover {
+  background: rgba(128, 128, 128, 0.15);
+}
+
+/* ==================== 画布主体 ==================== */
+.canvas-main {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+/* ==================== 框选矩形 ==================== */
+.selection-box {
+  position: absolute;
+  z-index: 30;
+  border: 1px solid;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+/* ==================== 底部浮动工具栏 ==================== */
+.bottom-toolbar {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+}
+
+/* ==================== 左下角缩放控件 ==================== */
+.zoom-controls {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  z-index: 40;
+}
+
+/* ==================== 小地图 ==================== */
+.minimap {
+  position: absolute;
+  bottom: 96px;
+  left: 24px;
+  z-index: 40;
+}
+
+/* ==================== 节点悬停工具栏 ==================== */
+.hover-toolbar-wrap {
+  position: absolute;
+  z-index: 45;
+}
+
+/* ==================== 图片预览弹窗 ==================== */
+.preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+
+.preview-img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 8px;
+  cursor: default;
+}
+
+.preview-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 24px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.preview-close:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* ==================== 快捷键帮助弹窗 ==================== */
+.help-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.help-modal {
+  border: 1px solid;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  padding: 24px;
+  max-width: 480px;
+  width: 90%;
+}
+
+.help-title {
+  margin: 0 0 16px 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.help-list {
+  margin: 0 0 16px 0;
+  padding-left: 20px;
+  font-size: 14px;
+  line-height: 2;
+}
+
+.help-list kbd {
+  display: inline-block;
+  padding: 2px 6px;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  border-radius: 4px;
+  background: rgba(128, 128, 128, 0.1);
+  font-size: 12px;
+  font-family: monospace;
+}
+
+.help-close-btn {
+  padding: 6px 16px;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.help-close-btn:hover {
+  background: rgba(128, 128, 128, 0.15);
+}
+
+/* ==================== 隐藏文件输入 ==================== */
+.hidden-file-input {
+  display: none;
 }
 </style>

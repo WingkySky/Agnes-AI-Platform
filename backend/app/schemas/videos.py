@@ -20,11 +20,16 @@ class VideoGenerationRequest(BaseModel):
     negative_prompt: Optional[str] = Field(default=None, description="负向提示词")
     model: str = Field(default="agnes-video-v2.0", description="模型名称")
 
-    # 视频参数
-    num_frames: int = Field(default=121, ge=9, le=441, description="帧数（需满足 8n+1）")
-    frame_rate: int = Field(default=24, ge=1, le=60, description="帧率 1-60")
-    width: int = Field(default=1152, description="视频宽度")
-    height: int = Field(default=768, description="视频高度")
+    # 视频参数（推荐使用 aspect_ratio，让服务端自动计算宽高）
+    # 直接给 aspect_ratio 优先级高于 width/height
+    aspect_ratio: Optional[str] = Field(default="16:9", description="画面比例（如 16:9 / 9:16 / 1:1 / 4:3 / 3:4 / 3:2 / 2:3 / 21:9）")
+    seconds: Optional[float] = Field(default=None, gt=0, description="视频时长（秒，可与 num_frames/frame_rate 二选一）")
+
+    # 视频参数（若提供 aspect_ratio，则 width/height 由服务端根据 aspect_ratio 确定）
+    num_frames: Optional[int] = Field(default=None, ge=9, le=441, description="帧数（需满足 8n+1）")
+    frame_rate: Optional[int] = Field(default=None, ge=1, le=60, description="帧率 1-60")
+    width: Optional[int] = Field(default=None, description="视频宽度")
+    height: Optional[int] = Field(default=None, description="视频高度")
 
     # 参考图 / 首尾帧
     mode: Optional[str] = Field(default="text2video", description="模式: text2video | image2video | keyframes")
@@ -51,6 +56,8 @@ class VideoGenerationRequest(BaseModel):
         帧数必须满足 8n+1 规则（Agnes Video API 要求）
         允许值：9, 17, 25, 33, 41, 49, 57, 65, 73, 81, ..., 441
         """
+        if v is None:
+            return v
         if (v - 1) % 8 != 0:
             raise ValueError(
                 f"num_frames 需满足 8n+1 规则（当前值 {v} 不满足），"

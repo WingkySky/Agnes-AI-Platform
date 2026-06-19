@@ -113,6 +113,8 @@ async def create_video_task(req: VideoGenerationRequest):
             frame_rate=req.frame_rate,
             width=req.width,
             height=req.height,
+            aspect_ratio=req.aspect_ratio,
+            seconds=req.seconds,
             negative_prompt=req.negative_prompt,
             mode=req.mode,
             image=req.image,
@@ -154,6 +156,8 @@ async def create_video_task(req: VideoGenerationRequest):
     # 启动后台轮询协程（独立 Task，不阻塞当前请求返回）
     params = {
         "model": req.model,
+        "aspect_ratio": req.aspect_ratio,
+        "seconds": req.seconds,
         "num_frames": req.num_frames,
         "frame_rate": req.frame_rate,
         "width": req.width,
@@ -179,6 +183,8 @@ async def create_video_task(req: VideoGenerationRequest):
         frame_rate=req.frame_rate,
         width=req.width,
         height=req.height,
+        aspect_ratio=req.aspect_ratio,
+        seconds=req.seconds,
         mode=req.mode,
         message="任务已创建，请轮询 GET /api/videos/{task_id} 获取最新状态",
     )

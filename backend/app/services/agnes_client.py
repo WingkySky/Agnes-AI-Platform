@@ -487,10 +487,12 @@ class AgnesAIClient:
         self,
         prompt: str,
         model: str = "agnes-video-v2.0",
-        num_frames: int = 121,
-        frame_rate: int = 24,
-        width: int = 1152,
-        height: int = 768,
+        num_frames: Optional[int] = None,
+        frame_rate: Optional[int] = None,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+        aspect_ratio: Optional[str] = None,
+        seconds: Optional[float] = None,
         negative_prompt: Optional[str] = None,
         mode: str = "text2video",
         image: Optional[str] = None,
@@ -503,13 +505,31 @@ class AgnesAIClient:
         创建视频生成异步任务。
 
         Agnes Video V2.0 当前文档使用 /videos/generations，并接收
-        aspect_ratio、duration、fps。前端仍保留帧数和宽高控制，这里在
-        BFF 层转换为官方参数，避免把旧字段透传给上游导致 422。
+        aspect_ratio、duration、fps。前端优先传入 aspect_ratio / seconds，
+        不再依赖 width/height / num_frames。
         """
         url = f"{self.base_url}/video/generations"
 
-        aspect_ratio = self._aspect_ratio(width, height)
-        duration = max(1, round(num_frames / frame_rate))
+        # 1) aspect_ratio：优先使用显式传入值；否则由 width/height 计算；最后回退到 16:9
+        if aspect_ratio and isinstance(aspect_ratio, str) and aspect_ratio.strip():
+            _aspect_ratio = aspect_ratio.strip()
+        elif width and height:
+            _aspect_ratio = self._aspect_ratio(width, height)
+        else:
+            _aspect_ratio = "16:9"
+
+        # 2) duration（秒）：优先使用显式传入的 seconds；否则用 num_frames / frame_rate 计算；最后回退 5s
+        if seconds and seconds > 0:
+            _duration = int(round(seconds))
+        elif num_frames and frame_rate:
+            _duration = max(1, round(num_frames / frame_rate))
+        elif num_frames:
+            _duration = max(1, round(num_frames / 24))
+        else:
+            _duration = 5
+
+        # 3) fps：优先使用显式传入的 frame_rate；否则默认 24
+        _fps = int(frame_rate) if frame_rate and frame_rate > 0 else 24
 
         # ── 图生视频模式 / 关键帧动画处理（核心修正）
         # 经实测 Agnes `video/generations` 对非平台托管 URL 均失败：
@@ -554,19 +574,19 @@ class AgnesAIClient:
                 from math import gcd
                 _g = gcd(w, h)
                 detected = f"{w // _g}:{h // _g}"
-                if detected != aspect_ratio:
+                if detected != _aspect_ratio:
                     logger.info(
                         "[视频生成] 图片真实宽高比 %s（%dx%d）与请求 aspect_ratio=%s 不一致，已自动覆盖",
-                        detected, w, h, aspect_ratio,
+                        detected, w, h, _aspect_ratio,
                     )
-                    aspect_ratio = detected
+                    _aspect_ratio = detected
 
         body = {
             "model": model,
             "prompt": prompt,
-            "aspect_ratio": aspect_ratio,
-            "duration": duration,
-            "fps": frame_rate,
+            "aspect_ratio": _aspect_ratio,
+            "duration": _duration,
+            "fps": _fps,
         }
 
         if seed is not None:
@@ -580,7 +600,7 @@ class AgnesAIClient:
             logger.info(
                 "[视频生成] 图生视频模式: model=%s, image_count=%d, "
                 "duration=%ss, aspect_ratio=%s, fps=%d, prompt=%s",
-                model, len(pairs), duration, aspect_ratio, frame_rate, prompt[:80],
+                model, len(pairs), _duration, _aspect_ratio, _fps, prompt[:80],
             )
 
         # 额外打印一次真正发出去的 body（避免 safe_body 只看前 120 字符造成误判）
@@ -588,7 +608,7 @@ class AgnesAIClient:
             img = body["extra_body"]["image"]
             logger.info(
                 "[视频生成] 上游请求体摘要: aspect_ratio=%s, image_type=%s, image_len=%d, image_head=%s",
-                aspect_ratio,
+                _aspect_ratio,
                 "agnes_url" if "platform-outputs.agnes-ai.space" in img else ("url" if img.lower().startswith("http") else "data_uri"),
                 len(img),
                 img[:160],
@@ -597,7 +617,7 @@ class AgnesAIClient:
         logger.info(
             "[视频生成] 创建任务: prompt=%s, mode=%s, duration=%ss, "
             "aspect_ratio=%s, fps=%d, seed=%s",
-            prompt[:60], mode, duration, aspect_ratio, frame_rate, seed,
+            prompt[:60], mode, _duration, _aspect_ratio, _fps, seed,
         )
         return await self._post(url, body)
 

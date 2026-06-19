@@ -530,7 +530,7 @@ function normalizeSize(size) {
  * - 参考图：取第一张作为 image（image2video 模式）
  *
  * @param {Object} ctx - 生成上下文 { prompt, referenceImages }
- * @param {Object} config - Config 节点配置 { model, seconds }
+ * @param {Object} config - Config 节点配置 { model, seconds, aspect_ratio }
  * @returns {Promise<{ task_id: string }>}
  */
 export async function createVideoGenerationTask(ctx, config) {
@@ -539,13 +539,18 @@ export async function createVideoGenerationTask(ctx, config) {
 
   const params = {
     prompt,
-    model: config.model || 'seedance-1-lite',
+    model: config.model || 'agnes-video-v2.0',
     mode: referenceImages && referenceImages.length > 0 ? 'image2video' : 'text2video',
   }
 
   // 视频时长（秒）
   if (config.seconds) {
     params.seconds = config.seconds
+  }
+
+  // 画面比例（如 "16:9"），传给后端作为 aspect_ratio
+  if (config.aspect_ratio) {
+    params.aspect_ratio = config.aspect_ratio
   }
 
   // image2video 模式：取第一张参考图
@@ -649,8 +654,9 @@ export async function executeMergeVideoGeneration(configId, store, options = {})
   if (onProgress) onProgress('building', { inputSummary: ctx.inputSummary })
 
   const config = {
-    model: configNode.content?.model || 'seedance-1-lite',
+    model: configNode.content?.model || 'agnes-video-v2.0',
     seconds: configNode.content?.seconds || 5,
+    aspect_ratio: configNode.content?.aspect_ratio || '16:9',
   }
 
   // 3. 创建视频任务
