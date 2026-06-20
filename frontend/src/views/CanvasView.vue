@@ -290,6 +290,7 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'v
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Trash2, Upload, Download, Pencil, ChevronDown } from 'lucide-vue-next'
 import { useCanvasStore } from '@/stores/canvas'
+import { useTaskQueueStore } from '@/stores/taskQueue'
 import InfiniteCanvas from '@/components/canvas/InfiniteCanvas.vue'
 import CanvasConnectionsLayer from '@/components/canvas/CanvasConnectionsLayer.vue'
 import CanvasNode from '@/components/canvas/CanvasNode.vue'
@@ -302,6 +303,7 @@ import CanvasAssetLibrary from '@/components/canvas/CanvasAssetLibrary.vue'
 import MaskEditDialog from '@/components/canvas/MaskEditDialog.vue'
 
 const store = useCanvasStore()
+const taskQueue = useTaskQueueStore()
 
 // ---------- 节点默认尺寸（对齐参考项目） ----------
 const NODE_DEFAULT_SIZES = {
@@ -679,6 +681,7 @@ async function handleNodeRetry(panel: typeof store.panels[number]) {
 // - sourcePanel: 源节点（文本节点或重试时的图片节点）
 // - prompt: 提示词
 // - targetPanelId: 可选，若提供则更新该节点而不是创建新节点（用于重试场景）
+// - 同步注册到任务队列，让画布任务在队列面板中可见
 async function generateImageFromPrompt(sourcePanel: typeof store.panels[number], prompt: string, targetPanelId: string | null = null) {
   let newPanelId: string | null = targetPanelId
 
@@ -707,27 +710,45 @@ async function generateImageFromPrompt(sourcePanel: typeof store.panels[number],
     const resp = await createImageTask({ prompt, model: 'agnes-image-2.1-flash', size: '1024x1024', response_format: 'url' })
     const taskId = resp.task_id
 
+    // 注册到任务队列（让画布任务在队列面板中可见）
+    taskQueue.registerCanvasTask({
+      taskId,
+      type: 'image',
+      prompt,
+      backendTaskId: taskId,
+      panelId: newPanelId || undefined,
+    })
+
     // 轮询任务状态（间隔 2 秒，最多 150 次 ≈ 5 分钟）
     const maxAttempts = 150
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise((r) => setTimeout(r, 2000))
       const status = await getImageTaskStatus(taskId)
-      if (status.status === 'completed' || status.status === 'succeeded' || status.status === 'success' || status.status === 'done') {
+      const isSuccess = ['completed', 'succeeded', 'success', 'done'].includes(status.status)
+      const isFailed = ['failed', 'error'].includes(status.status)
+
+      if (isSuccess) {
         const imageUrl = status.result_url || (status as any).image_url || status.url || (status as any).data?.[0]?.url
         store.updatePanel(newPanelId!, { content: { content: imageUrl, status: 'success' } })
         store.pushSnapshot()
+        taskQueue.updateCanvasTask(taskId, { status: 'success', resultUrl: imageUrl, progress: 100 })
         ElMessage.success('图片生成完成')
         return
       }
-      if (status.status === 'failed' || status.status === 'error') {
+      if (isFailed) {
         const errMsg = status.message || (status as any).error || '生成失败'
         store.updatePanel(newPanelId!, { content: { status: 'error', errorDetails: errMsg } })
+        taskQueue.updateCanvasTask(taskId, { status: 'failed' })
         ElMessage.error('图片生成失败: ' + errMsg)
         return
       }
+      // 更新队列进度
+      const progress = typeof status.progress === 'number' ? status.progress : undefined
+      taskQueue.updateCanvasTask(taskId, { status: 'processing', progress })
     }
     // 超时
     store.updatePanel(newPanelId!, { content: { status: 'error', errorDetails: '生成超时' } })
+    taskQueue.updateCanvasTask(taskId, { status: 'failed' })
     ElMessage.warning('生成超时')
   } catch (err) {
     console.error('[canvas] generate image error:', err)
@@ -737,7 +758,7 @@ async function generateImageFromPrompt(sourcePanel: typeof store.panels[number],
 }
 
 // 通用：重试生成
-// - 查找上游 config 节点，重新执行合并生成
+// - 查找上游 config 节点，重新执行合并生成（创建新的 loading 结果节点）
 // - 没有上游 config 节点时，用节点自身 prompt 重新生成（直接更新当前节点）
 async function retryGeneration(panel: typeof store.panels[number]) {
   // 查找上游 config 节点
@@ -748,18 +769,28 @@ async function retryGeneration(panel: typeof store.panels[number]) {
   })
 
   if (configConn) {
-    // 有上游 config 节点，重新执行合并生成
+    // 有上游 config 节点，重新执行合并生成（会创建新的 loading 结果节点）
     const configNode = store.panels.find((p) => p.id === configConn.source_panel_id)
     if (!configNode) return
     try {
       const { executeMergeGeneration, executeMergeVideoGeneration } = await import('@/lib/canvas-generation')
       const isVideo = panel.type === 'video'
       const fn = isVideo ? executeMergeVideoGeneration : executeMergeGeneration
+      // 先把当前失败的节点设为 loading
+      store.updatePanel(panel.id, { content: { status: 'loading', errorDetails: null } })
       ElMessage.info('正在重新生成...')
-      await fn(configNode.id, store as any, {
-        onProgress: (stage) => {
+      // 异步执行，不阻塞
+      fn(configNode.id, store as any, {
+        onProgress: (stage, data) => {
           if (stage === 'done') {
             ElMessage.success('重新生成完成')
+            const ids: string[] = data?.resultNodeIds || []
+            if (ids.length > 0) {
+              store.selectPanel(ids[0], { append: false })
+              store.centerOnPanel(ids[0])
+            }
+          } else if (stage === 'error') {
+            ElMessage.error('重新生成失败: ' + (data?.error || ''))
           }
         },
       })
@@ -785,6 +816,8 @@ function handleNodeUpload(panel: typeof store.panels[number]) {
 }
 
 // 配置节点：点击生成按钮，根据模式调用图片或视频合并生成流程
+// - 点击后立刻创建 loading 状态的结果节点，异步执行生成
+// - 不阻塞配置面板，可连续点击生成多次
 async function handleConfigGenerate(panel: typeof store.panels[number]) {
   const mode = (panel.content?.mode || 'text2image') as string
   const isVideo = mode.includes('video')
@@ -796,38 +829,35 @@ async function handleConfigGenerate(panel: typeof store.panels[number]) {
     return
   }
 
-  // 设置生成中状态
-  store.updatePanel(panel.id, { content: { generating: true, progress: 0, progressText: '准备中...' } })
-
   try {
     const { executeMergeGeneration, executeMergeVideoGeneration } = await import('@/lib/canvas-generation')
     const fn = isVideo ? executeMergeVideoGeneration : executeMergeGeneration
 
-    await fn(panel.id, store as any, {
-      onProgress: (stage) => {
-        // 按阶段更新进度条与文字
-        const stageMap: Record<string, { progress: number; text: string }> = {
-          building: { progress: 10, text: '构建上下文...' },
-          creating: { progress: 25, text: '创建任务...' },
-          polling: { progress: 40, text: '等待生成...' },
-          generating: { progress: 60, text: '生成中...' },
-          done: { progress: 100, text: '完成' },
-        }
-        const info = stageMap[stage]
-        if (info) {
-          store.updatePanel(panel.id, { content: { progress: info.progress, progressText: info.text } })
-        }
+    // 异步执行：立刻创建 loading 结果节点，后台轮询
+    const newNodeId = await fn(panel.id, store as any, {
+      onProgress: (stage, data) => {
         if (stage === 'done') {
           ElMessage.success(isVideo ? '视频生成完成' : '图片生成完成')
+          // 选中新节点并定位视口
+          const ids: string[] = data?.resultNodeIds || []
+          if (ids.length > 0) {
+            store.selectPanel(ids[0], { append: false })
+            store.centerOnPanel(ids[0])
+          }
+        } else if (stage === 'error') {
+          ElMessage.error(isVideo ? '视频生成失败' : '图片生成失败: ' + (data?.error || ''))
         }
       },
     })
+
+    // 立刻选中新创建的 loading 节点并定位视口
+    if (newNodeId) {
+      store.selectPanel(newNodeId, { append: false })
+      store.centerOnPanel(newNodeId)
+    }
   } catch (err) {
     console.error('[canvas] config generate error:', err)
     ElMessage.error('生成失败: ' + (err as Error).message)
-  } finally {
-    // 无论成功或失败，重置生成状态
-    store.updatePanel(panel.id, { content: { generating: false, progress: 0, progressText: '' } })
   }
 }
 
@@ -1133,6 +1163,7 @@ function handleHoverMaskEdit() {
 }
 
 // 蒙版编辑确认：调用 image2image 局部编辑
+// - 同步注册到任务队列，让画布任务在队列面板中可见
 async function handleMaskConfirm({ mask, prompt }: { mask: string; prompt: string }) {
   const panelId = maskEditState.panelId
   const panel = store.panels.find(p => p.id === panelId)
@@ -1172,26 +1203,44 @@ async function handleMaskConfirm({ mask, prompt }: { mask: string; prompt: strin
 
     const taskId = resp.task_id
 
+    // 注册到任务队列（让画布任务在队列面板中可见）
+    taskQueue.registerCanvasTask({
+      taskId,
+      type: 'image',
+      prompt,
+      backendTaskId: taskId,
+      panelId: panelId || undefined,
+    })
+
     // 轮询任务状态
     for (let i = 0; i < 150; i++) {
       await new Promise(r => setTimeout(r, 2000))
       const status = await getImageTaskStatus(taskId)
-      if (status.status === 'completed' || status.status === 'succeeded' || status.status === 'success' || status.status === 'done') {
+      const isSuccess = ['completed', 'succeeded', 'success', 'done'].includes(status.status)
+      const isFailed = ['failed', 'error'].includes(status.status)
+
+      if (isSuccess) {
         const resultUrl = status.result_url || (status as any).image_url || status.url || (status as any).data?.[0]?.url
         store.updatePanel(panelId!, { content: { content: resultUrl, status: 'success' } })
         store.pushSnapshot()
+        taskQueue.updateCanvasTask(taskId, { status: 'success', resultUrl, progress: 100 })
         ElMessage.success('局部编辑完成')
         return
       }
-      if (status.status === 'failed' || status.status === 'error') {
+      if (isFailed) {
         const errMsg = status.message || (status as any).error || '编辑失败'
         store.updatePanel(panelId!, { content: { status: 'error', errorDetails: errMsg } })
+        taskQueue.updateCanvasTask(taskId, { status: 'failed' })
         ElMessage.error('编辑失败: ' + errMsg)
         return
       }
+      // 更新队列进度
+      const progress = typeof status.progress === 'number' ? status.progress : undefined
+      taskQueue.updateCanvasTask(taskId, { status: 'processing', progress })
     }
     ElMessage.warning('编辑超时')
     store.updatePanel(panelId!, { content: { status: 'error', errorDetails: '超时' } })
+    taskQueue.updateCanvasTask(taskId, { status: 'failed' })
   } catch (err) {
     console.error('[canvas] mask edit error:', err)
     store.updatePanel(panelId!, { content: { status: 'error', errorDetails: (err as Error).message } })

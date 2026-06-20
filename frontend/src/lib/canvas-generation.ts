@@ -6,17 +6,19 @@
  * - 文本资源拼到 prompt 末尾，图片资源作为 referenceImages 数组
  * - 调用 /api/images/tasks 创建异步生成任务
  * - 轮询任务状态，完成后回填结果到画布新节点
+ * - 同步注册到任务队列（TaskQueue），让画布任务在队列面板中可见
  *
  * 核心数据流：
  *   Config 节点 + 上游资源 + composerContent
  *     → buildGenerationContext() 合并为 { prompt, referenceImages }
  *     → createImageTask() 创建任务
- *     → pollImageTask() 轮询状态
+ *     → pollImageTask() 轮询状态（同步更新 TaskQueue）
  *     → 回填结果到新 image 节点 + 连线
  * ===================================================== */
 
 import { createImageTask, getImageTaskStatus } from '@/api/images'
 import { createVideoTask, getVideoStatus } from '@/api/videos'
+import { useTaskQueueStore } from '@/stores/taskQueue'
 import type { ImageGenerationRequest, VideoGenerationRequest } from '@/types'
 
 // ---------- 类型定义 ----------
@@ -82,6 +84,8 @@ interface CanvasStore {
   connections: Connection[]
   addPanel: (panel: Record<string, any>) => string | undefined
   addConnection: (conn: Record<string, any>) => void
+  updatePanel: (id: string, updates: Record<string, any>) => void
+  pushSnapshot: () => void
 }
 
 /** 生成任务配置 */
@@ -96,7 +100,6 @@ interface GenerationConfig {
 /** 生成任务选项 */
 interface GenerationOptions {
   onProgress?: (phase: string, data: Record<string, any>) => void
-  count?: number
 }
 
 // ---------- 常量 ----------
@@ -155,21 +158,21 @@ function extractResourceContent(panel: Panel): ResourceContent | null {
       return {
         type: 'image',
         nodeId: panel.id,
-        imageUrl: c.imageUrl || c.image || c.url || '',
+        imageUrl: c.content || c.imageUrl || c.image || c.url || '',
         title,
       }
     case 'text':
       return {
         type: 'text',
         nodeId: panel.id,
-        text: c.text || '',
+        text: c.content || c.text || '',
         title,
       }
     case 'video':
       return {
         type: 'video',
         nodeId: panel.id,
-        videoUrl: c.videoUrl || c.url || '',
+        videoUrl: c.content || c.videoUrl || c.url || '',
         title,
       }
     default:
@@ -192,21 +195,21 @@ export function extractResourceContentForComposer(panel: Panel): ResourceContent
         nodeId: panel.id,
         type: 'image',
         title,
-        imageUrl: c.imageUrl || c.image || c.url || '',
+        imageUrl: c.content || c.imageUrl || c.image || c.url || '',
       }
     case 'text':
       return {
         nodeId: panel.id,
         type: 'text',
         title,
-        text: c.text || '',
+        text: c.content || c.text || '',
       }
     case 'video':
       return {
         nodeId: panel.id,
         type: 'video',
         title,
-        videoUrl: c.videoUrl || c.url || '',
+        videoUrl: c.content || c.videoUrl || c.url || '',
       }
     default:
       return null
@@ -404,6 +407,7 @@ export async function createGenerationTask(ctx: GenerationContext, config: Gener
  * 轮询图片任务状态直到完成
  * - 间隔 2 秒，超时 5 分钟
  * - onProgress 回调用于更新 UI 进度
+ * - 同步更新 TaskQueue Store，让画布任务在队列面板中可见
  */
 export async function pollImageTask(
   taskId: string,
@@ -412,38 +416,51 @@ export async function pollImageTask(
 ): Promise<{ status: string; resultUrl: string }> {
   const startTime = Date.now()
   const interval = 2000
+  const queueStore = useTaskQueueStore()
 
   while (true) {
     if (Date.now() - startTime > timeout) {
+      // 超时，更新队列状态
+      queueStore.updateCanvasTask(taskId, { status: 'failed' })
       throw new Error('生成任务超时（超过 5 分钟未完成）')
     }
 
     const data = await getImageTaskStatus(taskId)
     if (!data) {
+      queueStore.updateCanvasTask(taskId, { status: 'failed' })
       throw new Error('查询任务状态失败')
     }
 
     const status = data.status || 'pending'
     if (onProgress) onProgress(status, data)
 
-    // 完成
-    if (status === 'success' || status === 'done' || status === 'completed') {
+    // 同步更新任务队列
+    const isSuccess = ['success', 'completed', 'done', 'succeeded', 'finished'].includes(status)
+    const isFailed = ['failed', 'error', 'timeout'].includes(status)
+
+    if (isSuccess) {
       const resultUrl = data.result_url || data.url || ''
       if (!resultUrl) {
+        queueStore.updateCanvasTask(taskId, { status: 'failed' })
         throw new Error('生成完成但未返回图片 URL')
       }
+      queueStore.updateCanvasTask(taskId, { status: 'success', resultUrl, progress: 100 })
       return { status: 'success', resultUrl }
     }
 
-    // 失败
-    if (status === 'failed' || status === 'error') {
+    if (isFailed) {
+      queueStore.updateCanvasTask(taskId, { status: 'failed' })
       throw new Error(data.message || '生成失败')
     }
 
-    // 取消
     if (status === 'cancelled') {
+      queueStore.updateCanvasTask(taskId, { status: 'cancelled' })
       throw new Error('任务已取消')
     }
+
+    // 更新进度
+    const progress = typeof data.progress === 'number' ? data.progress : undefined
+    queueStore.updateCanvasTask(taskId, { status: 'processing', progress })
 
     // 继续等待
     await new Promise((resolve) => setTimeout(resolve, interval))
@@ -453,14 +470,75 @@ export async function pollImageTask(
 // ---------- 完整生成流程 ----------
 
 /**
- * 执行完整的合并生成流程
- * 1. 构建生成上下文（收集上游资源 + 解析 @[node:xxx]）
- * 2. 创建生成任务
- * 3. 轮询任务状态
- * 4. 回填结果到画布新节点
+ * 计算新结果节点的位置（Config 节点右侧，自动排列）
+ * - 返回 { x, y, width, height }
  */
-export async function executeMergeGeneration(configId: string, store: CanvasStore, options: GenerationOptions = {}): Promise<string[]> {
-  const { onProgress, count = 1 } = options
+function calcResultNodePosition(configNode: Panel, isVideo: boolean, index: number) {
+  const cols = 4
+  const nodeWidth = isVideo ? 320 : 200
+  const nodeHeight = isVideo ? 200 : 200
+  const gapX = isVideo ? 360 : 220
+  const gapY = 240
+
+  return {
+    x: (configNode.x ?? 0) + (configNode.width ?? 240) + 40 + (index % cols) * gapX,
+    y: (configNode.y ?? 0) + Math.floor(index / cols) * gapY,
+    width: nodeWidth,
+    height: nodeHeight,
+  }
+}
+
+/**
+ * 在 Config 节点右侧创建一个 loading 状态的结果节点并连线
+ * - 返回新节点 ID
+ */
+export function createLoadingResultNode(store: CanvasStore, configNode: Panel, isVideo: boolean, index: number = 0): string {
+  const pos = calcResultNodePosition(configNode, isVideo, index)
+  const prompt = configNode.content?.prompt || ''
+
+  const newPanel = {
+    type: isVideo ? 'video' : 'image',
+    x: pos.x,
+    y: pos.y,
+    width: pos.width,
+    height: pos.height,
+    content: {
+      content: '',
+      status: 'loading',
+      prompt,
+      sourceFrom: configNode.id,
+    },
+  }
+
+  const newId = store.addPanel(newPanel)
+
+  // 创建连线：Config → 新节点
+  if (newId) {
+    store.addConnection({
+      source_panel_id: configNode.id,
+      target_panel_id: newId,
+      type: 'auto',
+      source_anchor: 'right-middle',
+      target_anchor: 'left-middle',
+    })
+  }
+
+  return newId!
+}
+
+/**
+ * 执行完整的合并生成流程（异步，不阻塞配置面板）
+ * 1. 构建生成上下文（收集上游资源 + 解析 @[node:xxx]）
+ * 2. 创建 loading 状态的结果节点（立刻显示在画布上）
+ * 3. 创建生成任务 + 注册到任务队列
+ * 4. 异步轮询任务状态
+ * 5. 轮询完成后回填结果到结果节点（成功/失败都有反馈）
+ *
+ * @returns 新创建的结果节点 ID（loading 状态）
+ */
+export async function executeMergeGeneration(configId: string, store: CanvasStore, options: GenerationOptions = {}): Promise<string> {
+  const { onProgress } = options
+  const queueStore = useTaskQueueStore()
 
   // 1. 查找 Config 节点
   const configNode = store.panels.find((p) => p.id === configId)
@@ -480,79 +558,58 @@ export async function executeMergeGeneration(configId: string, store: CanvasStor
 
   if (onProgress) onProgress('building', { inputSummary: ctx.inputSummary })
 
+  // 3. 立刻创建 loading 状态的结果节点
+  const newNodeId = createLoadingResultNode(store, configNode, false)
+
   const config: GenerationConfig = {
     model: configNode.content?.model || 'agnes-image-2.1-flash',
     size: normalizeSize(configNode.content?.size),
     response_format: 'url',
   }
 
-  const resultNodeIds: string[] = []
+  // 4. 异步执行生成 + 轮询 + 回填（不阻塞调用方）
+  ;(async () => {
+    try {
+      if (onProgress) onProgress('creating', { index: 0, total: 1 })
 
-  // 3. 按 count 循环创建任务
-  const taskCount = Math.max(1, Number(count) || 1)
-  for (let i = 0; i < taskCount; i++) {
-    if (onProgress) onProgress('creating', { index: i, total: taskCount })
+      // 创建任务
+      const taskResp = await createGenerationTask(ctx, config)
+      const taskId = taskResp.task_id
 
-    // 创建任务
-    const taskResp = await createGenerationTask(ctx, config)
-    const taskId = taskResp.task_id
+      // 注册到任务队列
+      queueStore.registerCanvasTask({
+        taskId,
+        type: 'image',
+        prompt: ctx.prompt,
+        backendTaskId: taskId,
+        panelId: newNodeId,
+      })
 
-    if (onProgress) onProgress('polling', { index: i, taskId })
+      if (onProgress) onProgress('polling', { index: 0, taskId })
 
-    // 轮询任务状态
-    const result = await pollImageTask(taskId, (status, data) => {
-      if (onProgress) onProgress('generating', { index: i, status, progress: data.progress })
-    })
+      // 轮询任务状态
+      const result = await pollImageTask(taskId, (status, data) => {
+        if (onProgress) onProgress('generating', { index: 0, status, progress: data.progress })
+      })
 
-    // 4. 回填结果到画布新节点
-    const newNodeId = addResultNode(store, configNode, result.resultUrl, i)
-    resultNodeIds.push(newNodeId)
-  }
+      // 5. 回填结果到结果节点
+      store.updatePanel(newNodeId, {
+        content: { content: result.resultUrl, status: 'success' },
+      })
+      store.pushSnapshot()
+      if (onProgress) onProgress('done', { resultNodeIds: [newNodeId] })
+    } catch (err) {
+      // 失败：更新节点为 error 状态
+      const errMsg = (err as Error).message || '生成失败'
+      store.updatePanel(newNodeId, {
+        content: { status: 'error', errorDetails: errMsg },
+      })
+      if (onProgress) onProgress('error', { resultNodeIds: [newNodeId], error: errMsg })
+    }
+  })()
 
-  if (onProgress) onProgress('done', { resultNodeIds })
-  return resultNodeIds
-}
-
-/**
- * 把生成结果回填到画布：在 Config 节点右侧创建新 image 节点并连线
- */
-function addResultNode(store: CanvasStore, configNode: Panel, imageUrl: string, index: number = 0): string {
-  const cols = 4
-  const nodeWidth = 200
-  const nodeHeight = 200
-  const gapX = 220
-  const gapY = 240
-
-  const newPanel = {
-    type: 'image',
-    x: (configNode.x ?? 0) + (configNode.width ?? 240) + 40 + (index % cols) * gapX,
-    y: (configNode.y ?? 0) + Math.floor(index / cols) * gapY,
-    width: nodeWidth,
-    height: nodeHeight,
-    content: {
-      imageUrl,
-      image: imageUrl,
-      sourceFrom: configNode.id,
-      status: 'success',
-      rotation: 0,
-    },
-  }
-
-  // addPanel 返回新创建面板的 id
-  const newId = store.addPanel(newPanel)
-
-  // 创建连线：Config → 新节点
-  if (newId) {
-    store.addConnection({
-      source_panel_id: configNode.id,
-      target_panel_id: newId,
-      type: 'auto',
-      source_anchor: 'right-middle',
-      target_anchor: 'left-middle',
-    })
-  }
-
-  return newId!
+  // 立刻返回新节点 ID（loading 状态）
+  return newNodeId
 }
 
 /**
@@ -625,6 +682,7 @@ export async function createVideoGenerationTask(ctx: GenerationContext, config: 
  * 轮询视频任务状态直到完成
  * - 间隔 5 秒，超时 10 分钟
  * - onProgress 回调用于更新 UI 进度
+ * - 同步更新 TaskQueue Store，让画布任务在队列面板中可见
  */
 export async function pollVideoTask(
   taskId: string,
@@ -633,38 +691,50 @@ export async function pollVideoTask(
 ): Promise<{ status: string; videoUrl: string }> {
   const startTime = Date.now()
   const interval = 5000
+  const queueStore = useTaskQueueStore()
 
   while (true) {
     if (Date.now() - startTime > timeout) {
+      queueStore.updateCanvasTask(taskId, { status: 'failed' })
       throw new Error('视频生成任务超时（超过 10 分钟未完成）')
     }
 
     const data = await getVideoStatus(taskId)
     if (!data) {
+      queueStore.updateCanvasTask(taskId, { status: 'failed' })
       throw new Error('查询视频任务状态失败')
     }
 
     const status = data.status || 'pending'
     if (onProgress) onProgress(status, data)
 
-    // 完成
-    if (status === 'success' || status === 'done' || status === 'completed') {
+    // 同步更新任务队列
+    const isSuccess = ['success', 'completed', 'done', 'succeeded', 'finished'].includes(status)
+    const isFailed = ['failed', 'error', 'timeout'].includes(status)
+
+    if (isSuccess) {
       const videoUrl = data.video_url || ''
       if (!videoUrl) {
+        queueStore.updateCanvasTask(taskId, { status: 'failed' })
         throw new Error('视频生成完成但未返回视频 URL')
       }
+      queueStore.updateCanvasTask(taskId, { status: 'success', resultUrl: videoUrl, progress: 100 })
       return { status: 'success', videoUrl }
     }
 
-    // 失败
-    if (status === 'failed' || status === 'error') {
+    if (isFailed) {
+      queueStore.updateCanvasTask(taskId, { status: 'failed' })
       throw new Error(data.message || '视频生成失败')
     }
 
-    // 取消
     if (status === 'cancelled') {
+      queueStore.updateCanvasTask(taskId, { status: 'cancelled' })
       throw new Error('视频任务已取消')
     }
+
+    // 更新进度
+    const progress = typeof data.progress === 'number' ? data.progress : undefined
+    queueStore.updateCanvasTask(taskId, { status: 'processing', progress })
 
     // 继续等待
     await new Promise((resolve) => setTimeout(resolve, interval))
@@ -672,14 +742,18 @@ export async function pollVideoTask(
 }
 
 /**
- * 执行完整的视频合并生成流程
+ * 执行完整的视频合并生成流程（异步，不阻塞配置面板）
  * 1. 构建生成上下文（收集上游资源 + 解析 @[node:xxx]）
- * 2. 创建视频任务
- * 3. 轮询任务状态
- * 4. 回填结果到画布新 video 节点
+ * 2. 创建 loading 状态的结果节点（立刻显示在画布上）
+ * 3. 创建视频任务 + 注册到任务队列
+ * 4. 异步轮询任务状态
+ * 5. 轮询完成后回填结果到结果节点（成功/失败都有反馈）
+ *
+ * @returns 新创建的结果节点 ID（loading 状态）
  */
 export async function executeMergeVideoGeneration(configId: string, store: CanvasStore, options: GenerationOptions = {}): Promise<string> {
   const { onProgress } = options
+  const queueStore = useTaskQueueStore()
 
   // 1. 查找 Config 节点
   const configNode = store.panels.find((p) => p.id === configId)
@@ -699,62 +773,56 @@ export async function executeMergeVideoGeneration(configId: string, store: Canva
 
   if (onProgress) onProgress('building', { inputSummary: ctx.inputSummary })
 
+  // 3. 立刻创建 loading 状态的结果节点
+  const newNodeId = createLoadingResultNode(store, configNode, true)
+
   const config: GenerationConfig = {
     model: configNode.content?.model || 'agnes-video-v2.0',
     seconds: configNode.content?.seconds || 5,
     aspect_ratio: configNode.content?.aspect_ratio || '16:9',
   }
 
-  // 3. 创建视频任务
-  if (onProgress) onProgress('creating', { index: 0, total: 1 })
-  const taskResp = await createVideoGenerationTask(ctx, config)
-  const taskId = taskResp.task_id
+  // 4. 异步执行生成 + 轮询 + 回填（不阻塞调用方）
+  ;(async () => {
+    try {
+      if (onProgress) onProgress('creating', { index: 0, total: 1 })
 
-  // 4. 轮询任务状态
-  if (onProgress) onProgress('polling', { index: 0, taskId })
-  const result = await pollVideoTask(taskId, (status, data) => {
-    if (onProgress) onProgress('generating', { index: 0, status, progress: data.progress })
-  })
+      // 创建视频任务
+      const taskResp = await createVideoGenerationTask(ctx, config)
+      const taskId = taskResp.task_id
 
-  // 5. 回填结果到画布新 video 节点
-  const newNodeId = addVideoResultNode(store, configNode, result.videoUrl)
+      // 注册到任务队列
+      queueStore.registerCanvasTask({
+        taskId,
+        type: 'video',
+        prompt: ctx.prompt,
+        backendTaskId: taskId,
+        panelId: newNodeId,
+      })
 
-  if (onProgress) onProgress('done', { resultNodeIds: [newNodeId] })
+      if (onProgress) onProgress('polling', { index: 0, taskId })
+
+      // 轮询任务状态
+      const result = await pollVideoTask(taskId, (status, data) => {
+        if (onProgress) onProgress('generating', { index: 0, status, progress: data.progress })
+      })
+
+      // 5. 回填结果到结果节点
+      store.updatePanel(newNodeId, {
+        content: { content: result.videoUrl, status: 'success' },
+      })
+      store.pushSnapshot()
+      if (onProgress) onProgress('done', { resultNodeIds: [newNodeId] })
+    } catch (err) {
+      // 失败：更新节点为 error 状态
+      const errMsg = (err as Error).message || '视频生成失败'
+      store.updatePanel(newNodeId, {
+        content: { status: 'error', errorDetails: errMsg },
+      })
+      if (onProgress) onProgress('error', { resultNodeIds: [newNodeId], error: errMsg })
+    }
+  })()
+
+  // 立刻返回新节点 ID（loading 状态）
   return newNodeId
-}
-
-/**
- * 把视频生成结果回填到画布：在 Config 节点右侧创建新 video 节点并连线
- */
-function addVideoResultNode(store: CanvasStore, configNode: Panel, videoUrl: string): string {
-  const nodeWidth = 320
-  const nodeHeight = 200
-
-  const newPanel = {
-    type: 'video',
-    x: (configNode.x ?? 0) + (configNode.width ?? 320) + 40,
-    y: configNode.y ?? 0,
-    width: nodeWidth,
-    height: nodeHeight,
-    content: {
-      videoUrl,
-      sourceFrom: configNode.id,
-      status: 'success',
-    },
-  }
-
-  const newId = store.addPanel(newPanel)
-
-  // 创建连线：Config → 新节点
-  if (newId) {
-    store.addConnection({
-      source_panel_id: configNode.id,
-      target_panel_id: newId,
-      type: 'auto',
-      source_anchor: 'right-middle',
-      target_anchor: 'left-middle',
-    })
-  }
-
-  return newId!
 }

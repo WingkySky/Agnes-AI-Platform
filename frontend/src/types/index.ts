@@ -346,7 +346,9 @@ export interface QueueTask {
   pollIntervalMs: number
   rawResponse: unknown
   backendTaskId: string | null
-  source?: 'chat' | null
+  source?: 'chat' | 'canvas' | null
+  /** 画布来源任务的节点 ID，用于任务完成后回填结果 */
+  panelId?: string | null
 }
 
 /** 注册聊天任务参数 */
@@ -363,4 +365,15 @@ export interface UpdateChatTaskParams {
   status?: TaskStatus
   resultUrl?: string | null
   progress?: number
+}
+
+/** 注册画布任务参数 */
+export interface RegisterCanvasTaskParams {
+  taskId: string
+  type: 'image' | 'video'
+  prompt?: string
+  resultUrl?: string | null
+  backendTaskId?: string
+  /** 画布节点 ID，用于任务完成后回填结果 */
+  panelId?: string
 }

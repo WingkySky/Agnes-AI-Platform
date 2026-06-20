@@ -25,6 +25,7 @@ import type {
   TaskStatus,
   RegisterChatTaskParams,
   UpdateChatTaskParams,
+  RegisterCanvasTaskParams,
   ImageTaskStatusResponse,
   VideoStatusResponse,
 } from '@/types'
@@ -146,9 +147,9 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         })
       }
 
-      // 3. 启动所有未完成任务的轮询（跳过聊天来源的任务，由 chat store 自己管理）
+      // 3. 启动所有未完成任务的轮询（跳过聊天/画布来源的任务，由各自 store 自己管理）
       for (const task of Object.values(this.tasks)) {
-        if (!isFinalStatus(task.status) && task.source !== 'chat') {
+        if (!isFinalStatus(task.status) && task.source !== 'chat' && task.source !== 'canvas') {
           this._startPolling(task.taskId)
         }
       }
@@ -481,6 +482,51 @@ export const useTaskQueueStore = defineStore('taskQueue', {
     },
 
     // =====================================================
+    // 【画布任务集成】— 供画布调用，注册画布生成的媒体任务
+    // =====================================================
+
+    /** 注册画布生成的媒体任务到队列（仅展示，不启动 taskQueue 自己的轮询） */
+    registerCanvasTask({ taskId, type, prompt, resultUrl, backendTaskId, panelId }: RegisterCanvasTaskParams): void {
+      if (!taskId) return
+      // 避免重复注册
+      if (this.tasks[taskId]) return
+
+      const taskType: TaskType = type === 'video' ? 'video' : 'image'
+      this.tasks[taskId] = {
+        taskId,
+        type: taskType,
+        status: 'processing',
+        prompt: prompt || '',
+        params: {},
+        resultUrl: resultUrl || null,
+        posterUrl: null,
+        progress: 0,
+        errorMessage: '',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        pollIntervalMs: taskType === 'video' ? VIDEO_POLL_INTERVAL : IMAGE_POLL_INTERVAL,
+        rawResponse: null,
+        backendTaskId: backendTaskId || taskId,
+        // 标记来源为画布 — taskQueue 恢复时跳过此类任务的轮询
+        source: 'canvas',
+        panelId: panelId || null,
+      }
+      this._saveToStorage()
+    },
+
+    /** 更新画布任务的状态（由画布的轮询回调） */
+    updateCanvasTask(taskId: string, { status, resultUrl, progress }: UpdateChatTaskParams): void {
+      const task = this.tasks[taskId]
+      if (!task) return
+      if (status) task.status = status
+      if (resultUrl) task.resultUrl = resultUrl
+      if (typeof progress === 'number') task.progress = progress
+      task.updatedAt = Date.now()
+      if (status === 'success') task.progress = 100
+      this._saveToStorage()
+    },
+
+    // =====================================================
     // 【面板/选中】
     // =====================================================
     setActiveTask(taskId: string): void {
@@ -580,6 +626,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
           pollIntervalMs: t.pollIntervalMs,
           backendTaskId: t.backendTaskId,
           source: t.source || null,
+          panelId: t.panelId || null,
         }))
         const data = {
           tasks: tasksToSave,

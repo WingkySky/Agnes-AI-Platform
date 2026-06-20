@@ -233,9 +233,8 @@
             @wheel.stop
           />
 
-          <!-- 生成按钮 + 进度 -->
+          <!-- 生成按钮（异步操作，点击后不阻塞，可连续点击） -->
           <button
-            v-if="!configContent.generating"
             type="button"
             class="config-generate-btn"
             @click="handleConfigGenerate"
@@ -243,10 +242,6 @@
           >
             {{ isVideoMode ? '生成视频' : '生成图片' }}
           </button>
-          <div v-else class="config-progress">
-            <div class="config-progress-bar" :style="{ width: (configContent.progress || 0) + '%' }" />
-            <span class="config-progress-text">{{ configContent.progressText || '生成中...' }}</span>
-          </div>
         </div>
 
         <!-- 未知节点类型 -->
@@ -1137,29 +1132,6 @@ onUnmounted(() => {
 .config-generate-btn:hover {
   background: rgba(107, 156, 255, 0.35);
   transform: scale(1.01);
-}
-
-/* 生成进度条 */
-.config-progress {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  height: 34px;
-  justify-content: center;
-}
-
-.config-progress-bar {
-  width: 100%;
-  height: 4px;
-  border-radius: 2px;
-  background: #6b9cff;
-  transition: width 0.3s ease;
-}
-
-.config-progress-text {
-  font-size: 11px;
-  color: rgba(107, 132, 170, 0.8);
 }
 
 /* ===== 未知节点 ===== */
