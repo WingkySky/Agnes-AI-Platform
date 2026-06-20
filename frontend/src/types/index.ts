@@ -8,6 +8,24 @@
 // 通用类型
 // =====================================================
 
+/** 文件信息 — 用于组件间传递上传的文件数据 */
+export interface FileInfo {
+  /** 文件名 */
+  name: string
+  /** Base64 编码的文件内容（文件上传时使用） */
+  base64: string | null
+  /** 预览 URL（用于前端显示） */
+  previewUrl: string
+  /** MIME 类型 */
+  mimeType: string
+  /** 文件大小（字节） */
+  size: number | null
+  /** 数据来源：本地文件或远程 URL */
+  source: 'file' | 'url'
+  /** 原始 URL（当 source 为 'url' 时使用） */
+  url?: string
+}
+
 /** 健康检查响应 — 对齐 HealthResponse */
 export interface HealthResponse {
   status: string
@@ -384,4 +402,108 @@ export interface RegisterCanvasTaskParams {
   backendTaskId?: string
   /** 画布节点 ID，用于任务完成后回填结果 */
   panelId?: string
+}
+
+// =====================================================
+// Provider 与模型管理类型
+// =====================================================
+
+/** API Provider — 对齐 ProviderResponse */
+export interface ApiProvider {
+  id: number
+  name: string
+  base_url: string
+  /** API Key 脱敏后的展示值，如 sk-a****b123 */
+  api_key: string
+  poll_url: string
+  is_active: boolean
+  is_default: boolean
+  sort_order: number
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+/** Provider 列表响应 — 对齐 ProviderListResponse */
+export interface ProviderListResponse {
+  total: number
+  items: ApiProvider[]
+}
+
+/** 创建 Provider 请求 — 对齐 ProviderCreateRequest */
+export interface ProviderCreateRequest {
+  name: string
+  base_url: string
+  api_key: string
+  poll_url?: string
+  is_active?: boolean
+  is_default?: boolean
+  sort_order?: number
+}
+
+/** 更新 Provider 请求 — 对齐 ProviderUpdateRequest */
+export interface ProviderUpdateRequest {
+  name?: string
+  base_url?: string
+  /** 留空表示不修改 */
+  api_key?: string
+  poll_url?: string
+  is_active?: boolean
+  is_default?: boolean
+  sort_order?: number
+}
+
+/** 模型定义 — 对齐 ModelDefinitionResponse */
+export interface ModelDefinition {
+  id: number
+  provider_id: number
+  model_id: string
+  display_name: string
+  type: string
+  provider_name: string
+  capabilities: string[]
+  is_active: boolean
+  is_custom: boolean
+  sort_order: number
+}
+
+/** 模型定义列表响应 — 对齐 ModelListResponse */
+export interface ModelListResponse {
+  total: number
+  items: ModelDefinition[]
+}
+
+/** 添加自定义模型请求 — 对齐 CustomModelCreateRequest */
+export interface CustomModelCreateRequest {
+  provider_id: number
+  model_id: string
+  display_name?: string
+  model_type?: string
+  provider_name?: string
+  capabilities?: string[] | null
+  sort_order?: number
+}
+
+/** 更新模型定义请求 — 对齐 ModelUpdateRequest */
+export interface ModelUpdateRequest {
+  display_name?: string
+  model_type?: string
+  provider_name?: string
+  capabilities?: string[] | null
+  is_active?: boolean
+  sort_order?: number
+}
+
+/** 模型同步结果 — 对齐 SyncModelsResponse */
+export interface SyncModelsResponse {
+  provider_id: number
+  added: number
+  updated: number
+  deactivated: number
+  total: number
+  error?: string | null
+}
+
+/** 同步所有 Provider 模型响应 — 对齐 SyncAllResponse */
+export interface SyncAllResponse {
+  results: SyncModelsResponse[]
 }

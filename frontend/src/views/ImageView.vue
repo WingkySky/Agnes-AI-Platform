@@ -243,6 +243,7 @@ import RatioPicker from '@/components/RatioPicker.vue'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useModelsStore } from '@/stores/models'
 import { useI18n } from '@/i18n'
+import type { FileInfo } from '@/types'
 
 const { t } = useI18n()
 
@@ -293,7 +294,7 @@ const model = ref('')  // 初始值在 store 加载后自动设置
 watch(() => modelsStore.defaultImageModel, (v) => {
   if (v && !model.value) model.value = v
 }, { immediate: true })
-const referenceFileList = ref<any[]>([])   // 【多图】数组
+const referenceFileList = ref<FileInfo[]>([])   // 【多图】数组
 
 // ---------- 使用全局 Store 管理任务 ----------
 const queue = useTaskQueueStore()
@@ -369,7 +370,7 @@ function appendStylePrompt(tpl: string) {
   }
 }
 
-function handleImageChange(fileList: any) {
+function handleImageChange(fileList: FileInfo[]) {
   // fileList 为数组（可能为 null 表示清空）
   referenceFileList.value = Array.isArray(fileList) ? fileList : (fileList ? [fileList] : [])
 }

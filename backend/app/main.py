@@ -42,9 +42,11 @@ from app.core.logging import setup_logging
 from app.middleware.request_id import RequestIdMiddleware
 from app.routes import images, videos, history as history_route, config as config_route, chat as chat_route
 from app.routes import logs as logs_route
+from app.routes import providers as providers_route
 from app.services.video_poller import poller_manager
 from app.services.image_poller import image_poller_manager
 from app.services.agnes_client import agnes_client
+from app.services.provider_registry import provider_registry
 
 # ---------- 日志配置（替换原 logging.basicConfig）----------
 # 使用自定义日志系统：控制台 + 文件轮转 + JSON 错误日志 + Request ID 追踪
@@ -115,11 +117,20 @@ async def lifespan(app: FastAPI):
     """
     # ---------- 【启动阶段】----------
     if not settings.agnes_api_key or settings.agnes_api_key.startswith("sk-your"):
-        logger.warning("⚠️ AGNES_API_KEY 未配置！请编辑 backend/.env，填入你的 Agnes AI API Key 后重启服务。")
+        logger.warning("⚠️ AGNES_API_KEY 未配置！请在前端配置页添加 Provider，或编辑 backend/.env 填入引导配置后重启服务。")
     else:
-        logger.info("✓ Agnes AI API Key 已加载")
+        logger.info("✓ Agnes AI API Key 引导配置已加载（将用于首次启动创建默认 Provider）")
+
+    # 初始化 Provider 注册表（核心预处理层）
+    # - 从数据库加载所有 Provider 配置
+    # - 首次启动时用 settings 引导配置创建默认 Provider
+    # - 为每个 Provider 创建独立的 AgnesAIClient 实例
+    # - 用默认 Provider 配置全局 agnes_client 单例
+    await provider_registry.initialize()
+    logger.info("✓ Provider 注册表已初始化")
 
     # 初始化 httpx.AsyncClient（持久化连接池）
+    # agnes_client 单例已由 provider_registry.configure() 配置好
     await agnes_client.start()
     logger.info("✓ HTTP 连接池已就绪")
 
@@ -146,11 +157,15 @@ async def lifespan(app: FastAPI):
     await image_poller_manager.shutdown()
     logger.info("✓ 图片任务器已关闭")
 
-    # 3. 关闭 HTTP 连接池
+    # 3. 关闭 Provider 注册表（释放所有 Provider 的 client 连接池）
+    await provider_registry.shutdown()
+    logger.info("✓ Provider 注册表已关闭")
+
+    # 4. 关闭全局 agnes_client 单例的连接池
     await agnes_client.shutdown()
     logger.info("✓ HTTP 连接池已关闭")
 
-    # 3. 关闭异步数据库引擎
+    # 5. 关闭异步数据库引擎
     await async_engine.dispose()
     logger.info("✓ 数据库连接已释放")
 
@@ -199,6 +214,7 @@ async def global_exception_handler(request, exc):
 
 # ---------- 注册路由 ----------
 app.include_router(config_route.router, prefix="/api", tags=["配置"])
+app.include_router(providers_route.router, prefix="/api", tags=["Provider 与模型管理"])
 app.include_router(images.router, prefix="/api", tags=["图片生成"])
 app.include_router(videos.router, prefix="/api", tags=["视频生成"])
 app.include_router(history_route.router, prefix="/api", tags=["生成历史"])

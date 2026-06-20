@@ -181,8 +181,14 @@ class ChatService:
     """
 
     def __init__(self):
-        self.chat_url = f"{settings.agnes_api_base_url}/chat/completions"
+        # chat_url 改为动态 property，从 agnes_client 获取最新的 base_url
+        # （Provider 配置可能在前端配置页运行时修改）
         self._default_chat_model = ""  # 延迟初始化，从 model_registry 获取
+
+    @property
+    def chat_url(self) -> str:
+        """动态获取聊天 API 地址（从 agnes_client 读取最新的 base_url）"""
+        return f"{agnes_client.base_url}/chat/completions"
 
     async def _get_default_chat_model(self) -> str:
         """获取默认聊天模型（从 model_registry 动态获取）"""
@@ -824,8 +830,9 @@ class ChatService:
         """
         调用 Agnes AI Chat API（流式），解析 SSE 事件并 yield 结构化结果。
         """
+        # 从 agnes_client 获取最新的鉴权头（Provider 配置可能运行时修改）
         headers = {
-            "Authorization": f"Bearer {settings.agnes_api_key}",
+            "Authorization": f"Bearer {agnes_client.api_key}",
             "Content-Type": "application/json",
         }
 

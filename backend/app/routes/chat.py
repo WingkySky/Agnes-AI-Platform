@@ -34,6 +34,7 @@ from app.core.database import get_async_db, async_session
 from app.core.config import settings
 from app.models.chat import ChatSession, ChatMessage
 from app.services.chat_service import chat_service
+from app.services.agnes_client import agnes_client
 from app.services.image_poller import image_poller_manager
 from app.services.video_poller import poller_manager as video_poller_manager
 
@@ -348,11 +349,11 @@ async def send_message(
     - {"type": "assistant_message", "message": {...}} — AI 消息已保存
     - {"type": "done"} — 结束
     """
-    # API Key 检查
-    if not settings.agnes_api_key or settings.agnes_api_key.startswith("sk-your"):
+    # API Key 检查（从 agnes_client 读取当前配置，Provider 可能在前端配置页修改）
+    if not agnes_client.api_key or agnes_client.api_key.startswith("sk-your"):
         raise HTTPException(
             status_code=401,
-            detail="Agnes AI API Key 未配置，请在 backend/.env 中设置 AGNES_API_KEY",
+            detail="Agnes AI API Key 未配置，请在前端「配置管理」页面添加 Provider",
         )
 
     # 检查会话是否存在

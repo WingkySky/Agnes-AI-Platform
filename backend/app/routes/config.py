@@ -1,7 +1,7 @@
 # =====================================================
 # 配置接口路由
 # 返回前端可用的非敏感配置（不含 API Key）
-# 模型列表从环境变量动态读取，自动识别类型和供应商
+# 模型列表从数据库 model_definitions 表读取（由 provider_registry 管理）
 # =====================================================
 
 from fastapi import APIRouter
@@ -16,13 +16,13 @@ router = APIRouter()
 async def get_config():
     """
     返回前端需要的非敏感配置：
-    - 可用模型列表（从 API 动态获取，自动识别类型/供应商/能力）
+    - 可用模型列表（从数据库 model_definitions 表读取，由 provider_registry 管理）
     - 支持的图片尺寸
     - 视频帧数选项
     - 上传大小限制
 
-    模型列表来源优先级：API GET /models > 环境变量 AVAILABLE_MODELS
-    自动推断不准时：在 .env 的 MODEL_OVERRIDES 中手动指定。
+    模型列表来源：Provider 的 /models API 同步 + 用户自定义模型。
+    管理入口：前端配置页 /api/providers/* 和 /api/models/* 接口。
     """
     return ConfigResponse(
         models=await get_all_models(),

@@ -2,12 +2,15 @@
 # 后端核心配置
 # 使用 pydantic-settings 从 .env 文件和环境变量中加载配置
 # 优先级：环境变量 > .env 文件 > 默认值
+#
+# 注意：API Key / Base URL / 模型列表等运行时配置
+# 已迁移到数据库（api_providers / model_definitions 表），
+# 由前端配置页面管理。此处仅保留首次启动初始化用的引导配置。
 # =====================================================
 
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, field_validator
-import json
 
 
 class Settings(BaseSettings):
@@ -25,28 +28,27 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # ---------- Agnes AI API 配置 ----------
+    # ---------- Agnes AI API 引导配置（仅首次启动初始化默认 Provider 用） ----------
+    # 启动后这些值会被写入数据库 api_providers 表，后续在前端配置页修改
     agnes_api_key: str = Field(
         default="",
-        description="Agnes AI API Key（从 platform.agnes-ai.com 获取）",
+        description="Agnes AI API Key（仅首次启动初始化用，后续在前端配置页管理）",
     )
     agnes_api_base_url: str = Field(
         default="https://apihub.agnes-ai.com/v1",
-        description="Agnes AI API 基础地址",
+        description="Agnes AI API 基础地址（仅首次启动初始化用）",
     )
     agnes_api_poll_url: str = Field(
         default="https://apihub.agnes-ai.com/agnesapi",
-        description="Agnes AI 异步任务轮询专用接口",
+        description="Agnes AI 异步任务轮询专用接口（仅首次启动初始化用）",
     )
 
-    # ---------- 模型配置 ----------
-    available_models: str = Field(
+    # ---------- API Key 加密密钥 ----------
+    # 用于加密数据库中存储的 Provider API Key（Fernet 对称加密）
+    # 生产环境务必配置为随机字符串
+    encryption_key: str = Field(
         default="",
-        description="可用模型 ID 列表（逗号分隔，可选），仅作 API 不可用时的回退",
-    )
-    model_overrides: str = Field(
-        default="{}",
-        description="模型属性覆盖（JSON 字符串），当自动推断不准确时手动指定",
+        description="API Key 加密密钥（任意长度字符串，用于 Fernet 加密 Provider 的 api_key）",
     )
 
     # ---------- 数据库配置 ----------
@@ -106,31 +108,10 @@ class Settings(BaseSettings):
             return [item.strip() for item in v.split(",") if item.strip()]
         return v
 
-    @field_validator("model_overrides", mode="before")
-    @classmethod
-    def parse_model_overrides(cls, v):
-        """确保 model_overrides 是合法 JSON 字符串"""
-        if isinstance(v, str):
-            json.loads(v)  # 校验格式
-        return v
-
     @property
     def max_upload_bytes(self) -> int:
         """将 MB 转换为字节数，用于请求体大小校验"""
         return self.max_upload_size_mb * 1024 * 1024
-
-    @property
-    def model_id_list(self) -> List[str]:
-        """解析 available_models 为模型 ID 列表"""
-        return [m.strip() for m in self.available_models.split(",") if m.strip()]
-
-    @property
-    def model_overrides_dict(self) -> Dict[str, Any]:
-        """解析 model_overrides JSON 为字典"""
-        try:
-            return json.loads(self.model_overrides) if self.model_overrides else {}
-        except (json.JSONDecodeError, TypeError):
-            return {}
 
 
 # 全局单例配置实例

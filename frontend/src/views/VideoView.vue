@@ -308,6 +308,7 @@ import RatioPicker from '@/components/RatioPicker.vue'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useModelsStore } from '@/stores/models'
 import { useI18n } from '@/i18n'
+import type { FileInfo } from '@/types'
 
 const { t } = useI18n()
 
@@ -343,9 +344,9 @@ watch(() => modelsStore.defaultVideoModel, (v) => {
 }, { immediate: true })
 
 // ---------- 图片状态（图生视频：单张；首尾帧：起始帧+结束帧）----------
-const referenceFile = ref<any>(null)         // image2video 模式的参考图
-const startFrameFile = ref<any>(null)        // keyframes 模式的起始帧
-const endFrameFile = ref<any>(null)          // keyframes 模式的结束帧
+const referenceFile = ref<FileInfo | null>(null)         // image2video 模式的参考图
+const startFrameFile = ref<FileInfo | null>(null)        // keyframes 模式的起始帧
+const endFrameFile = ref<FileInfo | null>(null)          // keyframes 模式的结束帧
 
 // ---------- 视频播放状态 ----------
 const videoEl = ref<HTMLVideoElement | null>(null)
@@ -432,7 +433,7 @@ function appendStylePrompt(tpl: string) {
 
 // ---------- 图片管理（图生视频 + 首尾帧）----------
 // 图生视频：单张参考图
-function handleImageChange(files: any) {
+function handleImageChange(files: FileInfo[]) {
   if (!files || !files.length) {
     referenceFile.value = null
     return
@@ -444,7 +445,7 @@ function handleImageClear() {
 }
 
 // 首尾帧模式：起始帧 / 结束帧
-function handleFrameChange(frameType: string, files: any) {
+function handleFrameChange(frameType: string, files: FileInfo[]) {
   if (!files || !files.length) {
     if (frameType === 'start') startFrameFile.value = null
     else endFrameFile.value = null

@@ -8,3 +8,5 @@ aiofiles>=23.2.1
 # 异步数据库驱动
 aiosqlite>=0.20.0  # SQLite 异步驱动（用于 AsyncSession）
 greenlet>=3.0.0    # SQLAlchemy async 内部依赖（协程切换）
+# API Key 加密存储
+cryptography>=42.0.0  # Fernet 对称加密（用于加密 Provider 的 api_key）

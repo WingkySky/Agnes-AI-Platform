@@ -1,5 +1,5 @@
 # =====================================================
-# Agnes AI API 客户端封装（异步 + 连接池
+# Agnes AI API 客户端封装（异步 + 连接池）
 # 负责：
 #   1. 构建带鉴权的 HTTP 请求（通过持久化 httpx.AsyncClient 发送，复用连接）
 #   2. 图片生成（异步同步等待，不阻塞其他请求）
@@ -9,6 +9,8 @@
 #   - 使用单一持久化的 httpx.AsyncClient（连接池），避免每次请求新建 TCP 连接
 #   - start() 在应用启动时调用，shutdown() 在关闭时释放
 #   - 所有 API 方法均为 async，配合 FastAPI 异步路由，图片/视频任务互不阻塞
+#   - 构造函数接收 base_url/api_key/poll_url，支持多 Provider 实例化
+#   - configure() 方法支持运行时切换 Provider 配置（前端配置页修改后无需重启）
 # =====================================================
 
 import asyncio
@@ -52,17 +54,32 @@ class AgnesAIClient:
     Agnes AI 官方 API 的统一调用封装。
     使用单一持久化 httpx.AsyncClient（内部维护 HTTP 连接池），
     多个并发请求复用底层 TCP 连接，显著降低延迟。
+
+    支持两种使用方式：
+    1. 全局单例 agnes_client（启动时由 provider_registry 用默认 Provider 配置）
+    2. 多实例化：为每个 Provider 创建独立 client（不同 base_url / api_key）
     """
 
-    def __init__(self):
-        self.api_key = settings.agnes_api_key
-        self.base_url = settings.agnes_api_base_url
-        self.poll_url = settings.agnes_api_poll_url
+    def __init__(
+        self,
+        base_url: str = "",
+        api_key: str = "",
+        poll_url: str = "",
+    ):
+        """
+        初始化客户端配置。
+
+        参数为空时回退到 settings 中的引导配置（仅用于全局单例的首次启动）。
+        正常使用时由 provider_registry 传入从数据库读取的 Provider 配置。
+        """
+        self.base_url = base_url or settings.agnes_api_base_url
+        self.api_key = api_key or settings.agnes_api_key
+        self.poll_url = poll_url or settings.agnes_api_poll_url
         self.poll_interval = settings.video_poll_interval_sec
         self.poll_timeout = settings.video_poll_timeout_sec
 
         # 通用 HTTP Headers（鉴权）
-        self._headers = {
+        self._headers: Dict[str, str] = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
@@ -71,6 +88,32 @@ class AgnesAIClient:
         # 连接池限制：默认 100 个并发连接
         # 超时：单请求 120s，允许 AI 生成较长时间
         self._client: Optional[httpx.AsyncClient] = None
+
+    def configure(
+        self,
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+        poll_url: Optional[str] = None,
+    ) -> None:
+        """
+        运行时切换 Provider 配置（前端配置页修改后调用，无需重启服务）。
+        仅更新传入的非 None 字段，None 表示保持原值不变。
+        """
+        if base_url is not None and base_url != self.base_url:
+            self.base_url = base_url
+        if api_key is not None and api_key != self.api_key:
+            self.api_key = api_key
+        if poll_url is not None and poll_url != self.poll_url:
+            self.poll_url = poll_url
+        # 重建鉴权头
+        self._headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        logger.info(
+            "[AgnesAIClient] 配置已更新: base_url=%s, poll_url=%s, api_key=%s",
+            self.base_url, self.poll_url, "***" if self.api_key else "(空)",
+        )
 
     # ---------- 生命周期 ----------
     async def start(self):

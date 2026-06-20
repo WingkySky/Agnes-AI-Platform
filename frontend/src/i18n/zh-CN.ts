@@ -45,6 +45,7 @@ const zhCN = {
     videos: '视频生成',
     history: '生成历史',
     canvas: '无限画布',
+    settings: '配置管理',
   },
 
   // ------ 通用视图 ------
@@ -331,6 +332,7 @@ const zhCN = {
     videos: '视频生成',
     history: '生成历史',
     canvas: '无限画布',
+    settings: '配置管理',
   },
 
   // ------ 聊天界面 ------
@@ -754,6 +756,85 @@ const zhCN = {
 
   // ------ 首页加载 ------
   loading: 'Agnes AI Platform 加载中...',
+
+  // ------ 配置管理页面 ------
+  settings: {
+    title: '配置管理',
+    desc: '管理 API Provider 和模型列表。支持多 Provider 配置、API Key 加密存储、模型自动同步与自定义。',
+    // Provider 管理
+    providerSection: 'API Provider 管理',
+    providerDesc: '每个 Provider 对应一组独立的 API 配置（base_url / api_key）。可添加多个 Provider，默认 Provider 用于所有生成任务。',
+    addProvider: '新增 Provider',
+    syncAll: '同步所有模型',
+    syncAllTip: '调用所有已激活 Provider 的 /models API，刷新模型列表',
+    // Provider 表格
+    colName: '名称',
+    colBaseUrl: 'API 地址',
+    colApiKey: 'API Key',
+    colPollUrl: '轮询地址',
+    colStatus: '状态',
+    colDefault: '默认',
+    colActions: '操作',
+    active: '已激活',
+    inactive: '已停用',
+    isDefault: '默认',
+    setDefault: '设为默认',
+    syncModels: '同步模型',
+    syncModelsTip: '调用该 Provider 的 /models API 刷新模型列表',
+    // Provider 表单
+    formName: '名称',
+    formNamePlaceholder: '如：Agnes AI（默认）',
+    formBaseUrl: 'API 基础地址',
+    formBaseUrlPlaceholder: '如：https://apihub.agnes-ai.com/v1',
+    formApiKey: 'API Key',
+    formApiKeyPlaceholder: '输入 API Key（明文，后端会加密存储）',
+    formApiKeyHint: '编辑时留空表示不修改',
+    formPollUrl: '轮询地址（可选）',
+    formPollUrlPlaceholder: '如：https://apihub.agnes-ai.com/agnesapi',
+    formIsActive: '激活',
+    formIsDefault: '设为默认 Provider',
+    formSortOrder: '排序',
+    // 模型管理
+    modelSection: '模型列表管理',
+    modelDesc: '模型来源有两种：1) 点击「同步模型」从 Provider 的 /models API 自动拉取；2) 手动添加自定义模型（同步时不会被覆盖）。',
+    addModel: '新增自定义模型',
+    colModelId: '模型 ID',
+    colDisplayName: '显示名称',
+    colType: '类型',
+    colProvider: '供应商',
+    colCustom: '来源',
+    colCapabilities: '能力',
+    customYes: '自定义',
+    customNo: 'API 同步',
+    // 模型表单
+    formModelId: '模型 ID',
+    formModelIdPlaceholder: '如：agnes-image-2.1-flash',
+    formModelProvider: '所属 Provider',
+    formDisplayName: '显示名称（留空自动推断）',
+    formModelType: '类型（留空自动推断）',
+    formModelProviderName: '供应商名称（留空自动推断）',
+    formCapabilities: '能力标签',
+    // 同步结果
+    syncResultTitle: '同步结果',
+    syncSuccess: '同步成功：新增 {added} 个，更新 {updated} 个，停用 {deactivated} 个，API 返回 {total} 个',
+    // 确认提示
+    confirmDeleteProvider: '确定删除 Provider「{name}」吗？该操作会级联删除其下所有模型定义，且不可恢复。',
+    confirmDeleteModel: '确定删除模型「{modelId}」吗？',
+    confirmSyncAll: '确定要同步所有 Provider 的模型列表吗？这可能需要一些时间。',
+    // 操作结果
+    providerCreated: 'Provider 已创建',
+    providerUpdated: 'Provider 已更新',
+    providerDeleted: 'Provider 已删除',
+    modelCreated: '自定义模型已添加',
+    modelUpdated: '模型已更新',
+    modelDeleted: '模型已删除',
+    syncStarted: '开始同步模型...',
+    syncCompleted: '模型同步完成',
+    // 类型选项
+    typeImage: '图片',
+    typeVideo: '视频',
+    typeChat: '对话',
+  },
 }
 
 export default zhCN

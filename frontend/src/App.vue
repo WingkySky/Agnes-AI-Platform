@@ -39,6 +39,10 @@
             <el-icon><Grid /></el-icon>
             <span>{{ t('nav.canvas') }}</span>
           </router-link>
+          <router-link to="/settings" class="nav-item" active-class="active">
+            <el-icon><Setting /></el-icon>
+            <span>{{ t('nav.settings') }}</span>
+          </router-link>
         </nav>
 
         <div class="app-header-right">
@@ -70,7 +74,7 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { Picture, VideoPlay, Clock, ChatDotRound, Grid } from '@element-plus/icons-vue'
+import { Picture, VideoPlay, Clock, ChatDotRound, Grid, Setting } from '@element-plus/icons-vue'
 import TaskQueuePanel from './components/TaskQueuePanel.vue'
 import LanguageSwitcher from './components/LanguageSwitcher.vue'
 import { useI18n, getElementPlusLocale } from '@/i18n'
@@ -89,7 +93,7 @@ onMounted(() => {
 const isCanvasRoute = computed(() => route.name === 'canvas')
 
 // keep-alive 缓存的路由组件名称（切换标签页时保持状态不销毁）
-const cachedViews = ['ChatView', 'ImageView', 'VideoView', 'HistoryView', 'CanvasView']
+const cachedViews = ['ChatView', 'ImageView', 'VideoView', 'HistoryView', 'CanvasView', 'SettingsView']
 
 // 每当 locale 变化时返回对应的 Element Plus 语言对象
 const epLocale = computed(() => {

@@ -38,12 +38,15 @@ async def create_image_task_async(req: ImageGenerationRequest):
     创建图片异步生成任务，立即返回 task_id。
     实际生成在后台独立 asyncio.Task 中进行，不阻塞其他请求。
     """
-    # API Key 检查
-    if not settings.agnes_api_key or settings.agnes_api_key.startswith("sk-your"):
+    # API Key 检查（从 agnes_client 读取当前配置，Provider 可能在前端配置页修改）
+    if not agnes_client.api_key or agnes_client.api_key.startswith("sk-your"):
         raise HTTPException(
             status_code=401,
-            detail="Agnes AI API Key 未配置，请在 backend/.env 中设置 AGNES_API_KEY",
+            detail="Agnes AI API Key 未配置，请在前端「配置管理」页面添加 Provider",
         )
+
+    # 创建图片异步生成任务，立即返回 task_id。
+    # 实际生成在后台独立 asyncio.Task 中进行，不阻塞其他请求。
 
     # 参数校验（确保 size 格式正确）
     try:
@@ -156,10 +159,10 @@ async def create_image_generation(req: ImageGenerationRequest, db: AsyncSession 
     同步图片生成接口（保留以向后兼容）。
     新代码建议使用异步任务模式（POST /images/tasks）。
     """
-    if not settings.agnes_api_key or settings.agnes_api_key.startswith("sk-your"):
+    if not agnes_client.api_key or agnes_client.api_key.startswith("sk-your"):
         raise HTTPException(
             status_code=401,
-            detail="Agnes AI API Key 未配置，请在 backend/.env 中设置 AGNES_API_KEY",
+            detail="Agnes AI API Key 未配置，请在前端「配置管理」页面添加 Provider",
         )
 
     # 参考图大小校验（多图：每张图单独校验大小

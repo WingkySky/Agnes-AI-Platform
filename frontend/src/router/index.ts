@@ -42,6 +42,12 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/CanvasView.vue'),
     meta: { titleKey: 'router.canvas' }
   },
+  {
+    path: '/settings',
+    name: 'settings',
+    component: () => import('@/views/SettingsView.vue'),
+    meta: { titleKey: 'router.settings' }
+  },
   // 兜底路由
   {
     path: '/:pathMatch(.*)*',

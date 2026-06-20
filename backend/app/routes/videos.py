@@ -75,10 +75,10 @@ async def create_video_task(req: VideoGenerationRequest):
     - image2video: 额外传 image 字段
     - keyframes: 额外传 images 数组（1-2 张）
     """
-    if not settings.agnes_api_key or settings.agnes_api_key.startswith("sk-your"):
+    if not agnes_client.api_key or agnes_client.api_key.startswith("sk-your"):
         raise HTTPException(
             status_code=401,
-            detail="Agnes AI API Key 未配置，请在 backend/.env 中设置 AGNES_API_KEY",
+            detail="Agnes AI API Key 未配置，请在前端「配置管理」页面添加 Provider",
         )
 
     # ---------- 参考图 size 校验 + 类型日志（便于排查本地图/URL 是否混传）----------

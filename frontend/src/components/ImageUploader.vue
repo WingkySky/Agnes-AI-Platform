@@ -111,19 +111,9 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Delete, UploadFilled, Document } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
+import type { FileInfo } from '@/types'
 
 const { t } = useI18n()
-
-// 图片文件信息接口
-interface FileInfo {
-  name: string
-  base64: string | null
-  previewUrl: string
-  mimeType: string
-  size: number | null
-  source: 'file' | 'url'
-  url?: string
-}
 
 const props = defineProps({
   maxSizeMB: { type: Number, default: 10 },
