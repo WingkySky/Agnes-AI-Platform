@@ -1,0 +1,6 @@
+{
+  "name": "Agnes AI Platform",
+  "description": "A next-generation mobile platform for AI image and video generation powered by Agnes AI. 一站式由Agnes AI实现的图片、视频生成移动端平台。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

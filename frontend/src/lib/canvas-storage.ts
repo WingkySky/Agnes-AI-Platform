@@ -13,6 +13,8 @@ interface CanvasStorageData {
   workspaces?: any[]
   activeWorkspaceId?: string | null
   themeMode?: string
+  backgroundMode?: string
+  showImageInfo?: boolean
   viewport?: Record<string, any>
   panels?: any[]
   connections?: any[]
@@ -81,6 +83,8 @@ export function saveCanvas(state: CanvasStorageData): void {
         workspaces: state.workspaces,
         activeWorkspaceId: state.activeWorkspaceId,
         themeMode: state.themeMode,
+        backgroundMode: state.backgroundMode,
+        showImageInfo: state.showImageInfo,
         viewport: state.viewport,
         panels: state.panels,
         connections: state.connections,

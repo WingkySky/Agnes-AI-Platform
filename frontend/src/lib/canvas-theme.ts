@@ -54,8 +54,8 @@ export const canvasThemes: CanvasThemes = {
   light: {
     canvas: {
       background: '#f0f2f8',
-      dot: 'rgba(60,80,120,.22)',
-      line: 'rgba(60,80,120,.10)',
+      dot: 'rgba(60,80,120,.60)',
+      line: 'rgba(60,80,120,.45)',
       selectionStroke: '#6b9cff',
       selectionFill: 'rgba(107,156,255,.08)',
     },
@@ -84,8 +84,8 @@ export const canvasThemes: CanvasThemes = {
   dark: {
     canvas: {
       background: '#0b0f1a',
-      dot: 'rgba(160,180,220,.18)',
-      line: 'rgba(160,180,220,.08)',
+      dot: 'rgba(160,180,220,.55)',
+      line: 'rgba(160,180,220,.40)',
       selectionStroke: '#6b9cff',
       selectionFill: 'rgba(107,156,255,.10)',
     },

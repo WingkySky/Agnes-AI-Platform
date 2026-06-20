@@ -42,11 +42,11 @@ const containerRef = ref<HTMLElement | null>(null)
 // ---------- 实际使用的视口（props 优先，回退到 store）----------
 const currentViewport = computed(() => props.viewport || store.viewport)
 
-// ---------- 实际使用的背景模式（props 优先，映射 store 的 'dot'/'grid'）----------
+// ---------- 实际使用的背景模式（props 优先，回退到 store.backgroundMode）----------
+// store.backgroundMode 已是 'dots' | 'lines' | 'blank'，直接使用即可
 const currentBackgroundMode = computed(() => {
   if (props.backgroundMode) return props.backgroundMode
-  const map: Record<string, string> = { dot: 'dots', grid: 'lines', blank: 'blank' }
-  return map[store.backgroundMode] || 'dots'
+  return store.backgroundMode || 'dots'
 })
 
 // ---------- 实际使用的主题（props 优先，回退到 store.canvasTheme）----------

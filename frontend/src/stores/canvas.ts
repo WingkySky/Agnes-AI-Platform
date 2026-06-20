@@ -1238,6 +1238,12 @@ export const useCanvasStore = defineStore('canvas', {
           if (data.themeMode === 'dark' || data.themeMode === 'light') {
             this.themeMode = data.themeMode
           }
+          if (['dots', 'lines', 'blank'].includes(data.backgroundMode as string)) {
+            this.backgroundMode = data.backgroundMode as 'dots' | 'lines' | 'blank'
+          }
+          if (typeof data.showImageInfo === 'boolean') {
+            this.showImageInfo = data.showImageInfo
+          }
           if (data.viewport && typeof data.viewport === 'object') {
             this.viewport = { ...this.viewport, ...(data.viewport as Viewport) }
           }
