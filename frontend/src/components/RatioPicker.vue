@@ -94,16 +94,20 @@ const DEFAULT_VIDEO_OPTIONS: RatioOption[] = [
 ]
 
 /**
- * 计算形状的尺寸：在固定容器内，按真实比例渲染
+ * 计算形状的尺寸：容器是正方形，内部图形按宽高比自然渲染
+ * 横屏：宽度占满 → 矮胖；正方形：等宽等高；竖屏：高度占满 → 瘦高
  */
 function shapeStyle(opt: RatioOption) {
   const w = opt.w || 1
   const h = opt.h || 1
-  return {
-    aspectRatio: `${w} / ${h}`,
-    ...(w >= h
-      ? { width: '92%', maxHeight: '70%' }
-      : { height: '92%', maxWidth: '70%' }),
+  const ratio = w / h
+  // 正方形容器内，短边约束，长边按比例延伸
+  // 横屏(ratio>1): 宽100%,高=100%/ratio → 会很矮；需要反过来约束长边
+  // 正确做法：让较长边 = 100%，另一边按比例
+  if (w >= h) {
+    return { aspectRatio: `${w} / ${h}`, width: '100%' }
+  } else {
+    return { aspectRatio: `${w} / ${h}`, height: '100%' }
   }
 }
 
@@ -165,10 +169,11 @@ function select(opt: RatioOption) {
   color: #fff;
 }
 
-/* 图标容器：固定小方块，内部绘制真实比例矩形 */
+/* 图标容器：**正方形**，内部图形按真实宽高比自然呈现
+ * 16:9 → 横的矮矩形；1:1 → 正方形；9:16 → 竖的高矩形 */
 .ratio-btn__icon-box {
-  width: 28px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   display: flex;
   align-items: center;
   justify-content: center;

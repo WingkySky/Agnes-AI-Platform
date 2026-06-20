@@ -258,10 +258,11 @@ const popoverWidth = computed(() => props.mode === 'video' ? 320 : 400)
   color: #e8eef7;
 }
 
-/* 标签内的小比例图标 */
+/* 标签内的小比例图标：**正方形容器**，内部图形按比例自然呈现
+ * 16:9 → 矮横；1:1 → 正方形；9:16 → 瘦高 */
 .param-tag__icon {
-  width: 16px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -269,8 +270,6 @@ const popoverWidth = computed(() => props.mode === 'video' ? 320 : 400)
 
 .param-tag__shape {
   display: block;
-  width: 100%;
-  max-height: 100%;
   border-radius: 2px;
   background: rgba(139, 176, 255, 0.5);
 }
