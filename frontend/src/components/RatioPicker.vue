@@ -22,7 +22,7 @@
       <span class="ratio-btn__icon-box">
         <span class="ratio-btn__icon" :style="shapeStyle(opt)"></span>
       </span>
-      <span class="ratio-btn__label">{{ opt.value }}</span>
+      <span class="ratio-btn__label">{{ displayLabel(opt) }}</span>
     </button>
   </div>
 </template>
@@ -105,6 +105,17 @@ function shapeStyle(opt: RatioOption) {
       ? { width: '92%', maxHeight: '70%' }
       : { height: '92%', maxWidth: '70%' }),
   }
+}
+
+/**
+ * 显示标签：图片模式优先显示比例（如"16:9"），视频模式直接显示值
+ */
+function displayLabel(opt: RatioOption): string {
+  if (props.mode === 'image' && opt.label) {
+    // 图片模式：从 label 提取比例部分，如 "16:9 横屏" → "16:9"
+    return opt.label.replace(/\s+.+$/, '')
+  }
+  return opt.value
 }
 
 function select(opt: RatioOption) {

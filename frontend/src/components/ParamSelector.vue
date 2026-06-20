@@ -119,7 +119,7 @@ import { ref, computed } from 'vue'
 import { ArrowDown, VideoCamera, Film } from '@element-plus/icons-vue'
 import RatioPicker from '@/components/RatioPicker.vue'
 import { useModelsStore } from '@/stores/models'
-import { getImageSizeLabel, getVideoAspectRatioLabel, parseSize } from '@/config/model-params'
+import { getImageSizeLabel, getVideoAspectRatioLabel } from '@/config/model-params'
 import type { ModelInfo } from '@/types'
 
 const props = defineProps<{
@@ -187,7 +187,7 @@ const modelList = computed(() => props.modelList || (
   props.mode === 'video' ? modelsStore.videoModels : modelsStore.imageModels
 ))
 
-// 当前尺寸/比例的友好标签
+// 当前尺寸/比例的友好标签（统一显示比例，如"16:9 横屏"）
 const currentSizeLabel = computed(() => {
   if (props.mode === 'video') {
     return getVideoAspectRatioLabel(currentSize.value)
@@ -201,19 +201,25 @@ const currentModelLabel = computed(() => {
   return m?.name || currentModel.value
 })
 
-// 尺寸/比例小图标样式
+// 尺寸/比例小图标样式：统一用配置中的 w/h 绘制
+// 横屏约束宽度、竖屏约束高度，确保在 16x12 容器内正确渲染
 const currentShapeStyle = computed(() => {
+  let w = 16, h = 9
   if (props.mode === 'video') {
     const opt = config.value.videoAspectRatios.find(o => o.value === currentSize.value)
-    const w = opt?.w || 16
-    const h = opt?.h || 9
-    return { aspectRatio: `${w} / ${h}` }
+    w = opt?.w || 16
+    h = opt?.h || 9
+  } else {
+    const opt = config.value.imageSizes.find(o => o.value === currentSize.value)
+    w = opt?.w || 16
+    h = opt?.h || 9
   }
-  const parsed = parseSize(currentSize.value)
-  if (parsed) {
-    return { aspectRatio: `${parsed.width} / ${parsed.height}` }
+  return {
+    aspectRatio: `${w} / ${h}`,
+    ...(w >= h
+      ? { width: '100%', maxHeight: '100%' }
+      : { height: '100%', maxWidth: '100%' }),
   }
-  return { aspectRatio: '16 / 9' }
 })
 
 // Popover 宽度
