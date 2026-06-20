@@ -28,6 +28,7 @@ const emit = defineEmits([
   'pan',              // 平移时触发，payload: { x, y, zoom }
   'zoom',             // 缩放时触发，payload: { x, y, zoom }
   'background-click', // 点击背景时触发（用于取消选中）
+  'drop-asset',       // 从素材库拖拽素材到画布时触发，payload: { asset, worldX, worldY }
   // 以下为兼容 CanvasView 旧接口声明，本组件不主动触发
   'panel-edit',
   'panel-action',
@@ -284,6 +285,30 @@ onBeforeUnmount(() => {
   // 重置 store 的 Space 状态，避免遗留
   store._isSpacePressed = false
 })
+
+// ---------- 拖拽素材到画布 ----------
+// 接收从素材库拖出的素材，转换为世界坐标后 emit 给父组件创建节点
+function handleDragOver(e) {
+  // 仅接收素材拖拽（application/x-asset），不干扰文件拖拽上传
+  if (e.dataTransfer && e.dataTransfer.types.includes('application/x-asset')) {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+  }
+}
+
+function handleDrop(e) {
+  const assetData = e.dataTransfer?.getData('application/x-asset')
+  if (!assetData) return
+  e.preventDefault()
+  try {
+    const asset = JSON.parse(assetData)
+    // 屏幕坐标转世界坐标
+    const world = store.screenToWorld(e.clientX, e.clientY)
+    emit('drop-asset', { asset, worldX: world.x, worldY: world.y })
+  } catch (err) {
+    console.warn('[infinite-canvas] 素材 drop 解析失败:', err)
+  }
+}
 </script>
 
 <template>
@@ -292,6 +317,8 @@ onBeforeUnmount(() => {
     class="infinite-canvas"
     :style="{ background: currentTheme.canvas.background, cursor: cursorStyle }"
     @pointerdown="handlePointerDown"
+    @dragover="handleDragOver"
+    @drop="handleDrop"
   >
     <!-- 背景网格层（dots / lines / blank），pointer-events none，透明度 0.4 -->
     <div class="infinite-canvas-grid" :style="gridStyle" />

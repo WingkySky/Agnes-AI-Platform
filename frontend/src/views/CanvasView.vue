@@ -76,6 +76,7 @@
         ref="canvasRef"
         @background-click="handleBackgroundClick"
         @pointerdown="handleCanvasPointerDown"
+        @drop-asset="handleCanvasDropAsset"
       >
         <!-- 连线层（不传 props 时自动使用 store 数据） -->
         <CanvasConnectionsLayer />
@@ -1392,6 +1393,34 @@ async function handleUseAsset(asset) {
   ElMessage.success('已创建节点')
 }
 
+// 拖拽素材到画布：在 drop 的世界坐标位置创建节点
+function handleCanvasDropAsset({ asset, worldX, worldY }) {
+  if (!asset?.type || !asset?.url) return
+  const size = NODE_DEFAULT_SIZES[asset.type] ?? NODE_DEFAULT_SIZES.text
+  store.pushSnapshot()
+  const id = store.addPanel({
+    type: asset.type,
+    name: asset.name || NODE_NAMES[asset.type] || '节点',
+    x: worldX - size.width / 2,
+    y: worldY - size.height / 2,
+    width: size.width,
+    height: size.height,
+    content: {},
+  })
+  // 历史记录的视频用后端流式接口，避免直接加载完整文件
+  const nodeUrl = asset.source === 'history' && asset.type === 'video'
+    ? `/api/history/video/${asset.id}/stream`
+    : asset.url
+  store.updatePanel(id, {
+    content: {
+      content: nodeUrl,
+      status: 'success',
+      prompt: asset.prompt || '',
+    },
+  })
+  ElMessage.success('已创建节点')
+}
+
 // 删除素材：从素材库移除
 async function handleDeleteAsset(id) {
   if (!id) return
@@ -1413,14 +1442,15 @@ async function handleUploadAssetFiles(files) {
     const assetStore = useAssetStore()
     let count = 0
     for (const file of files) {
-      const url = URL.createObjectURL(file)
       const type = file.type.startsWith('image/') ? 'image'
         : file.type.startsWith('video/') ? 'video'
         : file.type.startsWith('audio/') ? 'audio'
         : 'image'
+      // 传入 blob（File 对象继承自 Blob），由 assetStore 持久化到 IndexedDB
+      // 刷新页面后从 IndexedDB 读取 Blob 重新创建 object URL，不会失效
       await assetStore.registerAsset({
         type,
-        url,
+        blob: file,
         name: file.name,
         prompt: '',
       })

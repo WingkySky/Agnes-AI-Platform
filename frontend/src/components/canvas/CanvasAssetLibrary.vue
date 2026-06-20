@@ -12,7 +12,15 @@
 -->
 
 <template>
-  <div class="asset-library-panel" :style="panelStyle">
+  <div
+    class="asset-library-panel"
+    :class="{ 'drag-over': isDragOver }"
+    :style="panelStyle"
+    @dragover.prevent="onPanelDragOver"
+    @dragenter.prevent="onPanelDragEnter"
+    @dragleave.prevent="onPanelDragLeave"
+    @drop.prevent="onPanelDrop"
+  >
     <!-- 标题栏 -->
     <div class="asset-header">
       <div class="asset-title-wrap">
@@ -88,37 +96,44 @@
         :key="item.uid"
         class="asset-card"
         :title="item.name"
+        draggable="true"
         @click="$emit('use-asset', item)"
         @mouseenter="onCardHover(item)"
         @mouseleave="onCardLeave"
+        @dragstart="onCardDragStart(item, $event)"
       >
         <!-- 缩略图（完整显示，不裁剪，固定高度） -->
         <div class="card-thumb">
+          <!-- 图片：直接显示 -->
           <img
             v-if="item.type === 'image'"
             :src="item.thumbUrl || item.url"
             :alt="item.name"
             loading="lazy"
           />
-          <img
-            v-else-if="item.type === 'video' && item.thumbUrl"
-            :src="item.thumbUrl"
-            :alt="item.name"
-            loading="lazy"
-          />
-          <video
-            v-else-if="item.type === 'video'"
-            :src="item.url"
-            :poster="item.posterUrl"
-            preload="metadata"
-            muted
-          />
+          <!-- 视频：首帧缩略图 + hover 时 GIF 动图覆盖 -->
+          <template v-else-if="item.type === 'video'">
+            <img
+              v-if="item.thumbUrl"
+              :src="item.thumbUrl"
+              :alt="item.name"
+              loading="lazy"
+              class="video-static-thumb"
+            />
+            <!-- hover 时加载 GIF 动图预览 -->
+            <img
+              v-if="previewItem?.uid === item.uid && videoPreviews[item.id]"
+              :src="videoPreviews[item.id]"
+              :alt="item.name"
+              class="video-gif-preview"
+            />
+          </template>
           <span v-else class="card-thumb-icon">
-            <Music2 :size="28" />
+            <Music2 :size="24" />
           </span>
           <!-- 视频播放标识 -->
           <span v-if="item.type === 'video'" class="card-play-icon">
-            <Play :size="20" />
+            <Play :size="18" />
           </span>
           <!-- 来源标签 -->
           <span class="card-source-badge" :class="item.source">
@@ -181,23 +196,31 @@
       class="card-preview-global"
       :style="previewStyle"
     >
+      <!-- 图片：直接显示大图 -->
       <img
         v-if="previewItem.type === 'image'"
         :src="previewItem.thumbUrl || previewItem.url"
         :alt="previewItem.name"
       />
-      <img
-        v-else-if="previewItem.type === 'video' && previewItem.thumbUrl"
-        :src="previewItem.thumbUrl"
-        :alt="previewItem.name"
-      />
-      <video
-        v-else-if="previewItem.type === 'video'"
-        :src="previewItem.url"
-        :poster="previewItem.posterUrl"
-        controls
-        muted
-      />
+      <!-- 视频：GIF 动图预览（可动画面），加载中显示首帧缩略图 -->
+      <template v-else-if="previewItem.type === 'video'">
+        <img
+          v-if="previewItem.thumbUrl"
+          :src="previewItem.thumbUrl"
+          :alt="previewItem.name"
+          class="preview-video-poster"
+        />
+        <img
+          v-if="videoPreviews[previewItem.id]"
+          :src="videoPreviews[previewItem.id]"
+          :alt="previewItem.name"
+          class="preview-video-gif"
+        />
+        <div v-else class="preview-loading">
+          <Loader2 :size="20" class="spin-icon" />
+          <span>加载预览...</span>
+        </div>
+      </template>
       <div v-if="previewItem.name" class="preview-name">{{ previewItem.name }}</div>
     </div>
   </Teleport>
@@ -214,7 +237,7 @@
  * - 本地素材支持删除 + 上传新文件
  * - 悬浮预览通过 Teleport + position:fixed，避免被面板裁剪
  * ===================================================== */
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { X, Trash2, Music2, Inbox, Loader2, History, FolderOpen, Upload, Play, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import { useAssetStore } from '@/stores/asset'
 import { getHistoryList } from '@/api/history'
@@ -382,12 +405,67 @@ async function onFileSelected(e) {
   e.target.value = ''
 }
 
+// ---------- 拖拽上传到素材库面板 ----------
+const isDragOver = ref(false)
+
+function onPanelDragEnter(e) {
+  // 仅当拖入的是文件时才高亮
+  if (e.dataTransfer && e.dataTransfer.types.includes('Files')) {
+    isDragOver.value = true
+  }
+}
+
+function onPanelDragOver(e) {
+  // 必须 preventDefault 才能触发 drop；设置 effectAllowed 提示
+  if (e.dataTransfer && e.dataTransfer.types.includes('Files')) {
+    e.dataTransfer.dropEffect = 'copy'
+  }
+}
+
+function onPanelDragLeave(e) {
+  // 仅当离开面板本身（而非子元素）时才取消高亮
+  if (e.target === e.currentTarget) {
+    isDragOver.value = false
+  }
+}
+
+function onPanelDrop(e) {
+  isDragOver.value = false
+  const files = Array.from(e.dataTransfer?.files || [])
+  if (files.length === 0) return
+  emit('upload-asset', files)
+}
+
+// ---------- 拖拽素材到画布 ----------
+// dragstart 时把素材信息写入 dataTransfer，画布 drop 时读取并创建节点
+function onCardDragStart(item, e) {
+  // 拖拽开始时立即隐藏悬浮预览，避免阻碍拖拽视线
+  previewItem.value = null
+  // 设置拖拽效果
+  e.dataTransfer.effectAllowed = 'copy'
+  // 写入素材数据（JSON 字符串），画布通过 'application/x-asset' 类型读取
+  e.dataTransfer.setData('application/x-asset', JSON.stringify({
+    id: item.id,
+    type: item.type,
+    url: item.url,
+    thumbUrl: item.thumbUrl,
+    name: item.name,
+    prompt: item.prompt,
+    source: item.source,
+  }))
+  // 同时设置 text/plain 兼容性
+  e.dataTransfer.setData('text/plain', item.name || item.url || '')
+}
+
 // ---------- 悬浮放大预览（Teleport + position:fixed） ----------
 // 鼠标悬浮卡片时，在面板左侧显示放大预览
+// 视频卡片 hover 时懒加载 GIF 动图预览（参考 HistoryView 的 ffmpeg 渲染效果）
 const previewItem = ref(null)
 const previewX = ref(0)
 const previewY = ref(0)
 const gridRef = ref(null)
+const videoPreviews = reactive({}) // { [id]: gifUrl } 已加载的视频 GIF 预览
+const previewLoading = reactive({}) // { [id]: boolean } GIF 加载状态
 
 function onCardHover(item) {
   previewItem.value = item
@@ -395,6 +473,30 @@ function onCardHover(item) {
   requestAnimationFrame(() => {
     updatePreviewPosition()
   })
+  // 视频：懒加载 GIF 动图预览
+  if (item.type === 'video' && item.source === 'history') {
+    loadVideoPreview(item.id)
+  }
+}
+
+// 加载视频 GIF 预览（后端 ffmpeg 生成，悬停时可动）
+async function loadVideoPreview(id) {
+  if (videoPreviews[id] || previewLoading[id]) return
+  previewLoading[id] = true
+  try {
+    const url = `/api/history/video/${id}/preview`
+    await new Promise((resolve, reject) => {
+      const img = new Image()
+      img.onload = resolve
+      img.onerror = reject
+      img.src = url
+    })
+    videoPreviews[id] = url
+  } catch (err) {
+    console.warn('[asset-library] GIF 预览加载失败 id=' + id, err)
+  } finally {
+    previewLoading[id] = false
+  }
 }
 
 function updatePreviewPosition() {
@@ -470,6 +572,18 @@ defineExpose({
   z-index: 45;
   overflow: hidden;
   pointer-events: auto;
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+
+/* 拖拽文件上传时面板高亮提示 */
+.asset-library-panel.drag-over {
+  border-color: #6b9cff;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.2), inset 4px 0 0 #6b9cff;
+}
+
+/* 拖拽中的卡片降低透明度 */
+.asset-card[draggable="true"]:active {
+  opacity: 0.5;
 }
 
 /* 标题栏 */
@@ -615,10 +729,10 @@ defineExpose({
 .asset-grid {
   flex: 1;
   overflow-y: auto;
-  padding: 14px;
+  padding: 12px;
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
   align-content: start;
 }
 
@@ -683,7 +797,7 @@ defineExpose({
 /* 缩略图（完整显示，不裁剪，固定高度确保布局稳定） */
 .card-thumb {
   width: 100%;
-  height: 150px;
+  height: 110px;
   overflow: hidden;
   background: rgba(128, 128, 128, 0.12);
   display: flex;
@@ -692,15 +806,34 @@ defineExpose({
   position: relative;
 }
 
-.card-thumb img,
-.card-thumb video {
-  max-width: 100%;
-  max-height: 100%;
+/* 图片/视频缩略图：填满容器，object-fit:contain 保持比例完整显示 */
+/* 用 width/height:100% 代替 max-width/max-height，避免 flex 布局中大图 max-height 失效 */
+.card-thumb > img {
+  width: 100%;
+  height: 100%;
   object-fit: contain;
 }
 
 .card-thumb-icon {
   opacity: 0.3;
+}
+
+/* 视频静态首帧缩略图 */
+.video-static-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  transition: opacity 0.2s ease;
+}
+
+/* 视频 hover 时的 GIF 动图预览（覆盖在缩略图上） */
+.video-gif-preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  z-index: 1;
 }
 
 /* 视频播放标识 */
@@ -712,26 +845,33 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.5);
   color: #fff;
   backdrop-filter: blur(4px);
   pointer-events: none;
+  z-index: 2;
+}
+
+/* hover 时隐藏播放图标（GIF 预览接管） */
+.asset-card:hover .card-play-icon {
+  opacity: 0;
+  transition: opacity 0.2s;
 }
 
 /* 来源标签 */
 .card-source-badge {
   position: absolute;
-  top: 8px;
-  left: 8px;
-  padding: 2px 8px;
+  top: 6px;
+  left: 6px;
+  padding: 1px 6px;
   border-radius: 4px;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
   backdrop-filter: blur(4px);
-  letter-spacing: 0.5px;
+  letter-spacing: 0.3px;
 }
 
 .card-source-badge.history {
@@ -747,11 +887,11 @@ defineExpose({
 /* 类型标签 */
 .card-type-badge {
   position: absolute;
-  top: 8px;
-  right: 8px;
-  padding: 2px 8px;
+  top: 6px;
+  right: 6px;
+  padding: 1px 6px;
   border-radius: 4px;
-  font-size: 10px;
+  font-size: 9px;
   background: rgba(0, 0, 0, 0.55);
   color: #fff;
   backdrop-filter: blur(4px);
@@ -759,9 +899,9 @@ defineExpose({
 
 /* 名称 */
 .card-name {
-  padding: 8px 10px;
-  font-size: 11px;
-  line-height: 1.4;
+  padding: 6px 8px;
+  font-size: 10px;
+  line-height: 1.3;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -898,6 +1038,44 @@ defineExpose({
   object-fit: contain;
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.3);
+}
+
+/* 视频预览：首帧缩略图（底层） */
+.card-preview-global .preview-video-poster {
+  width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+/* 视频预览：GIF 动图（覆盖在首帧上） */
+.card-preview-global .preview-video-gif {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  width: calc(100% - 16px);
+  max-height: 320px;
+  object-fit: contain;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.3);
+  z-index: 1;
+}
+
+/* 视频预览加载中提示 */
+.card-preview-global .preview-loading {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: #8ba3c9;
+  font-size: 12px;
+  z-index: 2;
 }
 
 .card-preview-global .preview-name {

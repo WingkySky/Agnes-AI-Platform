@@ -2,12 +2,15 @@
  * 统一资源库（assets）
  *  - 管理画布中已生成的图片/视频等可复用资源
  *  - 持久化到 localforage；运行时状态通过 Pinia store 维护
- *  - 资源条目：{ id, type, url, posterUrl, prompt, sourceNodeId, createdAt }
+ *  - 资源条目：{ id, type, url, posterUrl, prompt, sourceNodeId, hasBlob, createdAt }
  *    · type: 'image' | 'video'
- *    · url: 资源在线/本地地址
+ *    · url: 资源在线/本地地址（本地上传的为运行时 object URL，刷新后由 blob 重建）
  *    · posterUrl: 视频封面（可选）
  *    · prompt: 生成时使用的提示词（可选）
  *    · sourceNodeId: 来源画布节点 id（可选）
+ *    · hasBlob: 是否有本地 blob 数据（本地上传的素材为 true）
+ *  - 本地上传的文件 Blob 单独存到 localforage 的 `agnes_asset_blob_{id}` key
+ *    刷新页面时从 IndexedDB 读取 Blob 重新创建 object URL，确保持久化
  * ===================================================== */
 
 import { defineStore } from 'pinia'
@@ -45,6 +48,7 @@ async function getAssetStore() {
 }
 
 const INDEX_KEY = 'agnes_asset_index'
+const BLOB_KEY_PREFIX = 'agnes_asset_blob_'
 
 /** 生成唯一 ID */
 function uid() {
@@ -79,25 +83,41 @@ export const useAssetStore = defineStore('asset', {
   actions: {
     /**
      * 注册一条新资源
-     * - data: { type, url, posterUrl?, prompt?, sourceNodeId?, name? }
+     * - data: { type, url?, blob?, posterUrl?, prompt?, sourceNodeId?, name? }
+     * - 如果传入 blob（本地上传的 File 对象），将 Blob 持久化到 IndexedDB，
+     *   并创建运行时 object URL 作为 url
+     * - 如果传入 url（如生成结果的在线 URL），直接使用
      * - 自动补 id / createdAt / updatedAt
      * - 返回新增的完整资源对象
      */
     async registerAsset(data) {
-      if (!data || !data.url) {
+      if (!data || (!data.url && !data.blob)) {
         // eslint-disable-next-line no-console
-        console.warn('[asset] registerAsset 缺少 url')
+        console.warn('[asset] registerAsset 缺少 url 或 blob')
         return null
       }
+      const id = uid()
       const now = new Date().toISOString()
+      let url = data.url ?? ''
+      let hasBlob = false
+
+      // 本地上传的文件：Blob 持久化到 IndexedDB，创建运行时 object URL
+      if (data.blob) {
+        const store = await getAssetStore()
+        await store.setItem(BLOB_KEY_PREFIX + id, data.blob)
+        url = URL.createObjectURL(data.blob)
+        hasBlob = true
+      }
+
       const asset = {
-        id: uid(),
+        id,
         type: data.type ?? 'image',
-        url: data.url,
+        url,
         posterUrl: data.posterUrl ?? '',
         prompt: data.prompt ?? '',
         name: data.name ?? '',
         sourceNodeId: data.sourceNodeId ?? null,
+        hasBlob,
         createdAt: now,
         updatedAt: now,
       }
@@ -110,6 +130,14 @@ export const useAssetStore = defineStore('asset', {
     async removeAsset(id) {
       const idx = this.assets.findIndex((a) => a.id === id)
       if (idx === -1) return false
+      const asset = this.assets[idx]
+      // 释放运行时 object URL
+      if (asset.hasBlob && asset.url) {
+        URL.revokeObjectURL(asset.url)
+      }
+      // 删除 IndexedDB 中的 Blob 数据
+      const store = await getAssetStore()
+      await store.removeItem(BLOB_KEY_PREFIX + id)
       this.assets.splice(idx, 1)
       await this._persist()
       return true
@@ -126,6 +154,16 @@ export const useAssetStore = defineStore('asset', {
 
     /** 清空所有资源 */
     async clearAll() {
+      // 释放所有 object URL 并删除 Blob 数据
+      const store = await getAssetStore()
+      for (const asset of this.assets) {
+        if (asset.hasBlob && asset.url) {
+          URL.revokeObjectURL(asset.url)
+        }
+        if (asset.hasBlob) {
+          await store.removeItem(BLOB_KEY_PREFIX + asset.id)
+        }
+      }
       this.assets = []
       await this._persist()
     },
@@ -137,6 +175,19 @@ export const useAssetStore = defineStore('asset', {
       try {
         const assets = await store.getItem(INDEX_KEY)
         if (Array.isArray(assets)) {
+          // 为有 blob 的 asset 从 IndexedDB 读取 Blob，重新创建 object URL
+          for (const asset of assets) {
+            if (asset.hasBlob) {
+              const blob = await store.getItem(BLOB_KEY_PREFIX + asset.id)
+              if (blob) {
+                asset.url = URL.createObjectURL(blob)
+              } else {
+                // Blob 数据丢失，标记为不可用
+                asset.hasBlob = false
+                asset.url = ''
+              }
+            }
+          }
           this.assets = assets
         }
       } catch {
@@ -150,7 +201,8 @@ export const useAssetStore = defineStore('asset', {
       try {
         const store = await getAssetStore()
         // 关键：this.assets 是 Pinia Proxy 响应式数组，IndexedDB 无法结构化克隆 Proxy。
-        // 必须先 JSON 序列化剥离 Proxy，转成纯数组后再写入，否则会抛 DataCloneError。
+        // 必须先 JSON 序列化剥离 Proxy，转成纯数组后再写入，否则会抛 Data CloneError。
+        // 注意：hasBlob 标记会保留，但 Blob 数据本身存在单独的 key 中，不在此数组内。
         const plain = JSON.parse(JSON.stringify(this.assets))
         await store.setItem(INDEX_KEY, plain)
       } catch (e) {
