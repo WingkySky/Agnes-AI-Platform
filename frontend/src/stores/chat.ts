@@ -25,6 +25,68 @@ import {
   mediaCallback,
 } from '@/api/chat'
 import { useTaskQueueStore } from '@/stores/taskQueue'
+import type {
+  ChatSession,
+  ChatMessage,
+  MediaItem,
+  SSEEvent,
+  MessageAttachment,
+  MediaStatusResponse,
+} from '@/types'
+
+// ---------- State 接口 ----------
+interface ChatState {
+  // 会话列表
+  sessions: ChatSession[]
+  sessionsTotal: number
+  // 当前活跃会话 ID
+  activeSessionId: number | null
+  // 当前会话的消息列表
+  messages: ChatMessage[]
+  // 是否正在加载消息
+  loadingMessages: boolean
+  // 是否正在发送消息（等待 AI 回复）
+  sending: boolean
+  // 当前流式回复的临时内容
+  streamingContent: string
+  // 当前流式回复中的工具调用信息
+  streamingToolCalls: StreamingToolCall[]
+  // 媒体轮询定时器（taskId -> timerId）
+  mediaPollTimers: Record<string, ReturnType<typeof setInterval>>
+  // 媒体状态缓存（taskId -> status info）
+  mediaStatusMap: Record<string, MediaStatusResponse>
+  // 媒体轮询连续失败计数（taskId -> count）
+  mediaPollFailCounts: Record<string, number>
+  // 任务ID -> 消息ID 映射（关键：解决临时 ID / 真实 ID 异步冲突）
+  // 消息刚创建时 msg.id 是 Date.now() 临时值；收到 assistant_message 事件后才变为真实 DB ID
+  // 但媒体轮询回调需要真实 message_id，因此轮询完成时通过此映射查找当前正确的 message.id
+  mediaTaskToMessageId: Record<string, number>
+  // AbortController（用于取消流式请求）
+  _abortController: AbortController | null
+  // 是否已完成初始化（配合 keep-alive 防止重复加载消息覆盖内存状态）
+  _initialized: boolean
+  // 会话状态缓存（切换会话时保留当前会话的消息，回来时从缓存恢复，避免丢失流式内容）
+  // 格式：{ [sessionId]: { messages, streamingContent, streamingToolCalls, sending } }
+  _sessionCache: Record<string, SessionCacheEntry>
+  // 待回写的媒体任务 ID 集合
+  _pendingCallbackIds?: Set<string>
+}
+
+/** 流式工具调用信息 */
+interface StreamingToolCall {
+  tool: string
+  args?: Record<string, unknown>
+  status: 'calling' | 'done'
+  result?: SSEEvent['result']
+}
+
+/** 会话缓存条目 */
+interface SessionCacheEntry {
+  messages: ChatMessage[]
+  streamingContent: string
+  streamingToolCalls: StreamingToolCall[]
+  sending: boolean
+}
 
 // 媒体轮询间隔
 const MEDIA_POLL_INTERVAL = 3000
@@ -34,7 +96,7 @@ const MAX_POLL_FAIL_COUNT = 5
 const STORAGE_KEY = 'agnes_chat_state_v1'
 
 export const useChatStore = defineStore('chat', {
-  state: () => ({
+  state: (): ChatState => ({
     // 会话列表
     sessions: [],
     sessionsTotal: 0,
@@ -71,11 +133,11 @@ export const useChatStore = defineStore('chat', {
 
   getters: {
     // 当前活跃会话
-    activeSession(state) {
+    activeSession(state): ChatSession | null {
       return state.sessions.find(s => s.id === state.activeSessionId) || null
     },
     // 是否有活跃会话
-    hasActiveSession(state) {
+    hasActiveSession(state): boolean {
       return state.activeSessionId !== null
     },
   },
@@ -86,33 +148,33 @@ export const useChatStore = defineStore('chat', {
     // =====================================================
 
     /** 加载会话列表 */
-    async loadSessions() {
+    async loadSessions(): Promise<void> {
       try {
-        const data = await getChatSessions({ page: 1, page_size: 50 })
+        const data = await getChatSessions({ page: 1, page_size: 50 }) as { items?: ChatSession[]; total?: number }
         this.sessions = data.items || []
         this.sessionsTotal = data.total || 0
-      } catch (e) {
+      } catch (e: unknown) {
         console.error('[Chat] 加载会话列表失败:', e)
       }
     },
 
     /** 创建新会话 */
-    async newSession(title) {
+    async newSession(title?: string): Promise<ChatSession> {
       try {
-        const session = await createChatSession({ title })
+        const session = await createChatSession({ title }) as ChatSession
         this.sessions.unshift(session)
         this.activeSessionId = session.id
         this.messages = []
         this._saveToStorage()
         return session
-      } catch (e) {
+      } catch (e: unknown) {
         console.error('[Chat] 创建会话失败:', e)
         throw e
       }
     },
 
     /** 切换活跃会话 */
-    async switchSession(sessionId) {
+    async switchSession(sessionId: number): Promise<void> {
       if (sessionId === this.activeSessionId) return
 
       // ── 切换前：中止当前流式请求和媒体轮询 ──
@@ -136,7 +198,7 @@ export const useChatStore = defineStore('chat', {
     },
 
     /** 删除会话 */
-    async removeSession(sessionId) {
+    async removeSession(sessionId: number): Promise<void> {
       try {
         await deleteChatSession(sessionId)
         this.sessions = this.sessions.filter(s => s.id !== sessionId)
@@ -151,16 +213,16 @@ export const useChatStore = defineStore('chat', {
           this.streamingToolCalls = []
         }
         this._saveToStorage()
-      } catch (e) {
+      } catch (e: unknown) {
         console.error('[Chat] 删除会话失败:', e)
         throw e
       }
     },
 
     /** 修改会话标题 */
-    async updateSessionTitle(sessionId, newTitle) {
+    async updateSessionTitle(sessionId: number, newTitle: string): Promise<ChatSession> {
       try {
-        const updated = await updateChatSession(sessionId, newTitle)
+        const updated = await updateChatSession(sessionId, newTitle) as ChatSession
         // 更新本地 sessions 列表
         const session = this.sessions.find(s => s.id === sessionId)
         if (session) {
@@ -169,16 +231,16 @@ export const useChatStore = defineStore('chat', {
         }
         this._saveToStorage()
         return updated
-      } catch (e) {
+      } catch (e: unknown) {
         console.error('[Chat] 修改会话标题失败:', e)
         throw e
       }
     },
 
     /** 使用 AI 自动总结会话主题（生成新标题） */
-    async autoSummarizeSession(sessionId) {
+    async autoSummarizeSession(sessionId: number): Promise<ChatSession> {
       try {
-        const updated = await summarizeChatSession(sessionId)
+        const updated = await summarizeChatSession(sessionId) as ChatSession
         // 更新本地 sessions 列表
         const session = this.sessions.find(s => s.id === sessionId)
         if (session) {
@@ -187,18 +249,18 @@ export const useChatStore = defineStore('chat', {
         }
         this._saveToStorage()
         return updated
-      } catch (e) {
+      } catch (e: unknown) {
         console.error('[Chat] 自动总结会话失败:', e)
         throw e
       }
     },
 
     /** 加载会话消息（从数据库恢复，含 media_items） */
-    async loadMessages(sessionId) {
+    async loadMessages(sessionId: number): Promise<void> {
       if (!sessionId) return
       this.loadingMessages = true
       try {
-        const data = await getChatMessages(sessionId)
+        const data = await getChatMessages(sessionId) as { items?: ChatMessage[] }
         this.messages = data.items || []
 
         // 检查是否有进行中的媒体任务，启动轮询
@@ -211,7 +273,7 @@ export const useChatStore = defineStore('chat', {
             }
           }
         }
-      } catch (e) {
+      } catch (e: unknown) {
         console.error('[Chat] 加载消息失败:', e)
       } finally {
         this.loadingMessages = false
@@ -223,7 +285,7 @@ export const useChatStore = defineStore('chat', {
     // =====================================================
 
     /** 发送消息并处理流式响应 */
-    async sendMessage(content, attachments = []) {
+    async sendMessage(content: string, attachments: MessageAttachment[] = []): Promise<void> {
       if (!this.activeSessionId) {
         // 自动创建新会话（标题用默认的"新对话"，等 AI 回复完成后自动总结）
         await this.newSession()
@@ -233,9 +295,9 @@ export const useChatStore = defineStore('chat', {
       if (!content.trim() && (!attachments || attachments.length === 0)) return
 
       // 添加用户消息到列表（乐观更新）
-      const userMsg = {
+      const userMsg: ChatMessage = {
         id: Date.now(),
-        session_id: this.activeSessionId,
+        session_id: this.activeSessionId!,
         role: 'user',
         content: content,
         attachments: attachments || [],
@@ -254,9 +316,9 @@ export const useChatStore = defineStore('chat', {
 
       // 添加 AI 消息占位（流式更新）
       // 注意：id 先用 Date.now() 临时值，收到 assistant_message SSE 事件后更新为真实 DB ID
-      const assistantMsg = {
+      const assistantMsg: ChatMessage = {
         id: Date.now() + 1,
-        session_id: this.activeSessionId,
+        session_id: this.activeSessionId!,
         role: 'assistant',
         content: '',
         media_items: [],  // 使用 media_items 数组
@@ -268,21 +330,22 @@ export const useChatStore = defineStore('chat', {
 
       try {
         await sendMessageStream(
-          this.activeSessionId,
+          this.activeSessionId!,
           content,
           attachments,
-          (event) => this._handleSSEEvent(event),
+          (event: SSEEvent) => this._handleSSEEvent(event),
           this._abortController.signal,
         )
-      } catch (e) {
-        if (e.name === 'AbortError') {
+      } catch (e: unknown) {
+        if (e instanceof Error && e.name === 'AbortError') {
           console.log('[Chat] 流式请求已取消')
         } else {
           console.error('[Chat] 发送消息失败:', e)
           // 更新 AI 消息为错误状态
           const lastMsg = this.messages[this.messages.length - 1]
           if (lastMsg && lastMsg.role === 'assistant') {
-            lastMsg.content = `抱歉，发生了错误：${e.message}`
+            const errMsg = e instanceof Error ? e.message : String(e)
+            lastMsg.content = `抱歉，发生了错误：${errMsg}`
             lastMsg._streaming = false
           }
         }
@@ -294,14 +357,14 @@ export const useChatStore = defineStore('chat', {
     },
 
     /** 处理 SSE 事件 */
-    _handleSSEEvent(event) {
+    _handleSSEEvent(event: SSEEvent): void {
       switch (event.type) {
         case 'user_message':
           // 用户消息已保存到数据库（更新 ID）
           if (this.messages.length >= 2) {
             const userMsg = this.messages[this.messages.length - 2]
             if (userMsg.role === 'user') {
-              userMsg.id = event.message.id
+              userMsg.id = event.message!.id
             }
           }
           break
@@ -330,14 +393,14 @@ export const useChatStore = defineStore('chat', {
 
         case 'text':
           // AI 文本增量
-          this.streamingContent += event.content
+          this.streamingContent += event.content || ''
           this._updateStreamingMessage()
           break
 
         case 'tool_call':
           // 工具调用开始
           this.streamingToolCalls.push({
-            tool: event.tool,
+            tool: event.tool!,
             args: event.args,
             status: 'calling',
           })
@@ -357,11 +420,11 @@ export const useChatStore = defineStore('chat', {
             const result = event.result
             // 只添加有效的媒体项（有 media_type 且非 error）
             if (result.media_type && result.status !== 'error') {
-              const mediaItem = {
+              const mediaItem: MediaItem = {
                 type: result.media_type,
                 url: result.url || '',
                 task_id: result.task_id || result.video_id || '',
-                status: result.status || 'pending',
+                status: (result.status as MediaItem['status']) || 'pending',
               }
               // 确保 media_items 是数组
               if (!lastMsg.media_items) {
@@ -388,7 +451,6 @@ export const useChatStore = defineStore('chat', {
           if (event.message) {
             const lastMsg = this.messages[this.messages.length - 1]
             if (lastMsg && lastMsg.role === 'assistant') {
-              const previousId = lastMsg.id
               lastMsg.id = event.message.id
               lastMsg.content = event.message.content || this.streamingContent
               // 从数据库恢复 media_items（确保与后端一致）
@@ -417,9 +479,9 @@ export const useChatStore = defineStore('chat', {
                   // 延迟一点确保响应式更新完成
                   setTimeout(() => {
                     if (item.status === 'success' && item.url) {
-                      this._mediaCallbackToDB(event.message.id, item.task_id, item.url, 'success')
+                      this._mediaCallbackToDB(event.message!.id, item.task_id, item.url, 'success')
                     } else if (item.status === 'failed') {
-                      this._mediaCallbackToDB(event.message.id, item.task_id, '', 'failed')
+                      this._mediaCallbackToDB(event.message!.id, item.task_id, '', 'failed')
                     }
                   }, 0)
                 }
@@ -433,7 +495,7 @@ export const useChatStore = defineStore('chat', {
           // 错误事件
           const errMsg = this.messages[this.messages.length - 1]
           if (errMsg && errMsg.role === 'assistant') {
-            errMsg.content += `\n\n❌ 错误：${event.content}`
+            errMsg.content += `\n\n❌ 错误：${event.content || ''}`
             errMsg._streaming = false
           }
           break
@@ -464,7 +526,7 @@ export const useChatStore = defineStore('chat', {
     },
 
     /** 更新流式消息内容 */
-    _updateStreamingMessage() {
+    _updateStreamingMessage(): void {
       const lastMsg = this.messages[this.messages.length - 1]
       if (lastMsg && lastMsg.role === 'assistant' && lastMsg._streaming) {
         lastMsg.content = this.streamingContent
@@ -472,7 +534,7 @@ export const useChatStore = defineStore('chat', {
     },
 
     /** 取消流式请求 */
-    _abortStream() {
+    _abortStream(): void {
       if (this._abortController) {
         this._abortController.abort()
         this._abortController = null
@@ -490,7 +552,7 @@ export const useChatStore = defineStore('chat', {
     // =====================================================
 
     /** 启动媒体生成状态轮询 */
-    _startMediaPoll(taskId, messageId) {
+    _startMediaPoll(taskId: string, messageId: number): void {
       if (this.mediaPollTimers[taskId]) return
 
       // 建立 taskId -> messageId 映射（初始值，收到 assistant_message 后会更新）
@@ -499,9 +561,9 @@ export const useChatStore = defineStore('chat', {
       // 重置失败计数
       this.mediaPollFailCounts[taskId] = 0
 
-      const poll = async () => {
+      const poll = async (): Promise<void> => {
         try {
-          const data = await getMediaStatus(taskId)
+          const data = await getMediaStatus(taskId) as MediaStatusResponse
           // 轮询成功，重置失败计数
           this.mediaPollFailCounts[taskId] = 0
           this.mediaStatusMap[taskId] = data
@@ -513,7 +575,7 @@ export const useChatStore = defineStore('chat', {
           })
 
           if (msg) {
-            const item = msg.media_items.find(i => i.task_id === taskId)
+            const item = msg.media_items!.find(i => i.task_id === taskId)
             if (!item) return
 
             const rawStatus = String(data.status || '').toLowerCase()
@@ -554,7 +616,7 @@ export const useChatStore = defineStore('chat', {
               item.status = 'processing'
             }
           }
-        } catch (e) {
+        } catch (e: unknown) {
           // 累加失败计数
           this.mediaPollFailCounts[taskId] = (this.mediaPollFailCounts[taskId] || 0) + 1
           const failCount = this.mediaPollFailCounts[taskId]
@@ -568,14 +630,15 @@ export const useChatStore = defineStore('chat', {
               return m.media_items.some(item => item.task_id === taskId)
             })
             if (msg) {
-              const item = msg.media_items.find(i => i.task_id === taskId)
+              const item = msg.media_items!.find(i => i.task_id === taskId)
               if (item && item.status !== 'success') {
                 item.status = 'failed'
               }
             }
           } else {
+            const message = e instanceof Error ? e.message : String(e)
             console.warn('[Chat] 媒体状态轮询失败 (%d/%d): taskId=%s, %s',
-              failCount, MAX_POLL_FAIL_COUNT, taskId, e.message)
+              failCount, MAX_POLL_FAIL_COUNT, taskId, message)
           }
         }
       }
@@ -587,7 +650,7 @@ export const useChatStore = defineStore('chat', {
     },
 
     /** 停止媒体轮询 */
-    _stopMediaPoll(taskId) {
+    _stopMediaPoll(taskId: string): void {
       if (this.mediaPollTimers[taskId]) {
         clearInterval(this.mediaPollTimers[taskId])
         delete this.mediaPollTimers[taskId]
@@ -595,14 +658,14 @@ export const useChatStore = defineStore('chat', {
     },
 
     /** 停止所有媒体轮询 */
-    stopAllMediaPolls() {
+    stopAllMediaPolls(): void {
       for (const taskId of Object.keys(this.mediaPollTimers)) {
         this._stopMediaPoll(taskId)
       }
     },
 
     /** 媒体回调 — 回写数据库（健壮处理：404/网络异常不再弹错，仅记录） */
-    async _mediaCallbackToDB(messageId, taskId, mediaUrl, status) {
+    async _mediaCallbackToDB(messageId: number, taskId: string, mediaUrl: string, status: string): Promise<void> {
       if (!messageId || !taskId) return
       try {
         await mediaCallback({
@@ -612,12 +675,13 @@ export const useChatStore = defineStore('chat', {
           status: status,
         })
         console.log('[Chat] 媒体回写成功: msg=%s, task=%s', messageId, taskId)
-      } catch (e) {
+      } catch (e: unknown) {
         // 仅打印警告，不弹出错误
         // 404（消息不存在）通常是因为临时 ID 问题（已通过 _tempId 机制提前避免）
         // 但为了极端情况（如消息被删除）仍能优雅处理，这里只记录
+        const message = e instanceof Error ? e.message : 'unknown'
         console.warn('[Chat] 媒体回写跳过: msg=%s, task=%s, reason=%s',
-          messageId, taskId, e.message || 'unknown')
+          messageId, taskId, message)
       }
     },
 
@@ -626,7 +690,7 @@ export const useChatStore = defineStore('chat', {
     // =====================================================
 
     /** 将聊天生成的媒体任务注册到 taskQueue store（仅注册显示，不启动 taskQueue 自己的轮询） */
-    _registerToTaskQueue(mediaItem, toolResult) {
+    _registerToTaskQueue(mediaItem: MediaItem, toolResult: NonNullable<SSEEvent['result']>): void {
       try {
         const taskQueue = useTaskQueueStore()
         const taskId = mediaItem.task_id
@@ -640,18 +704,19 @@ export const useChatStore = defineStore('chat', {
           resultUrl: mediaItem.url || null,
           backendTaskId: taskId,
         })
-      } catch (e) {
-        console.warn('[Chat] 注册任务到队列失败:', e.message)
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : String(e)
+        console.warn('[Chat] 注册任务到队列失败:', message)
       }
     },
 
     /** 同步更新任务队列中的任务状态 */
-    _updateTaskQueueItem(taskId, status, resultUrl) {
+    _updateTaskQueueItem(taskId: string, status: string, resultUrl: string): void {
       try {
         const taskQueue = useTaskQueueStore()
         // 通过 taskQueue 的 action 更新，确保 Pinia 响应式更新正确触发
-        taskQueue.updateChatTask(taskId, { status, resultUrl })
-      } catch (e) {
+        taskQueue.updateChatTask(taskId, { status: status as 'success' | 'failed', resultUrl })
+      } catch (_) {
         // 忽略
       }
     },
@@ -660,7 +725,7 @@ export const useChatStore = defineStore('chat', {
     // 【持久化】— 页面切换后恢复状态
     // =====================================================
 
-    _saveToStorage() {
+    _saveToStorage(): void {
       if (typeof localStorage === 'undefined') return
       try {
         const data = {
@@ -674,12 +739,12 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    _restoreFromStorage() {
+    _restoreFromStorage(): void {
       if (typeof localStorage === 'undefined') return
       try {
         const raw = localStorage.getItem(STORAGE_KEY)
         if (!raw) return
-        const data = JSON.parse(raw)
+        const data = JSON.parse(raw) as { activeSessionId?: number }
         if (!data) return
 
         // 恢复活跃会话 ID（消息从数据库重新加载）
@@ -692,7 +757,7 @@ export const useChatStore = defineStore('chat', {
     },
 
     /** 初始化 — 应用启动时调用（仅首次生效，配合 keep-alive 防止重复加载） */
-    async init() {
+    async init(): Promise<void> {
       // 防止重复初始化覆盖内存中的消息状态（配合 keep-alive）
       if (this._initialized) return
       this._initialized = true

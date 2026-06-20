@@ -158,11 +158,11 @@
               :title="t('imageViewer.title')"
             />
             <img
-              v-else-if="activeTask.imageB64"
-              :src="'data:image/png;base64,' + activeTask.imageB64"
+              v-else-if="(activeTask as any).imageB64"
+              :src="'data:image/png;base64,' + (activeTask as any).imageB64"
               class="result-img"
               alt="generated"
-              @click="openViewerWithUrl('data:image/png;base64,' + activeTask.imageB64)"
+              @click="openViewerWithUrl('data:image/png;base64,' + (activeTask as any).imageB64)"
               :title="t('imageViewer.title')"
             />
             <div class="result-meta">
@@ -230,7 +230,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
@@ -249,7 +249,7 @@ const { t } = useI18n()
 const viewerVisible = ref(false)
 const viewerUrl = ref('')
 const viewerDownloadUrl = ref('')
-function openViewerWithUrl(url) {
+function openViewerWithUrl(url: string) {
   if (!url) return
   viewerUrl.value = url
   viewerDownloadUrl.value = url
@@ -289,7 +289,7 @@ const mode = ref('text2image')
 const prompt = ref('')
 const size = ref('1280x720')   // 默认横板 16:9，视觉上更通用
 const model = ref('agnes-image-2.1-flash')
-const referenceFileList = ref([])   // 【多图】数组
+const referenceFileList = ref<any[]>([])   // 【多图】数组
 
 // ---------- 使用全局 Store 管理任务 ----------
 const queue = useTaskQueueStore()
@@ -331,7 +331,7 @@ const taskElapsedSec = computed(() => {
 // 结果 URL
 const resultUrl = computed(() => {
   if (!activeTask.value) return ''
-  return activeTask.value.resultUrl || activeTask.value.url || ''
+  return activeTask.value.resultUrl || (activeTask.value as any).url || ''
 })
 
 // 状态标签（使用 i18n 显示本地化名称）
@@ -359,13 +359,13 @@ const canSubmit = computed(() => {
   return true
 })
 
-function appendStylePrompt(tpl) {
+function appendStylePrompt(tpl: string) {
   if (!prompt.value.trim().endsWith(tpl)) {
     prompt.value = prompt.value.trim() + tpl
   }
 }
 
-function handleImageChange(fileList) {
+function handleImageChange(fileList: any) {
   // fileList 为数组（可能为 null 表示清空）
   referenceFileList.value = Array.isArray(fileList) ? fileList : (fileList ? [fileList] : [])
 }
@@ -388,7 +388,7 @@ async function handleGenerate() {
     return
   }
 
-  const params = {
+  const params: Record<string, any> = {
     prompt: prompt.value.trim(),
     model: model.value,
     size: size.value,
@@ -412,7 +412,7 @@ async function handleGenerate() {
     ElMessage.success(t('generate.imageSubmitted'))
   } catch (e) {
     console.error('[ImageView] 提交任务失败：', e)
-    ElMessage.error(t('generate.createTaskFailed') + (e.message || ''))
+    ElMessage.error(t('generate.createTaskFailed') + ((e as Error).message || ''))
   }
 }
 

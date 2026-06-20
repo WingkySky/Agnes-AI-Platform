@@ -81,7 +81,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed } from 'vue'
 import { Compass, Focus, HelpCircle } from 'lucide-vue-next'
 
@@ -129,8 +129,8 @@ const activeStyle = computed(() => ({
 }))
 
 // 滑块输入：将百分比转回倍数后 emit
-function onSliderInput(event) {
-  emit('zoom-change', Number(event.target.value) / 100)
+function onSliderInput(event: Event) {
+  emit('zoom-change', Number((event.target as HTMLInputElement)?.value) / 100)
 }
 
 // 打开快捷键弹窗并 emit show-help

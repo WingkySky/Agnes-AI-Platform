@@ -22,32 +22,40 @@
  *   setLocale('en-US')
  * ===================================================== */
 
-import { reactive, computed, watch } from 'vue'
+import { reactive, computed, watch, type App, type ComputedRef, type WatchStopHandle } from 'vue'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import en from 'element-plus/es/locale/lang/en'
 
-import zhCNPack from './zh-CN.js'
-import enUSPack from './en-US.js'
+import zhCNPack from './zh-CN'
+import enUSPack from './en-US'
+
+// ------ 类型定义 ------
+
+/** 支持的语言类型 */
+export type Locale = 'zh-CN' | 'en-US'
+
+/** 插值参数类型 */
+export type InterpolateValues = Record<string, string | number>
 
 // ------ 常量 ------
 export const STORAGE_KEY = 'agnes_platform_locale'
-export const SUPPORTED_LOCALES = ['zh-CN', 'en-US']
-export const FALLBACK_LOCALE = 'zh-CN'
+export const SUPPORTED_LOCALES: Locale[] = ['zh-CN', 'en-US']
+export const FALLBACK_LOCALE: Locale = 'zh-CN'
 
 // 语言 -> Element Plus locale 对象
-const EP_LOCALE_MAP = {
+const EP_LOCALE_MAP: Record<Locale, typeof zhCn> = {
   'zh-CN': zhCn,
   'en-US': en,
 }
 
 // 所有语言包
-const MESSAGES = {
+const MESSAGES: Record<Locale, typeof zhCNPack> = {
   'zh-CN': zhCNPack,
   'en-US': enUSPack,
 }
 
 // 语言展示名（用于切换器展示）
-export const LOCALE_LABELS = {
+export const LOCALE_LABELS: Record<Locale, string> = {
   'zh-CN': '中文',
   'en-US': 'English',
 }
@@ -65,10 +73,10 @@ export const state = reactive({
  *  2) 浏览器语言是英文系 → en-US
  *  3) 其他 → zh-CN
  */
-function detectInitialLocale() {
+function detectInitialLocale(): Locale {
   if (typeof localStorage !== 'undefined') {
     const saved = localStorage.getItem(STORAGE_KEY)
-    if (saved && SUPPORTED_LOCALES.includes(saved)) return saved
+    if (saved && SUPPORTED_LOCALES.includes(saved as Locale)) return saved as Locale
   }
   if (typeof navigator !== 'undefined' && navigator.language) {
     const lang = navigator.language.toLowerCase()
@@ -83,10 +91,10 @@ function detectInitialLocale() {
  *  e.g. lookup({a:{b:'x'}}, 'a.b') → 'x'
  *       lookup({a:{b:'x'}}, 'a.missing', 'fallback') → 'fallback'
  */
-function lookup(obj, path, fallback) {
+function lookup(obj: Record<string, any>, path: string, fallback?: string): string | undefined {
   if (!obj || !path) return fallback
   const parts = String(path).split('.')
-  let cur = obj
+  let cur: any = obj
   for (const p of parts) {
     if (cur == null || typeof cur !== 'object') return fallback
     cur = cur[p]
@@ -99,7 +107,7 @@ function lookup(obj, path, fallback) {
  * 简单字符串插值：把 {key} 替换为 values[key]
  *  e.g. interpolate('Hello {name}!', { name: 'Agnes' }) → 'Hello Agnes!'
  */
-function interpolate(tpl, values) {
+function interpolate(tpl: string | undefined, values?: InterpolateValues): string {
   if (tpl == null) return ''
   if (!values || typeof values !== 'object') return String(tpl)
   return String(tpl).replace(/\{(\w+)\}/g, (m, k) => {
@@ -114,9 +122,9 @@ function interpolate(tpl, values) {
  *  - key  点分路径，如 'nav.images'
  *  - values 可选，用于 {key} 占位符替换
  */
-export function t(key, values) {
+export function t(key: string, values?: InterpolateValues): string {
   const pack = MESSAGES[state.locale] || MESSAGES[FALLBACK_LOCALE]
-  let value = lookup(pack, key, null)
+  let value = lookup(pack, key, undefined)
   if (value == null) {
     // 回退到默认语言包
     const fbPack = MESSAGES[FALLBACK_LOCALE]
@@ -128,14 +136,14 @@ export function t(key, values) {
 /**
  * 返回 Element Plus 当前语言对应的 locale 对象（用于 <el-config-provider>）
  */
-export function getElementPlusLocale() {
+export function getElementPlusLocale(): typeof zhCn {
   return EP_LOCALE_MAP[state.locale] || EP_LOCALE_MAP[FALLBACK_LOCALE]
 }
 
 /**
  * 切换语言，并持久化到 localStorage。同时更新 <html lang="...">
  */
-export function setLocale(locale) {
+export function setLocale(locale: Locale): void {
   if (!SUPPORTED_LOCALES.includes(locale)) {
     console.warn('[i18n] 不支持的语言：', locale)
     return
@@ -154,9 +162,9 @@ export function setLocale(locale) {
 }
 
 /**
- * 切换到下一个支持的语言（用于简单的“点击切换”按钮）。
+ * 切换到下一个支持的语言（用于简单的"点击切换"按钮）。
  */
-export function toggleLocale() {
+export function toggleLocale(): void {
   const idx = SUPPORTED_LOCALES.indexOf(state.locale)
   const next = SUPPORTED_LOCALES[(idx + 1) % SUPPORTED_LOCALES.length]
   setLocale(next)
@@ -168,10 +176,17 @@ export function toggleLocale() {
  * 实现思路：返回的 t 函数在每次调用时都会读取 state.locale，
  * 因此当语言切换时，使用该 t 函数的 computed / 模板会自动重新计算。
  */
-export function useI18n() {
+export function useI18n(): {
+  t: (key: string, values?: InterpolateValues) => string
+  locale: ComputedRef<Locale>
+  setLocale: (locale: Locale) => void
+  toggleLocale: () => void
+  supportedLocales: Locale[]
+  localeLabels: Record<Locale, string>
+} {
   return {
     // 每次调用都读取 state.locale，使依赖项与 Vue 响应式系统关联
-    t(key, values) {
+    t(key: string, values?: InterpolateValues): string {
       // eslint-disable-next-line no-unused-expressions
       state.locale
       return t(key, values)
@@ -187,8 +202,8 @@ export function useI18n() {
 /**
  * 便捷：订阅语言变化（可用于非 Vue 组件的外部逻辑）
  */
-export function onLocaleChange(callback) {
-  if (typeof callback !== 'function') return () => {}
+export function onLocaleChange(callback: (locale: Locale) => void): WatchStopHandle {
+  if (typeof callback !== 'function') return watch(() => state.locale, () => {})
   return watch(
     () => state.locale,
     (val) => callback(val),
@@ -203,7 +218,7 @@ if (typeof document !== 'undefined' && document.documentElement) {
 
 // ------ Vue 插件形式（可选地通过 app.use(i18n) 注入全局属性 $t）------
 export default {
-  install(app) {
+  install(app: App): void {
     app.config.globalProperties.$t = t
     app.provide('i18n-locale', state)
     app.provide('i18n-t', t)

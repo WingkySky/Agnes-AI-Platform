@@ -1,11 +1,25 @@
 /* Canvas Image Operations — 图像裁剪/分割/旋转/放大工具 */
 
+/** 裁剪区域 */
+interface Rect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/** 图像尺寸 */
+interface ImageSize {
+  width: number
+  height: number
+}
+
 /**
  * 加载图像
- * @param {string} source - 图像 URL 或 base64 data URL
- * @returns {Promise<HTMLImageElement>}
+ * @param source - 图像 URL 或 base64 data URL
+ * @returns Promise<HTMLImageElement>
  */
-export function loadImage(source) {
+export function loadImage(source: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     if (!source) {
       reject(new Error('loadImage: source 为空'))
@@ -22,24 +36,24 @@ export function loadImage(source) {
 /**
  * 内部辅助：加载图像源（统一入口）
  */
-function _loadSource(source) {
+function _loadSource(source: string): Promise<HTMLImageElement> {
   return loadImage(source)
 }
 
 /**
  * 内部辅助：将 canvas 转为 base64 PNG 字符串
  */
-function _canvasToBase64(canvas) {
+function _canvasToBase64(canvas: HTMLCanvasElement): string {
   return canvas.toDataURL('image/png')
 }
 
 /**
  * 裁剪图像
- * @param {string} source
- * @param {{x:number, y:number, width:number, height:number}} rect - 裁剪区域
- * @returns {Promise<string>} base64 PNG
+ * @param source - 图像源
+ * @param rect - 裁剪区域
+ * @returns base64 PNG
  */
-export function cropImage(source, { x, y, width, height }) {
+export function cropImage(source: string, { x, y, width, height }: Rect): Promise<string> {
   return _loadSource(source).then((img) => {
     const sx = Math.max(0, Math.floor(x))
     const sy = Math.max(0, Math.floor(y))
@@ -51,7 +65,7 @@ export function cropImage(source, { x, y, width, height }) {
     const canvas = document.createElement('canvas')
     canvas.width = sw
     canvas.height = sh
-    const ctx = canvas.getContext('2d')
+    const ctx = canvas.getContext('2d')!
     ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
     return _canvasToBase64(canvas)
   })
@@ -59,11 +73,11 @@ export function cropImage(source, { x, y, width, height }) {
 
 /**
  * 将图像等分成 N 份（默认 4 份，2x2 网格）
- * @param {string} source
- * @param {number} count - 等分数量（默认 4）
- * @returns {Promise<Array<string>>} base64 PNG 数组
+ * @param source - 图像源
+ * @param count - 等分数量（默认 4）
+ * @returns base64 PNG 数组
  */
-export function splitImage(source, count = 4) {
+export function splitImage(source: string, count: number = 4): Promise<string[]> {
   return _loadSource(source).then((img) => {
     if (count < 1) {
       throw new Error('splitImage: count 必须 >= 1')
@@ -73,7 +87,7 @@ export function splitImage(source, count = 4) {
     const rows = Math.ceil(count / n)
     const pieceW = Math.floor(img.width / cols)
     const pieceH = Math.floor(img.height / rows)
-    const pieces = []
+    const pieces: string[] = []
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         const sx = c * pieceW
@@ -83,7 +97,7 @@ export function splitImage(source, count = 4) {
         const canvas = document.createElement('canvas')
         canvas.width = sw
         canvas.height = sh
-        const ctx = canvas.getContext('2d')
+        const ctx = canvas.getContext('2d')!
         ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
         pieces.push(_canvasToBase64(canvas))
       }
@@ -94,11 +108,11 @@ export function splitImage(source, count = 4) {
 
 /**
  * 旋转图像（只支持 90/180/270 度）
- * @param {string} source
- * @param {number} degrees - 90 / 180 / 270
- * @returns {Promise<string>} base64 PNG
+ * @param source - 图像源
+ * @param degrees - 90 / 180 / 270
+ * @returns base64 PNG
  */
-export function rotateImage(source, degrees = 90) {
+export function rotateImage(source: string, degrees: number = 90): Promise<string> {
   return _loadSource(source).then((img) => {
     const d = ((degrees % 360) + 360) % 360
     if (d !== 90 && d !== 180 && d !== 270 && d !== 0) {
@@ -108,7 +122,7 @@ export function rotateImage(source, degrees = 90) {
     const isVertical = d === 90 || d === 270
     canvas.width = isVertical ? img.height : img.width
     canvas.height = isVertical ? img.width : img.height
-    const ctx = canvas.getContext('2d')
+    const ctx = canvas.getContext('2d')!
     ctx.save()
     if (d === 90) {
       ctx.translate(canvas.width, 0)
@@ -128,11 +142,11 @@ export function rotateImage(source, degrees = 90) {
 
 /**
  * 放大图像（等比）
- * @param {string} source
- * @param {number} scale - 放大倍数（1~4）
- * @returns {Promise<string>} base64 PNG
+ * @param source - 图像源
+ * @param scale - 放大倍数（1~4）
+ * @returns base64 PNG
  */
-export function upscaleImage(source, scale = 2) {
+export function upscaleImage(source: string, scale: number = 2): Promise<string> {
   return _loadSource(source).then((img) => {
     if (scale < 1 || scale > 4) {
       throw new Error('upscaleImage: scale 必须在 1~4 之间')
@@ -140,7 +154,7 @@ export function upscaleImage(source, scale = 2) {
     const canvas = document.createElement('canvas')
     canvas.width = Math.round(img.width * scale)
     canvas.height = Math.round(img.height * scale)
-    const ctx = canvas.getContext('2d')
+    const ctx = canvas.getContext('2d')!
     ctx.imageSmoothingEnabled = true
     ctx.imageSmoothingQuality = 'high'
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
@@ -150,10 +164,10 @@ export function upscaleImage(source, scale = 2) {
 
 /**
  * 获取图像尺寸
- * @param {string} source
- * @returns {Promise<{width:number, height:number}>}
+ * @param source - 图像源
+ * @returns 图像宽高
  */
-export function getImageSize(source) {
+export function getImageSize(source: string): Promise<ImageSize> {
   return _loadSource(source).then((img) => ({
     width: img.width,
     height: img.height,

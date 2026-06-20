@@ -89,7 +89,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed } from 'vue'
 import { Sun, Moon, CircleDot, Grid2x2, Square, Info } from 'lucide-vue-next'
 import { ElSwitch } from 'element-plus'

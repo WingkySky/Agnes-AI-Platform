@@ -27,15 +27,22 @@
   </div>
 </template>
 
-<script setup>
-import { computed } from 'vue'
+<script setup lang="ts">
+import { computed, type PropType } from 'vue'
+
+// 选项类型定义
+interface RatioOption {
+  value: string
+  w: number
+  h: number
+}
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
   // "image" 表示按具体尺寸；"video" 表示按宽高比
   mode: { type: String, default: 'image' },
   // 自定义选项；未传则用默认集
-  options: { type: Array, default: null },
+  options: { type: Array as PropType<RatioOption[]>, default: null },
 })
 
 const emit = defineEmits(['update:modelValue'])
@@ -72,7 +79,7 @@ const options = computed(() => {
  * - 用 aspect-ratio 保证真实比例
  * - 横向（w >= h）时按最大宽度限制，纵向时按最大高度限制
  */
-function shapeStyle(opt) {
+function shapeStyle(opt: RatioOption) {
   const w = opt.w || 1
   const h = opt.h || 1
   return {
@@ -84,7 +91,7 @@ function shapeStyle(opt) {
   }
 }
 
-function select(opt) {
+function select(opt: RatioOption) {
   if (props.modelValue !== opt.value) {
     emit('update:modelValue', opt.value)
   }

@@ -290,7 +290,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
@@ -326,12 +326,12 @@ const frameRate = ref(24)
 const seed = ref('')
 
 // ---------- 图片状态（图生视频：单张；首尾帧：起始帧+结束帧）----------
-const referenceFile = ref(null)         // image2video 模式的参考图
-const startFrameFile = ref(null)        // keyframes 模式的起始帧
-const endFrameFile = ref(null)          // keyframes 模式的结束帧
+const referenceFile = ref<any>(null)         // image2video 模式的参考图
+const startFrameFile = ref<any>(null)        // keyframes 模式的起始帧
+const endFrameFile = ref<any>(null)          // keyframes 模式的结束帧
 
 // ---------- 视频播放状态 ----------
-const videoEl = ref(null)
+const videoEl = ref<HTMLVideoElement | null>(null)
 const posterUrl = ref('')
 
 // ---------- 使用全局 Store 管理任务 ----------
@@ -386,7 +386,7 @@ const videoUrl = computed(() => {
 // 原始直链 URL（下载、复制链接）
 const rawVideoUrl = computed(() => {
   if (!activeTask.value) return ''
-  return activeTask.value.resultUrl || activeTask.value.url || ''
+  return activeTask.value.resultUrl || (activeTask.value as any).url || ''
 })
 
 // 状态标签（使用 i18n 显示本地化名称）
@@ -407,7 +407,7 @@ const canSubmit = computed(() => {
   return true
 })
 
-function appendStylePrompt(tpl) {
+function appendStylePrompt(tpl: string) {
   if (!prompt.value.trim().endsWith(tpl)) {
     prompt.value = prompt.value.trim() + tpl
   }
@@ -415,7 +415,7 @@ function appendStylePrompt(tpl) {
 
 // ---------- 图片管理（图生视频 + 首尾帧）----------
 // 图生视频：单张参考图
-function handleImageChange(files) {
+function handleImageChange(files: any) {
   if (!files || !files.length) {
     referenceFile.value = null
     return
@@ -427,7 +427,7 @@ function handleImageClear() {
 }
 
 // 首尾帧模式：起始帧 / 结束帧
-function handleFrameChange(frameType, files) {
+function handleFrameChange(frameType: string, files: any) {
   if (!files || !files.length) {
     if (frameType === 'start') startFrameFile.value = null
     else endFrameFile.value = null
@@ -436,7 +436,7 @@ function handleFrameChange(frameType, files) {
   if (frameType === 'start') startFrameFile.value = files[0]
   else endFrameFile.value = files[0]
 }
-function handleFrameClear(frameType) {
+function handleFrameClear(frameType: string) {
   if (frameType === 'start') startFrameFile.value = null
   else endFrameFile.value = null
 }
@@ -456,7 +456,7 @@ async function startGenerate() {
     return
   }
 
-  const params = {
+  const params: Record<string, any> = {
     prompt: prompt.value.trim(),
     negative_prompt: negativePrompt.value.trim() || undefined,
     model: 'agnes-video-v2.0',
@@ -513,7 +513,7 @@ async function startGenerate() {
     ElMessage.success(t('generate.videoSubmitted'))
   } catch (e) {
     console.error('[VideoView] 提交任务失败：', e)
-    ElMessage.error(t('generate.createTaskFailed') + (e.message || ''))
+    ElMessage.error(t('generate.createTaskFailed') + ((e as Error).message || ''))
   }
 }
 
@@ -609,7 +609,7 @@ function capturePoster() {
 }
 function onVideoLoaded() { }
 function onVideoCanPlay() { }
-function handleVideoError(e) {
+function handleVideoError(e: Event) {
   console.error('[VideoView] 视频播放失败：', e)
   ElMessage.error(t('preview.videoLoadFailed'))
 }

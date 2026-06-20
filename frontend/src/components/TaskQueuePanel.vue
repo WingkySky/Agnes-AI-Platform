@@ -87,7 +87,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 // ------ 国际化：引入 i18n composable ------
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
@@ -130,7 +130,7 @@ const filteredTasks = computed(() => {
   }
 })
 
-function getTabCount(key) {
+function getTabCount(key: string) {
   switch (key) {
     case 'running': return queue.runningCount
     case 'done':
@@ -141,7 +141,7 @@ function getTabCount(key) {
   }
 }
 
-function handleSelectTask(taskId) {
+function handleSelectTask(taskId: string) {
   const task = queue.tasks[taskId]
   if (!task) return
   // 先设置当前活跃任务，再根据类型跳转到对应的视图

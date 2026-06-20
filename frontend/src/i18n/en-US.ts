@@ -3,7 +3,7 @@
  * - All user-facing UI strings are managed here
  * ===================================================== */
 
-export default {
+const enUS = {
   // ------ Common ------
   common: {
     confirm: 'Confirm',
@@ -754,3 +754,5 @@ export default {
   // ------ First-page loading ------
   loading: 'Agnes AI Platform Loading...',
 }
+
+export default enUS

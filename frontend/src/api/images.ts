@@ -8,41 +8,33 @@
  * ===================================================== */
 
 import client from './client'
+import type {
+  ImageGenerationRequest,
+  ImageTaskCreatedResponse,
+  ImageTaskStatusResponse,
+  ImageTaskCancelResponse,
+  ImageGenerationResponse,
+  ImageRecordResponse
+} from '@/types'
 
 /**
  * 创建图片异步生成任务（推荐使用）
- * @param {Object} params
- * @param {string} params.prompt        - 提示词
- * @param {string} params.model         - 模型名
- * @param {string} params.size          - 尺寸，如 1024x1024
- * @param {string} params.response_format - url / b64_json
- * @param {string} [params.base64_image]- 图生图时的参考图（base64，不带前缀）
- * @returns {Promise<{task_id: string, id: string, status: string, ...}>}
  */
-export function createImageTask(params) {
+export function createImageTask(params: ImageGenerationRequest): Promise<ImageTaskCreatedResponse> {
   return client.post('/api/images/tasks', params)
 }
 
 /**
  * 查询图片任务状态（轮询用）
- * @param {string} taskId
- * @returns {Promise<{
- *   status: string,
- *   progress: number,
- *   result_url?: string,
- *   url?: string,
- *   message?: string
- * }>}
  */
-export function getImageTaskStatus(taskId) {
+export function getImageTaskStatus(taskId: string): Promise<ImageTaskStatusResponse> {
   return client.get(`/api/images/tasks/${taskId}`, { silent: true })
 }
 
 /**
  * 取消图片生成任务
- * @param {string} taskId
  */
-export function cancelImageTask(taskId) {
+export function cancelImageTask(taskId: string): Promise<ImageTaskCancelResponse> {
   return client.delete(`/api/images/tasks/${taskId}`)
 }
 
@@ -50,16 +42,14 @@ export function cancelImageTask(taskId) {
 
 /**
  * 同步生成图片（阻塞式，不推荐新代码使用）
- * @param {Object} params
  */
-export function createImage(params) {
+export function createImage(params: ImageGenerationRequest): Promise<ImageGenerationResponse> {
   return client.post('/api/images/generations', params)
 }
 
 /**
  * 获取单张图片生成记录
- * @param {number} id
  */
-export function getImageRecord(id) {
+export function getImageRecord(id: number): Promise<ImageRecordResponse> {
   return client.get(`/api/images/${id}`)
 }

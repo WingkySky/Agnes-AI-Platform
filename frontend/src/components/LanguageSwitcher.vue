@@ -29,9 +29,9 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed } from 'vue'
-import { useI18n } from '@/i18n'
+import { useI18n, type Locale } from '@/i18n'
 import { LocationFilled, ArrowDown, Check } from '@element-plus/icons-vue'
 
 const { t, locale, setLocale, supportedLocales, localeLabels } = useI18n()
@@ -43,8 +43,8 @@ const currentLabel = computed(() => {
   return (localeLabels && localeLabels[l]) || l
 })
 
-function onSelect(command) {
-  setLocale(command)
+function onSelect(command: string) {
+  setLocale(command as Locale)
 }
 </script>
 

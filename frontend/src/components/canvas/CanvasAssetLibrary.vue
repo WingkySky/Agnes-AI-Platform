@@ -226,7 +226,7 @@
   </Teleport>
 </template>
 
-<script setup>
+<script setup lang="ts">
 /* =====================================================
  * 画布素材库面板（重新设计版）
  * - 双 Tab：生成历史（后端 API 分页） + 我的素材（localforage 本地）
@@ -262,7 +262,7 @@ const filters = [
 const currentFilter = ref('all')
 
 // ---------- 历史记录数据（分页） ----------
-const historyList = ref([])
+const historyList = ref<any[]>([])
 const historyPage = ref(1)
 const historyPageSize = 20
 const historyTotal = ref(0)
@@ -335,24 +335,24 @@ const panelStyle = computed(() => ({
 }))
 
 // ---------- 工具函数 ----------
-function truncate(str, len) {
+function truncate(str: string, len: number) {
   if (!str) return ''
   return str.length > len ? str.slice(0, len) + '...' : str
 }
 
-function typeLabel(type) {
-  const labels = { image: '图片', video: '视频', audio: '音频' }
+function typeLabel(type: string) {
+  const labels: Record<string, string> = { image: '图片', video: '视频', audio: '音频' }
   return labels[type] || type
 }
 
 // ---------- Tab 切换 ----------
-function switchTab(tab) {
+function switchTab(tab: string) {
   if (activeTab.value === tab) return
   activeTab.value = tab
 }
 
 // ---------- 类型筛选切换 ----------
-function setFilter(value) {
+function setFilter(value: string) {
   if (currentFilter.value === value) return
   currentFilter.value = value
   // 历史记录需要重新请求后端（按类型筛选），回到第 1 页
@@ -363,7 +363,7 @@ function setFilter(value) {
 }
 
 // ---------- 分页跳转 ----------
-function goPage(page) {
+function goPage(page: number) {
   if (loading.value) return
   if (page < 1 || page > totalPages.value) return
   historyPage.value = page
@@ -392,44 +392,45 @@ async function loadHistory() {
 }
 
 // ---------- 本地素材上传 ----------
-const fileInputRef = ref(null)
+const fileInputRef = ref<HTMLInputElement | null>(null)
 function triggerUpload() {
   fileInputRef.value?.click()
 }
 
-async function onFileSelected(e) {
-  const files = Array.from(e.target.files || [])
+async function onFileSelected(e: Event) {
+  const target = e.target as HTMLInputElement
+  const files = Array.from(target.files || [])
   if (files.length === 0) return
   emit('upload-asset', files)
   // 清空 input，允许重复选择同一文件
-  e.target.value = ''
+  target.value = ''
 }
 
 // ---------- 拖拽上传到素材库面板 ----------
 const isDragOver = ref(false)
 
-function onPanelDragEnter(e) {
+function onPanelDragEnter(e: DragEvent) {
   // 仅当拖入的是文件时才高亮
   if (e.dataTransfer && e.dataTransfer.types.includes('Files')) {
     isDragOver.value = true
   }
 }
 
-function onPanelDragOver(e) {
+function onPanelDragOver(e: DragEvent) {
   // 必须 preventDefault 才能触发 drop；设置 effectAllowed 提示
   if (e.dataTransfer && e.dataTransfer.types.includes('Files')) {
     e.dataTransfer.dropEffect = 'copy'
   }
 }
 
-function onPanelDragLeave(e) {
+function onPanelDragLeave(e: DragEvent) {
   // 仅当离开面板本身（而非子元素）时才取消高亮
   if (e.target === e.currentTarget) {
     isDragOver.value = false
   }
 }
 
-function onPanelDrop(e) {
+function onPanelDrop(e: DragEvent) {
   isDragOver.value = false
   const files = Array.from(e.dataTransfer?.files || [])
   if (files.length === 0) return
@@ -438,9 +439,10 @@ function onPanelDrop(e) {
 
 // ---------- 拖拽素材到画布 ----------
 // dragstart 时把素材信息写入 dataTransfer，画布 drop 时读取并创建节点
-function onCardDragStart(item, e) {
+function onCardDragStart(item: any, e: DragEvent) {
   // 拖拽开始时立即隐藏悬浮预览，避免阻碍拖拽视线
   previewItem.value = null
+  if (!e.dataTransfer) return
   // 设置拖拽效果
   e.dataTransfer.effectAllowed = 'copy'
   // 写入素材数据（JSON 字符串），画布通过 'application/x-asset' 类型读取
@@ -460,14 +462,14 @@ function onCardDragStart(item, e) {
 // ---------- 悬浮放大预览（Teleport + position:fixed） ----------
 // 鼠标悬浮卡片时，在面板左侧显示放大预览
 // 视频卡片 hover 时懒加载 GIF 动图预览（参考 HistoryView 的 ffmpeg 渲染效果）
-const previewItem = ref(null)
+const previewItem = ref<any>(null)
 const previewX = ref(0)
 const previewY = ref(0)
-const gridRef = ref(null)
-const videoPreviews = reactive({}) // { [id]: gifUrl } 已加载的视频 GIF 预览
-const previewLoading = reactive({}) // { [id]: boolean } GIF 加载状态
+const gridRef = ref<HTMLElement | null>(null)
+const videoPreviews = reactive<Record<string, string>>({}) // { [id]: gifUrl } 已加载的视频 GIF 预览
+const previewLoading = reactive<Record<string, boolean>>({}) // { [id]: boolean } GIF 加载状态
 
-function onCardHover(item) {
+function onCardHover(item: any) {
   previewItem.value = item
   // 延迟一帧计算位置，确保预览框已渲染
   requestAnimationFrame(() => {
@@ -480,7 +482,7 @@ function onCardHover(item) {
 }
 
 // 加载视频 GIF 预览（后端 ffmpeg 生成，悬停时可动）
-async function loadVideoPreview(id) {
+async function loadVideoPreview(id: string) {
   if (videoPreviews[id] || previewLoading[id]) return
   previewLoading[id] = true
   try {

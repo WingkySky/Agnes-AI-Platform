@@ -19,6 +19,15 @@ import {
   getImageTaskStatus,
   cancelImageTask,
 } from '@/api/images'
+import type {
+  QueueTask,
+  TaskType,
+  TaskStatus,
+  RegisterChatTaskParams,
+  UpdateChatTaskParams,
+  ImageTaskStatusResponse,
+  VideoStatusResponse,
+} from '@/types'
 
 // ---------- 常量 ----------
 const STORAGE_KEY = 'agnes_task_queue_v1'
@@ -30,17 +39,36 @@ const HISTORY_KEEP_MS = 20 * 60 * 1000  // 已完成任务保留时长（20 分�
 const MAX_CONCURRENT = 5              // 每种类型最大并发数
 const PROGRESS_DURATION_ESTIMATE = 60000  // 预估进度填充基准（毫秒）
 
+// ---------- State 接口 ----------
+interface TaskQueueState {
+  // 所有任务（按 taskId 索引）
+  tasks: Record<string, QueueTask>
+  // 任务轮询定时器（taskId -> setInterval id）
+  pollTimers: Record<string, ReturnType<typeof setInterval>>
+  // 面板是否展开
+  panelOpen: boolean
+  // 当前选中的任务 ID（用于在视图中显示某任务的详情）
+  activeTaskId: string | null
+  // 时间戳标记（每秒递增，驱动耗时/时间显示的响应式刷新）
+  _tick: number
+  // 已初始化标志
+  _initialized: boolean
+  // 【历史刷新信号】—— 每当有任务（图片/视频）完成/取消/失败时递增
+  // HistoryView 监听此信号，实现点击生成按钮后历史列表的自动刷新
+  historyRefreshSignal: number
+}
+
 // ---------- 工具函数 ----------
-function uid() {
+function uid(): string {
   return 't_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8)
 }
 
-function isFinalStatus(status) {
+function isFinalStatus(status: TaskStatus): boolean {
   return ['success', 'failed', 'cancelled'].includes(status)
 }
 
 export const useTaskQueueStore = defineStore('taskQueue', {
-  state: () => ({
+  state: (): TaskQueueState => ({
     // 所有任务（按 taskId 索引）
     tasks: {},
     // 任务轮询定时器（taskId -> setInterval id）
@@ -60,39 +88,39 @@ export const useTaskQueueStore = defineStore('taskQueue', {
 
   getters: {
     // 所有任务列表（按创建时间倒序）
-    taskList(state) {
+    taskList(state): QueueTask[] {
       return Object.values(state.tasks).sort(
         (a, b) => b.createdAt - a.createdAt,
       )
     },
     // 进行中的任务数
-    runningCount(state) {
+    runningCount(state): number {
       return Object.values(state.tasks).filter(
         (t) => !isFinalStatus(t.status),
       ).length
     },
-    runningVideoCount(state) {
+    runningVideoCount(state): number {
       return Object.values(state.tasks).filter(
         (t) => t.type === 'video' && !isFinalStatus(t.status),
       ).length
     },
-    runningImageCount(state) {
+    runningImageCount(state): number {
       return Object.values(state.tasks).filter(
         (t) => t.type === 'image' && !isFinalStatus(t.status),
       ).length
     },
-    videoTasks(state, getters) {
-      return getters.taskList.filter((t) => t.type === 'video')
+    videoTasks(): QueueTask[] {
+      return this.taskList.filter((t) => t.type === 'video')
     },
-    imageTasks(state, getters) {
-      return getters.taskList.filter((t) => t.type === 'image')
+    imageTasks(): QueueTask[] {
+      return this.taskList.filter((t) => t.type === 'image')
     },
-    getTaskById: (state) => (id) => state.tasks[id] || null,
-    activeTask(state) {
+    getTaskById: (state) => (id: string): QueueTask | null => state.tasks[id] || null,
+    activeTask(state): QueueTask | null {
       return state.activeTaskId ? state.tasks[state.activeTaskId] : null
     },
     // 根据任务 ID 计算已耗时（秒）— 通过 _tick 实现响应式刷新
-    elapsedSec: (state) => (task) => {
+    elapsedSec: (state) => (task: QueueTask | null): number => {
       // 读取 _tick 让此 getter 与它建立响应式关联
       state._tick
       if (!task) return 0
@@ -104,7 +132,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
     // =====================================================
     // 【初始化】—— 在应用启动时调用一次
     // =====================================================
-    init() {
+    init(): void {
       if (this._initialized) return
       this._initialized = true
 
@@ -140,20 +168,21 @@ export const useTaskQueueStore = defineStore('taskQueue', {
     // =====================================================
 
     // ------ 图片生成任务
-    submitImageTask(params) {
+    submitImageTask(params: Record<string, unknown>): string {
       if (this.runningImageCount >= MAX_CONCURRENT) {
         throw new Error(
           `Maximum ${MAX_CONCURRENT} concurrent image tasks — please wait for some tasks to complete`,
         )
       }
       const taskId = uid()
-      const task = {
+      const task: QueueTask = {
         taskId,
         type: 'image',
         status: 'queued',
-        prompt: params.prompt,
+        prompt: params.prompt as string || '',
         params: { ...params },
         resultUrl: null,
+        posterUrl: null,
         progress: 0,
         errorMessage: '',
         createdAt: Date.now(),
@@ -171,22 +200,23 @@ export const useTaskQueueStore = defineStore('taskQueue', {
       return taskId
     },
 
-    async _createImageTaskInBackground(taskId, params) {
+    async _createImageTaskInBackground(taskId: string, params: Record<string, unknown>): Promise<void> {
       const task = this.tasks[taskId]
       if (!task) return
       try {
         task.status = 'pending'
         this._notifyTaskUpdate(taskId)
-        const resp = await createImageTask(params)
+        const resp = await createImageTask(params as any)
         task.backendTaskId =
-          resp.task_id || resp.id || resp.image_task_id || taskId
+          (resp as any).task_id || (resp as any).id || (resp as any).image_task_id || taskId
         task.rawResponse = resp
         task.status = 'processing'
         this._notifyTaskUpdate(taskId)
         this._startPolling(taskId)
-      } catch (err) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Failed to create task'
         task.status = 'failed'
-        task.errorMessage = err.message || 'Failed to create task'
+        task.errorMessage = message
         task.updatedAt = Date.now()
         this._notifyTaskUpdate(taskId)
         this._saveToStorage()
@@ -194,18 +224,18 @@ export const useTaskQueueStore = defineStore('taskQueue', {
     },
 
     // ------ 视频生成任务
-    submitVideoTask(params) {
+    submitVideoTask(params: Record<string, unknown>): string {
       if (this.runningVideoCount >= MAX_CONCURRENT) {
         throw new Error(
           `Maximum ${MAX_CONCURRENT} concurrent video tasks — please wait for some tasks to complete`,
         )
       }
       const taskId = uid()
-      const task = {
+      const task: QueueTask = {
         taskId,
         type: 'video',
         status: 'queued',
-        prompt: params.prompt,
+        prompt: params.prompt as string || '',
         params: { ...params },
         resultUrl: null,
         posterUrl: null,
@@ -225,22 +255,23 @@ export const useTaskQueueStore = defineStore('taskQueue', {
       return taskId
     },
 
-    async _createVideoTaskInBackground(taskId, params) {
+    async _createVideoTaskInBackground(taskId: string, params: Record<string, unknown>): Promise<void> {
       const task = this.tasks[taskId]
       if (!task) return
       try {
         task.status = 'pending'
         this._notifyTaskUpdate(taskId)
-        const resp = await createVideoTask(params)
+        const resp = await createVideoTask(params as any)
         task.backendTaskId =
-          resp.task_id || resp.video_id || resp.id || taskId
+          (resp as any).task_id || (resp as any).video_id || (resp as any).id || taskId
         task.rawResponse = resp
         task.status = 'processing'
         this._notifyTaskUpdate(taskId)
         this._startPolling(taskId)
-      } catch (err) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Failed to create task'
         task.status = 'failed'
-        task.errorMessage = err.message || 'Failed to create task'
+        task.errorMessage = message
         task.updatedAt = Date.now()
         this._notifyTaskUpdate(taskId)
         this._saveToStorage()
@@ -250,7 +281,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
     // =====================================================
     // 【轮询】
     // =====================================================
-    _startPolling(taskId) {
+    _startPolling(taskId: string): void {
       if (this.pollTimers[taskId]) return
       const task = this.tasks[taskId]
       if (!task) return
@@ -263,7 +294,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
       this._doPoll(taskId)
     },
 
-    _stopPolling(taskId) {
+    _stopPolling(taskId: string): void {
       const timer = this.pollTimers[taskId]
       if (timer) {
         clearInterval(timer)
@@ -271,7 +302,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
       }
     },
 
-    async _doPoll(taskId) {
+    async _doPoll(taskId: string): Promise<void> {
       const task = this.tasks[taskId]
       if (!task) return
       // 已结束 → 停止
@@ -286,18 +317,18 @@ export const useTaskQueueStore = defineStore('taskQueue', {
       }
       const backendId = task.backendTaskId || taskId
       try {
-        let data
+        let data: ImageTaskStatusResponse | VideoStatusResponse
         if (task.type === 'video') {
-          data = await getVideoStatus(backendId)
+          data = await getVideoStatus(backendId) as VideoStatusResponse
         } else {
-          data = await getImageTaskStatus(backendId)
+          data = await getImageTaskStatus(backendId) as ImageTaskStatusResponse
         }
         task.rawResponse = data
         task.updatedAt = Date.now()
 
         // 解析状态
         const rawStatus = String(
-          data.status || data.state || 'processing',
+          data.status || 'processing',
         ).toLowerCase()
         const isSuccess = ['success', 'completed', 'done', 'succeeded', 'finished'].includes(rawStatus)
         const isFailed = ['failed', 'error', 'timeout'].includes(rawStatus)
@@ -306,14 +337,16 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         if (isSuccess) {
           task.status = 'success'
           // 提取结果 URL —— 兼容多种字段名
+          const d = data as any
+          const dData = d.data as Record<string, unknown> | undefined
           const url =
-            data.video_url ||
-            data.url ||
-            data.result_url ||
-            data.image_url ||
-            (data.data && data.data.video_url) ||
-            (data.data && data.data.url) ||
-            (data.data && data.data.image_url) ||
+            (d.video_url as string) ||
+            (d.url as string) ||
+            (d.result_url as string) ||
+            (d.image_url as string) ||
+            (dData?.video_url as string) ||
+            (dData?.url as string) ||
+            (dData?.image_url as string) ||
             ''
           task.resultUrl = url
           task.progress = 100
@@ -326,7 +359,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
           this._saveToStorage()
         } else if (isFailed) {
           task.status = 'failed'
-          task.errorMessage = data.message || data.error || 'Generation failed'
+          task.errorMessage = (data as any).message as string || (data as any).error as string || 'Generation failed'
           this._stopPolling(taskId)
           this._saveToStorage()
         } else {
@@ -344,14 +377,15 @@ export const useTaskQueueStore = defineStore('taskQueue', {
           }
           this._saveToStorage()
         }
-      } catch (err) {
+      } catch (err: unknown) {
         // 单次轮询失败，静默继续（不影响整体状态）
-        console.warn('[TaskQueue] 轮询失败 taskId=', taskId, err.message)
+        const message = err instanceof Error ? err.message : String(err)
+        console.warn('[TaskQueue] 轮询失败 taskId=', taskId, message)
       }
     },
 
     // 根据已耗时估算进度（后端不返回进度时的兜底方案）
-    _estimateProgress(task) {
+    _estimateProgress(task: QueueTask): number {
       const elapsed = Date.now() - task.createdAt
       const expected = task.type === 'video' ? 3 * PROGRESS_DURATION_ESTIMATE : PROGRESS_DURATION_ESTIMATE
       return Math.min(Math.floor((elapsed / expected) * 100), 85)
@@ -360,7 +394,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
     // =====================================================
     // 【取消任务】
     // =====================================================
-    async cancelTask(taskId) {
+    async cancelTask(taskId: string): Promise<void> {
       const task = this.tasks[taskId]
       if (!task) return
       this._stopPolling(taskId)
@@ -373,7 +407,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         } else if (task.type === 'image' && task.backendTaskId) {
           await cancelImageTask(task.backendTaskId)
         }
-      } catch (_) {}
+      } catch (_) { /* 忽略后端取消失败 */ }
       // 【历史自动刷新】任务取消 → 触发刷新信号
       this.historyRefreshSignal++
       this._saveToStorage()
@@ -382,7 +416,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
     // =====================================================
     // 【移除任务】（仅移除 UI 显示，不影响历史记录）
     // =====================================================
-    removeTask(taskId) {
+    removeTask(taskId: string): void {
       this._stopPolling(taskId)
       if (this.activeTaskId === taskId) this.activeTaskId = null
       delete this.tasks[taskId]
@@ -392,7 +426,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
     // =====================================================
     // 【用原参数重新提交】
     // =====================================================
-    retryTask(taskId) {
+    retryTask(taskId: string): string | null {
       const task = this.tasks[taskId]
       if (!task) return null
       if (task.type === 'video') {
@@ -407,12 +441,12 @@ export const useTaskQueueStore = defineStore('taskQueue', {
     // =====================================================
 
     /** 注册聊天生成的媒体任务到队列（仅展示，不启动 taskQueue 自己的轮询） */
-    registerChatTask({ taskId, type, prompt, resultUrl, backendTaskId }) {
+    registerChatTask({ taskId, type, prompt, resultUrl, backendTaskId }: RegisterChatTaskParams): void {
       if (!taskId) return
       // 避免重复注册
       if (this.tasks[taskId]) return
 
-      const taskType = type === 'video' ? 'video' : 'image'
+      const taskType: TaskType = type === 'video' ? 'video' : 'image'
       this.tasks[taskId] = {
         taskId,
         type: taskType,
@@ -435,7 +469,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
     },
 
     /** 更新聊天任务的状态（由 chat store 的媒体轮询回调） */
-    updateChatTask(taskId, { status, resultUrl, progress }) {
+    updateChatTask(taskId: string, { status, resultUrl, progress }: UpdateChatTaskParams): void {
       const task = this.tasks[taskId]
       if (!task) return
       if (status) task.status = status
@@ -449,26 +483,26 @@ export const useTaskQueueStore = defineStore('taskQueue', {
     // =====================================================
     // 【面板/选中】
     // =====================================================
-    setActiveTask(taskId) {
+    setActiveTask(taskId: string): void {
       // 设置当前活跃任务（队列点击、提交任务后都会调用）
       this.activeTaskId = taskId
       // 持久化：刷新/切换页面后仍能记住选中的任务
       this._saveToStorage()
     },
-    togglePanel() {
+    togglePanel(): void {
       this.panelOpen = !this.panelOpen
     },
-    openPanel() {
+    openPanel(): void {
       this.panelOpen = true
     },
-    closePanel() {
+    closePanel(): void {
       this.panelOpen = false
     },
 
     // =====================================================
     // 【内部工具】
     // =====================================================
-    _markAsFailed(taskId, message) {
+    _markAsFailed(taskId: string, message: string): void {
       const task = this.tasks[taskId]
       if (!task) return
       this._stopPolling(taskId)
@@ -480,17 +514,17 @@ export const useTaskQueueStore = defineStore('taskQueue', {
       this._saveToStorage()
     },
 
-    _notifyTaskUpdate(taskId) {
+    _notifyTaskUpdate(_taskId: string): void {
       this._saveToStorage()
     },
 
-    _notifyTaskComplete(task) {
+    _notifyTaskComplete(_task: QueueTask): void {
       this._cleanupOldHistory()
       // 【历史自动刷新】任务完成 → 递增信号，通知 HistoryView 刷新列表
       this.historyRefreshSignal++
     },
 
-    _handleVisibilityChange() {
+    _handleVisibilityChange(): void {
       if (typeof document === 'undefined') return
       const hidden = document.hidden
       for (const task of Object.values(this.tasks)) {
@@ -506,7 +540,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
       }
     },
 
-    _cleanupOldHistory() {
+    _cleanupOldHistory(): void {
       const done = Object.values(this.tasks)
         .filter((t) => isFinalStatus(t.status))
         .sort((a, b) => b.updatedAt - a.updatedAt)
@@ -528,7 +562,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
     // =====================================================
     // 【持久化】
     // =====================================================
-    _saveToStorage() {
+    _saveToStorage(): void {
       if (typeof localStorage === 'undefined') return
       try {
         const tasksToSave = Object.values(this.tasks).map((t) => ({
@@ -559,12 +593,12 @@ export const useTaskQueueStore = defineStore('taskQueue', {
       }
     },
 
-    _restoreFromStorage() {
+    _restoreFromStorage(): void {
       if (typeof localStorage === 'undefined') return
       try {
         const raw = localStorage.getItem(STORAGE_KEY)
         if (!raw) return
-        const data = JSON.parse(raw)
+        const data = JSON.parse(raw) as { tasks: QueueTask[]; activeTaskId?: string }
         if (!data || !Array.isArray(data.tasks)) return
         const now = Date.now()
         for (const t of data.tasks) {

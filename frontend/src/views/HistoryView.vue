@@ -92,7 +92,7 @@
         <div class="card-preview">
           <img
             v-if="item.type === 'image'"
-            :src="item.result_url"
+            :src="item.result_url ?? ''"
             :alt="t('history.thumbnailAlt')"
             loading="lazy"
           />
@@ -164,7 +164,7 @@
         </div>
         <div class="card-meta">
           <div class="card-prompt">{{ truncate(item.prompt, 80) }}</div>
-          <div class="card-time">{{ formatTime(item.created_at) }}</div>
+          <div class="card-time">{{ formatTime(item.created_at ?? '') }}</div>
         </div>
       </div>
     </div>
@@ -194,7 +194,7 @@
         <div class="detail-media">
           <img
             v-if="detailItem.type === 'image'"
-            :src="detailItem.result_url"
+            :src="detailItem.result_url ?? ''"
             :alt="t('history.imageDetailAlt')"
             @click="openImageViewer(detailItem)"
             class="detail-image"
@@ -238,7 +238,7 @@
           <div class="info-row url-row">
             <span class="label">{{ t('history.linkLabel') }}：</span>
             <span class="url-value">{{ detailItem.result_url }}</span>
-            <el-button size="small" link type="primary" @click="copyLink(detailItem.result_url)">{{ t('history.copyLink') }}</el-button>
+            <el-button size="small" link type="primary" @click="copyLink(detailItem.result_url ?? '')">{{ t('history.copyLink') }}</el-button>
             <el-button size="small" link type="primary" @click="downloadDetail">{{ t('history.download') }}</el-button>
             <el-button size="small" link type="primary" @click="openInNewTab">{{ t('history.openNewTab') }}</el-button>
           </div>
@@ -286,7 +286,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted, watch, nextTick, reactive } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, Loading, Document, Delete, VideoPlay, CircleCloseFilled, Edit, Close, Download, ZoomIn } from '@element-plus/icons-vue'
@@ -294,6 +294,7 @@ import ImageViewer from '@/components/ImageViewer.vue'
 import { getHistoryList, deleteHistoryRecord, batchDeleteHistory } from '@/api/history'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useI18n } from '@/i18n'
+import type { GenerationRecord } from '@/types'
 
 const { t } = useI18n()
 
@@ -301,7 +302,7 @@ const { t } = useI18n()
 const viewerVisible = ref(false)
 const viewerUrl = ref('')
 const viewerDownloadUrl = ref('')
-function openImageViewer(item) {
+function openImageViewer(item: GenerationRecord) {
   if (!item || item.type !== 'image' || !item.result_url) return
   viewerUrl.value = item.result_url
   // 下载时优先走代理下载接口，确保可以下载
@@ -317,7 +318,7 @@ const LoadingIcon = Loading
 const DeleteIcon = Delete
 const CloseIcon = Close
 
-const list = ref([])
+const list = ref<GenerationRecord[]>([])
 const loading = ref(false)
 const totalCount = ref(0)
 const imageCount = ref(0)
@@ -328,21 +329,21 @@ const filterType = ref('all')
 
 const detailVisible = ref(false)
 const deleteVisible = ref(false)
-const detailItem = ref(null)
-const detailVideoEl = ref(null)
+const detailItem = ref<GenerationRecord | null>(null)
+const detailVideoEl = ref<HTMLVideoElement | null>(null)
 const detailPoster = ref('')
 const detailVideoLoading = ref(false)
 const detailVideoFailed = ref(false)
 
-const videoThumbnails = reactive({})
-const videoPreviews = reactive({})
-const hoveredVideoId = ref(null)
-const thumbnailLoading = reactive({})
-const previewLoading = reactive({})
-const thumbnailFailed = reactive({})
+const videoThumbnails = reactive<Record<string, string>>({})
+const videoPreviews = reactive<Record<string, string>>({})
+const hoveredVideoId = ref<number | null>(null)
+const thumbnailLoading = reactive<Record<string, boolean>>({})
+const previewLoading = reactive<Record<string, boolean>>({})
+const thumbnailFailed = reactive<Record<string, boolean>>({})
 
 const editMode = ref(false)
-const selectedIds = ref([])
+const selectedIds = ref<number[]>([])
 const batchDeleteVisible = ref(false)
 const batchDeleting = ref(false)
 const batchDownloading = ref(false)
@@ -358,12 +359,12 @@ const isIndeterminate = computed(() => {
   return selectedOnPage.length > 0 && selectedOnPage.length < pageIds.length
 })
 
-function getVideoStreamUrl(item) {
+function getVideoStreamUrl(item: GenerationRecord) {
   if (item.type !== 'video' || !item.result_url) return ''
   return `/api/history/video/${item.id}/stream`
 }
 
-function simpleHash(str) {
+function simpleHash(str: string) {
   let hash = 0
   for (let i = 0; i < str.length; i++) {
     const char = str.charCodeAt(i)
@@ -373,7 +374,7 @@ function simpleHash(str) {
   return Math.abs(hash).toString(36)
 }
 
-async function loadVideoThumbnail(item) {
+async function loadVideoThumbnail(item: GenerationRecord) {
   if (videoThumbnails[item.id] || thumbnailLoading[item.id] || thumbnailFailed[item.id]) return
   thumbnailLoading[item.id] = true
   try {
@@ -394,7 +395,7 @@ async function loadVideoThumbnail(item) {
   }
 }
 
-async function loadVideoPreview(item) {
+async function loadVideoPreview(item: GenerationRecord) {
   if (videoPreviews[item.id] || previewLoading[item.id]) return
   previewLoading[item.id] = true
   try {
@@ -414,12 +415,12 @@ async function loadVideoPreview(item) {
   }
 }
 
-function onVideoCardHover(item) {
+function onVideoCardHover(item: GenerationRecord) {
   hoveredVideoId.value = item.id
   loadVideoPreview(item)
 }
 
-function onVideoCardLeave(item) {
+function onVideoCardLeave(_item: GenerationRecord) {
   hoveredVideoId.value = null
 }
 
@@ -454,17 +455,17 @@ async function loadList(resetPage = false) {
   }
 }
 
-function handlePageChange(p) {
+function handlePageChange(p: number) {
   page.value = p
   loadList()
 }
-function handleSizeChange(size) {
+function handleSizeChange(size: number) {
   pageSize.value = size
   page.value = 1
   loadList()
 }
 
-function showDetail(item) {
+function showDetail(item: GenerationRecord) {
   detailItem.value = item
   detailPoster.value = ''
   detailVideoLoading.value = item.type === 'video' && !!item.result_url
@@ -479,7 +480,7 @@ function toggleEditMode() {
   }
 }
 
-function handleCardClick(item) {
+function handleCardClick(item: GenerationRecord) {
   if (editMode.value) {
     toggleSelect(item.id)
   } else {
@@ -487,7 +488,7 @@ function handleCardClick(item) {
   }
 }
 
-function toggleSelect(id) {
+function toggleSelect(id: number) {
   const idx = selectedIds.value.indexOf(id)
   if (idx >= 0) {
     selectedIds.value.splice(idx, 1)
@@ -496,7 +497,7 @@ function toggleSelect(id) {
   }
 }
 
-function toggleSelectAll(val) {
+function toggleSelectAll(val: boolean) {
   if (val) {
     const pageIds = list.value.map(item => item.id)
     const newSet = new Set(selectedIds.value)
@@ -561,7 +562,7 @@ async function doBatchDelete() {
   try {
     const res = await batchDeleteHistory(selectedIds.value)
     const deletedCount = res?.deleted_count ?? selectedIds.value.length
-    ElMessage.success(t('history.batchDeleted').replace('{n}', deletedCount))
+    ElMessage.success(t('history.batchDeleted').replace('{n}', String(deletedCount)))
     batchDeleteVisible.value = false
     selectedIds.value = []
     loadList()
@@ -572,7 +573,7 @@ async function doBatchDelete() {
   }
 }
 
-function copyToClipboard(text) {
+function copyToClipboard(text: string) {
   if (!text) return Promise.resolve()
   if (navigator.clipboard && window.isSecureContext) {
     return navigator.clipboard.writeText(text)
@@ -590,7 +591,7 @@ function copyToClipboard(text) {
   return ok ? Promise.resolve() : Promise.reject(new Error('copy failed'))
 }
 
-function copyLink(url) {
+function copyLink(url: string) {
   if (!url) {
     ElMessage.warning(t('history.noValidLink'))
     return
@@ -601,7 +602,7 @@ function copyLink(url) {
 }
 
 /** 卡片快捷下载（列表中直接点击下载图标） */
-function downloadItem(item) {
+function downloadItem(item: GenerationRecord) {
   if (!item?.result_url) {
     ElMessage.warning(t('history.noValidResource'))
     return
@@ -618,7 +619,7 @@ function downloadItem(item) {
 }
 
 /** 卡片快捷删除（列表中直接点击删除图标）——调用历史记录删除模块 */
-async function quickDelete(item) {
+async function quickDelete(item: GenerationRecord) {
   if (!item?.id) return
   // 复用详情弹窗中的 confirmDelete 逻辑，先设置当前项再弹出确认
   detailItem.value = item
@@ -681,7 +682,7 @@ function onDetailVideoCanPlay() {
   detailVideoFailed.value = false
 }
 
-function onDetailVideoError(e) {
+function onDetailVideoError(e: Event) {
   console.error('[History] ' + t('history.videoPlayFail') + '：', e)
   detailVideoLoading.value = false
   detailVideoFailed.value = true
@@ -711,11 +712,11 @@ async function doDelete() {
   }
 }
 
-function truncate(text, max) {
+function truncate(text: string, max: number) {
   if (!text) return ''
   return text.length > max ? text.slice(0, max) + '…' : text
 }
-function formatTime(t) {
+function formatTime(t: string) {
   if (!t) return ''
   const d = new Date(t)
   if (isNaN(d.getTime())) return String(t).slice(0, 19)

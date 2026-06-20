@@ -8,7 +8,7 @@
      - 1:1 复刻参考项目 infinite-canvas 的交互与视觉设计
      ===================================================== -->
 
-<script setup>
+<script setup lang="ts">
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useCanvasStore } from '@/stores/canvas'
 import CanvasConnectionsLayer from './CanvasConnectionsLayer.vue'
@@ -37,7 +37,7 @@ const emit = defineEmits([
 const store = useCanvasStore()
 
 // ---------- 容器引用 ----------
-const containerRef = ref(null)
+const containerRef = ref<HTMLElement | null>(null)
 
 // ---------- 实际使用的视口（props 优先，回退到 store）----------
 const currentViewport = computed(() => props.viewport || store.viewport)
@@ -45,7 +45,7 @@ const currentViewport = computed(() => props.viewport || store.viewport)
 // ---------- 实际使用的背景模式（props 优先，映射 store 的 'dot'/'grid'）----------
 const currentBackgroundMode = computed(() => {
   if (props.backgroundMode) return props.backgroundMode
-  const map = { dot: 'dots', grid: 'lines', blank: 'blank' }
+  const map: Record<string, string> = { dot: 'dots', grid: 'lines', blank: 'blank' }
   return map[store.backgroundMode] || 'dots'
 })
 
@@ -66,7 +66,7 @@ const panState = reactive({
 const isSpacePressed = ref(false)
 
 // ---------- 应用视口变更（兼容 props 和 store 两种模式）----------
-function applyViewport(newVp) {
+function applyViewport(newVp: { x: number; y: number; zoom: number }) {
   // 没传 props.viewport 时，直接更新 store（保持向后兼容）
   if (!props.viewport) {
     store.viewport.x = newVp.x
@@ -76,7 +76,7 @@ function applyViewport(newVp) {
 }
 
 // ---------- 滚轮缩放（以鼠标位置为中心，范围 0.05-5）----------
-function handleWheel(event) {
+function handleWheel(event: WheelEvent) {
   // 始终阻止默认滚动行为
   event.preventDefault()
 
@@ -109,7 +109,7 @@ function handleWheel(event) {
 }
 
 // ---------- 开始平移 ----------
-function startPan(event) {
+function startPan(event: MouseEvent) {
   panState.isPanning = true
   panState.startX = event.clientX
   panState.startY = event.clientY
@@ -120,7 +120,7 @@ function startPan(event) {
 }
 
 // ---------- 指针按下 ----------
-function handlePointerDown(event) {
+function handlePointerDown(event: PointerEvent) {
   const target = event.target instanceof Element ? event.target : null
   // 跳过标记了 data-canvas-no-zoom 的元素
   if (target?.closest?.('[data-canvas-no-zoom]')) return
@@ -139,7 +139,7 @@ function handlePointerDown(event) {
   // 中键：开始平移
   if (event.button === 1) {
     event.preventDefault()
-    event.currentTarget.setPointerCapture(event.pointerId)
+    ;(event.currentTarget as HTMLElement)?.setPointerCapture(event.pointerId)
     startPan(event)
     return
   }
@@ -147,7 +147,7 @@ function handlePointerDown(event) {
   // 左键点击背景：开始平移
   if (event.button === 0 && isBackgroundClick) {
     event.preventDefault()
-    event.currentTarget.setPointerCapture(event.pointerId)
+    ;(event.currentTarget as HTMLElement)?.setPointerCapture(event.pointerId)
     startPan(event)
     return
   }
@@ -155,14 +155,14 @@ function handlePointerDown(event) {
   // Space + 左键（即使点在节点上）：优先平移
   if (event.button === 0 && isSpacePressed.value) {
     event.preventDefault()
-    event.currentTarget.setPointerCapture(event.pointerId)
+    ;(event.currentTarget as HTMLElement)?.setPointerCapture(event.pointerId)
     startPan(event)
     return
   }
 }
 
 // ---------- 指针移动（全局监听，平移时更新视口）----------
-function handlePointerMove(event) {
+function handlePointerMove(event: PointerEvent) {
   if (!panState.isPanning) return
 
   const dx = event.clientX - panState.startX
@@ -198,7 +198,7 @@ function handlePointerUp() {
 }
 
 // ---------- Space 按键监听 ----------
-function handleKeyDown(event) {
+function handleKeyDown(event: KeyboardEvent) {
   if (event.code !== 'Space') return
   // 输入框内不响应
   if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return
@@ -207,7 +207,7 @@ function handleKeyDown(event) {
   store._isSpacePressed = true
 }
 
-function handleKeyUp(event) {
+function handleKeyUp(event: KeyboardEvent) {
   if (event.code === 'Space') {
     isSpacePressed.value = false
     store._isSpacePressed = false
@@ -252,7 +252,7 @@ const worldTransform = computed(
 )
 
 // ---------- 生命周期 ----------
-let wheelTarget = null
+let wheelTarget: HTMLElement | null = null
 
 // 更新画布容器在屏幕中的位置偏移（用于 screenToWorld 坐标转换）
 function updateCanvasRect() {
@@ -288,7 +288,7 @@ onBeforeUnmount(() => {
 
 // ---------- 拖拽素材到画布 ----------
 // 接收从素材库拖出的素材，转换为世界坐标后 emit 给父组件创建节点
-function handleDragOver(e) {
+function handleDragOver(e: DragEvent) {
   // 仅接收素材拖拽（application/x-asset），不干扰文件拖拽上传
   if (e.dataTransfer && e.dataTransfer.types.includes('application/x-asset')) {
     e.preventDefault()
@@ -296,7 +296,7 @@ function handleDragOver(e) {
   }
 }
 
-function handleDrop(e) {
+function handleDrop(e: DragEvent) {
   const assetData = e.dataTransfer?.getData('application/x-asset')
   if (!assetData) return
   e.preventDefault()

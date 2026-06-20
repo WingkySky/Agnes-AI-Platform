@@ -38,7 +38,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 /* =====================================================
  * CanvasNodeHoverToolbar 节点悬停工具栏
  * 1:1 复刻参考项目 infinite-canvas 的节点悬停工具栏设计
@@ -107,7 +107,7 @@ const toolbarStyle = computed(() => ({
 /* ---------- 按钮样式 ---------- */
 
 /** 按钮样式：图标颜色（删除按钮用红色） */
-function btnStyle(tool) {
+function btnStyle(tool: any) {
   return {
     color: tool.danger ? '#ef4444' : props.theme.toolbar.item,
   }
@@ -296,7 +296,7 @@ const tools = computed(() => {
 })
 
 /* ---------- 按钮点击处理 ---------- */
-function handleClick(tool) {
+function handleClick(tool: any) {
   if (tool.onClick) tool.onClick()
 }
 </script>

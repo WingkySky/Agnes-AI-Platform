@@ -25,12 +25,18 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 // ------ 引入 i18n ------
-import { computed } from 'vue'
+import { computed, type PropType } from 'vue'
 import { useI18n } from '@/i18n'
 
 const { t } = useI18n()
+
+// 模板项类型定义
+interface TemplateItem {
+  label: string
+  prompt: string
+}
 
 const props = defineProps({
   title: {
@@ -38,7 +44,7 @@ const props = defineProps({
     default: ''
   },
   templates: {
-    type: Array,
+    type: Array as PropType<TemplateItem[]>,
     required: true
   },
   type: {

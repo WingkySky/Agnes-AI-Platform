@@ -57,7 +57,7 @@
   </teleport>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, watch, nextTick } from 'vue'
 import { X, Eraser } from 'lucide-vue-next'
 
@@ -69,20 +69,20 @@ const props = defineProps({
 
 const emit = defineEmits(['confirm', 'cancel'])
 
-const canvasRef = ref(null)
+const canvasRef = ref<HTMLCanvasElement | null>(null)
 const brushSize = ref(30)
 const prompt = ref('')
 const isDrawing = ref(false)
 const hasMask = ref(false)
-let ctx = null
-let imageEl = null
+let ctx: CanvasRenderingContext2D | null = null
+let imageEl: HTMLImageElement | null = null
 
 // 画布尺寸
 const CANVAS_MAX_WIDTH = 600
 const CANVAS_MAX_HEIGHT = 400
 
 const dialogStyle = ref({})
-const maskCanvas = ref(null) // 离屏 mask canvas
+const maskCanvas = ref<HTMLCanvasElement | null>(null) // 离屏 mask canvas
 
 watch(() => props.visible, async (val) => {
   if (val) {
@@ -106,6 +106,7 @@ async function initCanvas() {
   imageEl = new Image()
   imageEl.crossOrigin = 'anonymous'
   imageEl.onload = () => {
+    if (!imageEl) return
     // 计算画布尺寸（保持比例）
     let w = imageEl.width
     let h = imageEl.height
@@ -121,24 +122,29 @@ async function initCanvas() {
     canvas.height = h
 
     ctx = canvas.getContext('2d')
+    if (!ctx) return
     // 绘制图片（半透明显示）
     ctx.globalAlpha = 0.7
     ctx.drawImage(imageEl, 0, 0, w, h)
     ctx.globalAlpha = 1
 
     // 创建离屏 mask canvas（纯黑白）
-    maskCanvas.value = document.createElement('canvas')
-    maskCanvas.value.width = imageEl.width
-    maskCanvas.value.height = imageEl.height
-    const maskCtx = maskCanvas.value.getContext('2d')
-    maskCtx.fillStyle = '#000'
-    maskCtx.fillRect(0, 0, imageEl.width, imageEl.height)
+    const maskEl = document.createElement('canvas')
+    maskEl.width = imageEl.width
+    maskEl.height = imageEl.height
+    maskCanvas.value = maskEl
+    const maskCtx = maskEl.getContext('2d')
+    if (maskCtx) {
+      maskCtx.fillStyle = '#000'
+      maskCtx.fillRect(0, 0, imageEl.width, imageEl.height)
+    }
   }
   imageEl.src = props.imageUrl
 }
 
-function getCanvasPos(event) {
+function getCanvasPos(event: PointerEvent) {
   const canvas = canvasRef.value
+  if (!canvas) return { x: 0, y: 0 }
   const rect = canvas.getBoundingClientRect()
   return {
     x: event.clientX - rect.left,
@@ -146,12 +152,12 @@ function getCanvasPos(event) {
   }
 }
 
-function startDraw(event) {
+function startDraw(event: PointerEvent) {
   isDrawing.value = true
   draw(event)
 }
 
-function draw(event) {
+function draw(event: PointerEvent) {
   if (!isDrawing.value || !ctx) return
   const { x, y } = getCanvasPos(event)
 
@@ -163,8 +169,10 @@ function draw(event) {
   ctx.fill()
 
   // 在离屏 mask canvas 上画纯白色（按原始图片尺寸缩放）
-  if (maskCanvas.value && imageEl) {
-    const maskCtx = maskCanvas.value.getContext('2d')
+  const maskEl = maskCanvas.value
+  if (maskEl && imageEl && canvasRef.value) {
+    const maskCtx = maskEl.getContext('2d')
+    if (!maskCtx) return
     const scaleX = imageEl.width / canvasRef.value.width
     const scaleY = imageEl.height / canvasRef.value.height
     maskCtx.fillStyle = '#fff'
@@ -181,7 +189,7 @@ function stopDraw() {
 }
 
 function clearMask() {
-  if (!ctx || !canvasRef.value) return
+  if (!ctx || !canvasRef.value || !imageEl) return
   // 清除显示画布
   ctx.clearRect(0, 0, canvasRef.value.width, canvasRef.value.height)
   ctx.globalAlpha = 0.7
@@ -189,10 +197,13 @@ function clearMask() {
   ctx.globalAlpha = 1
 
   // 清除 mask canvas
-  if (maskCanvas.value) {
-    const maskCtx = maskCanvas.value.getContext('2d')
-    maskCtx.fillStyle = '#000'
-    maskCtx.fillRect(0, 0, maskCanvas.value.width, maskCanvas.value.height)
+  const maskEl = maskCanvas.value
+  if (maskEl) {
+    const maskCtx = maskEl.getContext('2d')
+    if (maskCtx) {
+      maskCtx.fillStyle = '#000'
+      maskCtx.fillRect(0, 0, maskEl.width, maskEl.height)
+    }
   }
   hasMask.value = false
 }
@@ -201,7 +212,7 @@ function confirm() {
   if (!hasMask.value || !prompt.value.trim()) return
 
   // 生成 mask base64
-  const maskBase64 = maskCanvas.value.toDataURL('image/png')
+  const maskBase64 = maskCanvas.value?.toDataURL('image/png') || ''
 
   emit('confirm', {
     mask: maskBase64,

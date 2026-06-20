@@ -106,7 +106,7 @@
   </transition>
 </template>
 
-<script setup>
+<script setup lang="ts">
 /* =====================================================
  * ImageViewer 核心逻辑：
  * 1. 接收 visible（双向）与 url 控制显示
@@ -143,8 +143,8 @@ const props = defineProps({
 const emit = defineEmits(['update:visible', 'close'])
 
 /* ---------- 状态 ---------- */
-const stageEl = ref(null)
-const imgEl = ref(null)
+const stageEl = ref<HTMLElement | null>(null)
+const imgEl = ref<HTMLImageElement | null>(null)
 const scale = ref(1)
 const translateX = ref(0)
 const translateY = ref(0)
@@ -216,7 +216,7 @@ function resetView() {
 }
 
 /* ---------- 缩放 ---------- */
-function applyScale(next, centerX, centerY) {
+function applyScale(next: number, centerX?: number | null, centerY?: number | null) {
   const clamped = Math.max(MIN_SCALE, Math.min(MAX_SCALE, next))
   if (centerX != null && centerY != null) {
     // 以鼠标为中心进行缩放：让 (centerX, centerY) 点在缩放前后保持相对位置不变
@@ -235,7 +235,7 @@ function zoomOut() {
 }
 
 /* ---------- 滚轮缩放：以鼠标位置为中心 ---------- */
-function onWheel(e) {
+function onWheel(e: WheelEvent) {
   const stage = stageEl.value
   if (!stage) return
   const rect = stage.getBoundingClientRect()
@@ -247,7 +247,7 @@ function onWheel(e) {
 }
 
 /* ---------- 鼠标拖动平移 ---------- */
-function onMouseDown(e) {
+function onMouseDown(e: MouseEvent) {
   if (e.button !== 0) return // 只响应左键
   dragging.value = true
   dragStart.value = {
@@ -259,7 +259,7 @@ function onMouseDown(e) {
   window.addEventListener('mousemove', onMouseMove)
   window.addEventListener('mouseup', onMouseUp)
 }
-function onMouseMove(e) {
+function onMouseMove(e: MouseEvent) {
   if (!dragging.value) return
   translateX.value = dragStart.value.tx + (e.clientX - dragStart.value.x)
   translateY.value = dragStart.value.ty + (e.clientY - dragStart.value.y)
@@ -271,9 +271,9 @@ function onMouseUp() {
 }
 
 /* ---------- 触控：单指拖动 + 双指捏合 ---------- */
-const touchPoints = ref([])
-function onTouchStart(e) {
-  touchPoints.value = Array.from(e.touches).map((tp) => ({ x: tp.clientX, y: tp.clientY }))
+const touchPoints = ref<{ x: number; y: number }[]>([])
+function onTouchStart(e: TouchEvent) {
+  touchPoints.value = Array.from(e.touches).map((tp: Touch) => ({ x: tp.clientX, y: tp.clientY }))
   if (touchPoints.value.length === 1) {
     dragging.value = true
     dragStart.value = {
@@ -288,8 +288,8 @@ function onTouchStart(e) {
     pinchStartScale.value = scale.value
   }
 }
-function onTouchMove(e) {
-  const pts = Array.from(e.touches).map((tp) => ({ x: tp.clientX, y: tp.clientY }))
+function onTouchMove(e: TouchEvent) {
+  const pts = Array.from(e.touches).map((tp: Touch) => ({ x: tp.clientX, y: tp.clientY }))
   if (pts.length === 1 && dragging.value) {
     translateX.value = dragStart.value.tx + (pts[0].x - dragStart.value.x)
     translateY.value = dragStart.value.ty + (pts[0].y - dragStart.value.y)
@@ -301,13 +301,13 @@ function onTouchMove(e) {
     }
   }
 }
-function onTouchEnd(e) {
+function onTouchEnd(e: TouchEvent) {
   if (e.touches.length === 0) {
     dragging.value = false
     pinchStartDist.value = 0
   }
 }
-function touchDistance(a, b) {
+function touchDistance(a: { x: number; y: number }, b: { x: number; y: number }) {
   return Math.hypot(a.x - b.x, a.y - b.y)
 }
 
@@ -335,7 +335,7 @@ function flipY() {
 }
 
 /* ---------- 键盘快捷键：ESC 关闭 / +/- 缩放 / R 旋转 ---------- */
-function onKeyDown(e) {
+function onKeyDown(e: KeyboardEvent) {
   if (!props.visible) return
   if (e.key === 'Escape') {
     e.preventDefault()

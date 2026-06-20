@@ -58,7 +58,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed } from 'vue'
 import {
   Hand, Undo2, Redo2, Type, Image, Video, Music2, Settings2, Upload,
@@ -92,14 +92,14 @@ const emit = defineEmits([
 ])
 
 // 工具栏容器引用，用于计算 tooltip 水平位置
-const wrapRef = ref(null)
+const wrapRef = ref<HTMLElement | null>(null)
 // 当前 hover 的按钮 id
-const hovered = ref(null)
+const hovered = ref<string | null>(null)
 // tooltip 的水平偏移（相对工具栏容器）
 const tipX = ref(0)
 
 // 按钮分组配置：组间会渲染分隔符
-const buttonGroups = computed(() => [
+const buttonGroups = computed<any[][]>(() => [
   // 组1：移动/选择（无选中时高亮）
   [
     { id: 'tool-hand', label: '移动/选择', icon: Hand, active: !props.hasSelection, emit: 'select-tool' },
@@ -154,7 +154,7 @@ const activeStyle = computed(() => ({
 
 // tooltip 文案映射
 const tip = computed(() => {
-  const map = {
+  const map: Record<string, string> = {
     'tool-hand': '移动/选择',
     'tool-undo': '撤销',
     'tool-redo': '重做',
@@ -169,7 +169,7 @@ const tip = computed(() => {
     'tool-delete': '删除选中',
     'tool-clear': '清空画布',
   }
-  return map[hovered.value] || ''
+  return map[hovered.value!] || ''
 })
 
 // tooltip 样式：背景/文字色用 node token，水平位置跟随按钮中心
@@ -180,7 +180,7 @@ const tipStyle = computed(() => ({
 }))
 
 // 计算按钮 style：激活态 > hover 态 > 默认态
-function btnStyle(btn) {
+function btnStyle(btn: any) {
   if (btn.active) return activeStyle.value
   if (hovered.value === btn.id && !btn.disabled) return hoverStyle.value
   return {
@@ -190,7 +190,7 @@ function btnStyle(btn) {
 }
 
 // 计算 tooltip 相对工具栏容器的水平位置（按钮中心）
-function getTipX(target) {
+function getTipX(target: HTMLElement) {
   const wrap = wrapRef.value
   if (!wrap) return 0
   const wrapBox = wrap.getBoundingClientRect()
@@ -199,9 +199,9 @@ function getTipX(target) {
 }
 
 // 按钮 hover：记录 id 和 tooltip 位置
-function onHover(id, event) {
+function onHover(id: string, event: MouseEvent) {
   hovered.value = id
-  tipX.value = getTipX(event.currentTarget)
+  tipX.value = getTipX(event.currentTarget as HTMLElement)
 }
 
 // 按钮 leave：清除 hover 状态
@@ -210,7 +210,7 @@ function onLeave() {
 }
 
 // 按钮点击：根据配置 emit 对应事件（带 payload 时一并发出）
-function onBtnClick(btn) {
+function onBtnClick(btn: any) {
   if (btn.disabled) return
   if (btn.payload !== undefined) {
     emit(btn.emit, btn.payload)

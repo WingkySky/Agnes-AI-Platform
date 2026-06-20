@@ -4,10 +4,10 @@
  * - 标题随 i18n 语言变化动态更新
  * ===================================================== */
 
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useI18n } from '@/i18n'
 
-const routes = [
+const routes: RouteRecordRaw[] = [
   {
     path: '/',
     redirect: '/chat'
@@ -56,7 +56,7 @@ const router = createRouter({
 
 // 动态设置页面标题（使用当前 i18n 语言的文案）
 router.afterEach((to) => {
-  const key = to.meta?.titleKey
+  const key = to.meta?.titleKey as string | undefined
   if (key) {
     const { t } = useI18n()
     const title = t(key)

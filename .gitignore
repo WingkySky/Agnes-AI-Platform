@@ -30,6 +30,8 @@ backend/logs/
 
 #设计文档
 .trae/
+docs/
+
 
 #参考项目
 huobao-canvas/

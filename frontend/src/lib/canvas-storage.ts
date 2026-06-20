@@ -8,6 +8,16 @@
 
 import localforage from 'localforage'
 
+/** 画布持久化数据结构 */
+interface CanvasStorageData {
+  workspaces?: any[]
+  activeWorkspaceId?: string | null
+  themeMode?: string
+  viewport?: Record<string, any>
+  panels?: any[]
+  connections?: any[]
+}
+
 const STORAGE_KEY = 'agnes_canvas_v2'
 const V1_KEY = 'agnes_canvas_v1'
 const SAVE_DEBOUNCE_MS = 400
@@ -19,11 +29,11 @@ const canvasStore = localforage.createInstance({
 })
 
 let ready = false
-let initPromise = null
-let saveTimer = null
+let initPromise: Promise<void> | null = null
+let saveTimer: ReturnType<typeof setTimeout> | null = null
 
 /** 等待 localforage 就绪；幂等 */
-function ensureReady() {
+function ensureReady(): Promise<void> {
   if (initPromise) return initPromise
   initPromise = canvasStore
     .ready()
@@ -32,7 +42,7 @@ function ensureReady() {
     })
     .catch(() => {
       ready = false
-    })
+    }) as Promise<void>
   return initPromise
 }
 
@@ -41,13 +51,13 @@ ensureReady()
 
 /**
  * 从 localforage 读取画布状态
- * @returns {Promise<object|null>} v2 数据；不存在或解析失败返回 null
+ * @returns v2 数据；不存在或解析失败返回 null
  */
-export async function loadCanvas() {
+export async function loadCanvas(): Promise<CanvasStorageData | null> {
   await ensureReady()
   try {
     const data = await canvasStore.getItem(STORAGE_KEY)
-    return data || null
+    return (data as CanvasStorageData) || null
   } catch {
     return null
   }
@@ -57,9 +67,9 @@ export async function loadCanvas() {
  * 防抖保存画布状态到 localforage
  * - 400ms 内多次调用会合并为一次写入
  * - 不阻塞调用方，返回 undefined
- * @param {object} state 画布 store 状态（部分字段会被写入）
+ * @param state 画布 store 状态（部分字段会被写入）
  */
-export function saveCanvas(state) {
+export function saveCanvas(state: CanvasStorageData): void {
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = setTimeout(async () => {
     saveTimer = null
@@ -87,9 +97,9 @@ export function saveCanvas(state) {
 /**
  * 从 localStorage 'agnes_canvas_v1' 一次性迁移到 v2
  * - 成功迁移后删除 v1 key
- * @returns {Promise<boolean>} 是否真的发生了迁移
+ * @returns 是否真的发生了迁移
  */
-export async function migrateFromV1() {
+export async function migrateFromV1(): Promise<boolean> {
   await ensureReady()
   try {
     const raw = localStorage.getItem(V1_KEY)
@@ -104,6 +114,6 @@ export async function migrateFromV1() {
 }
 
 /** localforage 是否就绪（用于 store 状态指示） */
-export function isStorageReady() {
+export function isStorageReady(): boolean {
   return ready
 }

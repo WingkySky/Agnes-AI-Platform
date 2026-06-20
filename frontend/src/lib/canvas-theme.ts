@@ -4,7 +4,52 @@
 /* 融合项目深蓝紫主题：对齐 Agnes AI Platform 全局配色，
    canvas/node/toolbar 三组 token 与 App.vue 的 --agnes-* 变量协调 */
 
-export const canvasThemes = {
+/** 画布区域主题 token */
+interface CanvasThemeTokens {
+  background: string
+  dot: string
+  line: string
+  selectionStroke: string
+  selectionFill: string
+}
+
+/** 节点主题 token */
+interface NodeThemeTokens {
+  label: string
+  fill: string
+  panel: string
+  stroke: string
+  activeStroke: string
+  placeholder: string
+  text: string
+  muted: string
+  faint: string
+}
+
+/** 工具栏主题 token */
+interface ToolbarThemeTokens {
+  panel: string
+  border: string
+  item: string
+  itemHover: string
+  activeBg: string
+  activeText: string
+}
+
+/** 单套主题 */
+interface CanvasTheme {
+  canvas: CanvasThemeTokens
+  node: NodeThemeTokens
+  toolbar: ToolbarThemeTokens
+}
+
+/** 全部主题集合 */
+interface CanvasThemes {
+  light: CanvasTheme
+  dark: CanvasTheme
+}
+
+export const canvasThemes: CanvasThemes = {
   // 浅色主题：与项目浅色风格协调
   light: {
     canvas: {

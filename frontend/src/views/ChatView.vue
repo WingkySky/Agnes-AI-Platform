@@ -33,7 +33,7 @@
               class="session-title"
               :title="session.title || t('chat.newChat')"
             >{{ session.title || t('chat.newChat') }}</span>
-            <span class="session-time">{{ formatTime(session.updated_at) }}</span>
+            <span class="session-time">{{ formatTime(session.updated_at || '') }}</span>
           </div>
           <!-- 右侧操作区：三点菜单（点击后弹出操作选项） -->
           <div
@@ -42,7 +42,7 @@
           >
             <el-dropdown
               trigger="click"
-              @command="(cmd) => handleSessionAction(cmd, session)"
+              @command="(cmd: string | number | object) => handleSessionAction(cmd as string, session)"
             >
               <button
                 type="button"
@@ -320,7 +320,7 @@
               :icon="Plus"
               class="upload-btn"
               :disabled="chatStore.sending"
-              @click="$refs.fileInput.click()"
+              @click="fileInput?.click()"
               title="上传图片"
             />
             <input
@@ -358,11 +358,12 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 // 组件名称（供 keep-alive 缓存识别）
 defineOptions({ name: 'ChatView' })
 
 import { ref, onMounted, onActivated, onBeforeUnmount, nextTick, watch, computed } from 'vue'
+import type { ChatMessage, ChatSession, MessageAttachment, MediaItem } from '@/types'
 import {
   Plus, Delete, User, Monitor, Picture, VideoPlay,
   Loading, Check, WarningFilled, Promotion, ChatDotRound,
@@ -378,18 +379,18 @@ const chatStore = useChatStore()
 // 输入框文本
 const inputText = ref('')
 // 消息列表 DOM 引用
-const messagesRef = ref(null)
+const messagesRef = ref<HTMLElement | null>(null)
 // 隐藏的文件上传 input（点击"+"按钮触发）
-const fileInput = ref(null)
+const fileInput = ref<HTMLInputElement | null>(null)
 // 待发送附件列表（粘贴/上传后加入，发送时清空）
-const pendingAttachments = ref([])
+const pendingAttachments = ref<MessageAttachment[]>([])
 // 是否允许发送（有文本 或 有待发附件）
 const canSend = computed(() => inputText.value.trim().length > 0 || pendingAttachments.value.length > 0)
 
 // 重命名会话相关
 const renameDialogVisible = ref(false)
 const renameInput = ref('')
-const renamingSessionId = ref(null)
+const renamingSessionId = ref<number | null>(null)
 
 // 快捷提示
 const quickTips = computed(() => [
@@ -432,7 +433,7 @@ watch(
 // =====================================================
 
 /** 三点菜单统一处理函数（总结 / 重命名 / 删除） */
-function handleSessionAction(cmd, session) {
+function handleSessionAction(cmd: string, session: ChatSession) {
   switch (cmd) {
     case 'summarize':
       handleAutoSummarize(session.id)
@@ -456,7 +457,7 @@ async function handleNewSession() {
 }
 
 /** 切换会话 */
-async function handleSwitchSession(sessionId) {
+async function handleSwitchSession(sessionId: number) {
   if (sessionId === chatStore.activeSessionId) return
   try {
     await chatStore.switchSession(sessionId)
@@ -466,7 +467,7 @@ async function handleSwitchSession(sessionId) {
 }
 
 /** 删除会话 */
-async function handleDeleteSession(sessionId) {
+async function handleDeleteSession(sessionId: number) {
   try {
     await ElMessageBox.confirm(t('chat.confirmDelete'), t('common.confirm'), {
       type: 'warning',
@@ -479,7 +480,7 @@ async function handleDeleteSession(sessionId) {
 }
 
 /** 重命名会话 - 打开对话框 */
-function handleRenameSession(session) {
+function handleRenameSession(session: ChatSession) {
   renamingSessionId.value = session.id
   renameInput.value = session.title || ''
   renameDialogVisible.value = true
@@ -493,24 +494,24 @@ async function confirmRename() {
     return
   }
   try {
-    await chatStore.updateSessionTitle(renamingSessionId.value, newTitle)
+    await chatStore.updateSessionTitle(renamingSessionId.value!, newTitle)
     ElMessage.success(t('chat.renameSuccess'))
     renameDialogVisible.value = false
     renameInput.value = ''
     renamingSessionId.value = null
-  } catch (e) {
-    ElMessage.error(e.message || t('chat.renameFailed'))
+  } catch (e: unknown) {
+    ElMessage.error((e instanceof Error ? e.message : '') || t('chat.renameFailed'))
   }
 }
 
 /** AI 自动总结会话标题 */
-async function handleAutoSummarize(sessionId) {
+async function handleAutoSummarize(sessionId: number) {
   try {
     ElMessage.info(t('chat.summarizing'))
     const updated = await chatStore.autoSummarizeSession(sessionId)
     ElMessage.success(t('chat.summarizeSuccess') + ': ' + updated.title)
-  } catch (e) {
-    ElMessage.error(e.message || t('chat.summarizeFailed'))
+  } catch (e: unknown) {
+    ElMessage.error((e instanceof Error ? e.message : '') || t('chat.summarizeFailed'))
   }
 }
 
@@ -530,13 +531,13 @@ async function handleSend() {
   pendingAttachments.value = []
   try {
     await chatStore.sendMessage(content, attachments)
-  } catch (e) {
-    ElMessage.error(e.message || t('chat.sendFailed'))
+  } catch (e: unknown) {
+    ElMessage.error((e instanceof Error ? e.message : '') || t('chat.sendFailed'))
   }
 }
 
 /** 处理全局 Ctrl+V 粘贴事件：自动识别图片（二进制）/ 图片 URL */
-function handleGlobalPaste(e) {
+function handleGlobalPaste(e: ClipboardEvent) {
   // 仅在当前组件可见时处理（防止其他页面也触发）
   if (chatStore.sending) return
 
@@ -553,7 +554,7 @@ function handleGlobalPaste(e) {
             pendingAttachments.value.push({
               name: file.name || 'pasted-image.png',
               base64,
-              url: null,
+              url: undefined,
               size: file.size,
               mime_type: file.type || 'image/png',
             })
@@ -572,7 +573,7 @@ function handleGlobalPaste(e) {
       const url = text.trim()
       pendingAttachments.value.push({
         name: url.split('/').pop() || 'image',
-        base64: null,
+        base64: undefined,
         url,
         size: 0,
         mime_type: 'image/url',
@@ -588,8 +589,8 @@ function handleGlobalPaste(e) {
 }
 
 /** 点击"+"选择本地文件后加入待发送列表 */
-function onFileSelected(e) {
-  const files = e.target.files
+function onFileSelected(e: Event) {
+  const files = (e.target as HTMLInputElement).files
   if (!files || files.length === 0) return
   for (const file of files) {
     if (!file.type.startsWith('image/')) continue
@@ -597,33 +598,33 @@ function onFileSelected(e) {
       pendingAttachments.value.push({
         name: file.name,
         base64,
-        url: null,
+        url: undefined,
         size: file.size,
         mime_type: file.type,
       })
     })
   }
   // 重置：允许重复选择同一文件
-  e.target.value = ''
+  ;(e.target as HTMLInputElement).value = ''
 }
 
 /** 删除待发送附件 */
-function removePendingAttachment(index) {
+function removePendingAttachment(index: number) {
   pendingAttachments.value.splice(index, 1)
 }
 
 /** File → base64（异步） */
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
+function fileToBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
     const reader = new FileReader()
-    reader.onload = () => resolve(reader.result)
+    reader.onload = () => resolve(reader.result as string)
     reader.onerror = reject
     reader.readAsDataURL(file)
   })
 }
 
 /** 判断字符串是否为图片 URL（http/https 开头，且路径后缀或域名像图片） */
-function isImageUrl(text) {
+function isImageUrl(text: string) {
   if (!text) return false
   if (!/^https?:\/\//i.test(text)) return false
   // 检查是否是常见的图片扩展名
@@ -632,21 +633,21 @@ function isImageUrl(text) {
 }
 
 /** URL 截断显示（缩略图旁边的 URL 文案） */
-function truncateUrl(url) {
+function truncateUrl(url: string) {
   if (!url) return ''
   if (url.length <= 50) return url
   return url.slice(0, 47) + '...'
 }
 
 /** 回车发送（Shift+Enter 换行） */
-function handleEnter(e) {
+function handleEnter(e: KeyboardEvent) {
   if (e.shiftKey) return // Shift+Enter 换行
   e.preventDefault()
   handleSend()
 }
 
 /** 快捷提示点击 */
-async function handleQuickTip(tip) {
+async function handleQuickTip(tip: string) {
   if (!chatStore.hasActiveSession) {
     await chatStore.newSession()
   }
@@ -657,8 +658,9 @@ async function handleQuickTip(tip) {
 /** 滚动到底部 */
 async function scrollToBottom() {
   await nextTick()
-  if (messagesRef.value) {
-    messagesRef.value.scrollTop = messagesRef.value.scrollHeight
+  const el = messagesRef.value
+  if (el) {
+    el.scrollTop = el.scrollHeight
   }
 }
 
@@ -667,7 +669,7 @@ async function scrollToBottom() {
 // =====================================================
 
 /** 格式化时间 */
-function formatTime(isoStr) {
+function formatTime(isoStr: string) {
   if (!isoStr) return ''
   const d = new Date(isoStr)
   const now = new Date()
@@ -679,7 +681,7 @@ function formatTime(isoStr) {
 }
 
 /** 简易 Markdown 渲染（支持代码块、加粗、换行） */
-function renderMarkdown(text) {
+function renderMarkdown(text: string) {
   if (!text) return ''
   let html = text
     // 转义 HTML
@@ -698,13 +700,13 @@ function renderMarkdown(text) {
 }
 
 /** 获取消息的工具调用信息 */
-function getToolCallsForMessage(msg) {
+function getToolCallsForMessage(msg: ChatMessage) {
   if (!msg._streaming) return []
   return chatStore.streamingToolCalls
 }
 
 /** 获取视频代理 URL */
-function getVideoProxyUrl(url, taskId) {
+function getVideoProxyUrl(url: string, taskId: string) {
   if (!url) return ''
   // 如果是 Google Storage 等跨域 URL，使用后端代理
   if (taskId && (url.includes('storage.googleapis.com') || url.includes('google'))) {
@@ -715,22 +717,22 @@ function getVideoProxyUrl(url, taskId) {
 }
 
 /** 视频加载失败 */
-function onVideoError(e) {
+function onVideoError(_e: Event) {
   console.warn('[Chat] 视频加载失败')
 }
 
 /** 获取消息中所有图片 URL（用于图片预览） */
-function getAllImageUrls(mediaItems) {
+function getAllImageUrls(mediaItems: MediaItem[]) {
   if (!mediaItems) return []
   return mediaItems
-    .filter(item => item.type === 'image' && item.url && item.status === 'success')
-    .map(item => item.url)
+    .filter((item: MediaItem) => item.type === 'image' && item.url && item.status === 'success')
+    .map((item: MediaItem) => item.url)
 }
 
 /** 获取当前图片在预览列表中的索引 */
-function getImageIndex(mediaItems, currentIdx) {
+function getImageIndex(mediaItems: MediaItem[], currentIdx: number) {
   if (!mediaItems) return 0
-  const imageItems = mediaItems.filter(item => item.type === 'image' && item.url && item.status === 'success')
+  const imageItems = mediaItems.filter((item: MediaItem) => item.type === 'image' && item.url && item.status === 'success')
   const currentItem = mediaItems[currentIdx]
   const idx = imageItems.indexOf(currentItem)
   return idx >= 0 ? idx : 0
@@ -746,7 +748,7 @@ function getImageIndex(mediaItems, currentIdx) {
 const URL_REGEX = /\bhttps?:\/\/[^\s，。！？、<>（）()\[\]{}"'`]+/gi
 
 /** 根据文件扩展名快速判断链接类型（无需网络请求，即时响应） */
-function guessUrlTypeByExt(url) {
+function guessUrlTypeByExt(url: string) {
   if (!url) return 'unknown'
   const u = url.toLowerCase().split('?')[0]
   if (/\.(jpg|jpeg|png|gif|webp|bmp|svg|tiff?|avif)$/.test(u)) return 'image'
@@ -756,7 +758,7 @@ function guessUrlTypeByExt(url) {
 }
 
 /** 从 URL 中提取文件名（作为附件名称） */
-function extractUrlName(url) {
+function extractUrlName(url: string) {
   try {
     const u = new URL(url)
     const parts = u.pathname.split('/')
@@ -767,10 +769,10 @@ function extractUrlName(url) {
 }
 
 /** 从文本中识别 URL，返回附件对象数组（仅包含 image / video / document，webpage 不加入附件） */
-function extractUrlsAsAttachments(text) {
+function extractUrlsAsAttachments(text: string) {
   if (!text) return []
   const matches = text.match(URL_REGEX) || []
-  const atts = []
+  const atts: MessageAttachment[] = []
   const seen = new Set()
   for (const rawUrl of matches) {
     // 去重
@@ -802,7 +804,7 @@ function extractUrlsAsAttachments(text) {
 //   - 文档 URL:    doc_url / url
 // =====================================================
 
-function getAttachmentType(att) {
+function getAttachmentType(att: MessageAttachment) {
   if (!att) return 'image'
   // 优先使用前端标注的 _link_type
   if (att._link_type === 'video' || att.video_url) return 'video'
@@ -810,7 +812,7 @@ function getAttachmentType(att) {
   return 'image'
 }
 
-function getAttachmentUrl(att) {
+function getAttachmentUrl(att: MessageAttachment) {
   if (!att) return ''
   if (att.video_url) return att.video_url
   if (att.doc_url) return att.doc_url
@@ -818,7 +820,7 @@ function getAttachmentUrl(att) {
   return att.url || att.base64 || att.base64_image || ''
 }
 
-function getAttachmentName(att) {
+function getAttachmentName(att: MessageAttachment) {
   if (!att) return 'link'
   if (att.name) return att.name
   const url = getAttachmentUrl(att)
@@ -826,15 +828,15 @@ function getAttachmentName(att) {
 }
 
 /** 附件预览列表（仅包含图片，跳过视频/文档，避免被当作图片尝试加载） */
-function getAttachmentPreviewList(attachments) {
+function getAttachmentPreviewList(attachments: MessageAttachment[]) {
   if (!attachments || attachments.length === 0) return []
   return attachments
-    .filter(a => getAttachmentType(a) === 'image')
-    .map(a => getAttachmentUrl(a))
+    .filter((a: MessageAttachment) => getAttachmentType(a) === 'image')
+    .map((a: MessageAttachment) => getAttachmentUrl(a))
 }
 
 /** 计算图片附件在预览列表中的索引（因为附件可能混合视频/文档） */
-function getImageAttachmentIndex(attachments, currentIdx) {
+function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: number) {
   if (!attachments) return 0
   let imageIdx = 0
   for (let i = 0; i < currentIdx; i++) {

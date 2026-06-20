@@ -276,7 +276,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 /* =====================================================
  * CanvasView 无限画布主视图
  * - 整合 9 个子组件：InfiniteCanvas / CanvasConnectionsLayer /
@@ -340,7 +340,7 @@ function newCanvas() {
   ElMessage.success('已创建新画布')
 }
 
-function onSwitchCanvas(id) {
+function onSwitchCanvas(id: string) {
   if (id !== store.activeWorkspaceId) {
     store.switchWorkspace(id)
   }
@@ -353,7 +353,7 @@ function deleteCanvas() {
   }
   ElMessageBox.confirm('确定删除当前画布吗？此操作不可撤销。', '提示', { type: 'warning' })
     .then(() => {
-      store.deleteWorkspace(store.activeWorkspaceId)
+      store.deleteWorkspace(store.activeWorkspaceId!)
       ElMessage.success('画布已删除')
     })
     .catch(() => {})
@@ -367,7 +367,7 @@ function importJson() {
 
 const editingTitle = ref(false)
 const titleInput = ref('')
-const titleInputRef = ref(null)
+const titleInputRef = ref<HTMLInputElement | null>(null)
 const activeWorkspaceName = computed(() => store.activeWorkspace?.name ?? '未命名画布')
 
 const titleInputStyle = computed(() => ({
@@ -436,7 +436,7 @@ const selectionBoxStyle = computed(() => {
 })
 
 // 画布指针按下：检测 Ctrl/Cmd + 背景点击，启动框选
-function handleCanvasPointerDown(event) {
+function handleCanvasPointerDown(event: PointerEvent) {
   if (event.button !== 0) return
   if (!(event.ctrlKey || event.metaKey)) return
   // 检查是否点击在背景上（非节点、非连线）
@@ -454,7 +454,7 @@ function handleCanvasPointerDown(event) {
 }
 
 // 框选拖动：实时更新框选矩形并选中范围内节点
-function handleSelectionMove(event) {
+function handleSelectionMove(event: PointerEvent) {
   if (!selectionBox.active) return
   selectionBox.endScreenX = event.clientX
   selectionBox.endScreenY = event.clientY
@@ -475,7 +475,7 @@ function handleSelectionUp() {
 // 跟踪 Ctrl/Cmd 按键状态（用于多选判断）
 const ctrlPressed = ref(false)
 
-function handleNodeSelect(panelId) {
+function handleNodeSelect(panelId: string) {
   store.selectPanel(panelId, { append: ctrlPressed.value })
 }
 
@@ -483,13 +483,13 @@ function handleNodeSelect(panelId) {
 
 const dragState = reactive({
   active: false,
-  draggedId: null,
-  initialPositions: {}, // { panelId: { x, y } }
+  draggedId: null as string | null,
+  initialPositions: {} as Record<string, { x: number; y: number }>,
   hasMoved: false,
 })
 
 // 节点拖拽开始：记录所有选中节点的初始位置
-function handleNodeDragStart({ id, event }) {
+function handleNodeDragStart({ id, event: _event }: { id: string; event: PointerEvent }) {
   // 如果拖拽的节点不在选中列表中，只选中它
   if (!store.selectedPanelIds.includes(id)) {
     store.selectPanel(id, { append: false })
@@ -505,7 +505,7 @@ function handleNodeDragStart({ id, event }) {
 }
 
 // 节点拖拽中：第一次移动时压入快照，之后同步移动所有选中节点
-function handleNodeDrag({ id, x, y }) {
+function handleNodeDrag({ id, x, y }: { id: string; x: number; y: number }) {
   if (!dragState.active) return
   if (!dragState.hasMoved) {
     store.pushSnapshot()
@@ -524,7 +524,7 @@ function handleNodeDrag({ id, x, y }) {
 }
 
 // 节点拖拽结束：触发一次保存
-function handleNodeDragEnd({ id }) {
+function handleNodeDragEnd({ id }: { id: string }) {
   if (!dragState.active) return
   if (dragState.hasMoved) {
     const panel = store.panels.find((p) => p.id === id)
@@ -539,12 +539,12 @@ function handleNodeDragEnd({ id }) {
 
 const resizeState = reactive({
   active: false,
-  panelId: null,
+  panelId: null as string | null,
   hasMoved: false,
 })
 
 // 节点缩放开始：压入快照
-function handleNodeResizeStart({ id }) {
+function handleNodeResizeStart({ id }: { id: string }) {
   resizeState.active = true
   resizeState.panelId = id
   resizeState.hasMoved = false
@@ -552,13 +552,13 @@ function handleNodeResizeStart({ id }) {
 }
 
 // 节点缩放中：直接更新节点尺寸
-function handleNodeResize({ id, width, height, x, y }) {
+function handleNodeResize({ id, width, height, x, y }: { id: string; width: number; height: number; x: number; y: number }) {
   store._updatePanelDirect(id, { width, height, x, y })
   resizeState.hasMoved = true
 }
 
 // 节点缩放结束：触发一次保存
-function handleNodeResizeEnd({ id }) {
+function handleNodeResizeEnd({ id }: { id: string }) {
   if (resizeState.hasMoved) {
     const panel = store.panels.find((p) => p.id === id)
     if (panel) {
@@ -577,28 +577,28 @@ function handleNodeResizeEnd({ id }) {
 // ==================== 连线交互 ====================
 
 // 节点开始连线：启动全局 pointermove/pointerup 监听
-function handleNodeStartConnecting(panelId, anchorType) {
+function handleNodeStartConnecting(panelId: string, anchorType: string) {
   store.startConnecting(panelId, anchorType)
   window.addEventListener('pointermove', handleConnectingMove)
   window.addEventListener('pointerup', handleConnectingUp)
 }
 
 // 连线拖拽中：更新临时连线终点
-function handleConnectingMove(event) {
+function handleConnectingMove(event: PointerEvent) {
   if (!store.connecting) return
   const world = store.screenToWorld(event.clientX, event.clientY)
   store.updateConnecting(world.x, world.y)
 }
 
 // 连线结束：检测是否释放在节点上
-function handleConnectingUp(event) {
+function handleConnectingUp(event: PointerEvent) {
   window.removeEventListener('pointermove', handleConnectingMove)
   window.removeEventListener('pointerup', handleConnectingUp)
   if (!store.connecting) return
   const el = document.elementFromPoint(event.clientX, event.clientY)
   const nodeEl = el?.closest?.('[data-node-id]')
   if (nodeEl) {
-    const targetId = nodeEl.getAttribute('data-node-id')
+    const targetId = nodeEl.getAttribute('data-node-id')!
     store.endConnecting(targetId, 'target')
   } else {
     store.cancelConnecting()
@@ -611,12 +611,12 @@ const contextMenu = reactive({
   open: false,
   x: 0,
   y: 0,
-  targetType: 'node',
-  targetId: null,
+  targetType: 'node' as 'node' | 'connection',
+  targetId: null as string | null,
 })
 
 // 节点右键：打开菜单
-function handleNodeContextMenu(event) {
+function handleNodeContextMenu(event: PointerEvent) {
   event.preventDefault()
   event.stopPropagation()
   const nodeEl = event.target instanceof Element ? event.target.closest('[data-node-id]') : null
@@ -650,19 +650,19 @@ function handleContextDelete() {
 // ==================== 节点交互：其他事件 ====================
 
 // 查看图片大图
-function handleViewImage(imageUrl) {
+function handleViewImage(imageUrl: string) {
   if (imageUrl) previewImage.value = imageUrl
 }
 
 // 编辑文本节点内容
-function handleNodeEditText(panelId, text) {
+function handleNodeEditText(panelId: string, text: string) {
   store.pushSnapshot()
   store.updatePanel(panelId, { content: { content: text } })
 }
 
 // 从文本节点生图：读取文本内容作为 prompt，在源节点旁创建 image 节点并连线
-async function handleNodeGenerateImage(panel) {
-  const prompt = panel.content?.content || panel.content?.prompt || ''
+async function handleNodeGenerateImage(panel: typeof store.panels[number]) {
+  const prompt = (panel.content?.content || panel.content?.prompt || '') as string
   if (!prompt.trim()) {
     ElMessage.warning('文本节点内容为空')
     return
@@ -671,7 +671,7 @@ async function handleNodeGenerateImage(panel) {
 }
 
 // 重试生成：查找上游 config 节点重新生成，或用节点自身 prompt 重新生成
-async function handleNodeRetry(panel) {
+async function handleNodeRetry(panel: typeof store.panels[number]) {
   await retryGeneration(panel)
 }
 
@@ -679,8 +679,8 @@ async function handleNodeRetry(panel) {
 // - sourcePanel: 源节点（文本节点或重试时的图片节点）
 // - prompt: 提示词
 // - targetPanelId: 可选，若提供则更新该节点而不是创建新节点（用于重试场景）
-async function generateImageFromPrompt(sourcePanel, prompt, targetPanelId = null) {
-  let newPanelId = targetPanelId
+async function generateImageFromPrompt(sourcePanel: typeof store.panels[number], prompt: string, targetPanelId: string | null = null) {
+  let newPanelId: string | null = targetPanelId
 
   if (!targetPanelId) {
     // 在源节点右侧创建 image 节点（loading 状态）
@@ -704,7 +704,7 @@ async function generateImageFromPrompt(sourcePanel, prompt, targetPanelId = null
   try {
     // 调用图片生成 API
     const { createImageTask, getImageTaskStatus } = await import('@/api/images')
-    const resp = await createImageTask({ prompt, model: 'agnes-image-2.1-flash', size: '1024x1024' })
+    const resp = await createImageTask({ prompt, model: 'agnes-image-2.1-flash', size: '1024x1024', response_format: 'url' })
     const taskId = resp.task_id
 
     // 轮询任务状态（间隔 2 秒，最多 150 次 ≈ 5 分钟）
@@ -713,33 +713,33 @@ async function generateImageFromPrompt(sourcePanel, prompt, targetPanelId = null
       await new Promise((r) => setTimeout(r, 2000))
       const status = await getImageTaskStatus(taskId)
       if (status.status === 'completed' || status.status === 'succeeded' || status.status === 'success' || status.status === 'done') {
-        const imageUrl = status.result_url || status.image_url || status.url || status.data?.[0]?.url
-        store.updatePanel(newPanelId, { content: { content: imageUrl, status: 'success' } })
+        const imageUrl = status.result_url || (status as any).image_url || status.url || (status as any).data?.[0]?.url
+        store.updatePanel(newPanelId!, { content: { content: imageUrl, status: 'success' } })
         store.pushSnapshot()
         ElMessage.success('图片生成完成')
         return
       }
       if (status.status === 'failed' || status.status === 'error') {
-        const errMsg = status.message || status.error || '生成失败'
-        store.updatePanel(newPanelId, { content: { status: 'error', errorDetails: errMsg } })
+        const errMsg = status.message || (status as any).error || '生成失败'
+        store.updatePanel(newPanelId!, { content: { status: 'error', errorDetails: errMsg } })
         ElMessage.error('图片生成失败: ' + errMsg)
         return
       }
     }
     // 超时
-    store.updatePanel(newPanelId, { content: { status: 'error', errorDetails: '生成超时' } })
+    store.updatePanel(newPanelId!, { content: { status: 'error', errorDetails: '生成超时' } })
     ElMessage.warning('生成超时')
   } catch (err) {
     console.error('[canvas] generate image error:', err)
-    store.updatePanel(newPanelId, { content: { status: 'error', errorDetails: err.message } })
-    ElMessage.error('生成失败: ' + err.message)
+    store.updatePanel(newPanelId!, { content: { status: 'error', errorDetails: (err as Error).message } })
+    ElMessage.error('生成失败: ' + (err as Error).message)
   }
 }
 
 // 通用：重试生成
 // - 查找上游 config 节点，重新执行合并生成
 // - 没有上游 config 节点时，用节点自身 prompt 重新生成（直接更新当前节点）
-async function retryGeneration(panel) {
+async function retryGeneration(panel: typeof store.panels[number]) {
   // 查找上游 config 节点
   const upstreamConnections = store.connections.filter((c) => c.target_panel_id === panel.id)
   const configConn = upstreamConnections.find((c) => {
@@ -750,12 +750,13 @@ async function retryGeneration(panel) {
   if (configConn) {
     // 有上游 config 节点，重新执行合并生成
     const configNode = store.panels.find((p) => p.id === configConn.source_panel_id)
+    if (!configNode) return
     try {
       const { executeMergeGeneration, executeMergeVideoGeneration } = await import('@/lib/canvas-generation')
       const isVideo = panel.type === 'video'
       const fn = isVideo ? executeMergeVideoGeneration : executeMergeGeneration
       ElMessage.info('正在重新生成...')
-      await fn(configNode.id, store, {
+      await fn(configNode.id, store as any, {
         onProgress: (stage) => {
           if (stage === 'done') {
             ElMessage.success('重新生成完成')
@@ -763,11 +764,11 @@ async function retryGeneration(panel) {
         },
       })
     } catch (err) {
-      ElMessage.error('重试失败: ' + err.message)
+      ElMessage.error('重试失败: ' + (err as Error).message)
     }
   } else {
     // 没有上游 config 节点，用节点自身的 prompt 重新生成（直接更新当前节点）
-    const prompt = panel.content?.prompt || panel.content?.content || ''
+    const prompt = (panel.content?.prompt || panel.content?.content || '') as string
     if (!prompt.trim()) {
       ElMessage.warning('无法重试：未找到提示词')
       return
@@ -777,19 +778,19 @@ async function retryGeneration(panel) {
 }
 
 // 节点上传文件
-function handleNodeUpload(panel) {
+function handleNodeUpload(panel: typeof store.panels[number]) {
   if (panel) {
     triggerFileUpload(panel.id)
   }
 }
 
 // 配置节点：点击生成按钮，根据模式调用图片或视频合并生成流程
-async function handleConfigGenerate(panel) {
-  const mode = panel.content?.mode || 'text2image'
+async function handleConfigGenerate(panel: typeof store.panels[number]) {
+  const mode = (panel.content?.mode || 'text2image') as string
   const isVideo = mode.includes('video')
 
   // 校验提示词
-  const prompt = panel.content?.prompt || panel.content?.composerContent || ''
+  const prompt = (panel.content?.prompt || panel.content?.composerContent || '') as string
   if (!prompt.trim()) {
     ElMessage.warning('请先输入提示词')
     return
@@ -802,10 +803,10 @@ async function handleConfigGenerate(panel) {
     const { executeMergeGeneration, executeMergeVideoGeneration } = await import('@/lib/canvas-generation')
     const fn = isVideo ? executeMergeVideoGeneration : executeMergeGeneration
 
-    await fn(panel.id, store, {
+    await fn(panel.id, store as any, {
       onProgress: (stage) => {
         // 按阶段更新进度条与文字
-        const stageMap = {
+        const stageMap: Record<string, { progress: number; text: string }> = {
           building: { progress: 10, text: '构建上下文...' },
           creating: { progress: 25, text: '创建任务...' },
           polling: { progress: 40, text: '等待生成...' },
@@ -823,7 +824,7 @@ async function handleConfigGenerate(panel) {
     })
   } catch (err) {
     console.error('[canvas] config generate error:', err)
-    ElMessage.error('生成失败: ' + err.message)
+    ElMessage.error('生成失败: ' + (err as Error).message)
   } finally {
     // 无论成功或失败，重置生成状态
     store.updatePanel(panel.id, { content: { generating: false, progress: 0, progressText: '' } })
@@ -832,15 +833,15 @@ async function handleConfigGenerate(panel) {
 
 // ==================== 悬停工具栏 ====================
 
-const hoveredPanelId = ref(null)
+const hoveredPanelId = ref<string | null>(null)
 const showHoverToolbar = ref(false)
-let hoverHideTimer = null
+let hoverHideTimer: ReturnType<typeof setTimeout> | null = null
 
 // 蒙版编辑对话框状态
 const maskEditState = reactive({
   visible: false,
-  panelId: null,
-  imageUrl: '',
+  panelId: null as string | null,
+  imageUrl: '' as string,
 })
 
 const hoveredPanel = computed(() => {
@@ -862,7 +863,7 @@ const hoverToolbarStyle = computed(() => {
 })
 
 // 节点 hover 进入
-function handleNodeHoverEnter(panelId) {
+function handleNodeHoverEnter(panelId: string) {
   cancelHoverHide()
   hoveredPanelId.value = panelId
   showHoverToolbar.value = true
@@ -892,7 +893,7 @@ function cancelHoverHide() {
 
 function handleHoverInfo() {
   const p = hoveredPanel.value
-  if (p) ElMessage.info(`节点类型: ${NODE_NAMES[p.type] || p.type} | ID: ${p.id}`)
+  if (p) ElMessage.info(`节点类型: ${NODE_NAMES[p.type as keyof typeof NODE_NAMES] || p.type} | ID: ${p.id}`)
 }
 
 function handleHoverDelete() {
@@ -916,8 +917,8 @@ async function handleHoverSaveAsset() {
   const panel = hoveredPanel.value
   if (!panel) return
 
-  const content = panel.content || {}
-  const url = content.content || content.url
+  const content = panel.content || {} as Record<string, unknown>
+  const url = (content.content || content.url) as string
   if (!url) {
     ElMessage.warning('节点没有可保存的内容')
     return
@@ -927,15 +928,15 @@ async function handleHoverSaveAsset() {
     const { useAssetStore } = await import('@/stores/asset')
     const assetStore = useAssetStore()
     assetStore.registerAsset({
-      type: panel.type, // 'image' | 'video' | 'audio'
+      type: panel.type as 'image' | 'video',
       url: url,
-      prompt: content.prompt || '',
+      prompt: (content.prompt || '') as string,
       name: panel.name || `${panel.type}-${panel.id.slice(0, 8)}`,
       sourceNodeId: panel.id,
     })
     ElMessage.success('已保存到素材库')
   } catch (err) {
-    ElMessage.error('保存失败: ' + (err.message || err))
+    ElMessage.error('保存失败: ' + ((err as Error).message || err))
   }
 }
 
@@ -943,7 +944,7 @@ function handleHoverDownload() {
   const p = hoveredPanel.value
   if (p?.content?.content) {
     const a = document.createElement('a')
-    a.href = p.content.content
+    a.href = p.content.content as string
     a.download = `download-${Date.now()}`
     a.click()
   }
@@ -994,7 +995,7 @@ function handleHoverEditText() {
 async function handleHoverGenerateImage() {
   const panel = hoveredPanel.value
   if (!panel) return
-  const prompt = panel.content?.content || panel.content?.prompt || ''
+  const prompt = (panel.content?.content || panel.content?.prompt || '') as string
   if (!prompt.trim()) {
     ElMessage.warning('文本内容为空')
     return
@@ -1005,14 +1006,14 @@ async function handleHoverGenerateImage() {
 function handleHoverFontSizeDown() {
   if (!hoveredPanelId.value) return
   const p = store.panels.find((pp) => pp.id === hoveredPanelId.value)
-  const cur = p?.content?.fontSize ?? 16
+  const cur = (p?.content?.fontSize ?? 16) as number
   store.updatePanel(hoveredPanelId.value, { content: { fontSize: Math.max(10, cur - 2) } })
 }
 
 function handleHoverFontSizeUp() {
   if (!hoveredPanelId.value) return
   const p = store.panels.find((pp) => pp.id === hoveredPanelId.value)
-  const cur = p?.content?.fontSize ?? 16
+  const cur = (p?.content?.fontSize ?? 16) as number
   store.updatePanel(hoveredPanelId.value, { content: { fontSize: Math.min(48, cur + 2) } })
 }
 
@@ -1031,7 +1032,7 @@ function handleHoverUploadAudio() {
 function handleHoverCopyPrompt() {
   if (!hoveredPanelId.value) return
   const p = store.panels.find((pp) => pp.id === hoveredPanelId.value)
-  const prompt = p?.content?.prompt ?? ''
+  const prompt = (p?.content?.prompt ?? '') as string
   navigator.clipboard?.writeText(prompt).then(() => {
     ElMessage.success('已复制提示词')
   }).catch(() => {
@@ -1045,7 +1046,7 @@ async function handleHoverDescribe() {
   if (!panel) return
 
   // 取图片地址：优先 content.content，兼容 content.url
-  const imageUrl = panel.content?.content || panel.content?.url
+  const imageUrl = (panel.content?.content || panel.content?.url) as string
   if (!imageUrl) {
     ElMessage.warning('节点没有图片内容')
     return
@@ -1059,12 +1060,12 @@ async function handleHoverDescribe() {
 
     // 创建临时会话
     const session = await createChatSession({ title: '图片反推' })
-    const sessionId = session.id || session.session_id
+    const sessionId = (session as any).id || (session as any).session_id
 
     // 反推指令：让 AI 描述图片并输出适合 AI 绘画的英文提示词
     const prompt = '请详细描述这张图片的内容、风格、构图、色彩等，生成一段适合 AI 绘画的英文提示词（prompt），只输出提示词本身，不要其他解释。'
     // attachments 格式：{ source: 'url', url } —— sendMessageStream 内部会转成后端 image_url 格式
-    const attachments = [{ source: 'url', url: imageUrl }]
+    const attachments = [{ source: 'url' as const, url: imageUrl, name: 'image', size: 0, mime_type: 'image/url' }]
 
     let resultText = ''
 
@@ -1102,7 +1103,7 @@ async function handleHoverDescribe() {
   } catch (err) {
     console.error('[canvas] describe error:', err)
     store.updatePanel(panel.id, { content: { describing: false } })
-    ElMessage.error('反推失败: ' + (err.message || err))
+    ElMessage.error('反推失败: ' + ((err as Error).message || err))
   }
 }
 
@@ -1113,7 +1114,7 @@ function handleHoverReplaceImage() {
 function handleHoverToggleRatio() {
   if (!hoveredPanelId.value) return
   const p = store.panels.find((pp) => pp.id === hoveredPanelId.value)
-  const cur = p?.content?.freeResize ?? false
+  const cur = (p?.content?.freeResize ?? false) as boolean
   store.updatePanel(hoveredPanelId.value, { content: { freeResize: !cur } })
   ElMessage.success(cur ? '已切换为锁定比例' : '已切换为自由比例')
 }
@@ -1121,7 +1122,7 @@ function handleHoverToggleRatio() {
 function handleHoverMaskEdit() {
   const panel = hoveredPanel.value
   if (!panel) return
-  const imageUrl = panel.content?.content || panel.content?.url
+  const imageUrl = (panel.content?.content || panel.content?.url) as string
   if (!imageUrl) {
     ElMessage.warning('节点没有图片内容')
     return
@@ -1132,29 +1133,29 @@ function handleHoverMaskEdit() {
 }
 
 // 蒙版编辑确认：调用 image2image 局部编辑
-async function handleMaskConfirm({ mask, prompt }) {
+async function handleMaskConfirm({ mask, prompt }: { mask: string; prompt: string }) {
   const panelId = maskEditState.panelId
   const panel = store.panels.find(p => p.id === panelId)
   if (!panel) return
 
-  const imageUrl = panel.content?.content || panel.content?.url
+  const imageUrl = (panel.content?.content || panel.content?.url) as string | undefined
   maskEditState.visible = false
 
   // 设置节点为 loading 状态
-  store.updatePanel(panelId, { content: { status: 'loading' } })
+  store.updatePanel(panelId!, { content: { status: 'loading' } })
 
   try {
     const { createImageTask, getImageTaskStatus } = await import('@/api/images')
 
     // 将图片转为 base64（如果还不是 base64）
-    let base64Image = imageUrl
-    if (!imageUrl.startsWith('data:')) {
+    let base64Image = imageUrl!
+    if (imageUrl && !imageUrl.startsWith('data:')) {
       // URL 模式，需要先获取图片 base64
       const response = await fetch(imageUrl)
       const blob = await response.blob()
-      base64Image = await new Promise((resolve) => {
+      base64Image = await new Promise<string>((resolve) => {
         const reader = new FileReader()
-        reader.onloadend = () => resolve(reader.result)
+        reader.onloadend = () => resolve(reader.result as string)
         reader.readAsDataURL(blob)
       })
     }
@@ -1164,9 +1165,10 @@ async function handleMaskConfirm({ mask, prompt }) {
       prompt,
       model: 'agnes-image-2.1-flash',
       size: '1024x1024',
+      response_format: 'url',
       base64_image: base64Image,
       mask: mask,
-    })
+    } as any)
 
     const taskId = resp.task_id
 
@@ -1175,25 +1177,25 @@ async function handleMaskConfirm({ mask, prompt }) {
       await new Promise(r => setTimeout(r, 2000))
       const status = await getImageTaskStatus(taskId)
       if (status.status === 'completed' || status.status === 'succeeded' || status.status === 'success' || status.status === 'done') {
-        const resultUrl = status.result_url || status.image_url || status.url || status.data?.[0]?.url
-        store.updatePanel(panelId, { content: { content: resultUrl, status: 'success' } })
+        const resultUrl = status.result_url || (status as any).image_url || status.url || (status as any).data?.[0]?.url
+        store.updatePanel(panelId!, { content: { content: resultUrl, status: 'success' } })
         store.pushSnapshot()
         ElMessage.success('局部编辑完成')
         return
       }
       if (status.status === 'failed' || status.status === 'error') {
-        const errMsg = status.message || status.error || '编辑失败'
-        store.updatePanel(panelId, { content: { status: 'error', errorDetails: errMsg } })
+        const errMsg = status.message || (status as any).error || '编辑失败'
+        store.updatePanel(panelId!, { content: { status: 'error', errorDetails: errMsg } })
         ElMessage.error('编辑失败: ' + errMsg)
         return
       }
     }
     ElMessage.warning('编辑超时')
-    store.updatePanel(panelId, { content: { status: 'error', errorDetails: '超时' } })
+    store.updatePanel(panelId!, { content: { status: 'error', errorDetails: '超时' } })
   } catch (err) {
     console.error('[canvas] mask edit error:', err)
-    store.updatePanel(panelId, { content: { status: 'error', errorDetails: err.message } })
-    ElMessage.error('编辑失败: ' + err.message)
+    store.updatePanel(panelId!, { content: { status: 'error', errorDetails: (err as Error).message } })
+    ElMessage.error('编辑失败: ' + (err as Error).message)
   }
 }
 
@@ -1201,7 +1203,7 @@ async function handleMaskConfirm({ mask, prompt }) {
 async function handleHoverCrop() {
   const panel = hoveredPanel.value
   if (!panel?.content?.content) return
-  const imageUrl = panel.content.content
+  const imageUrl = panel.content.content as string
 
   try {
     // 弹出比例选择
@@ -1209,7 +1211,7 @@ async function handleHoverCrop() {
       inputValue: '1:1',
       inputPattern: /^\d+:\d+$/,
       inputErrorMessage: '请输入正确的比例格式，如 1:1',
-    })
+    }) as { value: string }
     const [rw, rh] = value.split(':').map(Number)
 
     ElMessage.info('正在裁剪...')
@@ -1235,8 +1237,8 @@ async function handleHoverCrop() {
     store.pushSnapshot()
     ElMessage.success('裁剪完成')
   } catch (err) {
-    if (err !== 'cancel' && err?.message !== 'cancel') {
-      ElMessage.error('裁剪失败: ' + (err.message || err))
+    if (err !== 'cancel' && (err as any)?.message !== 'cancel') {
+      ElMessage.error('裁剪失败: ' + ((err as Error).message || err))
     }
   }
 }
@@ -1245,7 +1247,7 @@ async function handleHoverCrop() {
 async function handleHoverSplit() {
   const panel = hoveredPanel.value
   if (!panel?.content?.content) return
-  const imageUrl = panel.content.content
+  const imageUrl = panel.content.content as string
 
   try {
     ElMessage.info('正在拆分图片...')
@@ -1274,7 +1276,7 @@ async function handleHoverSplit() {
     store.pushSnapshot()
     ElMessage.success('已拆分为 4 张图片')
   } catch (err) {
-    ElMessage.error('拆分失败: ' + (err.message || err))
+    ElMessage.error('拆分失败: ' + ((err as Error).message || err))
   }
 }
 
@@ -1282,7 +1284,7 @@ async function handleHoverSplit() {
 async function handleHoverUpscale() {
   const panel = hoveredPanel.value
   if (!panel?.content?.content) return
-  const imageUrl = panel.content.content
+  const imageUrl = panel.content.content as string
 
   try {
     ElMessage.info('正在放大 2x...')
@@ -1292,7 +1294,7 @@ async function handleHoverUpscale() {
     store.pushSnapshot()
     ElMessage.success('放大完成')
   } catch (err) {
-    ElMessage.error('放大失败: ' + (err.message || err))
+    ElMessage.error('放大失败: ' + ((err as Error).message || err))
   }
 }
 
@@ -1300,7 +1302,7 @@ async function handleHoverUpscale() {
 async function handleHoverSuperResolution() {
   const panel = hoveredPanel.value
   if (!panel?.content?.content) return
-  const imageUrl = panel.content.content
+  const imageUrl = panel.content.content as string
 
   try {
     ElMessage.info('正在超分辨率放大 4x...')
@@ -1310,7 +1312,7 @@ async function handleHoverSuperResolution() {
     store.pushSnapshot()
     ElMessage.success('超分完成')
   } catch (err) {
-    ElMessage.error('超分失败: ' + (err.message || err))
+    ElMessage.error('超分失败: ' + ((err as Error).message || err))
   }
 }
 
@@ -1318,14 +1320,14 @@ async function handleHoverSuperResolution() {
 async function handleHoverAngle() {
   const panel = hoveredPanel.value
   if (!panel?.content?.content) return
-  const imageUrl = panel.content.content
+  const imageUrl = panel.content.content as string
 
   try {
     const { value } = await ElMessageBox.prompt('请输入旋转角度（90/180/270）', '角度调整', {
       inputValue: '90',
       inputPattern: /^(90|180|270)$/,
       inputErrorMessage: '请输入 90、180 或 270',
-    })
+    }) as { value: string }
     const degrees = Number(value)
 
     ElMessage.info(`正在旋转 ${degrees}°...`)
@@ -1335,15 +1337,15 @@ async function handleHoverAngle() {
     store.pushSnapshot()
     ElMessage.success('旋转完成')
   } catch (err) {
-    if (err !== 'cancel' && err?.message !== 'cancel') {
-      ElMessage.error('旋转失败: ' + (err.message || err))
+    if (err !== 'cancel' && (err as any)?.message !== 'cancel') {
+      ElMessage.error('旋转失败: ' + ((err as Error).message || err))
     }
   }
 }
 
 function handleHoverViewLarge() {
   const p = hoveredPanel.value
-  if (p?.content?.content) previewImage.value = p.content.content
+  if (p?.content?.content) previewImage.value = p.content.content as string
 }
 
 // ==================== 底部工具栏事件 ====================
@@ -1358,7 +1360,7 @@ function handleSelectTool() {
 }
 
 // 工具栏添加节点
-function handleAddNode(type) {
+function handleAddNode(type: string) {
   createNodeAtCenter(type)
 }
 
@@ -1373,7 +1375,7 @@ function handleOpenAssetLibrary() {
 }
 
 // 使用素材：在画布中央创建对应类型的节点
-async function handleUseAsset(asset) {
+async function handleUseAsset(asset: Record<string, any>) {
   if (!asset?.type || !asset?.url) return
   const id = createNodeAtCenter(asset.type)
   // 历史记录的视频用后端流式接口，避免直接加载完整文件
@@ -1394,13 +1396,13 @@ async function handleUseAsset(asset) {
 }
 
 // 拖拽素材到画布：在 drop 的世界坐标位置创建节点
-function handleCanvasDropAsset({ asset, worldX, worldY }) {
+function handleCanvasDropAsset({ asset, worldX, worldY }: { asset: Record<string, any>; worldX: number; worldY: number }) {
   if (!asset?.type || !asset?.url) return
-  const size = NODE_DEFAULT_SIZES[asset.type] ?? NODE_DEFAULT_SIZES.text
+  const size = NODE_DEFAULT_SIZES[asset.type as keyof typeof NODE_DEFAULT_SIZES] ?? NODE_DEFAULT_SIZES.text
   store.pushSnapshot()
   const id = store.addPanel({
     type: asset.type,
-    name: asset.name || NODE_NAMES[asset.type] || '节点',
+    name: asset.name || NODE_NAMES[asset.type as keyof typeof NODE_NAMES] || '节点',
     x: worldX - size.width / 2,
     y: worldY - size.height / 2,
     width: size.width,
@@ -1422,7 +1424,7 @@ function handleCanvasDropAsset({ asset, worldX, worldY }) {
 }
 
 // 删除素材：从素材库移除
-async function handleDeleteAsset(id) {
+async function handleDeleteAsset(id: string) {
   if (!id) return
   try {
     const { useAssetStore } = await import('@/stores/asset')
@@ -1430,12 +1432,12 @@ async function handleDeleteAsset(id) {
     await assetStore.removeAsset(id)
     ElMessage.success('已删除素材')
   } catch (err) {
-    ElMessage.error('删除失败: ' + (err.message || err))
+    ElMessage.error('删除失败: ' + ((err as Error).message || err))
   }
 }
 
 // 素材库上传：将用户选择的文件注册为本地素材
-async function handleUploadAssetFiles(files) {
+async function handleUploadAssetFiles(files: FileList | File[]) {
   if (!files || files.length === 0) return
   try {
     const { useAssetStore } = await import('@/stores/asset')
@@ -1449,7 +1451,7 @@ async function handleUploadAssetFiles(files) {
       // 传入 blob（File 对象继承自 Blob），由 assetStore 持久化到 IndexedDB
       // 刷新页面后从 IndexedDB 读取 Blob 重新创建 object URL，不会失效
       await assetStore.registerAsset({
-        type,
+        type: type as 'image' | 'video',
         blob: file,
         name: file.name,
         prompt: '',
@@ -1458,7 +1460,7 @@ async function handleUploadAssetFiles(files) {
     }
     ElMessage.success(`已上传 ${count} 个素材`)
   } catch (err) {
-    ElMessage.error('上传失败: ' + (err.message || err))
+    ElMessage.error('上传失败: ' + ((err as Error).message || err))
   }
 }
 
@@ -1485,7 +1487,7 @@ function handleClearCanvas() {
 }
 
 // 切换图片信息显示
-function handleToggleImageInfo(val) {
+function handleToggleImageInfo(val: boolean) {
   if (val !== store.showImageInfo) store.toggleImageInfo()
 }
 
@@ -1505,7 +1507,7 @@ const helpModalStyle = computed(() => ({
 }))
 
 // 小地图定位：将视口中心移动到指定世界坐标
-function handleMinimapLocate(worldX, worldY) {
+function handleMinimapLocate(worldX: number, worldY: number) {
   const { zoom } = store.viewport
   store.viewport.x = window.innerWidth / 2 - worldX * zoom
   store.viewport.y = window.innerHeight / 2 - worldY * zoom
@@ -1514,14 +1516,14 @@ function handleMinimapLocate(worldX, worldY) {
 // ==================== 节点创建 ====================
 
 // 在视口中心创建节点
-function createNodeAtCenter(type) {
-  const size = NODE_DEFAULT_SIZES[type] ?? NODE_DEFAULT_SIZES.text
+function createNodeAtCenter(type: string) {
+  const size = NODE_DEFAULT_SIZES[type as keyof typeof NODE_DEFAULT_SIZES] ?? NODE_DEFAULT_SIZES.text
   const cx = (window.innerWidth / 2 - store.viewport.x) / store.viewport.zoom
   const cy = (window.innerHeight / 2 - store.viewport.y) / store.viewport.zoom
   store.pushSnapshot()
   const id = store.addPanel({
     type,
-    name: NODE_NAMES[type] ?? '节点',
+    name: NODE_NAMES[type as keyof typeof NODE_NAMES] ?? '节点',
     x: cx - size.width / 2,
     y: cy - size.height / 2,
     width: size.width,
@@ -1534,12 +1536,12 @@ function createNodeAtCenter(type) {
 
 // ==================== 文件上传 / 导入 ====================
 
-const fileInputRef = ref(null)
-const uploadTargetPanelId = ref(null)
+const fileInputRef = ref<HTMLInputElement | null>(null)
+const uploadTargetPanelId = ref<string | null>(null)
 const fileAccept = ref('*')
 
 // 触发文件选择对话框
-function triggerFileUpload(panelId, accept = '*') {
+function triggerFileUpload(panelId: string | null, accept = '*') {
   uploadTargetPanelId.value = panelId
   fileAccept.value = accept
   if (fileInputRef.value) {
@@ -1549,8 +1551,8 @@ function triggerFileUpload(panelId, accept = '*') {
 }
 
 // 文件选择回调
-function handleFileSelect(event) {
-  const file = event.target.files?.[0]
+function handleFileSelect(event: Event) {
+  const file = (event.target as HTMLInputElement)?.files?.[0]
   if (!file) return
 
   // JSON 导入
@@ -1558,10 +1560,10 @@ function handleFileSelect(event) {
     const reader = new FileReader()
     reader.onload = (e) => {
       try {
-        store.importJSON(e.target.result)
+        store.importJSON((e.target as FileReader)?.result as string)
         ElMessage.success('导入成功')
       } catch (err) {
-        ElMessage.error('导入失败：' + err.message)
+        ElMessage.error('导入失败：' + (err as Error).message)
       }
     }
     reader.readAsText(file)
@@ -1600,7 +1602,7 @@ function handleFileSelect(event) {
 
 // ==================== 图片预览弹窗 ====================
 
-const previewImage = ref(null)
+const previewImage = ref<string | null>(null)
 
 // ==================== 导出 JSON ====================
 
@@ -1618,7 +1620,7 @@ function handleExportJson() {
 
 // ==================== 全局快捷键 ====================
 
-function handleKeyDown(event) {
+function handleKeyDown(event: KeyboardEvent) {
   // 跟踪 Ctrl/Cmd 状态
   if (event.ctrlKey || event.metaKey) {
     ctrlPressed.value = true
@@ -1627,11 +1629,11 @@ function handleKeyDown(event) {
   // 输入框内不响应快捷键（Escape 除外）
   const isInput = event.target instanceof HTMLInputElement
     || event.target instanceof HTMLTextAreaElement
-    || event.target?.isContentEditable
+    || (event.target as HTMLElement)?.isContentEditable
 
   if (isInput) {
     if (event.key === 'Escape') {
-      event.target.blur()
+      (event.target as HTMLElement).blur()
     }
     return
   }
@@ -1705,7 +1707,7 @@ function handleKeyDown(event) {
 }
 
 // 按键释放：重置 Ctrl/Cmd 状态
-function handleKeyUp(event) {
+function handleKeyUp(event: KeyboardEvent) {
   if (!event.ctrlKey && !event.metaKey) {
     ctrlPressed.value = false
   }
@@ -1713,7 +1715,7 @@ function handleKeyUp(event) {
 
 // ==================== 全局点击：关闭弹出层 ====================
 
-function handleGlobalClick(event) {
+function handleGlobalClick(event: MouseEvent) {
   const target = event.target instanceof Element ? event.target : null
   // 关闭右键菜单
   if (contextMenu.open && !target?.closest?.('.context-menu')) {

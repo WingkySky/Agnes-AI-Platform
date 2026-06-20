@@ -7,7 +7,7 @@
      - 1:1 复刻参考项目 canvas-connections 的视觉与交互
      ===================================================== -->
 
-<script setup>
+<script setup lang="ts">
 import { computed } from 'vue'
 import { useCanvasStore } from '@/stores/canvas'
 
@@ -46,13 +46,13 @@ const currentConnecting = computed(() => props.connecting || store.connecting)
 const currentTheme = computed(() => props.theme || store.canvasTheme)
 
 // ---------- 工具：根据 id 查找节点 ----------
-function getPanelById(id) {
-  return currentPanels.value.find((p) => p.id === id) || null
+function getPanelById(id: string): any {
+  return currentPanels.value.find((p: any) => p.id === id) || null
 }
 
 // ---------- 计算贝塞尔曲线路径 ----------
 // 从源节点右侧中点到目标节点左侧中点，曲率为距离的 50%（最小 50）
-function computePath(from, to) {
+function computePath(from: any, to: any) {
   const startX = from.x + from.width
   const startY = from.y + from.height / 2
   const endX = to.x
@@ -64,8 +64,8 @@ function computePath(from, to) {
 
 // ---------- 已建立连线路径列表 ----------
 const connectionPaths = computed(() => {
-  const result = []
-  for (const conn of currentConnections.value) {
+  const result: any[] = []
+  for (const conn of currentConnections.value as any[]) {
     const from = getPanelById(conn.source_panel_id)
     const to = getPanelById(conn.target_panel_id)
     if (!from || !to) continue
@@ -81,13 +81,13 @@ const connectionPaths = computed(() => {
 // ---------- 拖拽中的临时连线路径 ----------
 // 根据源锚点类型决定方向：source 锚点从节点右侧出发，target 锚点从节点左侧出发
 const connectingPath = computed(() => {
-  const c = currentConnecting.value
+  const c = currentConnecting.value as any
   if (!c) return null
 
   const sourcePanel = getPanelById(c.sourcePanelId)
   if (!sourcePanel) return null
 
-  let startX, startY, endX, endY
+  let startX: number, startY: number, endX: number, endY: number
   if (c.sourceAnchorType === 'source') {
     // 从源节点右侧输出锚点出发，到鼠标位置
     startX = sourcePanel.x + sourcePanel.width
@@ -109,7 +109,7 @@ const connectingPath = computed(() => {
 })
 
 // ---------- 选中连线 ----------
-function handleSelectConnection(id) {
+function handleSelectConnection(id: string) {
   // 兼容旧用法：直接更新 store 选中状态
   if (!props.connections) {
     store.selectedConnectionId = id
@@ -120,7 +120,7 @@ function handleSelectConnection(id) {
 }
 
 // ---------- 删除连线（右键触发）----------
-function handleDeleteConnection(id) {
+function handleDeleteConnection(id: string) {
   // 兼容旧用法：直接调用 store 删除
   if (!props.connections) {
     store.deleteConnection(id)

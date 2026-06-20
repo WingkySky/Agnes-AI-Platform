@@ -9,7 +9,7 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
 // 使用 Vite 代理（开发环境）或 VITE_API_BASE_URL（生产环境）
-const baseURL = import.meta.env.VITE_API_BASE_URL || ''
+const baseURL: string = import.meta.env.VITE_API_BASE_URL || ''
 
 const client = axios.create({
   baseURL,
@@ -24,7 +24,7 @@ client.interceptors.request.use(
   (config) => {
     return config
   },
-  (error) => Promise.reject(error)
+  (error: unknown) => Promise.reject(error)
 )
 
 // ---------- 响应拦截 ----------
@@ -33,7 +33,7 @@ client.interceptors.response.use(
     // 直接返回 data，简化组件写法
     return response.data
   },
-  (error) => {
+  (error: any) => {
     // 统一错误提示（非静默失败时）
     let message = '请求失败，请稍后重试'
 
@@ -49,7 +49,7 @@ client.interceptors.response.use(
       message = error.message
     }
 
-    // 只在非静默模式下弹提示
+    // 只在非静默模式下弹提示（silent 是自定义配置项，通过 config 传入）
     if (!error.config?.silent) {
       ElMessage({
         type: 'error',

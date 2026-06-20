@@ -4,7 +4,7 @@
  * - 通过 i18n 模块统一提供 t(key) 访问
  * ===================================================== */
 
-export default {
+const zhCN = {
   // ------ 通用 ------
   common: {
     confirm: '确认',
@@ -755,3 +755,5 @@ export default {
   // ------ 首页加载 ------
   loading: 'Agnes AI Platform 加载中...',
 }
+
+export default zhCN

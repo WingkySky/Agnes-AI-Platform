@@ -77,12 +77,12 @@
         @dragover.prevent="isDragOver = true"
         @dragleave.prevent="isDragOver = false"
         @drop.prevent="handleDrop"
-        @click="$refs.fileInput.click()"
+        @click="fileInput?.click()"
         :class="{ 'drag-over': isDragOver, 'paste-active': pasteHighlight }"
       >
         <el-icon :size="32" class="upload-icon"><UploadFilled /></el-icon>
         <div class="upload-hint">{{ t('params.uploadHintUnified') }}</div>
-        <div class="upload-desc">{{ t('params.uploadDescUnified').replace('{n}', maxSizeMB) }}</div>
+        <div class="upload-desc">{{ String(t('params.uploadDescUnified')).replace('{n}', String(maxSizeMB)) }}</div>
         <div class="paste-hint">
           <el-icon><Document /></el-icon>
           <span>{{ t('params.pasteHint') }}</span>
@@ -106,13 +106,24 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Delete, UploadFilled, Document } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 
 const { t } = useI18n()
+
+// 图片文件信息接口
+interface FileInfo {
+  name: string
+  base64: string | null
+  previewUrl: string
+  mimeType: string
+  size: number | null
+  source: 'file' | 'url'
+  url?: string
+}
 
 const props = defineProps({
   maxSizeMB: { type: Number, default: 10 },
@@ -123,10 +134,10 @@ const props = defineProps({
 
 const emit = defineEmits(['change', 'clear'])
 
-const fileList = ref([])
+const fileList = ref<FileInfo[]>([])
 const isDragOver = ref(false)
-const fileInput = ref(null)
-const uploaderRef = ref(null)
+const fileInput = ref<HTMLInputElement | null>(null)
+const uploaderRef = ref<HTMLElement | null>(null)
 const pasteHighlight = ref(false)  // 粘贴成功时的高亮反馈
 const isActive = ref(false)         // 当前悬停激活状态 → 控制"鼠标在哪粘贴到哪"的视觉反馈
 
@@ -136,7 +147,7 @@ const isActive = ref(false)         // 当前悬停激活状态 → 控制"鼠�
 //       只有激活目标才响应全局 paste 事件（鼠标在哪就粘贴到哪）
 // =====================================================
 // 模块级共享变量：所有 ImageUploader 实例共用（ES module 单例）
-let activeUploaderEl = null       // 当前悬停的上传区 DOM 元素
+let activeUploaderEl: HTMLElement | null = null       // 当前悬停的上传区 DOM 元素
 
 function registerAsActive() {
   // 注册自己为"当前激活目标"
@@ -170,13 +181,13 @@ defineExpose({
 //   - 用户鼠标在哪 → 就粘贴到哪
 //   - 焦点在输入框中时不拦截（不影响 prompt 等文本粘贴）
 // =====================================================
-let pasteTimer = null
+let pasteTimer: ReturnType<typeof setTimeout> | null = null
 
-function handleGlobalPaste(e) {
+function handleGlobalPaste(e: ClipboardEvent) {
   // 只有"我是当前激活目标"才处理 —— 其他实例检查到自己不是激活目标就 return
   if (activeUploaderEl !== uploaderRef.value) return
 
-  const clipboard = e.clipboardData || window.clipboardData
+  const clipboard = e.clipboardData
   if (!clipboard) return
 
   // 1) 优先检查剪贴板中是否有图片
@@ -202,7 +213,7 @@ function handleGlobalPaste(e) {
     activeEl &&
     (activeEl.tagName === 'INPUT' ||
       activeEl.tagName === 'TEXTAREA' ||
-      activeEl.isContentEditable === true)
+      (activeEl as HTMLElement).isContentEditable === true)
 
   if (isEditingText) return
 
@@ -228,23 +239,23 @@ function triggerPasteHighlight() {
 // =====================================================
 // 工具函数
 // =====================================================
-function formatSize(bytes) {
+function formatSize(bytes: number) {
   if (!bytes) return ''
   if (bytes < 1024) return bytes + ' B'
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
   return (bytes / 1024 / 1024).toFixed(2) + ' MB'
 }
 
-function truncateName(name, max) {
+function truncateName(name: string, max: number) {
   if (!name) return ''
   if (name.length <= max) return name
   return name.slice(0, max - 3) + '...'
 }
 
-function validateFile(file) {
+function validateFile(file: File) {
   const maxBytes = props.maxSizeMB * 1024 * 1024
   if (file.size > maxBytes) {
-    ElMessage.error(t('params.imageTooLarge').replace('{n}', props.maxSizeMB))
+    ElMessage.error(String(t('params.imageTooLarge')).replace('{n}', String(props.maxSizeMB)))
     return false
   }
   if (!file.type || !file.type.startsWith('image/')) {
@@ -255,11 +266,11 @@ function validateFile(file) {
 }
 
 // File -> base64（清理 padding + 提取 MIME）
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
+function fileToBase64(file: File) {
+  return new Promise<FileInfo>((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => {
-      const fullBase64 = reader.result
+      const fullBase64 = reader.result as string
       const marker = ';base64,'
       const markerIndex = fullBase64.indexOf(marker)
       let mimeType = 'image/png'
@@ -268,7 +279,7 @@ function fileToBase64(file) {
         const mimeMatch = prefixPart.match(/^data:(image\/[a-zA-Z0-9.+-]+)/)
         if (mimeMatch) mimeType = mimeMatch[1]
       }
-      let pureBase64 = markerIndex >= 0
+      let pureBase64: string = markerIndex >= 0
         ? fullBase64.slice(markerIndex + marker.length)
         : fullBase64
       pureBase64 = pureBase64.replace(/\s/g, '')
@@ -306,7 +317,7 @@ function checkLimit() {
 // =====================================================
 // 添加图片（统一入口）
 // =====================================================
-async function addPastedImageFile(file) {
+async function addPastedImageFile(file: File) {
   if (!checkLimit()) return
   if (!validateFile(file)) return
   try {
@@ -320,7 +331,7 @@ async function addPastedImageFile(file) {
   }
 }
 
-function addPastedUrl(url) {
+function addPastedUrl(url: string) {
   if (!checkLimit()) return
   fileList.value.push({
     name: url.split('/').pop() || 'image',
@@ -339,8 +350,8 @@ function addPastedUrl(url) {
 // =====================================================
 // 文件选择
 // =====================================================
-async function handleFilesChange(e) {
-  const input = e.target
+async function handleFilesChange(e: Event) {
+  const input = e.target as HTMLInputElement
   const files = Array.from(input.files || [])
   if (files.length === 0) return
 
@@ -376,7 +387,7 @@ async function handleFilesChange(e) {
 // =====================================================
 // 拖拽
 // =====================================================
-async function handleDrop(e) {
+async function handleDrop(e: DragEvent) {
   isDragOver.value = false
   const files = Array.from(e.dataTransfer?.files || [])
   if (files.length === 0) return
@@ -388,7 +399,7 @@ async function handleDrop(e) {
   }
 
   const filesToAdd = files.slice(0, remaining)
-  const results = []
+  const results: FileInfo[] = []
   for (const file of filesToAdd) {
     if (!validateFile(file)) continue
     try {
@@ -408,7 +419,7 @@ async function handleDrop(e) {
 // =====================================================
 // 单张删除
 // =====================================================
-function removeFile(index) {
+function removeFile(index: number) {
   const name = fileList.value[index]?.name
   fileList.value.splice(index, 1)
   if (name) ElMessage.info(`已移除: ${name}`)
@@ -418,7 +429,7 @@ function removeFile(index) {
 // =====================================================
 // 预览大图
 // =====================================================
-function openPreview(url) {
+function openPreview(url: string) {
   if (!url) return
   try {
     const w = window.open()

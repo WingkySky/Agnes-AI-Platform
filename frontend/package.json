@@ -6,9 +6,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
-    "start": "vite"
+    "start": "vite",
+    "type-check": "vue-tsc -b --noEmit"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",
@@ -22,7 +23,10 @@
     "vue-router": "^4.3.0"
   },
   "devDependencies": {
+    "@types/node": "^26.0.0",
     "@vitejs/plugin-vue": "^5.0.4",
-    "vite": "^5.2.0"
+    "typescript": "^6.0.3",
+    "vite": "^5.2.0",
+    "vue-tsc": "^3.3.5"
   }
 }

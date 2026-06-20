@@ -67,7 +67,7 @@
   </el-config-provider>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { Picture, VideoPlay, Clock, ChatDotRound, Grid } from '@element-plus/icons-vue'

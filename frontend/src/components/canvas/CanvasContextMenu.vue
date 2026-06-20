@@ -52,7 +52,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 /* =====================================================
  * CanvasContextMenu 画布右键上下文菜单
  * 1:1 复刻参考项目 infinite-canvas 的右键菜单设计
@@ -116,15 +116,15 @@ function handleDelete() {
 /* ---------- 外部点击 / Esc 关闭菜单 ---------- */
 
 /** 外部点击：关闭菜单 */
-function handleOutsideClick(event) {
+function handleOutsideClick(event: PointerEvent) {
   const menu = document.querySelector('.canvas-context-menu')
-  if (menu && !menu.contains(event.target)) {
+  if (menu && !menu.contains(event.target as Node)) {
     emit('close')
   }
 }
 
 /** Esc 键：关闭菜单 */
-function handleEsc(event) {
+function handleEsc(event: KeyboardEvent) {
   if (event.key === 'Escape') {
     emit('close')
   }

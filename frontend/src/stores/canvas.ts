@@ -11,18 +11,115 @@ import { defineStore } from 'pinia'
 import { canvasThemes } from '@/lib/canvas-theme'
 import { loadCanvas, saveCanvas } from '@/lib/canvas-storage'
 
+// ---------- 本地类型定义 ----------
+
+/** 画布面板（节点） */
+interface CanvasPanel {
+  id: string
+  workspace_id?: string | null
+  type?: string
+  name?: string
+  x: number
+  y: number
+  width: number
+  height: number
+  zIndex: number
+  content: Record<string, unknown>
+  meta?: Record<string, unknown>
+  is_locked?: boolean
+  is_hidden?: boolean
+  created_at: string
+  updated_at: string
+}
+
+/** 画布连线 */
+interface CanvasConnection {
+  id: string
+  workspace_id?: string | null
+  source_panel_id: string
+  target_panel_id: string
+  type: string
+  created_at: string
+  [key: string]: unknown
+}
+
+/** 画布工作区 */
+interface CanvasWorkspace {
+  id: string
+  name: string
+  created_at: string
+  updated_at: string
+  viewport: Viewport
+  panels: CanvasPanel[]
+  connections: CanvasConnection[]
+}
+
+/** 视口 */
+interface Viewport {
+  x: number
+  y: number
+  zoom: number
+}
+
+/** 画布容器位置偏移 */
+interface CanvasRect {
+  left: number
+  top: number
+}
+
+/** 对齐参考线 */
+interface AlignmentGuides {
+  vertical: number[]
+  horizontal: number[]
+}
+
+/** 历史快照 */
+interface HistorySnapshot {
+  viewport: Viewport
+  panels: CanvasPanel[]
+  connections: CanvasConnection[]
+}
+
+/** 历史（撤销/重做） */
+interface History {
+  past: HistorySnapshot[]
+  future: HistorySnapshot[]
+}
+
+/** 拖拽连线状态 */
+interface ConnectingState {
+  sourcePanelId: string
+  sourceAnchorType: string
+  startWorld: { x: number; y: number }
+  endWorld: { x: number; y: number }
+}
+
+/** 待创建连线载荷 */
+interface PendingConnectionCreate {
+  sourceId: string
+  worldX: number
+  worldY: number
+}
+
+/** 主题 token 类型（对齐 canvas-theme.ts 的 CanvasTheme 结构） */
+interface ThemeTokens {
+  canvas: { background: string; dot: string; line: string; selectionStroke: string; selectionFill: string }
+  node: { label: string; fill: string; panel: string; stroke: string; activeStroke: string; placeholder: string; text: string; muted: string; faint: string }
+  toolbar: { panel: string; border: string; item: string; itemHover: string; activeBg: string; activeText: string }
+}
+
 // ---------- 常量 ----------
 const MAX_HISTORY = 80
 
 // ---------- 工具函数 ----------
 
 /** 生成唯一 ID */
-function uid() {
+function uid(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36)
 }
 
 /** 深拷贝快照（panels / connections / viewport） */
-function snapshot(state) {
+function snapshot(state: CanvasState): HistorySnapshot {
   return {
     viewport: { ...state.viewport },
     panels: JSON.parse(JSON.stringify(state.panels)),
@@ -31,7 +128,7 @@ function snapshot(state) {
 }
 
 /** 从快照恢复状态 */
-function restoreFromSnapshot(state, snap) {
+function restoreFromSnapshot(state: CanvasState, snap: HistorySnapshot): void {
   state.viewport = { ...snap.viewport }
   state.panels = JSON.parse(JSON.stringify(snap.panels))
   state.connections = JSON.parse(JSON.stringify(snap.connections))
@@ -41,17 +138,17 @@ function restoreFromSnapshot(state, snap) {
  * 深合并（仅合并普通对象；数组与基本类型用右侧值覆盖）
  * - 供 updatePanel 的 content 深度合并使用
  */
-function deepMerge(target, source) {
-  if (!source || typeof source !== 'object') return target ?? source
-  if (Array.isArray(source)) return source
+function deepMerge(target: Record<string, unknown> | null | undefined, source: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  if (!source || typeof source !== 'object') return target ?? source ?? {}
+  if (Array.isArray(source)) return source as unknown as Record<string, unknown>
   if (!target || typeof target !== 'object' || Array.isArray(target)) {
     return JSON.parse(JSON.stringify(source))
   }
-  const out = JSON.parse(JSON.stringify(target))
+  const out = JSON.parse(JSON.stringify(target)) as Record<string, unknown>
   for (const key of Object.keys(source)) {
     const sv = source[key]
     if (sv && typeof sv === 'object' && !Array.isArray(sv)) {
-      out[key] = deepMerge(out[key], sv)
+      out[key] = deepMerge(out[key] as Record<string, unknown>, sv as Record<string, unknown>)
     } else {
       out[key] = sv
     }
@@ -59,8 +156,76 @@ function deepMerge(target, source) {
   return out
 }
 
+// ---------- State 接口 ----------
+interface CanvasState {
+  // ---------- 工作区 ----------
+  workspaces: CanvasWorkspace[]
+  activeWorkspaceId: string | null
+
+  // ---------- 主题 ----------
+  themeMode: 'dark' | 'light'
+
+  // ---------- 节点与连线 ----------
+  panels: CanvasPanel[]
+  connections: CanvasConnection[]
+
+  // ---------- 视口 ----------
+  viewport: Viewport
+
+  // ---------- 画布容器在屏幕中的位置偏移（用于坐标转换） ----------
+  canvasRect: CanvasRect
+
+  // ---------- 选中 ----------
+  selectedPanelIds: string[]
+  selectedPanelId: string | null
+  selectedConnectionId: string | null
+
+  // ---------- 文本编辑（外部触发节点进入编辑模式） ----------
+  // 当值等于某 panel.id 时，对应 CanvasNode 自动进入文本编辑态
+  editingPanelId: string | null
+
+  // ---------- 背景 ----------
+  backgroundMode: 'dots' | 'lines' | 'blank'
+
+  // ---------- 显示图片信息 ----------
+  showImageInfo: boolean
+
+  // ---------- 历史 ----------
+  history: History
+
+  // ---------- 交互状态 ----------
+  _isSpacePressed: boolean
+  _isDraggingPanel: boolean
+
+  // ---------- 待创建连线 ----------
+  pendingConnectionCreate: PendingConnectionCreate | null
+
+  // ---------- 连线拖拽（临时连线状态）----------
+  connecting: ConnectingState | null
+
+  // ---------- 搜索与筛选 ----------
+  searchQuery: string
+  searchMatchedIds: string[]
+
+  // ---------- 网格 ----------
+  showGrid: boolean
+  gridSize: number
+
+  // ---------- 对齐参考线 ----------
+  alignmentGuides: AlignmentGuides
+
+  // ---------- 隐藏 ----------
+  hiddenIds: string[]
+
+  // ---------- 剪贴板 ----------
+  clipboard: CanvasPanel[]
+
+  // ---------- 持久化标记 ----------
+  _storageReady: boolean
+}
+
 export const useCanvasStore = defineStore('canvas', {
-  state: () => ({
+  state: (): CanvasState => ({
     // ---------- 工作区 ----------
     workspaces: [],
     activeWorkspaceId: null,
@@ -129,20 +294,20 @@ export const useCanvasStore = defineStore('canvas', {
 
   getters: {
     /** 当前激活的工作区 */
-    activeWorkspace(state) {
+    activeWorkspace(state): CanvasWorkspace | null {
       return state.workspaces.find((w) => w.id === state.activeWorkspaceId) ?? null
     },
 
     /** 当前画布主题 token 对象（来自 canvasThemes） */
-    canvasTheme(state) {
+    canvasTheme(state): ThemeTokens {
       return canvasThemes[state.themeMode] ?? canvasThemes.dark
     },
 
     /** 当前选中的面板对象列表（按 selectedPanelIds 顺序） */
-    selectedPanels(state) {
+    selectedPanels(state): CanvasPanel[] {
       if (state.selectedPanelIds.length === 0) return []
       const map = new Map(state.panels.map((p) => [p.id, p]))
-      const result = []
+      const result: CanvasPanel[] = []
       for (const id of state.selectedPanelIds) {
         const p = map.get(id)
         if (p) result.push(p)
@@ -151,7 +316,7 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /** 视口内的可见面板（性能优化） */
-    visiblePanels(state) {
+    visiblePanels(state): CanvasPanel[] {
       const { x, y, zoom } = state.viewport
       const viewWidth = window.innerWidth
       const viewHeight = window.innerHeight
@@ -167,7 +332,7 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /** 按 searchQuery 匹配面板列表（匹配 name / content.text / type） */
-    matchedPanels(state) {
+    matchedPanels(state): CanvasPanel[] {
       const q = (state.searchQuery || '').trim().toLowerCase()
       if (!q) return []
       return state.panels.filter((p) => {
@@ -186,14 +351,14 @@ export const useCanvasStore = defineStore('canvas', {
      * - threshold: 对齐阈值（默认 4 像素）
      * - 返回 { x, y, guides: { vertical, horizontal } }
      */
-    computeAlignment: (state) => (targetBounds, otherIds, threshold = 4) => {
+    computeAlignment: (state) => (targetBounds: { x: number; y: number; width: number; height: number }, otherIds: string[], threshold = 4): { x: number; y: number; guides: AlignmentGuides } => {
       const { x, y, width, height } = targetBounds
       const tx = [x, x + width / 2, x + width]
       const ty = [y, y + height / 2, y + height]
       let dx = 0
       let dy = 0
-      const vertical = []
-      const horizontal = []
+      const vertical: number[] = []
+      const horizontal: number[] = []
       const otherSet = new Set(otherIds)
 
       for (const other of state.panels) {
@@ -243,7 +408,7 @@ export const useCanvasStore = defineStore('canvas', {
      * - 规则：source_panel_id → target_panel_id 即"上游 → 下游"
      * - 每项：{ panel, output }
      */
-    getUpstreamOutput: (state) => (panelId) => {
+    getUpstreamOutput: (state) => (panelId: string): { panel: CanvasPanel; output: Record<string, unknown> }[] => {
       const upstreamIds = state.connections
         .filter((c) => c.target_panel_id === panelId)
         .map((c) => c.source_panel_id)
@@ -254,7 +419,7 @@ export const useCanvasStore = defineStore('canvas', {
           const panel = state.panels.find((p) => p.id === pid)
           if (!panel) return null
           const content = panel.content ?? {}
-          let output
+          let output: Record<string, unknown>
           switch (panel.type) {
             case 'image':
               output = {
@@ -300,13 +465,13 @@ export const useCanvasStore = defineStore('canvas', {
           }
           return { panel, output }
         })
-        .filter(Boolean)
+        .filter(Boolean) as { panel: CanvasPanel; output: Record<string, unknown> }[]
     },
 
     /**
      * 把上游节点的核心字段合并成一个 { prompt, model, size, imageUrl, resultUrl } 对象
      */
-    resolveInputs: (state) => (panelId) => {
+    resolveInputs: (state) => (panelId: string): Record<string, unknown> | null => {
       const panel = state.panels.find((p) => p.id === panelId)
       if (!panel) return null
       const upstreamIds = state.connections
@@ -314,12 +479,12 @@ export const useCanvasStore = defineStore('canvas', {
         .map((c) => c.source_panel_id)
         .filter(Boolean)
 
-      const merged = JSON.parse(JSON.stringify(panel.content ?? {}))
+      const merged = JSON.parse(JSON.stringify(panel.content ?? {})) as Record<string, unknown>
       for (const pid of upstreamIds) {
         const up = state.panels.find((p) => p.id === pid)
         if (!up) continue
         const content = up.content ?? {}
-        const output = {}
+        const output: Record<string, unknown> = {}
         if (content.resultUrl !== undefined) output.resultUrl = content.resultUrl
         if (content.imageUrl !== undefined) output.imageUrl = content.imageUrl
         if (content.prompt !== undefined) output.prompt = content.prompt
@@ -338,7 +503,7 @@ export const useCanvasStore = defineStore('canvas', {
     // ==================== 主题 ====================
 
     /** 切换主题模式：'dark' | 'light' */
-    setThemeMode(mode) {
+    setThemeMode(mode: 'dark' | 'light'): void {
       if (mode === 'dark' || mode === 'light') {
         this.themeMode = mode
         saveCanvas(this)
@@ -346,7 +511,7 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /** 切换背景模式：'dots' | 'lines' | 'blank'（对齐参考项目 dots/lines/blank） */
-    setBackgroundMode(mode) {
+    setBackgroundMode(mode: 'dots' | 'lines' | 'blank'): void {
       if (['dots', 'lines', 'blank'].includes(mode)) {
         this.backgroundMode = mode
         saveCanvas(this)
@@ -354,7 +519,7 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /** 切换图片信息显示开关 */
-    toggleImageInfo() {
+    toggleImageInfo(): void {
       this.showImageInfo = !this.showImageInfo
       saveCanvas(this)
     },
@@ -362,8 +527,8 @@ export const useCanvasStore = defineStore('canvas', {
     // ==================== 工作区 ====================
 
     /** 创建并切换到新工作区 */
-    createWorkspace(name) {
-      const ws = {
+    createWorkspace(name?: string): CanvasWorkspace {
+      const ws: CanvasWorkspace = {
         id: uid(),
         name: name ?? '未命名工作区',
         created_at: new Date().toISOString(),
@@ -385,7 +550,7 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /** 切换到指定工作区（保存当前、加载目标） */
-    switchWorkspace(id) {
+    switchWorkspace(id: string): void {
       const current = this.workspaces.find((w) => w.id === this.activeWorkspaceId)
       if (current) {
         current.viewport = { ...this.viewport }
@@ -412,7 +577,7 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /** 删除工作区 */
-    deleteWorkspace(id) {
+    deleteWorkspace(id: string): void {
       const idx = this.workspaces.findIndex((w) => w.id === id)
       if (idx === -1) return
       this.workspaces.splice(idx, 1)
@@ -433,7 +598,7 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /** 重命名工作区 */
-    renameWorkspace(id, name) {
+    renameWorkspace(id: string, name: string): void {
       const ws = this.workspaces.find((w) => w.id === id)
       if (!ws) return
       const trimmed = (name ?? '').trim()
@@ -446,13 +611,13 @@ export const useCanvasStore = defineStore('canvas', {
     // ==================== 视口 ====================
 
     /** 平移画布（世界坐标增量） */
-    pan(dx, dy) {
+    pan(dx: number, dy: number): void {
       this.viewport.x += Number(dx) || 0
       this.viewport.y += Number(dy) || 0
     },
 
     /** 设置缩放（可选以中心点为缩放中心；范围 5%-500%，对齐参考项目） */
-    setZoom(zoom, center = null) {
+    setZoom(zoom: number, center: { x: number; y: number } | null = null): void {
       const oldZoom = this.viewport.zoom
       const newZoom = Math.min(5, Math.max(0.05, Number(zoom) || oldZoom))
       if (center) {
@@ -463,13 +628,13 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /** 重置视口 */
-    resetView() {
+    resetView(): void {
       this.viewport = { x: 0, y: 0, zoom: 1 }
     },
 
     /** 屏幕坐标 → 世界坐标 */
     /** 屏幕坐标(clientX/clientY) → 世界坐标，自动减去画布容器偏移 */
-    screenToWorld(sx, sy) {
+    screenToWorld(sx: number, sy: number): { x: number; y: number } {
       const lx = sx - this.canvasRect.left
       const ly = sy - this.canvasRect.top
       return {
@@ -479,7 +644,7 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /** 世界坐标 → 屏幕坐标(clientX/clientY)，自动加上画布容器偏移 */
-    worldToScreen(wx, wy) {
+    worldToScreen(wx: number, wy: number): { x: number; y: number } {
       return {
         x: wx * this.viewport.zoom + this.viewport.x + this.canvasRect.left,
         y: wy * this.viewport.zoom + this.viewport.y + this.canvasRect.top,
@@ -487,53 +652,54 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /** 更新画布容器在屏幕中的位置偏移（由 InfiniteCanvas 组件调用） */
-    setCanvasRect(rect) {
+    setCanvasRect(rect: { left: number; top: number }): void {
       this.canvasRect = { left: rect.left, top: rect.top }
     },
 
     // ==================== 节点操作 ====================
 
     /** 添加面板（自动生成 id / workspace_id / zIndex / 时间戳） */
-    addPanel(panel) {
+    addPanel(panel: Partial<CanvasPanel> & { x: number; y: number; width: number; height: number }): string {
       if (!this.activeWorkspaceId) {
         this.createWorkspace('画布 1')
       }
       panel.id = uid()
-      panel.workspace_id = this.activeWorkspaceId
+      panel.workspace_id = this.activeWorkspaceId!
       panel.zIndex = this.panels.length + 1
       panel.created_at = new Date().toISOString()
       panel.updated_at = new Date().toISOString()
       if (!panel.content || typeof panel.content !== 'object') {
         panel.content = {}
       }
-      this.panels.push(panel)
+      this.panels.push(panel as CanvasPanel)
       saveCanvas(this)
       return panel.id
     },
 
     /** 更新面板（顶层浅合并；content 深合并） */
-    updatePanel(id, changes) {
+    updatePanel(id: string, changes: Partial<CanvasPanel>): void {
       const panel = this.panels.find((p) => p.id === id)
       if (!panel || !changes) return
+      let mergedChanges = changes
       if (changes.content && typeof changes.content === 'object') {
-        changes = {
+        mergedChanges = {
           ...changes,
-          content: deepMerge(panel.content ?? {}, changes.content),
+          content: deepMerge(panel.content ?? {}, changes.content as Record<string, unknown>),
         }
       }
-      Object.assign(panel, changes, { updated_at: new Date().toISOString() })
+      Object.assign(panel, mergedChanges, { updated_at: new Date().toISOString() })
       saveCanvas(this)
     },
 
     /** 直接写回（不压历史快照）：拖动/缩放等高频操作 */
-    _updatePanelDirect(id, changes) {
+    _updatePanelDirect(id: string, changes: Partial<CanvasPanel>): void {
       const panel = this.panels.find((p) => p.id === id)
       if (!panel) return
       Object.assign(panel, changes, { updated_at: new Date().toISOString() })
     },
 
     /** 删除面板（同时清理相关连线） */
-    deletePanel(id) {
+    deletePanel(id: string): void {
       this.connections = this.connections.filter(
         (c) => c.source_panel_id !== id && c.target_panel_id !== id,
       )
@@ -544,7 +710,7 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /** 清空所有面板 */
-    clearAllPanels() {
+    clearAllPanels(): void {
       if (this.panels.length === 0) return
       this.connections = []
       this.panels = []
@@ -553,7 +719,7 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /** 复制单个面板（向右下偏移 20 像素） */
-    duplicatePanel(id) {
+    duplicatePanel(id: string): string | undefined {
       const orig = this.panels.find((p) => p.id === id)
       if (!orig) return
       return this.addPanel({
@@ -565,19 +731,19 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /** 复制所有选中面板（向右下偏移，整体选中） */
-    duplicateSelectedPanels() {
+    duplicateSelectedPanels(): string[] {
       if (this.selectedPanelIds.length === 0) return []
       const idSet = new Set(this.selectedPanelIds)
       const origs = this.panels.filter((p) => idSet.has(p.id))
       const maxZ = Math.max(...this.panels.map((p) => p.zIndex || 0), 0)
       const now = new Date().toISOString()
-      const newIds = []
+      const newIds: string[] = []
       for (let i = 0; i < origs.length; i++) {
         const orig = origs[i]
-        const newPanel = {
+        const newPanel: CanvasPanel = {
           ...orig,
           id: uid(),
-          workspace_id: this.activeWorkspaceId,
+          workspace_id: this.activeWorkspaceId!,
           x: orig.x + 20,
           y: orig.y + 20,
           zIndex: maxZ + i + 1,
@@ -597,9 +763,9 @@ export const useCanvasStore = defineStore('canvas', {
     // ==================== 选中 ====================
 
     /** 选中面板（append=true 时与已有选中叠加） */
-    selectPanel(id, { append = false } = {}) {
+    selectPanel(id: string | null, { append = false }: { append?: boolean } = {}): void {
       if (append) {
-        const idx = this.selectedPanelIds.indexOf(id)
+        const idx = this.selectedPanelIds.indexOf(id!)
         if (idx >= 0) {
           this.selectedPanelIds.splice(idx, 1)
         } else if (id) {
@@ -618,13 +784,13 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /** 清空所有选中 */
-    clearSelection() {
+    clearSelection(): void {
       this.selectedPanelIds = []
       this.selectedPanelId = null
     },
 
     /** 框选：所有中心点落在 rect 内的面板 */
-    selectPanelsInRect({ startWorld, endWorld }, { append = false } = {}) {
+    selectPanelsInRect({ startWorld, endWorld }: { startWorld: { x: number; y: number }; endWorld: { x: number; y: number } }, { append = false }: { append?: boolean } = {}): void {
       const left = Math.min(startWorld.x, endWorld.x)
       const right = Math.max(startWorld.x, endWorld.x)
       const top = Math.min(startWorld.y, endWorld.y)
@@ -649,7 +815,7 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /** 将面板置顶 */
-    movePanelToFront(id) {
+    movePanelToFront(id: string): void {
       const panel = this.panels.find((p) => p.id === id)
       if (!panel) return
       panel.zIndex = Math.max(...this.panels.map((p) => p.zIndex || 0), 0) + 1
@@ -658,9 +824,9 @@ export const useCanvasStore = defineStore('canvas', {
     // ==================== 连线 ====================
 
     /** 添加连线 */
-    addConnection({ source_panel_id, target_panel_id, type = 'manual', ...rest }) {
+    addConnection({ source_panel_id, target_panel_id, type = 'manual', ...rest }: { source_panel_id: string; target_panel_id: string; type?: string; [key: string]: unknown }): CanvasConnection | null {
       if (!source_panel_id || !target_panel_id) return null
-      const conn = {
+      const conn: CanvasConnection = {
         id: uid(),
         workspace_id: this.activeWorkspaceId,
         source_panel_id,
@@ -675,13 +841,13 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /** 删除连线 */
-    deleteConnection(id) {
+    deleteConnection(id: string): void {
       this.connections = this.connections.filter((c) => c.id !== id)
       saveCanvas(this)
     },
 
     /** 开始拖拽连线：记录源节点和锚点类型 */
-    startConnecting(sourcePanelId, anchorType) {
+    startConnecting(sourcePanelId: string, anchorType: string): void {
       const source = this.panels.find((p) => p.id === sourcePanelId)
       if (!source) return
       // 源节点锚点的世界坐标（中心左/右）
@@ -698,20 +864,20 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /** 更新拖拽连线的终点坐标 */
-    updateConnecting(worldX, worldY) {
+    updateConnecting(worldX: number, worldY: number): void {
       if (!this.connecting) return
       this.connecting.endWorld = { x: worldX, y: worldY }
     },
 
     /** 完成连线：在源节点和目标节点之间创建一条连接 */
-    endConnecting(targetPanelId, targetAnchorType) {
+    endConnecting(targetPanelId: string, targetAnchorType: string): void {
       if (!this.connecting) return
       const sourceId = this.connecting.sourcePanelId
       const sourceAnchor = this.connecting.sourceAnchorType
       this.connecting = null
       if (!targetPanelId || targetPanelId === sourceId) return
       // 确定真正的 source/target：source 锚点代表输出，target 锚点代表输入
-      let realSource, realTarget
+      let realSource: string, realTarget: string
       if (sourceAnchor === 'source') {
         realSource = sourceId
         realTarget = targetPanelId
@@ -732,31 +898,31 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /** 取消当前拖拽连线 */
-    cancelConnecting() {
+    cancelConnecting(): void {
       this.connecting = null
     },
 
     // ==================== 待创建连线 ====================
 
     /** 设置待创建连线状态 */
-    setPendingConnectionCreate(payload) {
+    setPendingConnectionCreate(payload: PendingConnectionCreate | null): void {
       this.pendingConnectionCreate = payload ?? null
     },
 
     /** 清空待创建连线状态 */
-    clearPendingConnectionCreate() {
+    clearPendingConnectionCreate(): void {
       this.pendingConnectionCreate = null
     },
 
     /** 从待创建连线状态生成一个新节点，并建立连线 */
-    createConnectedNode(type, pending) {
+    createConnectedNode(type: string, pending: PendingConnectionCreate): CanvasPanel | undefined {
       if (!pending) return
       const { sourceId, worldX, worldY } = pending
       const width = 260
       const height = type === 'image' ? 260 : 220
-      const panel = {
+      const panel: CanvasPanel = {
         id: uid(),
-        workspace_id: this.activeWorkspaceId,
+        workspace_id: this.activeWorkspaceId!,
         type,
         name: `新${type === 'image' ? '图片' : type === 'text' ? '文本' : '笔记'}节点`,
         x: worldX - width / 2,
@@ -790,7 +956,7 @@ export const useCanvasStore = defineStore('canvas', {
     // ==================== 历史（撤销/重做） ====================
 
     /** 压入历史快照（最多 80 条；清空 future） */
-    pushSnapshot() {
+    pushSnapshot(): void {
       const snap = snapshot(this)
       this.history.past.push(snap)
       if (this.history.past.length > MAX_HISTORY) {
@@ -800,21 +966,21 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /** 撤销 */
-    undo() {
+    undo(): void {
       if (this.history.past.length === 0) return
       const currentSnap = snapshot(this)
       this.history.future.push(currentSnap)
-      const prevSnap = this.history.past.pop()
+      const prevSnap = this.history.past.pop()!
       restoreFromSnapshot(this, prevSnap)
       saveCanvas(this)
     },
 
     /** 重做 */
-    redo() {
+    redo(): void {
       if (this.history.future.length === 0) return
       const currentSnap = snapshot(this)
       this.history.past.push(currentSnap)
-      const nextSnap = this.history.future.pop()
+      const nextSnap = this.history.future.pop()!
       restoreFromSnapshot(this, nextSnap)
       saveCanvas(this)
     },
@@ -822,7 +988,7 @@ export const useCanvasStore = defineStore('canvas', {
     // ==================== 搜索与定位 ====================
 
     /** 设置搜索关键字 */
-    setSearchQuery(q) {
+    setSearchQuery(q: string): void {
       this.searchQuery = typeof q === 'string' ? q : ''
       if (!this.searchQuery) {
         this.searchMatchedIds = []
@@ -830,7 +996,7 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /** 执行搜索并定位首个匹配项 */
-    searchAndLocate(q) {
+    searchAndLocate(q: string): void {
       this.setSearchQuery(q)
       const matched = this.matchedPanels
       this.searchMatchedIds = matched.map((p) => p.id)
@@ -840,7 +1006,7 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /** 将指定面板置于视口中心（不缩放） */
-    centerOnPanel(id) {
+    centerOnPanel(id: string): void {
       const panel = this.panels.find((p) => p.id === id)
       if (!panel) return
       const { zoom } = this.viewport
@@ -855,7 +1021,7 @@ export const useCanvasStore = defineStore('canvas', {
     // ==================== 隐藏 ====================
 
     /** 设置面板隐藏状态 */
-    setPanelHidden(id, hidden) {
+    setPanelHidden(id: string, hidden: boolean): void {
       if (!id) return
       const idx = this.hiddenIds.indexOf(id)
       if (hidden) {
@@ -868,19 +1034,19 @@ export const useCanvasStore = defineStore('canvas', {
     // ==================== 网格 ====================
 
     /** 切换是否启用网格 */
-    toggleGrid() {
+    toggleGrid(): void {
       this.showGrid = !this.showGrid
     },
 
     /** 设置网格大小（限幅 4~128） */
-    setGridSize(size) {
+    setGridSize(size: number): void {
       const n = Number(size)
       if (!isFinite(n) || n <= 0) return
       this.gridSize = Math.min(128, Math.max(4, n))
     },
 
     /** 网格吸附（返回吸附后的坐标） */
-    snapToGrid(x, y) {
+    snapToGrid(x: number, y: number): { x: number; y: number } {
       if (!this.showGrid) return { x, y }
       const g = this.gridSize
       return {
@@ -892,19 +1058,19 @@ export const useCanvasStore = defineStore('canvas', {
     // ==================== 对齐参考线 ====================
 
     /** 设置当前对齐参考线 */
-    setAlignmentGuides(guides) {
+    setAlignmentGuides(guides: AlignmentGuides): void {
       this.alignmentGuides = guides ?? { vertical: [], horizontal: [] }
     },
 
     /** 清空对齐参考线 */
-    clearAlignmentGuides() {
+    clearAlignmentGuides(): void {
       this.alignmentGuides = { vertical: [], horizontal: [] }
     },
 
     // ==================== 锁定 ====================
 
     /** 切换锁定状态 */
-    toggleLock(id) {
+    toggleLock(id: string): void {
       const panel = this.panels.find((p) => p.id === id)
       if (!panel) return
       const current = !!panel.content?.locked
@@ -914,7 +1080,7 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /** 锁定面板 */
-    lockPanel(id) {
+    lockPanel(id: string): void {
       const panel = this.panels.find((p) => p.id === id)
       if (!panel) return
       this._updatePanelDirect(id, {
@@ -923,7 +1089,7 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /** 解锁面板 */
-    unlockPanel(id) {
+    unlockPanel(id: string): void {
       const panel = this.panels.find((p) => p.id === id)
       if (!panel) return
       this._updatePanelDirect(id, {
@@ -934,15 +1100,15 @@ export const useCanvasStore = defineStore('canvas', {
     // ==================== 图片节点拆分 ====================
 
     /** 将图片节点分割成 n 个小节点（位置错开） */
-    splitImagePanel(id, n = 4) {
+    splitImagePanel(id: string, n = 4): string[] {
       const orig = this.panels.find((p) => p.id === id)
       if (!orig) return []
       const count = Math.max(1, Number(n) || 4)
       const maxZ = Math.max(...this.panels.map((p) => p.zIndex || 0), 0)
       const now = new Date().toISOString()
-      const newIds = []
+      const newIds: string[] = []
       for (let i = 0; i < count; i++) {
-        const newPanel = {
+        const newPanel: CanvasPanel = {
           ...orig,
           id: uid(),
           x: orig.x + 30 + i * 20,
@@ -962,7 +1128,7 @@ export const useCanvasStore = defineStore('canvas', {
     // ==================== 旋转 ====================
 
     /** 设置面板旋转角度（0/90/180/270） */
-    setPanelRotation(id, degrees) {
+    setPanelRotation(id: string, degrees: number): void {
       const allowed = [0, 90, 180, 270]
       const r = Number(degrees)
       if (!allowed.includes(r)) return
@@ -976,7 +1142,7 @@ export const useCanvasStore = defineStore('canvas', {
     // ==================== 复制粘贴 ====================
 
     /** 复制面板到剪贴板（不传 id 则复制选中） */
-    copyToClipboard(id) {
+    copyToClipboard(id?: string): void {
       const ids = id ? [id] : [...this.selectedPanelIds]
       if (ids.length === 0) return
       this.clipboard = this.panels
@@ -985,7 +1151,7 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /** 粘贴剪贴板到指定屏幕坐标（以首个面板左上角为锚点） */
-    pastePanel(screenX, screenY) {
+    pastePanel(screenX: number, screenY: number): void {
       if (!Array.isArray(this.clipboard) || this.clipboard.length === 0) return
       const world = this.screenToWorld(screenX, screenY)
       const anchor = this.clipboard[0]
@@ -993,15 +1159,15 @@ export const useCanvasStore = defineStore('canvas', {
       const offsetY = world.y - (anchor.y || 0)
       const maxZ = Math.max(...this.panels.map((p) => p.zIndex || 0), 0)
       const now = new Date().toISOString()
-      const newIds = []
+      const newIds: string[] = []
       for (let i = 0; i < this.clipboard.length; i++) {
         const item = this.clipboard[i]
-        const copy = {
+        const copy: CanvasPanel = {
           ...JSON.parse(JSON.stringify(item)),
           id: uid(),
           x: (item.x || 0) + offsetX,
           y: (item.y || 0) + offsetY,
-          workspace_id: this.activeWorkspaceId,
+          workspace_id: this.activeWorkspaceId!,
           zIndex: maxZ + i + 1,
           created_at: now,
           updated_at: now,
@@ -1017,7 +1183,7 @@ export const useCanvasStore = defineStore('canvas', {
     // ==================== 导入导出 ====================
 
     /** 导出当前画布为 JSON 字符串 */
-    exportJSON() {
+    exportJSON(): string {
       const data = {
         version: 1,
         exportedAt: new Date().toISOString(),
@@ -1033,14 +1199,15 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /** 从 JSON 字符串导入画布（替换当前 panels/connections/viewport） */
-    importJSON(jsonStr) {
-      let data
+    importJSON(jsonStr: string): { panels: number; connections: number } {
+      let data: Record<string, unknown>
       try {
         data = JSON.parse(jsonStr)
-      } catch (e) {
-        throw new Error('JSON 解析失败: ' + e.message)
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : String(e)
+        throw new Error('JSON 解析失败: ' + message)
       }
-      const ws = data?.workspace
+      const ws = data?.workspace as { panels?: CanvasPanel[]; connections?: CanvasConnection[]; viewport?: Viewport } | undefined
       if (!ws || !Array.isArray(ws.panels) || !Array.isArray(ws.connections)) {
         throw new Error('JSON 结构不合法（缺少 workspace.panels 或 workspace.connections）')
       }
@@ -1061,23 +1228,23 @@ export const useCanvasStore = defineStore('canvas', {
     // ==================== 持久化 hydrate ====================
 
     /** 从存储加载数据填充 state（幂等，_storageReady 标记避免重复加载） */
-    async _hydrateFromStorage() {
+    async _hydrateFromStorage(): Promise<void> {
       if (this._storageReady) return
       try {
-        const data = await loadCanvas()
+        const data = await loadCanvas() as Record<string, unknown> | null
         if (data && typeof data === 'object') {
-          if (Array.isArray(data.workspaces)) this.workspaces = data.workspaces
-          if ('activeWorkspaceId' in data) this.activeWorkspaceId = data.activeWorkspaceId
+          if (Array.isArray(data.workspaces)) this.workspaces = data.workspaces as CanvasWorkspace[]
+          if ('activeWorkspaceId' in data) this.activeWorkspaceId = data.activeWorkspaceId as string | null
           if (data.themeMode === 'dark' || data.themeMode === 'light') {
             this.themeMode = data.themeMode
           }
           if (data.viewport && typeof data.viewport === 'object') {
-            this.viewport = { ...this.viewport, ...data.viewport }
+            this.viewport = { ...this.viewport, ...(data.viewport as Viewport) }
           }
-          if (Array.isArray(data.panels)) this.panels = data.panels
-          if (Array.isArray(data.connections)) this.connections = data.connections
+          if (Array.isArray(data.panels)) this.panels = data.panels as CanvasPanel[]
+          if (Array.isArray(data.connections)) this.connections = data.connections as CanvasConnection[]
         }
-      } catch (err) {
+      } catch (err: unknown) {
         // eslint-disable-next-line no-console
         console.warn('[canvas] 持久化加载失败', err)
       }

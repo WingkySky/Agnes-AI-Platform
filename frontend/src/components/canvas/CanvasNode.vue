@@ -187,7 +187,7 @@
           <select
             class="config-select"
             :value="configContent.model"
-            @change="updateConfigContent('model', $event.target.value)"
+            @change="updateConfigContent('model', ($event.target as HTMLSelectElement)?.value)"
             @mousedown.stop
           >
             <option v-for="m in availableModels" :key="m" :value="m">{{ m }}</option>
@@ -198,7 +198,7 @@
             v-if="isImageMode"
             class="config-select"
             :value="configContent.size"
-            @change="updateConfigContent('size', $event.target.value)"
+            @change="updateConfigContent('size', ($event.target as HTMLSelectElement)?.value)"
             @mousedown.stop
           >
             <option v-for="s in availableSizes" :key="s" :value="s">{{ s }}</option>
@@ -209,7 +209,7 @@
             <select
               class="config-select"
               :value="configContent.aspect_ratio"
-              @change="updateConfigContent('aspect_ratio', $event.target.value)"
+              @change="updateConfigContent('aspect_ratio', ($event.target as HTMLSelectElement)?.value)"
               @mousedown.stop
             >
               <option v-for="r in ['16:9','9:16','1:1','4:3']" :key="r" :value="r">{{ r }}</option>
@@ -217,7 +217,7 @@
             <select
               class="config-select"
               :value="configContent.seconds"
-              @change="updateConfigContent('seconds', $event.target.value)"
+              @change="updateConfigContent('seconds', ($event.target as HTMLSelectElement)?.value)"
               @mousedown.stop
             >
               <option v-for="s in [3,5,8,10]" :key="s" :value="s">{{ s }}秒</option>
@@ -305,7 +305,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 /* =====================================================
  * CanvasNode 画布节点组件
  * 1:1 复刻参考项目 infinite-canvas 的节点设计与图标
@@ -378,7 +378,7 @@ const availableSizes = ['1024x1024', '768x1024', '1024x768', '768x768']
 /* ---------- 响应式状态 ---------- */
 const hovered = ref(false) // 是否悬停
 const isEditingContent = ref(false) // 是否正在编辑文本
-const textareaRef = ref(null) // 文本编辑区引用
+const textareaRef = ref<HTMLTextAreaElement | null>(null) // 文本编辑区引用
 
 /* ---------- 四角缩放手柄配置 ---------- */
 const resizeCorners = [
@@ -538,7 +538,7 @@ const configPrompt = computed({
 /* ---------- 工具函数 ---------- */
 
 /** 格式化字节数为可读字符串 */
-function formatBytes(bytes) {
+function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes) || bytes <= 0) return ''
   const units = ['B', 'KB', 'MB', 'GB']
   let value = bytes
@@ -553,9 +553,9 @@ function formatBytes(bytes) {
 /* ---------- 交互：拖拽移动 ---------- */
 
 /** 鼠标按下：开始拖拽节点 */
-function handleMouseDown(event) {
+function handleMouseDown(event: MouseEvent) {
   // 输入类元素不拦截，让元素正常工作
-  const tag = (event.target && event.target.tagName) || ''
+  const tag = (event.target instanceof Element ? event.target.tagName : '') || ''
   if (['INPUT', 'TEXTAREA', 'BUTTON', 'SELECT'].includes(tag)) return
 
   emit('select', props.panel.id)
@@ -567,7 +567,7 @@ function handleMouseDown(event) {
   const startY = props.panel.y
   const zoom = props.viewport?.zoom || 1
 
-  function onMove(ev) {
+  function onMove(ev: MouseEvent) {
     // 屏幕坐标差 → 世界坐标差
     const screenDx = ev.clientX - startClientX
     const screenDy = ev.clientY - startClientY
@@ -593,7 +593,7 @@ function handleMouseDown(event) {
 /* ---------- 交互：缩放（四角手柄） ---------- */
 
 /** 缩放手柄按下：开始缩放 */
-function handleResizeStart(event, corner) {
+function handleResizeStart(event: MouseEvent, corner: any) {
   event.stopPropagation()
   event.preventDefault()
 
@@ -620,7 +620,7 @@ function handleResizeStart(event, corner) {
   const fromLeft = corner.dx === -1
   const fromTop = corner.dy === -1
 
-  function onMove(ev) {
+  function onMove(ev: MouseEvent) {
     // 屏幕坐标差 → 世界坐标差
     const dx = (ev.clientX - startClientX) / zoom
     const dy = (ev.clientY - startClientY) / zoom
@@ -667,7 +667,7 @@ function handleResizeStart(event, corner) {
 /* ---------- 交互：连线锚点 ---------- */
 
 /** 连线锚点按下：开始连线 */
-function handleConnectStart(event, anchorType) {
+function handleConnectStart(event: MouseEvent, anchorType: string) {
   event.stopPropagation()
   emit('start-connecting', anchorType)
 }
@@ -675,7 +675,7 @@ function handleConnectStart(event, anchorType) {
 /* ---------- 交互：双击 ---------- */
 
 /** 双击：图片查看大图 / 文本进入编辑 */
-function handleDoubleClick(event) {
+function handleDoubleClick(event: MouseEvent) {
   // 图片节点：双击查看大图
   if (props.panel.type === 'image' && hasImageContent.value) {
     event.stopPropagation()
@@ -698,8 +698,8 @@ function handleDoubleClick(event) {
 /* ---------- 交互：文本编辑 ---------- */
 
 /** 文本输入：emit edit-text */
-function handleContentInput(event) {
-  const value = event.target.value
+function handleContentInput(event: Event) {
+  const value = (event.target as HTMLTextAreaElement)?.value
   emit('edit-text', value)
 }
 
@@ -743,7 +743,7 @@ function handleRetry() {
 /* ---------- 交互：配置节点 ---------- */
 
 /** 更新配置节点内容字段（直接调用 store 更新） */
-function updateConfigContent(key, value) {
+function updateConfigContent(key: string, value: any) {
   store.updatePanel(props.panel.id, { content: { [key]: value } })
 }
 
@@ -767,17 +767,17 @@ function handleMouseLeave() {
 }
 
 /** 右键菜单 */
-function handleContextMenu(event) {
+function handleContextMenu(event: MouseEvent) {
   emit('context-menu', event)
 }
 
 /* ---------- 编辑态外部点击关闭 ---------- */
 
 /** 外部点击：关闭文本编辑 */
-function handleOutsidePointerDown(event) {
+function handleOutsidePointerDown(event: PointerEvent) {
   if (!isEditingContent.value) return
-  const target = event.target
-  if (textareaRef.value && textareaRef.value.contains(target)) return
+  const target = event.target as Node | null
+  if (textareaRef.value && target && textareaRef.value.contains(target)) return
   isEditingContent.value = false
 }
 

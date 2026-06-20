@@ -43,12 +43,12 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed } from 'vue'
 
 const props = defineProps({
   theme: { type: Object, required: true },
-  panels: { type: Array, default: () => [] }, // 所有节点
+  panels: { type: Array as () => any[], default: () => [] }, // 所有节点
   viewport: { type: Object, required: true }, // { x, y, zoom }
   canvasSize: {
     type: Object,
@@ -64,7 +64,7 @@ const height = 160
 // 节点边界外扩 padding（世界坐标）
 const PADDING = 500
 
-const svgRef = ref(null)
+const svgRef = ref<SVGSVGElement | null>(null)
 const isDragging = ref(false)
 
 // 计算所有节点的世界边界 + 缩放比 + 偏移
@@ -80,11 +80,11 @@ const minimapBounds = computed(() => {
   let minY = Infinity
   let maxX = -Infinity
   let maxY = -Infinity
-  for (const node of props.panels) {
-    const nx = node.x ?? 0
-    const ny = node.y ?? 0
-    const nw = node.width ?? 0
-    const nh = node.height ?? 0
+  for (const node of props.panels as any[]) {
+    const nx = (node as any).x ?? 0
+    const ny = (node as any).y ?? 0
+    const nw = (node as any).width ?? 0
+    const nh = (node as any).height ?? 0
     minX = Math.min(minX, nx)
     minY = Math.min(minY, ny)
     maxX = Math.max(maxX, nx + nw)
@@ -107,7 +107,7 @@ const minimapBounds = computed(() => {
 })
 
 // 世界坐标 -> 小地图坐标
-function toMinimap(worldX, worldY) {
+function toMinimap(worldX: number, worldY: number) {
   const { worldBounds, scale, offset } = minimapBounds.value
   return {
     x: (worldX - worldBounds.x) * scale + offset.x,
@@ -116,7 +116,7 @@ function toMinimap(worldX, worldY) {
 }
 
 // 小地图坐标 -> 世界坐标
-function toWorld(minimapX, minimapY) {
+function toWorld(minimapX: number, minimapY: number) {
   const { worldBounds, scale, offset } = minimapBounds.value
   return {
     x: (minimapX - offset.x) / scale + worldBounds.x,
@@ -125,7 +125,7 @@ function toWorld(minimapX, minimapY) {
 }
 
 // 节点在小地图上的矩形
-function nodeRect(node) {
+function nodeRect(node: any) {
   const pos = toMinimap(node.x ?? 0, node.y ?? 0)
   const s = minimapBounds.value.scale
   return {
@@ -137,7 +137,7 @@ function nodeRect(node) {
 }
 
 // 节点类型颜色
-function nodeColor(type) {
+function nodeColor(type: string) {
   switch (type) {
     case 'image':
       return '#10b981'
@@ -179,7 +179,7 @@ const containerStyle = computed(() => ({
 }))
 
 // 拖拽/点击定位视口：将小地图坐标转为世界坐标后 emit
-function locateFromEvent(event) {
+function locateFromEvent(event: PointerEvent) {
   const rect = svgRef.value?.getBoundingClientRect()
   if (!rect) return
   const mx = event.clientX - rect.left
@@ -188,14 +188,14 @@ function locateFromEvent(event) {
   emit('locate', world.x, world.y)
 }
 
-function onPointerDown(event) {
+function onPointerDown(event: PointerEvent) {
   event.preventDefault()
   svgRef.value?.setPointerCapture?.(event.pointerId)
   isDragging.value = true
   locateFromEvent(event)
 }
 
-function onPointerMove(event) {
+function onPointerMove(event: PointerEvent) {
   if (!isDragging.value) return
   locateFromEvent(event)
 }

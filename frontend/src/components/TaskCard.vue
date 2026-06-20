@@ -100,7 +100,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 // ------ 引入 i18n composable ------
 import { computed } from 'vue'
 import { useI18n } from '@/i18n'
@@ -150,12 +150,12 @@ const elapsedSec = computed(() => {
   return Math.floor((Date.now() - props.task.createdAt) / 1000)
 })
 
-function truncate(text, max) {
+function truncate(text: string, max: number) {
   if (!text) return ''
   return text.length > max ? text.slice(0, max) + '...' : text
 }
 
-function formatTime(ts) {
+function formatTime(ts: number) {
   if (!ts) return ''
   const d = new Date(ts)
   const hh = String(d.getHours()).padStart(2, '0')

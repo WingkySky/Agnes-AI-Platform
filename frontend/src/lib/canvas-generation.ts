@@ -17,6 +17,87 @@
 
 import { createImageTask, getImageTaskStatus } from '@/api/images'
 import { createVideoTask, getVideoStatus } from '@/api/videos'
+import type { ImageGenerationRequest, VideoGenerationRequest } from '@/types'
+
+// ---------- 类型定义 ----------
+
+/** 资源内容：从资源节点提取的内容 */
+interface ResourceContent {
+  type: 'image' | 'text' | 'video'
+  nodeId: string
+  imageUrl?: string
+  text?: string
+  videoUrl?: string
+  title: string
+}
+
+/** Composer 编辑器需要的 inputs 格式 */
+interface ResourceContentForComposer {
+  nodeId: string
+  type: 'image' | 'text' | 'video'
+  title: string
+  imageUrl?: string
+  text?: string
+  videoUrl?: string
+}
+
+/** 输入摘要（供 UI 显示） */
+interface InputSummary {
+  textCount: number
+  imageCount: number
+  videoCount: number
+  total: number
+}
+
+/** 生成上下文 */
+interface GenerationContext {
+  prompt: string
+  referenceImages: string[]
+  referenceTexts: string[]
+  inputSummary: InputSummary
+}
+
+/** 面板类型（简化） */
+interface Panel {
+  id: string
+  type: string
+  name?: string
+  x?: number
+  y?: number
+  width?: number
+  height?: number
+  content?: Record<string, any>
+}
+
+/** 连线类型 */
+interface Connection {
+  source_panel_id: string
+  target_panel_id: string
+  [key: string]: any
+}
+
+/** Canvas Store 接口（简化） */
+interface CanvasStore {
+  panels: Panel[]
+  connections: Connection[]
+  addPanel: (panel: Record<string, any>) => string | undefined
+  addConnection: (conn: Record<string, any>) => void
+}
+
+/** 生成任务配置 */
+interface GenerationConfig {
+  model?: string
+  size?: string
+  response_format?: string
+  seconds?: number
+  aspect_ratio?: string
+}
+
+/** 生成任务选项 */
+interface GenerationOptions {
+  onProgress?: (phase: string, data: Record<string, any>) => void
+  count?: number
+}
 
 // ---------- 常量 ----------
 
@@ -24,8 +105,8 @@ import { createVideoTask, getVideoStatus } from '@/api/videos'
 const NODE_REFERENCE_PATTERN = /@\[node:([^\]]+)\]/g
 
 /** 资源类型标签生成器：图片1、图片2、文本1、视频1... */
-function resourceLabel(type, index) {
-  const labels = { image: '图片', text: '文本', video: '视频', audio: '音频' }
+function resourceLabel(type: string, index: number): string {
+  const labels: Record<string, string> = { image: '图片', text: '文本', video: '视频', audio: '音频' }
   return `${labels[type] || '资源'}${index + 1}`
 }
 
@@ -36,7 +117,7 @@ function resourceLabel(type, index) {
  * - image / text / video / audio 类型都是资源节点
  * - config / frame / quick-generate 不是资源节点
  */
-export function isResourceNode(panel) {
+export function isResourceNode(panel: Panel | null | undefined): boolean {
   if (!panel) return false
   return ['image', 'text', 'video', 'audio'].includes(panel.type)
 }
@@ -45,12 +126,8 @@ export function isResourceNode(panel) {
  * 获取指定节点的所有上游资源节点（根据连线查找）
  * - 查找 connections 中 target_panel_id === nodeId 的所有 source_panel_id
  * - 过滤掉非资源节点
- * @param {string} nodeId - 目标节点 ID
- * @param {Array} panels - 所有面板
- * @param {Array} connections - 所有连线
- * @returns {Array} 上游资源节点数组
  */
-export function getUpstreamNodes(nodeId, panels, connections) {
+export function getUpstreamNodes(nodeId: string, panels: Panel[], connections: Connection[]): Panel[] {
   const upstreamIds = connections
     .filter((c) => c.target_panel_id === nodeId)
     .map((c) => c.source_panel_id)
@@ -59,7 +136,7 @@ export function getUpstreamNodes(nodeId, panels, connections) {
   const panelMap = new Map(panels.map((p) => [p.id, p]))
   return upstreamIds
     .map((id) => panelMap.get(id))
-    .filter((p) => p && isResourceNode(p))
+    .filter((p): p is Panel => !!p && isResourceNode(p))
 }
 
 /**
@@ -68,7 +145,7 @@ export function getUpstreamNodes(nodeId, panels, connections) {
  * - text: 返回 { type: 'text', nodeId, text, title }
  * - video: 返回 { type: 'video', nodeId, videoUrl, title }
  */
-function extractResourceContent(panel) {
+function extractResourceContent(panel: Panel): ResourceContent | null {
   if (!panel) return null
   const c = panel.content || {}
   const title = panel.name || panel.type
@@ -105,7 +182,7 @@ function extractResourceContent(panel) {
  * - 供 CanvasConfigComposer 组件使用
  * - 返回 { nodeId, type, title, text, imageUrl }
  */
-export function extractResourceContentForComposer(panel) {
+export function extractResourceContentForComposer(panel: Panel): ResourceContentForComposer | null {
   if (!panel) return null
   const c = panel.content || {}
   const title = panel.name || panel.type
@@ -149,25 +226,20 @@ export function extractResourceContentForComposer(panel) {
  * - 如果没有 composerContent，走简单合并路径：
  *   · 所有上游文本拼到 prompt 末尾
  *   · 所有上游图片作为 referenceImages
- *
- * @param {Object} configNode - Config 节点
- * @param {Array} panels - 所有面板
- * @param {Array} connections - 所有连线
- * @returns {{ prompt: string, referenceImages: string[], referenceTexts: string[], inputSummary: object }}
  */
-export function buildGenerationContext(configNode, panels, connections) {
+export function buildGenerationContext(configNode: Panel, panels: Panel[], connections: Connection[]): GenerationContext | null {
   if (!configNode) return null
 
   // 收集上游资源
   const upstreamPanels = getUpstreamNodes(configNode.id, panels, connections)
-  const inputs = upstreamPanels.map(extractResourceContent).filter(Boolean)
+  const inputs = upstreamPanels.map(extractResourceContent).filter((r): r is ResourceContent => r !== null)
 
   // 获取组装提示词（composerContent）或普通 prompt
   const composerContent = configNode.content?.composerContent?.trim()
   const basePrompt = composerContent || configNode.content?.prompt || ''
 
   // 输入摘要（供 UI 显示）
-  const inputSummary = {
+  const inputSummary: InputSummary = {
     textCount: inputs.filter((i) => i.type === 'text').length,
     imageCount: inputs.filter((i) => i.type === 'image').length,
     videoCount: inputs.filter((i) => i.type === 'video').length,
@@ -186,14 +258,14 @@ export function buildGenerationContext(configNode, panels, connections) {
 /**
  * 简单合并路径：所有上游文本拼到 prompt，所有图片作为参考图
  */
-function buildSimpleContext(inputs, basePrompt, inputSummary) {
+function buildSimpleContext(inputs: ResourceContent[], basePrompt: string, inputSummary: InputSummary): GenerationContext {
   const textBlocks = inputs
     .filter((i) => i.type === 'text' && i.text)
-    .map((i) => i.text)
+    .map((i) => i.text!)
 
   const referenceImages = inputs
     .filter((i) => i.type === 'image' && i.imageUrl)
-    .map((i) => i.imageUrl)
+    .map((i) => i.imageUrl!)
 
   const referenceTexts = textBlocks.slice()
 
@@ -216,12 +288,12 @@ function buildSimpleContext(inputs, basePrompt, inputSummary) {
  * - 视频/音频资源：暂不支持，跳过
  * - 未匹配到的 token 保留原样
  */
-function buildComposerContext(inputs, composerContent, inputSummary) {
+function buildComposerContext(inputs: ResourceContent[], composerContent: string, inputSummary: InputSummary): GenerationContext {
   const inputByNodeId = new Map(inputs.map((i) => [i.nodeId, i]))
-  const labelByNodeId = new Map()
-  const selectedImages = []
-  const textBlocks = []
-  const counts = { image: 0, text: 0, video: 0, audio: 0 }
+  const labelByNodeId = new Map<string, string>()
+  const selectedImages: string[] = []
+  const textBlocks: string[] = []
+  const counts: Record<string, number> = { image: 0, text: 0, video: 0, audio: 0 }
   let nextPrompt = ''
   let lastIndex = 0
 
@@ -283,9 +355,9 @@ function buildComposerContext(inputs, composerContent, inputSummary) {
  * 把图片 URL 列表分类为 base64 数组和 URL 数组
  * - 以 http 开头的为 URL，其余为 base64
  */
-function classifyImages(images) {
-  const base64Images = []
-  const imageUrls = []
+function classifyImages(images: string[]): { base64Images: string[]; imageUrls: string[] } {
+  const base64Images: string[] = []
+  const imageUrls: string[] = []
   for (const img of images) {
     if (!img) continue
     if (img.trim().toLowerCase().startsWith('http')) {
@@ -301,16 +373,12 @@ function classifyImages(images) {
  * 创建图片生成任务（调用 /api/images/tasks）
  * - 根据是否有参考图自动选择 text2image / image2image 模式
  * - 多图参考：base64_images / image_urls 数组
- *
- * @param {Object} ctx - 生成上下文 { prompt, referenceImages }
- * @param {Object} config - Config 节点配置 { model, size, response_format }
- * @returns {Promise<{ task_id: string }>}
  */
-export async function createGenerationTask(ctx, config) {
+export async function createGenerationTask(ctx: GenerationContext, config: GenerationConfig): Promise<{ task_id: string }> {
   const { prompt, referenceImages } = ctx
   const { base64Images, imageUrls } = classifyImages(referenceImages || [])
 
-  const params = {
+  const params: Record<string, any> = {
     prompt,
     model: config.model || 'agnes-image-2.1-flash',
     size: config.size || '1024x1024',
@@ -325,7 +393,7 @@ export async function createGenerationTask(ctx, config) {
     params.image_urls = imageUrls
   }
 
-  const resp = await createImageTask(params)
+  const resp = await createImageTask(params as ImageGenerationRequest)
   if (!resp || !resp.task_id) {
     throw new Error('创建生成任务失败：未返回 task_id')
   }
@@ -336,13 +404,12 @@ export async function createGenerationTask(ctx, config) {
  * 轮询图片任务状态直到完成
  * - 间隔 2 秒，超时 5 分钟
  * - onProgress 回调用于更新 UI 进度
- *
- * @param {string} taskId - 任务 ID
- * @param {Function} onProgress - 进度回调 (status, data) => void
- * @param {number} timeout - 超时时间（毫秒），默认 300000（5分钟）
- * @returns {Promise<{ status: string, resultUrl: string }>}
  */
-export async function pollImageTask(taskId, onProgress, timeout = 300000) {
+export async function pollImageTask(
+  taskId: string,
+  onProgress?: (status: string, data: Record<string, any>) => void,
+  timeout: number = 300000,
+): Promise<{ status: string; resultUrl: string }> {
   const startTime = Date.now()
   const interval = 2000
 
@@ -370,7 +437,7 @@ export async function pollImageTask(taskId, onProgress, timeout = 300000) {
 
     // 失败
     if (status === 'failed' || status === 'error') {
-      throw new Error(data.message || data.error || '生成失败')
+      throw new Error(data.message || '生成失败')
     }
 
     // 取消
@@ -391,13 +458,8 @@ export async function pollImageTask(taskId, onProgress, timeout = 300000) {
  * 2. 创建生成任务
  * 3. 轮询任务状态
  * 4. 回填结果到画布新节点
- *
- * @param {string} configId - Config 节点 ID
- * @param {Object} store - Pinia canvas store
- * @param {Object} options - { onProgress, count }
- * @returns {Promise<Array>} 创建的结果节点 ID 数组
  */
-export async function executeMergeGeneration(configId, store, options = {}) {
+export async function executeMergeGeneration(configId: string, store: CanvasStore, options: GenerationOptions = {}): Promise<string[]> {
   const { onProgress, count = 1 } = options
 
   // 1. 查找 Config 节点
@@ -418,13 +480,13 @@ export async function executeMergeGeneration(configId, store, options = {}) {
 
   if (onProgress) onProgress('building', { inputSummary: ctx.inputSummary })
 
-  const config = {
+  const config: GenerationConfig = {
     model: configNode.content?.model || 'agnes-image-2.1-flash',
     size: normalizeSize(configNode.content?.size),
     response_format: 'url',
   }
 
-  const resultNodeIds = []
+  const resultNodeIds: string[] = []
 
   // 3. 按 count 循环创建任务
   const taskCount = Math.max(1, Number(count) || 1)
@@ -453,14 +515,8 @@ export async function executeMergeGeneration(configId, store, options = {}) {
 
 /**
  * 把生成结果回填到画布：在 Config 节点右侧创建新 image 节点并连线
- *
- * @param {Object} store - Pinia canvas store
- * @param {Object} configNode - Config 节点
- * @param {string} imageUrl - 生成结果的图片 URL
- * @param {number} index - 第几张（用于错开位置）
- * @returns {string} 新节点 ID
  */
-function addResultNode(store, configNode, imageUrl, index = 0) {
+function addResultNode(store: CanvasStore, configNode: Panel, imageUrl: string, index: number = 0): string {
   const cols = 4
   const nodeWidth = 200
   const nodeHeight = 200
@@ -496,7 +552,7 @@ function addResultNode(store, configNode, imageUrl, index = 0) {
     })
   }
 
-  return newId
+  return newId!
 }
 
 /**
@@ -505,12 +561,12 @@ function addResultNode(store, configNode, imageUrl, index = 0) {
  * - "16:9" → "1024x576"
  * - "1024x1024" → 原样返回
  */
-function normalizeSize(size) {
+function normalizeSize(size: string | undefined): string {
   if (!size) return '1024x1024'
   // 已经是 宽x高 格式
   if (/^\d+x\d+$/i.test(size)) return size
   // 比例格式转换
-  const ratioMap = {
+  const ratioMap: Record<string, string> = {
     '1:1': '1024x1024',
     '16:9': '1024x576',
     '9:16': '576x1024',
@@ -528,16 +584,12 @@ function normalizeSize(size) {
  * 创建视频生成任务（调用 /api/videos）
  * - 根据是否有参考图自动选择 text2video / image2video 模式
  * - 参考图：取第一张作为 image（image2video 模式）
- *
- * @param {Object} ctx - 生成上下文 { prompt, referenceImages }
- * @param {Object} config - Config 节点配置 { model, seconds, aspect_ratio }
- * @returns {Promise<{ task_id: string }>}
  */
-export async function createVideoGenerationTask(ctx, config) {
+export async function createVideoGenerationTask(ctx: GenerationContext, config: GenerationConfig): Promise<{ task_id: string }> {
   const { prompt, referenceImages } = ctx
   const { base64Images, imageUrls } = classifyImages(referenceImages || [])
 
-  const params = {
+  const params: Record<string, any> = {
     prompt,
     model: config.model || 'agnes-video-v2.0',
     mode: referenceImages && referenceImages.length > 0 ? 'image2video' : 'text2video',
@@ -562,24 +614,23 @@ export async function createVideoGenerationTask(ctx, config) {
     }
   }
 
-  const resp = await createVideoTask(params)
+  const resp = await createVideoTask(params as VideoGenerationRequest)
   if (!resp || !resp.task_id) {
     throw new Error('创建视频任务失败：未返回 task_id')
   }
-  return resp
+  return { task_id: resp.task_id }
 }
 
 /**
  * 轮询视频任务状态直到完成
  * - 间隔 5 秒，超时 10 分钟
  * - onProgress 回调用于更新 UI 进度
- *
- * @param {string} taskId - 任务 ID
- * @param {Function} onProgress - 进度回调 (status, data) => void
- * @param {number} timeout - 超时时间（毫秒），默认 600000（10分钟）
- * @returns {Promise<{ status: string, videoUrl: string }>}
  */
-export async function pollVideoTask(taskId, onProgress, timeout = 600000) {
+export async function pollVideoTask(
+  taskId: string,
+  onProgress?: (status: string, data: Record<string, any>) => void,
+  timeout: number = 600000,
+): Promise<{ status: string; videoUrl: string }> {
   const startTime = Date.now()
   const interval = 5000
 
@@ -598,7 +649,7 @@ export async function pollVideoTask(taskId, onProgress, timeout = 600000) {
 
     // 完成
     if (status === 'success' || status === 'done' || status === 'completed') {
-      const videoUrl = data.video_url || data.url || data.result_url || ''
+      const videoUrl = data.video_url || ''
       if (!videoUrl) {
         throw new Error('视频生成完成但未返回视频 URL')
       }
@@ -607,7 +658,7 @@ export async function pollVideoTask(taskId, onProgress, timeout = 600000) {
 
     // 失败
     if (status === 'failed' || status === 'error') {
-      throw new Error(data.message || data.error || '视频生成失败')
+      throw new Error(data.message || '视频生成失败')
     }
 
     // 取消
@@ -626,13 +677,8 @@ export async function pollVideoTask(taskId, onProgress, timeout = 600000) {
  * 2. 创建视频任务
  * 3. 轮询任务状态
  * 4. 回填结果到画布新 video 节点
- *
- * @param {string} configId - Config 节点 ID
- * @param {Object} store - Pinia canvas store
- * @param {Object} options - { onProgress }
- * @returns {Promise<string>} 创建的结果节点 ID
  */
-export async function executeMergeVideoGeneration(configId, store, options = {}) {
+export async function executeMergeVideoGeneration(configId: string, store: CanvasStore, options: GenerationOptions = {}): Promise<string> {
   const { onProgress } = options
 
   // 1. 查找 Config 节点
@@ -653,7 +699,7 @@ export async function executeMergeVideoGeneration(configId, store, options = {})
 
   if (onProgress) onProgress('building', { inputSummary: ctx.inputSummary })
 
-  const config = {
+  const config: GenerationConfig = {
     model: configNode.content?.model || 'agnes-video-v2.0',
     seconds: configNode.content?.seconds || 5,
     aspect_ratio: configNode.content?.aspect_ratio || '16:9',
@@ -679,13 +725,8 @@ export async function executeMergeVideoGeneration(configId, store, options = {})
 
 /**
  * 把视频生成结果回填到画布：在 Config 节点右侧创建新 video 节点并连线
- *
- * @param {Object} store - Pinia canvas store
- * @param {Object} configNode - Config 节点
- * @param {string} videoUrl - 生成结果的视频 URL
- * @returns {string} 新节点 ID
  */
-function addVideoResultNode(store, configNode, videoUrl) {
+function addVideoResultNode(store: CanvasStore, configNode: Panel, videoUrl: string): string {
   const nodeWidth = 320
   const nodeHeight = 200
 
@@ -715,5 +756,5 @@ function addVideoResultNode(store, configNode, videoUrl) {
     })
   }
 
-  return newId
+  return newId!
 }
