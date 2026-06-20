@@ -473,14 +473,14 @@ class AgnesAIClient:
         """
         调用 Agnes AI 生成图片（异步等待，不阻塞其他请求的事件循环）。
 
-        API 调用规范（严格按 Agnes Image 2.1 Flash 文档）：
+        API 调用规范（按 Agnes Image 2.0/2.1 Flash 文档）：
           - model、prompt、size → 顶层必填参数
-          - 图生图：image 放在 extra_body 中（2.1-flash 规范，不在顶层）
+          - 图生图：image 放在 extra_body 中（官方示例均如此）
           - return_base64: true → 文生图 Base64 输出（顶层参数）
           - extra_body.response_format: "url" | "b64_json" → 输出格式（放顶层会 400）
           - 文生图：不传入 image 字段
-          - 图生图：image 放在 extra_body.image 中
           - 局部编辑：mask 放在 extra_body.mask 中（黑白图，白色为编辑区域）
+          - 不传 seed：Image API 参数表无此字段
 
         【多图参考改造】：
           - 参数优先级：base64_images / image_urls（新字段，数组）→ base64_image / image_url（旧字段，单值）
@@ -504,23 +504,22 @@ class AgnesAIClient:
         if not ref_images and image_url and image_url.strip():
             ref_images.append(image_url)
 
-        # 【核心修复】严格按 Agnes Image 2.1 Flash 文档构建请求体
+        # 【核心修复】严格按 Agnes Image 2.0/2.1 Flash 文档构建请求体
         #   - model、prompt、size → 顶层必填参数
-        #   - 图生图：image 放在 extra_body 中（2.1-flash 规范）
+        #   - 图生图：image 放在 extra_body 中（官方示例均如此）
         #   - 文生图 Base64 输出：顶层参数 return_base64: true
         #   - response_format → 必须放在 extra_body 中（放顶层会 400）
-        #   - seed → 随机种子，避免相同 prompt 生成相同图片
-        import random
+        #   - 不传 seed：Image API 参数表无此字段，传了可能导致 422
         body = {
             "model": model,
             "prompt": prompt,
             "size": size,
-            "seed": random.randint(1, 2147483647),  # 随机 seed，确保每次请求不同
         }
 
         if ref_images:
-            # 【图生图模式】按官方规范将参考图数组放在 extra_body.image 中
-            # 每张图统一走 _normalize_image_input: URL/Data URI/纯 base64 都可
+            # 【图生图模式】按官方文档示例构建请求体：
+            #   - image 放在 extra_body 中（2.0/2.1 Flash 官方示例均如此）
+            #   - 每张图统一走 _normalize_image_input: URL/Data URI/纯 base64 都可
             normalized = []
             for img in ref_images:
                 uri, _size = self._normalize_image_input(img)
