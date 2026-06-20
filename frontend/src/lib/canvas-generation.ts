@@ -355,18 +355,49 @@ function buildComposerContext(inputs: ResourceContent[], composerContent: string
 // ---------- API 调用与轮询 ----------
 
 /**
- * 把图片 URL 列表分类为 base64 数组和 URL 数组
- * - 以 http 开头的为 URL，其余为 base64
+ * 将图片 URL 转为 base64 data URI
+ * - blob URL / 本地 URL：fetch 后转 data URI
+ * - 公网 URL：直接返回原 URL
+ * - data URI：直接返回
  */
-function classifyImages(images: string[]): { base64Images: string[]; imageUrls: string[] } {
+async function toBase64IfNeeded(imageUrl: string): Promise<string> {
+  if (!imageUrl) return ''
+  // data URI 直接返回
+  if (imageUrl.startsWith('data:')) return imageUrl
+  // 公网 URL 直接返回
+  if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) return imageUrl
+  // blob URL 等本地 URL：fetch 后转 data URI
+  try {
+    const response = await fetch(imageUrl)
+    const blob = await response.blob()
+    return await new Promise<string>((resolve) => {
+      const reader = new FileReader()
+      reader.onloadend = () => resolve(reader.result as string)
+      reader.readAsDataURL(blob)
+    })
+  } catch {
+    // 转换失败，返回原值（让后端报错更明确）
+    return imageUrl
+  }
+}
+
+/**
+ * 把图片 URL 列表分类为 base64 数组和 URL 数组
+ * - 公网 URL（http/https）放入 imageUrls
+ * - 其余（data URI / base64）放入 base64Images
+ * - blob URL 会先转为 data URI 再分类
+ */
+async function classifyImages(images: string[]): Promise<{ base64Images: string[]; imageUrls: string[] }> {
   const base64Images: string[] = []
   const imageUrls: string[] = []
   for (const img of images) {
     if (!img) continue
-    if (img.trim().toLowerCase().startsWith('http')) {
-      imageUrls.push(img.trim())
+    // 先处理 blob URL 等本地 URL
+    const normalized = await toBase64IfNeeded(img)
+    if (normalized.startsWith('http://') || normalized.startsWith('https://')) {
+      imageUrls.push(normalized.trim())
     } else {
-      base64Images.push(img)
+      base64Images.push(normalized)
     }
   }
   return { base64Images, imageUrls }
@@ -379,7 +410,7 @@ function classifyImages(images: string[]): { base64Images: string[]; imageUrls: 
  */
 export async function createGenerationTask(ctx: GenerationContext, config: GenerationConfig): Promise<{ task_id: string }> {
   const { prompt, referenceImages } = ctx
-  const { base64Images, imageUrls } = classifyImages(referenceImages || [])
+  const { base64Images, imageUrls } = await classifyImages(referenceImages || [])
 
   const params: Record<string, any> = {
     prompt,
@@ -644,7 +675,7 @@ function normalizeSize(size: string | undefined): string {
  */
 export async function createVideoGenerationTask(ctx: GenerationContext, config: GenerationConfig): Promise<{ task_id: string }> {
   const { prompt, referenceImages } = ctx
-  const { base64Images, imageUrls } = classifyImages(referenceImages || [])
+  const { base64Images, imageUrls } = await classifyImages(referenceImages || [])
 
   const params: Record<string, any> = {
     prompt,
