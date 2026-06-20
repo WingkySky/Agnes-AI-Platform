@@ -25,6 +25,22 @@ class ModelInfo(BaseModel):
     )
 
 
+class ImageSizeOption(BaseModel):
+    """图片尺寸选项（含比例信息，供前端绘制比例图标）"""
+    value: str = Field(description="传给 API 的尺寸值，如 1024x768")
+    w: int = Field(description="宽高比宽分量")
+    h: int = Field(description="宽高比高分量")
+    label: str = Field(description="显示标签，如 16:9 横屏")
+
+
+class VideoAspectRatioOption(BaseModel):
+    """视频宽高比选项"""
+    value: str = Field(description="传给 API 的比例值，如 16:9")
+    w: int = Field(description="宽高比宽分量")
+    h: int = Field(description="宽高比高分量")
+    label: str = Field(description="显示标签，如 16:9 横屏")
+
+
 class ConfigResponse(BaseModel):
     """前端可用配置（不含敏感信息）"""
 
@@ -34,10 +50,28 @@ class ConfigResponse(BaseModel):
         description="所有可用模型列表",
     )
 
-    # 支持的图片尺寸
+    # 图片尺寸选项（结构化，含比例信息）
     image_sizes: List[str] = Field(
         default=["1024x768", "1024x1024", "768x1024", "512x512"],
-        description="支持的图片尺寸选项",
+        description="支持的图片尺寸选项（兼容旧版）",
+    )
+    image_size_options: List[ImageSizeOption] = Field(
+        default_factory=list,
+        description="图片尺寸选项（结构化，含比例和标签）",
+    )
+    default_image_size: str = Field(
+        default="1280x720",
+        description="默认图片尺寸",
+    )
+
+    # 视频宽高比选项
+    video_aspect_ratios: List[VideoAspectRatioOption] = Field(
+        default_factory=list,
+        description="视频宽高比选项",
+    )
+    default_video_aspect_ratio: str = Field(
+        default="16:9",
+        description="默认视频宽高比",
     )
 
     # 视频帧数选项（需满足 8n+1 规则）
@@ -46,7 +80,21 @@ class ConfigResponse(BaseModel):
         description="支持的视频帧数选项（需满足 8n+1）",
     )
 
-    # 默认帧率
+    # 视频时长选项（秒）
+    video_durations: List[int] = Field(
+        default=[3, 5, 7, 10, 15],
+        description="视频时长选项（秒）",
+    )
+    default_video_duration: int = Field(
+        default=5,
+        description="默认视频时长（秒）",
+    )
+
+    # 视频帧率选项
+    video_frame_rates: List[int] = Field(
+        default=[24, 30],
+        description="视频帧率选项",
+    )
     default_frame_rate: int = 24
 
     # 默认分辨率

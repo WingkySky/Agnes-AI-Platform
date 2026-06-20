@@ -1,21 +1,21 @@
 <!-- =====================================================
-     RatioPicker：图形化比例/尺寸选择器（复刻官方紧凑版）
+     RatioPicker：图形化比例/尺寸选择器
      - 一排横向小按钮，每个按钮 = 小矩形（按真实比例绘制）+ 下方数字
-     - 无多余中文，整体超紧凑
      - 两种模式：
          mode="image"  → 传出 WxH（如 "1280x720"）
          mode="video"  → 传出 ratio（如 "16:9"）
+     - 选项来源优先级：props.options > store 配置 > 本地默认
      ===================================================== -->
 
 <template>
   <div class="ratio-picker">
     <button
-      v-for="opt in options"
+      v-for="opt in currentOptions"
       :key="opt.value"
       type="button"
       class="ratio-btn"
       :class="{ 'ratio-btn--active': modelValue === opt.value }"
-      :title="opt.value"
+      :title="opt.label || opt.value"
       @click="select(opt)"
     >
       <!-- 小方形容器，内部绘制一个按真实宽高比的矩形 -->
@@ -29,62 +29,78 @@
 
 <script setup lang="ts">
 import { computed, type PropType } from 'vue'
+import { useModelsStore } from '@/stores/models'
 
 // 选项类型定义
 interface RatioOption {
   value: string
   w: number
   h: number
+  label?: string
 }
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
   // "image" 表示按具体尺寸；"video" 表示按宽高比
   mode: { type: String, default: 'image' },
-  // 自定义选项；未传则用默认集
+  // 自定义选项；未传则从 store 获取
   options: { type: Array as PropType<RatioOption[]>, default: null },
 })
 
 const emit = defineEmits(['update:modelValue'])
 
+const modelsStore = useModelsStore()
+
 /**
- * 默认选项（全符合 Agnes 文档的允许规格）
+ * 当前使用的选项列表
+ * 优先级：props.options > store 配置 > 本地兜底
  */
-const DEFAULT_IMAGE_OPTIONS = [
-  { value: '1280x720',  w: 16, h: 9  },
-  { value: '1536x1024', w: 3,  h: 2  },
-  { value: '1024x1024', w: 1,  h: 1  },
-  { value: '1024x1536', w: 2,  h: 3  },
-  { value: '720x1280',  w: 9,  h: 16 },
-  { value: '1792x1024', w: 7,  h: 4  },
-  { value: '1024x1792', w: 4,  h: 7  },
-  { value: '1024x768',  w: 4,  h: 3  },
-]
-
-const DEFAULT_VIDEO_OPTIONS = [
-  { value: '16:9', w: 16, h: 9  },
-  { value: '9:16', w: 9,  h: 16 },
-  { value: '1:1',  w: 1,  h: 1  },
-  { value: '4:3',  w: 4,  h: 3  },
-  { value: '3:4',  w: 3,  h: 4  },
-]
-
-const options = computed(() => {
+const currentOptions = computed(() => {
+  // 1. 优先使用传入的自定义选项
   if (props.options && props.options.length) return props.options
+
+  // 2. 从 store 获取后端配置
+  const config = modelsStore.getModelParamsConfig()
+  if (props.mode === 'video') {
+    const storeOpts = config.videoAspectRatios
+    if (storeOpts.length > 0) return storeOpts
+  } else {
+    const storeOpts = config.imageSizes
+    if (storeOpts.length > 0) return storeOpts
+  }
+
+  // 3. 兜底：本地默认选项
   return props.mode === 'video' ? DEFAULT_VIDEO_OPTIONS : DEFAULT_IMAGE_OPTIONS
 })
 
+// 本地兜底默认选项
+const DEFAULT_IMAGE_OPTIONS: RatioOption[] = [
+  { value: '1280x720',  w: 16, h: 9,  label: '16:9 横屏' },
+  { value: '1536x1024', w: 3,  h: 2,  label: '3:2 横屏' },
+  { value: '1024x1024', w: 1,  h: 1,  label: '1:1 方形' },
+  { value: '1024x1536', w: 2,  h: 3,  label: '2:3 竖屏' },
+  { value: '720x1280',  w: 9,  h: 16, label: '9:16 竖屏' },
+  { value: '1792x1024', w: 7,  h: 4,  label: '7:4 宽幅' },
+  { value: '1024x1792', w: 4,  h: 7,  label: '4:7 窄幅' },
+  { value: '1024x768',  w: 4,  h: 3,  label: '4:3 横屏' },
+]
+
+const DEFAULT_VIDEO_OPTIONS: RatioOption[] = [
+  { value: '16:9', w: 16, h: 9,  label: '16:9 横屏' },
+  { value: '9:16', w: 9,  h: 16, label: '9:16 竖屏' },
+  { value: '1:1',  w: 1,  h: 1,  label: '1:1 方形' },
+  { value: '4:3',  w: 4,  h: 3,  label: '4:3 横屏' },
+  { value: '3:4',  w: 3,  h: 4,  label: '3:4 竖屏' },
+]
+
 /**
  * 计算形状的尺寸：在固定容器内，按真实比例渲染
- * - 用 aspect-ratio 保证真实比例
- * - 横向（w >= h）时按最大宽度限制，纵向时按最大高度限制
  */
 function shapeStyle(opt: RatioOption) {
   const w = opt.w || 1
   const h = opt.h || 1
   return {
     aspectRatio: `${w} / ${h}`,
-    // 让 shape 按最长边撑满容器的 70~90%，保证比例正确且不溢出
     ...(w >= h
       ? { width: '92%', maxHeight: '70%' }
       : { height: '92%', maxWidth: '70%' }),
@@ -107,7 +123,7 @@ function select(opt: RatioOption) {
   align-items: flex-start;
 }
 
-/* ============== 单个按钮：图标在上，数字在下，整体极小 ============== */
+/* 单个按钮：图标在上，数字在下，整体极小 */
 .ratio-btn {
   display: flex;
   flex-direction: column;
@@ -138,7 +154,7 @@ function select(opt: RatioOption) {
   color: #fff;
 }
 
-/* ============== 图标容器：固定小方块，内部绘制真实比例矩形 ============== */
+/* 图标容器：固定小方块，内部绘制真实比例矩形 */
 .ratio-btn__icon-box {
   width: 28px;
   height: 18px;
@@ -162,7 +178,7 @@ function select(opt: RatioOption) {
     0 1px 3px rgba(107, 156, 255, 0.4);
 }
 
-/* ============== 数字标签：超小字体，等宽 ============== */
+/* 数字标签：超小字体，等宽 */
 .ratio-btn__label {
   font-size: 11px;
   font-weight: 500;

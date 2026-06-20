@@ -193,7 +193,7 @@
             <option v-for="m in availableModels" :key="m.id" :value="m.id">{{ m.name }}</option>
           </select>
 
-          <!-- 尺寸选择（图片模式） -->
+          <!-- 尺寸选择（图片模式）：显示友好标签 -->
           <select
             v-if="isImageMode"
             class="config-select"
@@ -201,10 +201,10 @@
             @change="updateConfigContent('size', ($event.target as HTMLSelectElement)?.value)"
             @mousedown.stop
           >
-            <option v-for="s in availableSizes" :key="s" :value="s">{{ s }}</option>
+            <option v-for="s in imageSizeOptions" :key="s.value" :value="s.value">{{ s.label }}</option>
           </select>
 
-          <!-- 视频参数（视频模式）：比例 + 时长 -->
+          <!-- 视频参数（视频模式）：比例 + 时长，显示友好标签 -->
           <div v-if="isVideoMode" class="config-video-params">
             <select
               class="config-select"
@@ -212,7 +212,7 @@
               @change="updateConfigContent('aspect_ratio', ($event.target as HTMLSelectElement)?.value)"
               @mousedown.stop
             >
-              <option v-for="r in ['16:9','9:16','1:1','4:3']" :key="r" :value="r">{{ r }}</option>
+              <option v-for="r in videoAspectRatioOptions" :key="r.value" :value="r.value">{{ r.label }}</option>
             </select>
             <select
               class="config-select"
@@ -220,7 +220,7 @@
               @change="updateConfigContent('seconds', ($event.target as HTMLSelectElement)?.value)"
               @mousedown.stop
             >
-              <option v-for="s in [3,5,8,10]" :key="s" :value="s">{{ s }}秒</option>
+              <option v-for="s in availableDurations" :key="s" :value="s">{{ s }}秒</option>
             </select>
           </div>
 
@@ -369,8 +369,24 @@ const configModes = [
 // 模型列表：从后端 API 获取，按类型自动分类
 const modelsStore = useModelsStore()
 const availableModels = computed(() => modelsStore.getModelsByMode(configContent.value.mode || 'text2image'))
-// 可用图片尺寸
-const availableSizes = computed(() => modelsStore.imageSizes.length > 0 ? modelsStore.imageSizes : ['1024x1024', '768x1024', '1024x768', '768x768'])
+// 图片尺寸选项（结构化，含友好标签）
+const imageSizeOptions = computed(() => {
+  const opts = modelsStore.imageSizeOptions
+  if (opts.length > 0) return opts
+  // 兜底：从纯字符串列表生成
+  return (modelsStore.imageSizes.length > 0 ? modelsStore.imageSizes : ['1024x1024', '768x1024', '1024x768', '1280x720'])
+    .map(v => ({ value: v, w: 1, h: 1, label: v }))
+})
+// 视频宽高比选项（结构化，含友好标签）
+const videoAspectRatioOptions = computed(() => {
+  const config = modelsStore.getModelParamsConfig()
+  return config.videoAspectRatios
+})
+// 可用视频时长：从统一配置获取
+const availableDurations = computed(() => {
+  const config = modelsStore.getModelParamsConfig()
+  return config.videoDurations
+})
 
 /* ---------- 响应式状态 ---------- */
 const hovered = ref(false) // 是否悬停

@@ -74,15 +74,9 @@
               @select="appendStylePrompt"
             />
 
-            <!-- 图形化尺寸/比例选择：直观矩形代替下拉数字 -->
+            <!-- 紧凑参数选择：尺寸 + 模型，一行标签搞定 -->
             <el-form-item :label="t('params.size')">
-              <RatioPicker v-model="size" mode="image" />
-            </el-form-item>
-
-            <el-form-item :label="t('params.model')">
-              <el-select v-model="model">
-                <el-option v-for="m in IMAGE_MODELS" :key="m.id" :label="m.name" :value="m.id" />
-              </el-select>
+              <ParamSelector mode="image" v-model:size="size" v-model:model="model" />
             </el-form-item>
 
             <!-- 生成按钮 -->
@@ -172,7 +166,7 @@
               </div>
               <div class="meta-row">
               <span class="meta-label">{{ t('params.size') }}：</span>
-              <span class="meta-value">{{ size }}</span>
+              <span class="meta-value">{{ getImageSizeLabel(size) }}</span>
               </div>
             </div>
           </div>
@@ -239,10 +233,11 @@ import {
 import PromptTemplates from '@/components/PromptTemplates.vue'
 import ImageUploader from '@/components/ImageUploader.vue'
 import ImageViewer from '@/components/ImageViewer.vue'
-import RatioPicker from '@/components/RatioPicker.vue'
+import ParamSelector from '@/components/ParamSelector.vue'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useModelsStore } from '@/stores/models'
 import { useI18n } from '@/i18n'
+import { matchImageSize, getImageSizeLabel } from '@/config/model-params'
 import type { FileInfo } from '@/types'
 
 const { t } = useI18n()
@@ -270,16 +265,6 @@ const imageTemplates = computed(() => ([
   { label: t('presets.inkStyle'), prompt: '，中国水墨风格，留白艺术，意境悠远' },
 ]))
 
-const IMAGE_SIZES = [
-  '1024x1024',
-  '1280x720',
-  '720x1280',
-  '1536x1024',
-  '1024x1536',
-  '1792x1024',
-  '1024x1792',
-]
-
 // 模型列表：从后端 API 动态获取
 const modelsStore = useModelsStore()
 const IMAGE_MODELS = computed(() => modelsStore.imageModels)
@@ -287,13 +272,17 @@ const IMAGE_MODELS = computed(() => modelsStore.imageModels)
 // ---------- 表单参数 ----------
 const mode = ref('text2image')
 const prompt = ref('')
-const size = ref('1280x720')   // 默认横板 16:9，视觉上更通用
+// 默认尺寸从 store 配置获取
+const size = ref(modelsStore.defaultImageSize || '1280x720')
 const model = ref('')  // 初始值在 store 加载后自动设置
 
-// store 加载完成后自动设置默认模型
+// store 加载完成后自动设置默认模型和默认尺寸
 watch(() => modelsStore.defaultImageModel, (v) => {
   if (v && !model.value) model.value = v
 }, { immediate: true })
+watch(() => modelsStore.defaultImageSize, (v) => {
+  if (v && size.value === '1280x720') size.value = v
+})
 const referenceFileList = ref<FileInfo[]>([])   // 【多图】数组
 
 // ---------- 使用全局 Store 管理任务 ----------
@@ -373,9 +362,25 @@ function appendStylePrompt(tpl: string) {
 function handleImageChange(fileList: FileInfo[]) {
   // fileList 为数组（可能为 null 表示清空）
   referenceFileList.value = Array.isArray(fileList) ? fileList : (fileList ? [fileList] : [])
+  // 图生图自适应分辨率：上传参考图后自动匹配最接近的预设尺寸
+  if (referenceFileList.value.length > 0 && referenceFileList.value[0].previewUrl) {
+    autoMatchSize(referenceFileList.value[0])
+  }
 }
 function handleImageClear() {
   referenceFileList.value = []
+}
+
+/** 根据上传图片的实际尺寸自动匹配最接近的预设分辨率 */
+function autoMatchSize(file: FileInfo) {
+  const img = new Image()
+  img.onload = () => {
+    const matched = matchImageSize(img.naturalWidth, img.naturalHeight)
+    if (matched && matched !== size.value) {
+      size.value = matched
+    }
+  }
+  img.src = file.previewUrl || file.url || ''
 }
 
 // ---------- 提交任务 ----------

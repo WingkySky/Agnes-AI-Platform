@@ -1,18 +1,39 @@
 /* =====================================================
  * 模型配置 Store
- * 从后端 /api/config 获取可用模型列表，按类型自动分类
+ * 从后端 /api/config 获取可用模型列表和参数配置
+ * 按 provider 匹配参数预设，兜底使用本地配置
  * ===================================================== */
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getPlatformConfig } from '@/api/history'
-import type { ModelInfo, ConfigResponse } from '@/types'
+import type { ModelInfo, ConfigResponse, ImageSizeOption, VideoAspectRatioOption } from '@/types'
+import {
+  getModelParams as getLocalModelParams,
+  type ModelParams,
+} from '@/config/model-params'
 
 export const useModelsStore = defineStore('models', () => {
   // 所有模型列表
   const models = ref<ModelInfo[]>([])
-  // 图片尺寸选项
+  // 图片尺寸选项（兼容旧版，纯字符串数组）
   const imageSizes = ref<string[]>([])
+  // 图片尺寸选项（结构化，含比例信息）
+  const imageSizeOptions = ref<ImageSizeOption[]>([])
+  // 默认图片尺寸
+  const defaultImageSize = ref('1280x720')
+  // 视频宽高比选项
+  const videoAspectRatios = ref<VideoAspectRatioOption[]>([])
+  // 默认视频宽高比
+  const defaultVideoAspectRatio = ref('16:9')
+  // 视频时长选项（秒）
+  const videoDurations = ref<number[]>([3, 5, 7, 10, 15])
+  // 默认视频时长
+  const defaultVideoDuration = ref(5)
+  // 视频帧率选项
+  const videoFrameRates = ref<number[]>([24, 30])
+  // 默认帧率
+  const defaultFrameRate = ref(24)
   // 是否已加载
   const loaded = ref(false)
 
@@ -31,7 +52,17 @@ export const useModelsStore = defineStore('models', () => {
     try {
       const resp: ConfigResponse = await getPlatformConfig()
       models.value = resp.models || []
+      // 图片尺寸
       imageSizes.value = resp.image_sizes || []
+      imageSizeOptions.value = resp.image_size_options || []
+      defaultImageSize.value = resp.default_image_size || '1280x720'
+      // 视频参数
+      videoAspectRatios.value = resp.video_aspect_ratios || []
+      defaultVideoAspectRatio.value = resp.default_video_aspect_ratio || '16:9'
+      videoDurations.value = resp.video_durations || [3, 5, 7, 10, 15]
+      defaultVideoDuration.value = resp.default_video_duration || 5
+      videoFrameRates.value = resp.video_frame_rates || [24, 30]
+      defaultFrameRate.value = resp.default_frame_rate || 24
       loaded.value = true
     } catch (err) {
       console.error('[models store] 加载配置失败:', err)
@@ -55,9 +86,40 @@ export const useModelsStore = defineStore('models', () => {
     return defaultImageModel.value
   }
 
+  /**
+   * 获取当前模型的参数配置
+   * 优先使用后端返回的结构化配置，兜底使用本地 model-params 配置
+   * provider 参数用于匹配本地预设，后端配置为主
+   */
+  function getModelParamsConfig(provider?: string): ModelParams {
+    // 后端已返回结构化配置时直接使用
+    if (imageSizeOptions.value.length > 0) {
+      return {
+        imageSizes: imageSizeOptions.value,
+        defaultImageSize: defaultImageSize.value,
+        videoAspectRatios: videoAspectRatios.value,
+        defaultVideoAspectRatio: defaultVideoAspectRatio.value,
+        videoDurations: videoDurations.value,
+        defaultVideoDuration: defaultVideoDuration.value,
+        videoFrameRates: videoFrameRates.value,
+        defaultFrameRate: defaultFrameRate.value,
+      }
+    }
+    // 兜底：使用本地配置（按 provider 匹配）
+    return getLocalModelParams(provider)
+  }
+
   return {
     models,
     imageSizes,
+    imageSizeOptions,
+    defaultImageSize,
+    videoAspectRatios,
+    defaultVideoAspectRatio,
+    videoDurations,
+    defaultVideoDuration,
+    videoFrameRates,
+    defaultFrameRate,
     loaded,
     imageModels,
     videoModels,
@@ -68,5 +130,6 @@ export const useModelsStore = defineStore('models', () => {
     getModelById,
     getModelsByMode,
     getDefaultModelByMode,
+    getModelParamsConfig,
   }
 })

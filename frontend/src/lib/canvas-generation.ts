@@ -20,6 +20,7 @@ import { createImageTask, getImageTaskStatus } from '@/api/images'
 import { createVideoTask, getVideoStatus } from '@/api/videos'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useModelsStore } from '@/stores/models'
+import { parseSize } from '@/config/model-params'
 import type { ImageGenerationRequest, VideoGenerationRequest } from '@/types'
 
 // ---------- 类型定义 ----------

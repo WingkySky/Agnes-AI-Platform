@@ -108,33 +108,15 @@
 
             <PromptTemplates :templates="videoTemplates" @select="appendStylePrompt" />
 
-            <!-- 图形化画面比例选择：直观矩形代替数字宽高输入 -->
+            <!-- 紧凑参数选择：比例 + 时长 + 帧率 + 模型，一行标签搞定 -->
             <el-form-item :label="t('params.aspectRatio')">
-              <RatioPicker v-model="aspectRatio" mode="video" :per-row="5" />
-            </el-form-item>
-
-            <!-- 时长快捷选择：按钮代替帧数输入 -->
-            <el-form-item :label="t('params.duration')">
-              <div class="duration-btns">
-                <button
-                  v-for="sec in DURATION_OPTIONS"
-                  :key="sec"
-                  type="button"
-                  class="duration-btn"
-                  :class="{ 'duration-btn--active': seconds === sec }"
-                  @click="seconds = sec"
-                >{{ sec }}s</button>
-              </div>
-            </el-form-item>
-
-            <el-form-item :label="t('params.frameRate')">
-              <el-input-number v-model="frameRate" :min="1" :max="60" />
-            </el-form-item>
-
-            <el-form-item :label="t('params.model')">
-              <el-select v-model="videoModel">
-                <el-option v-for="m in VIDEO_MODELS" :key="m.id" :label="m.name" :value="m.id" />
-              </el-select>
+              <ParamSelector
+                mode="video"
+                v-model:aspectRatio="aspectRatio"
+                v-model:seconds="seconds"
+                v-model:frameRate="frameRate"
+                v-model:model="videoModel"
+              />
             </el-form-item>
 
             <el-row :gutter="16">
@@ -304,10 +286,11 @@ import {
 } from '@element-plus/icons-vue'
 import PromptTemplates from '@/components/PromptTemplates.vue'
 import ImageUploader from '@/components/ImageUploader.vue'
-import RatioPicker from '@/components/RatioPicker.vue'
+import ParamSelector from '@/components/ParamSelector.vue'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useModelsStore } from '@/stores/models'
 import { useI18n } from '@/i18n'
+import { matchVideoAspectRatio, getVideoAspectRatioLabel } from '@/config/model-params'
 import type { FileInfo } from '@/types'
 
 const { t } = useI18n()
@@ -321,9 +304,6 @@ const videoTemplates = computed(() => ([
   { label: t('presets.smoothTransition'), prompt: '，丝滑电影感过渡，电影级调色' }
 ]))
 
-// 视频时长可选档（单位：秒）
-const DURATION_OPTIONS = [3, 5, 7, 10, 15]
-
 // ---------- 模型列表 ----------
 const modelsStore = useModelsStore()
 const VIDEO_MODELS = computed(() => modelsStore.videoModels)
@@ -332,16 +312,36 @@ const VIDEO_MODELS = computed(() => modelsStore.videoModels)
 const mode = ref('text2video')
 const prompt = ref('')
 const negativePrompt = ref('')
-const aspectRatio = ref('16:9')   // 画面比例（官方规范）
-const seconds = ref(5)            // 视频时长（秒）
-const frameRate = ref(24)
+// 画面比例、时长、帧率均从 store 配置获取默认值
+const aspectRatio = ref(modelsStore.defaultVideoAspectRatio || '16:9')
+const seconds = ref(modelsStore.defaultVideoDuration || 5)
+const frameRate = ref(modelsStore.defaultFrameRate || 24)
 const seed = ref('')
 const videoModel = ref('')  // 初始值在 store 加载后自动设置
 
-// store 加载完成后自动设置默认模型
+// 视频时长选项从 store 配置获取
+const DURATION_OPTIONS = computed(() => modelsStore.videoDurations.length > 0
+  ? modelsStore.videoDurations
+  : [3, 5, 7, 10, 15])
+
+// 视频帧率选项从 store 配置获取
+const FRAME_RATE_OPTIONS = computed(() => modelsStore.videoFrameRates.length > 0
+  ? modelsStore.videoFrameRates
+  : [24, 30])
+
+// store 加载完成后自动设置默认模型和参数
 watch(() => modelsStore.defaultVideoModel, (v) => {
   if (v && !videoModel.value) videoModel.value = v
 }, { immediate: true })
+watch(() => modelsStore.defaultVideoAspectRatio, (v) => {
+  if (v && aspectRatio.value === '16:9') aspectRatio.value = v
+})
+watch(() => modelsStore.defaultVideoDuration, (v) => {
+  if (v && seconds.value === 5) seconds.value = v
+})
+watch(() => modelsStore.defaultFrameRate, (v) => {
+  if (v && frameRate.value === 24) frameRate.value = v
+})
 
 // ---------- 图片状态（图生视频：单张；首尾帧：起始帧+结束帧）----------
 const referenceFile = ref<FileInfo | null>(null)         // image2video 模式的参考图
@@ -439,6 +439,8 @@ function handleImageChange(files: FileInfo[]) {
     return
   }
   referenceFile.value = files[0]
+  // 图生视频自适应比例：上传参考图后自动匹配最接近的预设比例
+  autoMatchAspectRatio(files[0])
 }
 function handleImageClear() {
   referenceFile.value = null
@@ -451,12 +453,29 @@ function handleFrameChange(frameType: string, files: FileInfo[]) {
     else endFrameFile.value = null
     return
   }
-  if (frameType === 'start') startFrameFile.value = files[0]
-  else endFrameFile.value = files[0]
+  if (frameType === 'start') {
+    startFrameFile.value = files[0]
+    // 起始帧上传后自动匹配比例
+    autoMatchAspectRatio(files[0])
+  } else {
+    endFrameFile.value = files[0]
+  }
 }
 function handleFrameClear(frameType: string) {
   if (frameType === 'start') startFrameFile.value = null
   else endFrameFile.value = null
+}
+
+/** 根据上传图片的实际尺寸自动匹配最接近的视频宽高比 */
+function autoMatchAspectRatio(file: FileInfo) {
+  const img = new Image()
+  img.onload = () => {
+    const matched = matchVideoAspectRatio(img.naturalWidth, img.naturalHeight)
+    if (matched && matched !== aspectRatio.value) {
+      aspectRatio.value = matched
+    }
+  }
+  img.src = file.previewUrl || file.url || ''
 }
 
 // ---------- 开始生成 ----------
@@ -780,28 +799,6 @@ function handleVideoError(e: Event) {
   color: #7c94b8 !important;
 }
 
-.param-form :deep(.el-input-number) {
-  background: rgba(18, 27, 50, 0.55) !important;
-  border-color: rgba(107, 126, 156, 0.25) !important;
-  border-radius: 10px !important;
-  box-shadow: none !important;
-  color: #e8eef7 !important;
-}
-
-.param-form :deep(.el-input-number__decrease),
-.param-form :deep(.el-input-number__increase) {
-  background: rgba(18, 27, 50, 0.55) !important;
-  color: #c5d3ea !important;
-  border-color: rgba(107, 126, 156, 0.25) !important;
-}
-
-.param-form :deep(.el-input-number .el-input__wrapper) {
-  background: rgba(18, 27, 50, 0.55) !important;
-  border-color: rgba(107, 126, 156, 0.25) !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-}
-
 .param-form { margin-top: 12px; }
 
 .generate-btn {
@@ -976,44 +973,5 @@ function handleVideoError(e: Event) {
   font-weight: bold;
 }
 
-/* 时长快捷按钮：与 RatioPicker 风格保持一致 */
-.duration-btns {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
 
-.duration-btn {
-  min-width: 44px;
-  padding: 6px 12px;
-  border-radius: 8px;
-  border: 1px solid rgba(107, 126, 156, 0.25);
-  background: rgba(18, 27, 50, 0.55);
-  color: #c5d3ea;
-  cursor: pointer;
-  font-size: 12.5px;
-  font-weight: 500;
-  transition: all 0.18s ease;
-  font-family: inherit;
-  letter-spacing: 0.2px;
-}
-
-.duration-btn:hover {
-  border-color: rgba(139, 176, 255, 0.55);
-  background: rgba(26, 40, 72, 0.7);
-  color: #fff;
-}
-
-.duration-btn--active {
-  border-color: #8bb0ff;
-  background: linear-gradient(
-    180deg,
-    rgba(107, 156, 255, 0.22) 0%,
-    rgba(107, 156, 255, 0.06) 100%
-  );
-  color: #fff;
-  box-shadow: 0 0 0 1px rgba(107, 156, 255, 0.35),
-              0 2px 10px rgba(107, 156, 255, 0.2);
-}
 </style>

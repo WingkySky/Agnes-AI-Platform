@@ -41,11 +41,42 @@ export interface ModelInfo {
   capabilities: string[]  // 能力标签，如 text2image, image2image, keyframes
 }
 
+/** 图片尺寸选项（含比例信息，供前端绘制比例图标） */
+export interface ImageSizeOption {
+  /** 传给 API 的尺寸值，如 1024x768 */
+  value: string
+  /** 宽高比宽分量 */
+  w: number
+  /** 宽高比高分量 */
+  h: number
+  /** 显示标签，如 16:9 横屏 */
+  label: string
+}
+
+/** 视频宽高比选项 */
+export interface VideoAspectRatioOption {
+  /** 传给 API 的比例值，如 16:9 */
+  value: string
+  /** 宽高比宽分量 */
+  w: number
+  /** 宽高比高分量 */
+  h: number
+  /** 显示标签，如 16:9 横屏 */
+  label: string
+}
+
 /** 前端可用配置 — 对齐 ConfigResponse */
 export interface ConfigResponse {
   models: ModelInfo[]
   image_sizes: string[]
+  image_size_options: ImageSizeOption[]
+  default_image_size: string
+  video_aspect_ratios: VideoAspectRatioOption[]
+  default_video_aspect_ratio: string
   video_num_frames: number[]
+  video_durations: number[]
+  default_video_duration: number
+  video_frame_rates: number[]
   default_frame_rate: number
   default_video_width: number
   default_video_height: number
