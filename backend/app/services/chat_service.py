@@ -182,7 +182,15 @@ class ChatService:
 
     def __init__(self):
         self.chat_url = f"{settings.agnes_api_base_url}/chat/completions"
-        self.model = "agnes-2.0-flash"
+        self._default_chat_model = ""  # 延迟初始化，从 model_registry 获取
+
+    async def _get_default_chat_model(self) -> str:
+        """获取默认聊天模型（从 model_registry 动态获取）"""
+        if not self._default_chat_model:
+            from app.services.model_registry import get_models_by_type
+            chat_models = await get_models_by_type("chat")
+            self._default_chat_model = chat_models[0].id if chat_models else ""
+        return self._default_chat_model
 
     # =====================================================
     # 【会话标题总结】—— 根据对话内容自动生成有意义的标题
@@ -231,7 +239,7 @@ class ChatService:
         user_prompt += "\n标题："
 
         body = {
-            "model": self.model,
+            "model": await self._get_default_chat_model(),
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -458,7 +466,7 @@ class ChatService:
                     break
 
         body = {
-            "model": self.model,
+            "model": await self._get_default_chat_model(),
             "messages": request_messages,
             "tools": CHAT_TOOLS,
             "stream": True,
@@ -608,7 +616,7 @@ class ChatService:
             second_messages = request_messages + [assistant_msg] + tool_results
 
             second_body = {
-                "model": self.model,
+                "model": await self._get_default_chat_model(),
                 "messages": second_messages,
                 "stream": True,
             }
@@ -693,7 +701,7 @@ class ChatService:
                     break
 
         body = {
-            "model": self.model,
+            "model": await self._get_default_chat_model(),
             "messages": request_messages,
             "tools": CHAT_TOOLS,
         }
@@ -780,7 +788,7 @@ class ChatService:
             second_messages = request_messages + [assistant_msg] + tool_results
 
             second_body = {
-                "model": self.model,
+                "model": await self._get_default_chat_model(),
                 "messages": second_messages,
             }
 
@@ -1244,9 +1252,14 @@ class ChatService:
                 use_image = False
                 logger.info("[Chat] generate_image: 无参考图，使用纯文生图 text2image")
 
+        # 获取默认图片模型
+        from app.services.model_registry import get_models_by_type
+        _image_models = await get_models_by_type("image")
+        _default_image_model = _image_models[0].id if _image_models else ""
+
         try:
             params = {
-                "model": "agnes-image-2.1-flash",
+                "model": _default_image_model,
                 "size": size,
                 "response_format": "url",
                 "mode": final_mode,
@@ -1373,10 +1386,15 @@ class ChatService:
         elif final_mode == "keyframes":
             images_param = [a.get("base64_image") or a.get("image_url") for a in attachments if a.get("base64_image") or a.get("image_url")]
 
+        # 获取默认视频模型
+        from app.services.model_registry import get_models_by_type as _get_models_by_type
+        _video_models = await _get_models_by_type("video")
+        _default_video_model = _video_models[0].id if _video_models else ""
+
         try:
             result = await agnes_client.create_video_task(
                 prompt=prompt,
-                model="agnes-video-v2.0",
+                model=_default_video_model,
                 num_frames=num_frames,
                 frame_rate=24,
                 width=width,
@@ -1398,7 +1416,7 @@ class ChatService:
             # 启动后台轮询
             from app.services.video_poller import poller_manager
             params = {
-                "model": "agnes-video-v2.0",
+                "model": _default_video_model,
                 "num_frames": num_frames,
                 "frame_rate": 24,
                 "width": width,

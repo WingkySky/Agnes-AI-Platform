@@ -291,6 +291,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Trash2, Upload, Download, Pencil, ChevronDown } from 'lucide-vue-next'
 import { useCanvasStore } from '@/stores/canvas'
 import { useTaskQueueStore } from '@/stores/taskQueue'
+import { useModelsStore } from '@/stores/models'
 import InfiniteCanvas from '@/components/canvas/InfiniteCanvas.vue'
 import CanvasConnectionsLayer from '@/components/canvas/CanvasConnectionsLayer.vue'
 import CanvasNode from '@/components/canvas/CanvasNode.vue'
@@ -707,7 +708,7 @@ async function generateImageFromPrompt(sourcePanel: typeof store.panels[number],
   try {
     // 调用图片生成 API
     const { createImageTask, getImageTaskStatus } = await import('@/api/images')
-    const resp = await createImageTask({ prompt, model: 'agnes-image-2.1-flash', size: '1024x1024', response_format: 'url' })
+    const resp = await createImageTask({ prompt, model: useModelsStore().defaultImageModel, size: '1024x1024', response_format: 'url' })
     const taskId = resp.task_id
 
     // 注册到任务队列（让画布任务在队列面板中可见）
@@ -1194,7 +1195,7 @@ async function handleMaskConfirm({ mask, prompt }: { mask: string; prompt: strin
     // 创建 image2image 任务（带 mask 局部编辑）
     const resp = await createImageTask({
       prompt,
-      model: 'agnes-image-2.1-flash',
+      model: useModelsStore().defaultImageModel,
       size: '1024x1024',
       response_format: 'url',
       base64_image: base64Image,

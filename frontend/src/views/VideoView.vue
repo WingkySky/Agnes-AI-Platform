@@ -95,7 +95,7 @@
             </div>
           </div>
 
-          <el-form label-position="top">
+          <el-form label-position="top" class="param-form">
             <el-form-item :label="t('params.prompt')">
               <el-input v-model="prompt" type="textarea" :rows="4"
                 :placeholder="t('params.videoPromptPlaceholder')" maxlength="2000" show-word-limit />
@@ -129,6 +129,12 @@
 
             <el-form-item :label="t('params.frameRate')">
               <el-input-number v-model="frameRate" :min="1" :max="60" />
+            </el-form-item>
+
+            <el-form-item :label="t('params.model')">
+              <el-select v-model="videoModel">
+                <el-option v-for="m in VIDEO_MODELS" :key="m.id" :label="m.name" :value="m.id" />
+              </el-select>
             </el-form-item>
 
             <el-row :gutter="16">
@@ -291,7 +297,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   VideoPlay, Download, CopyDocument, CircleCloseFilled, VideoCameraFilled, Loading, MagicStick
@@ -300,6 +306,7 @@ import PromptTemplates from '@/components/PromptTemplates.vue'
 import ImageUploader from '@/components/ImageUploader.vue'
 import RatioPicker from '@/components/RatioPicker.vue'
 import { useTaskQueueStore } from '@/stores/taskQueue'
+import { useModelsStore } from '@/stores/models'
 import { useI18n } from '@/i18n'
 
 const { t } = useI18n()
@@ -316,6 +323,10 @@ const videoTemplates = computed(() => ([
 // 视频时长可选档（单位：秒）
 const DURATION_OPTIONS = [3, 5, 7, 10, 15]
 
+// ---------- 模型列表 ----------
+const modelsStore = useModelsStore()
+const VIDEO_MODELS = computed(() => modelsStore.videoModels)
+
 // ---------- 表单参数 ----------
 const mode = ref('text2video')
 const prompt = ref('')
@@ -324,6 +335,12 @@ const aspectRatio = ref('16:9')   // 画面比例（官方规范）
 const seconds = ref(5)            // 视频时长（秒）
 const frameRate = ref(24)
 const seed = ref('')
+const videoModel = ref('')  // 初始值在 store 加载后自动设置
+
+// store 加载完成后自动设置默认模型
+watch(() => modelsStore.defaultVideoModel, (v) => {
+  if (v && !videoModel.value) videoModel.value = v
+}, { immediate: true })
 
 // ---------- 图片状态（图生视频：单张；首尾帧：起始帧+结束帧）----------
 const referenceFile = ref<any>(null)         // image2video 模式的参考图
@@ -459,7 +476,7 @@ async function startGenerate() {
   const params: Record<string, any> = {
     prompt: prompt.value.trim(),
     negative_prompt: negativePrompt.value.trim() || undefined,
-    model: 'agnes-video-v2.0',
+    model: videoModel.value,
     aspect_ratio: aspectRatio.value,   // 直接传比例字符串，后端会映射为官方 aspect_ratio
     seconds: seconds.value,             // 直接传时长（秒），后端会转换为 duration
     frame_rate: frameRate.value,
@@ -712,7 +729,7 @@ function handleVideoError(e: Event) {
 }
 
 /* 统一表单标签：更醒目、更有视觉层级 */
-.video-view :deep(.el-form-item__label) {
+.param-form :deep(.el-form-item__label) {
   color: #c5d3ea !important;
   font-size: 13px !important;
   font-weight: 500 !important;
@@ -721,9 +738,9 @@ function handleVideoError(e: Event) {
 }
 
 /* 统一输入/下拉控件：贴合深色主题 */
-.video-view :deep(.el-input__wrapper),
-.video-view :deep(.el-textarea__inner),
-.video-view :deep(.el-input-number) {
+.param-form :deep(.el-input__wrapper),
+.param-form :deep(.el-textarea__inner),
+.param-form :deep(.el-select) {
   background: rgba(18, 27, 50, 0.55) !important;
   border-color: rgba(107, 126, 156, 0.25) !important;
   border-radius: 10px !important;
@@ -731,32 +748,60 @@ function handleVideoError(e: Event) {
   color: #e8eef7 !important;
 }
 
-.video-view :deep(.el-textarea__inner) {
+.param-form :deep(.el-textarea__inner) {
   padding: 12px !important;
   font-size: 14px !important;
   line-height: 1.55 !important;
 }
 
-.video-view :deep(.el-input__wrapper:hover),
-.video-view :deep(.el-textarea__inner:hover) {
+.param-form :deep(.el-input__wrapper:hover),
+.param-form :deep(.el-textarea__inner:hover),
+.param-form :deep(.el-select .el-select__wrapper:hover) {
   border-color: rgba(139, 176, 255, 0.55) !important;
 }
 
-.video-view :deep(.el-input-number__decrease),
-.video-view :deep(.el-input-number__increase) {
+.param-form :deep(.el-select .el-select__wrapper) {
+  box-shadow: none !important;
+  background: rgba(18, 27, 50, 0.55) !important;
+  border-radius: 10px !important;
+  min-height: 36px !important;
+}
+
+.param-form :deep(.el-input__inner),
+.param-form :deep(.el-select__placeholder),
+.param-form :deep(.el-select__selected-item) {
+  color: #e8eef7 !important;
+  font-size: 14px !important;
+}
+
+.param-form :deep(.el-input__placeholder),
+.param-form :deep(.el-select__placeholder) {
+  color: #7c94b8 !important;
+}
+
+.param-form :deep(.el-input-number) {
+  background: rgba(18, 27, 50, 0.55) !important;
+  border-color: rgba(107, 126, 156, 0.25) !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+  color: #e8eef7 !important;
+}
+
+.param-form :deep(.el-input-number__decrease),
+.param-form :deep(.el-input-number__increase) {
   background: rgba(18, 27, 50, 0.55) !important;
   color: #c5d3ea !important;
   border-color: rgba(107, 126, 156, 0.25) !important;
 }
 
-.video-view :deep(.el-input__inner) {
-  color: #e8eef7 !important;
-  font-size: 14px !important;
+.param-form :deep(.el-input-number .el-input__wrapper) {
+  background: rgba(18, 27, 50, 0.55) !important;
+  border-color: rgba(107, 126, 156, 0.25) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
 }
 
-.video-view :deep(.el-input__placeholder) {
-  color: #7c94b8 !important;
-}
+.param-form { margin-top: 12px; }
 
 .generate-btn {
   width: 100%;

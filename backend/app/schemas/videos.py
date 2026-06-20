@@ -18,7 +18,7 @@ class VideoGenerationRequest(BaseModel):
 
     prompt: str = Field(..., min_length=1, max_length=2000, description="提示词")
     negative_prompt: Optional[str] = Field(default=None, description="负向提示词")
-    model: str = Field(default="agnes-video-v2.0", description="模型名称")
+    model: str = Field(default="", description="模型名称（前端从 /api/config 获取可用模型列表）")
 
     # 视频参数（推荐使用 aspect_ratio，让服务端自动计算宽高）
     # 直接给 aspect_ratio 优先级高于 width/height
@@ -93,10 +93,12 @@ class VideoTaskCreatedResponse(BaseModel):
     status: str = "pending"                     # pending / processing / success / failed / cancelled
     prompt: str
     model: str
-    num_frames: int
-    frame_rate: int
-    width: int
-    height: int
+    num_frames: Optional[int] = None            # Agnes Video V2.0 使用 aspect_ratio + seconds，此字段可选
+    frame_rate: Optional[int] = None            # 同上
+    width: Optional[int] = None                 # 同上
+    height: Optional[int] = None                # 同上
+    aspect_ratio: Optional[str] = None          # 画面比例（如 16:9）
+    seconds: Optional[float] = None             # 视频时长（秒）
     mode: str
     message: Optional[str] = None
 

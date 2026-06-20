@@ -16,7 +16,7 @@ class ImageGenerationRequest(BaseModel):
     """
 
     prompt: str = Field(..., min_length=1, max_length=2000, description="提示词")
-    model: str = Field(default="agnes-image-2.1-flash", description="模型名称")
+    model: str = Field(default="", description="模型名称（前端从 /api/config 获取可用模型列表）")
     size: str = Field(default="1024x1024", description="图片尺寸，格式: 宽x高")
     response_format: str = Field(default="url", description="响应格式: url 或 b64_json")
     quality: Optional[str] = Field(default="standard", description="图片质量 (standard/hd)")

@@ -4,9 +4,10 @@
 # 优先级：环境变量 > .env 文件 > 默认值
 # =====================================================
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, field_validator
+import json
 
 
 class Settings(BaseSettings):
@@ -36,6 +37,16 @@ class Settings(BaseSettings):
     agnes_api_poll_url: str = Field(
         default="https://apihub.agnes-ai.com/agnesapi",
         description="Agnes AI 异步任务轮询专用接口",
+    )
+
+    # ---------- 模型配置 ----------
+    available_models: str = Field(
+        default="",
+        description="可用模型 ID 列表（逗号分隔，可选），仅作 API 不可用时的回退",
+    )
+    model_overrides: str = Field(
+        default="{}",
+        description="模型属性覆盖（JSON 字符串），当自动推断不准确时手动指定",
     )
 
     # ---------- 数据库配置 ----------
@@ -95,10 +106,31 @@ class Settings(BaseSettings):
             return [item.strip() for item in v.split(",") if item.strip()]
         return v
 
+    @field_validator("model_overrides", mode="before")
+    @classmethod
+    def parse_model_overrides(cls, v):
+        """确保 model_overrides 是合法 JSON 字符串"""
+        if isinstance(v, str):
+            json.loads(v)  # 校验格式
+        return v
+
     @property
     def max_upload_bytes(self) -> int:
         """将 MB 转换为字节数，用于请求体大小校验"""
         return self.max_upload_size_mb * 1024 * 1024
+
+    @property
+    def model_id_list(self) -> List[str]:
+        """解析 available_models 为模型 ID 列表"""
+        return [m.strip() for m in self.available_models.split(",") if m.strip()]
+
+    @property
+    def model_overrides_dict(self) -> Dict[str, Any]:
+        """解析 model_overrides JSON 为字典"""
+        try:
+            return json.loads(self.model_overrides) if self.model_overrides else {}
+        except (json.JSONDecodeError, TypeError):
+            return {}
 
 
 # 全局单例配置实例

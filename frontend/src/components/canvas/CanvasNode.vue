@@ -183,14 +183,14 @@
             </button>
           </div>
 
-          <!-- 模型选择 -->
+          <!-- 模型选择（按当前模式自动筛选对应类型模型） -->
           <select
             class="config-select"
             :value="configContent.model"
             @change="updateConfigContent('model', ($event.target as HTMLSelectElement)?.value)"
             @mousedown.stop
           >
-            <option v-for="m in availableModels" :key="m" :value="m">{{ m }}</option>
+            <option v-for="m in availableModels" :key="m.id" :value="m.id">{{ m.name }}</option>
           </select>
 
           <!-- 尺寸选择（图片模式） -->
@@ -317,6 +317,7 @@
 import { computed, ref, nextTick, watch, onMounted, onUnmounted } from 'vue'
 import { Image as ImageIcon, Video, Music2, RefreshCw } from 'lucide-vue-next'
 import { useCanvasStore } from '@/stores/canvas'
+import { useModelsStore } from '@/stores/models'
 
 /* ---------- Props 定义 ---------- */
 const props = defineProps({
@@ -358,17 +359,18 @@ const MIN_HEIGHT = 160 // 最小高度
 const store = useCanvasStore()
 
 /* ---------- 配置节点常量 ---------- */
-// 生成模式：文生图 / 图生图 / 文生视频 / 图生视频
+// 生成模式：文生图 / 图生图 / 文生视频 / 图生视频（关键帧由接入图片数量自动触发）
 const configModes = [
   { value: 'text2image', label: '文生图' },
   { value: 'image2image', label: '图生图' },
   { value: 'text2video', label: '文生视频' },
   { value: 'image2video', label: '图生视频' },
 ]
-// 可用模型列表
-const availableModels = ['agnes-image-2.1-flash', 'agnes-image-2.1', 'agnes-video-v2.0']
+// 模型列表：从后端 API 获取，按类型自动分类
+const modelsStore = useModelsStore()
+const availableModels = computed(() => modelsStore.getModelsByMode(configContent.value.mode || 'text2image'))
 // 可用图片尺寸
-const availableSizes = ['1024x1024', '768x1024', '1024x768', '768x768']
+const availableSizes = computed(() => modelsStore.imageSizes.length > 0 ? modelsStore.imageSizes : ['1024x1024', '768x1024', '1024x768', '768x768'])
 
 /* ---------- 响应式状态 ---------- */
 const hovered = ref(false) // 是否悬停
@@ -508,7 +510,7 @@ const imageInfoSize = computed(() => formatBytes(metadata.value.bytes || 0))
 /** 配置节点内容（从 panel.content 读取，带默认值） */
 const configContent = computed(() => ({
   mode: 'text2image',
-  model: 'agnes-image-2.1-flash',
+  model: modelsStore.defaultImageModel,
   size: '1024x1024',
   prompt: '',
   generating: false,
@@ -521,7 +523,7 @@ const isImageMode = computed(
   () => configContent.value.mode?.includes('image') && !configContent.value.mode?.includes('video'),
 )
 
-/** 是否为视频模式（含 text2video / image2video） */
+/** 是否为视频模式（text2video / image2video，关键帧由接入图片数量自动触发） */
 const isVideoMode = computed(() => configContent.value.mode?.includes('video'))
 
 /** 提示词双向绑定：get 读 configContent.prompt，set 调 updateConfigContent */
@@ -737,9 +739,20 @@ function handleRetry() {
 
 /* ---------- 交互：配置节点 ---------- */
 
-/** 更新配置节点内容字段（直接调用 store 更新） */
+/** 更新配置节点内容，切换模式时自动切换对应类型的默认模型 */
 function updateConfigContent(key: string, value: any) {
-  store.updatePanel(props.panel.id, { content: { [key]: value } })
+  const updates: Record<string, any> = { [key]: value }
+  // 切换模式时自动切换模型
+  if (key === 'mode') {
+    const currentModel = configContent.value.model
+    const targetModels = modelsStore.getModelsByMode(value)
+    const targetIds = targetModels.map((m) => m.id)
+    // 当前模型不在目标列表中时，自动切到该类型默认模型
+    if (!targetIds.includes(currentModel)) {
+      updates.model = modelsStore.getDefaultModelByMode(value)
+    }
+  }
+  store.updatePanel(props.panel.id, { content: updates })
 }
 
 /** 点击配置节点的生成按钮：emit generate 事件交由父组件执行生成流程 */

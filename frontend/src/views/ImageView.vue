@@ -81,7 +81,7 @@
 
             <el-form-item :label="t('params.model')">
               <el-select v-model="model">
-                <el-option v-for="m in IMAGE_MODELS" :key="m" :label="m" :value="m" />
+                <el-option v-for="m in IMAGE_MODELS" :key="m.id" :label="m.name" :value="m.id" />
               </el-select>
             </el-form-item>
 
@@ -231,7 +231,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   MagicStick, Download, Link, PictureFilled, Loading, CircleCloseFilled, VideoPlay
@@ -241,6 +241,7 @@ import ImageUploader from '@/components/ImageUploader.vue'
 import ImageViewer from '@/components/ImageViewer.vue'
 import RatioPicker from '@/components/RatioPicker.vue'
 import { useTaskQueueStore } from '@/stores/taskQueue'
+import { useModelsStore } from '@/stores/models'
 import { useI18n } from '@/i18n'
 
 const { t } = useI18n()
@@ -278,17 +279,20 @@ const IMAGE_SIZES = [
   '1024x1792',
 ]
 
-const IMAGE_MODELS = [
-  'agnes-image-2.1-flash',
-  'agnes-image-2.1-pro',
-  'agnes-image-2.0',
-]
+// 模型列表：从后端 API 动态获取
+const modelsStore = useModelsStore()
+const IMAGE_MODELS = computed(() => modelsStore.imageModels)
 
 // ---------- 表单参数 ----------
 const mode = ref('text2image')
 const prompt = ref('')
 const size = ref('1280x720')   // 默认横板 16:9，视觉上更通用
-const model = ref('agnes-image-2.1-flash')
+const model = ref('')  // 初始值在 store 加载后自动设置
+
+// store 加载完成后自动设置默认模型
+watch(() => modelsStore.defaultImageModel, (v) => {
+  if (v && !model.value) model.value = v
+}, { immediate: true })
 const referenceFileList = ref<any[]>([])   // 【多图】数组
 
 // ---------- 使用全局 Store 管理任务 ----------

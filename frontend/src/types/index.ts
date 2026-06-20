@@ -14,11 +14,19 @@ export interface HealthResponse {
   service: string
 }
 
+/** 模型信息 — 对齐 ModelInfo */
+export interface ModelInfo {
+  id: string          // 模型标识，如 agnes-image-2.1-flash
+  name: string        // 显示名称，如 Agnes Image 2.1 Flash
+  type: string        // 模型类型：image / video / chat
+  provider: string    // 模型供应商，如 Agnes / 字节跳动 / OpenAI
+  capabilities: string[]  // 能力标签，如 text2image, image2image, keyframes
+}
+
 /** 前端可用配置 — 对齐 ConfigResponse */
 export interface ConfigResponse {
+  models: ModelInfo[]
   image_sizes: string[]
-  image_models: string[]
-  video_models: string[]
   video_num_frames: number[]
   default_frame_rate: number
   default_video_width: number

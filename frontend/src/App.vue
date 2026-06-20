@@ -68,15 +68,22 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { Picture, VideoPlay, Clock, ChatDotRound, Grid } from '@element-plus/icons-vue'
 import TaskQueuePanel from './components/TaskQueuePanel.vue'
 import LanguageSwitcher from './components/LanguageSwitcher.vue'
 import { useI18n, getElementPlusLocale } from '@/i18n'
+import { useModelsStore } from '@/stores/models'
 
 const { t, locale } = useI18n()
 const route = useRoute()
+
+// 应用启动时加载模型配置
+const modelsStore = useModelsStore()
+onMounted(() => {
+  modelsStore.fetchConfig()
+})
 
 // canvas 路由时 app-main 全屏无边距
 const isCanvasRoute = computed(() => route.name === 'canvas')

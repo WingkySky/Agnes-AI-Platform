@@ -19,6 +19,7 @@
 import { createImageTask, getImageTaskStatus } from '@/api/images'
 import { createVideoTask, getVideoStatus } from '@/api/videos'
 import { useTaskQueueStore } from '@/stores/taskQueue'
+import { useModelsStore } from '@/stores/models'
 import type { ImageGenerationRequest, VideoGenerationRequest } from '@/types'
 
 // ---------- 类型定义 ----------
@@ -414,7 +415,7 @@ export async function createGenerationTask(ctx: GenerationContext, config: Gener
 
   const params: Record<string, any> = {
     prompt,
-    model: config.model || 'agnes-image-2.1-flash',
+    model: config.model || useModelsStore().defaultImageModel,
     size: config.size || '1024x1024',
     response_format: config.response_format || 'url',
     mode: referenceImages && referenceImages.length > 0 ? 'image2image' : 'text2image',
@@ -593,7 +594,7 @@ export async function executeMergeGeneration(configId: string, store: CanvasStor
   const newNodeId = createLoadingResultNode(store, configNode, false)
 
   const config: GenerationConfig = {
-    model: configNode.content?.model || 'agnes-image-2.1-flash',
+    model: configNode.content?.model || useModelsStore().defaultImageModel,
     size: normalizeSize(configNode.content?.size),
     response_format: 'url',
   }
@@ -670,17 +671,32 @@ function normalizeSize(size: string | undefined): string {
 
 /**
  * 创建视频生成任务（调用 /api/videos）
- * - 根据是否有参考图自动选择 text2video / image2video 模式
- * - 参考图：取第一张作为 image（image2video 模式）
+ * - text2video：纯文本生成视频
+ * - image2video：1 张参考图生成视频
+ * - keyframes：2+ 张参考图自动触发关键帧动画（起始帧+结束帧）
+ * - 模式根据参考图数量自动推断，无需手动指定
  */
 export async function createVideoGenerationTask(ctx: GenerationContext, config: GenerationConfig): Promise<{ task_id: string }> {
   const { prompt, referenceImages } = ctx
   const { base64Images, imageUrls } = await classifyImages(referenceImages || [])
 
+  // 合并所有参考图（URL 和 base64 统一排列）
+  const allImages = [...imageUrls, ...base64Images]
+
+  // 根据参考图数量自动推断模式
+  let mode: string
+  if (allImages.length >= 2) {
+    mode = 'keyframes'  // 2+ 张图 → 关键帧（起始帧+结束帧）
+  } else if (allImages.length === 1) {
+    mode = 'image2video'  // 1 张图 → 图生视频
+  } else {
+    mode = 'text2video'  // 无图 → 文生视频
+  }
+
   const params: Record<string, any> = {
     prompt,
-    model: config.model || 'agnes-video-v2.0',
-    mode: referenceImages && referenceImages.length > 0 ? 'image2video' : 'text2video',
+    model: config.model || useModelsStore().defaultVideoModel,
+    mode,
   }
 
   // 视频时长（秒）
@@ -688,18 +704,20 @@ export async function createVideoGenerationTask(ctx: GenerationContext, config: 
     params.seconds = config.seconds
   }
 
-  // 画面比例（如 "16:9"），传给后端作为 aspect_ratio
+  // 画面比例（如 "16:9"）
   if (config.aspect_ratio) {
     params.aspect_ratio = config.aspect_ratio
   }
 
-  // image2video 模式：取第一张参考图
-  if (params.mode === 'image2video') {
-    if (imageUrls.length > 0) {
-      params.image = imageUrls[0]
-    } else if (base64Images.length > 0) {
-      params.image = base64Images[0]
-    }
+  // 根据模式传参考图
+  if (mode === 'keyframes') {
+    // 关键帧模式：传 images 数组（起始帧 + 结束帧）
+    params.images = allImages.slice(0, 2)
+    params.image_mime_types = allImages.slice(0, 2).map(() => 'image/png')
+  } else if (mode === 'image2video') {
+    // 图生视频模式：取第一张参考图
+    params.image = allImages[0]
+    params.image_mime_type = 'image/png'
   }
 
   const resp = await createVideoTask(params as VideoGenerationRequest)
@@ -808,7 +826,7 @@ export async function executeMergeVideoGeneration(configId: string, store: Canva
   const newNodeId = createLoadingResultNode(store, configNode, true)
 
   const config: GenerationConfig = {
-    model: configNode.content?.model || 'agnes-video-v2.0',
+    model: configNode.content?.model || useModelsStore().defaultVideoModel,
     seconds: configNode.content?.seconds || 5,
     aspect_ratio: configNode.content?.aspect_ratio || '16:9',
   }

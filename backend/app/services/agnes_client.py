@@ -97,6 +97,29 @@ class AgnesAIClient:
             self._client = None
             logger.info("[AgnesAIClient] HTTP 连接池已释放")
 
+    async def list_models(self) -> List[Dict[str, Any]]:
+        """
+        调用 GET /models 获取 API 提供商的所有可用模型列表。
+        OpenAI 兼容 API 标准：返回 { "data": [{ "id": "model-id", ... }, ...] }
+        """
+        url = f"{self.base_url}/models"
+        # GET 请求不需要 Content-Type，只传鉴权
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        try:
+            resp = await self.client.get(url, headers=headers, timeout=30.0)
+            resp.raise_for_status()
+            data = resp.json()
+            # OpenAI 兼容格式：{ "object": "list", "data": [...] }
+            if isinstance(data, dict) and "data" in data:
+                return data["data"]
+            # 兜底：直接返回列表
+            if isinstance(data, list):
+                return data
+            return []
+        except Exception as e:
+            logger.warning("[AgnesAIClient] 获取模型列表失败: %s", e)
+            return []
+
     # ---------- 获取当前 client（懒初始化保护）----------
     @property
     def client(self) -> httpx.AsyncClient:
@@ -395,7 +418,7 @@ class AgnesAIClient:
     async def create_image(
         self,
         prompt: str,
-        model: str = "agnes-image-2.1-flash",
+        model: str = "",
         size: str = "1024x1024",
         response_format: str = "url",
         base64_image: Optional[str] = None,           # 保留：向后兼容（单图）
@@ -497,7 +520,7 @@ class AgnesAIClient:
     async def create_video_task(
         self,
         prompt: str,
-        model: str = "agnes-video-v2.0",
+        model: str = "",
         num_frames: Optional[int] = None,
         frame_rate: Optional[int] = None,
         width: Optional[int] = None,
@@ -665,10 +688,14 @@ class AgnesAIClient:
         )
         try:
             # 区分 base64 / URL 传参
+            # 使用第一个可用的图片模型做 pass-through
+            from app.services.model_registry import get_models_by_type
+            image_models = await get_models_by_type("image")
+            _pass_model = image_models[0].id if image_models else ""
             if lowered.startswith("http"):
                 resp = await self.create_image(
                     prompt="reproduce reference image as is to get its hosted url",
-                    model="agnes-image-2.1-flash",
+                    model=_pass_model,
                     size=size_str,
                     response_format="url",
                     image_urls=[uri],
@@ -676,7 +703,7 @@ class AgnesAIClient:
             else:
                 resp = await self.create_image(
                     prompt="reproduce reference image as is to get its hosted url",
-                    model="agnes-image-2.1-flash",
+                    model=_pass_model,
                     size=size_str,
                     response_format="url",
                     base64_images=[uri],
@@ -705,7 +732,7 @@ class AgnesAIClient:
 
     # ---------- 视频任务轮询 ----------
     async def poll_video_status(
-        self, video_id: Optional[str] = None, task_id: Optional[str] = None
+        self, video_id: Optional[str] = None, task_id: Optional[str] = None, model_name: str = ""
     ) -> Dict[str, Any]:
         """
         查询视频任务状态。
@@ -716,7 +743,7 @@ class AgnesAIClient:
             try:
                 data = await self._get(
                     self.poll_url,
-                    params={"video_id": video_id, "model_name": "agnes-video-v2.0"},
+                    params={"video_id": video_id, "model_name": model_name},
                 )
                 return self._normalize_video_status(data)
             except Exception as e:

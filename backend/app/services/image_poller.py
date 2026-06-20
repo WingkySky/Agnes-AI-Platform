@@ -150,7 +150,7 @@ class ImagePollerManager:
             # 调用 Agnes AI 生成图片（await，不阻塞事件循环）
             result = await agnes_client.create_image(
                 prompt=task.prompt,
-                model=task.params.get("model", "agnes-image-2.1-flash"),
+                model=task.params.get("model", ""),
                 size=task.params.get("size", "1024x1024"),
                 response_format=task.params.get("response_format", "url"),
                 # 【多图参考改造点】新字段优先，回退到旧字段以保持兼容
@@ -237,7 +237,7 @@ class ImagePollerManager:
                 record = Generation(
                     type="image",
                     prompt=task.prompt,
-                    model=task.params.get("model", "agnes-image-2.1-flash"),
+                    model=task.params.get("model", ""),
                     params={
                         k: v for k, v in task.params.items()
                         # 不保存大的 base64 / URL 数组，避免数据库膨胀

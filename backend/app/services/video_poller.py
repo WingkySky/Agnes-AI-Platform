@@ -173,7 +173,8 @@ class VideoPollerManager:
 
                 try:
                     status_data = await agnes_client.poll_video_status(
-                        video_id=task.video_id, task_id=task.task_id
+                        video_id=task.video_id, task_id=task.task_id,
+                        model_name=task.params.get("model", ""),
                     )
 
                     status = status_data.get("status", "unknown")
@@ -251,7 +252,7 @@ class VideoPollerManager:
                 record = Generation(
                     type="video",
                     prompt=task.prompt,
-                    model=task.params.get("model", "agnes-video-v2.0"),
+                    model=task.params.get("model", ""),
                     params=task.params,
                     mode=task.params.get("mode"),
                     result_url=task.video_url,

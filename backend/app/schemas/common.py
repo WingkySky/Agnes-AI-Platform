@@ -13,25 +13,31 @@ class HealthResponse(BaseModel):
     service: str
 
 
+class ModelInfo(BaseModel):
+    """单个模型信息"""
+    id: str = Field(description="模型标识，如 agnes-image-2.1-flash")
+    name: str = Field(description="模型显示名称，如 Agnes Image 2.1 Flash")
+    type: str = Field(description="模型类型：image / video / chat")
+    provider: str = Field(default="Unknown", description="模型供应商，如 Agnes / 字节跳动 / OpenAI")
+    capabilities: List[str] = Field(
+        default_factory=list,
+        description="模型能力标签，如 text2image, image2image, text2video, image2video, keyframes",
+    )
+
+
 class ConfigResponse(BaseModel):
     """前端可用配置（不含敏感信息）"""
+
+    # 可用模型列表（结构化，按类型自动分类）
+    models: List[ModelInfo] = Field(
+        default_factory=list,
+        description="所有可用模型列表",
+    )
 
     # 支持的图片尺寸
     image_sizes: List[str] = Field(
         default=["1024x768", "1024x1024", "768x1024", "512x512"],
         description="支持的图片尺寸选项",
-    )
-
-    # 图片模型
-    image_models: List[str] = Field(
-        default=["agnes-image-2.1-flash"],
-        description="支持的图片生成模型",
-    )
-
-    # 视频模型
-    video_models: List[str] = Field(
-        default=["agnes-video-v2.0"],
-        description="支持的视频生成模型",
     )
 
     # 视频帧数选项（需满足 8n+1 规则）
