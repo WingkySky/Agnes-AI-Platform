@@ -32,7 +32,20 @@ import type {
 } from '@/types'
 
 // ---------- 常量 ----------
-const STORAGE_KEY = 'agnes_task_queue_v1'
+const BASE_STORAGE_KEY = 'agnes_task_queue_v1'
+/** 当前绑定的用户标识；空值为 "anon"（匿名） */
+let _currentUserKey: string = 'anon'
+
+/** 计算当前用户的存储 key */
+function storageKey(): string {
+  return `${BASE_STORAGE_KEY}_${_currentUserKey}`
+}
+
+/** 强制切换用户数据空间 */
+function switchTaskUser(userId: number | string | null): void {
+  _currentUserKey = userId ? 'u_' + String(userId) : 'anon'
+}
+
 const IMAGE_POLL_INTERVAL = 3000      // 图片轮询间隔（毫秒）
 const VIDEO_POLL_INTERVAL = 5000      // 视频轮询间隔（毫秒）
 const POLL_TIMEOUT = 10 * 60 * 1000  // 轮询超时保护（10 分钟）
@@ -163,6 +176,18 @@ export const useTaskQueueStore = defineStore('taskQueue', {
 
       // 6. 每秒递增 tick，驱动耗时/时间显示的响应式刷新
       setInterval(() => { this._tick++ }, 1000)
+
+      // 7. 监听用户登录/退出事件
+      if (typeof window !== 'undefined') {
+        window.addEventListener('agnes:user-login', (e: Event) => {
+          const ce = e as CustomEvent
+          const userId: number | null = (ce?.detail?.id as number) ?? null
+          this._switchUserStorage(userId)
+        })
+        window.addEventListener('agnes:user-logout', () => {
+          this._switchUserStorage(null)
+        })
+      }
     },
 
     // =====================================================
@@ -657,7 +682,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
     _restoreFromStorage(): void {
       if (typeof localStorage === 'undefined') return
       try {
-        const raw = localStorage.getItem(STORAGE_KEY)
+        const raw = localStorage.getItem(storageKey())
         if (!raw) return
         const data = JSON.parse(raw) as { tasks: QueueTask[]; activeTaskId?: string }
         if (!data || !Array.isArray(data.tasks)) return
@@ -677,6 +702,30 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         }
       } catch (_) {
         // 解析失败不影响启动
+      }
+    },
+
+    /**
+     * 用户切换时切换任务队列数据空间
+     * - 停止所有正在进行的轮询
+     * - 清空当前任务
+     * - 切换存储 key 并重载
+     */
+    _switchUserStorage(userId: number | string | null): void {
+      // 停止所有轮询定时器
+      for (const id of Object.keys(this.pollTimers)) {
+        clearInterval(this.pollTimers[id])
+      }
+      this.pollTimers = {}
+      this.tasks = {}
+      this.activeTaskId = null
+      switchTaskUser(userId)
+      this._restoreFromStorage()
+      // 用户切换后，重启对进行中任务的轮询
+      for (const task of Object.values(this.tasks)) {
+        if (!isFinalStatus(task.status) && task.source !== 'chat' && task.source !== 'canvas') {
+          this._startPolling(task.taskId)
+        }
       }
     },
   },

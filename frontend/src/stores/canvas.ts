@@ -9,7 +9,7 @@
 
 import { defineStore } from 'pinia'
 import { canvasThemes } from '@/lib/canvas-theme'
-import { loadCanvas, saveCanvas } from '@/lib/canvas-storage'
+import { loadCanvas, saveCanvas, switchCanvasUser } from '@/lib/canvas-storage'
 
 // ---------- 本地类型定义 ----------
 
@@ -1255,6 +1255,26 @@ export const useCanvasStore = defineStore('canvas', {
         console.warn('[canvas] 持久化加载失败', err)
       }
       this._storageReady = true
+    },
+
+    /**
+     * 用户切换时切换画布数据空间
+     * - 切换 localforage 中的 user key
+     * - 重置 _storageReady 并重新 hydrate
+     */
+    async _switchUserStorage(userId: number | string | null): Promise<void> {
+      switchCanvasUser(userId)
+      // 清空当前 state（避免看到上一个用户的数据）
+      this.workspaces = []
+      this.activeWorkspaceId = null
+      this.panels = []
+      this.connections = []
+      this.selectedPanelId = null
+      this.historyStack = []
+      this.redoStack = []
+      // 重新 hydrate 新用户数据
+      this._storageReady = false
+      await this._hydrateFromStorage()
     },
   },
 })

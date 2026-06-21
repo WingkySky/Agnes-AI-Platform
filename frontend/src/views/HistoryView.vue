@@ -287,11 +287,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick, reactive } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, reactive } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, Loading, Document, Delete, VideoPlay, CircleCloseFilled, Edit, Close, Download, ZoomIn } from '@element-plus/icons-vue'
 import ImageViewer from '@/components/ImageViewer.vue'
 import { getHistoryList, deleteHistoryRecord, batchDeleteHistory } from '@/api/history'
+import client from '@/api/client'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useI18n } from '@/i18n'
 import type { GenerationRecord } from '@/types'
@@ -359,34 +360,38 @@ const isIndeterminate = computed(() => {
   return selectedOnPage.length > 0 && selectedOnPage.length < pageIds.length
 })
 
+/**
+ * 获取视频播放地址
+ * 直接使用 Agnes CDN 的 result_url，因为 CDN 本身就是公开可访问的
+ * 不走后端代理流（代理流需要鉴权，而 <video> 标签无法携带 JWT）
+ */
 function getVideoStreamUrl(item: GenerationRecord) {
   if (item.type !== 'video' || !item.result_url) return ''
-  return `/api/history/video/${item.id}/stream`
+  return item.result_url
 }
 
-function simpleHash(str: string) {
-  let hash = 0
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i)
-    hash = ((hash << 5) - hash) + char
-    hash |= 0
-  }
-  return Math.abs(hash).toString(36)
+/**
+ * 通过 axios 下载二进制资源并生成 blob URL
+ * 这样请求会经过 axios 请求拦截器，自动携带 JWT token
+ * 解决 <img src="url"> 或 new Image().src 无法携带 JWT 的问题
+ */
+async function fetchBlobAsUrl(url: string): Promise<string> {
+  const blob = await client.get(url, {
+    responseType: 'blob',
+    silent: true,
+  }) as unknown as Blob
+  return URL.createObjectURL(blob)
 }
 
 async function loadVideoThumbnail(item: GenerationRecord) {
   if (videoThumbnails[item.id] || thumbnailLoading[item.id] || thumbnailFailed[item.id]) return
   thumbnailLoading[item.id] = true
   try {
-    const urlHash = item.result_url ? simpleHash(item.result_url) : 'nourl'
-    const url = `/api/history/video/${item.id}/thumbnail?v=${urlHash}`
-    await new Promise((resolve, reject) => {
-      const img = new Image()
-      img.onload = resolve
-      img.onerror = reject
-      img.src = url
-    })
-    videoThumbnails[item.id] = url
+    // 通过 axios 下载，请求拦截器会自动注入 JWT token
+    // 后端按 user_id 隔离，只有当前用户能获取自己视频的缩略图
+    const url = `/api/history/video/${item.id}/thumbnail`
+    const blobUrl = await fetchBlobAsUrl(url)
+    videoThumbnails[item.id] = blobUrl
   } catch (e) {
     console.warn('[History] ' + t('history.thumbLoadFail') + ' id=' + item.id, e)
     thumbnailFailed[item.id] = true
@@ -399,15 +404,10 @@ async function loadVideoPreview(item: GenerationRecord) {
   if (videoPreviews[item.id] || previewLoading[item.id]) return
   previewLoading[item.id] = true
   try {
-    const urlHash = item.result_url ? simpleHash(item.result_url) : 'nourl'
-    const url = `/api/history/video/${item.id}/preview?v=${urlHash}`
-    await new Promise((resolve, reject) => {
-      const img = new Image()
-      img.onload = resolve
-      img.onerror = reject
-      img.src = url
-    })
-    videoPreviews[item.id] = url
+    // 通过 axios 下载，自动携带 JWT token
+    const url = `/api/history/video/${item.id}/preview`
+    const blobUrl = await fetchBlobAsUrl(url)
+    videoPreviews[item.id] = blobUrl
   } catch (e) {
     console.warn('[History] ' + t('history.gifLoadFail') + ' id=' + item.id, e)
   } finally {
@@ -736,7 +736,45 @@ watch(
   },
 )
 
-onMounted(() => loadList())
+/**
+ * 释放所有视频相关的 blob URL，避免内存泄漏
+ */
+function clearVideoBlobUrls() {
+  Object.values(videoThumbnails).forEach(url => {
+    if (url && url.startsWith('blob:')) URL.revokeObjectURL(url)
+  })
+  Object.values(videoPreviews).forEach(url => {
+    if (url && url.startsWith('blob:')) URL.revokeObjectURL(url)
+  })
+}
+
+// 【用户隔离】用户登录/登出后自动刷新历史列表，确保只看自己的数据
+// 由于 HistoryView 在 cachedViews 中被 keep-alive，不会重新 onMounted，
+// 因此需要通过事件监听来触发数据空间切换
+function handleUserSwitch() {
+  clearVideoBlobUrls()
+  list.value = []
+  totalCount.value = 0
+  imageCount.value = 0
+  videoCount.value = 0
+  loadList()
+}
+
+onMounted(() => {
+  loadList()
+  if (typeof window !== 'undefined') {
+    window.addEventListener('agnes:user-login', handleUserSwitch as EventListener)
+    window.addEventListener('agnes:user-logout', handleUserSwitch as EventListener)
+  }
+})
+
+onBeforeUnmount(() => {
+  clearVideoBlobUrls()
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('agnes:user-login', handleUserSwitch as EventListener)
+    window.removeEventListener('agnes:user-logout', handleUserSwitch as EventListener)
+  }
+})
 </script>
 
 <style scoped>

@@ -90,8 +90,26 @@ async function getAssetStore(): Promise<LocalForageInstance> {
   return assetStoreInstance
 }
 
-const INDEX_KEY = 'agnes_asset_index'
-const BLOB_KEY_PREFIX = 'agnes_asset_blob_'
+const BASE_INDEX_KEY = 'agnes_asset_index'
+const BASE_BLOB_KEY_PREFIX = 'agnes_asset_blob_'
+
+/** 当前绑定的用户标识；空值为 "anon"（匿名） */
+let _currentUserKey: string = 'anon'
+
+/** 计算当前用户的资源索引 key */
+function indexKey(): string {
+  return `${BASE_INDEX_KEY}_${_currentUserKey}`
+}
+
+/** 计算当前用户下指定 id 的 Blob key */
+function blobKey(id: string): string {
+  return `${BASE_BLOB_KEY_PREFIX}${_currentUserKey}_${id}`
+}
+
+/** 强制切换用户数据空间；重置 _storageReady 以便重新 hydrate */
+function switchAssetUser(userId: number | string | null): void {
+  _currentUserKey = userId ? 'u_' + String(userId) : 'anon'
+}
 
 /** 生成唯一 ID */
 function uid(): string {
@@ -147,7 +165,7 @@ export const useAssetStore = defineStore('asset', {
       // 本地上传的文件：Blob 持久化到 IndexedDB，创建运行时 object URL
       if (data.blob) {
         const store = await getAssetStore()
-        await store.setItem(BLOB_KEY_PREFIX + id, data.blob)
+        await store.setItem(blobKey(id), data.blob)
         url = URL.createObjectURL(data.blob)
         hasBlob = true
       }
@@ -180,7 +198,7 @@ export const useAssetStore = defineStore('asset', {
       }
       // 删除 IndexedDB 中的 Blob 数据
       const store = await getAssetStore()
-      await store.removeItem(BLOB_KEY_PREFIX + id)
+      await store.removeItem(blobKey(id))
       this.assets.splice(idx, 1)
       await this._persist()
       return true
@@ -204,7 +222,7 @@ export const useAssetStore = defineStore('asset', {
           URL.revokeObjectURL(asset.url)
         }
         if (asset.hasBlob) {
-          await store.removeItem(BLOB_KEY_PREFIX + asset.id)
+          await store.removeItem(blobKey(asset.id))
         }
       }
       this.assets = []
@@ -216,12 +234,12 @@ export const useAssetStore = defineStore('asset', {
       if (this._storageReady) return
       const store = await getAssetStore()
       try {
-        const assets = await store.getItem<AssetItem[]>(INDEX_KEY)
+        const assets = await store.getItem<AssetItem[]>(indexKey())
         if (Array.isArray(assets)) {
           // 为有 blob 的 asset 从 IndexedDB 读取 Blob，重新创建 object URL
           for (const asset of assets) {
             if (asset.hasBlob) {
-              const blob = await store.getItem<Blob>(BLOB_KEY_PREFIX + asset.id)
+              const blob = await store.getItem<Blob>(blobKey(asset.id))
               if (blob) {
                 asset.url = URL.createObjectURL(blob)
               } else {
@@ -247,11 +265,28 @@ export const useAssetStore = defineStore('asset', {
         // 必须先 JSON 序列化剥离 Proxy，转成纯数组后再写入，否则会抛 Data CloneError。
         // 注意：hasBlob 标记会保留，但 Blob 数据本身存在单独的 key 中，不在此数组内。
         const plain = JSON.parse(JSON.stringify(this.assets))
-        await store.setItem(INDEX_KEY, plain)
+        await store.setItem(indexKey(), plain)
       } catch (e: unknown) {
         // eslint-disable-next-line no-console
         console.warn('[asset] 持久化失败:', e)
       }
+    },
+
+    /**
+     * 用户切换时切换素材库数据空间
+     * - 重置 _storageReady 并重新 hydrate
+     */
+    async _switchUserStorage(userId: number | string | null): Promise<void> {
+      // 先释放当前用户所有资源的 object URL（避免内存泄漏）
+      for (const asset of this.assets) {
+        if (asset.hasBlob && asset.url) {
+          try { URL.revokeObjectURL(asset.url) } catch (_e) { /* ignore */ }
+        }
+      }
+      this.assets = []
+      switchAssetUser(userId)
+      this._storageReady = false
+      await this.hydrate()
     },
   },
 })

@@ -1786,6 +1786,9 @@ onMounted(async () => {
   window.addEventListener('keydown', handleKeyDown)
   window.addEventListener('keyup', handleKeyUp)
   window.addEventListener('click', handleGlobalClick)
+  // 监听用户登录/退出，切换画布数据空间
+  window.addEventListener('agnes:user-login', handleUserSwitch as EventListener)
+  window.addEventListener('agnes:user-logout', handleUserLogout as EventListener)
 })
 
 onBeforeUnmount(() => {
@@ -1797,9 +1800,28 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointerup', handleSelectionUp)
   window.removeEventListener('pointermove', handleConnectingMove)
   window.removeEventListener('pointerup', handleConnectingUp)
+  window.removeEventListener('agnes:user-login', handleUserSwitch as EventListener)
+  window.removeEventListener('agnes:user-logout', handleUserLogout as EventListener)
   // 清理 hover 定时器
   cancelHoverHide()
 })
+
+/** 登录/切换用户后，切换到对应的数据空间 */
+async function handleUserSwitch(e: CustomEvent) {
+  const userId: number | null = (e?.detail?.id as number) ?? null
+  await store._switchUserStorage(userId)
+  if (!store.activeWorkspaceId && store.workspaces.length === 0) {
+    store.createWorkspace('画布 1')
+  }
+}
+
+/** 退出登录：切换到匿名数据空间 */
+async function handleUserLogout() {
+  await store._switchUserStorage(null)
+  if (!store.activeWorkspaceId && store.workspaces.length === 0) {
+    store.createWorkspace('画布 1')
+  }
+}
 </script>
 
 <style scoped>

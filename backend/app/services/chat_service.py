@@ -285,6 +285,7 @@ class ChatService:
         messages: List[Dict[str, str]],
         session_id: Optional[int] = None,
         attachments: Optional[List[Dict[str, Any]]] = None,
+        user_id: Optional[int] = None,
     ) -> AsyncGenerator[str, None]:
         """
         流式聊天接口，通过 SSE 逐块返回结果。
@@ -299,6 +300,7 @@ class ChatService:
             messages: 对话历史 [{"role": "user/assistant/system", "content": "..."}]
             session_id: 会话 ID（用于关联生成任务）
             attachments: 可选的用户参考图列表（用于 System Prompt 上下文注入与工具执行）
+            user_id: 当前登录用户的 ID（用于隔离生成记录）
         """
         # ── 根据附件和会话历史，动态追加 System Prompt 上下文 ──
         # 区分三种类型的附件，对 AI 说明其能力边界：
@@ -597,7 +599,7 @@ class ChatService:
                             }
                     effective_attachments = [a for a in effective_attachments if a is not None]
 
-                result = await self._execute_tool(func_name, func_args, session_id, attachments=effective_attachments if effective_attachments else None, messages=messages)
+                result = await self._execute_tool(func_name, func_args, session_id, attachments=effective_attachments if effective_attachments else None, messages=messages, user_id=user_id)
                 tool_results.append({
                     "tool_call_id": tc.get("id", ""),
                     "role": "tool",
@@ -773,7 +775,7 @@ class ChatService:
                     effective_attachments = [a for a in effective_attachments if a is not None and not a.get("_is_url")]
 
                 # 执行工具
-                result = await self._execute_tool(func_name, func_args, session_id, attachments=effective_attachments if effective_attachments else None, messages=messages)
+                result = await self._execute_tool(func_name, func_args, session_id, attachments=effective_attachments if effective_attachments else None, messages=messages, user_id=user_id)
                 tool_results.append({
                     "tool_call_id": tc.get("id", ""),
                     "role": "tool",
@@ -1153,6 +1155,7 @@ class ChatService:
         session_id: Optional[int] = None,
         attachments: Optional[List[Dict[str, Any]]] = None,
         messages: Optional[List[Dict[str, Any]]] = None,
+        user_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         执行工具调用（generate_image / generate_video）。
@@ -1160,11 +1163,12 @@ class ChatService:
 
         【新增】messages 参数用于在"继续修改"场景下，
         从会话历史中找到最近生成的图片，作为 image2image 参考图。
+        【新增】user_id 参数用于将生成任务绑定到当前用户，实现数据隔离。
         """
         if func_name == "generate_image":
-            return await self._execute_generate_image(func_args, session_id, attachments, messages=messages)
+            return await self._execute_generate_image(func_args, session_id, attachments, messages=messages, user_id=user_id)
         elif func_name == "generate_video":
-            return await self._execute_generate_video(func_args, session_id, attachments)
+            return await self._execute_generate_video(func_args, session_id, attachments, user_id=user_id)
         else:
             return {"status": "error", "message": f"未知工具: {func_name}"}
 
@@ -1174,6 +1178,7 @@ class ChatService:
         session_id: Optional[int] = None,
         attachments: Optional[List[Dict[str, Any]]] = None,
         messages: Optional[List[Dict[str, Any]]] = None,
+        user_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         执行图片生成工具（支持 text2image 与 image2image 两种模式）。
@@ -1308,6 +1313,7 @@ class ChatService:
             task = await image_poller_manager.create_task(
                 prompt=prompt,
                 params=params,
+                user_id=user_id,
             )
             logger.info("[Chat] 图片生成任务已创建: task_id=%s, mode=%s, prompt=%s",
                         task.task_id, final_mode, prompt[:50])
@@ -1435,6 +1441,7 @@ class ChatService:
                 video_id=video_id,
                 prompt=prompt,
                 params=params,
+                user_id=user_id,
             )
 
             logger.info("[Chat] 视频生成任务已创建: task_id=%s, video_id=%s, mode=%s", task_id, video_id, final_mode)

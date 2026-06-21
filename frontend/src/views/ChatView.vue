@@ -705,14 +705,14 @@ function getToolCallsForMessage(msg: ChatMessage) {
   return chatStore.streamingToolCalls
 }
 
-/** 获取视频代理 URL */
-function getVideoProxyUrl(url: string, taskId: string) {
+/** 获取视频 URL —— 直接使用原始 CDN URL
+ *  说明：之前用后端代理 URL `/api/videos/{taskId}/stream`，
+ *  但 <video src> 无法携带 JWT 头，导致鉴权失败时视频无法播放。
+ *  Agnes CDN 资源为公开访问，因此直接返回原始 URL 即可。
+ */
+function getVideoProxyUrl(url: string, _taskId: string) {
   if (!url) return ''
-  // 如果是 Google Storage 等跨域 URL，使用后端代理
-  if (taskId && (url.includes('storage.googleapis.com') || url.includes('google'))) {
-    const baseURL = import.meta.env.VITE_API_BASE_URL || ''
-    return `${baseURL}/api/videos/${taskId}/stream`
-  }
+  // 直接使用原始 CDN URL，不走后端代理
   return url
 }
 

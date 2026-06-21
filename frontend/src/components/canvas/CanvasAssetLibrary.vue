@@ -241,6 +241,7 @@ import { ref, computed, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { X, Trash2, Music2, Inbox, Loader2, History, FolderOpen, Upload, Play, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import { useAssetStore } from '@/stores/asset'
 import { getHistoryList } from '@/api/history'
+import client from '@/api/client'
 
 const props = defineProps({
   theme: { type: Object, required: true },
@@ -288,14 +289,15 @@ const displayItems = computed(() => {
       type: item.type,
       // 创建节点时用流式 URL（视频）或原图 URL（图片）
       url: item.result_url || '',
-      // 视频缩略图用后端接口，避免直接加载完整视频
+      // 视频缩略图：用异步加载的 blob URL（解决 JWT 鉴权问题，
+      // 浏览器原生 <img src> 无法携带 Authorization 头）
       thumbUrl:
         item.type === 'video'
-          ? `/api/history/video/${item.id}/thumbnail`
+          ? videoThumbnails[item.id] || ''
           : item.result_url || '',
       posterUrl:
         item.type === 'video'
-          ? `/api/history/video/${item.id}/thumbnail`
+          ? videoThumbnails[item.id] || ''
           : '',
       name: truncate(item.prompt || `${typeLabel(item.type)}-${item.id}`, 28),
       prompt: item.prompt || '',
@@ -382,12 +384,31 @@ async function loadHistory() {
     // client 拦截器已解包，resp 即后端 HistoryListResponse
     historyList.value = resp.items || []
     historyTotal.value = resp.total || 0
+    // 异步加载视频缩略图（通过 axios 携带 JWT）
+    historyList.value
+      .filter((item: any) => item.type === 'video')
+      .forEach((item: any) => {
+        loadVideoThumbnail(item.id)
+      })
     // 滚动回顶部
     if (gridRef.value) gridRef.value.scrollTop = 0
   } catch (err) {
     console.error('[asset-library] 加载历史失败:', err)
   } finally {
     loading.value = false
+  }
+}
+
+// 加载视频缩略图（通过 axios 携带 JWT，解决 <img src> 无法鉴权的问题）
+async function loadVideoThumbnail(id: string) {
+  if (videoThumbnails[id] || thumbnailFailed[id]) return
+  try {
+    const url = `/api/history/video/${id}/thumbnail`
+    const blobUrl = await fetchBlobAsUrl(url)
+    videoThumbnails[id] = blobUrl
+  } catch (err) {
+    console.warn('[asset-library] 视频缩略图加载失败 id=' + id, err)
+    thumbnailFailed[id] = true
   }
 }
 
@@ -468,6 +489,29 @@ const previewY = ref(0)
 const gridRef = ref<HTMLElement | null>(null)
 const videoPreviews = reactive<Record<string, string>>({}) // { [id]: gifUrl } 已加载的视频 GIF 预览
 const previewLoading = reactive<Record<string, boolean>>({}) // { [id]: boolean } GIF 加载状态
+const videoThumbnails = reactive<Record<string, string>>({}) // { [id]: blobUrl } 视频静态缩略图
+const thumbnailFailed = reactive<Record<string, boolean>>({}) // { [id]: boolean } 缩略图加载失败
+
+/**
+ * 通过 axios 下载二进制资源并生成 blob URL
+ * 解决 <img src="url"> 无法携带 JWT 的用户隔离问题
+ */
+async function fetchBlobAsUrl(url: string): Promise<string> {
+  const blob = await client.get(url, {
+    responseType: 'blob',
+    silent: true,
+  }) as unknown as Blob
+  return URL.createObjectURL(blob)
+}
+
+function clearVideoBlobUrls() {
+  Object.values(videoThumbnails).forEach(url => {
+    if (url && url.startsWith('blob:')) URL.revokeObjectURL(url)
+  })
+  Object.values(videoPreviews).forEach(url => {
+    if (url && url.startsWith('blob:')) URL.revokeObjectURL(url)
+  })
+}
 
 function onCardHover(item: any) {
   previewItem.value = item
@@ -482,18 +526,14 @@ function onCardHover(item: any) {
 }
 
 // 加载视频 GIF 预览（后端 ffmpeg 生成，悬停时可动）
+// 通过 axios 下载 blob URL，解决 <img src> 无法携带 JWT 的问题
 async function loadVideoPreview(id: string) {
   if (videoPreviews[id] || previewLoading[id]) return
   previewLoading[id] = true
   try {
     const url = `/api/history/video/${id}/preview`
-    await new Promise((resolve, reject) => {
-      const img = new Image()
-      img.onload = resolve
-      img.onerror = reject
-      img.src = url
-    })
-    videoPreviews[id] = url
+    const blobUrl = await fetchBlobAsUrl(url)
+    videoPreviews[id] = blobUrl
   } catch (err) {
     console.warn('[asset-library] GIF 预览加载失败 id=' + id, err)
   } finally {
@@ -538,11 +578,32 @@ onMounted(() => {
   assetStore.hydrate()
   loadHistory()
   window.addEventListener('resize', onResize)
+  // 监听用户登录/退出，切换素材库数据空间
+  window.addEventListener('agnes:user-login', handleUserSwitch as EventListener)
+  window.addEventListener('agnes:user-logout', handleUserLogout as EventListener)
 })
 
 onBeforeUnmount(() => {
+  clearVideoBlobUrls()
   window.removeEventListener('resize', onResize)
+  window.removeEventListener('agnes:user-login', handleUserSwitch as EventListener)
+  window.removeEventListener('agnes:user-logout', handleUserLogout as EventListener)
 })
+
+/** 登录/切换用户后，切换素材库数据空间 */
+async function handleUserSwitch(e: CustomEvent) {
+  clearVideoBlobUrls()
+  const userId: number | null = (e?.detail?.id as number) ?? null
+  await assetStore._switchUserStorage(userId)
+  loadHistory()
+}
+
+/** 退出登录：切换到匿名素材库空间 */
+async function handleUserLogout() {
+  clearVideoBlobUrls()
+  await assetStore._switchUserStorage(null)
+  loadHistory()
+}
 
 // ---------- 暴露刷新方法（供父组件在保存素材后调用） ----------
 defineExpose({

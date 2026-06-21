@@ -84,6 +84,9 @@ export const useUserStore = defineStore('user', () => {
       localStorage.setItem(TOKEN_STORAGE_KEY, data.access_token)
       // 获取用户信息
       await fetchMe()
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('agnes:user-login', { detail: { id: user.value?.id, username: user.value?.username } }))
+      }
       ElMessage.success(`欢迎回来，${user.value?.username}`)
       return user.value
     } finally {
@@ -102,6 +105,9 @@ export const useUserStore = defineStore('user', () => {
       token.value = data.access_token
       localStorage.setItem(TOKEN_STORAGE_KEY, data.access_token)
       await fetchMe()
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('agnes:user-login', { detail: { id: user.value?.id, username: user.value?.username } }))
+      }
       ElMessage.success(`注册成功，欢迎 ${user.value?.username}`)
       return user.value
     } finally {

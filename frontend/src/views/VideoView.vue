@@ -392,11 +392,11 @@ const taskElapsedSec = computed(() => {
 // 视频 URL：代理地址
 const videoUrl = computed(() => {
   if (!activeTask.value) return ''
-  const backendTaskId = activeTask.value.backendTaskId || activeTask.value.taskId
   const status = activeTask.value.status
-  if (backendTaskId && status === 'success') {
-    const proxyUrl = `/api/videos/${backendTaskId}/stream`
-    return proxyUrl
+  if (status === 'success') {
+    // 直接使用 Agnes CDN 的原始 URL，
+    // 不走后端代理，因为 <video src> 无法携带 JWT
+    return activeTask.value.resultUrl || (activeTask.value as any).url || ''
   }
   return ''
 })

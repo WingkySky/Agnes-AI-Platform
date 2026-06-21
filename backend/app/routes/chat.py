@@ -624,6 +624,7 @@ async def send_message(
                 chat_history,
                 session_id,
                 attachments=validated_attachments if validated_attachments else None,
+                user_id=current_user.id if current_user else None,
             ):
                 yield f"data: {chunk}\n\n"
 
