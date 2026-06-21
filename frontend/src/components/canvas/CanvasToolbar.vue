@@ -61,8 +61,8 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import {
-  Hand, Undo2, Redo2, Type, Image, Video, Music2, Settings2, Upload,
-  FolderOpen, Palette, Trash2, Eraser,
+  Hand, MousePointer2, Undo2, Redo2, Type, Image, Video, Music2, Settings2, Upload,
+  FolderOpen, Palette, Trash2, Eraser, Keyboard,
 } from 'lucide-vue-next'
 import CanvasAppearancePanel from './CanvasAppearancePanel.vue'
 import { useI18n } from '@/i18n'
@@ -78,6 +78,8 @@ const props = defineProps({
   themeMode: { type: String, default: 'dark' },
   backgroundMode: { type: String, default: 'dots' },
   showImageInfo: { type: Boolean, default: false },
+  // 当前激活的工具：hand（移动）/ select（选择框选）
+  activeTool: { type: String, default: 'hand' },
 })
 
 const emit = defineEmits([
@@ -92,6 +94,7 @@ const emit = defineEmits([
   'set-theme',
   'set-background',
   'toggle-image-info',
+  'show-shortcuts',
 ])
 
 // 工具栏容器引用，用于计算 tooltip 水平位置
@@ -103,9 +106,10 @@ const tipX = ref(0)
 
 // 按钮分组配置：组间会渲染分隔符
 const buttonGroups = computed<any[][]>(() => [
-  // 组1：移动/选择（无选中时高亮）
+  // 组1：移动/选择（互斥工具，根据 activeTool 高亮）
   [
-    { id: 'tool-hand', label: t('canvas.toolbar.toolHand'), icon: Hand, active: !props.hasSelection, emit: 'select-tool' },
+    { id: 'tool-hand', label: t('canvas.toolbar.toolHand'), icon: Hand, active: props.activeTool === 'hand', emit: 'select-tool', payload: 'hand' },
+    { id: 'tool-select', label: t('canvas.toolbar.toolSelect'), icon: MousePointer2, active: props.activeTool === 'select', emit: 'select-tool', payload: 'select' },
   ],
   // 组2：撤销/重做
   [
@@ -126,7 +130,11 @@ const buttonGroups = computed<any[][]>(() => [
     { id: 'tool-assets', label: t('canvas.toolbar.toolAssets'), icon: FolderOpen, emit: 'open-asset-library' },
     { id: 'tool-style', label: t('canvas.toolbar.toolStyle'), icon: Palette, active: props.showAppearancePanel, emit: 'toggle-appearance-panel' },
   ],
-  // 组5：删除选中（仅选中时显示，红色）+ 清空画布（红色）
+  // 组5：快捷键帮助（独立一组，方便用户查阅）
+  [
+    { id: 'tool-help', label: t('canvas.toolbar.toolHelp'), icon: Keyboard, emit: 'show-shortcuts' },
+  ],
+  // 组6：删除选中（仅选中时显示，红色）+ 清空画布（红色）
   [
     { id: 'tool-delete', label: t('canvas.toolbar.toolDelete'), icon: Trash2, danger: true, conditional: true, emit: 'delete-selected' },
     { id: 'tool-clear', label: t('canvas.toolbar.toolClear'), icon: Eraser, danger: true, emit: 'clear-canvas' },
@@ -159,6 +167,7 @@ const activeStyle = computed(() => ({
 const tip = computed(() => {
   const map: Record<string, string> = {
     'tool-hand': t('canvas.toolbar.toolHand'),
+    'tool-select': t('canvas.toolbar.toolSelect'),
     'tool-undo': t('canvas.toolbar.toolUndo'),
     'tool-redo': t('canvas.toolbar.toolRedo'),
     'tool-text': t('canvas.toolbar.toolText'),
@@ -169,6 +178,7 @@ const tip = computed(() => {
     'tool-upload': t('canvas.toolbar.toolUpload'),
     'tool-assets': t('canvas.toolbar.toolAssets'),
     'tool-style': t('canvas.toolbar.toolStyle'),
+    'tool-help': t('canvas.toolbar.toolHelp'),
     'tool-delete': t('canvas.toolbar.toolDelete'),
     'tool-clear': t('canvas.toolbar.toolClear'),
   }

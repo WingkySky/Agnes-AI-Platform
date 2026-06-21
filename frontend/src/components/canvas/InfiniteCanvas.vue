@@ -21,6 +21,8 @@ const props = defineProps({
   backgroundMode: { type: String, default: '' },
   // 主题 token 对象；不传则使用 store.canvasTheme
   theme: { type: Object, default: null },
+  // 是否允许左键拖动平移画布；选择工具模式下应设为 false，由外部处理框选
+  panEnabled: { type: Boolean, default: true },
 })
 
 // ---------- Emits ----------
@@ -144,8 +146,8 @@ function handlePointerDown(event: PointerEvent) {
     return
   }
 
-  // 左键点击背景：开始平移
-  if (event.button === 0 && isBackgroundClick) {
+  // 左键点击背景：开始平移（panEnabled 为 false 时跳过，交给外部处理框选）
+  if (event.button === 0 && isBackgroundClick && props.panEnabled) {
     event.preventDefault()
     ;(event.currentTarget as HTMLElement)?.setPointerCapture(event.pointerId)
     startPan(event)
@@ -215,9 +217,11 @@ function handleKeyUp(event: KeyboardEvent) {
 }
 
 // ---------- 光标样式 ----------
+// 光标样式：平移中=grabbing，按住 Space=grab，禁用平移（选择模式）=crosshair，默认=grab
 const cursorStyle = computed(() => {
   if (panState.isPanning) return 'grabbing'
   if (isSpacePressed.value) return 'grab'
+  if (!props.panEnabled) return 'crosshair'
   return 'grab'
 })
 

@@ -52,7 +52,7 @@
 import { computed } from 'vue'
 import {
   Info, Trash2, RefreshCw, FolderPlus, Download, MessageSquare,
-  Pencil, Image as ImageIcon, Minus, Plus, Upload, Video, Music2,
+  Image as ImageIcon, Minus, Plus, Upload, Video, Music2,
   Copy, FileText, Lock, LockOpen, Brush, Scissors, Grid2x2,
   ZoomIn, Sparkles, Camera, Maximize2,
 } from 'lucide-vue-next'
@@ -69,7 +69,7 @@ const props = defineProps({
 /* ---------- Emits 定义 ---------- */
 const emit = defineEmits([
   'info', 'delete', 'retry', 'save-asset', 'download', 'edit',
-  'edit-text', 'generate-image', 'font-size-down', 'font-size-up',
+  'generate-image', 'quick-generate', 'font-size-down', 'font-size-up',
   'upload-image', 'upload-video', 'upload-audio',
   'copy-prompt', 'describe', 'replace-image', 'toggle-ratio',
   'mask-edit', 'crop', 'split', 'upscale', 'super-resolution', 'angle', 'view-large',
@@ -145,8 +145,8 @@ const tools = computed(() => {
     })
   }
 
-  // 3. 有内容时：存素材、下载、编辑
-  if (hasContent.value) {
+  // 3. 有内容时：存素材、下载、编辑（文本节点跳过下载和编辑，文本靠双击编辑）
+  if (hasContent.value && !isText.value) {
     list.push({
       id: 'save-asset',
       title: t('canvas.hoverToolbar.saveAsset'),
@@ -166,20 +166,29 @@ const tools = computed(() => {
       onClick: () => emit('edit', props.panel),
     })
   }
+  // 文本节点有内容时：仅显示存素材
+  if (hasContent.value && isText.value) {
+    list.push({
+      id: 'save-asset',
+      title: t('canvas.hoverToolbar.saveAsset'),
+      icon: FolderPlus,
+      onClick: () => emit('save-asset', props.panel),
+    })
+  }
 
-  // 4. text 类型：编辑文字、生图、缩小字号、放大字号
+  // 4. text 类型：生图、生视频、缩小字号、放大字号（双击即可编辑，不再单独放编辑文字按钮）
   if (isText.value) {
     list.push({
-      id: 'edit-text',
-      title: t('canvas.hoverToolbar.editText'),
-      icon: Pencil,
-      onClick: () => emit('edit-text', props.panel),
-    })
-    list.push({
-      id: 'generate-image',
+      id: 'quick-generate-image',
       title: t('canvas.hoverToolbar.generateImage'),
       icon: ImageIcon,
-      onClick: () => emit('generate-image', props.panel),
+      onClick: () => emit('quick-generate', { panel: props.panel, mode: 'text2image' }),
+    })
+    list.push({
+      id: 'quick-generate-video',
+      title: t('canvas.hoverToolbar.generateVideo'),
+      icon: Video,
+      onClick: () => emit('quick-generate', { panel: props.panel, mode: 'text2video' }),
     })
     list.push({
       id: 'font-size-down',
@@ -225,8 +234,21 @@ const tools = computed(() => {
     })
   }
 
-  // 8. image 有图：复制提示词、反推、替换、锁比例、局部编辑、裁剪、拆分、放大、超分、角度、查看大图
+  // 8. image 有图：生图、生视频、复制提示词、反推、替换、锁比例、局部编辑、裁剪、拆分、放大、超分、角度、查看大图
   if (hasImage.value) {
+    // 快捷生成：图生图 + 图生视频
+    list.push({
+      id: 'quick-generate-image',
+      title: t('canvas.hoverToolbar.quickImage'),
+      icon: ImageIcon,
+      onClick: () => emit('quick-generate', { panel: props.panel, mode: 'image2image' }),
+    })
+    list.push({
+      id: 'quick-generate-video',
+      title: t('canvas.hoverToolbar.quickVideo'),
+      icon: Video,
+      onClick: () => emit('quick-generate', { panel: props.panel, mode: 'image2video' }),
+    })
     list.push({
       id: 'copy-prompt',
       title: t('canvas.hoverToolbar.copyPrompt'),

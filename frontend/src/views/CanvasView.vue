@@ -14,41 +14,43 @@
   <div class="canvas-view" :data-theme="store.themeMode">
     <!-- ============ 画布主体 ============ -->
     <main class="canvas-main">
-      <!-- 画布标题栏：浮动在画布左上角 -->
-      <div class="canvas-title-bar" :style="titleBarStyle">
-        <!-- 画布选择器（下拉切换） + 改名输入 -->
-        <div class="title-wrap">
-          <!-- 改名输入模式 -->
-          <input
-            v-if="editingTitle"
-            ref="titleInputRef"
-            v-model="titleInput"
-            class="title-input"
-            :style="titleInputStyle"
+      <!-- 画布标题栏：默认微缩态，hover 展开操作 -->
+      <div
+        class="canvas-title-bar"
+        :class="{ expanded: titleHovered || editingTitle }"
+        :style="titleBarStyle"
+        @mouseenter="titleHovered = true"
+        @mouseleave="titleHovered = false"
+      >
+        <!-- 微缩态：只显示画布名称首字图标 -->
+        <div v-if="!titleHovered && !editingTitle" class="title-mini" :style="{ background: store.canvasTheme.node.activeStroke }">
+          {{ (activeWorkspaceName || 'C').charAt(0) }}
+        </div>
+
+        <!-- 展开态：画布名称 + 操作按钮 -->
+        <template v-else>
+          <div class="title-wrap">
+            <!-- 改名输入模式 -->
+            <input
+              v-if="editingTitle"
+              ref="titleInputRef"
+              v-model="titleInput"
+              class="title-input"
+              :style="titleInputStyle"
             @keydown.enter="saveTitle"
             @keydown.escape="cancelTitle"
             @blur="saveTitle"
           />
-          <!-- 画布下拉选择器 -->
-          <el-dropdown v-else trigger="click" @command="onSwitchCanvas">
-            <span class="canvas-selector" :style="{ color: store.canvasTheme.node.text }">
-              {{ activeWorkspaceName }}
-              <ChevronDown :size="14" style="margin-left: 4px; opacity: 0.6;" />
-            </span>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item
-                  v-for="ws in store.workspaces"
-                  :key="ws.id"
-                  :command="ws.id"
-                  :class="{ 'is-active': ws.id === store.activeWorkspaceId }"
-                >
-                  {{ ws.name }}
-                </el-dropdown-item>
-                <el-dropdown-item v-if="store.workspaces.length === 0" disabled>{{ t('canvas.messages.noCanvasTip') }}</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
+          <!-- 画布名称显示（点击打开管理弹窗） -->
+          <span
+            v-else
+            class="canvas-selector"
+            :style="{ color: store.canvasTheme.node.text }"
+            :title="t('canvas.manager.title')"
+            @click="managerVisible = true"
+          >
+            {{ activeWorkspaceName }}
+          </span>
         </div>
 
         <!-- 画布管理按钮组 -->
@@ -56,24 +58,24 @@
           <button class="title-btn" :style="titleBtnStyle" :title="t('canvas.messages.rename')" @click="startEditTitle">
             <Pencil :size="15" />
           </button>
-          <button class="title-btn" :style="titleBtnStyle" :title="t('canvas.messages.newCanvasTip')" @click="newCanvas">
+          <button class="title-btn" :style="titleBtnStyle" :title="t('canvas.manager.newCanvas')" @click="newCanvas">
             <Plus :size="16" />
-          </button>
-          <button class="title-btn" :style="titleBtnStyle" :title="t('canvas.messages.deleteCanvasTip')" @click="deleteCanvas">
-            <Trash2 :size="16" />
-          </button>
-          <button class="title-btn" :style="titleBtnStyle" :title="t('canvas.messages.importJsonTip')" @click="importJson">
-            <Upload :size="16" />
           </button>
           <button class="title-btn" :style="titleBtnStyle" :title="t('canvas.messages.exportJsonTip')" @click="handleExportJson">
             <Download :size="16" />
           </button>
+          <!-- 管理按钮：打开完整管理弹窗（批量操作、模板库） -->
+          <button class="title-btn" :style="titleBtnStyle" :title="t('canvas.manager.title')" @click="managerVisible = true">
+            <LayoutGrid :size="16" />
+          </button>
         </div>
+        </template>
       </div>
 
       <!-- 无限画布（背景网格 + 视口变换 + 连线层 + 节点层） -->
       <InfiniteCanvas
         ref="canvasRef"
+        :pan-enabled="activeTool !== 'select'"
         @background-click="handleBackgroundClick"
         @pointerdown="handleCanvasPointerDown"
         @drop-asset="handleCanvasDropAsset"
@@ -129,6 +131,7 @@
         :theme-mode="store.themeMode"
         :background-mode="store.backgroundMode"
         :show-image-info="store.showImageInfo"
+        :active-tool="activeTool"
         @select-tool="handleSelectTool"
         @undo="store.undo()"
         @redo="store.redo()"
@@ -141,10 +144,12 @@
         @set-theme="(mode) => store.setThemeMode(mode)"
         @set-background="(mode) => store.setBackgroundMode(mode)"
         @toggle-image-info="(val) => handleToggleImageInfo(val)"
+        @show-shortcuts="handleShowShortcuts"
       />
 
       <!-- ============ 左下角缩放控件 ============ -->
       <CanvasZoomControls
+        ref="zoomControlsRef"
         class="zoom-controls"
         :theme="store.canvasTheme"
         :zoom="store.viewport.zoom"
@@ -152,7 +157,6 @@
         @toggle-minimap="minimapVisible = !minimapVisible"
         @reset-view="store.resetView()"
         @zoom-change="(z) => store.setZoom(z)"
-        @show-help="showHelp = true"
       />
 
       <!-- ============ 小地图（条件渲染） ============ -->
@@ -183,8 +187,8 @@
           @save-asset="handleHoverSaveAsset"
           @download="handleHoverDownload"
           @edit="handleHoverEdit"
-          @edit-text="handleHoverEditText"
           @generate-image="handleHoverGenerateImage"
+          @quick-generate="handleQuickGenerate"
           @font-size-down="handleHoverFontSizeDown"
           @font-size-up="handleHoverFontSizeUp"
           @upload-image="handleHoverUploadImage"
@@ -236,33 +240,63 @@
         @cancel="maskEditState.visible = false"
       />
 
+      <!-- ============ 画布管理弹窗（批量操作、模板库） ============ -->
+      <CanvasManagerPopover
+        v-model="managerVisible"
+        @new-canvas="newCanvas"
+        @import-json="importJson"
+        @save-as-template="openSaveTemplateDialog"
+        @use-template="handleUseTemplate"
+      />
+
+      <!-- ============ 保存为模板对话框 ============ -->
+      <el-dialog
+        v-model="saveTemplateVisible"
+        :title="t('canvas.templates.saveTitle')"
+        width="440px"
+        :append-to-body="true"
+      >
+        <el-form :model="saveTemplateForm" label-position="top">
+          <el-form-item :label="t('canvas.templates.nameLabel')">
+            <el-input
+              v-model="saveTemplateForm.name"
+              :placeholder="t('canvas.templates.namePlaceholder')"
+              maxlength="40"
+              show-word-limit
+            />
+          </el-form-item>
+          <el-form-item :label="t('canvas.templates.descLabel')">
+            <el-input
+              v-model="saveTemplateForm.description"
+              type="textarea"
+              :rows="3"
+              :placeholder="t('canvas.templates.descPlaceholder')"
+              maxlength="120"
+              show-word-limit
+            />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="saveTemplateVisible = false">{{ t('canvas.templates.cancel') }}</el-button>
+          <el-button type="primary" :loading="saveTemplateLoading" @click="handleSaveAsTemplate">
+            {{ t('canvas.templates.confirmSave') }}
+          </el-button>
+        </template>
+      </el-dialog>
+
       <!-- ============ 图片预览弹窗 ============ -->
       <div v-if="previewImage" class="preview-overlay" @click="previewImage = null">
         <img :src="previewImage" class="preview-img" @click.stop />
         <button class="preview-close" @click="previewImage = null">×</button>
       </div>
 
-      <!-- ============ 快捷键帮助弹窗 ============ -->
-      <div v-if="showHelp" class="help-overlay" @click="showHelp = false">
-        <div class="help-modal" :style="helpModalStyle" @click.stop>
-          <h3 class="help-title">{{ t('canvas.help.title') }}</h3>
-          <ul class="help-list">
-            <li><kbd>Space</kbd> {{ t('canvas.help.spacePan') }}</li>
-            <li><kbd>Ctrl</kbd> {{ t('canvas.help.ctrlWheel') }}</li>
-            <li><kbd>Ctrl</kbd> {{ t('canvas.help.ctrlDrag') }}</li>
-            <li><kbd>Ctrl</kbd> {{ t('canvas.help.ctrlClick') }}</li>
-            <li><kbd>Ctrl</kbd> + <kbd>Z</kbd> {{ t('canvas.help.ctrlZ') }}</li>
-            <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd> {{ t('canvas.help.ctrlShiftZ') }}</li>
-            <li><kbd>Ctrl</kbd> + <kbd>D</kbd> {{ t('canvas.help.ctrlD') }}</li>
-            <li><kbd>Ctrl</kbd> + <kbd>A</kbd> {{ t('canvas.help.ctrlA') }}</li>
-            <li><kbd>Ctrl</kbd> + <kbd>S</kbd> {{ t('canvas.help.ctrlS') }}</li>
-            <li><kbd>Ctrl</kbd> + <kbd>L</kbd> {{ t('canvas.help.ctrlL') }}</li>
-            <li><kbd>Delete</kbd> / <kbd>Backspace</kbd> {{ t('canvas.help.delete') }}</li>
-            <li><kbd>Escape</kbd> {{ t('canvas.help.escape') }}</li>
-          </ul>
-          <button class="help-close-btn" @click="showHelp = false">{{ t('canvas.help.close') }}</button>
-        </div>
-      </div>
+      <!-- ============ 快捷生成配置弹窗（从文本/图片节点快速触发生图/生视频） ============ -->
+      <GenerationQuickPanel
+        v-model="quickGenerateState.visible"
+        :source-panel="quickGenerateState.sourcePanel"
+        :mode="quickGenerateState.mode"
+        @generate="handleQuickGenerateConfirm"
+      />
 
       <!-- ============ 隐藏的文件输入（用于上传素材 / 导入 JSON） ============ -->
       <input
@@ -288,7 +322,7 @@
 
 import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Trash2, Upload, Download, Pencil, ChevronDown } from 'lucide-vue-next'
+import { Download, Pencil, Plus, LayoutGrid } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
 import { useCanvasStore } from '@/stores/canvas'
 import { useTaskQueueStore } from '@/stores/taskQueue'
@@ -302,9 +336,20 @@ import CanvasMinimap from '@/components/canvas/CanvasMinimap.vue'
 import CanvasNodeHoverToolbar from '@/components/canvas/CanvasNodeHoverToolbar.vue'
 import CanvasContextMenu from '@/components/canvas/CanvasContextMenu.vue'
 import CanvasAssetLibrary from '@/components/canvas/CanvasAssetLibrary.vue'
+import GenerationQuickPanel from '@/components/canvas/GenerationQuickPanel.vue'
 import MaskEditDialog from '@/components/canvas/MaskEditDialog.vue'
+// 画布模板库组件
+import CanvasManagerPopover from '@/components/canvas/CanvasManagerPopover.vue'
 // 画布积分预估与校验（生图/生视频/局部编辑前预检积分）
 import { checkCreditsBeforeGenerate, showCostConsumedMessage } from '@/lib/canvas-credits'
+// 画布模板管理（保存/加载/创建画布）
+import {
+  type CanvasTemplate,
+  saveAsTemplate,
+  createWorkspaceFromTemplate,
+} from '@/lib/canvas-templates'
+// 画布生成：上游节点查找（用于配置节点 prompt 为空时检查上游文本）
+import { getUpstreamNodes } from '@/lib/canvas-generation'
 
 const { t } = useI18n()
 
@@ -342,25 +387,6 @@ const titleBtnStyle = computed(() => ({
 function newCanvas() {
   store.createWorkspace(`${t('canvas.canvas')} ${store.workspaces.length + 1}`)
   ElMessage.success(t('canvas.messages.canvasCreated'))
-}
-
-function onSwitchCanvas(id: string) {
-  if (id !== store.activeWorkspaceId) {
-    store.switchWorkspace(id)
-  }
-}
-
-function deleteCanvas() {
-  if (!store.activeWorkspaceId) {
-    ElMessage.warning(t('canvas.messages.noCanvas'))
-    return
-  }
-  ElMessageBox.confirm(t('canvas.messages.confirmDeleteCanvas'), { type: 'warning' })
-    .then(() => {
-      store.deleteWorkspace(store.activeWorkspaceId!)
-      ElMessage.success(t('canvas.messages.canvasDeleted'))
-    })
-    .catch(() => {})
 }
 
 function importJson() {
@@ -410,7 +436,12 @@ function handleBackgroundClick() {
   showAppearancePanel.value = false
 }
 
-// ==================== 框选（Ctrl/Cmd + 拖动背景） ====================
+// ==================== 工具模式（hand=移动，select=选择框选） ====================
+
+// 当前激活的工具：hand（默认，拖动平移画布）/ select（拖动框选节点）
+const activeTool = ref<'hand' | 'select'>('hand')
+
+// ==================== 框选（选择模式拖动 / Ctrl/Cmd + 拖动背景） ====================
 
 const selectionBox = reactive({
   active: false,
@@ -439,10 +470,14 @@ const selectionBoxStyle = computed(() => {
   }
 })
 
-// 画布指针按下：检测 Ctrl/Cmd + 背景点击，启动框选
+// 画布指针按下：
+// - 选择模式（activeTool === 'select'）：直接拖动框选节点
+// - 移动模式（hand）：Ctrl/Cmd + 拖动背景才框选，否则交给 InfiniteCanvas 平移
 function handleCanvasPointerDown(event: PointerEvent) {
   if (event.button !== 0) return
-  if (!(event.ctrlKey || event.metaKey)) return
+  // 选择模式直接框选；移动模式需要 Ctrl/Cmd 才框选
+  const isSelectMode = activeTool.value === 'select'
+  if (!isSelectMode && !(event.ctrlKey || event.metaKey)) return
   // 检查是否点击在背景上（非节点、非连线）
   const target = event.target instanceof Element ? event.target : null
   if (target?.closest?.('[data-node-id],[data-connection-id]')) return
@@ -452,6 +487,12 @@ function handleCanvasPointerDown(event: PointerEvent) {
   selectionBox.startScreenY = event.clientY
   selectionBox.endScreenX = event.clientX
   selectionBox.endScreenY = event.clientY
+
+  // 选择模式下阻止事件冒泡，避免 InfiniteCanvas 同时平移画布
+  if (isSelectMode) {
+    event.stopPropagation()
+    event.preventDefault()
+  }
 
   window.addEventListener('pointermove', handleSelectionMove)
   window.addEventListener('pointerup', handleSelectionUp)
@@ -674,6 +715,64 @@ async function handleNodeGenerateImage(panel: typeof store.panels[number]) {
   await generateImageFromPrompt(panel, prompt)
 }
 
+// ==================== 快捷生成弹窗（从文本/图片节点快速触发生图/生视频） ====================
+
+// 弹窗状态：visible + 源节点 + 模式（text2image/text2video/image2image/image2video）
+const quickGenerateState = reactive({
+  visible: false,
+  sourcePanel: null as any,
+  mode: 'text2image' as 'text2image' | 'text2video' | 'image2image' | 'image2video',
+})
+
+// 打开快捷生成弹窗（由文本/图片节点的生图/生视频按钮触发）
+function handleQuickGenerate({ panel, mode }: { panel: any; mode: string }) {
+  // 校验源内容非空
+  if (panel.type === 'text') {
+    const text = (panel.content?.content || '').trim()
+    if (!text) {
+      ElMessage.warning(t('canvas.messages.textNodeEmpty'))
+      return
+    }
+  } else if (panel.type === 'image') {
+    const img = panel.content?.content || ''
+    if (!img) {
+      ElMessage.warning(t('canvas.messages.imageNodeEmpty'))
+      return
+    }
+  }
+  quickGenerateState.sourcePanel = panel
+  quickGenerateState.mode = mode as any
+  quickGenerateState.visible = true
+}
+
+// 弹窗确认生成：根据模式拼装 prompt 和参考图，调用图片/视频生成 API
+async function handleQuickGenerateConfirm(payload: any) {
+  const { mode, prompt: auxPrompt, model, size, aspect_ratio, seconds } = payload
+  const sourcePanel = quickGenerateState.sourcePanel
+  if (!sourcePanel) return
+
+  // 拼装最终 prompt 和参考图
+  let finalPrompt = ''
+  let referenceImages: string[] = []
+
+  if (mode.startsWith('text')) {
+    // 文本源：主提示词 = 文本内容 + 辅助提示词（可选）
+    const textContent = (sourcePanel.content?.content || '').trim()
+    finalPrompt = auxPrompt.trim() ? `${textContent}\n\n${auxPrompt.trim()}` : textContent
+  } else {
+    // 图片源：参考图 = 图片内容，prompt = 辅助提示词
+    referenceImages = [sourcePanel.content?.content || '']
+    finalPrompt = auxPrompt.trim()
+  }
+
+  // 根据模式调用对应的生成函数
+  if (mode.includes('video')) {
+    await generateVideoFromSource(sourcePanel, finalPrompt, model, aspect_ratio, seconds, referenceImages)
+  } else {
+    await generateImageFromSource(sourcePanel, finalPrompt, model, size, referenceImages)
+  }
+}
+
 // 重试生成：查找上游 config 节点重新生成，或用节点自身 prompt 重新生成
 async function handleNodeRetry(panel: typeof store.panels[number]) {
   await retryGeneration(panel)
@@ -766,6 +865,208 @@ async function generateImageFromPrompt(sourcePanel: typeof store.panels[number],
   }
 }
 
+// 快捷生成图片：支持自定义模型/尺寸/参考图（从快捷生成弹窗触发）
+// - sourcePanel: 源节点（文本/图片）
+// - prompt: 最终提示词（已合并辅助提示词）
+// - model/size: 自定义参数
+// - referenceImages: 参考图 URL 列表（图生图模式）
+async function generateImageFromSource(
+  sourcePanel: typeof store.panels[number],
+  prompt: string,
+  model: string,
+  size: string,
+  referenceImages: string[] = [],
+) {
+  const mode = referenceImages.length > 0 ? 'image2image' : 'text2image'
+  // 积分预检
+  const canGenerate = await checkCreditsBeforeGenerate({ type: 'image', mode, size })
+  if (!canGenerate) return
+
+  // 在源节点右侧创建 image 节点（loading 状态）
+  const newPanelId = store.addPanel({
+    type: 'image',
+    x: sourcePanel.x + sourcePanel.width + 60,
+    y: sourcePanel.y,
+    width: 340,
+    height: 240,
+    content: { content: '', status: 'loading', prompt },
+  })
+  store.addConnection({ source_panel_id: sourcePanel.id, target_panel_id: newPanelId })
+  store.pushSnapshot()
+
+  try {
+    // 处理参考图：blob URL 转 base64，data URI 直接用，公网 URL 直接用
+    let base64Images: string[] = []
+    let imageUrls: string[] = []
+    if (referenceImages.length > 0) {
+      const { toBase64IfNeeded } = await import('@/lib/canvas-generation')
+      for (const img of referenceImages) {
+        const processed = await toBase64IfNeeded(img)
+        if (processed.startsWith('data:')) {
+          base64Images.push(processed)
+        } else if (processed.startsWith('http')) {
+          imageUrls.push(processed)
+        } else {
+          base64Images.push(processed)
+        }
+      }
+    }
+
+    // 调用图片生成 API
+    const { createImageTask, getImageTaskStatus } = await import('@/api/images')
+    const resp = await createImageTask({
+      prompt,
+      model: model || useModelsStore().defaultImageModel,
+      size,
+      response_format: 'url',
+      mode: mode as 'text2image' | 'image2image',
+      base64_images: base64Images.length > 0 ? base64Images : null,
+      image_urls: imageUrls.length > 0 ? imageUrls : null,
+    })
+    const taskId = resp.task_id
+
+    // 注册到任务队列
+    taskQueue.registerCanvasTask({
+      taskId,
+      type: 'image',
+      prompt,
+      backendTaskId: taskId,
+      panelId: newPanelId,
+    })
+
+    // 轮询任务状态（间隔 2 秒，最多 150 次 ≈ 5 分钟）
+    const maxAttempts = 150
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise((r) => setTimeout(r, 2000))
+      const status = await getImageTaskStatus(taskId)
+      const isSuccess = ['completed', 'succeeded', 'success', 'done'].includes(status.status)
+      const isFailed = ['failed', 'error'].includes(status.status)
+
+      if (isSuccess) {
+        const imageUrl = status.result_url || (status as any).image_url || status.url || (status as any).data?.[0]?.url
+        store.updatePanel(newPanelId, { content: { content: imageUrl, status: 'success' } })
+        store.pushSnapshot()
+        taskQueue.updateCanvasTask(taskId, { status: 'success', resultUrl: imageUrl, progress: 100 })
+        showCostConsumedMessage({ type: 'image', mode, size }, t('canvas.messages.imageGenerationDone'))
+        return
+      }
+      if (isFailed) {
+        const errMsg = status.message || (status as any).error || t('canvas.messages.generateFailed')
+        store.updatePanel(newPanelId, { content: { status: 'error', errorDetails: errMsg } })
+        taskQueue.updateCanvasTask(taskId, { status: 'failed' })
+        ElMessage.error(`${t('canvas.messages.imageGenerationFailed')}: ${errMsg}`)
+        return
+      }
+      const progress = typeof status.progress === 'number' ? status.progress : undefined
+      taskQueue.updateCanvasTask(taskId, { status: 'processing', progress })
+    }
+    // 超时
+    store.updatePanel(newPanelId, { content: { status: 'error', errorDetails: t('canvas.messages.generateTimeout') } })
+    taskQueue.updateCanvasTask(taskId, { status: 'failed' })
+    ElMessage.warning(t('canvas.messages.generateTimeout'))
+  } catch (err) {
+    console.error('[canvas] quick generate image error:', err)
+    store.updatePanel(newPanelId, { content: { status: 'error', errorDetails: (err as Error).message } })
+    ElMessage.error(`${t('canvas.messages.generateFailed')}: ${(err as Error).message}`)
+  }
+}
+
+// 快捷生成视频：支持文生视频/图生视频（从快捷生成弹窗触发）
+// - sourcePanel: 源节点（文本/图片）
+// - prompt: 最终提示词
+// - model/aspect_ratio/seconds: 视频参数
+// - referenceImages: 参考图（图生视频模式，取第一张）
+async function generateVideoFromSource(
+  sourcePanel: typeof store.panels[number],
+  prompt: string,
+  model: string,
+  aspectRatio: string,
+  seconds: number,
+  referenceImages: string[] = [],
+) {
+  const mode = referenceImages.length > 0 ? 'image2video' : 'text2video'
+  // 积分预检
+  const canGenerate = await checkCreditsBeforeGenerate({ type: 'video', mode, seconds })
+  if (!canGenerate) return
+
+  // 在源节点右侧创建 video 节点（loading 状态）
+  const newPanelId = store.addPanel({
+    type: 'video',
+    x: sourcePanel.x + sourcePanel.width + 60,
+    y: sourcePanel.y,
+    width: 360,
+    height: 240,
+    content: { content: '', status: 'loading', prompt },
+  })
+  store.addConnection({ source_panel_id: sourcePanel.id, target_panel_id: newPanelId })
+  store.pushSnapshot()
+
+  try {
+    // 处理参考图（图生视频）：blob URL 转 base64
+    let imageBase64: string | null = null
+    if (referenceImages.length > 0) {
+      const { toBase64IfNeeded } = await import('@/lib/canvas-generation')
+      imageBase64 = await toBase64IfNeeded(referenceImages[0])
+    }
+
+    // 调用视频生成 API
+    const { createVideoTask, getVideoStatus } = await import('@/api/videos')
+    const resp = await createVideoTask({
+      prompt,
+      model: model || useModelsStore().defaultVideoModel,
+      aspect_ratio: aspectRatio,
+      seconds,
+      mode: mode as 'text2video' | 'image2video',
+      image: imageBase64,
+    })
+    const taskId = resp.task_id
+
+    // 注册到任务队列
+    taskQueue.registerCanvasTask({
+      taskId,
+      type: 'video',
+      prompt,
+      backendTaskId: taskId,
+      panelId: newPanelId,
+    })
+
+    // 轮询任务状态（间隔 3 秒，最多 100 次 ≈ 5 分钟）
+    const maxAttempts = 100
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise((r) => setTimeout(r, 3000))
+      const status = await getVideoStatus(taskId)
+      const isSuccess = ['completed', 'succeeded', 'success', 'done'].includes(status.status)
+      const isFailed = ['failed', 'error'].includes(status.status)
+
+      if (isSuccess) {
+        const videoUrl = status.result_url || (status as any).video_url || status.url || (status as any).data?.[0]?.url
+        store.updatePanel(newPanelId, { content: { content: videoUrl, status: 'success' } })
+        store.pushSnapshot()
+        taskQueue.updateCanvasTask(taskId, { status: 'success', resultUrl: videoUrl, progress: 100 })
+        showCostConsumedMessage({ type: 'video', mode, seconds }, t('canvas.messages.videoGenerationDone'))
+        return
+      }
+      if (isFailed) {
+        const errMsg = status.message || (status as any).error || t('canvas.messages.generateFailed')
+        store.updatePanel(newPanelId, { content: { status: 'error', errorDetails: errMsg } })
+        taskQueue.updateCanvasTask(taskId, { status: 'failed' })
+        ElMessage.error(`${t('canvas.messages.videoGenerationFailed')}: ${errMsg}`)
+        return
+      }
+      const progress = typeof status.progress === 'number' ? status.progress : undefined
+      taskQueue.updateCanvasTask(taskId, { status: 'processing', progress })
+    }
+    // 超时
+    store.updatePanel(newPanelId, { content: { status: 'error', errorDetails: t('canvas.messages.generateTimeout') } })
+    taskQueue.updateCanvasTask(taskId, { status: 'failed' })
+    ElMessage.warning(t('canvas.messages.generateTimeout'))
+  } catch (err) {
+    console.error('[canvas] quick generate video error:', err)
+    store.updatePanel(newPanelId, { content: { status: 'error', errorDetails: (err as Error).message } })
+    ElMessage.error(`${t('canvas.messages.generateFailed')}: ${(err as Error).message}`)
+  }
+}
+
 // 通用：重试生成
 // - 查找上游 config 节点，重新执行合并生成（创建新的 loading 结果节点）
 // - 没有上游 config 节点时，用节点自身 prompt 重新生成（直接更新当前节点）
@@ -842,11 +1143,18 @@ async function handleConfigGenerate(panel: typeof store.panels[number]) {
   const mode = (panel.content?.mode || 'text2image') as string
   const isVideo = mode.includes('video')
 
-  // 校验提示词
+  // 校验提示词：prompt 为空时检查上游文本节点（配置节点 prompt 为可选补充）
   const prompt = (panel.content?.prompt || panel.content?.composerContent || '') as string
   if (!prompt.trim()) {
-    ElMessage.warning(t('canvas.messages.promptEmpty'))
-    return
+    // prompt 为空时，检查上游是否有文本节点（buildSimpleContext 会自动拼接上游文本）
+    const upstreamNodes = getUpstreamNodes(panel.id, store.panels, store.connections)
+    const hasUpstreamText = upstreamNodes.some(
+      (p) => p.type === 'text' && ((p.content?.content as string) || '').trim(),
+    )
+    if (!hasUpstreamText) {
+      ElMessage.warning(t('canvas.messages.promptOrUpstreamEmpty'))
+      return
+    }
   }
 
   // 积分预检：根据模式构造预估参数
@@ -909,6 +1217,77 @@ const maskEditState = reactive({
   panelId: null as string | null,
   imageUrl: '' as string,
 })
+
+// ============ 画布模板功能 ============
+// 画布管理弹窗显示状态（批量操作、模板库）
+const managerVisible = ref(false)
+// 标题栏 hover 状态（控制微缩态/展开态切换）
+const titleHovered = ref(false)
+// 保存为模板对话框状态
+const saveTemplateVisible = ref(false)
+const saveTemplateLoading = ref(false)
+const saveTemplateForm = reactive({
+  name: '',
+  description: '',
+})
+
+/** 打开"保存为模板"对话框，预填当前画布名称 */
+function openSaveTemplateDialog() {
+  if (!store.activeWorkspaceId || store.panels.length === 0) {
+    ElMessage.warning(t('canvas.templates.emptyCanvas'))
+    return
+  }
+  saveTemplateForm.name = store.activeWorkspace?.name || ''
+  saveTemplateForm.description = ''
+  saveTemplateVisible.value = true
+}
+
+/** 把当前画布保存为用户自定义模板 */
+async function handleSaveAsTemplate() {
+  if (!saveTemplateForm.name.trim()) {
+    ElMessage.warning(t('canvas.templates.nameRequired'))
+    return
+  }
+  saveTemplateLoading.value = true
+  try {
+    // 深拷贝当前画布数据（剥离 Proxy）
+    const workspaceData = {
+      panels: JSON.parse(JSON.stringify(store.panels)),
+      connections: JSON.parse(JSON.stringify(store.connections)),
+      viewport: { ...store.viewport },
+    }
+    await saveAsTemplate(saveTemplateForm.name, saveTemplateForm.description, workspaceData)
+    ElMessage.success(t('canvas.templates.saved'))
+    saveTemplateVisible.value = false
+  } catch (err) {
+    console.error('[canvas] save as template failed:', err)
+    ElMessage.error(`${t('canvas.templates.saveFailed')}: ${(err as Error).message}`)
+  } finally {
+    saveTemplateLoading.value = false
+  }
+}
+
+/** 从模板创建新画布 */
+function handleUseTemplate(template: CanvasTemplate) {
+  try {
+    // 从模板数据构建新画布的 panels/connections/viewport（重新生成 id）
+    const { panels, connections, viewport } = createWorkspaceFromTemplate(template)
+    // 创建新画布
+    const wsName = `${template.name} ${store.workspaces.length + 1}`
+    store.createWorkspace(wsName)
+    // 把模板数据填入新画布
+    store.panels.splice(0, store.panels.length, ...panels)
+    store.connections.splice(0, store.connections.length, ...connections)
+    store.viewport.x = viewport.x
+    store.viewport.y = viewport.y
+    store.viewport.zoom = viewport.zoom
+    store.pushSnapshot()
+    ElMessage.success(t('canvas.messages.templateApplied'))
+  } catch (err) {
+    console.error('[canvas] apply template failed:', err)
+    ElMessage.error(`${t('canvas.messages.templateApplyFailed')}: ${(err as Error).message}`)
+  }
+}
 
 const hoveredPanel = computed(() => {
   if (!hoveredPanelId.value) return null
@@ -1555,8 +1934,9 @@ const showAppearancePanel = ref(false)
 const showAssetLibrary = ref(false)
 
 // 选择/移动工具
-function handleSelectTool() {
-  // 无需特殊处理，默认即为选择模式
+// 工具栏切换工具：hand（移动）/ select（选择框选）
+function handleSelectTool(tool: 'hand' | 'select') {
+  activeTool.value = tool
 }
 
 // 工具栏添加节点
@@ -1694,17 +2074,17 @@ function handleToggleImageInfo(val: boolean) {
 // ==================== 缩放控件 + 小地图 ====================
 
 const minimapVisible = ref(false)
-const showHelp = ref(false)
+// 左下角缩放控件引用（用于外部按钮触发快捷键弹窗）
+const zoomControlsRef = ref<InstanceType<typeof CanvasZoomControls> | null>(null)
 const canvasSize = computed(() => ({
   width: window.innerWidth,
   height: window.innerHeight,
 }))
 
-const helpModalStyle = computed(() => ({
-  background: store.canvasTheme.toolbar.panel,
-  borderColor: store.canvasTheme.toolbar.border,
-  color: store.canvasTheme.node.text,
-}))
+// 打开快捷键帮助弹窗（由底部工具栏的快捷键按钮触发）
+function handleShowShortcuts() {
+  zoomControlsRef.value?.openShortcuts()
+}
 
 // 小地图定位：将视口中心移动到指定世界坐标
 function handleMinimapLocate(worldX: number, worldY: number) {
@@ -1845,7 +2225,6 @@ function handleKeyDown(event: KeyboardEvent) {
     if (store.connecting) store.cancelConnecting()
     else if (contextMenu.open) contextMenu.open = false
     else if (showAppearancePanel.value) showAppearancePanel.value = false
-    else if (showHelp.value) showHelp.value = false
     else store.clearSelection()
     return
   }
@@ -1987,6 +2366,7 @@ async function handleUserLogout() {
 }
 
 /* ==================== 画布标题栏（浮动在画布左上角） ==================== */
+/* 默认微缩态：只显示首字图标；hover 展开显示名称和按钮 */
 .canvas-title-bar {
   position: absolute;
   top: 16px;
@@ -1995,11 +2375,33 @@ async function handleUserLogout() {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 8px 6px 14px;
+  padding: 4px;
   border: 1px solid;
-  border-radius: 10px;
+  border-radius: 999px;
   backdrop-filter: blur(12px);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  transition: padding 0.2s ease, border-radius 0.2s ease;
+  max-width: 60px;
+  overflow: hidden;
+}
+.canvas-title-bar.expanded {
+  padding: 6px 8px 6px 14px;
+  border-radius: 10px;
+  max-width: 480px;
+}
+
+/* 微缩态首字图标 */
+.title-mini {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  flex-shrink: 0;
 }
 
 /* ---- 画布标题 ---- */
@@ -2149,63 +2551,6 @@ async function handleUserLogout() {
 
 .preview-close:hover {
   background: rgba(255, 255, 255, 0.25);
-}
-
-/* ==================== 快捷键帮助弹窗 ==================== */
-.help-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  background: var(--agnes-overlay-bg);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.help-modal {
-  border: 1px solid;
-  border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-  padding: 24px;
-  max-width: 480px;
-  width: 90%;
-}
-
-.help-title {
-  margin: 0 0 16px 0;
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.help-list {
-  margin: 0 0 16px 0;
-  padding-left: 20px;
-  font-size: 14px;
-  line-height: 2;
-}
-
-.help-list kbd {
-  display: inline-block;
-  padding: 2px 6px;
-  border: 1px solid var(--agnes-border);
-  border-radius: 4px;
-  background: var(--agnes-bg-hover);
-  font-size: 12px;
-  font-family: monospace;
-}
-
-.help-close-btn {
-  padding: 6px 16px;
-  border: 1px solid var(--agnes-border);
-  border-radius: 8px;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  font-size: 14px;
-}
-
-.help-close-btn:hover {
-  background: var(--agnes-bg-hover);
 }
 
 /* ==================== 隐藏文件输入 ==================== */

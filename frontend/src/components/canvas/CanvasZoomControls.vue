@@ -1,6 +1,7 @@
 <!--
   CanvasZoomControls.vue
-  画布左下角缩放控件：包含小地图开关、重置视图、缩放滑块、缩放百分比显示、快捷键帮助
+  画布左下角缩放控件：包含小地图开关、重置视图、缩放滑块、缩放百分比显示
+  快捷键帮助弹窗也由本组件提供（通过 defineExpose openShortcuts 暴露给父组件）
   1:1 复刻参考项目 infinite-canvas 的 canvas-zoom-controls 设计
 -->
 <template>
@@ -50,23 +51,12 @@
       <span class="zoom-value" :style="{ color: theme.node.muted }">
         {{ zoomPercent }}%
       </span>
-
-      <!-- 快捷键帮助 -->
-      <button
-        class="dock-btn"
-        :style="shortcutsOpen ? activeStyle : { color: theme.toolbar.item }"
-        title="快捷键"
-        aria-label="快捷键"
-        @click="openShortcuts"
-      >
-        <HelpCircle class="icon" />
-      </button>
     </div>
 
-    <!-- 快捷键帮助 Modal -->
+    <!-- 快捷键帮助 Modal（由底部工具栏的快捷键按钮通过 ref 触发） -->
     <el-dialog
       v-model="shortcutsOpen"
-      title="快捷键"
+      :title="t('canvas.help.title')"
       width="420px"
       align-center
       append-to-body
@@ -83,7 +73,10 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { Compass, Focus, HelpCircle } from 'lucide-vue-next'
+import { Compass, Focus } from 'lucide-vue-next'
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
 
 const props = defineProps({
   theme: { type: Object, required: true },
@@ -91,7 +84,7 @@ const props = defineProps({
   minimapVisible: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['toggle-minimap', 'reset-view', 'zoom-change', 'show-help'])
+const emit = defineEmits(['toggle-minimap', 'reset-view', 'zoom-change'])
 
 // 快捷键帮助弹窗开关
 const shortcutsOpen = ref(false)
@@ -133,25 +126,30 @@ function onSliderInput(event: Event) {
   emit('zoom-change', Number((event.target as HTMLInputElement)?.value) / 100)
 }
 
-// 打开快捷键弹窗并 emit show-help
+// 打开快捷键弹窗（同时供父组件通过 ref 调用）
 function openShortcuts() {
   shortcutsOpen.value = true
-  emit('show-help')
 }
 
-// 画布快捷键列表
-const shortcuts = [
-  { label: 'Space + 拖拽', value: '平移画布' },
-  { label: '滚轮', value: '缩放画布' },
-  { label: 'Delete', value: '删除选中' },
-  { label: 'Escape', value: '取消选中' },
-  { label: 'Ctrl+Z', value: '撤销' },
-  { label: 'Ctrl+Shift+Z', value: '重做' },
-  { label: 'Ctrl+D', value: '复制选中' },
-  { label: 'Ctrl+A', value: '全选' },
-  { label: 'Ctrl+S', value: '保存' },
-  { label: 'Ctrl+L', value: '锁定/解锁' },
-]
+// 画布快捷键列表（label 为按键名硬编，value 为功能说明走 i18n）
+const shortcuts = computed(() => [
+  { label: 'Space + 拖动 / 中键', value: t('canvas.help.spacePan') },
+  { label: '滚轮', value: t('canvas.help.ctrlWheel') },
+  { label: 'Ctrl + 拖动背景', value: t('canvas.help.ctrlDrag') },
+  { label: 'Ctrl + 点击节点', value: t('canvas.help.ctrlClick') },
+  { label: t('canvas.toolbar.toolSelect'), value: t('canvas.help.selectTool') },
+  { label: 'Ctrl + Z', value: t('canvas.help.ctrlZ') },
+  { label: 'Ctrl + Shift + Z', value: t('canvas.help.ctrlShiftZ') },
+  { label: 'Ctrl + D', value: t('canvas.help.ctrlD') },
+  { label: 'Ctrl + A', value: t('canvas.help.ctrlA') },
+  { label: 'Ctrl + S', value: t('canvas.help.ctrlS') },
+  { label: 'Ctrl + L', value: t('canvas.help.ctrlL') },
+  { label: 'Delete / Backspace', value: t('canvas.help.delete') },
+  { label: 'Escape', value: t('canvas.help.escape') },
+])
+
+// 暴露给父组件：外部按钮也可触发快捷键弹窗
+defineExpose({ openShortcuts })
 </script>
 
 <style scoped>

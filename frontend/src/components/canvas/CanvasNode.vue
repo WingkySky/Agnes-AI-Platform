@@ -35,12 +35,12 @@
           :style="{ color: theme.node.activeStroke }"
         >
           <div class="loading-spinner" :style="loadingSpinnerStyle"></div>
-          <span class="loading-text">生成中</span>
+          <span class="loading-text">{{ t('canvas.node.generating') }}</span>
         </div>
 
         <!-- 错误状态：红色错误文字 + 重试按钮 -->
         <div v-else-if="metadata.status === 'error'" class="node-error">
-          <div class="error-text">{{ metadata.errorDetails || '生成失败' }}</div>
+          <div class="error-text">{{ metadata.errorDetails || t('canvas.node.generateFailed') }}</div>
           <button
             type="button"
             class="retry-btn"
@@ -49,26 +49,12 @@
             @mousedown.stop
           >
             <RefreshCw :size="14" />
-            重试
+            {{ t('canvas.node.retry') }}
           </button>
         </div>
 
-        <!-- 文本节点：可编辑文本区 + 右上角"生图"按钮 -->
+        <!-- 文本节点：可编辑文本区（生图/生视频入口由悬停工具栏提供） -->
         <div v-else-if="panel.type === 'text'" class="text-content">
-          <!-- 生图按钮（Image 图标 + 文字） -->
-          <button
-            type="button"
-            class="generate-btn"
-            :style="generateBtnStyle"
-            @click.stop="handleGenerateImage"
-            @mousedown.stop
-            @pointerdown.stop
-            title="用文本生图"
-            aria-label="用文本生图"
-          >
-            <ImageIcon :size="14" />
-            生图
-          </button>
           <!-- 编辑态：textarea -->
           <textarea
             v-if="isEditingContent"
@@ -76,7 +62,7 @@
             class="text-textarea"
             :style="textStyle"
             :value="metadata.content || ''"
-            placeholder="双击编辑文字"
+            :placeholder="t('canvas.node.doubleClickToEdit')"
             @input="handleContentInput"
             @blur="stopEditing"
             @keydown.escape="stopEditing"
@@ -87,7 +73,7 @@
           <!-- 展示态：div -->
           <div v-else class="text-display" :style="textStyle" @wheel.stop>
             <span v-if="metadata.content">{{ metadata.content }}</span>
-            <span v-else :style="{ color: theme.node.placeholder }">双击编辑文字</span>
+            <span v-else :style="{ color: theme.node.placeholder }">{{ t('canvas.node.doubleClickToEdit') }}</span>
           </div>
         </div>
 
@@ -102,7 +88,7 @@
             <div class="empty-icon" :style="{ background: theme.toolbar.activeBg }">
               <ImageIcon :size="24" />
             </div>
-            <span class="empty-text">空图片节点</span>
+            <span class="empty-text">{{ t('canvas.node.emptyImage') }}</span>
           </div>
           <!-- 有图：显示图片（object-contain） -->
           <img
@@ -125,7 +111,7 @@
             :style="{ color: theme.node.placeholder }"
           >
             <Video :size="28" />
-            <span class="empty-text empty-text-sm">空视频节点</span>
+            <span class="empty-text empty-text-sm">{{ t('canvas.node.emptyVideo') }}</span>
           </div>
           <!-- 有视频：video 播放器 -->
           <video
@@ -146,7 +132,7 @@
             :style="{ color: theme.node.placeholder }"
           >
             <Music2 :size="28" />
-            <span class="empty-text empty-text-sm">空音频节点</span>
+            <span class="empty-text empty-text-sm">{{ t('canvas.node.emptyAudio') }}</span>
           </div>
           <!-- 有音频：音频信息 + audio 播放器 -->
           <div
@@ -156,7 +142,7 @@
           >
             <div class="audio-info">
               <Music2 :size="16" />
-              <span class="audio-title">{{ panel.title || '音频' }}</span>
+              <span class="audio-title">{{ panel.title || t('canvas.node.audio') }}</span>
             </div>
             <audio
               :src="metadata.content"
@@ -220,7 +206,7 @@
               @change="updateConfigContent('seconds', ($event.target as HTMLSelectElement)?.value)"
               @mousedown.stop
             >
-              <option v-for="s in availableDurations" :key="s" :value="s">{{ s }}秒</option>
+              <option v-for="s in availableDurations" :key="s" :value="s">{{ s }}{{ t('canvas.node.secondsSuffix') }}</option>
             </select>
           </div>
 
@@ -228,7 +214,7 @@
           <textarea
             class="config-prompt"
             v-model="configPrompt"
-            placeholder="输入提示词，可用 @[node:xxx] 引用上游节点"
+            :placeholder="t('canvas.node.configPromptPlaceholder')"
             @mousedown.stop
             @wheel.stop
           />
@@ -240,7 +226,7 @@
             @click="handleConfigGenerate"
             @mousedown.stop
           >
-            {{ isVideoMode ? '生成视频' : '生成图片' }}
+            {{ isVideoMode ? t('canvas.node.generateVideoBtn') : t('canvas.node.generateImageBtn') }}
           </button>
         </div>
 
@@ -250,7 +236,7 @@
           class="unknown-content"
           :style="{ color: theme.node.placeholder }"
         >
-          未知节点
+          {{ t('canvas.node.unknownNode') }}
         </div>
       </div>
 
@@ -316,8 +302,12 @@
 
 import { computed, ref, nextTick, watch, onMounted, onUnmounted } from 'vue'
 import { Image as ImageIcon, Video, Music2, RefreshCw } from 'lucide-vue-next'
+import { useI18n } from '@/i18n'
 import { useCanvasStore } from '@/stores/canvas'
 import { useModelsStore } from '@/stores/models'
+
+/* ---------- i18n ---------- */
+const { t } = useI18n()
 
 /* ---------- Props 定义 ---------- */
 const props = defineProps({
@@ -344,7 +334,7 @@ const emit = defineEmits([
   'hover-leave',
   'view-image', // (imageUrl)
   'edit-text', // (text)
-  'generate-image', // 从 text 节点生图
+  'generate-image', // 从 text 节点生图（保留用于 retry 等场景）
   'generate', // 从 config 节点触发合并生成
   'retry', // 重试生成
   'upload', // 上传文件
@@ -359,12 +349,12 @@ const store = useCanvasStore()
 
 /* ---------- 配置节点常量 ---------- */
 // 生成模式：文生图 / 图生图 / 文生视频 / 图生视频（关键帧由接入图片数量自动触发）
-const configModes = [
-  { value: 'text2image', label: '文生图' },
-  { value: 'image2image', label: '图生图' },
-  { value: 'text2video', label: '文生视频' },
-  { value: 'image2video', label: '图生视频' },
-]
+const configModes = computed(() => [
+  { value: 'text2image', label: t('canvas.node.configMode.text2image') },
+  { value: 'image2image', label: t('canvas.node.configMode.image2image') },
+  { value: 'text2video', label: t('canvas.node.configMode.text2video') },
+  { value: 'image2video', label: t('canvas.node.configMode.image2video') },
+])
 // 模型列表：从后端 API 获取，按类型自动分类
 const modelsStore = useModelsStore()
 const availableModels = computed(() => modelsStore.getModelsByMode(configContent.value.mode || 'text2image'))
@@ -479,13 +469,6 @@ const loadingSpinnerStyle = computed(() => ({
 const retryBtnStyle = computed(() => ({
   background: props.theme.toolbar.panel,
   borderColor: props.theme.toolbar.border,
-  color: props.theme.node.text,
-}))
-
-/** 生图按钮样式 */
-const generateBtnStyle = computed(() => ({
-  background: `${props.theme.toolbar.panel}dd`,
-  borderColor: props.theme.node.stroke,
   color: props.theme.node.text,
 }))
 
@@ -740,12 +723,7 @@ watch(
   },
 )
 
-/* ---------- 交互：生图 / 重试 ---------- */
-
-/** 点击生图按钮 */
-function handleGenerateImage() {
-  emit('generate-image', props.panel)
-}
+/* ---------- 交互：快速生成 / 重试 ---------- */
 
 /** 点击重试按钮 */
 function handleRetry() {
@@ -924,33 +902,6 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  padding-top: 32px;
-}
-
-/* 生图按钮：右上角，Image 图标 + 文字 */
-.generate-btn {
-  position: absolute;
-  right: 12px;
-  top: 12px;
-  z-index: 20;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 32px;
-  padding: 0 10px;
-  border-radius: 9999px;
-  border: 1px solid;
-  font-size: 12px;
-  font-weight: 500;
-  opacity: 0.85;
-  backdrop-filter: blur(12px);
-  cursor: pointer;
-  transition: transform 0.15s ease, opacity 0.15s ease;
-}
-
-.generate-btn:hover {
-  transform: scale(1.02);
-  opacity: 1;
 }
 
 /* 文本编辑区 / 展示区 */
@@ -964,7 +915,7 @@ onUnmounted(() => {
   word-break: break-word;
   overflow-wrap: break-word;
   background: transparent;
-  padding: 0 56px 16px 16px;
+  padding: 16px;
   font-family: monospace;
   box-sizing: border-box;
 }

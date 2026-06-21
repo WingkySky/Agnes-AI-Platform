@@ -620,6 +620,114 @@ export const useCanvasStore = defineStore('canvas', {
       saveCanvas(this)
     },
 
+    /**
+     * 复制工作区（深拷贝当前画布的所有 panels/connections/viewport）
+     * - 重新生成所有 panel id 和 connection id，避免 id 冲突
+     * - 同步更新 connections 中的 source_panel_id / target_panel_id 引用
+     * - 同步更新 config 节点 composerContent / prompt 中的 @[node:xxx] 引用
+     * - 新画布追加到列表末尾并切换过去
+     * @param name 新画布名称（由调用方拼好后缀，避免 store 依赖 i18n）
+     */
+    duplicateWorkspace(id: string, name?: string): string | null {
+      const ws = this.workspaces.find((w) => w.id === id)
+      if (!ws) return null
+
+      // 先保存当前画布状态（避免复制的是旧数据）
+      const current = this.workspaces.find((w) => w.id === this.activeWorkspaceId)
+      if (current) {
+        current.viewport = { ...this.viewport }
+        current.panels = JSON.parse(JSON.stringify(this.panels))
+        current.connections = JSON.parse(JSON.stringify(this.connections))
+        current.updated_at = new Date().toISOString()
+      }
+
+      // 重新生成 panel id 和 connection id
+      const idMap = new Map<string, string>()
+      const newPanels = JSON.parse(JSON.stringify(ws.panels)) as CanvasPanel[]
+      newPanels.forEach(p => {
+        const oldId = p.id
+        const newId = uid()
+        idMap.set(oldId, newId)
+        p.id = newId
+      })
+      const newConnections = JSON.parse(JSON.stringify(ws.connections)) as CanvasConnection[]
+      newConnections.forEach(c => {
+        c.id = uid()
+        c.source_panel_id = idMap.get(c.source_panel_id) || c.source_panel_id
+        c.target_panel_id = idMap.get(c.target_panel_id) || c.target_panel_id
+      })
+      // 更新 config 节点中的 @[node:xxx] 引用
+      const nodeRefPattern = /@\[node:([^\]]+)\]/g
+      newPanels.forEach(panel => {
+        if (panel.type === 'config' && panel.content) {
+          const updateRef = (text: string): string => {
+            if (!text) return text
+            return text.replace(nodeRefPattern, (match, oldNodeId: string) => {
+              const newNodeId = idMap.get(oldNodeId)
+              return newNodeId ? `@[node:${newNodeId}]` : match
+            })
+          }
+          if (panel.content.composerContent) panel.content.composerContent = updateRef(panel.content.composerContent)
+          if (panel.content.prompt) panel.content.prompt = updateRef(panel.content.prompt)
+        }
+      })
+
+      const newWs: CanvasWorkspace = {
+        id: uid(),
+        name: name || ws.name,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        viewport: { ...ws.viewport },
+        panels: newPanels,
+        connections: newConnections,
+      }
+      this.workspaces.push(newWs)
+      this.switchWorkspace(newWs.id)
+      return newWs.id
+    },
+
+    /**
+     * 导出指定工作区为 JSON 字符串（不影响当前画布状态）
+     * - 不要求该工作区是当前激活的
+     */
+    exportWorkspaceById(id: string): string | null {
+      const ws = this.workspaces.find((w) => w.id === id)
+      if (!ws) return null
+      const data = {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        workspace: {
+          id: ws.id,
+          name: ws.name,
+          viewport: { ...ws.viewport },
+          panels: JSON.parse(JSON.stringify(ws.panels)),
+          connections: JSON.parse(JSON.stringify(ws.connections)),
+        },
+      }
+      return JSON.stringify(data, null, 2)
+    },
+
+    /** 批量删除工作区（不切换当前激活的画布除非被删） */
+    deleteWorkspaces(ids: string[]): void {
+      const idSet = new Set(ids)
+      const wasActiveDeleted = idSet.has(this.activeWorkspaceId || '')
+      this.workspaces = this.workspaces.filter(w => !idSet.has(w.id))
+      if (wasActiveDeleted) {
+        if (this.workspaces.length > 0) {
+          this.switchWorkspace(this.workspaces[0].id)
+        } else {
+          this.activeWorkspaceId = null
+          this.viewport = { x: 0, y: 0, zoom: 1 }
+          this.panels = []
+          this.connections = []
+          this.selectedPanelIds = []
+          this.selectedPanelId = null
+          this.history = { past: [], future: [] }
+        }
+      }
+      saveCanvas(this)
+    },
+
     // ==================== 视口 ====================
 
     /** 平移画布（世界坐标增量） */
