@@ -367,7 +367,7 @@ const epLocale = computed(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
+  padding: 6px 14px;
   background: var(--agnes-credits-bg);
   border: 1px solid var(--agnes-credits-border);
   border-radius: 10px;
@@ -375,6 +375,9 @@ const epLocale = computed(() => {
   font-size: 13px;
   cursor: pointer;
   transition: all 0.2s ease;
+  /* 允许 chip 随数字位数自适应扩展，不被父容器挤压 */
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .credits-chip:hover {
   background: var(--agnes-credits-bg-hover);
@@ -386,7 +389,11 @@ const epLocale = computed(() => {
 }
 .credits-value {
   font-weight: 700;
+  font-size: 14px;
   color: var(--agnes-credits-value);
+  /* 等宽数字，避免位数变化时宽度跳动 */
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.3px;
 }
 .credits-label {
   font-size: 11px;

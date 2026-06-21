@@ -558,6 +558,13 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         panelId: panelId || null,
       }
       this._saveToStorage()
+
+      // 【积分刷新】画布任务创建时后端已预扣积分，立即刷新前端积分显示
+      // 与常规 submitImageTask/submitVideoTask 保持一致（避免积分显示滞后，需刷新页面才更新）
+      try {
+        const userStore = useUserStore()
+        if (userStore.isAuthenticated) userStore.fetchCredits()
+      } catch (_) { /* 忽略 */ }
     },
 
     /** 更新画布任务的状态（由画布的轮询回调） */
