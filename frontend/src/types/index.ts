@@ -538,3 +538,105 @@ export interface SyncModelsResponse {
 export interface SyncAllResponse {
   results: SyncModelsResponse[]
 }
+
+/* =====================================================
+ * 用户认证相关类型
+ * ===================================================== */
+
+/** 注册请求体 — 对齐 RegisterRequest */
+export interface AuthRegisterRequest {
+  /** 用户名（3-32 字符） */
+  username: string
+  /** 邮箱（可选） */
+  email?: string | null
+  /** 密码（6-64 字符） */
+  password: string
+}
+
+/** 登录请求体 — 对齐 LoginRequest */
+export interface AuthLoginRequest {
+  username: string
+  password: string
+}
+
+/** 登录/注册成功返回的 token 响应 — 对齐 TokenResponse */
+export interface AuthTokenResponse {
+  /** JWT access token — 需存储并在后续请求的 Authorization 头使用 */
+  access_token: string
+  /** token 类型，固定为 'bearer' */
+  token_type: string
+  /** token 有效期（秒） */
+  expires_in: number
+}
+
+/** 当前用户信息响应 — 对齐 UserInfoResponse */
+export interface UserInfoResponse {
+  id: number
+  username: string
+  email?: string | null
+  credits: number
+  role: string
+  is_active: boolean
+  is_admin: boolean
+  created_at?: string | null
+  last_login_at?: string | null
+}
+
+// =====================================================
+// 管理员：用户与角色管理
+// =====================================================
+
+/** 管理员看到的用户行 — 对齐 UserAdminRow */
+export interface UserAdminRow {
+  id: number
+  username: string
+  email?: string | null
+  credits: number
+  role: string
+  is_active: boolean
+  is_admin: boolean
+  created_at?: string | null
+  last_login_at?: string | null
+}
+
+/** 用户列表响应 */
+export interface UserListResponse {
+  items: UserAdminRow[]
+  total: number
+}
+
+/** 修改用户角色请求 */
+export interface UpdateRoleRequest {
+  role: string
+}
+
+/** 修改用户积分请求 */
+export interface UpdateCreditsRequest {
+  credits: number
+}
+
+/** 启用/禁用用户请求 */
+export interface UpdateActiveRequest {
+  is_active: boolean
+}
+
+// =====================================================
+// 管理员：积分规则管理
+// =====================================================
+
+/** 积分规则响应 — 对齐 CreditRuleResponse */
+export interface CreditRuleResponse {
+  id?: number
+  rule_key: string
+  name: string
+  value: number
+  description?: string
+  updated_at?: string
+}
+
+/** 修改积分规则请求 — 对齐 CreditRuleUpdateRequest */
+export interface CreditRuleUpdateRequest {
+  value: number
+  name?: string | null
+  description?: string | null
+}

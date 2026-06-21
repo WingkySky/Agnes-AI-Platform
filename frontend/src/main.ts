@@ -16,6 +16,7 @@ import App from './App.vue'
 import router from './router'
 import './assets/main.css'
 import { useTaskQueueStore } from './stores/taskQueue'
+import { useUserStore } from './stores/user'
 
 // 国际化（i18n）插件
 import i18n from '@/i18n'
@@ -31,7 +32,7 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
 // 注册插件
 app.use(createPinia())
 app.use(router)
-// 使用 Element Plus（默认语言通过 <el-config-provider> 覆盖）
+// 使用 Element Plus（默认语言通过 <el-config-provider 覆盖）
 app.use(ElementPlus)
 // 挂载 i18n 插件：提供 $t 全局属性
 app.use(i18n)
@@ -44,3 +45,7 @@ app.mount('#app')
 // 初始化全局任务队列 Store（恢复历史任务 + 启动后台轮询）
 const taskQueue = useTaskQueueStore()
 taskQueue.init()
+
+// 初始化用户认证 Store（恢复本地 JWT + 尝试获取当前用户信息）
+const userStore = useUserStore()
+userStore.init()

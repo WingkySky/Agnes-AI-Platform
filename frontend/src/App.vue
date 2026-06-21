@@ -43,9 +43,62 @@
             <el-icon><Setting /></el-icon>
             <span>{{ t('nav.settings') }}</span>
           </router-link>
+          <!-- 管理员菜单（仅管理员可见） -->
+          <template v-if="userStore.isAuthenticated && userStore.isAdmin">
+            <router-link to="/admin/users" class="nav-item" active-class="active">
+              <el-icon><UserFilled /></el-icon>
+              <span>用户管理</span>
+            </router-link>
+            <router-link to="/admin/credit-rules" class="nav-item" active-class="active">
+              <el-icon><Coin /></el-icon>
+              <span>积分规则</span>
+            </router-link>
+          </template>
         </nav>
 
         <div class="app-header-right">
+          <!-- 积分显示（仅登录后） -->
+          <div v-if="userStore.isAuthenticated" class="credits-chip" :title="'当前积分，生成任务会消耗积分'">
+            <el-icon><Coin /></el-icon>
+            <span class="credits-value">{{ creditsText }}</span>
+            <span class="credits-label">积分</span>
+          </div>
+
+          <!-- 登录入口 / 用户菜单 -->
+          <template v-if="userStore.isAuthenticated">
+            <el-dropdown trigger="click" @command="handleUserCommand">
+              <div class="user-chip">
+                <el-avatar :size="32" :icon="UserFilled" />
+                <div class="user-info">
+                  <span class="user-name">{{ userStore.username || '未命名' }}</span>
+                  <span class="user-role">{{ userStore.isAdmin ? '管理员' : '普通用户' }}</span>
+                </div>
+                <el-icon><CaretBottom /></el-icon>
+              </div>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item disabled>
+                    <span>{{ userStore.username }}</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item divided disabled>
+                    <el-icon><Coin /></el-icon>
+                    <span>积分：{{ creditsText }}</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item divided command="logout">
+                    <el-icon><SwitchButton /></el-icon>
+                    <span>退出登录</span>
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </template>
+          <template v-else>
+            <el-button type="primary" @click="router.push('/login')">
+              <el-icon><User /></el-icon>
+              <span>登录 / 注册</span>
+            </el-button>
+          </template>
+
           <LanguageSwitcher />
         </div>
       </header>
@@ -73,18 +126,25 @@
 
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
-import { Picture, VideoPlay, Clock, ChatDotRound, Grid, Setting } from '@element-plus/icons-vue'
+import { useRoute, useRouter } from 'vue-router'
+import {
+  Picture, VideoPlay, Clock, ChatDotRound, Grid, Setting,
+  User, UserFilled, Coin, CaretBottom, SwitchButton
+} from '@element-plus/icons-vue'
 import TaskQueuePanel from './components/TaskQueuePanel.vue'
 import LanguageSwitcher from './components/LanguageSwitcher.vue'
 import { useI18n, getElementPlusLocale } from '@/i18n'
 import { useModelsStore } from '@/stores/models'
+import { useUserStore } from '@/stores/user'
 
 const { t, locale } = useI18n()
 const route = useRoute()
+const router = useRouter()
+
+const modelsStore = useModelsStore()
+const userStore = useUserStore()
 
 // 应用启动时加载模型配置
-const modelsStore = useModelsStore()
 onMounted(() => {
   modelsStore.fetchConfig()
 })
@@ -93,11 +153,25 @@ onMounted(() => {
 const isCanvasRoute = computed(() => route.name === 'canvas')
 
 // keep-alive 缓存的路由组件名称（切换标签页时保持状态不销毁）
-const cachedViews = ['ChatView', 'ImageView', 'VideoView', 'HistoryView', 'CanvasView', 'SettingsView']
+const cachedViews = ['ChatView', 'ImageView', 'VideoView', 'HistoryView', 'CanvasView', 'SettingsView', 'UsersAdminView', 'CreditRulesView']
+
+// 积分显示：数字千分位格式化
+const creditsText = computed(() => {
+  const value = userStore.credits
+  if (value === null || value === undefined) return '—'
+  return value.toLocaleString('en-US')
+})
+
+// 用户下拉菜单操作
+function handleUserCommand(cmd: string) {
+  if (cmd === 'logout') {
+    userStore.logout()
+    router.push('/login')
+  }
+}
 
 // 每当 locale 变化时返回对应的 Element Plus 语言对象
 const epLocale = computed(() => {
-  // 读取 locale.value 使 computed 与语言切换关联
   const _ = locale.value // eslint-disable-line no-unused-vars
   return getElementPlusLocale()
 })
@@ -195,6 +269,67 @@ const epLocale = computed(() => {
 .app-header-right {
   display: flex;
   align-items: center;
+  gap: 12px;
+}
+
+/* ---- 积分显示 chip ---- */
+.credits-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: linear-gradient(135deg, rgba(255, 188, 90, 0.18) 0%, rgba(255, 152, 200, 0.12) 100%);
+  border: 1px solid rgba(255, 190, 120, 0.3);
+  border-radius: 10px;
+  color: #ffd28a;
+  font-size: 14px;
+}
+.credits-chip .el-icon {
+  font-size: 16px;
+}
+.credits-value {
+  font-weight: 700;
+  color: #fff2cf;
+}
+.credits-label {
+  font-size: 12px;
+  color: rgba(255, 220, 160, 0.7);
+  margin-left: 2px;
+}
+
+/* ---- 用户头像 chip ---- */
+.user-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px 6px 6px;
+  background: rgba(20, 30, 50, 0.7);
+  border: 1px solid rgba(100, 150, 220, 0.15);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.user-chip:hover {
+  background: rgba(30, 45, 75, 0.8);
+  border-color: rgba(100, 150, 220, 0.3);
+}
+.user-info {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+.user-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #e8eef7;
+}
+.user-role {
+  font-size: 11px;
+  color: #8ba3c9;
+}
+.user-chip .el-icon:last-child {
+  color: #8ba3c9;
+  font-size: 12px;
 }
 
 /* ---- 主内容 ---- */

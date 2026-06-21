@@ -41,11 +41,15 @@ class VideoTask:
         video_id: Optional[str],
         prompt: str,
         params: Dict,
+        user_id: Optional[int] = None,
+        credits_consumed: int = 0,
     ):
         self.task_id = task_id
         self.video_id = video_id
         self.prompt = prompt
         self.params = params or {}
+        self.user_id = user_id
+        self.credits_consumed = credits_consumed
         self.status = "processing"
         self.progress = 0
         self.video_url: Optional[str] = None
@@ -63,6 +67,7 @@ class VideoTask:
             "progress": self.progress,
             "video_url": self.video_url,
             "message": self.error_message,
+            "credits_consumed": self.credits_consumed,
             "elapsed_sec": int(time.time() - self.created_at),
         }
 
@@ -103,13 +108,18 @@ class VideoPollerManager:
         video_id: Optional[str],
         prompt: str,
         params: Dict,
+        user_id: Optional[int] = None,
+        credits_consumed: int = 0,
     ) -> VideoTask:
         """
         创建 VideoTask 并启动后台协程轮询，不阻塞当前请求。
         图片生成请求（走 images 路由不会调用此方法）与视频任务互不影响。
         """
         key = task_id or video_id or f"unknown_{int(time.time() * 1000)}"
-        task = VideoTask(task_id=task_id, video_id=video_id, prompt=prompt, params=params)
+        task = VideoTask(
+            task_id=task_id, video_id=video_id, prompt=prompt, params=params,
+            user_id=user_id, credits_consumed=credits_consumed,
+        )
 
         async with self._lock:
             self._tasks[key] = task
@@ -118,7 +128,10 @@ class VideoPollerManager:
 
         # 启动后台轮询协程（独立 asyncio.Task，不阻塞创建请求）
         task._poll_task = asyncio.create_task(self._poll_loop(key, task))
-        logger.info("[视频轮询器] 已启动任务: task_id=%s video_id=%s", task_id, video_id)
+        logger.info(
+            "[视频轮询器] 已启动任务: task_id=%s video_id=%s user=%s cost=%s",
+            task_id, video_id, user_id, credits_consumed,
+        )
         return task
 
     # ---------- 获取任务状态 ----------
@@ -251,12 +264,14 @@ class VideoPollerManager:
             async with new_async_session() as session:
                 record = Generation(
                     type="video",
+                    user_id=task.user_id,
                     prompt=task.prompt,
                     model=task.params.get("model", ""),
                     params=task.params,
                     mode=task.params.get("mode"),
                     result_url=task.video_url,
                     status=task.status,
+                    credits_consumed=task.credits_consumed,
                     task_id=task.task_id or task.video_id,
                 )
                 session.add(record)

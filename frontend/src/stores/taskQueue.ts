@@ -9,6 +9,7 @@
  * ===================================================== */
 
 import { defineStore } from 'pinia'
+import { useUserStore } from '@/stores/user'
 import {
   createVideoTask,
   getVideoStatus,
@@ -354,6 +355,13 @@ export const useTaskQueueStore = defineStore('taskQueue', {
           this._stopPolling(taskId)
           this._notifyTaskComplete(task)
           this._saveToStorage()
+          // 【积分刷新】任务成功后刷新用户剩余积分
+          try {
+            const userStore = useUserStore()
+            if (userStore.isAuthenticated) userStore.fetchCredits()
+          } catch (_) {
+            // 忽略刷新失败
+          }
         } else if (isCancelled) {
           task.status = 'cancelled'
           this._stopPolling(taskId)
@@ -477,7 +485,10 @@ export const useTaskQueueStore = defineStore('taskQueue', {
       if (resultUrl) task.resultUrl = resultUrl
       if (typeof progress === 'number') task.progress = progress
       task.updatedAt = Date.now()
-      if (status === 'success') task.progress = 100
+      if (status === 'success') {
+        task.progress = 100
+        try { useUserStore().fetchCredits() } catch (_) { /* 忽略 */ }
+      }
       this._saveToStorage()
     },
 
@@ -522,7 +533,10 @@ export const useTaskQueueStore = defineStore('taskQueue', {
       if (resultUrl) task.resultUrl = resultUrl
       if (typeof progress === 'number') task.progress = progress
       task.updatedAt = Date.now()
-      if (status === 'success') task.progress = 100
+      if (status === 'success') {
+        task.progress = 100
+        try { useUserStore().fetchCredits() } catch (_) { /* 忽略 */ }
+      }
       this._saveToStorage()
     },
 

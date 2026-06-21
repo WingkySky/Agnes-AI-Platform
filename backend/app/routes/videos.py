@@ -19,15 +19,18 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.core.database import get_async_db
 from app.core.config import settings
+from app.core.database import get_async_db
+from app.core.security import get_current_user_optional
 from app.models.generation import Generation
+from app.models.user import User
 from app.schemas.videos import (
     VideoGenerationRequest,
     VideoTaskCreatedResponse,
     VideoStatusResponse,
 )
 from app.services.agnes_client import agnes_client
+from app.services.credits_service import consume_credits, get_video_cost_async
 from app.services.video_poller import poller_manager
 
 logger = logging.getLogger("agnes_platform")
@@ -68,7 +71,11 @@ def _validate_image_size(raw: str, label: str) -> None:
 
 
 @router.post("/videos", response_model=VideoTaskCreatedResponse, summary="创建视频生成任务")
-async def create_video_task(req: VideoGenerationRequest):
+async def create_video_task(
+    req: VideoGenerationRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User | None = Depends(get_current_user_optional),
+):
     """
     创建视频生成异步任务。
     - text2video：只传 prompt
@@ -104,6 +111,12 @@ async def create_video_task(req: VideoGenerationRequest):
                 (req.image_mime_types[idx] if req.image_mime_types and idx < len(req.image_mime_types) else "image/png"),
                 img[:100],
             )
+
+    # --- 计算并消耗积分 ---
+    cost = await get_video_cost_async(db, mode=req.mode, seconds=req.seconds or 5, num_frames=req.num_frames)
+    if current_user is not None:
+        await consume_credits(db, current_user, cost, description=f"video/{req.mode}/{req.seconds}s")
+    user_id = current_user.id if current_user else None
 
     try:
         result = await agnes_client.create_video_task(
@@ -171,6 +184,8 @@ async def create_video_task(req: VideoGenerationRequest):
         video_id=video_id,
         prompt=req.prompt,
         params=params,
+        user_id=user_id,
+        credits_consumed=cost if current_user else 0,
     )
 
     return VideoTaskCreatedResponse(
@@ -186,20 +201,33 @@ async def create_video_task(req: VideoGenerationRequest):
         aspect_ratio=req.aspect_ratio,
         seconds=req.seconds,
         mode=req.mode,
+        credits_consumed=cost if current_user else 0,
+        remaining_credits=current_user.credits if current_user else None,
         message="任务已创建，请轮询 GET /api/videos/{task_id} 获取最新状态",
     )
 
 
 @router.get("/videos/{task_id}", response_model=VideoStatusResponse, summary="查询视频任务状态")
-async def get_video_status(task_id: str, db: AsyncSession = Depends(get_async_db)):
+async def get_video_status(
+    task_id: str,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
     """
-    查询视频任务状态。
+    查询视频任务状态（按用户隔离）。
     优先从后端内存缓存获取（实时状态），缓存中不存在则回退查询数据库。
     """
     # 方式 1：从内存缓存查询（并发安全
     cached_task = await poller_manager.get_status(task_id=task_id)
     if not cached_task:
         cached_task = await poller_manager.get_status(video_id=task_id)
+
+    # --- 用户隔离检查（内存缓存）---
+    if cached_task is not None:
+        if current_user is None and cached_task.user_id is not None:
+            cached_task = None
+        elif current_user is not None and cached_task.user_id != current_user.id:
+            cached_task = None
 
     if cached_task:
         return VideoStatusResponse(
@@ -212,12 +240,15 @@ async def get_video_status(task_id: str, db: AsyncSession = Depends(get_async_db
             elapsed_sec=cached_task.to_dict()["elapsed_sec"],
         )
 
-    # 方式 2：从数据库查询已完成的记录（异步查询，不阻塞事件循环）
-    result = await db.execute(
-        select(Generation).filter(
-            (Generation.task_id == task_id) & (Generation.type == "video")
-        )
+    # 方式 2：从数据库查询已完成的记录（按用户隔离）
+    stmt = select(Generation).filter(
+        (Generation.task_id == task_id) & (Generation.type == "video")
     )
+    if current_user:
+        stmt = stmt.filter(Generation.user_id == current_user.id)
+    else:
+        stmt = stmt.filter(Generation.user_id.is_(None))
+    result = await db.execute(stmt)
     record = result.scalar_one_or_none()
 
     if record:
@@ -237,10 +268,21 @@ async def get_video_status(task_id: str, db: AsyncSession = Depends(get_async_db
 
 
 @router.delete("/videos/{task_id}", summary="中止视频任务")
-async def cancel_video_task(task_id: str):
+async def cancel_video_task(
+    task_id: str,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
     """
-    中止指定视频任务的后台轮询（仅停止本地轮询，不保证服务端已终止）。
+    中止指定视频任务的后台轮询（按用户隔离，仅允许任务创建者取消）。
     """
+    # 先从缓存中检查是否属于当前用户
+    cached_task = await poller_manager.get_status(task_id=task_id)
+    if cached_task is not None:
+        if current_user is None and cached_task.user_id is not None:
+            raise HTTPException(status_code=404, detail="任务不存在或无权操作")
+        if current_user is not None and cached_task.user_id != current_user.id:
+            raise HTTPException(status_code=404, detail="任务不存在或无权操作")
+
     await poller_manager.cancel(task_id=task_id)
     return {"success": True, "message": f"已尝试中止任务 {task_id}"}
 
@@ -252,9 +294,13 @@ async def cancel_video_task(task_id: str):
 # =====================================================
 
 
-async def _find_video_url_by_task_id(task_id: str, db: AsyncSession) -> str:
+async def _find_video_url_by_task_id(
+    task_id: str,
+    db: AsyncSession,
+    current_user: Optional[User] = None,
+) -> str:
     """
-    根据 task_id 查找视频 URL。
+    根据 task_id 查找视频 URL（按用户隔离）。
     优先从内存缓存获取（进行中的任务），回退查询数据库（已完成的任务）。
     """
     # 方式 1：从内存缓存查询
@@ -262,15 +308,25 @@ async def _find_video_url_by_task_id(task_id: str, db: AsyncSession) -> str:
     if not cached_task:
         cached_task = await poller_manager.get_status(video_id=task_id)
 
+    # 用户隔离检查（内存缓存）
+    if cached_task is not None:
+        if current_user is None and cached_task.user_id is not None:
+            cached_task = None
+        elif current_user is not None and cached_task.user_id != current_user.id:
+            cached_task = None
+
     if cached_task and cached_task.video_url:
         return cached_task.video_url
 
-    # 方式 2：从数据库查询
-    result = await db.execute(
-        select(Generation).filter(
-            (Generation.task_id == task_id) & (Generation.type == "video")
-        )
+    # 方式 2：从数据库查询（按用户隔离）
+    stmt = select(Generation).filter(
+        (Generation.task_id == task_id) & (Generation.type == "video")
     )
+    if current_user:
+        stmt = stmt.filter(Generation.user_id == current_user.id)
+    else:
+        stmt = stmt.filter(Generation.user_id.is_(None))
+    result = await db.execute(stmt)
     record = result.scalar_one_or_none()
     if record and record.result_url:
         return record.result_url
@@ -279,13 +335,17 @@ async def _find_video_url_by_task_id(task_id: str, db: AsyncSession) -> str:
 
 
 @router.get("/videos/{task_id}/stream", summary="视频流代理（支持 Range + CORS）")
-async def stream_video_by_task(request: Request, task_id: str, db: AsyncSession = Depends(get_async_db)):
+async def stream_video_by_task(
+    request: Request,
+    task_id: str,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
     """
-    通过 task_id 代理播放视频资源，解决 CORS 和 Range 请求问题。
-    逻辑与 /api/history/video/{id}/stream 一致。
+    通过 task_id 代理播放视频资源（按用户隔离，解决 CORS 和 Range 请求问题）。
     """
     # 查找视频 URL
-    video_url = await _find_video_url_by_task_id(task_id, db)
+    video_url = await _find_video_url_by_task_id(task_id, db, current_user)
     if not video_url:
         raise HTTPException(status_code=404, detail="未找到对应的视频资源")
 

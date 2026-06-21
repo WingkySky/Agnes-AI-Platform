@@ -29,27 +29,31 @@ class Generation(Base):
     __tablename__ = "generations"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=True, index=True)         # 归属用户 ID（匿名任务为 NULL，登录用户为 user.id）
     type = Column(String(20), index=True, nullable=False)     # 'image' | 'video'
-    prompt = Column(Text, nullable=False)                       # 提示词
-    model = Column(String(100), nullable=True)                  # 使用的模型名
-    params = Column(JSON, nullable=True)                        # JSON 参数
-    mode = Column(String(30), nullable=True)                    # 生成模式：text2image / image2image / text2video / image2video / keyframes
-    image_input = Column(Text, nullable=True)                   # base64 输入图片（可选）
+    prompt = Column(Text, nullable=False)                          # 提示词
+    model = Column(String(100), nullable=True)                    # 使用的模型名
+    params = Column(JSON, nullable=True)                           # JSON 参数
+    mode = Column(String(30), nullable=True)                     # 生成模式：text2image / image2image / text2video / image2video / keyframes
+    image_input = Column(Text, nullable=True)                    # base64 输入图片（可选）
     result_url = Column(Text, nullable=True)                    # 生成结果 URL
-    status = Column(String(20), default="success")              # 任务状态
-    task_id = Column(String(200), nullable=True, index=True)    # Agnes AI 任务/视频 ID
+    status = Column(String(20), default="success")                  # 任务状态
+    credits_consumed = Column(Integer, default=0, nullable=False)    # 本次任务消耗的积分数
+    task_id = Column(String(200), nullable=True, index=True)    # Agnes AI 异步任务 ID（主要用于视频生成）
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
     def to_dict(self):
         """便捷转换为字典（用于 JSON 序列化）"""
         return {
             "id": self.id,
+            "user_id": self.user_id,
             "type": self.type,
             "prompt": self.prompt,
             "model": self.model,
             "params": self.params,
             "result_url": self.result_url,
             "status": self.status,
+            "credits_consumed": self.credits_consumed,
             "task_id": self.task_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

@@ -11,6 +11,7 @@
 #   - 使用 asyncio.Lock 保护 _tasks 字典，并发读写安全
 #   - 图片生成使用 Agnes AI 的同步接口，包装为独立 asyncio.Task
 #   - LRU 式清理：已完成/失败任务超过 TTL 后自动移除
+#   - 若在创建时传入 user_id + credits_consumed，会写入 generations 表
 # =====================================================
 
 import asyncio
@@ -25,14 +26,10 @@ from app.core.database import new_async_session
 
 logger = logging.getLogger("agnes_platform")
 
-# ---------- 清理参数 ----------
-CLEANUP_INTERVAL_SEC = 300   # 每 5 分钟扫描一次过期缓存
-CLEANUP_TTL_SEC = 3600        # 已完成任务保留 1 小时后清除
+CLEANUP_INTERVAL_SEC = 300
+CLEANUP_TTL_SEC = 3600
 
 
-# =====================================================
-# 单个图片任务状态对象
-# =====================================================
 class ImageTask:
     """单个图片任务的状态缓存"""
 
@@ -41,11 +38,15 @@ class ImageTask:
         task_id: str,
         prompt: str,
         params: Dict,
+        user_id: Optional[int] = None,
+        credits_consumed: int = 0,
     ):
         self.task_id = task_id
         self.prompt = prompt
         self.params = params or {}
-        self.status = "queued"   # queued / processing / success / failed / cancelled
+        self.user_id = user_id
+        self.credits_consumed = credits_consumed
+        self.status = "queued"
         self.progress = 0
         self.result_url: Optional[str] = None
         self.image_b64: Optional[str] = None
@@ -61,16 +62,14 @@ class ImageTask:
             "status": self.status,
             "progress": self.progress,
             "result_url": self.result_url,
-            "url": self.result_url,   # 兼容字段
+            "url": self.result_url,
             "image_b64": self.image_b64,
             "message": self.error_message,
+            "credits_consumed": self.credits_consumed,
             "elapsed_sec": int(time.time() - self.created_at),
         }
 
 
-# =====================================================
-# 图片任务管理器（全局单例）
-# =====================================================
 class ImagePollerManager:
     """
     管理所有进行中的图片任务：
@@ -85,50 +84,48 @@ class ImagePollerManager:
         self._cleanup_task: Optional[asyncio.Task] = None
         self._started = False
 
-    # ---------- 启动后台清理协程 ----------
     async def start(self):
-        """启动后台周期性清理协程（在应用启动时调用一次）"""
         if self._started:
             return
         self._started = True
         self._cleanup_task = asyncio.create_task(self._cleanup_loop())
         logger.info("[图片任务器] 已启动，清理周期 %ss", CLEANUP_INTERVAL_SEC)
 
-    # ---------- 创建任务 ----------
     async def create_task(
         self,
         prompt: str,
         params: Dict,
+        user_id: Optional[int] = None,
+        credits_consumed: int = 0,
     ) -> ImageTask:
-        """
-        创建图片生成任务，立即返回 ImageTask，
-        实际生成在后台异步进行（不阻塞请求）。
-        """
         task_id = f"img_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
-        task = ImageTask(task_id=task_id, prompt=prompt, params=params)
+        task = ImageTask(
+            task_id=task_id,
+            prompt=prompt,
+            params=params,
+            user_id=user_id,
+            credits_consumed=credits_consumed,
+        )
         task.status = "pending"
 
         async with self._lock:
             self._tasks[task_id] = task
 
-        # 启动后台生成协程（独立 asyncio.Task，不阻塞创建请求）
         task._gen_task = asyncio.create_task(self._gen_loop(task_id, task))
-        logger.info("[图片任务器] 已创建任务: task_id=%s prompt=%s", task_id, prompt[:50])
+        logger.info(
+            "[图片任务器] 已创建任务: task_id=%s user=%s cost=%s prompt=%s",
+            task_id, user_id, credits_consumed, prompt[:50],
+        )
         return task
 
-    # ---------- 获取任务状态 ----------
     async def get_status(self, task_id: str) -> Optional[ImageTask]:
-        """根据 task_id 查找任务状态（并发安全读取）"""
         async with self._lock:
             return self._tasks.get(task_id)
 
-    # ---------- 取消任务 ----------
     async def cancel(self, task_id: str):
-        """取消指定图片任务"""
         task = None
         async with self._lock:
             task = self._tasks.get(task_id)
-
         if task and not task._cancelled:
             task._cancelled = True
             task.status = "cancelled"
@@ -136,37 +133,26 @@ class ImagePollerManager:
                 task._gen_task.cancel()
             logger.info("[图片任务器] 任务已取消: task_id=%s", task_id)
 
-    # ---------- 生成主循环 ----------
     async def _gen_loop(self, task_id: str, task: ImageTask):
-        """
-        后台生成协程：调用 Agnes AI 生成图片，
-        完成/失败后更新状态并写入数据库。
-        """
         try:
             task.status = "processing"
             task.progress = 10
             task.last_updated = time.time()
 
-            # 调用 Agnes AI 生成图片（await，不阻塞事件循环）
             result = await agnes_client.create_image(
                 prompt=task.prompt,
                 model=task.params.get("model", ""),
                 size=task.params.get("size", "1024x1024"),
                 response_format=task.params.get("response_format", "url"),
-                # 【多图参考改造点】新字段优先，回退到旧字段以保持兼容
                 base64_image=task.params.get("base64_image"),
                 image_url=task.params.get("image_url"),
                 base64_images=task.params.get("base64_images"),
                 image_urls=task.params.get("image_urls"),
-                # 【局部编辑】透传 mask 参数
                 mask=task.params.get("mask"),
             )
 
-            # 解析结果
             output_url = None
             output_b64 = None
-
-            # 兼容多种返回结构
             if isinstance(result, dict):
                 data = result.get("data")
                 if isinstance(data, list) and len(data) > 0:
@@ -177,15 +163,13 @@ class ImagePollerManager:
                 if not output_url and result.get("image"):
                     output_url = result["image"]
 
-            # 更新进度
             task.progress = 80
             task.last_updated = time.time()
 
-            # 检查是否有有效结果
             if not output_url and not output_b64:
                 task.status = "failed"
                 task.error_message = "Agnes AI 返回异常，未找到图片数据"
-                logger.warning("[图片任务器] 无结果数据: task_id=%s（不写入历史）", task_id)
+                logger.warning("[图片任务器] 无结果数据: task_id=%s", task_id)
                 return
 
             task.status = "success"
@@ -196,8 +180,7 @@ class ImagePollerManager:
 
             logger.info(
                 "[图片任务器] 任务完成: task_id=%s url=%s",
-                task_id,
-                output_url[:100] if output_url else "(base64)",
+                task_id, output_url[:100] if output_url else "(base64)",
             )
 
             await self._persist_result(task)
@@ -205,58 +188,42 @@ class ImagePollerManager:
         except asyncio.CancelledError:
             task.status = "cancelled"
             logger.info("[图片任务器] 任务被取消: task_id=%s", task_id)
-
         except Exception as e:
             task.status = "failed"
-            # agnes_client 里已把网络异常/5xx 转成中文 RuntimeError，直接用即可
             task.error_message = str(e) or "生成失败，请稍后重试"
             task.last_updated = time.time()
             logger.error(
-                "[图片任务器] 任务失败: task_id=%s error=%s（不写入历史）",
-                task_id,
-                str(e),
-                exc_info=True,
+                "[图片任务器] 任务失败: task_id=%s error=%s",
+                task_id, str(e), exc_info=True,
             )
 
-    # ---------- 异步写入数据库 ----------
     async def _persist_result(self, task: ImageTask):
-        """
-        图片任务完成后，异步写入数据库。
-        仅在成功状态下写入，失败任务不进历史。
-        使用 AsyncSession，完全异步 I/O，不阻塞事件循环。
-        """
         if task.status != "success":
-            logger.info(
-                "[图片任务器] 跳过写入历史: task_id=%s status=%s",
-                task.task_id,
-                task.status,
-            )
             return
         try:
             async with new_async_session() as session:
                 record = Generation(
                     type="image",
+                    user_id=task.user_id,
                     prompt=task.prompt,
                     model=task.params.get("model", ""),
                     params={
                         k: v for k, v in task.params.items()
-                        # 不保存大的 base64 / URL 数组，避免数据库膨胀
                         if k not in ("base64_image", "image_url", "base64_images", "image_urls", "mask")
                     },
                     mode=task.params.get("mode"),
                     result_url=task.result_url or "(base64)",
                     status=task.status,
+                    credits_consumed=task.credits_consumed,
                     task_id=task.task_id,
                 )
                 session.add(record)
                 await session.commit()
-            logger.info("[图片任务器] 记录已异步写入数据库: status=%s", task.status)
+            logger.info("[图片任务器] 记录已异步写入数据库: task_id=%s", task.task_id)
         except Exception as e:
             logger.error("[图片任务器] 数据库写入失败: %s", e)
 
-    # ---------- 后台清理协程 ----------
     async def _cleanup_loop(self):
-        """定期清理已完成/失败/取消且超过 TTL 的任务"""
         while True:
             await asyncio.sleep(CLEANUP_INTERVAL_SEC)
             try:
@@ -270,26 +237,20 @@ class ImagePollerManager:
                             removed.append(key)
                     for key in removed:
                         del self._tasks[key]
-
                 if removed:
                     logger.info("[图片任务器] 已清理 %s 个过期任务缓存", len(removed))
             except Exception as e:
                 logger.error("[图片任务器] 清理协程异常: %s", e)
 
-    # ---------- 优雅关闭 ----------
     async def shutdown(self):
-        """服务关闭时：取消所有进行中的生成任务"""
         async with self._lock:
             for key, task in self._tasks.items():
                 if task._gen_task and not task._gen_task.done():
                     task._gen_task.cancel()
-
         if self._cleanup_task and not self._cleanup_task.done():
             self._cleanup_task.cancel()
-
         self._started = False
         logger.info("[图片任务器] 已关闭所有后台任务")
 
 
-# 全局单例
 image_poller_manager = ImagePollerManager()

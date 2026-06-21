@@ -32,7 +32,9 @@ from sqlalchemy import desc, func
 
 from app.core.database import get_async_db, async_session
 from app.core.config import settings
+from app.core.security import get_current_user_optional
 from app.models.chat import ChatSession, ChatMessage
+from app.models.user import User
 from app.services.chat_service import chat_service
 from app.services.agnes_client import agnes_client
 from app.services.image_poller import image_poller_manager
@@ -158,15 +160,17 @@ async def _refresh_message_media_items(messages: List[ChatMessage], db: AsyncSes
 async def create_session(
     req: CreateSessionRequest = None,
     db: AsyncSession = Depends(get_async_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
-    """创建一个新的聊天会话"""
+    """创建一个新的聊天会话（登录用户的会话会绑定 user_id）"""
     session = ChatSession(
         title=req.title if req and req.title else "新对话",
+        user_id=current_user.id if current_user else None,
     )
     db.add(session)
     await db.commit()
     await db.refresh(session)
-    logger.info("[Chat] 创建会话: id=%s, title=%s", session.id, session.title)
+    logger.info("[Chat] 创建会话: id=%s, title=%s, user_id=%s", session.id, session.title, session.user_id)
     return session.to_dict()
 
 
@@ -175,15 +179,26 @@ async def list_sessions(
     page: int = 1,
     page_size: int = 20,
     db: AsyncSession = Depends(get_async_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
-    """获取会话列表，按更新时间倒序"""
+    """获取会话列表（按用户隔离）：未登录用户只能看到未绑定任何用户的匿名会话"""
+    # 构造过滤条件：登录用户只看自己；未登录用户看 user_id 为 NULL 的记录
+    stmt = select(ChatSession)
+    count_stmt = select(func.count()).select_from(ChatSession)
+    if current_user:
+        stmt = stmt.filter(ChatSession.user_id == current_user.id)
+        count_stmt = count_stmt.filter(ChatSession.user_id == current_user.id)
+    else:
+        stmt = stmt.filter(ChatSession.user_id.is_(None))
+        count_stmt = count_stmt.filter(ChatSession.user_id.is_(None))
+
     # 总数
-    count_result = await db.execute(select(func.count()).select_from(ChatSession))
+    count_result = await db.execute(count_stmt)
     total = count_result.scalar_one() or 0
 
     # 分页查询
     stmt = (
-        select(ChatSession)
+        stmt
         .order_by(desc(ChatSession.updated_at))
         .offset((page - 1) * page_size)
         .limit(page_size)
@@ -203,11 +218,15 @@ async def list_sessions(
 async def get_session(
     session_id: int,
     db: AsyncSession = Depends(get_async_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
-    """获取会话详情，包含所有消息"""
-    result = await db.execute(
-        select(ChatSession).filter(ChatSession.id == session_id)
-    )
+    """获取会话详情，包含所有消息（按用户隔离）"""
+    stmt = select(ChatSession).filter(ChatSession.id == session_id)
+    if current_user:
+        stmt = stmt.filter(ChatSession.user_id == current_user.id)
+    else:
+        stmt = stmt.filter(ChatSession.user_id.is_(None))
+    result = await db.execute(stmt)
     session = result.scalar_one_or_none()
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
@@ -220,11 +239,15 @@ async def update_session(
     session_id: int,
     req: UpdateSessionRequest,
     db: AsyncSession = Depends(get_async_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
-    """修改会话的标题"""
-    result = await db.execute(
-        select(ChatSession).filter(ChatSession.id == session_id)
-    )
+    """修改会话的标题（按用户隔离）"""
+    stmt = select(ChatSession).filter(ChatSession.id == session_id)
+    if current_user:
+        stmt = stmt.filter(ChatSession.user_id == current_user.id)
+    else:
+        stmt = stmt.filter(ChatSession.user_id.is_(None))
+    result = await db.execute(stmt)
     session = result.scalar_one_or_none()
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
@@ -241,12 +264,16 @@ async def update_session(
 async def summarize_session(
     session_id: int,
     db: AsyncSession = Depends(get_async_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
-    """使用 AI 分析对话内容，自动生成一个有意义的会话标题"""
-    # 检查会话是否存在
-    result = await db.execute(
-        select(ChatSession).filter(ChatSession.id == session_id)
-    )
+    """使用 AI 分析对话内容，自动生成一个有意义的会话标题（按用户隔离）"""
+    # 检查会话是否存在并且属于当前用户
+    stmt = select(ChatSession).filter(ChatSession.id == session_id)
+    if current_user:
+        stmt = stmt.filter(ChatSession.user_id == current_user.id)
+    else:
+        stmt = stmt.filter(ChatSession.user_id.is_(None))
+    result = await db.execute(stmt)
     session = result.scalar_one_or_none()
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
@@ -268,7 +295,6 @@ async def summarize_session(
         summary_title = await chat_service.summarize_session_title(messages)
     except Exception as e:
         logger.warning("[Chat] AI 总结标题失败，使用降级方案: %s", e)
-        # 降级方案：取第一条用户消息的前 30 字
         first_user_msg = next((m for m in messages if m.role == "user"), None)
         summary_title = (first_user_msg.content[:30] + "..." if first_user_msg and first_user_msg.content and len(first_user_msg.content) > 30
                          else (first_user_msg.content if first_user_msg else "新对话"))
@@ -286,11 +312,15 @@ async def summarize_session(
 async def delete_session(
     session_id: int,
     db: AsyncSession = Depends(get_async_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
-    """删除会话及其所有消息"""
-    result = await db.execute(
-        select(ChatSession).filter(ChatSession.id == session_id)
-    )
+    """删除会话及其所有消息（按用户隔离）"""
+    stmt = select(ChatSession).filter(ChatSession.id == session_id)
+    if current_user:
+        stmt = stmt.filter(ChatSession.user_id == current_user.id)
+    else:
+        stmt = stmt.filter(ChatSession.user_id.is_(None))
+    result = await db.execute(stmt)
     session = result.scalar_one_or_none()
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
@@ -309,12 +339,16 @@ async def delete_session(
 async def get_messages(
     session_id: int,
     db: AsyncSession = Depends(get_async_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
-    """获取指定会话的所有消息"""
-    # 检查会话是否存在
-    result = await db.execute(
-        select(ChatSession).filter(ChatSession.id == session_id)
-    )
+    """获取指定会话的所有消息（按用户隔离）"""
+    # 检查会话是否存在且属于当前用户
+    stmt = select(ChatSession).filter(ChatSession.id == session_id)
+    if current_user:
+        stmt = stmt.filter(ChatSession.user_id == current_user.id)
+    else:
+        stmt = stmt.filter(ChatSession.user_id.is_(None))
+    result = await db.execute(stmt)
     session = result.scalar_one_or_none()
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
@@ -337,9 +371,10 @@ async def send_message(
     session_id: int,
     req: SendMessageRequest,
     db: AsyncSession = Depends(get_async_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """
-    发送消息并获取 AI 流式回复（SSE）。
+    发送消息并获取 AI 流式回复（SSE，按用户隔离）。
 
     SSE 事件格式（每行以 "data: " 开头）：
     - {"type": "user_message", "message": {...}} — 用户消息已保存
@@ -356,10 +391,13 @@ async def send_message(
             detail="Agnes AI API Key 未配置，请在前端「配置管理」页面添加 Provider",
         )
 
-    # 检查会话是否存在
-    result = await db.execute(
-        select(ChatSession).filter(ChatSession.id == session_id)
-    )
+    # 检查会话是否存在且属于当前用户
+    stmt = select(ChatSession).filter(ChatSession.id == session_id)
+    if current_user:
+        stmt = stmt.filter(ChatSession.user_id == current_user.id)
+    else:
+        stmt = stmt.filter(ChatSession.user_id.is_(None))
+    result = await db.execute(stmt)
     session = result.scalar_one_or_none()
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")

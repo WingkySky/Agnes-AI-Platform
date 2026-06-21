@@ -10,3 +10,6 @@ aiosqlite>=0.20.0  # SQLite 异步驱动（用于 AsyncSession）
 greenlet>=3.0.0    # SQLAlchemy async 内部依赖（协程切换）
 # API Key 加密存储
 cryptography>=42.0.0  # Fernet 对称加密（用于加密 Provider 的 api_key）
+# 用户认证与 JWT
+PyJWT>=2.8.0           # JSON Web Token 生成与验证
+bcrypt>=4.1.0          # 密码哈希（替代 passlib，更轻量）

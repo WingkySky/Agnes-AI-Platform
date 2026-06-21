@@ -29,7 +29,9 @@ from sqlalchemy.future import select
 from sqlalchemy import desc, func
 
 from app.core.database import get_async_db
+from app.core.security import get_current_user_optional
 from app.models.generation import Generation
+from app.models.user import User
 from app.schemas.common import (
     HistoryListResponse,
     GenerationRecord,
@@ -48,11 +50,18 @@ async def get_history(
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     db: AsyncSession = Depends(get_async_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """
-    分页获取生成历史记录（异步查询，不阻塞事件循环），按创建时间倒序排列。
+    分页获取生成历史记录（按用户隔离，异步查询，不阻塞事件循环），按创建时间倒序排列。
     """
     stmt = select(Generation)
+
+    # --- 用户隔离：只返回当前用户的记录 ---
+    if current_user:
+        stmt = stmt.filter(Generation.user_id == current_user.id)
+    else:
+        stmt = stmt.filter(Generation.user_id.is_(None))
 
     if type and type.lower() in ("image", "video"):
         stmt = stmt.filter(Generation.type == type.lower())
@@ -62,9 +71,15 @@ async def get_history(
     count_result = await db.execute(count_stmt)
     total = count_result.scalar_one() or 0
 
-    # 各类型全局计数（不受筛选条件影响，始终返回全量统计）
+    # 各类型全局计数（按用户隔离，不受 type 筛选条件影响）
     img_count_stmt = select(func.count()).filter(Generation.type == "image")
     vid_count_stmt = select(func.count()).filter(Generation.type == "video")
+    if current_user:
+        img_count_stmt = img_count_stmt.filter(Generation.user_id == current_user.id)
+        vid_count_stmt = vid_count_stmt.filter(Generation.user_id == current_user.id)
+    else:
+        img_count_stmt = img_count_stmt.filter(Generation.user_id.is_(None))
+        vid_count_stmt = vid_count_stmt.filter(Generation.user_id.is_(None))
     img_count_result = await db.execute(img_count_stmt)
     vid_count_result = await db.execute(vid_count_stmt)
     total_image_count = img_count_result.scalar_one() or 0
@@ -106,13 +121,20 @@ async def get_history(
 
 
 @router.delete("/history/{record_id}", response_model=DeleteResponse, summary="删除单条历史记录")
-async def delete_history_record(record_id: int, db: AsyncSession = Depends(get_async_db)):
+async def delete_history_record(
+    record_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
     """
-    根据 ID 删除一条生成历史记录（异步操作，不阻塞事件循环）。
+    根据 ID 删除一条生成历史记录（按用户隔离，异步操作，不阻塞事件循环）。
     """
-    result = await db.execute(
-        select(Generation).filter(Generation.id == record_id)
-    )
+    stmt = select(Generation).filter(Generation.id == record_id)
+    if current_user:
+        stmt = stmt.filter(Generation.user_id == current_user.id)
+    else:
+        stmt = stmt.filter(Generation.user_id.is_(None))
+    result = await db.execute(stmt)
     record = result.scalar_one_or_none()
 
     if not record:
@@ -134,10 +156,11 @@ async def delete_history_record(record_id: int, db: AsyncSession = Depends(get_a
 async def batch_delete_history(
     body: BatchDeleteRequest,
     db: AsyncSession = Depends(get_async_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """
-    根据 ID 列表批量删除多条生成历史记录（异步事务操作）。
-    即使部分 ID 不存在，也会尽量删除能查到的记录。
+    根据 ID 列表批量删除多条生成历史记录（按用户隔离，异步事务操作）。
+    即使部分 ID 不属于当前用户，也会被忽略。
     """
     ids = body.ids or []
     if not ids:
@@ -147,10 +170,13 @@ async def batch_delete_history(
     unique_ids = list(set(ids))
 
     try:
-        # 查询所有待删除记录
-        result = await db.execute(
-            select(Generation).filter(Generation.id.in_(unique_ids))
-        )
+        # 查询所有待删除记录（按用户隔离）
+        stmt = select(Generation).filter(Generation.id.in_(unique_ids))
+        if current_user:
+            stmt = stmt.filter(Generation.user_id == current_user.id)
+        else:
+            stmt = stmt.filter(Generation.user_id.is_(None))
+        result = await db.execute(stmt)
         records = result.scalars().all()
 
         deleted_ids = []
@@ -162,7 +188,7 @@ async def batch_delete_history(
 
         await db.commit()
 
-        # 计算失败（未找到）的 ID
+        # 计算失败（未找到或不属于当前用户）的 ID
         failed_ids = [rid for rid in unique_ids if rid not in deleted_ids]
 
         logger.info(
@@ -194,9 +220,10 @@ async def batch_delete_history(
 async def batch_download_files(
     ids: str = Query(..., description="记录 ID 列表，逗号分隔"),
     db: AsyncSession = Depends(get_async_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """
-    批量下载图片/视频，打包为 zip 文件。
+    批量下载图片/视频，打包为 zip 文件（按用户隔离）。
 
     参数：
     - ids: 逗号分隔的记录 ID 列表（如 "1,2,3"）
@@ -218,10 +245,13 @@ async def batch_download_files(
     if len(id_list) > 100:
         raise HTTPException(status_code=400, detail="单次最多下载 100 个文件")
 
-    # 查询所有选中记录
-    result = await db.execute(
-        select(Generation).filter(Generation.id.in_(id_list))
-    )
+    # 查询所有选中记录（按用户隔离）
+    stmt = select(Generation).filter(Generation.id.in_(id_list))
+    if current_user:
+        stmt = stmt.filter(Generation.user_id == current_user.id)
+    else:
+        stmt = stmt.filter(Generation.user_id.is_(None))
+    result = await db.execute(stmt)
     records = result.scalars().all()
 
     if not records:
@@ -292,9 +322,13 @@ async def batch_download_files(
 
 
 @router.get("/history/{record_id}/download", summary="下载文件（图片/视频，强制保存到本地）")
-async def download_file(record_id: int, db: AsyncSession = Depends(get_async_db)):
+async def download_file(
+    record_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
     """
-    通过后端代理下载图片或视频文件。
+    通过后端代理下载图片或视频文件（按用户隔离）。
 
     解决的问题：
     - 前端直接 fetch 远程 URL 会因 CORS 被拦截
@@ -305,10 +339,13 @@ async def download_file(record_id: int, db: AsyncSession = Depends(get_async_db)
     - 图片（image）：下载为 .png 文件
     - 视频（video）：下载为 .mp4 文件
     """
-    # 查询记录
-    result = await db.execute(
-        select(Generation).filter(Generation.id == record_id)
-    )
+    # 查询记录（按用户隔离）
+    stmt = select(Generation).filter(Generation.id == record_id)
+    if current_user:
+        stmt = stmt.filter(Generation.user_id == current_user.id)
+    else:
+        stmt = stmt.filter(Generation.user_id.is_(None))
+    result = await db.execute(stmt)
     record = result.scalar_one_or_none()
 
     if not record:
@@ -461,9 +498,14 @@ async def download_by_url(
 
 
 @router.get("/history/video/{record_id}/stream", summary="视频流代理（支持 Range + CORS）")
-async def stream_video(request: Request, record_id: int, db: AsyncSession = Depends(get_async_db)):
+async def stream_video(
+    request: Request,
+    record_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
     """
-    代理播放历史视频资源。
+    代理播放历史视频资源（按用户隔离）。
 
     当前端直接访问 Google Storage 视频 URL 时，会遇到：
     1. CORS 缺少 Access-Control-Allow-Origin 头
@@ -475,10 +517,13 @@ async def stream_video(request: Request, record_id: int, db: AsyncSession = Depe
     - 正确返回 Content-Range / Content-Length，确保浏览器可正常播放和拖动
     - 以流式传输避免大文件内存占用
     """
-    # 查询视频记录
-    result = await db.execute(
-        select(Generation).filter(Generation.id == record_id)
-    )
+    # 查询视频记录（按用户隔离）
+    stmt = select(Generation).filter(Generation.id == record_id)
+    if current_user:
+        stmt = stmt.filter(Generation.user_id == current_user.id)
+    else:
+        stmt = stmt.filter(Generation.user_id.is_(None))
+    result = await db.execute(stmt)
     record = result.scalar_one_or_none()
 
     if not record:
@@ -729,15 +774,22 @@ async def _extract_gif_with_ffmpeg(input_path: str, output_path: str, duration: 
 
 
 @router.get("/history/video/{record_id}/thumbnail", summary="视频首帧缩略图")
-async def get_video_thumbnail(record_id: int, db: AsyncSession = Depends(get_async_db)):
+async def get_video_thumbnail(
+    record_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
     """
-    提取视频首帧作为缩略图（JPEG 格式）。
+    提取视频首帧作为缩略图（JPEG 格式，按用户隔离）。
     使用文件缓存，同一视频只提取一次。
     """
-    # 查询视频记录
-    result = await db.execute(
-        select(Generation).filter(Generation.id == record_id)
-    )
+    # 查询视频记录（按用户隔离）
+    stmt = select(Generation).filter(Generation.id == record_id)
+    if current_user:
+        stmt = stmt.filter(Generation.user_id == current_user.id)
+    else:
+        stmt = stmt.filter(Generation.user_id.is_(None))
+    result = await db.execute(stmt)
     record = result.scalar_one_or_none()
 
     if not record:
@@ -791,15 +843,22 @@ async def get_video_thumbnail(record_id: int, db: AsyncSession = Depends(get_asy
 
 
 @router.get("/history/video/{record_id}/preview", summary="视频预览 GIF（悬停效果）")
-async def get_video_preview(record_id: int, db: AsyncSession = Depends(get_async_db)):
+async def get_video_preview(
+    record_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
     """
-    生成视频前 3 秒的 GIF 预览，用于鼠标悬停时的动态效果。
+    生成视频前 3 秒的 GIF 预览（按用户隔离），用于鼠标悬停时的动态效果。
     使用文件缓存，同一视频只生成一次。
     """
-    # 查询视频记录
-    result = await db.execute(
-        select(Generation).filter(Generation.id == record_id)
-    )
+    # 查询视频记录（按用户隔离）
+    stmt = select(Generation).filter(Generation.id == record_id)
+    if current_user:
+        stmt = stmt.filter(Generation.user_id == current_user.id)
+    else:
+        stmt = stmt.filter(Generation.user_id.is_(None))
+    result = await db.execute(stmt)
     record = result.scalar_one_or_none()
 
     if not record:

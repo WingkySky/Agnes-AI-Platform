@@ -71,6 +71,20 @@ class Settings(BaseSettings):
     video_poll_interval_sec: int = Field(default=5, description="视频任务轮询间隔（秒）")
     video_poll_timeout_sec: int = Field(default=600, description="视频任务轮询超时（秒）")
 
+    # ---------- JWT 与用户认证 ----------
+    jwt_secret: str = Field(
+        default="change-me-please-this-is-not-secure",
+        description="JWT 签名密钥（生产环境请务必修改为随机字符串）",
+    )
+    jwt_access_token_expire_minutes: int = Field(
+        default=60 * 24 * 7,
+        description="JWT access token 默认有效期（分钟），默认 7 天",
+    )
+    new_user_default_credits: int = Field(
+        default=500,
+        description="新注册用户默认赠送的积分",
+    )
+
     # ---------- 日志配置 ----------
     log_level: str = Field(
         default="INFO",
