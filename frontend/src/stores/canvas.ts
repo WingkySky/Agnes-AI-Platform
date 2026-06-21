@@ -10,6 +10,7 @@
 import { defineStore } from 'pinia'
 import { canvasThemes } from '@/lib/canvas-theme'
 import { loadCanvas, saveCanvas, switchCanvasUser } from '@/lib/canvas-storage'
+import { useThemeStore } from './theme'
 
 // ---------- 本地类型定义 ----------
 
@@ -502,9 +503,20 @@ export const useCanvasStore = defineStore('canvas', {
   actions: {
     // ==================== 主题 ====================
 
-    /** 切换主题模式：'dark' | 'light' */
+    /** 切换主题模式：'dark' | 'light'（同步联动全局主题，保证标题栏/页脚一起切换） */
     setThemeMode(mode: 'dark' | 'light'): void {
       if (mode === 'dark' || mode === 'light') {
+        this.themeMode = mode
+        saveCanvas(this)
+        // 联动全局主题 store：同步切换 <html> class 和 Element Plus 主题
+        // 这样标题栏、页脚、Element Plus 组件都会跟着画布一起变深/变浅
+        useThemeStore().setMode(mode)
+      }
+    },
+
+    /** 从全局主题同步到画布（仅更新画布内部状态，不反向调用 theme store，避免循环） */
+    syncFromGlobalTheme(mode: 'dark' | 'light'): void {
+      if ((mode === 'dark' || mode === 'light') && this.themeMode !== mode) {
         this.themeMode = mode
         saveCanvas(this)
       }
@@ -1235,9 +1247,8 @@ export const useCanvasStore = defineStore('canvas', {
         if (data && typeof data === 'object') {
           if (Array.isArray(data.workspaces)) this.workspaces = data.workspaces as CanvasWorkspace[]
           if ('activeWorkspaceId' in data) this.activeWorkspaceId = data.activeWorkspaceId as string | null
-          if (data.themeMode === 'dark' || data.themeMode === 'light') {
-            this.themeMode = data.themeMode
-          }
+          // themeMode 不从 localforage 恢复：全局主题 store（localStorage）是唯一真相源，
+          // 由 App.vue 的 watch(immediate) 同步过来，避免 localforage 旧值覆盖全局主题
           if (['dots', 'lines', 'blank'].includes(data.backgroundMode as string)) {
             this.backgroundMode = data.backgroundMode as 'dots' | 'lines' | 'blank'
           }

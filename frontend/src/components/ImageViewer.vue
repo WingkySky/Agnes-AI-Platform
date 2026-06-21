@@ -393,7 +393,7 @@ function handleDownload() {
 .image-viewer-mask {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.85);
+  background: var(--viewer-overlay-bg);
   z-index: 3000;
   display: flex;
   flex-direction: column;
@@ -403,7 +403,7 @@ function handleDownload() {
   user-select: none;
 }
 
-/* 顶部栏 */
+/* 顶部栏：图片查看器始终保持深色沉浸式风格，不跟随主题切换 */
 .viewer-top-bar {
   position: absolute;
   top: 0;
@@ -414,22 +414,22 @@ function handleDownload() {
   align-items: center;
   justify-content: space-between;
   padding: 0 24px;
-  color: #e8eef7;
-  background: linear-gradient(180deg, rgba(0, 0, 0, 0.45), transparent);
+  color: var(--viewer-text);
+  background: var(--viewer-top-bar-gradient);
   z-index: 2;
 }
 .viewer-title {
   font-size: 15px;
   font-weight: 500;
-  color: #aac5ea;
+  color: var(--viewer-text-muted);
 }
 .viewer-close-btn {
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  color: #fff;
+  background: var(--viewer-close-bg);
+  border: 1px solid var(--viewer-close-border);
+  color: var(--viewer-close-text);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -437,8 +437,8 @@ function handleDownload() {
   transition: all 0.2s ease;
 }
 .viewer-close-btn:hover {
-  background: rgba(255, 140, 140, 0.2);
-  border-color: rgba(255, 150, 150, 0.4);
+  background: var(--viewer-close-hover-bg);
+  border-color: var(--viewer-close-hover-border);
 }
 
 /* 中间舞台：可滚动 / 拖动的区域 */
@@ -464,10 +464,10 @@ function handleDownload() {
   display: block;
   transform-origin: center center;
   will-change: transform;
-  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--viewer-img-shadow);
   border-radius: 4px;
   pointer-events: auto;
-  background: #000;
+  background: var(--agnes-bg-dark-surface);
 }
 
 /* 加载失败 */
@@ -476,11 +476,11 @@ function handleDownload() {
   flex-direction: column;
   align-items: center;
   gap: 10px;
-  color: #ffa5ad;
+  color: var(--viewer-danger);
   font-size: 14px;
 }
 
-/* 底部工具栏 */
+/* 底部工具栏：图片查看器始终保持深色沉浸式风格，不跟随主题切换 */
 .viewer-toolbar {
   position: absolute;
   bottom: 20px;
@@ -490,11 +490,11 @@ function handleDownload() {
   align-items: center;
   gap: 20px;
   padding: 8px 16px;
-  background: rgba(20, 30, 50, 0.85);
-  border: 1px solid rgba(120, 170, 255, 0.25);
+  background: var(--viewer-toolbar-bg);
+  border: 1px solid var(--viewer-border);
   border-radius: 14px;
   backdrop-filter: blur(8px);
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--viewer-shadow);
   z-index: 2;
   max-width: calc(100vw - 40px);
   flex-wrap: wrap;
@@ -504,18 +504,18 @@ function handleDownload() {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #aac5ea;
+  color: var(--viewer-text-muted);
   font-size: 13px;
   font-family: 'SF Mono', Menlo, monospace;
   min-width: 80px;
 }
 .zoom-value {
-  color: #fff;
+  color: var(--viewer-btn-hover);
   font-weight: 600;
   font-size: 14px;
 }
 .rotate-value {
-  color: #aac5ea;
+  color: var(--viewer-text-muted);
   font-size: 12px;
 }
 
@@ -533,21 +533,21 @@ function handleDownload() {
   border-radius: 8px;
   background: transparent;
   border: 1px solid transparent;
-  color: #c5d5ea;
+  color: var(--viewer-btn);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 .viewer-btn:hover {
-  background: rgba(120, 170, 255, 0.15);
-  border-color: rgba(120, 170, 255, 0.3);
-  color: #fff;
+  background: var(--viewer-btn-hover-bg);
+  border-color: var(--viewer-btn-hover-border);
+  color: var(--viewer-btn-hover);
 }
 .viewer-btn-primary {
-  color: #8bb0ff;
+  color: var(--viewer-btn-primary);
 }
 .viewer-btn-primary:hover {
-  background: rgba(120, 170, 255, 0.25);
-  color: #fff;
+  background: var(--viewer-btn-primary-hover-bg);
+  color: var(--viewer-btn-hover);
 }
 .btn-divider {
   width: 1px;
@@ -557,7 +557,7 @@ function handleDownload() {
 }
 
 .viewer-hint {
-  color: #6b84aa;
+  color: var(--viewer-divider);
   font-size: 12px;
 }
 

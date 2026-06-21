@@ -184,29 +184,29 @@ onMounted(fetchRules)
 }
 .page-head h2 {
   margin: 0 0 4px;
-  color: #e8eef7;
+  color: var(--agnes-text-primary);
   font-size: 20px;
 }
 .muted {
-  color: #8ba3c9;
+  color: var(--agnes-text-muted);
   font-size: 13px;
   margin: 0;
 }
 .rules-card {
-  background: rgba(15, 22, 38, 0.6);
-  border: 1px solid rgba(100, 150, 220, 0.15);
+  background: var(--agnes-bg-elevated);
+  border: 1px solid var(--agnes-border);
   border-radius: 10px;
 }
 :deep(.el-table) {
   background: transparent;
 }
 :deep(.el-table th.el-table__cell) {
-  background-color: rgba(25, 35, 55, 0.8);
-  color: #a0b4d6;
+  background-color: var(--agnes-bg-hover);
+  color: var(--agnes-text-secondary);
 }
 .rule-key {
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-  color: #a5b4fc;
+  color: var(--agnes-text-secondary);
   font-size: 13px;
   word-break: break-all;
 }
@@ -214,9 +214,9 @@ onMounted(fetchRules)
   margin-top: 4px;
 }
 :deep(.el-table th.el-table__cell) {
-  background: rgba(25, 35, 55, 0.8);
+  background: var(--agnes-bg-hover);
 }
 :deep(.el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell) {
-  background: rgba(20, 30, 50, 0.4);
+  background: var(--agnes-bg-hover);
 }
 </style>

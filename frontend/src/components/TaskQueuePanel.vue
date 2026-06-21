@@ -46,7 +46,7 @@
         <div class="panel-list" ref="listRef">
           <template v-if="filteredTasks.length === 0">
             <div class="empty-state">
-              <div class="empty-icon">✨</div>
+              <el-icon class="empty-icon"><MagicStick /></el-icon>
               <div class="empty-text">{{ emptyLabel }}</div>
             </div>
           </template>
@@ -91,6 +91,7 @@
 // ------ 国际化：引入 i18n composable ------
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { MagicStick } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import TaskCard from './TaskCard.vue'
 import { useTaskQueueStore } from '@/stores/taskQueue'
@@ -177,21 +178,21 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   padding: 12px 18px;
-  background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
-  color: white;
+  background: linear-gradient(135deg, var(--agnes-primary) 0%, var(--agnes-accent) 100%);
+  color: var(--agnes-text-primary);
   border: none;
   border-radius: 50px;
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  box-shadow: 0 6px 24px rgba(59, 130, 246, 0.4), 0 2px 8px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 6px 24px var(--agnes-primary-border), 0 2px 8px rgba(0, 0, 0, 0.3);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
 }
 
 .floating-btn:hover {
   transform: translateY(-2px) scale(1.02);
-  box-shadow: 0 8px 32px rgba(59, 130, 246, 0.5), 0 4px 12px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 8px 32px var(--agnes-primary-border), 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
 .floating-btn:active {
@@ -203,8 +204,8 @@ onMounted(() => {
 }
 
 @keyframes glow-pulse {
-  0%, 100% { box-shadow: 0 6px 24px rgba(59, 130, 246, 0.4); }
-  50% { box-shadow: 0 6px 32px rgba(139, 92, 246, 0.6); }
+  0%, 100% { box-shadow: 0 6px 24px var(--agnes-primary-border); }
+  50% { box-shadow: 0 6px 32px var(--agnes-accent-soft); }
 }
 
 .btn-icon {
@@ -218,7 +219,7 @@ onMounted(() => {
   min-width: 22px;
   height: 22px;
   padding: 0 6px;
-  background: #ef4444;
+  background: var(--agnes-error);
   color: white;
   border-radius: 11px;
   font-size: 12px;
@@ -226,19 +227,19 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.4);
+  box-shadow: 0 2px 8px var(--agnes-error-border);
 }
 
 /* 展开面板 */
 .panel-content {
   width: 380px;
   max-height: 500px;
-  background: rgba(15, 23, 42, 0.95);
-  border: 1px solid rgba(120, 170, 255, 0.2);
+  background: var(--agnes-bg-elevated);
+  border: 1px solid var(--agnes-info-bg);
   border-radius: 16px;
   overflow: hidden;
   backdrop-filter: blur(16px);
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(120, 170, 255, 0.1);
+  box-shadow: 0 12px 48px var(--agnes-overlay-bg), 0 0 0 1px var(--agnes-nav-hover-bg);
   display: flex;
   flex-direction: column;
 }
@@ -260,7 +261,7 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 14px 18px;
-  border-bottom: 1px solid rgba(120, 170, 255, 0.15);
+  border-bottom: 1px solid var(--agnes-info-bg);
 }
 
 .panel-title {
@@ -269,7 +270,7 @@ onMounted(() => {
   gap: 8px;
   font-size: 15px;
   font-weight: 600;
-  color: #e2e8f0;
+  color: var(--agnes-text-primary);
 }
 
 .title-icon {
@@ -279,8 +280,8 @@ onMounted(() => {
 .running-badge {
   font-size: 11px;
   padding: 2px 8px;
-  background: rgba(96, 165, 250, 0.2);
-  color: #93c5fd;
+  background: var(--agnes-info-bg);
+  color: var(--agnes-primary-soft);
   border-radius: 10px;
   font-weight: 500;
 }
@@ -288,7 +289,7 @@ onMounted(() => {
 .close-btn {
   background: transparent;
   border: none;
-  color: #8ba3c9;
+  color: var(--agnes-text-muted);
   font-size: 14px;
   cursor: pointer;
   padding: 4px 8px;
@@ -297,8 +298,8 @@ onMounted(() => {
 }
 
 .close-btn:hover {
-  background: rgba(248, 113, 113, 0.15);
-  color: #f87171;
+  background: var(--agnes-error-bg);
+  color: var(--agnes-error);
 }
 
 /* Tab 切换 */
@@ -306,8 +307,8 @@ onMounted(() => {
   display: flex;
   gap: 4px;
   padding: 8px 12px;
-  background: rgba(15, 23, 42, 0.6);
-  border-bottom: 1px solid rgba(120, 170, 255, 0.1);
+  background: var(--agnes-bg-elevated);
+  border-bottom: 1px solid var(--agnes-nav-hover-bg);
 }
 
 .tab-btn {
@@ -315,7 +316,7 @@ onMounted(() => {
   padding: 8px 12px;
   background: transparent;
   border: none;
-  color: #8ba3c9;
+  color: var(--agnes-text-muted);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
@@ -328,19 +329,19 @@ onMounted(() => {
 }
 
 .tab-btn:hover {
-  background: rgba(120, 170, 255, 0.08);
-  color: #d5e3f7;
+  background: var(--agnes-nav-hover-bg);
+  color: var(--agnes-text-primary);
 }
 
 .tab-btn.active {
-  background: rgba(59, 130, 246, 0.2);
-  color: #93c5fd;
+  background: var(--agnes-info-bg);
+  color: var(--agnes-primary-soft);
 }
 
 .tab-count {
   font-size: 11px;
   padding: 1px 6px;
-  background: rgba(120, 170, 255, 0.15);
+  background: var(--agnes-info-bg);
   border-radius: 10px;
   min-width: 18px;
   text-align: center;
@@ -367,12 +368,12 @@ onMounted(() => {
 }
 
 .panel-list::-webkit-scrollbar-thumb {
-  background: rgba(120, 170, 255, 0.2);
+  background: var(--agnes-info-bg);
   border-radius: 3px;
 }
 
 .panel-list::-webkit-scrollbar-thumb:hover {
-  background: rgba(120, 170, 255, 0.3);
+  background: var(--agnes-info-bg);
 }
 
 /* 空状态 */
@@ -383,7 +384,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   padding: 40px 20px;
-  color: #6b84aa;
+  color: var(--agnes-text-faint);
 }
 
 .empty-icon {
@@ -401,9 +402,9 @@ onMounted(() => {
   padding: 10px 18px;
   text-align: center;
   font-size: 11px;
-  color: #6b84aa;
-  border-top: 1px solid rgba(120, 170, 255, 0.1);
-  background: rgba(10, 15, 30, 0.5);
+  color: var(--agnes-text-faint);
+  border-top: 1px solid var(--agnes-nav-hover-bg);
+  background: var(--agnes-bg-inset);
 }
 
 /* 响应式：小屏幕时缩小面板 */

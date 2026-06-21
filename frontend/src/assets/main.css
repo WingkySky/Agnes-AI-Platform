@@ -1,16 +1,171 @@
 /* =====================================================
  * 全局自定义样式（在 Element Plus 基础样式之上叠加）
- * - 深色主题全局变量
+ * - 深色 / 浅色两套 CSS 变量（通过 <html>.dark / .light 切换）
  * - 通用卡片/按钮/表单美化
  * ===================================================== */
 
-:root {
+/* ---------- 深色主题变量（默认） ---------- */
+:root,
+:root.dark {
   --agnes-primary: #6b9cff;
   --agnes-primary-hover: #85b2ff;
   --agnes-accent: #a78bff;
+
+  /* 背景层 */
+  --agnes-bg-base: #0b0f1a;
+  --agnes-bg-gradient-1: #0b0f1a;
+  --agnes-bg-gradient-2: #101827;
+  --agnes-bg-elevated: rgba(15, 22, 38, 0.75);     /* 标题栏 / 浮层 */
   --agnes-bg-card: rgba(22, 32, 54, 0.7);
-  --agnes-border: rgba(120, 170, 230, 0.2);
+  --agnes-bg-inset: rgba(20, 30, 50, 0.55);        /* 导航条内嵌背景 */
+  --agnes-bg-input: rgba(15, 24, 42, 0.7);
+  --agnes-bg-chip: rgba(20, 30, 50, 0.7);
+  --agnes-bg-hover: rgba(30, 45, 75, 0.8);
+
+  /* 文字 */
+  --agnes-text-primary: #e8eef7;
+  --agnes-text-secondary: #a0b4d6;
   --agnes-text-muted: #8ba3c9;
+  --agnes-text-faint: #6b84aa;
+
+  /* 边框 */
+  --agnes-border: rgba(120, 170, 230, 0.2);
+  --agnes-border-strong: rgba(100, 150, 220, 0.18);
+  --agnes-border-faint: rgba(120, 150, 225, 0.1);
+
+  /* 滚动条 */
+  --agnes-scrollbar-track: #0e1422;
+  --agnes-scrollbar-thumb: #2a3b5e;
+  --agnes-scrollbar-thumb-hover: #3d5282;
+
+  /* 阴影 */
+  --agnes-shadow-card: 0 4px 24px rgba(0, 0, 0, 0.25);
+
+  /* 品牌渐变文字 */
+  --agnes-brand-gradient: linear-gradient(90deg, #a0d4ff 0%, #c9b3ff 100%);
+
+  /* 导航激活态 */
+  --agnes-nav-active-bg: linear-gradient(135deg, rgba(80, 140, 255, 0.3) 0%, rgba(160, 120, 255, 0.3) 100%);
+  --agnes-nav-active-shadow: 0 0 20px rgba(100, 150, 255, 0.18);
+  --agnes-nav-hover-bg: rgba(120, 170, 255, 0.08);
+
+  /* 功能状态色（深色背景上的浅色调） */
+  --agnes-success: #2ee58c;
+  --agnes-success-bg: rgba(46, 229, 140, 0.18);
+  --agnes-success-border: rgba(46, 229, 140, 0.4);
+  --agnes-error: #ff7b7b;
+  --agnes-error-bg: rgba(255, 123, 123, 0.18);
+  --agnes-error-border: rgba(255, 123, 123, 0.4);
+  --agnes-warning: #ffb86b;
+  --agnes-warning-bg: rgba(255, 184, 107, 0.18);
+  --agnes-warning-border: rgba(255, 184, 107, 0.4);
+  --agnes-info: #ffa56b;
+  --agnes-info-bg: rgba(255, 165, 107, 0.18);
+  --agnes-info-border: rgba(255, 165, 107, 0.4);
+
+  /* 品牌色辅助（浅色调，用于渐变终点、次要图标、半透明边框等） */
+  --agnes-primary-soft: #8bb0ff;
+  --agnes-accent-soft: #c9b3ff;
+  --agnes-brand-glow: rgba(120, 180, 255, 0.45);
+  --agnes-primary-border: rgba(120, 170, 255, 0.35);
+  --agnes-primary-border-faint: rgba(120, 170, 255, 0.15);
+
+  /* 遮罩层（两套主题共用深色遮罩，保证弹窗/预览遮罩一致性） */
+  --agnes-overlay-bg: rgba(0, 0, 0, 0.5);
+  --agnes-overlay-strong: rgba(0, 0, 0, 0.85);
+
+  /* 深色区块（图片/视频预览背景，两套主题共用） */
+  --agnes-bg-dark-surface: #0a0f1c;
+
+  /* 积分 chip 配色（深色背景） */
+  --agnes-credits-text: #ffd28a;
+  --agnes-credits-value: #fff2cf;
+  --agnes-credits-label: rgba(255, 220, 160, 0.7);
+  --agnes-credits-border: rgba(255, 190, 120, 0.3);
+  --agnes-credits-bg: linear-gradient(135deg, rgba(255, 188, 90, 0.18) 0%, rgba(255, 152, 200, 0.12) 100%);
+  --agnes-credits-bg-hover: linear-gradient(135deg, rgba(255, 188, 90, 0.28) 0%, rgba(255, 152, 200, 0.2) 100%);
+}
+
+/* ---------- 浅色主题变量 ---------- */
+/* 文字/主色/边框/阴影均按 WCAG AA 4.5:1 校准，状态色用深色调适配白底 */
+:root.light {
+  --agnes-primary: #2563eb;
+  --agnes-primary-hover: #1d4ed8;
+  --agnes-accent: #7c3aed;
+
+  /* 背景层 */
+  --agnes-bg-base: #f5f7fb;
+  --agnes-bg-gradient-1: #f5f7fb;
+  --agnes-bg-gradient-2: #eaeef6;
+  --agnes-bg-elevated: rgba(255, 255, 255, 0.92);
+  --agnes-bg-card: #ffffff;
+  --agnes-bg-inset: rgba(240, 243, 250, 0.9);
+  --agnes-bg-input: #ffffff;
+  --agnes-bg-chip: rgba(240, 243, 250, 0.95);
+  --agnes-bg-hover: rgba(235, 240, 250, 0.95);
+
+  /* 文字（全部满足 WCAG AA 4.5:1） */
+  --agnes-text-primary: #0f172a;
+  --agnes-text-secondary: #334155;
+  --agnes-text-muted: #475569;
+  --agnes-text-faint: #64748b;
+
+  /* 边框（加深让分隔线在白底可见） */
+  --agnes-border: rgba(30, 50, 90, 0.14);
+  --agnes-border-strong: rgba(30, 50, 90, 0.2);
+  --agnes-border-faint: rgba(30, 50, 90, 0.08);
+
+  /* 滚动条 */
+  --agnes-scrollbar-track: #eef1f6;
+  --agnes-scrollbar-thumb: #c5cdd9;
+  --agnes-scrollbar-thumb-hover: #a8b3c4;
+
+  /* 阴影（加深让卡片在浅色背景上浮起来） */
+  --agnes-shadow-card: 0 4px 16px rgba(30, 50, 90, 0.08), 0 1px 3px rgba(30, 50, 90, 0.06);
+
+  /* 品牌渐变文字（浅色下用饱和度更高的色值） */
+  --agnes-brand-gradient: linear-gradient(90deg, #2563eb 0%, #7c3aed 100%);
+
+  /* 导航激活态 */
+  --agnes-nav-active-bg: linear-gradient(135deg, rgba(37, 99, 235, 0.12) 0%, rgba(124, 58, 237, 0.12) 100%);
+  --agnes-nav-active-shadow: 0 0 16px rgba(37, 99, 235, 0.12);
+  --agnes-nav-hover-bg: rgba(37, 99, 235, 0.06);
+
+  /* 功能状态色（浅色背景上的深色调，满足 4.5:1） */
+  --agnes-success: #16a34a;
+  --agnes-success-bg: rgba(22, 163, 74, 0.12);
+  --agnes-success-border: rgba(22, 163, 74, 0.3);
+  --agnes-error: #dc2626;
+  --agnes-error-bg: rgba(220, 38, 38, 0.1);
+  --agnes-error-border: rgba(220, 38, 38, 0.3);
+  --agnes-warning: #d97706;
+  --agnes-warning-bg: rgba(217, 119, 6, 0.12);
+  --agnes-warning-border: rgba(217, 119, 6, 0.3);
+  --agnes-info: #c2410c;
+  --agnes-info-bg: rgba(194, 65, 12, 0.12);
+  --agnes-info-border: rgba(194, 65, 12, 0.3);
+
+  /* 品牌色辅助（浅色调，用于渐变终点、次要图标、半透明边框等） */
+  --agnes-primary-soft: #60a5fa;
+  --agnes-accent-soft: #a78bfa;
+  --agnes-brand-glow: rgba(100, 150, 255, 0.35);
+  --agnes-primary-border: rgba(37, 99, 235, 0.35);
+  --agnes-primary-border-faint: rgba(37, 99, 235, 0.15);
+
+  /* 遮罩层（两套主题共用深色遮罩，保证弹窗/预览遮罩一致性） */
+  --agnes-overlay-bg: rgba(0, 0, 0, 0.5);
+  --agnes-overlay-strong: rgba(0, 0, 0, 0.85);
+
+  /* 深色区块（图片/视频预览背景，两套主题共用） */
+  --agnes-bg-dark-surface: #0a0f1c;
+
+  /* 积分 chip 配色（浅色下用深色调，保证可读） */
+  --agnes-credits-text: #b45309;
+  --agnes-credits-value: #92400e;
+  --agnes-credits-label: rgba(180, 83, 9, 0.7);
+  --agnes-credits-border: rgba(180, 83, 9, 0.25);
+  --agnes-credits-bg: linear-gradient(135deg, rgba(245, 158, 11, 0.16) 0%, rgba(217, 70, 160, 0.1) 100%);
+  --agnes-credits-bg-hover: linear-gradient(135deg, rgba(245, 158, 11, 0.24) 0%, rgba(217, 70, 160, 0.16) 100%);
 }
 
 /* 全局 */
@@ -18,8 +173,9 @@
 
 body {
   margin: 0;
-  background: #0b0f1a;
-  color: #e8eef7;
+  background: var(--agnes-bg-base);
+  color: var(--agnes-text-primary);
+  transition: background 0.3s ease, color 0.3s ease;
 }
 
 /* 美化滚动条 */
@@ -28,18 +184,18 @@ body {
   height: 10px;
 }
 ::-webkit-scrollbar-track {
-  background: #0e1422;
+  background: var(--agnes-scrollbar-track);
 }
 ::-webkit-scrollbar-thumb {
-  background: #2a3b5e;
+  background: var(--agnes-scrollbar-thumb);
   border-radius: 5px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3d5282;
+  background: var(--agnes-scrollbar-thumb-hover);
 }
 
 /* =====================================================
- * Element Plus 组件自定义样式（深色模式微调）
+ * Element Plus 组件自定义样式（响应主题变量）
  * ===================================================== */
 
 /* Card */
@@ -48,7 +204,7 @@ body {
   border: 1px solid var(--agnes-border) !important;
   border-radius: 14px !important;
   backdrop-filter: blur(8px);
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25) !important;
+  box-shadow: var(--agnes-shadow-card) !important;
 }
 .el-card__header {
   border-bottom: 1px solid var(--agnes-border) !important;
@@ -61,10 +217,10 @@ body {
 /* Input / Textarea */
 .el-input__wrapper,
 .el-textarea__inner {
-  background: rgba(15, 24, 42, 0.7) !important;
+  background: var(--agnes-bg-input) !important;
   border: 1px solid var(--agnes-border) !important;
   box-shadow: none !important;
-  color: #e8eef7 !important;
+  color: var(--agnes-text-primary) !important;
 }
 .el-input__wrapper.is-focus,
 .el-textarea__inner:focus {
@@ -72,23 +228,23 @@ body {
 }
 .el-input__inner::placeholder,
 .el-textarea__inner::placeholder {
-  color: #6b84aa !important;
+  color: var(--agnes-text-faint) !important;
 }
 
 /* Tabs */
 .el-tabs__item {
-  color: #a0b4d6 !important;
+  color: var(--agnes-text-secondary) !important;
 }
 .el-tabs__item.is-active {
-  color: #fff !important;
+  color: var(--agnes-text-primary) !important;
 }
 .el-tabs__active-bar {
-  background: linear-gradient(90deg, #6b9cff, #a78bff) !important;
+  background: linear-gradient(90deg, var(--agnes-primary), var(--agnes-accent)) !important;
 }
 
 /* Button 渐变主按钮 */
 .el-button--primary {
-  background: linear-gradient(135deg, #5a86ff 0%, #9a7bff 100%) !important;
+  background: linear-gradient(135deg, var(--agnes-primary) 0%, var(--agnes-accent) 100%) !important;
   border: none !important;
   color: #fff !important;
   transition: transform 0.15s ease, box-shadow 0.15s ease !important;
@@ -116,14 +272,14 @@ body {
 
 /* Dialog */
 .el-dialog {
-  background: #111827 !important;
+  background: var(--agnes-bg-elevated) !important;
   border: 1px solid var(--agnes-border) !important;
 }
 .el-dialog__title {
-  color: #fff !important;
+  color: var(--agnes-text-primary) !important;
 }
 .el-dialog__body {
-  color: #e8eef7 !important;
+  color: var(--agnes-text-primary) !important;
 }
 
 /* 通用样式工具类 */
@@ -131,6 +287,7 @@ body {
   font-size: 22px;
   font-weight: 700;
   margin: 0 0 4px;
+  color: var(--agnes-text-primary);
 }
 .page-desc {
   color: var(--agnes-text-muted);
@@ -141,9 +298,39 @@ body {
   font-size: 14px;
   font-weight: 600;
   margin: 0 0 10px;
-  color: #d5e3f7;
+  color: var(--agnes-text-primary);
 }
 .muted-text {
   color: var(--agnes-text-muted);
   font-size: 12px;
+}
+
+/* =====================================================
+ * 沉浸式查看器 token（图片查看器等，固定深色不跟随主题）
+ * 这些 token 在两套主题下值相同，便于未来统一调整查看器风格
+ * ===================================================== */
+:root {
+  --viewer-overlay-bg: rgba(0, 0, 0, 0.85);
+  --viewer-top-bar-gradient: linear-gradient(180deg, rgba(0, 0, 0, 0.45), transparent);
+  --viewer-text: #e8eef7;
+  --viewer-text-muted: #aac5ea;
+  --viewer-text-dim: #c5d5ea;
+  --viewer-title: #aac5ea;
+  --viewer-toolbar-bg: rgba(20, 28, 45, 0.85);
+  --viewer-border: rgba(120, 170, 255, 0.25);
+  --viewer-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+  --viewer-img-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+  --viewer-btn: #c5d5ea;
+  --viewer-btn-hover: #fff;
+  --viewer-btn-hover-bg: rgba(120, 170, 255, 0.15);
+  --viewer-btn-hover-border: rgba(120, 170, 255, 0.3);
+  --viewer-btn-primary: #8bb0ff;
+  --viewer-btn-primary-hover-bg: rgba(120, 170, 255, 0.25);
+  --viewer-close-bg: rgba(255, 255, 255, 0.08);
+  --viewer-close-border: rgba(255, 255, 255, 0.15);
+  --viewer-close-text: #fff;
+  --viewer-close-hover-bg: rgba(255, 140, 140, 0.2);
+  --viewer-close-hover-border: rgba(255, 150, 150, 0.4);
+  --viewer-danger: #ffa5ad;
+  --viewer-divider: rgba(170, 197, 234, 0.6);
 }

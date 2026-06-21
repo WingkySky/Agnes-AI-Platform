@@ -17,6 +17,7 @@ import router from './router'
 import './assets/main.css'
 import { useTaskQueueStore } from './stores/taskQueue'
 import { useUserStore } from './stores/user'
+import { useThemeStore } from './stores/theme'
 
 // 国际化（i18n）插件
 import i18n from '@/i18n'
@@ -37,8 +38,10 @@ app.use(ElementPlus)
 // 挂载 i18n 插件：提供 $t 全局属性
 app.use(i18n)
 
-// 确保 body 使用深色主题类（Element Plus 会根据 class="dark" 应用深色变量）
-document.documentElement.classList.add('dark')
+// 初始化全局主题（从 localStorage 恢复深色/浅色，同步到 <html> class）
+// 必须在 mount 之前完成，避免页面闪烁
+const themeStore = useThemeStore()
+themeStore.init()
 
 // 初始化用户认证 Store（恢复本地 JWT + 尝试获取当前用户信息）
 // 不需要 await：路由守卫会通过 userStore.ready() 等待 init 完成

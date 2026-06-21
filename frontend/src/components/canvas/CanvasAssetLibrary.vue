@@ -640,8 +640,8 @@ defineExpose({
 
 /* 拖拽文件上传时面板高亮提示 */
 .asset-library-panel.drag-over {
-  border-color: #6b9cff;
-  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.2), inset 4px 0 0 #6b9cff;
+  border-color: var(--agnes-primary);
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.2), inset 4px 0 0 var(--agnes-primary);
 }
 
 /* 拖拽中的卡片降低透明度 */
@@ -655,7 +655,7 @@ defineExpose({
   align-items: center;
   justify-content: space-between;
   padding: 18px 20px 14px;
-  border-bottom: 1px solid rgba(128, 128, 128, 0.15);
+  border-bottom: 1px solid var(--agnes-border);
   flex-shrink: 0;
 }
 
@@ -693,7 +693,7 @@ defineExpose({
 
 .asset-close:hover {
   opacity: 1;
-  background: rgba(128, 128, 128, 0.15);
+  background: var(--agnes-bg-hover);
 }
 
 /* Tab 切换条 */
@@ -726,8 +726,8 @@ defineExpose({
 
 .asset-tab.active {
   opacity: 1;
-  border-bottom-color: #6b9cff;
-  color: #6b9cff;
+  border-bottom-color: var(--agnes-primary);
+  color: var(--agnes-primary);
 }
 
 /* 工具栏（筛选 + 上传） */
@@ -737,7 +737,7 @@ defineExpose({
   justify-content: space-between;
   gap: 8px;
   padding: 10px 16px 12px;
-  border-bottom: 1px solid rgba(128, 128, 128, 0.1);
+  border-bottom: 1px solid var(--agnes-border);
   flex-shrink: 0;
 }
 
@@ -759,14 +759,14 @@ defineExpose({
 }
 
 .asset-filter-btn:hover {
-  background: rgba(128, 128, 128, 0.1);
+  background: var(--agnes-bg-hover);
   opacity: 0.8;
 }
 
 .asset-filter-btn.active {
-  background: rgba(107, 156, 255, 0.15);
+  background: var(--agnes-info-bg);
   opacity: 1;
-  color: #6b9cff;
+  color: var(--agnes-primary);
 }
 
 .asset-upload-btn {
@@ -776,16 +776,16 @@ defineExpose({
   padding: 5px 12px;
   border: none;
   border-radius: 6px;
-  background: rgba(107, 156, 255, 0.12);
+  background: var(--agnes-info-bg);
   cursor: pointer;
-  color: #6b9cff;
+  color: var(--agnes-primary);
   font-size: 12px;
   font-weight: 500;
   transition: all 0.15s;
 }
 
 .asset-upload-btn:hover {
-  background: rgba(107, 156, 255, 0.22);
+  background: var(--agnes-info-bg);
 }
 
 /* 网格区域（可滚动） */
@@ -847,14 +847,14 @@ defineExpose({
   overflow: hidden;
   cursor: pointer;
   transition: transform 0.15s, box-shadow 0.15s;
-  background: rgba(128, 128, 128, 0.06);
-  border: 1px solid rgba(128, 128, 128, 0.08);
+  background: var(--agnes-bg-hover);
+  border: 1px solid var(--agnes-border);
 }
 
 .asset-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
-  border-color: rgba(107, 156, 255, 0.3);
+  border-color: var(--agnes-primary-border);
 }
 
 /* 缩略图（完整显示，不裁剪，固定高度确保布局稳定） */
@@ -862,7 +862,7 @@ defineExpose({
   width: 100%;
   height: 110px;
   overflow: hidden;
-  background: rgba(128, 128, 128, 0.12);
+  background: var(--agnes-bg-hover);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -911,7 +911,7 @@ defineExpose({
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--agnes-bg-dark-surface);
   color: #fff;
   backdrop-filter: blur(4px);
   pointer-events: none;
@@ -938,12 +938,12 @@ defineExpose({
 }
 
 .card-source-badge.history {
-  background: rgba(107, 156, 255, 0.85);
+  background: var(--agnes-primary);
   color: #fff;
 }
 
 .card-source-badge.local {
-  background: rgba(167, 139, 255, 0.85);
+  background: var(--agnes-accent);
   color: #fff;
 }
 
@@ -955,7 +955,7 @@ defineExpose({
   padding: 1px 6px;
   border-radius: 4px;
   font-size: 9px;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--agnes-bg-dark-surface);
   color: #fff;
   backdrop-filter: blur(4px);
 }
@@ -983,7 +983,7 @@ defineExpose({
   height: 26px;
   border: none;
   border-radius: 6px;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--agnes-bg-dark-surface);
   cursor: pointer;
   color: #fff;
   opacity: 0;
@@ -997,8 +997,8 @@ defineExpose({
 
 .card-delete:hover {
   opacity: 1 !important;
-  color: #ef4444;
-  background: rgba(239, 68, 68, 0.7);
+  color: var(--agnes-error);
+  background: var(--agnes-error);
 }
 
 /* 分页栏 */
@@ -1008,7 +1008,7 @@ defineExpose({
   justify-content: center;
   gap: 12px;
   padding: 10px 16px;
-  border-top: 1px solid rgba(128, 128, 128, 0.1);
+  border-top: 1px solid var(--agnes-border);
   flex-shrink: 0;
 }
 
@@ -1020,15 +1020,15 @@ defineExpose({
   height: 30px;
   border: none;
   border-radius: 6px;
-  background: rgba(128, 128, 128, 0.1);
+  background: var(--agnes-bg-hover);
   cursor: pointer;
   color: inherit;
   transition: all 0.15s;
 }
 
 .pager-btn:hover:not(:disabled) {
-  background: rgba(107, 156, 255, 0.2);
-  color: #6b9cff;
+  background: var(--agnes-info-bg);
+  color: var(--agnes-primary);
 }
 
 .pager-btn:disabled {
@@ -1058,12 +1058,12 @@ defineExpose({
 }
 
 .asset-grid::-webkit-scrollbar-thumb {
-  background: rgba(128, 128, 128, 0.2);
+  background: var(--agnes-border);
   border-radius: 3px;
 }
 
 .asset-grid::-webkit-scrollbar-thumb:hover {
-  background: rgba(128, 128, 128, 0.35);
+  background: var(--agnes-bg-hover);
 }
 </style>
 
@@ -1076,9 +1076,9 @@ defineExpose({
   max-height: 380px;
   padding: 8px;
   border-radius: 12px;
-  background: rgba(15, 22, 38, 0.92);
-  border: 1px solid rgba(107, 156, 255, 0.25);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  background: var(--agnes-bg-elevated);
+  border: 1px solid var(--agnes-border);
+  box-shadow: var(--agnes-shadow-card);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   z-index: 9999;
@@ -1100,7 +1100,7 @@ defineExpose({
   max-height: 320px;
   object-fit: contain;
   border-radius: 8px;
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--agnes-overlay-bg);
 }
 
 /* 视频预览：首帧缩略图（底层） */
@@ -1109,7 +1109,7 @@ defineExpose({
   max-height: 320px;
   object-fit: contain;
   border-radius: 8px;
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--agnes-overlay-bg);
 }
 
 /* 视频预览：GIF 动图（覆盖在首帧上） */
@@ -1122,7 +1122,7 @@ defineExpose({
   max-height: 320px;
   object-fit: contain;
   border-radius: 8px;
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--agnes-overlay-bg);
   z-index: 1;
 }
 
@@ -1136,7 +1136,7 @@ defineExpose({
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  color: #8ba3c9;
+  color: var(--agnes-text-muted);
   font-size: 12px;
   z-index: 2;
 }
@@ -1149,6 +1149,6 @@ defineExpose({
   overflow: hidden;
   text-overflow: ellipsis;
   padding: 0 4px;
-  color: #e8eef7;
+  color: var(--agnes-text-primary);
 }
 </style>

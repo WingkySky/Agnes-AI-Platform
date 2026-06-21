@@ -66,7 +66,7 @@ const defaultTitle = computed(() => t('params.stylePresets'))
 
 .section-title {
   font-size: 13px;
-  color: #a0b4d6;
+  color: var(--agnes-text-secondary);
   margin-bottom: 10px;
   font-weight: 500;
 }
@@ -83,7 +83,7 @@ const defaultTitle = computed(() => t('params.stylePresets'))
   height: auto !important;
   background: linear-gradient(135deg, rgba(90, 134, 255, 0.25) 0%, rgba(154, 123, 255, 0.25) 100%) !important;
   border: 1px solid rgba(120, 170, 255, 0.35) !important;
-  color: #d4e3ff !important;
+  color: var(--agnes-text-primary) !important;
   font-weight: 500;
   transition: all 0.2s ease !important;
 }

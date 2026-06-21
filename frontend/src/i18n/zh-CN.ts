@@ -38,6 +38,30 @@ const zhCN = {
     footer: '© Agnes AI Platform · 基于 Vue 3 + FastAPI 构建',
   },
 
+  // ------ 主题切换 ------
+  theme: {
+    switchToDark: '切换到深色模式',
+    switchToLight: '切换到浅色模式',
+  },
+
+  // ------ 首页 ------
+  home: {
+    brand: 'Agnes AI Platform',
+    tagline: '一站式 AI 创作平台',
+    subtitle: '图片生成 · 视频生成 · AI 对话 · 无限画布',
+    ctaLogin: '开始使用',
+    ctaEnter: '进入工作台',
+    feature1Title: '图片生成',
+    feature1Desc: '文生图、图生图，多模型多尺寸，实时预览生成效果',
+    feature2Title: '视频生成',
+    feature2Desc: '文生视频、图生视频，自定义时长与帧率，队列化处理',
+    feature3Title: 'AI 对话',
+    feature3Desc: '多轮上下文对话，流式输出，支持会话历史管理',
+    feature4Title: '无限画布',
+    feature4Desc: '可视化创作工作台，自由排布生成结果，灵感无限延伸',
+    footerNote: '基于 Vue 3 + FastAPI 构建 · 全异步架构',
+  },
+
   // ------ 顶部导航 ------
   nav: {
     chat: 'AI 对话',
@@ -365,6 +389,8 @@ const zhCN = {
 
   // ------ 路由 / 页面标题 ------
   router: {
+    home: '首页',
+    login: '登录',
     chat: 'AI 对话',
     images: '图片生成',
     videos: '视频生成',
@@ -421,6 +447,14 @@ const zhCN = {
     canvas: '画布',
     topBar: {
       titlePlaceholder: '未命名画布',
+      menu: '菜单',
+      home: '主页',
+      docs: '文档',
+      myCanvas: '我的画布',
+      newCanvas: '新建画布',
+      deleteCanvas: '删除当前画布',
+      importAsset: '导入素材',
+      agent: 'Agent',
     },
     // 底部工具栏按钮
     toolbar: {
@@ -513,49 +547,6 @@ const zhCN = {
     createNodeVideo: '视频生成',
     createNodeText: '文本生成',
     createNodeConfig: '配置节点',
-    // 节点悬浮工具栏
-    toolbar: {
-      edit: '编辑',
-      generate: '生图',
-      generateVideo: '生视频',
-      crop: '裁剪',
-      duplicate: '复制',
-      delete: '删除',
-      rewrite: '改写',
-      fontUp: '放大字号',
-      fontDown: '缩小字号',
-      info: '查看信息',
-      upload: '上传文件',
-      lock: '锁定',
-      unlock: '解锁',
-      // 任务 3：节点操作深度
-      split: '拆分',
-      rotate: '旋转',
-      inferPrompt: '反推提示词',
-      addToAssets: '加入素材库',
-      extractFirstFrame: '提取首帧',
-      // 任务 3：搜索 + 类型筛选
-      searchPlaceholder: '搜索节点...',
-      searchClear: '清空',
-      searchShortcutHint: '按 / 搜索',
-      filterTypes: '类型筛选',
-      filterAll: '全选',
-      filterNone: '全不选',
-      filterActive: '已选 {n} 种',
-      // 任务 8：顶部工具栏（对齐参考项目）
-      hand: '移动/选择',
-      undo: '撤销',
-      redo: '重做',
-      text: '文本',
-      image: '图片',
-      video: '视频',
-      audio: '音频',
-      config: '生成配置',
-      assetLibrary: '我的素材',
-      appearance: '画布外观',
-      deleteSelected: '删除选中',
-      clearCanvas: '清空画布',
-    },
     // 节点编辑弹窗（PanelEditDialog）
     editDialog: {
       title: '编辑节点',
@@ -783,18 +774,6 @@ const zhCN = {
       deleteNode: '删除节点',
       regenerate: '重新生成',
     },
-    // 任务 8：顶部栏
-    topBar: {
-      menu: '菜单',
-      home: '主页',
-      docs: '文档',
-      myCanvas: '我的画布',
-      newCanvas: '新建画布',
-      deleteCanvas: '删除当前画布',
-      importAsset: '导入素材',
-      agent: 'Agent',
-      titlePlaceholder: '未命名画布',
-    },
     // 节点类型名称
     nodeNames: {
       text: '文本节点',
@@ -966,6 +945,7 @@ const zhCN = {
     changeRoleSuccess: '角色已更新',
     changeRoleFailed: '修改失败：',
     creditsUpdated: '积分更新成功',
+    cannotEditSelf: '自己无法修改',
   },
 
   // ------ 积分规则页 ------
@@ -993,6 +973,11 @@ const zhCN = {
       'video.text2video.per_second': '文生视频 - 每秒消耗',
       'video.video2video.per_second': '视频生成 - 每秒消耗',
       'new_user.default_credits': '新用户初始积分',
+      'image.text2image.base_cost.desc': '每次文生图任务的基础积分消耗',
+      'image.image2image.base_cost.desc': '每次图生图任务的基础积分消耗',
+      'video.text2video.per_second.desc': '文生视频每秒消耗的积分',
+      'video.video2video.per_second.desc': '视频生成每秒消耗的积分',
+      'new_user.default_credits.desc': '新注册用户初始获得的积分数',
     },
   },
 

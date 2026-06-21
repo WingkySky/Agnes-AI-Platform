@@ -37,6 +37,30 @@ const enUS = {
     footer: '© Agnes AI Platform · Built with Vue 3 + FastAPI',
   },
 
+  // ------ Theme switching ------
+  theme: {
+    switchToDark: 'Switch to dark mode',
+    switchToLight: 'Switch to light mode',
+  },
+
+  // ------ Home / Landing ------
+  home: {
+    brand: 'Agnes AI Platform',
+    tagline: 'All-in-one AI creation platform',
+    subtitle: 'Image · Video · Chat · Infinite Canvas',
+    ctaLogin: 'Get Started',
+    ctaEnter: 'Enter Workspace',
+    feature1Title: 'Image Generation',
+    feature1Desc: 'Text-to-image, image-to-image, multi-model multi-size, live preview',
+    feature2Title: 'Video Generation',
+    feature2Desc: 'Text-to-video, image-to-video, custom duration & frame rate, queued',
+    feature3Title: 'AI Chat',
+    feature3Desc: 'Multi-turn context, streaming output, session history management',
+    feature4Title: 'Infinite Canvas',
+    feature4Desc: 'Visual workspace, freely arrange results, endless inspiration',
+    footerNote: 'Built with Vue 3 + FastAPI · Fully async architecture',
+  },
+
   // ------ Top navigation ------
   nav: {
     chat: 'AI Chat',
@@ -364,6 +388,8 @@ const enUS = {
 
   // ------ Router / page titles ------
   router: {
+    home: 'Home',
+    login: 'Login',
     chat: 'AI Chat',
     images: 'Image Generation',
     videos: 'Video Generation',
@@ -420,6 +446,14 @@ const enUS = {
     canvas: 'Canvas',
     topBar: {
       titlePlaceholder: 'Untitled Canvas',
+      menu: 'Menu',
+      home: 'Home',
+      docs: 'Docs',
+      myCanvas: 'My Canvas',
+      newCanvas: 'New Canvas',
+      deleteCanvas: 'Delete Canvas',
+      importAsset: 'Import Asset',
+      agent: 'Agent',
     },
     // Bottom toolbar buttons
     toolbar: {
@@ -512,49 +546,6 @@ const enUS = {
     createNodeVideo: 'Video Generation',
     createNodeText: 'Text Generation',
     createNodeConfig: 'Config Node',
-    // Node hover toolbar
-    toolbar: {
-      edit: 'Edit',
-      generate: 'Generate Image',
-      generateVideo: 'Generate Video',
-      crop: 'Crop',
-      duplicate: 'Duplicate',
-      delete: 'Delete',
-      rewrite: 'Rewrite',
-      fontUp: 'Increase Font Size',
-      fontDown: 'Decrease Font Size',
-      info: 'View Info',
-      upload: 'Upload File',
-      lock: 'Lock',
-      unlock: 'Unlock',
-      // Task 3: Node action depth
-      split: 'Split',
-      rotate: 'Rotate',
-      inferPrompt: 'Infer Prompt',
-      addToAssets: 'Add to Assets',
-      extractFirstFrame: 'Extract First Frame',
-      // Task 3: Search + type filter
-      searchPlaceholder: 'Search nodes...',
-      searchClear: 'Clear',
-      searchShortcutHint: 'Press / to search',
-      filterTypes: 'Filter types',
-      filterAll: 'All',
-      filterNone: 'None',
-      filterActive: '{n} selected',
-      // Task 8: Top toolbar (aligned with reference project)
-      hand: 'Move/Select',
-      undo: 'Undo',
-      redo: 'Redo',
-      text: 'Text',
-      image: 'Image',
-      video: 'Video',
-      audio: 'Audio',
-      config: 'Config',
-      assetLibrary: 'Assets',
-      appearance: 'Appearance',
-      deleteSelected: 'Delete Selected',
-      clearCanvas: 'Clear Canvas',
-    },
     // Node edit dialog (PanelEditDialog)
     editDialog: {
       title: 'Edit Node',
@@ -782,18 +773,6 @@ const enUS = {
       deleteNode: 'Delete Node',
       regenerate: 'Regenerate',
     },
-    // Task 8: Top bar
-    topBar: {
-      menu: 'Menu',
-      home: 'Home',
-      docs: 'Docs',
-      myCanvas: 'My Canvas',
-      newCanvas: 'New Canvas',
-      deleteCanvas: 'Delete Canvas',
-      importAsset: 'Import Asset',
-      agent: 'Agent',
-      titlePlaceholder: 'Untitled Canvas',
-    },
     // Node type names
     nodeNames: {
       text: 'Text Node',
@@ -965,6 +944,7 @@ const enUS = {
     changeRoleSuccess: 'Role updated',
     changeRoleFailed: 'Failed to update: ',
     creditsUpdated: 'credits updated',
+    cannotEditSelf: 'Cannot edit yourself',
   },
 
   // ------ Credit rules page ------
@@ -992,6 +972,11 @@ const enUS = {
       'video.text2video.per_second': 'Text-to-Video - Per Second',
       'video.video2video.per_second': 'Video-to-Video - Per Second',
       'new_user.default_credits': 'New User Default Credits',
+      'image.text2image.base_cost.desc': 'Base credit cost per text-to-image task',
+      'image.image2image.base_cost.desc': 'Base credit cost per image-to-image task',
+      'video.text2video.per_second.desc': 'Credit cost per second for text-to-video',
+      'video.video2video.per_second.desc': 'Credit cost per second for video generation',
+      'new_user.default_credits.desc': 'Initial credits granted to new users on registration',
     },
   },
 

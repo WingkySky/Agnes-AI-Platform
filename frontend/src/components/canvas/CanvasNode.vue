@@ -351,7 +351,6 @@ const emit = defineEmits([
 ])
 
 /* ---------- 常量 ---------- */
-const SELECTION_BLUE = '#2f80ff' // 选中态蓝色
 const MIN_WIDTH = 220 // 最小宽度
 const MIN_HEIGHT = 160 // 最小高度
 
@@ -426,7 +425,7 @@ const isActive = computed(() => props.selected)
 
 /** 图片边框颜色：选中蓝色 / 否则 muted */
 const imageBorderColor = computed(() => {
-  if (isActive.value) return SELECTION_BLUE
+  if (isActive.value) return props.theme.canvas.selectionStroke
   return props.theme.node.muted
 })
 
@@ -446,11 +445,11 @@ const shellStyle = computed(() => {
   if (hasImageContent.value) {
     borderColor = imageBorderColor.value
   } else if (isActive.value) {
-    borderColor = SELECTION_BLUE
+    borderColor = props.theme.canvas.selectionStroke
   } else {
     borderColor = props.theme.node.stroke
   }
-  const boxShadow = isActive.value ? `0 0 0 1px ${SELECTION_BLUE}55` : undefined
+  const boxShadow = isActive.value ? `0 0 0 1px ${props.theme.canvas.selectionStroke}55` : undefined
   return { background, borderColor, boxShadow }
 })
 
@@ -897,7 +896,7 @@ onUnmounted(() => {
 .error-text {
   font-size: 12px;
   line-height: 20px;
-  color: #fca5a5;
+  color: var(--agnes-error);
 }
 
 .retry-btn {
@@ -1007,7 +1006,7 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   border-radius: 18px;
-  background: black;
+  background: var(--agnes-bg-dark-surface);
   object-fit: contain;
 }
 
@@ -1072,7 +1071,7 @@ onUnmounted(() => {
   height: 28px;
   padding: 0 8px;
   border-radius: 8px;
-  border: 1px solid rgba(120, 170, 230, 0.2);
+  border: 1px solid var(--agnes-border);
   background: transparent;
   font-size: 11px;
   font-weight: 500;
@@ -1083,13 +1082,13 @@ onUnmounted(() => {
 }
 
 .config-mode-tab:hover {
-  background: rgba(120, 170, 255, 0.1);
+  background: var(--agnes-nav-hover-bg);
 }
 
 .config-mode-tab.active {
-  background: rgba(107, 156, 255, 0.2);
-  border-color: #6b9cff;
-  color: #6b9cff;
+  background: var(--agnes-info-bg);
+  border-color: var(--agnes-primary);
+  color: var(--agnes-primary);
 }
 
 /* 下拉选择框 */
@@ -1097,8 +1096,8 @@ onUnmounted(() => {
   height: 30px;
   padding: 0 8px;
   border-radius: 8px;
-  border: 1px solid rgba(120, 170, 230, 0.2);
-  background: rgba(15, 22, 38, 0.6);
+  border: 1px solid var(--agnes-border);
+  background: var(--agnes-bg-input);
   font-size: 12px;
   color: inherit;
   cursor: pointer;
@@ -1107,7 +1106,7 @@ onUnmounted(() => {
 }
 
 .config-select:focus {
-  border-color: #6b9cff;
+  border-color: var(--agnes-primary);
 }
 
 /* 视频参数行：比例 + 时长并排 */
@@ -1126,8 +1125,8 @@ onUnmounted(() => {
   min-height: 60px;
   padding: 8px;
   border-radius: 8px;
-  border: 1px solid rgba(120, 170, 230, 0.2);
-  background: rgba(15, 22, 38, 0.6);
+  border: 1px solid var(--agnes-border);
+  background: var(--agnes-bg-input);
   font-size: 12px;
   font-family: monospace;
   color: inherit;
@@ -1138,28 +1137,28 @@ onUnmounted(() => {
 }
 
 .config-prompt:focus {
-  border-color: #6b9cff;
+  border-color: var(--agnes-primary);
 }
 
 .config-prompt::placeholder {
-  color: rgba(107, 132, 170, 0.6);
+  color: var(--agnes-text-faint);
 }
 
 /* 生成按钮 */
 .config-generate-btn {
   height: 34px;
   border-radius: 10px;
-  border: 1px solid #6b9cff;
-  background: rgba(107, 156, 255, 0.2);
+  border: 1px solid var(--agnes-primary);
+  background: var(--agnes-info-bg);
   font-size: 13px;
   font-weight: 600;
-  color: #6b9cff;
+  color: var(--agnes-primary);
   cursor: pointer;
   transition: background 0.15s ease, transform 0.15s ease;
 }
 
 .config-generate-btn:hover {
-  background: rgba(107, 156, 255, 0.35);
+  background: var(--agnes-info-bg);
   transform: scale(1.01);
 }
 
@@ -1223,7 +1222,7 @@ onUnmounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   border-radius: 6px;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--agnes-bg-dark-surface);
   padding: 4px 8px;
   font-size: 11px;
   font-weight: 500;

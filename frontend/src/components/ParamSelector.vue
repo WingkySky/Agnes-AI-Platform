@@ -240,12 +240,12 @@ const popoverWidth = computed(() => props.mode === 'video' ? 320 : 400)
   align-items: center;
   gap: 5px;
   padding: 5px 10px;
-  background: rgba(18, 27, 50, 0.6);
+  background: var(--agnes-bg-input);
   border: 1px solid rgba(107, 126, 156, 0.25);
   border-radius: 16px;
   cursor: pointer;
   transition: all 0.15s ease;
-  color: #c5d3ea;
+  color: var(--agnes-text-secondary);
   font-size: 13px;
   line-height: 1;
   user-select: none;
@@ -253,9 +253,9 @@ const popoverWidth = computed(() => props.mode === 'video' ? 320 : 400)
 }
 
 .param-tag:hover {
-  border-color: rgba(139, 176, 255, 0.5);
-  background: rgba(26, 40, 72, 0.8);
-  color: #e8eef7;
+  border-color: var(--agnes-primary);
+  background: var(--agnes-bg-hover);
+  color: var(--agnes-text-primary);
 }
 
 /* 标签内的小比例图标：**正方形容器**，内部图形按比例自然呈现
@@ -271,7 +271,7 @@ const popoverWidth = computed(() => props.mode === 'video' ? 320 : 400)
 .param-tag__shape {
   display: block;
   border-radius: 2px;
-  background: rgba(139, 176, 255, 0.5);
+  background: var(--agnes-primary);
 }
 
 .param-tag__text {
@@ -303,8 +303,8 @@ const popoverWidth = computed(() => props.mode === 'video' ? 320 : 400)
   padding: 6px 14px;
   border: 1px solid rgba(107, 126, 156, 0.25);
   border-radius: 8px;
-  background: rgba(18, 27, 50, 0.5);
-  color: #a0b4d6;
+  background: var(--agnes-bg-input);
+  color: var(--agnes-text-secondary);
   cursor: pointer;
   font-size: 13px;
   font-family: inherit;
@@ -312,14 +312,14 @@ const popoverWidth = computed(() => props.mode === 'video' ? 320 : 400)
 }
 
 .param-btn:hover {
-  border-color: rgba(139, 176, 255, 0.5);
-  background: rgba(26, 40, 72, 0.7);
-  color: #d5e3f7;
+  border-color: var(--agnes-primary);
+  background: var(--agnes-bg-hover);
+  color: var(--agnes-text-primary);
 }
 
 .param-btn--active {
   border-color: #8bb0ff;
-  background: rgba(107, 156, 255, 0.14);
+  background: var(--agnes-info-bg);
   color: #fff;
 }
 
@@ -339,16 +339,16 @@ const popoverWidth = computed(() => props.mode === 'video' ? 320 : 400)
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.15s ease;
-  color: #c5d3ea;
+  color: var(--agnes-text-secondary);
 }
 
 .param-model-item:hover {
-  background: rgba(26, 40, 72, 0.7);
-  color: #e8eef7;
+  background: var(--agnes-bg-hover);
+  color: var(--agnes-text-primary);
 }
 
 .param-model-item--active {
-  background: rgba(107, 156, 255, 0.14);
+  background: var(--agnes-info-bg);
   color: #fff;
 }
 

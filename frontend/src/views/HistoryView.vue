@@ -215,7 +215,7 @@
               @abort="onDetailVideoAbort"
             ></video>
             <div v-else class="detail-video-empty">
-              <el-icon :size="36" color="#ff9b9b"><CircleCloseFilled /></el-icon>
+              <el-icon :size="36" :color="'var(--agnes-error)'"><CircleCloseFilled /></el-icon>
               <div>{{ t('history.videoUrlEmpty') }}</div>
             </div>
             <div v-if="detailVideoLoading" class="detail-video-status">
@@ -268,7 +268,7 @@
       :title="t('history.confirmBatchDeleteTitle')"
       width="460px">
       <div>
-        {{ t('history.confirmBatchDeleteMsg1') }} <b style="color:#ff9b9b">{{ selectedIds.length }}</b> {{ t('history.confirmBatchDeleteMsg2') }}
+        {{ t('history.confirmBatchDeleteMsg1') }} <b class="batch-delete-count">{{ selectedIds.length }}</b> {{ t('history.confirmBatchDeleteMsg2') }}
       </div>
       <template #footer>
         <el-button @click="batchDeleteVisible = false">{{ t('common.cancel') }}</el-button>
@@ -803,7 +803,7 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.history-view { color: #e8eef7; }
+.history-view { color: var(--agnes-text-primary); }
 
 .filter-wrap {
   display: flex;
@@ -811,9 +811,9 @@ onBeforeUnmount(() => {
   align-items: center;
   margin-bottom: 20px;
   padding: 12px 16px;
-  background: rgba(15, 24, 42, 0.5);
+  background: var(--agnes-bg-inset);
   border-radius: 10px;
-  border: 1px solid rgba(120, 170, 255, 0.15);
+  border: 1px solid var(--agnes-primary-border-faint);
 }
 
 .filter-actions {
@@ -828,23 +828,28 @@ onBeforeUnmount(() => {
   align-items: center;
   padding: 12px 16px;
   margin-bottom: 16px;
-  background: rgba(60, 30, 30, 0.45);
-  border: 1px solid rgba(255, 155, 155, 0.25);
+  background: var(--agnes-error-bg);
+  border: 1px solid var(--agnes-error-border);
   border-radius: 10px;
 }
 .edit-left {
   display: flex;
   align-items: center;
   gap: 16px;
-  color: #d5e3f7;
+  color: var(--agnes-text-primary);
 }
 .selection-info {
   font-size: 13px;
-  color: #8ba3c9;
+  color: var(--agnes-text-muted);
 }
 .selection-count {
-  color: #ff9b9b;
+  color: var(--agnes-error);
   font-size: 15px;
+}
+/* 批量删除确认弹窗中的数字高亮 */
+.batch-delete-count {
+  color: var(--agnes-error);
+  font-weight: 700;
 }
 .edit-right {
   display: flex;
@@ -854,9 +859,9 @@ onBeforeUnmount(() => {
 .loading-state, .empty-state {
   padding: 80px 20px;
   text-align: center;
-  color: #6b84aa;
+  color: var(--agnes-text-faint);
 }
-.spinner { animation: spin 1.2s linear infinite; color: #6b9cff; }
+.spinner { animation: spin 1.2s linear infinite; color: var(--agnes-primary); }
 @keyframes spin { to { transform: rotate(360deg); } }
 .empty-text { margin-top: 16px; font-size: 14px; }
 
@@ -866,8 +871,8 @@ onBeforeUnmount(() => {
   gap: 18px;
 }
 .history-card {
-  background: rgba(15, 24, 42, 0.7);
-  border: 1px solid rgba(120, 170, 255, 0.15);
+  background: var(--agnes-bg-elevated);
+  border: 1px solid var(--agnes-primary-border-faint);
   border-radius: 12px;
   overflow: hidden;
   cursor: pointer;
@@ -875,8 +880,8 @@ onBeforeUnmount(() => {
   position: relative;
 }
 .history-card.is-selected {
-  border-color: rgba(255, 155, 155, 0.75);
-  box-shadow: 0 0 0 2px rgba(255, 155, 155, 0.4), 0 8px 24px rgba(100, 150, 255, 0.2);
+  border-color: var(--agnes-error);
+  box-shadow: 0 0 0 2px var(--agnes-error-border), 0 8px 24px var(--agnes-primary-border-faint);
   transform: translateY(-2px);
 }
 .card-checkbox {
@@ -885,15 +890,15 @@ onBeforeUnmount(() => {
   right: 10px;
   z-index: 2;
   padding: 6px 8px;
-  background: rgba(15, 24, 42, 0.7);
+  background: var(--agnes-bg-elevated);
   border-radius: 8px;
-  border: 1px solid rgba(120, 170, 255, 0.2);
+  border: 1px solid var(--agnes-primary-border-faint);
   cursor: pointer;
 }
 .history-card:hover {
   transform: translateY(-4px);
-  box-shadow: 0 8px 32px rgba(100, 150, 255, 0.25);
-  border-color: rgba(120, 170, 255, 0.4);
+  box-shadow: 0 8px 32px var(--agnes-brand-glow);
+  border-color: var(--agnes-primary-border);
 }
 .history-card.is-selected:hover {
   transform: translateY(-2px);
@@ -902,7 +907,7 @@ onBeforeUnmount(() => {
   position: relative;
   width: 100%;
   aspect-ratio: 4/3;
-  background: #0a1220;
+  background: var(--agnes-bg-base);
   overflow: hidden;
 }
 .card-preview img,
@@ -916,7 +921,7 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   position: relative;
-  background: linear-gradient(135deg, #1a2744 0%, #0f1a30 100%);
+  background: var(--agnes-bg-elevated);
   overflow: hidden;
 }
 .video-thumb-img {
@@ -934,11 +939,11 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  color: #8ba3c9;
+  color: var(--agnes-text-muted);
 }
 .video-thumb-placeholder .play-icon {
-  color: #6b9cff;
-  filter: drop-shadow(0 4px 12px rgba(107, 156, 255, 0.4));
+  color: var(--agnes-primary);
+  filter: drop-shadow(0 4px 12px var(--agnes-primary-border));
 }
 .video-thumb-label {
   font-size: 13px;
@@ -952,16 +957,17 @@ onBeforeUnmount(() => {
   object-fit: cover;
   z-index: 1;
 }
+/* 播放图标蒙层：视频缩略图属于沉浸式媒体预览，两套主题都用固定深色半透明背景，确保缩略图本身和白色播放图标都可见 */
 .video-play-overlay {
   position: absolute;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.25);
+  background: rgba(10, 15, 30, 0.4);
   z-index: 2;
   transition: opacity 0.2s ease;
-  color: rgba(255, 255, 255, 0.85);
+  color: rgba(255, 255, 255, 0.9);
 }
 .video-play-overlay .el-icon {
   filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.5));
@@ -972,6 +978,7 @@ onBeforeUnmount(() => {
 .video-thumb:hover .video-thumb-img {
   opacity: 0;
 }
+/* 类型标签（图片 / 视频）：叠在缩略图上，两套主题都用半透明深色背景 + 浅色文字 */
 .type-badge {
   position: absolute;
   top: 10px;
@@ -980,13 +987,15 @@ onBeforeUnmount(() => {
   border-radius: 20px;
   font-size: 11px;
   font-weight: 600;
-  background: rgba(15, 24, 42, 0.75);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(10, 15, 30, 0.55);
   backdrop-filter: blur(4px);
 }
 .type-badge.image { color: #8bb4ff; border: 1px solid rgba(139, 180, 255, 0.5); }
 .type-badge.video { color: #c4a7ff; border: 1px solid rgba(196, 167, 255, 0.5); }
 
-/* 生成模式标签（文生图 / 图生图 等） */
+/* 生成模式标签（文生图 / 图生图 等）：叠在缩略图上，两套主题都用半透明深色背景 + 浅色文字 */
 .mode-badge {
   position: absolute;
   top: 10px;
@@ -995,7 +1004,7 @@ onBeforeUnmount(() => {
   border-radius: 20px;
   font-size: 11px;
   font-weight: 600;
-  background: rgba(15, 24, 42, 0.75);
+  background: rgba(10, 15, 30, 0.55);
   backdrop-filter: blur(4px);
 }
 .mode-badge.mode-image {
@@ -1006,8 +1015,9 @@ onBeforeUnmount(() => {
   color: #8be9d0;
   border: 1px solid rgba(139, 233, 208, 0.5);
 }
+/* 详情页生成模式文字：用主题感知的 warning 色，浅色模式下为深橙、深色模式下为亮橙黄，保证两套主题下对比度均达标 */
 .mode-text {
-  color: #ffd98b;
+  color: var(--agnes-warning);
   font-weight: 600;
 }
 
@@ -1026,11 +1036,11 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(15, 24, 42, 0.75);
+  background: var(--agnes-bg-elevated);
   backdrop-filter: blur(4px);
   border-radius: 8px;
-  border: 1px solid rgba(120, 170, 255, 0.35);
-  color: #a0c4ff;
+  border: 1px solid var(--agnes-primary-border);
+  color: var(--agnes-primary-soft);
   cursor: pointer;
   opacity: 0;
   pointer-events: none;
@@ -1041,24 +1051,24 @@ onBeforeUnmount(() => {
   pointer-events: auto;
 }
 .card-action-btn:hover {
-  background: rgba(80, 140, 255, 0.35);
-  border-color: rgba(120, 170, 255, 0.6);
+  background: var(--agnes-info-bg);
+  border-color: var(--agnes-primary);
   color: #fff;
 }
 /* 删除按钮：独立的危险色样式，区别于放大/下载 */
 .card-action-btn.card-action-delete {
-  color: #ff9b9b;
-  border-color: rgba(255, 155, 155, 0.35);
+  color: var(--agnes-error);
+  border-color: var(--agnes-error-border);
 }
 .card-action-btn.card-action-delete:hover {
-  background: rgba(255, 80, 80, 0.35);
-  border-color: rgba(255, 155, 155, 0.6);
+  background: var(--agnes-error-bg);
+  border-color: var(--agnes-error);
   color: #fff;
 }
 .card-meta { padding: 12px 14px; }
 .card-prompt {
   font-size: 13px;
-  color: #d5e3f7;
+  color: var(--agnes-text-primary);
   line-height: 1.5;
   min-height: 40px;
   overflow: hidden;
@@ -1066,7 +1076,7 @@ onBeforeUnmount(() => {
 .card-time {
   margin-top: 8px;
   font-size: 12px;
-  color: #6b84aa;
+  color: var(--agnes-text-faint);
 }
 
 .pagination-wrap {
@@ -1087,28 +1097,28 @@ onBeforeUnmount(() => {
 .detail-media img:hover {
   opacity: 0.92;
   transform: scale(1.008);
-  box-shadow: 0 8px 28px rgba(120, 170, 255, 0.25);
+  box-shadow: 0 8px 28px var(--agnes-primary-border-faint);
 }
 .detail-media video {
   max-width: 100%;
   max-height: 400px;
   border-radius: 10px;
-  background: #000;
+  background: var(--agnes-bg-dark-surface);
 }
 .detail-info {
   width: 100%;
-  background: rgba(15, 24, 42, 0.5);
+  background: var(--agnes-bg-inset);
   padding: 16px;
   border-radius: 10px;
 }
-.info-row { padding: 6px 0; font-size: 13px; line-height: 1.6; color: #d5e3f7; }
-.label { color: #8ba3c9; margin-right: 8px; font-weight: 500; }
-.credits-value { color: #ffd28a; font-weight: 600; }
+.info-row { padding: 6px 0; font-size: 13px; line-height: 1.6; color: var(--agnes-text-primary); }
+.label { color: var(--agnes-text-muted); margin-right: 8px; font-weight: 500; }
+.credits-value { color: var(--agnes-credits-value); font-weight: 600; }
 .url-row {
   margin-top: 8px;
   padding: 12px !important;
-  background: rgba(10, 20, 40, 0.6);
-  border: 1px solid rgba(120, 170, 255, 0.15);
+  background: var(--agnes-bg-elevated);
+  border: 1px solid var(--agnes-primary-border-faint);
   border-radius: 8px;
   word-break: break-all;
   display: flex;
@@ -1117,7 +1127,7 @@ onBeforeUnmount(() => {
   gap: 6px;
 }
 .url-row .url-value {
-  color: #d5e3f7;
+  color: var(--agnes-text-primary);
   font-family: monospace;
   font-size: 12px;
   max-width: 100%;
@@ -1128,7 +1138,7 @@ onBeforeUnmount(() => {
   max-width: 100%;
   max-height: 400px;
   border-radius: 10px;
-  background: #000;
+  background: var(--agnes-bg-dark-surface);
 }
 
 .detail-video-wrap {
@@ -1139,10 +1149,10 @@ onBeforeUnmount(() => {
 
 .detail-video-empty {
   padding: 40px 20px;
-  background: #0a1220;
+  background: var(--agnes-bg-base);
   border-radius: 10px;
   text-align: center;
-  color: #8ba3c9;
+  color: var(--agnes-text-muted);
   font-size: 13px;
 }
 .detail-video-empty div { margin-top: 10px; }
@@ -1154,20 +1164,20 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  background: rgba(0, 0, 0, 0.72);
+  background: var(--agnes-bg-dark-surface);
   border-radius: 10px;
-  color: #d5e3f7;
+  color: var(--agnes-text-primary);
   font-size: 13px;
   pointer-events: none;
 }
 .detail-video-status.error {
-  color: #ff9b9b;
+  color: var(--agnes-error);
 }
 
 .spinner {
   display: inline-block;
   animation: spin 1.2s linear infinite;
-  color: #6b9cff;
+  color: var(--agnes-primary);
 }
 @keyframes spin {
   to { transform: rotate(360deg); }

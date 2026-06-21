@@ -193,7 +193,7 @@ const shortcuts = [
 }
 
 .dock-btn:hover {
-  background: rgba(125, 125, 125, 0.12);
+  background: var(--agnes-bg-hover);
 }
 
 /* 图标尺寸 size-4 */

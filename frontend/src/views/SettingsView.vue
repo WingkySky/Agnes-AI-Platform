@@ -539,19 +539,19 @@ async function handleDeleteModel(model: ModelDefinition) {
   margin: 0 0 8px;
   font-size: 24px;
   font-weight: 700;
-  color: #e8eef7;
+  color: var(--agnes-text-primary);
 }
 
 .page-desc {
   margin: 0 0 24px;
   font-size: 14px;
-  color: #8ba3c9;
+  color: var(--agnes-text-muted);
   line-height: 1.6;
 }
 
 .settings-section {
-  background: rgba(20, 30, 50, 0.55);
-  border: 1px solid rgba(100, 150, 220, 0.12);
+  background: var(--agnes-bg-input);
+  border: 1px solid var(--agnes-border-faint);
   border-radius: 12px;
   padding: 20px 24px;
   margin-bottom: 24px;
@@ -570,13 +570,13 @@ async function handleDeleteModel(model: ModelDefinition) {
   margin: 0 0 6px;
   font-size: 16px;
   font-weight: 600;
-  color: #e8eef7;
+  color: var(--agnes-text-primary);
 }
 
 .section-desc {
   margin: 0;
   font-size: 13px;
-  color: #8ba3c9;
+  color: var(--agnes-text-muted);
   line-height: 1.5;
   max-width: 700px;
 }
@@ -601,37 +601,37 @@ async function handleDeleteModel(model: ModelDefinition) {
   background: transparent;
   --el-table-bg-color: transparent;
   --el-table-tr-bg-color: transparent;
-  --el-table-header-bg-color: rgba(30, 45, 70, 0.6);
-  --el-table-border-color: rgba(100, 150, 220, 0.12);
-  --el-table-header-text-color: #a0b4d6;
-  --el-table-text-color: #e8eef7;
-  --el-table-row-hover-bg-color: rgba(80, 140, 255, 0.08);
+  --el-table-header-bg-color: var(--agnes-bg-hover);
+  --el-table-border-color: var(--agnes-border-faint);
+  --el-table-header-text-color: var(--agnes-text-secondary);
+  --el-table-text-color: var(--agnes-text-primary);
+  --el-table-row-hover-bg-color: var(--agnes-primary-border-faint);
 }
 
 :deep(.el-table th.el-table__cell) {
-  background: rgba(30, 45, 70, 0.6) !important;
+  background: var(--agnes-bg-hover) !important;
 }
 
 :deep(.el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell) {
-  background: rgba(20, 30, 50, 0.4);
+  background: var(--agnes-bg-hover);
 }
 
 /* 弹窗深色主题覆盖 */
 :deep(.el-dialog) {
-  background: #1a2438;
-  border: 1px solid rgba(100, 150, 220, 0.18);
+  background: var(--agnes-bg-base);
+  border: 1px solid var(--agnes-border);
 }
 
 :deep(.el-dialog__title) {
-  color: #e8eef7;
+  color: var(--agnes-text-primary);
 }
 
 :deep(.el-dialog__body) {
-  color: #e8eef7;
+  color: var(--agnes-text-primary);
 }
 
 :deep(.el-form-item__label) {
-  color: #a0b4d6;
+  color: var(--agnes-text-secondary);
 }
 
 @media (max-width: 900px) {

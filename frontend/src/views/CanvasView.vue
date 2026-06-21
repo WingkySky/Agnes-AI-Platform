@@ -1879,7 +1879,7 @@ async function handleUserLogout() {
 }
 
 .canvas-selector:hover {
-  background: rgba(128, 128, 128, 0.1);
+  background: var(--agnes-bg-hover);
 }
 
 .title-input {
@@ -1913,7 +1913,7 @@ async function handleUserLogout() {
 }
 
 .title-btn:hover {
-  background: rgba(128, 128, 128, 0.15);
+  background: var(--agnes-bg-hover);
 }
 
 /* ==================== 画布主体 ==================== */
@@ -1968,7 +1968,7 @@ async function handleUserLogout() {
   position: fixed;
   inset: 0;
   z-index: 200;
-  background: rgba(0, 0, 0, 0.85);
+  background: var(--agnes-overlay-strong);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2009,7 +2009,7 @@ async function handleUserLogout() {
   position: fixed;
   inset: 0;
   z-index: 200;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--agnes-overlay-bg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2040,16 +2040,16 @@ async function handleUserLogout() {
 .help-list kbd {
   display: inline-block;
   padding: 2px 6px;
-  border: 1px solid rgba(128, 128, 128, 0.4);
+  border: 1px solid var(--agnes-border);
   border-radius: 4px;
-  background: rgba(128, 128, 128, 0.1);
+  background: var(--agnes-bg-hover);
   font-size: 12px;
   font-family: monospace;
 }
 
 .help-close-btn {
   padding: 6px 16px;
-  border: 1px solid rgba(128, 128, 128, 0.4);
+  border: 1px solid var(--agnes-border);
   border-radius: 8px;
   background: transparent;
   color: inherit;
@@ -2058,7 +2058,7 @@ async function handleUserLogout() {
 }
 
 .help-close-btn:hover {
-  background: rgba(128, 128, 128, 0.15);
+  background: var(--agnes-bg-hover);
 }
 
 /* ==================== 隐藏文件输入 ==================== */

@@ -4,15 +4,17 @@
      - 通过 <el-config-provider> 响应式切换 Element Plus 语言
      - 右上角 LanguageSwitcher 切换界面语言
      - 管理员菜单（用户管理 / 积分规则 / 配置管理）收起到「管理」下拉
+     - 登录页 / 首页等独立全屏页面不显示标题栏
+     - 顶部栏右侧提供全局深色/浅色主题切换按钮
      ===================================================== -->
 
 <template>
   <el-config-provider :locale="epLocale">
-    <div class="app-root">
-      <!-- 顶部栏 -->
-      <header class="app-header">
+    <div class="app-root" :class="{ 'no-header': isStandaloneRoute }">
+      <!-- 顶部栏（登录页 / 首页等独立全屏页面不显示） -->
+      <header v-if="!isStandaloneRoute" class="app-header">
         <div class="app-brand">
-          <span class="brand-icon">✨</span>
+          <el-icon class="brand-icon"><MagicStick /></el-icon>
           <h1>Agnes AI Platform</h1>
         </div>
 
@@ -80,6 +82,14 @@
             </div>
           </el-tooltip>
 
+          <!-- 全局主题切换按钮（深色 / 浅色） -->
+          <el-tooltip :content="themeStore.isDark ? t('theme.switchToLight') : t('theme.switchToDark')" placement="bottom">
+            <button class="theme-toggle-btn" @click="themeStore.toggle()">
+              <el-icon v-if="themeStore.isDark"><Sunny /></el-icon>
+              <el-icon v-else><Moon /></el-icon>
+            </button>
+          </el-tooltip>
+
           <!-- 登录入口 / 用户菜单 -->
           <template v-if="userStore.isAuthenticated">
             <el-dropdown trigger="click" @command="handleUserCommand">
@@ -118,7 +128,7 @@
 
       <!-- 主内容区（keep-alive 保持组件状态，切换标签页时不丢失流式输出等内容） -->
       <!-- canvas 路由时去掉 padding/max-width，让画布全屏工作 -->
-      <main class="app-main" :class="{ 'canvas-mode': isCanvasRoute }">
+      <main class="app-main" :class="{ 'canvas-mode': isCanvasRoute, 'standalone': isStandaloneRoute }">
         <router-view v-slot="{ Component }">
           <keep-alive :include="cachedViews">
             <component :is="Component" />
@@ -127,10 +137,10 @@
       </main>
 
       <!-- 全局任务队列悬浮面板（路由切换时不销毁） -->
-      <TaskQueuePanel />
+      <TaskQueuePanel v-if="!isStandaloneRoute" />
 
-      <!-- 页脚 -->
-      <footer class="app-footer">
+      <!-- 页脚（独立全屏页面不显示） -->
+      <footer v-if="!isStandaloneRoute" class="app-footer">
         <span>{{ t('app.footer') }}</span>
       </footer>
     </div>
@@ -138,17 +148,19 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Picture, VideoPlay, Clock, ChatDotRound, Grid, Setting,
-  User, UserFilled, Coin, CaretBottom, SwitchButton
+  User, UserFilled, Coin, CaretBottom, SwitchButton, Sunny, Moon, MagicStick
 } from '@element-plus/icons-vue'
 import TaskQueuePanel from './components/TaskQueuePanel.vue'
 import LanguageSwitcher from './components/LanguageSwitcher.vue'
 import { useI18n, getElementPlusLocale } from '@/i18n'
 import { useModelsStore } from '@/stores/models'
 import { useUserStore } from '@/stores/user'
+import { useThemeStore } from '@/stores/theme'
+import { useCanvasStore } from '@/stores/canvas'
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -156,14 +168,29 @@ const router = useRouter()
 
 const modelsStore = useModelsStore()
 const userStore = useUserStore()
+const themeStore = useThemeStore()
+const canvasStore = useCanvasStore()
 
 // 应用启动时加载模型配置
 onMounted(() => {
   modelsStore.fetchConfig()
 })
 
+// 全局主题变化时同步到画布（标题栏切换主题 → 画布跟着变）
+// 使用 syncFromGlobalTheme 避免循环调用（canvas.setThemeMode 会反向调用 theme.setMode）
+// immediate: true 让应用启动时（themeStore.init 恢复 localStorage 主题后）立即同步一次到画布，
+// 否则 watch 默认 lazy，首次进入 canvas 页面前画布主题不会跟随全局主题
+watch(() => themeStore.mode, (newMode) => {
+  canvasStore.syncFromGlobalTheme(newMode)
+}, { immediate: true })
+
 // canvas 路由时 app-main 全屏无边距
 const isCanvasRoute = computed(() => route.name === 'canvas')
+
+// 独立全屏页面（登录页 / 首页）：不显示标题栏、页脚、任务队列面板
+const isStandaloneRoute = computed(() => {
+  return route.name === 'login' || route.name === 'home'
+})
 
 // 管理员下拉是否高亮：当前路由命中任一管理类页面时高亮
 const isAdminRouteActive = computed(() => {
@@ -202,16 +229,22 @@ const epLocale = computed(() => {
 
 <style scoped>
 /* =====================================================
- * 全局布局样式（沿用原项目深色主题设计风格）
+ * 全局布局样式（依赖 CSS 变量，自动响应深色/浅色主题）
  * ===================================================== */
 .app-root {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(135deg, #0b0f1a 0%, #101827 50%, #0b0f1a 100%);
-  color: #e8eef7;
+  background: linear-gradient(135deg, var(--agnes-bg-gradient-1) 0%, var(--agnes-bg-gradient-2) 50%, var(--agnes-bg-gradient-1) 100%);
+  color: var(--agnes-text-primary);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
     "Microsoft YaHei", sans-serif;
+  transition: background 0.3s ease, color 0.3s ease;
+}
+
+/* 独立全屏页面（登录页 / 首页）：去掉默认布局约束 */
+.app-root.no-header {
+  background: var(--agnes-bg-base);
 }
 
 /* ---- 顶部栏 ---- */
@@ -221,12 +254,13 @@ const epLocale = computed(() => {
   justify-content: space-between;
   gap: 16px;
   padding: 12px 24px;
-  background: rgba(15, 22, 38, 0.75);
-  border-bottom: 1px solid rgba(100, 150, 220, 0.18);
+  background: var(--agnes-bg-elevated);
+  border-bottom: 1px solid var(--agnes-border-strong);
   backdrop-filter: blur(12px);
   position: sticky;
   top: 0;
   z-index: 100;
+  transition: background 0.3s ease, border-color 0.3s ease;
 }
 
 .app-brand {
@@ -237,15 +271,16 @@ const epLocale = computed(() => {
 }
 
 .brand-icon {
-  font-size: 28px;
-  filter: drop-shadow(0 0 12px rgba(120, 180, 255, 0.45));
+  font-size: 24px;
+  color: var(--agnes-accent);
+  filter: drop-shadow(0 0 12px var(--agnes-brand-glow));
 }
 
 .app-brand h1 {
   margin: 0;
   font-size: 18px;
   font-weight: 700;
-  background: linear-gradient(90deg, #a0d4ff 0%, #c9b3ff 100%);
+  background: var(--agnes-brand-gradient);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -257,10 +292,11 @@ const epLocale = computed(() => {
 .app-nav {
   display: flex;
   gap: 4px;
-  background: rgba(20, 30, 50, 0.55);
+  background: var(--agnes-bg-inset);
   padding: 6px;
   border-radius: 12px;
-  border: 1px solid rgba(100, 150, 220, 0.12);
+  border: 1px solid var(--agnes-border-faint);
+  transition: background 0.3s ease, border-color 0.3s ease;
 }
 
 .nav-item {
@@ -268,7 +304,7 @@ const epLocale = computed(() => {
   align-items: center;
   gap: 6px;
   padding: 8px 14px;
-  color: #a0b4d6;
+  color: var(--agnes-text-secondary);
   text-decoration: none;
   border-radius: 8px;
   font-size: 14px;
@@ -278,21 +314,21 @@ const epLocale = computed(() => {
 }
 
 .nav-item:hover {
-  color: #fff;
-  background: rgba(120, 170, 255, 0.08);
+  color: var(--agnes-text-primary);
+  background: var(--agnes-nav-hover-bg);
 }
 
 .nav-item.active {
-  color: #fff;
-  background: linear-gradient(135deg, rgba(80, 140, 255, 0.3) 0%, rgba(160, 120, 255, 0.3) 100%);
-  box-shadow: 0 0 20px rgba(100, 150, 255, 0.18);
+  color: var(--agnes-text-primary);
+  background: var(--agnes-nav-active-bg);
+  box-shadow: var(--agnes-nav-active-shadow);
 }
 
 /* 管理员下拉触发器：复用 nav-item 样式，并加上小箭头 */
 .nav-item-dropdown .caret {
   font-size: 11px;
   margin-left: 2px;
-  color: #8ba3c9;
+  color: var(--agnes-text-muted);
 }
 
 .app-header-right {
@@ -302,23 +338,45 @@ const epLocale = computed(() => {
   flex-shrink: 0;
 }
 
+/* ---- 全局主题切换按钮 ---- */
+.theme-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--agnes-bg-chip);
+  border: 1px solid var(--agnes-border);
+  color: var(--agnes-text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 16px;
+}
+.theme-toggle-btn:hover {
+  background: var(--agnes-bg-hover);
+  border-color: var(--agnes-primary);
+  color: var(--agnes-primary);
+  transform: translateY(-1px);
+}
+
 /* ---- 积分显示 chip（可点击跳转到积分明细） ---- */
 .credits-chip {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 6px 12px;
-  background: linear-gradient(135deg, rgba(255, 188, 90, 0.18) 0%, rgba(255, 152, 200, 0.12) 100%);
-  border: 1px solid rgba(255, 190, 120, 0.3);
+  background: var(--agnes-credits-bg);
+  border: 1px solid var(--agnes-credits-border);
   border-radius: 10px;
-  color: #ffd28a;
+  color: var(--agnes-credits-text);
   font-size: 13px;
   cursor: pointer;
   transition: all 0.2s ease;
 }
 .credits-chip:hover {
-  background: linear-gradient(135deg, rgba(255, 188, 90, 0.28) 0%, rgba(255, 152, 200, 0.2) 100%);
-  border-color: rgba(255, 190, 120, 0.55);
+  background: var(--agnes-credits-bg-hover);
+  border-color: var(--agnes-credits-border);
   box-shadow: 0 0 12px rgba(255, 190, 120, 0.2);
 }
 .credits-chip .el-icon {
@@ -326,11 +384,11 @@ const epLocale = computed(() => {
 }
 .credits-value {
   font-weight: 700;
-  color: #fff2cf;
+  color: var(--agnes-credits-value);
 }
 .credits-label {
   font-size: 11px;
-  color: rgba(255, 220, 160, 0.7);
+  color: var(--agnes-credits-label);
   margin-left: 2px;
 }
 
@@ -340,27 +398,27 @@ const epLocale = computed(() => {
   align-items: center;
   gap: 8px;
   padding: 4px 10px 4px 4px;
-  background: rgba(20, 30, 50, 0.7);
-  border: 1px solid rgba(100, 150, 220, 0.15);
+  background: var(--agnes-bg-chip);
+  border: 1px solid var(--agnes-border-faint);
   border-radius: 10px;
   cursor: pointer;
   transition: all 0.2s ease;
 }
 .user-chip:hover {
-  background: rgba(30, 45, 75, 0.8);
-  border-color: rgba(100, 150, 220, 0.3);
+  background: var(--agnes-bg-hover);
+  border-color: var(--agnes-border);
 }
 .user-name {
   font-size: 13px;
   font-weight: 600;
-  color: #e8eef7;
+  color: var(--agnes-text-primary);
   max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .user-chip .el-icon:last-child {
-  color: #8ba3c9;
+  color: var(--agnes-text-muted);
   font-size: 12px;
 }
 
@@ -384,13 +442,20 @@ const epLocale = computed(() => {
   overflow: hidden;
 }
 
+/* 独立全屏页面（登录页 / 首页）：去掉 padding 和 max-width */
+.app-main.standalone {
+  padding: 0;
+  max-width: none;
+}
+
 /* ---- 页脚 ---- */
 .app-footer {
   padding: 20px 32px;
   text-align: center;
   font-size: 12px;
-  color: #6b84aa;
-  border-top: 1px solid rgba(120, 150, 225, 0.1);
+  color: var(--agnes-text-faint);
+  border-top: 1px solid var(--agnes-border-faint);
+  transition: color 0.3s ease, border-color 0.3s ease;
 }
 
 /* ---- 过渡动画 ---- */

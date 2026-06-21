@@ -61,7 +61,7 @@ function onSelect(command: string) {
   padding: 6px 10px;
   background: rgba(255, 255, 255, 0.06);
   border-radius: 8px;
-  color: #c9d8f0;
+  color: var(--agnes-text-secondary);
   font-weight: 500;
   transition: all 0.2s ease;
   cursor: pointer;
@@ -69,7 +69,7 @@ function onSelect(command: string) {
 
 .switcher-btn:hover {
   background: rgba(120, 170, 255, 0.15);
-  color: #fff;
+  color: var(--agnes-text-primary);
 }
 
 .switcher-btn .el-icon {

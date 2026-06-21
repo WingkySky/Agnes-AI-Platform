@@ -308,11 +308,11 @@ onMounted(() => loadList(true))
 }
 .page-head h2 {
   margin: 0 0 4px;
-  color: #e8eef7;
+  color: var(--agnes-text-primary);
   font-size: 20px;
 }
 .muted {
-  color: #8ba3c9;
+  color: var(--agnes-text-muted);
   font-size: 13px;
   margin: 0;
 }
@@ -331,26 +331,26 @@ onMounted(() => loadList(true))
   flex-wrap: wrap;
 }
 .total-text {
-  color: #8ba3c9;
+  color: var(--agnes-text-muted);
   font-size: 13px;
   margin-left: auto;
 }
 
 /* ================ 表格卡片 ================ */
 .table-card {
-  background: rgba(15, 22, 38, 0.6);
-  border: 1px solid rgba(100, 150, 220, 0.15);
+  background: var(--agnes-bg-elevated);
+  border: 1px solid var(--agnes-border);
   border-radius: 10px;
 }
 :deep(.el-table) {
   background: transparent;
 }
 :deep(.el-table th.el-table__cell) {
-  background-color: rgba(25, 35, 55, 0.8);
-  color: #a0b4d6;
+  background-color: var(--agnes-bg-hover);
+  color: var(--agnes-text-secondary);
 }
 :deep(.el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell) {
-  background: rgba(20, 30, 50, 0.4);
+  background: var(--agnes-bg-hover);
 }
 
 /* ================ 单元格样式 ================ */
@@ -360,12 +360,12 @@ onMounted(() => loadList(true))
   gap: 2px;
 }
 .user-id {
-  color: #a5b4fc;
+  color: var(--agnes-text-secondary);
   font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
   font-size: 12px;
 }
 .user-name {
-  color: #cdd9ec;
+  color: var(--agnes-text-secondary);
   font-size: 13px;
 }
 .amount {
@@ -373,13 +373,13 @@ onMounted(() => loadList(true))
   font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
 }
 .amount.positive {
-  color: #67c23a;
+  color: var(--agnes-success);
 }
 .amount.negative {
-  color: #f56c6c;
+  color: var(--agnes-error);
 }
 .balance {
-  color: #cdd9ec;
+  color: var(--agnes-text-secondary);
   font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
 }
 .desc-cell {
@@ -391,14 +391,14 @@ onMounted(() => loadList(true))
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: #a5b4fc;
+  color: var(--agnes-text-secondary);
   font-size: 12px;
   cursor: pointer;
   transition: color 0.2s ease;
   width: fit-content;
 }
 .desc-cell .ref-link:hover {
-  color: #c9b3ff;
+  color: var(--agnes-accent-soft);
   text-decoration: underline;
 }
 .desc-cell .ref-link .ref-icon {
@@ -412,7 +412,7 @@ onMounted(() => loadList(true))
   align-items: center;
   gap: 8px;
   padding: 48px 0;
-  color: #6b7a99;
+  color: var(--agnes-text-faint);
 }
 
 /* ================ 分页 ================ */

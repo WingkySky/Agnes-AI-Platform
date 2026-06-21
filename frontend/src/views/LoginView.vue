@@ -10,7 +10,7 @@
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { User, Lock, Coin, Message as MessageIcon } from '@element-plus/icons-vue'
+import { User, Lock, Coin, Message as MessageIcon, MagicStick } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { useI18n } from '@/i18n'
 
@@ -121,7 +121,7 @@ async function handleRegister() {
     <!-- 左侧品牌区 -->
     <div class="brand-panel">
       <div class="brand-logo">
-        <span class="brand-logo-emoji">✨</span>
+        <el-icon class="brand-logo-emoji"><MagicStick /></el-icon>
       </div>
       <h1 class="brand-title">Agnes AI Platform</h1>
       <p class="brand-sub">{{ t('login.brandSub') }}</p>
@@ -264,8 +264,8 @@ async function handleRegister() {
   height: 100vh;
   display: flex;
   align-items: stretch;
-  background: linear-gradient(135deg, #0b0f1a 0%, #11172a 100%);
-  color: #e6ebf2;
+  background: var(--agnes-bg-base);
+  color: var(--agnes-text-primary);
 }
 
 /* 左侧品牌面板 */
@@ -285,13 +285,14 @@ async function handleRegister() {
   width: 72px;
   height: 72px;
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--agnes-bg-inset);
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .brand-logo-emoji {
   font-size: 44px;
+  color: #a78bff;
   line-height: 1;
   filter: drop-shadow(0 0 12px rgba(139, 92, 246, 0.5));
 }
@@ -306,7 +307,7 @@ async function handleRegister() {
 .brand-sub {
   font-size: 16px;
   margin: 0;
-  color: rgba(230, 235, 242, 0.75);
+  color: var(--agnes-text-secondary);
 }
 
 .brand-feats {
@@ -322,10 +323,10 @@ async function handleRegister() {
   align-items: center;
   gap: 12px;
   font-size: 15px;
-  color: rgba(230, 235, 242, 0.85);
+  color: var(--agnes-text-primary);
 }
 .brand-feats .el-icon {
-  color: #8b5cf6;
+  color: var(--agnes-accent);
   font-size: 18px;
 }
 
@@ -336,17 +337,17 @@ async function handleRegister() {
   align-items: center;
   justify-content: center;
   padding: 40px;
-  background: rgba(255, 255, 255, 0.02);
-  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--agnes-bg-inset);
+  border-left: 1px solid var(--agnes-border);
 }
 
 .form-card {
   width: 100%;
-  background: rgba(17, 23, 42, 0.75);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--agnes-bg-card);
+  border: 1px solid var(--agnes-border);
   border-radius: 20px;
   padding: 40px 40px 32px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--agnes-shadow-card);
   backdrop-filter: blur(12px);
 }
 
@@ -358,7 +359,7 @@ async function handleRegister() {
 .form-card__header .sub {
   margin: 0 0 20px;
   font-size: 14px;
-  color: rgba(230, 235, 242, 0.6);
+  color: var(--agnes-text-muted);
 }
 
 .tabs {
@@ -375,7 +376,7 @@ async function handleRegister() {
 .switch-hint {
   margin-top: 12px;
   font-size: 13px;
-  color: rgba(230, 235, 242, 0.55);
+  color: var(--agnes-text-muted);
   text-align: center;
 }
 

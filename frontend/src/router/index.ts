@@ -15,7 +15,9 @@ import { useUserStore } from '@/stores/user'
 const routes: RouteRecordRaw[] = [
   {
     path: '/',
-    redirect: '/chat'
+    name: 'home',
+    component: () => import('@/views/HomeView.vue'),
+    meta: { titleKey: 'router.home', requiresAuth: false }
   },
   // 登录 / 注册页 — 未登录时可达，已登录访问则直接跳转到业务页
   {
@@ -82,7 +84,7 @@ const routes: RouteRecordRaw[] = [
   // 兜底路由
   {
     path: '/:pathMatch(.*)*',
-    redirect: '/chat'
+    redirect: '/'
   }
 ]
 

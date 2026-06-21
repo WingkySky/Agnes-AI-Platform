@@ -858,7 +858,7 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
   height: calc(100vh - 160px);
   min-height: 500px;
   gap: 0;
-  background: rgba(15, 22, 38, 0.4);
+  background: var(--agnes-bg-inset);
   border-radius: 16px;
   border: 1px solid rgba(100, 150, 220, 0.15);
   overflow: hidden;
@@ -868,7 +868,7 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
 .chat-sidebar {
   width: 260px;
   min-width: 260px;
-  background: rgba(10, 16, 30, 0.6);
+  background: var(--agnes-bg-elevated);
   border-right: 1px solid rgba(100, 150, 220, 0.12);
   display: flex;
   flex-direction: column;
@@ -879,14 +879,14 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
   align-items: center;
   justify-content: space-between;
   padding: 16px 16px 12px;
-  border-bottom: 1px solid rgba(100, 150, 220, 0.1);
+  border-bottom: 1px solid var(--agnes-border-faint);
 }
 
 .sidebar-header h3 {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
-  color: #c9d6e8;
+  color: var(--agnes-text-secondary);
 }
 
 .session-list {
@@ -907,11 +907,11 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
 }
 
 .session-item:hover {
-  background: rgba(120, 170, 255, 0.08);
+  background: var(--agnes-nav-hover-bg);
 }
 
 .session-item.active {
-  background: linear-gradient(135deg, rgba(80, 140, 255, 0.2) 0%, rgba(160, 120, 255, 0.2) 100%);
+  background: var(--agnes-nav-active-bg);
   border: 1px solid rgba(100, 150, 220, 0.2);
 }
 
@@ -923,7 +923,7 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
 .session-title {
   display: block;
   font-size: 13px;
-  color: #d0dce8;
+  color: var(--agnes-text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -932,14 +932,14 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
 .session-time {
   display: block;
   font-size: 11px;
-  color: #6b84aa;
+  color: var(--agnes-text-faint);
   margin-top: 2px;
 }
 
 .session-delete {
   opacity: 0;
   transition: opacity 0.2s;
-  color: #8ba3c9 !important;
+  color: var(--agnes-text-muted) !important;
 }
 
 .session-actions {
@@ -964,7 +964,7 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
   justify-content: center;
   background: transparent;
   border: none;
-  color: #8ba3c9;
+  color: var(--agnes-text-muted);
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -972,14 +972,14 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
 }
 
 .session-menu-btn:hover {
-  background: rgba(120, 170, 255, 0.15);
-  color: #a0d4ff;
+  background: var(--agnes-info-bg);
+  color: var(--agnes-primary);
 }
 
 .session-empty {
   text-align: center;
   padding: 40px 16px;
-  color: #6b84aa;
+  color: var(--agnes-text-faint);
   font-size: 13px;
 }
 
@@ -996,7 +996,7 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
 .drag-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(10, 20, 40, 0.88);
+  background: var(--agnes-bg-elevated);
   border: 2px dashed rgba(100, 180, 255, 0.6);
   border-radius: 0;
   display: flex;
@@ -1009,7 +1009,7 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
 
 .drag-overlay-content {
   text-align: center;
-  color: #a0d4ff;
+  color: var(--agnes-primary-soft);
   animation: dragPulse 1.5s ease-in-out infinite;
 }
 
@@ -1045,12 +1045,12 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
 .chat-welcome h2 {
   font-size: 22px;
   font-weight: 600;
-  color: #d0dce8;
+  color: var(--agnes-text-primary);
   margin: 0 0 8px;
 }
 
 .chat-welcome p {
-  color: #8ba3c9;
+  color: var(--agnes-text-muted);
   font-size: 14px;
   margin: 0 0 24px;
   max-width: 400px;
@@ -1073,20 +1073,20 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
   align-items: center;
   gap: 10px;
   padding: 12px 16px;
-  background: rgba(20, 30, 50, 0.5);
+  background: var(--agnes-bg-hover);
   border: 1px solid rgba(100, 150, 220, 0.15);
   border-radius: 10px;
   cursor: pointer;
   transition: all 0.2s ease;
-  color: #a0b4d6;
+  color: var(--agnes-text-secondary);
   font-size: 13px;
   text-align: left;
 }
 
 .tip-item:hover {
-  background: rgba(120, 170, 255, 0.1);
-  border-color: rgba(100, 150, 220, 0.3);
-  color: #d0dce8;
+  background: var(--agnes-nav-hover-bg);
+  border-color: var(--agnes-border-strong);
+  color: var(--agnes-text-primary);
 }
 
 /* ---- 消息列表 ---- */
@@ -1128,15 +1128,15 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
 }
 
 .user-avatar {
-  background: linear-gradient(135deg, #508cff 0%, #a078ff 100%);
-  color: #fff;
+  background: linear-gradient(135deg, var(--agnes-primary) 0%, var(--agnes-accent) 100%);
+  color: var(--agnes-text-primary);
   order: 2;
 }
 
 .assistant-avatar {
-  background: linear-gradient(135deg, #1a3a5c 0%, #2a1a4c 100%);
-  color: #a0d4ff;
-  border: 1px solid rgba(100, 150, 220, 0.2);
+  background: var(--agnes-bg-elevated);
+  color: var(--agnes-primary-soft);
+  border: 1px solid var(--agnes-border);
 }
 
 .message-content {
@@ -1148,16 +1148,16 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
 }
 
 .user-bubble .message-content {
-  background: linear-gradient(135deg, rgba(80, 140, 255, 0.3) 0%, rgba(160, 120, 255, 0.3) 100%);
-  color: #e8eef7;
+  background: var(--agnes-nav-active-bg);
+  color: var(--agnes-text-primary);
   border: 1px solid rgba(100, 150, 220, 0.2);
   order: 1;
 }
 
 .assistant-bubble .message-content {
-  background: rgba(20, 30, 50, 0.5);
-  color: #d0dce8;
-  border: 1px solid rgba(100, 150, 220, 0.1);
+  background: var(--agnes-bg-hover);
+  color: var(--agnes-text-primary);
+  border: 1px solid var(--agnes-border-faint);
 }
 
 .message-text {
@@ -1165,15 +1165,15 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
 }
 
 .message-text :deep(code) {
-  background: rgba(100, 150, 220, 0.15);
+  background: var(--agnes-info-bg);
   padding: 1px 5px;
   border-radius: 4px;
   font-size: 13px;
-  color: #a0d4ff;
+  color: var(--agnes-primary);
 }
 
 .message-text :deep(pre) {
-  background: rgba(10, 16, 30, 0.8);
+  background: var(--agnes-bg-elevated);
   padding: 12px;
   border-radius: 8px;
   overflow-x: auto;
@@ -1189,7 +1189,7 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
 .streaming-cursor {
   display: inline-block;
   animation: blink 1s infinite;
-  color: #a0d4ff;
+  color: var(--agnes-primary);
   font-size: 14px;
   margin-left: 2px;
 }
@@ -1205,16 +1205,16 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
-  background: rgba(100, 150, 220, 0.12);
+  background: var(--agnes-info-bg);
   border-radius: 6px;
   font-size: 12px;
-  color: #a0d4ff;
+  color: var(--agnes-primary);
   margin-top: 6px;
   margin-right: 6px;
 }
 
 .tool-done {
-  color: #67c23a;
+  color: var(--agnes-success);
 }
 
 /* 媒体容器 */
@@ -1244,16 +1244,16 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
   align-items: center;
   gap: 8px;
   padding: 16px;
-  color: #8ba3c9;
+  color: var(--agnes-text-muted);
   font-size: 13px;
 }
 
 .media-generating {
-  color: #a0d4ff;
+  color: var(--agnes-primary);
 }
 
 .media-failed {
-  color: #f56c6c;
+  color: var(--agnes-error);
 }
 
 /* 加载中 */
@@ -1261,7 +1261,7 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #8ba3c9;
+  color: var(--agnes-text-muted);
   font-size: 13px;
   padding: 16px;
   justify-content: center;
@@ -1270,8 +1270,8 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
 /* ---- 输入区 ---- */
 .chat-input-area {
   padding: 16px 24px 12px;
-  border-top: 1px solid rgba(100, 150, 220, 0.1);
-  background: rgba(10, 16, 30, 0.3);
+  border-top: 1px solid var(--agnes-border-faint);
+  background: var(--agnes-bg-inset);
 }
 
 .input-wrapper {
@@ -1281,9 +1281,9 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
 }
 
 .input-wrapper :deep(.el-textarea__inner) {
-  background: rgba(20, 30, 50, 0.6);
+  background: var(--agnes-bg-hover);
   border: 1px solid rgba(100, 150, 220, 0.2);
-  color: #d0dce8;
+  color: var(--agnes-text-primary);
   border-radius: 10px;
   padding: 10px 14px;
   font-size: 14px;
@@ -1291,12 +1291,12 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
 }
 
 .input-wrapper :deep(.el-textarea__inner):focus {
-  border-color: rgba(100, 150, 220, 0.4);
+  border-color: var(--agnes-primary-border);
   box-shadow: 0 0 0 2px rgba(80, 140, 255, 0.1);
 }
 
 .input-wrapper :deep(.el-textarea__inner)::placeholder {
-  color: #6b84aa;
+  color: var(--agnes-text-faint);
 }
 
 .send-btn {
@@ -1341,8 +1341,8 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
   height: 72px;
   border-radius: 8px;
   overflow: hidden;
-  border: 1px solid rgba(100, 150, 220, 0.25);
-  background: rgba(20, 30, 50, 0.4);
+  border: 1px solid var(--agnes-border);
+  background: var(--agnes-bg-hover);
 }
 
 .pending-attachment-thumb {
@@ -1367,7 +1367,7 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
 
 .pending-attachment-url .url-text {
   font-size: 11px;
-  color: #a0c4ff;
+  color: var(--agnes-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1396,7 +1396,7 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
   height: 80px;
   border-radius: 6px;
   cursor: pointer;
-  border: 1px solid rgba(100, 150, 220, 0.3);
+  border: 1px solid var(--agnes-border-strong);
 }
 
 .attachment-thumb-fallback {
@@ -1405,8 +1405,8 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 100, 100, 0.1);
-  color: #ff8080;
+  background: var(--agnes-error-bg);
+  color: var(--agnes-error);
 }
 
 /* =====================================================
@@ -1416,8 +1416,8 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
   max-width: 280px;
   max-height: 200px;
   border-radius: 8px;
-  border: 1px solid rgba(100, 150, 220, 0.3);
-  background: #000;
+  border: 1px solid var(--agnes-border-strong);
+  background: var(--agnes-bg-dark-surface);
   display: block;
 }
 
@@ -1429,10 +1429,10 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  background: linear-gradient(135deg, rgba(80, 140, 255, 0.1) 0%, rgba(160, 120, 255, 0.1) 100%);
-  border: 1px solid rgba(100, 150, 220, 0.25);
+  background: var(--agnes-nav-hover-bg);
+  border: 1px solid var(--agnes-border);
   border-radius: 8px;
-  color: #c9d6e8;
+  color: var(--agnes-text-secondary);
   text-decoration: none;
   font-size: 13px;
   transition: all 0.2s ease;
@@ -1440,7 +1440,7 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
 }
 
 .attachment-doc:hover {
-  background: linear-gradient(135deg, rgba(80, 140, 255, 0.2) 0%, rgba(160, 120, 255, 0.2) 100%);
+  background: var(--agnes-nav-active-bg);
   border-color: rgba(100, 150, 220, 0.5);
 }
 
@@ -1448,13 +1448,13 @@ function getImageAttachmentIndex(attachments: MessageAttachment[], currentIdx: n
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: #a0c4ff;
+  color: var(--agnes-primary);
 }
 
 .input-hint {
   margin: 6px 0 0;
   font-size: 11px;
-  color: #5a7399;
+  color: var(--agnes-text-faint);
 }
 
 /* ---- 响应式 ---- */

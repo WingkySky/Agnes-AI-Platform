@@ -150,25 +150,25 @@ function select(opt: RatioOption) {
   gap: 4px;
   padding: 6px 8px 6px;
   min-width: 0;
-  background: rgba(18, 27, 50, 0.5);
+  background: var(--agnes-bg-input);
   border: 1px solid rgba(107, 126, 156, 0.22);
   border-radius: 6px;
   cursor: pointer;
   transition: border-color 0.15s ease, background-color 0.15s ease;
-  color: #a0b4d6;
+  color: var(--agnes-text-secondary);
   font-family: inherit;
   line-height: 1;
 }
 
 .ratio-btn:hover {
-  border-color: rgba(139, 176, 255, 0.5);
-  background: rgba(26, 40, 72, 0.7);
-  color: #d5e3f7;
+  border-color: var(--agnes-primary);
+  background: var(--agnes-bg-hover);
+  color: var(--agnes-text-primary);
 }
 
 .ratio-btn--active {
-  border-color: #8bb0ff;
-  background: rgba(107, 156, 255, 0.14);
+  border-color: var(--agnes-primary-soft);
+  background: var(--agnes-info-bg);
   color: #fff;
 }
 
@@ -186,15 +186,15 @@ function select(opt: RatioOption) {
 .ratio-btn__icon {
   display: block;
   border-radius: 2px;
-  background: rgba(150, 170, 210, 0.55);
+  background: var(--agnes-border);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
 .ratio-btn--active .ratio-btn__icon {
-  background: linear-gradient(135deg, #7fa6ff 0%, #a8c1ff 100%);
+  background: linear-gradient(135deg, var(--agnes-primary) 0%, var(--agnes-primary-soft) 100%);
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.25),
-    0 1px 3px rgba(107, 156, 255, 0.4);
+    0 1px 3px var(--agnes-primary-border);
 }
 
 /* 数字标签：超小字体，等宽 */

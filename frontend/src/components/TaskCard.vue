@@ -17,8 +17,8 @@
   >
     <!-- 左侧图标 -->
     <div class="task-icon" :class="task.type">
-      <span v-if="task.type === 'video'">🎬</span>
-      <span v-else>🖼️</span>
+      <el-icon v-if="task.type === 'video'"><VideoPlay /></el-icon>
+      <el-icon v-else><PictureFilled /></el-icon>
     </div>
 
     <!-- 中间内容区 -->
@@ -103,6 +103,7 @@
 <script setup lang="ts">
 // ------ 引入 i18n composable ------
 import { computed } from 'vue'
+import { VideoPlay, PictureFilled } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 
@@ -182,8 +183,8 @@ function handleRemove() {
   align-items: flex-start;
   gap: 12px;
   padding: 10px 12px;
-  background: rgba(20, 30, 50, 0.6);
-  border: 1px solid rgba(120, 170, 255, 0.15);
+  background: var(--agnes-bg-hover);
+  border: 1px solid var(--agnes-info-bg);
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -191,28 +192,28 @@ function handleRemove() {
 }
 
 .task-card:hover {
-  background: rgba(30, 45, 70, 0.8);
-  border-color: rgba(120, 170, 255, 0.3);
+  background: var(--agnes-bg-hover);
+  border-color: var(--agnes-info-bg);
 }
 
 .task-card.is-active {
-  background: rgba(50, 80, 130, 0.4);
-  border-color: rgba(120, 180, 255, 0.5);
+  background: var(--agnes-border);
+  border-color: var(--agnes-primary-border);
 }
 
 .task-card.status-success {
-  border-left: 3px solid #4ade80;
+  border-left: 3px solid var(--agnes-success);
 }
 .task-card.status-failed {
-  border-left: 3px solid #f87171;
+  border-left: 3px solid var(--agnes-error);
 }
 .task-card.status-cancelled {
-  border-left: 3px solid #a1a1aa;
+  border-left: 3px solid var(--agnes-text-faint);
 }
 .task-card.status-processing,
 .task-card.status-pending,
 .task-card.status-queued {
-  border-left: 3px solid #60a5fa;
+  border-left: 3px solid var(--agnes-primary);
 }
 
 .task-icon {
@@ -225,8 +226,8 @@ function handleRemove() {
   border-radius: 8px;
   font-size: 18px;
 }
-.task-icon.video { background: rgba(96, 165, 250, 0.15); }
-.task-icon.image { background: rgba(244, 114, 182, 0.15); }
+.task-icon.video { background: var(--agnes-info-bg); }
+.task-icon.image { background: var(--agnes-error-bg); }
 
 .task-body {
   flex: 1;
@@ -249,35 +250,35 @@ function handleRemove() {
 .task-status-badge.queued,
 .task-status-badge.pending,
 .task-status-badge.processing {
-  background: rgba(96, 165, 250, 0.2);
-  color: #93c5fd;
+  background: var(--agnes-info-bg);
+  color: var(--agnes-primary-soft);
 }
 .task-status-badge.success {
-  background: rgba(74, 222, 128, 0.2);
-  color: #86efac;
+  background: var(--agnes-success-bg);
+  color: var(--agnes-success);
 }
 .task-status-badge.failed {
-  background: rgba(248, 113, 113, 0.2);
-  color: #fca5a5;
+  background: var(--agnes-error-bg);
+  color: var(--agnes-error);
 }
 .task-status-badge.cancelled {
-  background: rgba(161, 161, 170, 0.2);
-  color: #d4d4d8;
+  background: var(--agnes-bg-hover);
+  color: var(--agnes-text-muted);
 }
 
 .task-type-label {
   font-size: 11px;
-  color: #8ba3c9;
+  color: var(--agnes-text-muted);
 }
 .task-time {
   font-size: 11px;
-  color: #6b84aa;
+  color: var(--agnes-text-faint);
   margin-left: auto;
 }
 
 .task-prompt {
   font-size: 13px;
-  color: #d5e3f7;
+  color: var(--agnes-text-primary);
   line-height: 1.5;
   margin: 2px 0 6px;
   word-break: break-word;
@@ -291,13 +292,13 @@ function handleRemove() {
 .progress-track {
   flex: 1;
   height: 4px;
-  background: rgba(107, 132, 170, 0.2);
+  background: var(--agnes-bg-hover);
   border-radius: 2px;
   overflow: hidden;
 }
 .progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #60a5fa, #a78bfa);
+  background: linear-gradient(90deg, var(--agnes-primary), var(--agnes-accent));
   border-radius: 2px;
   transition: width 0.3s ease;
   animation: pulse-shimmer 2s ease-in-out infinite;
@@ -308,7 +309,7 @@ function handleRemove() {
 }
 .progress-text {
   font-size: 11px;
-  color: #93c5fd;
+  color: var(--agnes-primary-soft);
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
   min-width: 60px;
@@ -325,10 +326,10 @@ function handleRemove() {
   font-size: 12px;
   margin-top: 4px;
 }
-.task-success { color: #86efac; }
-.task-failed { color: #fca5a5; }
-.task-cancelled { color: #d4d4d8; }
-.task-queued { color: #93c5fd; }
+.task-success { color: var(--agnes-success); }
+.task-failed { color: var(--agnes-error); }
+.task-cancelled { color: var(--agnes-text-muted); }
+.task-queued { color: var(--agnes-primary-soft); }
 
 .task-actions {
   display: flex;
@@ -338,8 +339,8 @@ function handleRemove() {
 }
 .action-btn {
   background: transparent;
-  border: 1px solid rgba(120, 170, 255, 0.2);
-  color: #8ba3c9;
+  border: 1px solid var(--agnes-info-bg);
+  color: var(--agnes-text-muted);
   font-size: 11px;
   padding: 4px 10px;
   border-radius: 6px;
@@ -347,18 +348,18 @@ function handleRemove() {
   transition: all 0.2s ease;
 }
 .action-btn:hover {
-  background: rgba(120, 170, 255, 0.1);
-  color: #d5e3f7;
+  background: var(--agnes-nav-hover-bg);
+  color: var(--agnes-text-primary);
 }
 .cancel-btn:hover {
-  background: rgba(248, 113, 113, 0.15);
-  border-color: rgba(248, 113, 113, 0.4);
-  color: #fca5a5;
+  background: var(--agnes-error-bg);
+  border-color: var(--agnes-error-border);
+  color: var(--agnes-error);
 }
 .retry-btn:hover {
-  background: rgba(74, 222, 128, 0.15);
-  border-color: rgba(74, 222, 128, 0.4);
-  color: #86efac;
+  background: var(--agnes-success-bg);
+  border-color: var(--agnes-success-border);
+  color: var(--agnes-success);
 }
 
 /* 紧凑模式（用于队列面板） */

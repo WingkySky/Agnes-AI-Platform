@@ -103,15 +103,16 @@ const hasImage = computed(() => isImage.value && hasContent.value)
 /** 工具栏容器样式：背景 + 边框 + hover 背景变量 */
 function toolbarStyle() {
   return {
-    background: props.theme.toolbar.background,
+    background: props.theme.toolbar.panel,
     border: `1px solid ${props.theme.toolbar.border}`,
+    '--hover-bg': props.theme.toolbar.itemHover,
   }
 }
 
 /** 按钮 hover 样式 */
 function btnStyle(tool: any) {
   return {
-    color: tool.danger ? '#ef4444' : props.theme.toolbar.item,
+    color: tool.danger ? 'var(--agnes-error)' : props.theme.toolbar.item,
   }
 }
 
@@ -334,6 +335,6 @@ function handleClick(tool: any) {
 }
 
 .toolbar-btn:hover {
-  background-color: var(--hover-bg, #e7e5df);
+  background-color: var(--hover-bg, var(--agnes-bg-hover));
 }
 </style>

@@ -51,7 +51,7 @@
               <el-option :label="t('users.roleUser')" value="user" />
               <el-option :label="t('users.roleAdmin')" value="admin" />
             </el-select>
-            <div v-if="isSelf(row)" class="muted small">自己无法修改</div>
+            <div v-if="isSelf(row)" class="muted small">{{ t('users.cannotEditSelf') }}</div>
           </template>
         </el-table-column>
         <el-table-column :label="t('users.colStatus')" width="140" align="center">
@@ -189,11 +189,11 @@ onMounted(fetchUsers)
 }
 .page-head h2 {
   margin: 0 0 4px;
-  color: #e8eef7;
+  color: var(--agnes-text-primary);
   font-size: 20px;
 }
 .muted {
-  color: #8ba3c9;
+  color: var(--agnes-text-muted);
   font-size: 13px;
   margin: 0;
 }
@@ -202,20 +202,20 @@ onMounted(fetchUsers)
   margin-top: 4px;
 }
 .table-card {
-  background: rgba(15, 22, 38, 0.6);
-  border: 1px solid rgba(100, 150, 220, 0.15);
+  background: var(--agnes-bg-elevated);
+  border: 1px solid var(--agnes-border);
   border-radius: 10px;
 }
 :deep(.el-table) {
   background: transparent;
-  color: #cfd9e8;
+  color: var(--agnes-text-secondary);
 }
 :deep(.el-table th.el-table__cell) {
-  background: rgba(25, 35, 55, 0.8);
-  color: #a0b4d6;
+  background: var(--agnes-bg-hover);
+  color: var(--agnes-text-secondary);
 }
 :deep(.el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell) {
-  background: rgba(20, 30, 50, 0.4);
+  background: var(--agnes-bg-hover);
 }
 .user-cell {
   display: flex;
@@ -227,7 +227,7 @@ onMounted(fetchUsers)
   flex-direction: column;
 }
 .user-cell-name {
-  color: #e8eef7;
+  color: var(--agnes-text-primary);
   font-weight: 500;
 }
 .user-cell-email {

@@ -8,7 +8,7 @@
 
 <template>
   <div class="image-view">
-    <h2 class="page-title">🎨 {{ t('view.imageTitle') }}</h2>
+    <h2 class="page-title">{{ t('view.imageTitle') }}</h2>
     <p class="page-desc">{{ t('view.imageDesc') }}</p>
 
     <el-row :gutter="24">
@@ -26,7 +26,7 @@
               <el-tab-pane name="text2image">
                 <template #label>
                   <span class="mode-label">
-                    <span class="mode-icon">✍️</span>
+                    <el-icon class="mode-icon"><Edit /></el-icon>
                     <span class="mode-text">
                       <span class="mode-title">{{ t('params.mode.text2image') }}</span>
                       <span class="mode-sub">{{ t('params.mode.textOnly') }}</span>
@@ -37,7 +37,7 @@
               <el-tab-pane name="image2image">
                 <template #label>
                   <span class="mode-label">
-                    <span class="mode-icon">🖼️</span>
+                    <el-icon class="mode-icon"><PictureFilled /></el-icon>
                     <span class="mode-text">
                       <span class="mode-title">{{ t('params.mode.image2image') }}</span>
                       <span class="mode-sub">{{ t('params.mode.imageOnly') }}</span>
@@ -186,7 +186,7 @@
 
           <!-- 情况 C：任务失败 -->
           <div v-else-if="activeTask && activeTask.status === 'failed'" class="result-failed">
-            <el-icon :size="48" color="#ff7b7b"><CircleCloseFilled /></el-icon>
+            <el-icon :size="48" :color="'var(--agnes-error)'"><CircleCloseFilled /></el-icon>
             <div class="failed-text">{{ t('status.imageGenerateFailed') }}</div>
             <div class="failed-sub">{{ activeTask.errorMessage || '' }}</div>
             <el-button type="primary" size="small" class="retry-btn" @click="retryActiveTask">
@@ -196,7 +196,7 @@
 
           <!-- 情况 D：已取消 -->
           <div v-else-if="activeTask && activeTask.status === 'cancelled'" class="result-failed">
-            <el-icon :size="48" color="#ffb86b"><CircleCloseFilled /></el-icon>
+            <el-icon :size="48" :color="'var(--agnes-warning)'"><CircleCloseFilled /></el-icon>
             <div class="failed-text">{{ t('status.cancelled') }}</div>
             <div class="failed-sub">{{ t('preview.wrongTypeHint') }}</div>
           </div>
@@ -241,7 +241,7 @@
 import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  MagicStick, Download, Link, PictureFilled, Loading, CircleCloseFilled, VideoPlay
+  MagicStick, Download, Link, PictureFilled, Edit, Loading, CircleCloseFilled, VideoPlay
 } from '@element-plus/icons-vue'
 import PromptTemplates from '@/components/PromptTemplates.vue'
 import ImageUploader from '@/components/ImageUploader.vue'
@@ -363,7 +363,7 @@ const statusLabel = computed(() => {
   return localized === key ? s : localized
 })
 
-const progressColor = '#ff8c42'
+const progressColor = 'var(--agnes-warning)'
 
 // 任务总数
 const taskCount = computed(() => {
@@ -521,9 +521,9 @@ function copyImageUrl() {
 </script>
 
 <style scoped>
-.image-view { color: #e8eef7; }
+.image-view { color: var(--agnes-text-primary); }
 .page-title { margin: 0 0 4px 0; }
-.page-desc { color: #8ba3c9; font-size: 14px; margin-bottom: 20px; line-height: 1.6; }
+.page-desc { color: var(--agnes-text-muted); font-size: 14px; margin-bottom: 20px; line-height: 1.6; }
 .card-header {
   display: flex;
   justify-content: space-between;
@@ -545,28 +545,28 @@ function copyImageUrl() {
 .task-pill.status-queued,
 .task-pill.status-pending,
 .task-pill.status-processing {
-  background: rgba(255, 140, 66, 0.2);
-  color: #ffa56b;
+  background: var(--agnes-info-bg);
+  color: var(--agnes-info);
 }
 .task-pill.status-success {
-  background: rgba(46, 184, 128, 0.2);
-  color: #2ee58c;
+  background: var(--agnes-success-bg);
+  color: var(--agnes-success);
 }
 .task-pill.status-failed {
-  background: rgba(255, 123, 123, 0.2);
-  color: #ff9b9b;
+  background: var(--agnes-error-bg);
+  color: var(--agnes-error);
 }
 .task-pill.status-cancelled {
-  background: rgba(255, 184, 107, 0.2);
-  color: #ffb86b;
+  background: var(--agnes-warning-bg);
+  color: var(--agnes-warning);
 }
-.tab-sub { font-size: 12px; color: #8ba3c9; margin-left: 6px; }
+.tab-sub { font-size: 12px; color: var(--agnes-text-muted); margin-left: 6px; }
 /* 模式切换：图标 + 标题 + 短副标签 */
 .mode-tabs :deep(.el-tabs__nav) {
   width: 100%;
   display: flex;
   justify-content: space-between;
-  border-bottom: 1px solid rgba(107, 126, 156, 0.2);
+  border-bottom: 1px solid var(--agnes-border);
 }
 .mode-tabs :deep(.el-tabs__item) {
   flex: 1;
@@ -578,7 +578,7 @@ function copyImageUrl() {
 }
 .mode-tabs :deep(.el-tabs__active-bar) {
   height: 3px;
-  background: linear-gradient(90deg, #6b9cff, #8bb0ff);
+  background: linear-gradient(90deg, var(--agnes-primary), var(--agnes-primary-soft));
   border-radius: 3px 3px 0 0;
 }
 .mode-tabs .mode-label {
@@ -602,16 +602,16 @@ function copyImageUrl() {
 .mode-tabs .mode-title {
   font-size: 15px;
   font-weight: 600;
-  color: #d5e3f7;
+  color: var(--agnes-text-primary);
   white-space: nowrap;
 }
 .mode-tabs :deep(.is-active) .mode-title,
 .mode-tabs :deep(.is-active) .mode-icon {
-  color: #8bb0ff;
+  color: var(--agnes-primary-soft);
 }
 .mode-tabs .mode-sub {
   font-size: 12px;
-  color: #8ba3c9;
+  color: var(--agnes-text-muted);
   margin-top: 2px;
   white-space: nowrap;
 }
@@ -620,7 +620,7 @@ function copyImageUrl() {
 
 /* 统一表单标签：更醒目、更有视觉层级 */
 .param-form :deep(.el-form-item__label) {
-  color: #c5d3ea !important;
+  color: var(--agnes-text-secondary) !important;
   font-size: 13px !important;
   font-weight: 500 !important;
   padding-bottom: 6px !important;
@@ -631,11 +631,11 @@ function copyImageUrl() {
 .param-form :deep(.el-input__wrapper),
 .param-form :deep(.el-textarea__inner),
 .param-form :deep(.el-select) {
-  background: rgba(18, 27, 50, 0.55) !important;
-  border-color: rgba(107, 126, 156, 0.25) !important;
+  background: var(--agnes-bg-input) !important;
+  border-color: var(--agnes-border) !important;
   border-radius: 10px !important;
   box-shadow: none !important;
-  color: #e8eef7 !important;
+  color: var(--agnes-text-primary) !important;
 }
 
 .param-form :deep(.el-textarea__inner) {
@@ -647,12 +647,12 @@ function copyImageUrl() {
 .param-form :deep(.el-input__wrapper:hover),
 .param-form :deep(.el-textarea__inner:hover),
 .param-form :deep(.el-select .el-select__wrapper:hover) {
-  border-color: rgba(139, 176, 255, 0.55) !important;
+  border-color: var(--agnes-primary) !important;
 }
 
 .param-form :deep(.el-select .el-select__wrapper) {
   box-shadow: none !important;
-  background: rgba(18, 27, 50, 0.55) !important;
+  background: var(--agnes-bg-input) !important;
   border-radius: 10px !important;
   min-height: 36px !important;
 }
@@ -660,13 +660,13 @@ function copyImageUrl() {
 .param-form :deep(.el-input__inner),
 .param-form :deep(.el-select__placeholder),
 .param-form :deep(.el-select__selected-item) {
-  color: #e8eef7 !important;
+  color: var(--agnes-text-primary) !important;
   font-size: 14px !important;
 }
 
 .param-form :deep(.el-input__placeholder),
 .param-form :deep(.el-select__placeholder) {
-  color: #7c94b8 !important;
+  color: var(--agnes-text-muted) !important;
 }
 
 .generate-btn {
@@ -680,7 +680,7 @@ function copyImageUrl() {
 .queue-hint {
   margin-top: 8px;
   font-size: 12px;
-  color: #8ba3c9;
+  color: var(--agnes-text-muted);
   text-align: center;
 }
 
@@ -688,11 +688,11 @@ function copyImageUrl() {
 .no-credits-hint {
   margin-top: 8px;
   padding: 8px 12px;
-  background: rgba(255, 123, 123, 0.1);
-  border: 1px solid rgba(255, 123, 123, 0.3);
+  background: var(--agnes-error-bg);
+  border: 1px solid var(--agnes-error-border);
   border-radius: 8px;
   font-size: 12px;
-  color: #ff9b9b;
+  color: var(--agnes-error);
   text-align: center;
 }
 
@@ -701,13 +701,13 @@ function copyImageUrl() {
   margin-top: 8px;
   font-size: 12px;
   text-align: center;
-  color: #ffd28a;
+  color: var(--agnes-credits-text);
 }
 .cost-hint .cost-loading {
-  color: #8ba3c9;
+  color: var(--agnes-text-muted);
 }
 .cost-hint .cost-value.insufficient {
-  color: #ff9b9b;
+  color: var(--agnes-error);
 }
 
 /* 结果区 */
@@ -717,27 +717,27 @@ function copyImageUrl() {
 }
 .task-id-row {
   font-size: 12px;
-  color: #6b84aa;
+  color: var(--agnes-text-faint);
   margin-bottom: 16px;
   font-family: monospace;
 }
 .loading-text {
   margin-top: 16px;
   font-size: 16px;
-  color: #d5e3f7;
+  color: var(--agnes-text-primary);
 }
 .loading-sub {
   margin-top: 6px;
   font-size: 12px;
-  color: #8ba3c9;
+  color: var(--agnes-text-muted);
 }
 .prompt-row {
   margin-top: 16px;
   padding: 10px 14px;
-  background: rgba(15, 24, 42, 0.4);
+  background: var(--agnes-bg-inset);
   border-radius: 8px;
   font-size: 13px;
-  color: #a0b4d6;
+  color: var(--agnes-text-secondary);
   text-align: left;
   word-break: break-word;
   max-height: 80px;
@@ -750,7 +750,7 @@ function copyImageUrl() {
   max-height: 520px;
   object-fit: contain;
   border-radius: 12px;
-  background: #000;
+  background: var(--agnes-bg-dark-surface);
   display: block;
   cursor: zoom-in;
   transition: opacity 0.2s ease, transform 0.2s ease;
@@ -762,40 +762,40 @@ function copyImageUrl() {
 .result-meta {
   margin-top: 16px;
   padding: 12px;
-  background: rgba(15, 24, 42, 0.4);
+  background: var(--agnes-bg-inset);
   border-radius: 8px;
   text-align: left;
 }
-.meta-row { font-size: 13px; padding: 4px 0; color: #d5e3f7; }
-.meta-label { color: #8ba3c9; margin-right: 8px; }
+.meta-row { font-size: 13px; padding: 4px 0; color: var(--agnes-text-primary); }
+.meta-label { color: var(--agnes-text-muted); margin-right: 8px; }
 .meta-value { word-break: break-word; }
 
 .result-failed {
   padding: 60px 20px;
   text-align: center;
-  color: #ff9b9b;
+  color: var(--agnes-error);
 }
-.failed-text { margin-top: 16px; font-size: 16px; color: #ffb5b5; }
-.failed-sub { font-size: 12px; color: #8ba3c9; margin-top: 6px; }
+.failed-text { margin-top: 16px; font-size: 16px; color: var(--agnes-error); }
+.failed-sub { font-size: 12px; color: var(--agnes-text-muted); margin-top: 6px; }
 .retry-btn { margin-top: 20px; }
 
 .empty-state {
   padding: 80px 20px;
   text-align: center;
-  color: #6b84aa;
+  color: var(--agnes-text-faint);
 }
 .empty-text { margin-top: 16px; font-size: 14px; }
-.empty-sub { margin-top: 8px; font-size: 12px; color: #8ba3c9; line-height: 1.6; }
+.empty-sub { margin-top: 8px; font-size: 12px; color: var(--agnes-text-muted); line-height: 1.6; }
 
 .tips-card {
   margin-top: 16px;
   padding: 16px 20px;
-  background: rgba(15, 24, 42, 0.5);
-  border: 1px solid rgba(120, 170, 255, 0.15);
+  background: var(--agnes-bg-inset);
+  border: 1px solid var(--agnes-border);
   border-radius: 12px;
   font-size: 13px;
-  color: #a0b4d6;
+  color: var(--agnes-text-secondary);
 }
-.tip-title { font-weight: 600; color: #d5e3f7; margin-bottom: 8px; }
+.tip-title { font-weight: 600; color: var(--agnes-text-primary); margin-bottom: 8px; }
 .tips-card ul { margin: 0; padding-left: 20px; line-height: 1.8; }
 </style>

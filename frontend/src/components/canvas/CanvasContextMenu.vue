@@ -96,7 +96,7 @@ const itemStyle = computed(() => ({}))
 
 /** 危险菜单项样式（红色） */
 const dangerItemStyle = computed(() => ({
-  color: '#f87171',
+  color: 'var(--agnes-error)',
 }))
 
 /* ---------- 菜单项点击处理 ---------- */
@@ -171,10 +171,10 @@ onUnmounted(() => {
 }
 
 .menu-item:hover {
-  background-color: var(--hover-bg, #e7e5df);
+  background-color: var(--hover-bg, var(--agnes-bg-hover));
 }
 
 .menu-item.is-danger {
-  color: #f87171;
+  color: var(--agnes-error);
 }
 </style>

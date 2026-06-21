@@ -228,7 +228,7 @@ function confirm() {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--agnes-overlay-bg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -251,7 +251,7 @@ function confirm() {
   align-items: center;
   justify-content: space-between;
   padding: 16px 20px;
-  border-bottom: 1px solid rgba(128, 128, 128, 0.15);
+  border-bottom: 1px solid var(--agnes-border);
 }
 
 .mask-title {
@@ -275,14 +275,14 @@ function confirm() {
 
 .mask-close:hover {
   opacity: 1;
-  background: rgba(128, 128, 128, 0.15);
+  background: var(--agnes-bg-hover);
 }
 
 .mask-canvas-area {
   padding: 20px;
   display: flex;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--agnes-bg-dark-surface);
 }
 
 .mask-canvas-area canvas {
@@ -296,7 +296,7 @@ function confirm() {
   align-items: center;
   gap: 16px;
   padding: 12px 20px;
-  border-top: 1px solid rgba(128, 128, 128, 0.1);
+  border-top: 1px solid var(--agnes-border);
 }
 
 .mask-tool-label {
@@ -316,7 +316,7 @@ function confirm() {
   align-items: center;
   gap: 4px;
   padding: 6px 12px;
-  border: 1px solid rgba(128, 128, 128, 0.2);
+  border: 1px solid var(--agnes-border);
   border-radius: 8px;
   background: transparent;
   cursor: pointer;
@@ -325,7 +325,7 @@ function confirm() {
 }
 
 .mask-tool-btn:hover {
-  background: rgba(128, 128, 128, 0.1);
+  background: var(--agnes-bg-hover);
 }
 
 .mask-prompt-area {
@@ -335,7 +335,7 @@ function confirm() {
 .mask-prompt-area textarea {
   width: 100%;
   padding: 8px 12px;
-  border: 1px solid rgba(128, 128, 128, 0.2);
+  border: 1px solid var(--agnes-border);
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.15);
   color: inherit;
@@ -346,7 +346,7 @@ function confirm() {
 }
 
 .mask-prompt-area textarea:focus {
-  border-color: #6b9cff;
+  border-color: var(--agnes-primary);
 }
 
 .mask-actions {
@@ -354,12 +354,12 @@ function confirm() {
   justify-content: flex-end;
   gap: 12px;
   padding: 16px 20px;
-  border-top: 1px solid rgba(128, 128, 128, 0.1);
+  border-top: 1px solid var(--agnes-border);
 }
 
 .mask-btn-cancel {
   padding: 8px 20px;
-  border: 1px solid rgba(128, 128, 128, 0.2);
+  border: 1px solid var(--agnes-border);
   border-radius: 8px;
   background: transparent;
   cursor: pointer;
@@ -368,14 +368,14 @@ function confirm() {
 }
 
 .mask-btn-cancel:hover {
-  background: rgba(128, 128, 128, 0.1);
+  background: var(--agnes-bg-hover);
 }
 
 .mask-btn-confirm {
   padding: 8px 20px;
   border: none;
   border-radius: 8px;
-  background: linear-gradient(135deg, #6b9cff, #a78bff);
+  background: linear-gradient(135deg, var(--agnes-primary), var(--agnes-accent));
   cursor: pointer;
   color: #fff;
   font-size: 14px;

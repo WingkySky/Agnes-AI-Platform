@@ -456,8 +456,8 @@ onBeforeUnmount(() => {
 }
 /* 鼠标悬停时（激活目标）：强调边框和背景 —— 让用户一眼知道：这里就是要粘贴的框 */
 .image-uploader.is-active {
-  border-color: rgba(107, 156, 255, 0.45);
-  background: rgba(107, 156, 255, 0.08);
+  border-color: var(--agnes-primary-border);
+  background: var(--agnes-nav-hover-bg);
 }
 
 /* 标题区 */
@@ -471,14 +471,14 @@ onBeforeUnmount(() => {
 .uploader-title {
   font-size: 14px;
   font-weight: 500;
-  color: #d5e3f7;
+  color: var(--agnes-text-primary);
 }
 .uploader-hint {
   font-size: 12px;
-  color: #6b84aa;
+  color: var(--agnes-text-faint);
 }
 .uploader-hint b {
-  color: #6b9cff;
+  color: var(--agnes-primary);
   font-weight: 600;
 }
 
@@ -490,10 +490,10 @@ onBeforeUnmount(() => {
   margin-bottom: 12px;
 }
 .file-card {
-  border: 1px solid rgba(120, 170, 255, 0.2);
+  border: 1px solid var(--agnes-primary-border-faint);
   border-radius: 10px;
   padding: 8px;
-  background: rgba(15, 24, 42, 0.4);
+  background: var(--agnes-bg-inset);
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -509,20 +509,20 @@ onBeforeUnmount(() => {
   margin-top: 6px;
   font-size: 12px;
   text-align: center;
-  color: #a0b4d6;
+  color: var(--agnes-text-secondary);
 }
 .file-name {
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #d5e3f7;
+  color: var(--agnes-text-primary);
 }
 .file-size {
-  color: #6b84aa;
+  color: var(--agnes-text-faint);
 }
 .file-source {
-  color: #6b9cff;
+  color: var(--agnes-primary);
   font-size: 11px;
 }
 .del-btn {
@@ -531,8 +531,8 @@ onBeforeUnmount(() => {
 
 /* 添加区外层 */
 .add-area {
-  background: rgba(15, 24, 42, 0.35);
-  border: 1px solid rgba(120, 170, 255, 0.15);
+  background: var(--agnes-bg-inset);
+  border: 1px solid var(--agnes-primary-border-faint);
   border-radius: 12px;
   padding: 14px;
 }
@@ -541,11 +541,11 @@ onBeforeUnmount(() => {
 .upload-zone {
   width: 100%;
   min-height: 140px;
-  border: 2px dashed rgba(120, 170, 255, 0.35);
+  border: 2px dashed var(--agnes-primary-border);
   border-radius: 10px;
   padding: 20px 20px 14px;
   text-align: center;
-  background: rgba(10, 18, 34, 0.4);
+  background: var(--agnes-bg-inset);
   cursor: pointer;
   transition: all 0.2s ease;
   display: flex;
@@ -555,27 +555,27 @@ onBeforeUnmount(() => {
 }
 .upload-zone:hover,
 .upload-zone.drag-over {
-  border-color: #6b9cff;
-  background: rgba(90, 134, 255, 0.1);
+  border-color: var(--agnes-primary);
+  background: var(--agnes-nav-hover-bg);
 }
 /* 粘贴高亮反馈 */
 .upload-zone.paste-active {
-  border-color: #2ee58c;
-  background: rgba(46, 229, 140, 0.12);
-  box-shadow: 0 0 0 3px rgba(46, 229, 140, 0.15);
+  border-color: var(--agnes-success);
+  background: var(--agnes-success-bg);
+  box-shadow: 0 0 0 3px var(--agnes-success-bg);
 }
 .upload-icon {
-  color: #6b9cff;
+  color: var(--agnes-primary);
   margin-bottom: 8px;
 }
 .upload-hint {
-  color: #d5e3f7;
+  color: var(--agnes-text-primary);
   font-weight: 500;
   font-size: 14px;
   margin-bottom: 4px;
 }
 .upload-desc {
-  color: #6b84aa;
+  color: var(--agnes-text-faint);
   font-size: 12px;
 }
 .paste-hint {
@@ -584,10 +584,10 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
-  background: rgba(107, 156, 255, 0.1);
-  border: 1px solid rgba(107, 156, 255, 0.25);
+  background: var(--agnes-nav-hover-bg);
+  border: 1px solid var(--agnes-primary-border);
   border-radius: 12px;
-  color: #8bb0ff;
+  color: var(--agnes-primary-soft);
   font-size: 12px;
 }
 .paste-hint .el-icon {
@@ -603,11 +603,11 @@ onBeforeUnmount(() => {
 .limit-hint {
   margin-top: 8px;
   font-size: 12px;
-  color: #ffb86b;
+  color: var(--agnes-warning);
   text-align: center;
   padding: 10px;
-  background: rgba(255, 184, 107, 0.08);
+  background: var(--agnes-warning-bg);
   border-radius: 8px;
-  border: 1px dashed rgba(255, 184, 107, 0.3);
+  border: 1px dashed var(--agnes-warning-border);
 }
 </style>
