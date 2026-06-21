@@ -80,7 +80,7 @@
             <!-- 连接指示线：起始帧 → 结束帧 -->
             <div class="frame-connector">
               <div class="connector-line"></div>
-              <div class="connector-arrow">↓</div>
+              <div class="connector-arrow"><el-icon><ArrowDownBold /></el-icon></div>
               <div class="connector-line"></div>
             </div>
 
@@ -296,7 +296,7 @@ import { ref, computed, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   VideoPlay, Download, CopyDocument, CircleCloseFilled, VideoCameraFilled, Loading, MagicStick,
-  Edit, Film, PictureFilled
+  Edit, Film, PictureFilled, ArrowDownBold
 } from '@element-plus/icons-vue'
 import PromptTemplates from '@/components/PromptTemplates.vue'
 import ImageUploader from '@/components/ImageUploader.vue'

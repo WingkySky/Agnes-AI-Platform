@@ -15,14 +15,14 @@
         <!-- 头部 -->
         <div class="panel-header">
           <div class="panel-title">
-            <span class="title-icon">⚡</span>
+            <el-icon class="title-icon"><Promotion /></el-icon>
             <span>{{ t('queue.title') }}</span>
             <span v-if="queue.runningCount > 0" class="running-badge">
               {{ queue.runningCount }}{{ t('queue.runningBadge').replace('{n}', '') }}
             </span>
           </div>
           <button class="close-btn" @click="queue.closePanel()" :title="t('queue.collapse')">
-            ✕
+            <el-icon><Close /></el-icon>
           </button>
         </div>
 
@@ -76,7 +76,7 @@
       @click="queue.togglePanel()"
       :title="queue.panelOpen ? t('queue.collapse') : t('queue.expand')"
     >
-      <span class="btn-icon">⚡</span>
+      <el-icon class="btn-icon"><Promotion /></el-icon>
       <span v-if="!queue.panelOpen" class="btn-text">
         {{ t('queue.queueShort') }}
       </span>
@@ -91,7 +91,7 @@
 // ------ 国际化：引入 i18n composable ------
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { MagicStick } from '@element-plus/icons-vue'
+import { MagicStick, Close, Promotion } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import TaskCard from './TaskCard.vue'
 import { useTaskQueueStore } from '@/stores/taskQueue'

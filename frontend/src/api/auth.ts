@@ -24,6 +24,7 @@ import type {
   UpdateRoleRequest,
   UpdateCreditsRequest,
   UpdateActiveRequest,
+  UpdateProfileRequest,
   CreditRuleResponse,
   CreditRuleUpdateRequest,
 } from '@/types'
@@ -46,6 +47,20 @@ export function getMe(): Promise<UserInfoResponse> {
 /** 获取当前积分余额 */
 export function getCredits(): Promise<{ credits: number }> {
   return client.get('/api/auth/credits', { silent: true })
+}
+
+/** 更新当前用户个人资料（邮箱） */
+export function updateMyProfile(params: UpdateProfileRequest): Promise<UserInfoResponse> {
+  return client.put('/api/auth/me', params)
+}
+
+/** 上传/更新当前用户头像（multipart/form-data） */
+export function uploadAvatar(file: File): Promise<UserInfoResponse> {
+  const form = new FormData()
+  form.append('file', file)
+  return client.post('/api/auth/avatar', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
 }
 
 // ---------- 管理员：用户与角色管理 ----------

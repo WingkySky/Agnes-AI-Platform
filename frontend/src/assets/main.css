@@ -198,6 +198,13 @@ body {
  * Element Plus 组件自定义样式（响应主题变量）
  * ===================================================== */
 
+/* ElMessage / ElNotification 向下偏移，避免遮挡顶部菜单栏（约 56px 高） */
+.el-message,
+.el-notification {
+  top: 64px !important;
+}
+/* ElMessageBox 居中弹窗不受影响，无需调整 */
+
 /* Card */
 .el-card {
   background: var(--agnes-bg-card) !important;

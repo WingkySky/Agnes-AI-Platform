@@ -19,6 +19,21 @@ import type {
 } from '@/types'
 
 // =====================================================
+// 辅助：为原生 fetch 读取 JWT Authorization 头
+// sendMessageStream 用 fetch 而非 axios client，需手动注入 token
+// =====================================================
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  try {
+    // 优先从 localStorage 读取（与 client.ts 拦截器一致）
+    const token = localStorage.getItem('agnes.platform.auth.token')
+    if (token) {
+      return { Authorization: `Bearer ${token}` }
+    }
+  } catch (_) { /* ignore */ }
+  return {}
+}
+
+// =====================================================
 // 会话管理
 // =====================================================
 
@@ -150,6 +165,10 @@ export async function sendMessageStream(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      // 手动注入 JWT：sendMessageStream 用原生 fetch 而非 axios client，
+      // 不会走请求拦截器，需要自行读取 token 加到 Authorization 头，
+      // 否则后端 current_user 为 None，会话按 user_id IS NULL 查询导致 404
+      ...(await getAuthHeaders()),
     },
     body: JSON.stringify(body),
     signal,

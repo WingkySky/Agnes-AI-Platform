@@ -15,6 +15,25 @@ interface ImageSize {
 }
 
 /**
+ * 将远程图片 URL 转为后端代理 URL，绕过浏览器 CORS 限制
+ * - 仅对 http/https 远程 URL 生效
+ * - data: URI（base64）和 blob: URL 原样返回
+ * - 代理接口：GET /api/proxy/image?url=<远程 URL>
+ */
+function toProxyUrl(source: string): string {
+  if (!source) return source
+  // data: / blob: URI 无需代理
+  if (source.startsWith('data:') || source.startsWith('blob:')) return source
+  // 同源 URL（相对路径或 localhost）无需代理
+  if (source.startsWith('/')) return source
+  // 远程 http/https URL → 走后端代理
+  if (source.startsWith('http://') || source.startsWith('https://')) {
+    return `/api/proxy/image?url=${encodeURIComponent(source)}`
+  }
+  return source
+}
+
+/**
  * 加载图像
  * @param source - 图像 URL 或 base64 data URL
  * @returns Promise<HTMLImageElement>
@@ -29,7 +48,8 @@ export function loadImage(source: string): Promise<HTMLImageElement> {
     img.crossOrigin = 'anonymous'
     img.onload = () => resolve(img)
     img.onerror = () => reject(new Error('loadImage: 图像加载失败'))
-    img.src = source
+    // 远程 URL 走后端代理，绕过 CORS（canvas 像素操作需要 crossOrigin + CORS 头）
+    img.src = toProxyUrl(source)
   })
 }
 

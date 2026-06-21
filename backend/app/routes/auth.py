@@ -14,9 +14,11 @@
 # =====================================================
 
 import logging
+import os
+import time
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -41,6 +43,7 @@ from app.schemas.user import (
     UpdateRoleRequest,
     UpdateCreditsRequest,
     UpdateActiveRequest,
+    UpdateProfileRequest,
 )
 
 logger = logging.getLogger("agnes_platform")
@@ -186,6 +189,137 @@ async def get_me(current_user: User = Depends(get_current_user)):
         id=current_user.id,
         username=current_user.username,
         email=current_user.email,
+        avatar_url=current_user.avatar_url,
+        credits=current_user.credits,
+        role=current_user.role,
+        is_active=current_user.is_active,
+        is_admin=is_admin,
+        created_at=current_user.created_at,
+        last_login_at=current_user.last_login_at,
+    )
+
+
+# =====================================================
+# 更新个人资料（邮箱）
+# =====================================================
+
+@router.put("/me", response_model=UserInfoResponse, summary="更新当前用户个人资料")
+async def update_my_profile(
+    req: UpdateProfileRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    更新当前登录用户的个人资料（目前仅支持修改邮箱）。
+    - 邮箱可选，传 null 清空
+    - 邮箱唯一，冲突返回 409
+    """
+    if req.email is not None:
+        # 检查邮箱是否已被其他用户占用
+        if req.email:
+            existing = await db.execute(
+                select(User).filter(User.email == req.email, User.id != current_user.id)
+            )
+            if existing.scalar_one_or_none():
+                raise HTTPException(status_code=409, detail="该邮箱已被其他用户占用")
+        current_user.email = req.email or None
+
+    await db.commit()
+    await db.refresh(current_user)
+    logger.info("[个人资料更新] user=%s id=%d email=%s", current_user.username, current_user.id, current_user.email)
+
+    is_admin = current_user.role == ROLE_ADMIN or current_user.is_admin
+    return UserInfoResponse(
+        id=current_user.id,
+        username=current_user.username,
+        email=current_user.email,
+        avatar_url=current_user.avatar_url,
+        credits=current_user.credits,
+        role=current_user.role,
+        is_active=current_user.is_active,
+        is_admin=is_admin,
+        created_at=current_user.created_at,
+        last_login_at=current_user.last_login_at,
+    )
+
+
+# =====================================================
+# 上传头像
+# =====================================================
+
+# 头像保存目录（相对于后端工作目录）
+AVATAR_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads", "avatars")
+# 允许的头像 MIME 类型
+ALLOWED_AVATAR_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+# 头像最大大小 2MB
+MAX_AVATAR_BYTES = 2 * 1024 * 1024
+
+
+@router.post("/avatar", response_model=UserInfoResponse, summary="上传/更新当前用户头像")
+async def upload_avatar(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    上传或更新当前登录用户的头像。
+    - 接收 multipart/form-data 文件
+    - 支持 jpeg/png/webp/gif，最大 2MB
+    - 保存到 backend/uploads/avatars/，文件名带用户 ID + 时间戳防冲突
+    - 返回更新后的用户信息（含新的 avatar_url）
+    """
+    # 校验文件类型
+    if file.content_type not in ALLOWED_AVATAR_TYPES:
+        raise HTTPException(status_code=400, detail=f"不支持的头像格式：{file.content_type}，仅支持 jpeg/png/webp/gif")
+
+    # 读取文件内容并校验大小
+    content = await file.read()
+    if len(content) > MAX_AVATAR_BYTES:
+        raise HTTPException(status_code=400, detail="头像文件过大，最大 2MB")
+
+    # 确保目录存在
+    os.makedirs(AVATAR_DIR, exist_ok=True)
+
+    # 根据 MIME 类型确定扩展名
+    ext_map = {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/webp": ".webp",
+        "image/gif": ".gif",
+    }
+    ext = ext_map.get(file.content_type, ".jpg")
+
+    # 文件名：用户 ID + 时间戳，避免覆盖旧文件；同时删除旧头像
+    filename = f"{current_user.id}_{int(time.time())}{ext}"
+    filepath = os.path.join(AVATAR_DIR, filename)
+
+    # 删除旧头像文件（如果存在且不是默认头像）
+    if current_user.avatar_url:
+        old_filename = os.path.basename(current_user.avatar_url)
+        old_filepath = os.path.join(AVATAR_DIR, old_filename)
+        if os.path.exists(old_filepath) and old_filepath != filepath:
+            try:
+                os.remove(old_filepath)
+            except OSError:
+                pass
+
+    # 写入新文件
+    with open(filepath, "wb") as f:
+        f.write(content)
+
+    # 更新数据库中的 avatar_url（前端通过 /uploads/avatars/<filename> 访问）
+    current_user.avatar_url = f"/uploads/avatars/{filename}"
+    await db.commit()
+    await db.refresh(current_user)
+
+    logger.info("[头像更新] user=%s id=%d avatar=%s", current_user.username, current_user.id, current_user.avatar_url)
+
+    is_admin = current_user.role == ROLE_ADMIN or current_user.is_admin
+    return UserInfoResponse(
+        id=current_user.id,
+        username=current_user.username,
+        email=current_user.email,
+        avatar_url=current_user.avatar_url,
         credits=current_user.credits,
         role=current_user.role,
         is_active=current_user.is_active,

@@ -49,19 +49,19 @@
 
       <!-- 成功状态：展示结果缩略图 -->
       <div v-else-if="task.status === 'success' && task.resultUrl" class="task-success">
-        <span class="success-icon">✓</span>
+        <el-icon class="success-icon"><Check /></el-icon>
         <span class="success-text">{{ t('taskStatus.successText') }} · {{ formatTime(task.updatedAt) }}</span>
       </div>
 
       <!-- 失败状态：展示错误信息 -->
       <div v-else-if="task.status === 'failed'" class="task-failed">
-        <span class="failed-icon">✗</span>
+        <el-icon class="failed-icon"><Close /></el-icon>
         <span class="failed-text">{{ task.errorMessage || t('taskStatus.failedText') }}</span>
       </div>
 
       <!-- 已取消 -->
       <div v-else-if="task.status === 'cancelled'" class="task-cancelled">
-        <span class="cancelled-icon">⊘</span>
+        <el-icon class="cancelled-icon"><Remove /></el-icon>
         <span class="cancelled-text">{{ t('taskStatus.cancelledText') }}</span>
       </div>
 
@@ -103,7 +103,7 @@
 <script setup lang="ts">
 // ------ 引入 i18n composable ------
 import { computed } from 'vue'
-import { VideoPlay, PictureFilled } from '@element-plus/icons-vue'
+import { VideoPlay, PictureFilled, Check, Close, Remove } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 

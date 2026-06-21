@@ -34,6 +34,11 @@ export default defineConfig({
       '/health': {
         target: 'http://localhost:8000',
         changeOrigin: true
+      },
+      // 用户上传的头像等静态资源走后端服务
+      '/uploads': {
+        target: 'http://localhost:8000',
+        changeOrigin: true
       }
     }
   },

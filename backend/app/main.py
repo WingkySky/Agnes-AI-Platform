@@ -30,11 +30,13 @@
 # =====================================================
 
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
 from app.core.database import Base, engine, async_engine
@@ -45,6 +47,7 @@ from app.routes import logs as logs_route
 from app.routes import providers as providers_route
 from app.routes import admin as admin_route
 from app.routes import credits as credits_route
+from app.routes import proxy as proxy_route
 from app.services.video_poller import poller_manager
 from app.services.image_poller import image_poller_manager
 from app.services.agnes_client import agnes_client
@@ -225,12 +228,20 @@ app.include_router(logs_route.router, prefix="/api", tags=["日志查询"])
 app.include_router(auth_route.router, prefix="/api", tags=["用户认证"])
 app.include_router(admin_route.router, prefix="/api", tags=["管理员-积分规则"])
 app.include_router(credits_route.router, prefix="/api", tags=["积分明细"])
+app.include_router(proxy_route.router, prefix="/api", tags=["图片代理"])
 
 
 # ---------- 健康检查 ----------
 @app.get("/health", summary="健康检查")
 async def health_check():
     return {"status": "ok", "service": "agnes-ai-platform"}
+
+
+# ---------- 静态文件：用户上传的头像 ----------
+# 通过 /uploads/avatars/<filename> 访问 backend/uploads/avatars/ 下的头像文件
+UPLOADS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads")
+os.makedirs(os.path.join(UPLOADS_DIR, "avatars"), exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 
 
 @app.get("/", summary="根路径 — 返回服务信息")

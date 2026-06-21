@@ -8,7 +8,7 @@
 
 <template>
   <div class="history-view">
-    <h2 class="page-title">📜 {{ t('history.title') }}</h2>
+    <h2 class="page-title"><el-icon><Document /></el-icon> {{ t('history.title') }}</h2>
     <p class="page-desc">{{ t('history.desc') }}</p>
 
     <!-- 筛选 Tab -->

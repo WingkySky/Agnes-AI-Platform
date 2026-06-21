@@ -94,7 +94,7 @@
           <template v-if="userStore.isAuthenticated">
             <el-dropdown trigger="click" @command="handleUserCommand">
               <div class="user-chip">
-                <el-avatar :size="28" :icon="UserFilled" />
+                <el-avatar :size="28" :src="userStore.avatarUrl || undefined" :icon="UserFilled" />
                 <span class="user-name">{{ userStore.username || t('userMenu.unnamed') }}</span>
                 <el-icon><CaretBottom /></el-icon>
               </div>
@@ -103,9 +103,9 @@
                   <el-dropdown-item disabled>
                     <span>{{ userStore.username }}</span>
                   </el-dropdown-item>
-                  <el-dropdown-item divided disabled>
-                    <el-icon><Coin /></el-icon>
-                    <span>{{ t('userMenu.creditsText') }}{{ creditsText }}</span>
+                  <el-dropdown-item divided command="profile">
+                    <el-icon><UserFilled /></el-icon>
+                    <span>{{ t('userMenu.profile') }}</span>
                   </el-dropdown-item>
                   <el-dropdown-item divided command="logout">
                     <el-icon><SwitchButton /></el-icon>
@@ -198,7 +198,7 @@ const isAdminRouteActive = computed(() => {
 })
 
 // keep-alive 缓存的路由组件名称（切换标签页时保持状态不销毁）
-const cachedViews = ['ChatView', 'ImageView', 'VideoView', 'HistoryView', 'CanvasView', 'SettingsView', 'UsersAdminView', 'CreditRulesView']
+const cachedViews = ['ChatView', 'ImageView', 'VideoView', 'HistoryView', 'CanvasView', 'SettingsView', 'UsersAdminView', 'CreditRulesView', 'ProfileView']
 
 // 积分显示：数字千分位格式化
 const creditsText = computed(() => {
@@ -212,6 +212,8 @@ function handleUserCommand(cmd: string) {
   if (cmd === 'logout') {
     userStore.logout()
     router.push('/login')
+  } else if (cmd === 'profile') {
+    router.push('/profile')
   }
 }
 

@@ -504,7 +504,7 @@ export const useChatStore = defineStore('chat', {
           // 错误事件
           const errMsg = this.messages[this.messages.length - 1]
           if (errMsg && errMsg.role === 'assistant') {
-            errMsg.content += `\n\n❌ 错误：${event.content || ''}`
+            errMsg.content += `\n\n错误：${event.content || ''}`
             errMsg._streaming = false
           }
           break

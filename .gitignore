@@ -36,3 +36,8 @@ docs/
 #参考项目
 huobao-canvas/
 *infinite-canvas*
+
+# 上传的文件
+.uploads/
+.claude/
+uploads/

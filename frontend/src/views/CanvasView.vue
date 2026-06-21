@@ -1063,11 +1063,43 @@ function handleHoverCopyPrompt() {
   if (!hoveredPanelId.value) return
   const p = store.panels.find((pp) => pp.id === hoveredPanelId.value)
   const prompt = (p?.content?.prompt ?? '') as string
-  navigator.clipboard?.writeText(prompt).then(() => {
-    ElMessage.success(t('canvas.messages.promptCopied'))
-  }).catch(() => {
-    ElMessage.warning(t('canvas.messages.copyFailed'))
-  })
+  // 复制到剪贴板：优先用 Clipboard API，失败时回退到 textarea + execCommand
+  // （HTTP 非安全上下文或浏览器禁用 Clipboard API 时需要兜底）
+  const fallbackCopy = (text: string) => {
+    try {
+      const textarea = document.createElement('textarea')
+      textarea.value = text
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      const ok = document.execCommand('copy')
+      document.body.removeChild(textarea)
+      return ok
+    } catch (_) {
+      return false
+    }
+  }
+
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard?.writeText(prompt).then(() => {
+      ElMessage.success(t('canvas.messages.promptCopied'))
+    }).catch(() => {
+      // Clipboard API 失败（如非安全上下文），用兜底方案
+      if (fallbackCopy(prompt)) {
+        ElMessage.success(t('canvas.messages.promptCopied'))
+      } else {
+        ElMessage.warning(t('canvas.messages.copyFailed'))
+      }
+    })
+  } else {
+    // 无 Clipboard API，直接用兜底方案
+    if (fallbackCopy(prompt)) {
+      ElMessage.success(t('canvas.messages.promptCopied'))
+    } else {
+      ElMessage.warning(t('canvas.messages.copyFailed'))
+    }
+  }
 }
 
 // 悬停工具栏：反推提示词（图生文）—— 将当前 hover 图片发给 AI，生成适合 AI 绘画的英文 prompt，写入节点 prompt 字段
@@ -1181,8 +1213,11 @@ async function handleMaskConfirm({ mask, prompt }: { mask: string; prompt: strin
     // 将图片转为 base64（如果还不是 base64）
     let base64Image = imageUrl!
     if (imageUrl && !imageUrl.startsWith('data:')) {
-      // URL 模式，需要先获取图片 base64
-      const response = await fetch(imageUrl)
+      // URL 模式：走后端代理获取图片，绕过 CORS（远程图片服务器无 CORS 头）
+      const proxyUrl = imageUrl.startsWith('http')
+        ? `/api/proxy/image?url=${encodeURIComponent(imageUrl)}`
+        : imageUrl
+      const response = await fetch(proxyUrl)
       const blob = await response.blob()
       base64Image = await new Promise<string>((resolve) => {
         const reader = new FileReader()
@@ -1256,14 +1291,18 @@ async function handleHoverCrop() {
 
   try {
     // 弹出比例选择
-    const { value } = await ElMessageBox.prompt(t('canvas.messages.cropDone'), t('canvas.messages.cropFailed'), {
-      inputValue: '1:1',
-      inputPattern: /^\d+:\d+$/,
-      inputErrorMessage: t('canvas.messages.cropFailed'),
-    }) as { value: string }
+    const { value } = await ElMessageBox.prompt(
+      t('canvas.messages.cropPromptMsg'),
+      t('canvas.messages.cropPromptTitle'),
+      {
+        inputValue: '1:1',
+        inputPattern: /^\d+:\d+$/,
+        inputErrorMessage: t('canvas.messages.cropFailed'),
+      }
+    ) as { value: string }
     const [rw, rh] = value.split(':').map(Number)
 
-    ElMessage.info(t('canvas.messages.cropFailed'))
+    ElMessage.info(t('canvas.messages.cropProcessing'))
     const { cropImage, getImageSize } = await import('@/lib/canvas-image-ops')
     const { width, height } = await getImageSize(imageUrl)
     // 计算居中裁剪区域
@@ -1299,7 +1338,7 @@ async function handleHoverSplit() {
   const imageUrl = panel.content.content as string
 
   try {
-    ElMessage.info(t('canvas.messages.splitDone'))
+    ElMessage.info(t('canvas.messages.splitProcessing'))
     const { splitImage } = await import('@/lib/canvas-image-ops')
     const pieces = await splitImage(imageUrl, 4) // 2x2 拆分为 4 份
     // store.splitImagePanel 不接受 pieces 数组，手动创建 4 个新节点并连线
@@ -1336,7 +1375,7 @@ async function handleHoverUpscale() {
   const imageUrl = panel.content.content as string
 
   try {
-    ElMessage.info(t('canvas.messages.upscaleDone'))
+    ElMessage.info(t('canvas.messages.upscaleProcessing'))
     const { upscaleImage } = await import('@/lib/canvas-image-ops')
     const result = await upscaleImage(imageUrl, 2)
     store.updatePanel(panel.id, { content: { content: result } })
@@ -1354,7 +1393,7 @@ async function handleHoverSuperResolution() {
   const imageUrl = panel.content.content as string
 
   try {
-    ElMessage.info(t('canvas.messages.superResDone'))
+    ElMessage.info(t('canvas.messages.superResProcessing'))
     const { upscaleImage } = await import('@/lib/canvas-image-ops')
     const result = await upscaleImage(imageUrl, 4)
     store.updatePanel(panel.id, { content: { content: result } })
@@ -1373,8 +1412,8 @@ async function handleHoverAngle() {
 
   try {
     const { value } = await ElMessageBox.prompt(
-      t('canvas.messages.rotateDone'),
-      t('canvas.messages.rotateFailed'),
+      t('canvas.messages.rotatePromptMsg'),
+      t('canvas.messages.rotatePromptTitle'),
       {
         inputValue: '90',
         inputPattern: /^(90|180|270)$/,
@@ -1383,12 +1422,12 @@ async function handleHoverAngle() {
     ) as { value: string }
     const degrees = Number(value)
 
-    ElMessage.info(`${t('canvas.messages.rotateDone')}: ${degrees}°`)
+    ElMessage.info(t('canvas.messages.rotateProcessing'))
     const { rotateImage } = await import('@/lib/canvas-image-ops')
     const result = await rotateImage(imageUrl, degrees)
     store.updatePanel(panel.id, { content: { content: result } })
     store.pushSnapshot()
-    ElMessage.success(t('canvas.messages.rotateDone'))
+    ElMessage.success(`${t('canvas.messages.rotateDone')}: ${degrees}°`)
   } catch (err) {
     if (err !== 'cancel' && (err as any)?.message !== 'cancel') {
       ElMessage.error(`${t('canvas.messages.rotateFailed')}: ${(err as Error).message || err}`)

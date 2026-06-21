@@ -575,12 +575,18 @@ export interface UserInfoResponse {
   id: number
   username: string
   email?: string | null
+  avatar_url?: string | null
   credits: number
   role: string
   is_active: boolean
   is_admin: boolean
   created_at?: string | null
   last_login_at?: string | null
+}
+
+/** 更新个人资料请求体 */
+export interface UpdateProfileRequest {
+  email?: string | null
 }
 
 // =====================================================

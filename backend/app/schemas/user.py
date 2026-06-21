@@ -51,6 +51,7 @@ class UserInfoResponse(BaseModel):
     id: int
     username: str
     email: Optional[str] = None
+    avatar_url: Optional[str] = None
     credits: int
     role: str           # admin / user
     is_active: bool
@@ -65,6 +66,11 @@ class UserInfoResponse(BaseModel):
 class UserCreditsResponse(BaseModel):
     """用户积分查询响应"""
     credits: int
+
+
+class UpdateProfileRequest(BaseModel):
+    """更新个人资料请求体（目前仅支持修改邮箱）"""
+    email: Optional[str] = Field(default=None, max_length=128, description="新邮箱（可选，传 null 清空）")
 
 
 # =====================================================

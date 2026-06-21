@@ -105,7 +105,7 @@
       </el-dialog>
       <!-- 无会话时的欢迎页 -->
       <div v-if="!chatStore.hasActiveSession" class="chat-welcome">
-        <div class="welcome-icon">💬</div>
+        <div class="welcome-icon"><el-icon :size="48"><ChatDotRound /></el-icon></div>
         <h2>{{ t('chat.welcomeTitle') }}</h2>
         <p>{{ t('chat.welcomeDesc') }}</p>
         <div class="welcome-actions">

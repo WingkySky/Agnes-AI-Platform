@@ -46,6 +46,8 @@ class User(Base):
     username = Column(String(64), unique=True, index=True, nullable=False)
     email = Column(String(128), unique=True, index=True, nullable=True)
     password_hash = Column(String(255), nullable=False)
+    # 头像 URL（用户上传的头像文件路径，为空则使用默认头像）
+    avatar_url = Column(String(255), nullable=True)
 
     # 积分余额（用于生成任务消耗）
     credits = Column(Integer, default=0, nullable=False)
@@ -87,6 +89,7 @@ class User(Base):
             "id": self.id,
             "username": self.username,
             "email": self.email,
+            "avatar_url": self.avatar_url,
             "credits": self.credits,
             "role": self.role,
             "is_active": self.is_active,

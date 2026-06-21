@@ -7,7 +7,7 @@
 
 <template>
   <div class="settings-view">
-    <h2 class="page-title">⚙️ {{ t('settings.title') }}</h2>
+    <h2 class="page-title"><el-icon><Setting /></el-icon> {{ t('settings.title') }}</h2>
     <p class="page-desc">{{ t('settings.desc') }}</p>
 
     <!-- ========== Provider 管理区 ========== -->
@@ -246,7 +246,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { Plus, Edit, Delete, Refresh } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Refresh, Setting } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { useProvidersStore } from '@/stores/providers'
 import { useModelsStore } from '@/stores/models'

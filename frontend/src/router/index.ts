@@ -63,6 +63,12 @@ const routes: RouteRecordRaw[] = [
     meta: { titleKey: 'router.credits', requiresAuth: true }
   },
   {
+    path: '/profile',
+    name: 'profile',
+    component: () => import('@/views/ProfileView.vue'),
+    meta: { titleKey: 'router.profile', requiresAuth: true }
+  },
+  {
     path: '/settings',
     name: 'settings',
     component: () => import('@/views/SettingsView.vue'),

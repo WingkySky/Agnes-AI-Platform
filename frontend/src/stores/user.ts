@@ -16,8 +16,8 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { login as apiLogin, register as apiRegister, getMe, getCredits } from '@/api/auth'
-import type { AuthLoginRequest, AuthRegisterRequest, UserInfoResponse } from '@/types'
+import { login as apiLogin, register as apiRegister, getMe, getCredits, updateMyProfile, uploadAvatar } from '@/api/auth'
+import type { AuthLoginRequest, AuthRegisterRequest, UserInfoResponse, UpdateProfileRequest } from '@/types'
 
 /** JWT 在 localStorage 中的 key（前端仅保存，不可篡改） */
 const TOKEN_STORAGE_KEY = 'agnes.platform.auth.token'
@@ -39,6 +39,7 @@ export const useUserStore = defineStore('user', () => {
   const credits = computed(() => user.value?.credits ?? 0)
   const userId = computed(() => user.value?.id || null)
   const isAdmin = computed(() => !!user.value?.is_admin)
+  const avatarUrl = computed(() => user.value?.avatar_url || '')
 
   // ================ actions ================
 
@@ -86,6 +87,22 @@ export const useUserStore = defineStore('user', () => {
     } catch (e) {
       // 静默处理
     }
+  }
+
+  /** 更新个人资料（邮箱） */
+  async function updateProfile(payload: UpdateProfileRequest) {
+    if (!token.value) return
+    const data = await updateMyProfile(payload)
+    user.value = data
+    return data
+  }
+
+  /** 上传/更新头像 */
+  async function uploadUserAvatar(file: File) {
+    if (!token.value) return
+    const data = await uploadAvatar(file)
+    user.value = data
+    return data
   }
 
   /** 登录：提交用户名 + 密码，保存 JWT，并拉取用户信息 */
@@ -174,11 +191,14 @@ export const useUserStore = defineStore('user', () => {
     credits,
     userId,
     isAdmin,
+    avatarUrl,
     // actions
     init,
     ready,
     fetchMe,
     fetchCredits,
+    updateProfile,
+    uploadUserAvatar,
     login,
     register,
     logout,

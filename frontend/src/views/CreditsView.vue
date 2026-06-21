@@ -10,7 +10,7 @@
   <div class="credits-view">
     <header class="page-head">
       <div>
-        <h2>🪙 {{ t('credits.title') }}</h2>
+        <h2><el-icon><Coin /></el-icon> {{ t('credits.title') }}</h2>
         <p class="muted">{{ t('credits.desc') }}</p>
       </div>
       <div class="head-actions">
@@ -128,7 +128,7 @@
                 v-if="row.ref_id && (row.type === 'consume' || row.type === 'refund')"
                 class="ref-link"
                 @click="goToHistory(row.ref_id)">
-                <span class="ref-icon">{{ refTypeIcon(row.ref_type) }}</span>
+                <el-icon class="ref-icon"><component :is="refTypeIcon(row.ref_type)" /></el-icon>
                 <span class="ref-text">{{ t('credits.viewHistory') }}</span>
               </span>
             </div>
@@ -199,11 +199,11 @@ function formatTime(val?: string | null) {
   }
 }
 
-/** 关联任务的图标（按 ref_type 区分图片/视频） */
-function refTypeIcon(refType?: string | null): string {
-  if (refType === 'image') return '🖼️'
-  if (refType === 'video') return '🎬'
-  return '🔗'
+/** 关联任务的图标（按 ref_type 区分图片/视频），返回 Element Plus 图标组件 */
+function refTypeIcon(refType?: string | null) {
+  if (refType === 'image') return Picture
+  if (refType === 'video') return VideoCamera
+  return Link
 }
 
 /** 跳转到历史记录页，并通过 task_id 定位对应记录 */
