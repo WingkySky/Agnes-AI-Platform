@@ -30,6 +30,9 @@
 <script setup lang="ts">
 import { computed, type PropType } from 'vue'
 import { useModelsStore } from '@/stores/models'
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
 
 // 选项类型定义
 interface RatioOption {
@@ -75,22 +78,22 @@ const currentOptions = computed(() => {
 
 // 本地兜底默认选项
 const DEFAULT_IMAGE_OPTIONS: RatioOption[] = [
-  { value: '1280x720',  w: 16, h: 9,  label: '16:9 横屏' },
-  { value: '1536x1024', w: 3,  h: 2,  label: '3:2 横屏' },
-  { value: '1024x1024', w: 1,  h: 1,  label: '1:1 方形' },
-  { value: '1024x1536', w: 2,  h: 3,  label: '2:3 竖屏' },
-  { value: '720x1280',  w: 9,  h: 16, label: '9:16 竖屏' },
-  { value: '1792x1024', w: 7,  h: 4,  label: '7:4 宽幅' },
-  { value: '1024x1792', w: 4,  h: 7,  label: '4:7 窄幅' },
-  { value: '1024x768',  w: 4,  h: 3,  label: '4:3 横屏' },
+  { value: '1280x720',  w: 16, h: 9,  label: `16:9 ${t('ratio.landscape')}` },
+  { value: '1536x1024', w: 3,  h: 2,  label: `3:2 ${t('ratio.landscape')}` },
+  { value: '1024x1024', w: 1,  h: 1,  label: `1:1 ${t('ratio.square')}` },
+  { value: '1024x1536', w: 2,  h: 3,  label: `2:3 ${t('ratio.portrait')}` },
+  { value: '720x1280',  w: 9,  h: 16, label: `9:16 ${t('ratio.portrait')}` },
+  { value: '1792x1024', w: 7,  h: 4,  label: `7:4 ${t('ratio.wide')}` },
+  { value: '1024x1792', w: 4,  h: 7,  label: `4:7 ${t('ratio.tall')}` },
+  { value: '1024x768',  w: 4,  h: 3,  label: `4:3 ${t('ratio.landscape')}` },
 ]
 
 const DEFAULT_VIDEO_OPTIONS: RatioOption[] = [
-  { value: '16:9', w: 16, h: 9,  label: '16:9 横屏' },
-  { value: '9:16', w: 9,  h: 16, label: '9:16 竖屏' },
-  { value: '1:1',  w: 1,  h: 1,  label: '1:1 方形' },
-  { value: '4:3',  w: 4,  h: 3,  label: '4:3 横屏' },
-  { value: '3:4',  w: 3,  h: 4,  label: '3:4 竖屏' },
+  { value: '16:9', w: 16, h: 9,  label: `16:9 ${t('ratio.landscape')}` },
+  { value: '9:16', w: 9,  h: 16, label: `9:16 ${t('ratio.portrait')}` },
+  { value: '1:1',  w: 1,  h: 1,  label: `1:1 ${t('ratio.square')}` },
+  { value: '4:3',  w: 4,  h: 3,  label: `4:3 ${t('ratio.landscape')}` },
+  { value: '3:4',  w: 3,  h: 4,  label: `3:4 ${t('ratio.portrait')}` },
 ]
 
 /**

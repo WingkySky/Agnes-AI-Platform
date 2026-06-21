@@ -47,21 +47,21 @@
           <template v-if="userStore.isAuthenticated && userStore.isAdmin">
             <router-link to="/admin/users" class="nav-item" active-class="active">
               <el-icon><UserFilled /></el-icon>
-              <span>用户管理</span>
+              <span>{{ t('nav.usersAdmin') }}</span>
             </router-link>
             <router-link to="/admin/credit-rules" class="nav-item" active-class="active">
               <el-icon><Coin /></el-icon>
-              <span>积分规则</span>
+              <span>{{ t('nav.creditRules') }}</span>
             </router-link>
           </template>
         </nav>
 
         <div class="app-header-right">
           <!-- 积分显示（仅登录后） -->
-          <div v-if="userStore.isAuthenticated" class="credits-chip" :title="'当前积分，生成任务会消耗积分'">
+          <div v-if="userStore.isAuthenticated" class="credits-chip" :title="t('userMenu.creditsTitle')">
             <el-icon><Coin /></el-icon>
             <span class="credits-value">{{ creditsText }}</span>
-            <span class="credits-label">积分</span>
+            <span class="credits-label">{{ t('userMenu.creditsLabel') }}</span>
           </div>
 
           <!-- 登录入口 / 用户菜单 -->
@@ -70,8 +70,8 @@
               <div class="user-chip">
                 <el-avatar :size="32" :icon="UserFilled" />
                 <div class="user-info">
-                  <span class="user-name">{{ userStore.username || '未命名' }}</span>
-                  <span class="user-role">{{ userStore.isAdmin ? '管理员' : '普通用户' }}</span>
+                  <span class="user-name">{{ userStore.username || t('userMenu.unnamed') }}</span>
+                  <span class="user-role">{{ userStore.isAdmin ? t('userMenu.roleAdmin') : t('userMenu.roleUser') }}</span>
                 </div>
                 <el-icon><CaretBottom /></el-icon>
               </div>
@@ -82,11 +82,11 @@
                   </el-dropdown-item>
                   <el-dropdown-item divided disabled>
                     <el-icon><Coin /></el-icon>
-                    <span>积分：{{ creditsText }}</span>
+                    <span>{{ t('userMenu.creditsText') }}{{ creditsText }}</span>
                   </el-dropdown-item>
                   <el-dropdown-item divided command="logout">
                     <el-icon><SwitchButton /></el-icon>
-                    <span>退出登录</span>
+                    <span>{{ t('userMenu.logout') }}</span>
                   </el-dropdown-item>
                 </el-dropdown-menu>
               </template>
@@ -95,7 +95,7 @@
           <template v-else>
             <el-button type="primary" @click="router.push('/login')">
               <el-icon><User /></el-icon>
-              <span>登录 / 注册</span>
+              <span>{{ t('userMenu.loginRegister') }}</span>
             </el-button>
           </template>
 

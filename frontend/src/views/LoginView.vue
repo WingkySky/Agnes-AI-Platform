@@ -12,11 +12,13 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { User, Lock, Coin, Message as MessageIcon } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
+import { useI18n } from '@/i18n'
 
 // ========= 基础依赖 =========
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
+const { t } = useI18n()
 
 // 登录 / 注册 Tab
 const activeTab = ref<'login' | 'register'>('login')
@@ -30,12 +32,12 @@ const loginForm = ref({
 const loginRef = ref<FormInstance>()
 const loginRules: FormRules = {
   username: [
-    { required: true, message: '请输入用户名', trigger: 'blur' },
-    { min: 3, max: 32, message: '用户名长度 3-32 字符', trigger: 'blur' }
+    { required: true, message: t('login.usernameRequired'), trigger: 'blur' },
+    { min: 3, max: 32, message: t('login.usernameLength'), trigger: 'blur' }
   ],
   password: [
-    { required: true, message: '请输入密码', trigger: 'blur' },
-    { min: 6, max: 64, message: '密码长度 6-64 字符', trigger: 'blur' }
+    { required: true, message: t('login.passwordRequired'), trigger: 'blur' },
+    { min: 6, max: 64, message: t('login.passwordLength'), trigger: 'blur' }
   ]
 }
 
@@ -53,7 +55,7 @@ async function handleLogin() {
   } catch (e: any) {
     // 错误已在拦截器中提示，此处仅作为兜底
     if (!e?.message?.includes('unauthorized')) {
-      ElMessage.warning('登录失败：用户名或密码错误')
+      ElMessage.warning(t('login.loginFailed'))
     }
   }
 }
@@ -68,22 +70,22 @@ const registerForm = ref({
 const registerRef = ref<FormInstance>()
 const registerRules: FormRules = {
   username: [
-    { required: true, message: '请输入用户名', trigger: 'blur' },
-    { min: 3, max: 32, message: '用户名长度 3-32 字符', trigger: 'blur' }
+    { required: true, message: t('login.usernameRequired'), trigger: 'blur' },
+    { min: 3, max: 32, message: t('login.usernameLength'), trigger: 'blur' }
   ],
   email: [
-    { type: 'email', message: '邮箱格式不正确', trigger: 'blur' }
+    { type: 'email', message: t('login.emailInvalid'), trigger: 'blur' }
   ],
   password: [
-    { required: true, message: '请输入密码', trigger: 'blur' },
-    { min: 6, max: 64, message: '密码长度 6-64 字符', trigger: 'blur' }
+    { required: true, message: t('login.passwordRequired'), trigger: 'blur' },
+    { min: 6, max: 64, message: t('login.passwordLength'), trigger: 'blur' }
   ],
   confirmPassword: [
-    { required: true, message: '请再次输入密码', trigger: 'blur' },
+    { required: true, message: t('login.confirmPasswordRequired'), trigger: 'blur' },
     {
       validator: (_rule, value, callback) => {
         if (value !== registerForm.value.password) {
-          callback(new Error('两次输入的密码不一致'))
+          callback(new Error(t('login.passwordMismatch')))
         } else {
           callback()
         }
@@ -118,11 +120,11 @@ async function handleRegister() {
         <span class="brand-logo-emoji">✨</span>
       </div>
       <h1 class="brand-title">Agnes AI Platform</h1>
-      <p class="brand-sub">图片 · 视频 · 多模态创作中心</p>
+      <p class="brand-sub">{{ t('login.brandSub') }}</p>
       <ul class="brand-feats">
-        <li><el-icon><User /></el-icon>独立账号与作品管理</li>
-        <li><el-icon><Coin /></el-icon>积分制：按需使用，按次消耗</li>
-        <li><el-icon><Lock /></el-icon>后端统一鉴权，保障账户安全</li>
+        <li><el-icon><User /></el-icon>{{ t('login.featAccount') }}</li>
+        <li><el-icon><Coin /></el-icon>{{ t('login.featCredits') }}</li>
+        <li><el-icon><Lock /></el-icon>{{ t('login.featSecurity') }}</li>
       </ul>
     </div>
 
@@ -130,17 +132,17 @@ async function handleRegister() {
     <div class="form-panel">
       <div class="form-card">
         <div class="form-card__header">
-          <h2 v-if="activeTab === 'login'">欢迎回来</h2>
-          <h2 v-else>创建一个新账户</h2>
+          <h2 v-if="activeTab === 'login'">{{ t('login.welcome') }}</h2>
+          <h2 v-else>{{ t('login.createAccount') }}</h2>
           <p class="sub">
-            <template v-if="activeTab === 'login'">使用你的用户名和密码登录</template>
-            <template v-else>注册后即可开始创作，默认赠送初始积分</template>
+            <template v-if="activeTab === 'login'">{{ t('login.loginHint') }}</template>
+            <template v-else>{{ t('login.registerHint') }}</template>
           </p>
         </div>
 
         <el-tabs v-model="activeTab" class="tabs" stretch>
           <!-- 登录 Tab -->
-          <el-tab-pane label="登录" name="login">
+          <el-tab-pane :label="t('login.login')" name="login">
             <el-form
               ref="loginRef"
               :model="loginForm"
@@ -148,20 +150,20 @@ async function handleRegister() {
               label-position="top"
               @submit.prevent="handleLogin"
             >
-              <el-form-item label="用户名" prop="username">
+              <el-form-item :label="t('login.username')" prop="username">
                 <el-input
                   v-model="loginForm.username"
-                  placeholder="请输入用户名"
+                  :placeholder="t('login.usernamePlaceholder')"
                   clearable
                   :prefix-icon="User"
                   autocomplete="username"
                 />
               </el-form-item>
-              <el-form-item label="密码" prop="password">
+              <el-form-item :label="t('login.password')" prop="password">
                 <el-input
                   v-model="loginForm.password"
                   type="password"
-                  placeholder="请输入密码"
+                  :placeholder="t('login.passwordPlaceholder')"
                   show-password
                   :prefix-icon="Lock"
                   autocomplete="current-password"
@@ -174,17 +176,17 @@ async function handleRegister() {
                   class="submit-btn"
                   :loading="submitting"
                   @click="handleLogin"
-                >登录</el-button>
+                >{{ t('login.login') }}</el-button>
               </el-form-item>
             </el-form>
             <div class="switch-hint">
-              还没有账号？
-              <el-link type="primary" @click="activeTab = 'register'">去注册</el-link>
+              {{ t('login.noAccount') }}
+              <el-link type="primary" @click="activeTab = 'register'">{{ t('login.goRegister') }}</el-link>
             </div>
           </el-tab-pane>
 
           <!-- 注册 Tab -->
-          <el-tab-pane label="注册" name="register">
+          <el-tab-pane :label="t('login.register')" name="register">
             <el-form
               ref="registerRef"
               :model="registerForm"
@@ -192,16 +194,16 @@ async function handleRegister() {
               label-position="top"
               @submit.prevent="handleRegister"
             >
-              <el-form-item label="用户名" prop="username">
+              <el-form-item :label="t('login.username')" prop="username">
                 <el-input
                   v-model="registerForm.username"
-                  placeholder="3-32 个字符"
+                  :placeholder="t('login.usernameHint')"
                   clearable
                   :prefix-icon="User"
                   autocomplete="username"
                 />
               </el-form-item>
-              <el-form-item label="邮箱（可选）" prop="email">
+              <el-form-item :label="t('login.emailOptional')" prop="email">
                 <el-input
                   v-model="registerForm.email"
                   placeholder="example@company.com"
@@ -210,21 +212,21 @@ async function handleRegister() {
                   autocomplete="email"
                 />
               </el-form-item>
-              <el-form-item label="密码" prop="password">
+              <el-form-item :label="t('login.password')" prop="password">
                 <el-input
                   v-model="registerForm.password"
                   type="password"
-                  placeholder="6-64 个字符"
+                  :placeholder="t('login.passwordHint')"
                   show-password
                   :prefix-icon="Lock"
                   autocomplete="new-password"
                 />
               </el-form-item>
-              <el-form-item label="确认密码" prop="confirmPassword">
+              <el-form-item :label="t('login.confirmPassword')" prop="confirmPassword">
                 <el-input
                   v-model="registerForm.confirmPassword"
                   type="password"
-                  placeholder="再次输入密码"
+                  :placeholder="t('login.confirmPasswordPlaceholder')"
                   show-password
                   :prefix-icon="Lock"
                   autocomplete="new-password"
@@ -237,12 +239,12 @@ async function handleRegister() {
                   class="submit-btn"
                   :loading="submitting"
                   @click="handleRegister"
-                >注册并登录</el-button>
+                >{{ t('login.register') }}</el-button>
               </el-form-item>
             </el-form>
             <div class="switch-hint">
-              已有账号？
-              <el-link type="primary" @click="activeTab = 'login'">去登录</el-link>
+              {{ t('login.hasAccount') }}
+              <el-link type="primary" @click="activeTab = 'login'">{{ t('login.goLogin') }}</el-link>
             </div>
           </el-tab-pane>
         </el-tabs>

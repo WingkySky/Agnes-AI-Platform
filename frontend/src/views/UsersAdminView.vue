@@ -8,27 +8,27 @@
   <div class="users-admin-wrap">
     <header class="page-head">
       <div>
-        <h2>用户与角色管理</h2>
-        <p class="muted">管理平台所有用户的角色、积分与账号状态。</p>
+        <h2>{{ t('users.title') }}</h2>
+        <p class="muted">{{ t('users.title') }}</p>
       </div>
-      <el-button :icon="Refresh" @click="fetchUsers" :loading="loading">刷新</el-button>
+      <el-button :icon="Refresh" @click="fetchUsers" :loading="loading">{{ t('common.refresh') }}</el-button>
     </header>
 
     <el-card class="table-card" shadow="never">
       <el-table :data="users" style="width: 100%" stripe v-loading="loading">
         <el-table-column prop="id" label="ID" width="70" align="center" />
-        <el-table-column label="用户名" min-width="140">
+        <el-table-column :label="t('users.colUsername')" min-width="140">
           <template #default="{ row }">
             <div class="user-cell">
               <el-avatar :size="30" :icon="UserFilled" />
               <div class="user-cell-info">
                 <div class="user-cell-name">{{ row.username }}</div>
-                <div class="user-cell-email muted">{{ row.email || '未绑定邮箱' }}</div>
+                <div class="user-cell-email muted">{{ row.email || t('users.noEmail') }}</div>
               </div>
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="积分" width="140" align="center">
+        <el-table-column :label="t('users.colCredits')" width="140" align="center">
           <template #default="{ row }">
             <el-input-number
               :model-value="row.credits"
@@ -40,7 +40,7 @@
             />
           </template>
         </el-table-column>
-        <el-table-column label="角色" width="170" align="center">
+        <el-table-column :label="t('users.colRole')" width="170" align="center">
           <template #default="{ row }">
             <el-select
               :model-value="row.role"
@@ -48,31 +48,31 @@
               :disabled="isSelf(row)"
               @change="(val: string) => onRoleChange(row, val)"
             >
-              <el-option label="普通用户" value="user" />
-              <el-option label="超级管理员" value="admin" />
+              <el-option :label="t('users.roleUser')" value="user" />
+              <el-option :label="t('users.roleAdmin')" value="admin" />
             </el-select>
             <div v-if="isSelf(row)" class="muted small">自己无法修改</div>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="140" align="center">
+        <el-table-column :label="t('users.colStatus')" width="140" align="center">
           <template #default="{ row }">
             <el-switch
               :model-value="row.is_active"
               :disabled="isSelf(row)"
-              active-text="已启用"
-              inactive-text="已禁用"
+              :active-text="t('users.statusActive')"
+              :inactive-text="t('users.statusInactive')"
               @change="(val: boolean) => onActiveChange(row, val)"
             />
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="190" align="center">
+        <el-table-column prop="created_at" :label="t('users.colCreated')" width="190" align="center">
           <template #default="{ row }">
             <span class="muted">{{ formatTime(row.created_at) }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="last_login_at" label="最近登录" width="190" align="center">
+        <el-table-column prop="last_login_at" :label="t('users.colLastLogin')" width="190" align="center">
           <template #default="{ row }">
-            <span class="muted">{{ formatTime(row.last_login_at) || '从未登录' }}</span>
+            <span class="muted">{{ formatTime(row.last_login_at) || t('users.neverLogin') }}</span>
           </template>
         </el-table-column>
       </el-table>
@@ -87,7 +87,9 @@ import { Refresh, UserFilled } from '@element-plus/icons-vue'
 import { listUsers, updateUserRole, updateUserCredits, updateUserActive } from '@/api/auth'
 import { useUserStore } from '@/stores/user'
 import type { UserAdminRow } from '@/types'
+import { useI18n } from '@/i18n'
 
+const { t } = useI18n()
 const userStore = useUserStore()
 const users = ref<UserAdminRow[]>([])
 const loading = ref(false)
@@ -114,7 +116,6 @@ async function fetchUsers() {
     const resp = await listUsers()
     users.value = resp.items || []
   } catch (e) {
-    // 错误由全局拦截器处理
     console.warn(e)
   } finally {
     loading.value = false
@@ -124,12 +125,12 @@ async function fetchUsers() {
 /** 修改角色 */
 async function onRoleChange(row: UserAdminRow, newRole: string) {
   if (isSelf(row)) return
-  const roleName = newRole === 'admin' ? '超级管理员' : '普通用户'
+  const roleName = newRole === 'admin' ? t('users.roleAdmin') : t('users.roleUser')
   try {
     await ElMessageBox.confirm(
-      `确认将用户 "${row.username}" 的角色修改为 ${roleName} 吗？`,
-      '修改角色',
-      { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
+      `${t('users.confirmChangeRole')} ${roleName} ?`,
+      t('users.changeRole'),
+      { confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel'), type: 'warning' }
     )
   } catch {
     // 取消：恢复原值
@@ -140,10 +141,9 @@ async function onRoleChange(row: UserAdminRow, newRole: string) {
     await updateUserRole(row.id, { role: newRole })
     row.role = newRole
     row.is_admin = newRole === 'admin'
-    ElMessage.success(`已将 "${row.username}" 修改为 ${roleName}`)
+    ElMessage.success(t('users.changeRoleSuccess'))
   } catch (e) {
     console.warn(e)
-    // 失败，刷新还原
     fetchUsers()
   }
 }
@@ -153,7 +153,7 @@ async function onCreditsChange(row: UserAdminRow, newValue: number) {
   try {
     await updateUserCredits(row.id, { credits: newValue })
     row.credits = newValue
-    ElMessage.success(`已将 "${row.username}" 的积分更新为 ${newValue}`)
+    ElMessage.success(`${newValue} ${t('users.creditsUpdated')}`)
   } catch (e) {
     console.warn(e)
     fetchUsers()
@@ -166,7 +166,7 @@ async function onActiveChange(row: UserAdminRow, active: boolean) {
   try {
     await updateUserActive(row.id, { is_active: active })
     row.is_active = active
-    ElMessage.success(active ? `已启用 "${row.username}"` : `已禁用 "${row.username}"`)
+    ElMessage.success(active ? t('users.statusActive') : t('users.statusInactive'))
   } catch (e) {
     console.warn(e)
     fetchUsers()

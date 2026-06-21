@@ -1,6 +1,7 @@
 <!-- =====================================================
      积分规则配置页（仅管理员可见）
      - 展示与编辑所有积分规则（图文生图、视频生成等基础积分）
+     - 规则名称和描述从前端 i18n 按 rule_key 查找翻译
      - 支持 "恢复默认值" 一键还原
      ===================================================== -->
 
@@ -8,32 +9,33 @@
   <div class="credit-rules-wrap">
     <header class="page-head">
       <div>
-        <h2>积分规则配置</h2>
-        <p class="muted">调整每次生成任务消耗的基础积分。生效后，新的生成任务将以此为计算标准。</p>
+        <h2>{{ t('creditRules.title') }}</h2>
+        <p class="muted">{{ t('creditRules.desc') }}</p>
       </div>
-      <el-button :icon="RefreshLeft" @click="onReset" :loading="loading">恢复默认值</el-button>
+      <el-button :icon="RefreshLeft" @click="onReset" :loading="loading">{{ t('creditRules.restoreDefaults') }}</el-button>
     </header>
 
     <el-card class="rules-card" shadow="never">
       <el-table :data="rules" style="width: 100%" stripe v-loading="loading">
-        <el-table-column prop="rule_key" label="规则 Key" min-width="260">
+        <!-- 规则 Key（技术标识） -->
+        <el-table-column prop="rule_key" :label="t('creditRules.colRuleKey')" min-width="260">
           <template #default="{ row }">
             <div>
               <div class="rule-key">{{ row.rule_key }}</div>
-              <div class="rule-desc muted">{{ row.description || '' }}</div>
+              <div class="rule-desc muted">{{ getRuleDescription(row) }}</div>
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="名称" min-width="180">
+
+        <!-- 名称（前端按 rule_key 翻译显示，不再是输入框） -->
+        <el-table-column :label="t('creditRules.colName')" min-width="200">
           <template #default="{ row }">
-            <el-input
-              v-model="row.name"
-              size="small"
-              placeholder="规则名称"
-            />
+            <span>{{ getRuleName(row) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="当前值（积分）" width="220" align="center">
+
+        <!-- 当前值（可编辑） -->
+        <el-table-column :label="t('creditRules.colValue')" width="220" align="center">
           <template #default="{ row }">
             <el-input-number
               v-model="row.value"
@@ -44,14 +46,18 @@
             />
           </template>
         </el-table-column>
-        <el-table-column label="更新时间" width="200" align="center">
+
+        <!-- 更新时间 -->
+        <el-table-column :label="t('creditRules.colUpdated')" width="200" align="center">
           <template #default="{ row }">
             <span class="muted">{{ formatTime(row.updated_at) || '—' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="160" align="center" fixed="right">
+
+        <!-- 操作 -->
+        <el-table-column :label="t('creditRules.colActions')" width="160" align="center" fixed="right">
           <template #default="{ row }">
-            <el-button type="primary" size="small" @click="onSave(row)" :loading="row._saving">保存</el-button>
+            <el-button type="primary" size="small" @click="onSave(row)" :loading="row._saving">{{ t('creditRules.save') }}</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -65,6 +71,9 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { RefreshLeft } from '@element-plus/icons-vue'
 import { listCreditRules, updateCreditRule, resetCreditRules } from '@/api/auth'
 import type { CreditRuleResponse } from '@/types'
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
 
 /** 本地扩展字段：_saving（是否正在保存） */
 interface LocalRuleRow extends CreditRuleResponse {
@@ -74,6 +83,31 @@ interface LocalRuleRow extends CreditRuleResponse {
 const rules = ref<LocalRuleRow[]>([])
 const loading = ref(false)
 
+/** 按 rule_key 查找翻译名称；若找不到则使用后端返回的 name；仍无则返回 rule_key */
+function getRuleName(row: LocalRuleRow): string {
+  const key = `creditRules.rule.${row.rule_key}`
+  const translated = t(key)
+  // i18n 查找不到时 t() 会原样返回 key 字符串
+  if (translated && translated !== key) {
+    return translated
+  }
+  if (row.name && row.name.trim()) {
+    return row.name
+  }
+  return row.rule_key
+}
+
+/** 按 rule_key 查找翻译描述；若找不到则使用后端返回的 description */
+function getRuleDescription(row: LocalRuleRow): string {
+  const key = `creditRules.rule.${row.rule_key}.desc`
+  const translated = t(key)
+  if (translated && translated !== key) {
+    return translated
+  }
+  return row.description || ''
+}
+
+/** 格式化时间 */
 function formatTime(val?: string | null) {
   if (!val) return ''
   try {
@@ -105,7 +139,7 @@ async function onSave(row: LocalRuleRow) {
       name: row.name,
       description: row.description || '',
     })
-    ElMessage.success(`规则 "${row.name || row.rule_key}" 已更新`)
+    ElMessage.success(t('creditRules.saveSuccess'))
     await fetchRules()
   } catch (e) {
     console.warn(e)
@@ -118,16 +152,16 @@ async function onSave(row: LocalRuleRow) {
 async function onReset() {
   try {
     await ElMessageBox.confirm(
-      '确认恢复所有积分规则到默认值吗？',
-      '恢复默认值',
-      { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
+      t('creditRules.confirmRestore'),
+      t('creditRules.restoreDefaults'),
+      { confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel'), type: 'warning' }
     )
   } catch {
     return
   }
   try {
     await resetCreditRules()
-    ElMessage.success('已恢复为默认积分规则')
+    ElMessage.success(t('creditRules.restored'))
     await fetchRules()
   } catch (e) {
     console.warn(e)

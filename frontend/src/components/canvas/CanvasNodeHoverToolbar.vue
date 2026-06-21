@@ -56,6 +56,9 @@ import {
   Copy, FileText, Lock, LockOpen, Brush, Scissors, Grid2x2,
   ZoomIn, Sparkles, Camera, Maximize2,
 } from 'lucide-vue-next'
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
 
 /* ---------- Props 定义 ---------- */
 const props = defineProps({
@@ -98,15 +101,14 @@ const hasImage = computed(() => isImage.value && hasContent.value)
 /* ---------- 容器样式 ---------- */
 
 /** 工具栏容器样式：背景 + 边框 + hover 背景变量 */
-const toolbarStyle = computed(() => ({
-  background: props.theme.node.panel,
-  borderColor: props.theme.toolbar.border,
-  '--hover-bg': props.theme.toolbar.itemHover,
-}))
+function toolbarStyle() {
+  return {
+    background: props.theme.toolbar.background,
+    border: `1px solid ${props.theme.toolbar.border}`,
+  }
+}
 
-/* ---------- 按钮样式 ---------- */
-
-/** 按钮样式：图标颜色（删除按钮用红色） */
+/** 按钮 hover 样式 */
 function btnStyle(tool: any) {
   return {
     color: tool.danger ? '#ef4444' : props.theme.toolbar.item,
@@ -120,13 +122,13 @@ const tools = computed(() => {
   // 1. 基础按钮（所有类型）：信息、删除
   list.push({
     id: 'info',
-    title: '查看节点信息',
+    title: t('canvas.hoverToolbar.viewNodeInfo'),
     icon: Info,
     onClick: () => emit('info', props.panel),
   })
   list.push({
     id: 'delete',
-    title: '删除节点',
+    title: t('canvas.hoverToolbar.deleteNode'),
     icon: Trash2,
     danger: true,
     onClick: () => emit('delete', props.panel),
@@ -136,7 +138,7 @@ const tools = computed(() => {
   if (isError.value) {
     list.push({
       id: 'retry',
-      title: '重新生成',
+      title: t('canvas.hoverToolbar.regenerate'),
       icon: RefreshCw,
       onClick: () => emit('retry', props.panel),
     })
@@ -146,19 +148,19 @@ const tools = computed(() => {
   if (hasContent.value) {
     list.push({
       id: 'save-asset',
-      title: '存素材',
+      title: t('canvas.hoverToolbar.saveAsset'),
       icon: FolderPlus,
       onClick: () => emit('save-asset', props.panel),
     })
     list.push({
       id: 'download',
-      title: '下载',
+      title: t('canvas.hoverToolbar.download'),
       icon: Download,
       onClick: () => emit('download', props.panel),
     })
     list.push({
       id: 'edit',
-      title: '编辑',
+      title: t('canvas.hoverToolbar.edit'),
       icon: MessageSquare,
       onClick: () => emit('edit', props.panel),
     })
@@ -168,25 +170,25 @@ const tools = computed(() => {
   if (isText.value) {
     list.push({
       id: 'edit-text',
-      title: '编辑文字',
+      title: t('canvas.hoverToolbar.editText'),
       icon: Pencil,
       onClick: () => emit('edit-text', props.panel),
     })
     list.push({
       id: 'generate-image',
-      title: '生图',
+      title: t('canvas.hoverToolbar.generateImage'),
       icon: ImageIcon,
       onClick: () => emit('generate-image', props.panel),
     })
     list.push({
       id: 'font-size-down',
-      title: '缩小字号',
+      title: t('canvas.hoverToolbar.fontSizeDown'),
       icon: Minus,
       onClick: () => emit('font-size-down', props.panel),
     })
     list.push({
       id: 'font-size-up',
-      title: '放大字号',
+      title: t('canvas.hoverToolbar.fontSizeUp'),
       icon: Plus,
       onClick: () => emit('font-size-up', props.panel),
     })
@@ -196,7 +198,7 @@ const tools = computed(() => {
   if (isImage.value && !hasContent.value) {
     list.push({
       id: 'upload-image',
-      title: '上传图片',
+      title: t('canvas.hoverToolbar.uploadImage'),
       icon: Upload,
       onClick: () => emit('upload-image', props.panel),
     })
@@ -206,7 +208,7 @@ const tools = computed(() => {
   if (isVideo.value) {
     list.push({
       id: 'upload-video',
-      title: hasContent.value ? '替换视频' : '上传视频',
+      title: hasContent.value ? t('canvas.hoverToolbar.replaceVideo') : t('canvas.hoverToolbar.uploadVideo'),
       icon: Video,
       onClick: () => emit('upload-video', props.panel),
     })
@@ -216,7 +218,7 @@ const tools = computed(() => {
   if (isAudio.value) {
     list.push({
       id: 'upload-audio',
-      title: hasContent.value ? '替换音频' : '上传音频',
+      title: hasContent.value ? t('canvas.hoverToolbar.replaceAudio') : t('canvas.hoverToolbar.uploadAudio'),
       icon: Music2,
       onClick: () => emit('upload-audio', props.panel),
     })
@@ -226,67 +228,67 @@ const tools = computed(() => {
   if (hasImage.value) {
     list.push({
       id: 'copy-prompt',
-      title: '复制提示词',
+      title: t('canvas.hoverToolbar.copyPrompt'),
       icon: Copy,
       onClick: () => emit('copy-prompt', props.panel),
     })
     list.push({
       id: 'describe',
-      title: '反推提示词',
+      title: t('canvas.hoverToolbar.describe'),
       icon: FileText,
       onClick: () => emit('describe', props.panel),
     })
     list.push({
       id: 'replace-image',
-      title: '替换图片',
+      title: t('canvas.hoverToolbar.replaceImage'),
       icon: Upload,
       onClick: () => emit('replace-image', props.panel),
     })
     list.push({
       id: 'toggle-ratio',
-      title: content.value.freeResize ? '锁定比例' : '自由比例',
+      title: content.value.freeResize ? t('canvas.hoverToolbar.lockRatio') : t('canvas.hoverToolbar.unlockRatio'),
       icon: content.value.freeResize ? Lock : LockOpen,
       onClick: () => emit('toggle-ratio', props.panel),
     })
     list.push({
       id: 'mask-edit',
-      title: '局部编辑',
+      title: t('canvas.hoverToolbar.maskEdit'),
       icon: Brush,
       onClick: () => emit('mask-edit', props.panel),
     })
     list.push({
       id: 'crop',
-      title: '裁剪',
+      title: t('canvas.hoverToolbar.crop'),
       icon: Scissors,
       onClick: () => emit('crop', props.panel),
     })
     list.push({
       id: 'split',
-      title: '拆分',
+      title: t('canvas.hoverToolbar.split'),
       icon: Grid2x2,
       onClick: () => emit('split', props.panel),
     })
     list.push({
       id: 'upscale',
-      title: '放大',
+      title: t('canvas.hoverToolbar.upscale'),
       icon: ZoomIn,
       onClick: () => emit('upscale', props.panel),
     })
     list.push({
       id: 'super-resolution',
-      title: '超分',
+      title: t('canvas.hoverToolbar.superResolution'),
       icon: Sparkles,
       onClick: () => emit('super-resolution', props.panel),
     })
     list.push({
       id: 'angle',
-      title: '角度',
+      title: t('canvas.hoverToolbar.angle'),
       icon: Camera,
       onClick: () => emit('angle', props.panel),
     })
     list.push({
       id: 'view-large',
-      title: '查看大图',
+      title: t('canvas.hoverToolbar.viewLarge'),
       icon: Maximize2,
       onClick: () => emit('view-large', props.panel),
     })

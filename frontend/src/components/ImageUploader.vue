@@ -33,8 +33,8 @@
     <div class="uploader-header">
       <span class="uploader-title">{{ title || t('params.refImage') }}{{ optional ? '（' + t('common.optional') + '）' : '' }}</span>
       <span class="uploader-hint">
-        已上传 <b>{{ fileList.length }}</b> 张
-        <template v-if="maxCount"> / 最多 {{ maxCount }} 张</template>
+        {{ t('uploader.uploaded') }} <b>{{ fileList.length }}</b>
+        <template v-if="maxCount"> / {{ t('uploader.max') }} {{ maxCount }}</template>
       </span>
     </div>
 
@@ -298,7 +298,7 @@ function emitChange() {
 // 检查是否已达上限
 function checkLimit() {
   if (props.maxCount && fileList.value.length >= props.maxCount) {
-    ElMessage.warning(`已达上传上限（${props.maxCount} 张）`)
+    ElMessage.warning(t('uploader.uploadLimit').replace('{n}', String(props.maxCount)))
     return false
   }
   return true
@@ -313,7 +313,7 @@ async function addPastedImageFile(file: File) {
   try {
     const info = await fileToBase64(file)
     fileList.value.push(info)
-    ElMessage.success(`已粘贴图片（共 ${fileList.value.length} 张）`)
+    ElMessage.success(t('uploader.pastedOk').replace('{n}', String(fileList.value.length)))
     triggerPasteHighlight()
     emitChange()
   } catch {
@@ -332,7 +332,7 @@ function addPastedUrl(url: string) {
     url,
     mimeType: 'image/png',
   })
-  ElMessage.success(`已粘贴 URL 图片（共 ${fileList.value.length} 张）`)
+  ElMessage.success(t('uploader.pastedUrlOk').replace('{n}', String(fileList.value.length)))
   triggerPasteHighlight()
   emitChange()
 }
@@ -347,13 +347,13 @@ async function handleFilesChange(e: Event) {
 
   const remaining = props.maxCount ? props.maxCount - fileList.value.length : files.length
   if (remaining <= 0) {
-    ElMessage.warning(`已达上传上限（${props.maxCount} 张）`)
+    ElMessage.warning(t('uploader.uploadLimit').replace('{n}', String(props.maxCount)))
     return
   }
 
   const filesToAdd = files.slice(0, remaining)
   if (files.length > remaining) {
-    ElMessage.warning(`仅添加前 ${remaining} 张，已达上限（${props.maxCount} 张）`)
+    ElMessage.warning(t('uploader.limitPartial').replace('{remaining}', String(remaining)).replace('{n}', String(props.maxCount)))
   }
 
   let added = 0
@@ -368,7 +368,7 @@ async function handleFilesChange(e: Event) {
     }
   }
   if (added > 0) {
-    ElMessage.success(`已添加 ${added} 张图片（共 ${fileList.value.length} 张）`)
+    ElMessage.success(t('uploader.addedOk').replace('{added}', String(added)).replace('{total}', String(fileList.value.length)))
   }
   emitChange()
   if (input) input.value = ''
@@ -384,7 +384,7 @@ async function handleDrop(e: DragEvent) {
 
   const remaining = props.maxCount ? props.maxCount - fileList.value.length : files.length
   if (remaining <= 0) {
-    ElMessage.warning(`已达上传上限（${props.maxCount} 张）`)
+    ElMessage.warning(t('uploader.uploadLimit').replace('{n}', String(props.maxCount)))
     return
   }
 
@@ -401,7 +401,7 @@ async function handleDrop(e: DragEvent) {
   }
   if (results.length > 0) {
     fileList.value.push(...results)
-    ElMessage.success(`已添加 ${results.length} 张图片（共 ${fileList.value.length} 张）`)
+    ElMessage.success(t('uploader.addedOk').replace('{added}', String(results.length)).replace('{total}', String(fileList.value.length)))
     emitChange()
   }
 }
@@ -412,7 +412,7 @@ async function handleDrop(e: DragEvent) {
 function removeFile(index: number) {
   const name = fileList.value[index]?.name
   fileList.value.splice(index, 1)
-  if (name) ElMessage.info(`已移除: ${name}`)
+  if (name) ElMessage.info(`${t('uploader.removed')}: ${name}`)
   emitChange()
 }
 

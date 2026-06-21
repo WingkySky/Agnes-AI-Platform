@@ -1,6 +1,6 @@
 import asyncio
 from datetime import datetime
-from app.core.database import async_session_local
+from app.core.database import async_session
 from app.models.generation import Generation
 
 async def main():
@@ -9,12 +9,12 @@ async def main():
         'https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
         'https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
     ]
-    async with async_session_local() as db:
+    async with async_session() as db:
         for i, url in enumerate(test_urls):
             record = Generation(
                 user_id=user_id, type='video', model='agnes-video-v1',
                 prompt='Test video ' + str(i+1) + ': Beautiful nature scene',
-                task_id='test-task-' + str(i+1), backend_task_id='test-backend-' + str(i+1),
+                task_id='test-task-' + str(i+1),
                 result_url=url, status='success', created_at=datetime.utcnow(),
             )
             db.add(record)

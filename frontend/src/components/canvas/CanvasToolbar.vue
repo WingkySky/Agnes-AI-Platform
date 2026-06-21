@@ -65,6 +65,9 @@ import {
   FolderOpen, Palette, Trash2, Eraser,
 } from 'lucide-vue-next'
 import CanvasAppearancePanel from './CanvasAppearancePanel.vue'
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
 
 const props = defineProps({
   theme: { type: Object, required: true },
@@ -102,31 +105,31 @@ const tipX = ref(0)
 const buttonGroups = computed<any[][]>(() => [
   // 组1：移动/选择（无选中时高亮）
   [
-    { id: 'tool-hand', label: '移动/选择', icon: Hand, active: !props.hasSelection, emit: 'select-tool' },
+    { id: 'tool-hand', label: t('canvas.toolbar.toolHand'), icon: Hand, active: !props.hasSelection, emit: 'select-tool' },
   ],
   // 组2：撤销/重做
   [
-    { id: 'tool-undo', label: '撤销', icon: Undo2, disabled: !props.canUndo, emit: 'undo' },
-    { id: 'tool-redo', label: '重做', icon: Redo2, disabled: !props.canRedo, emit: 'redo' },
+    { id: 'tool-undo', label: t('canvas.toolbar.toolUndo'), icon: Undo2, disabled: !props.canUndo, emit: 'undo' },
+    { id: 'tool-redo', label: t('canvas.toolbar.toolRedo'), icon: Redo2, disabled: !props.canRedo, emit: 'redo' },
   ],
   // 组3：新增节点（文本/图片/视频/音频/生成配置/上传素材）
   [
-    { id: 'tool-text', label: '文本', icon: Type, emit: 'add-node', payload: 'text' },
-    { id: 'tool-image', label: '图片', icon: Image, emit: 'add-node', payload: 'image' },
-    { id: 'tool-video', label: '视频', icon: Video, emit: 'add-node', payload: 'video' },
-    { id: 'tool-audio', label: '音频', icon: Music2, emit: 'add-node', payload: 'audio' },
-    { id: 'tool-config', label: '生成配置', icon: Settings2, emit: 'add-node', payload: 'config' },
-    { id: 'tool-upload', label: '上传素材', icon: Upload, emit: 'upload-asset' },
+    { id: 'tool-text', label: t('canvas.toolbar.toolText'), icon: Type, emit: 'add-node', payload: 'text' },
+    { id: 'tool-image', label: t('canvas.toolbar.toolImage'), icon: Image, emit: 'add-node', payload: 'image' },
+    { id: 'tool-video', label: t('canvas.toolbar.toolVideo'), icon: Video, emit: 'add-node', payload: 'video' },
+    { id: 'tool-audio', label: t('canvas.toolbar.toolAudio'), icon: Music2, emit: 'add-node', payload: 'audio' },
+    { id: 'tool-config', label: t('canvas.toolbar.toolConfig'), icon: Settings2, emit: 'add-node', payload: 'config' },
+    { id: 'tool-upload', label: t('canvas.toolbar.toolUpload'), icon: Upload, emit: 'upload-asset' },
   ],
   // 组4：我的素材/画布外观
   [
-    { id: 'tool-assets', label: '我的素材', icon: FolderOpen, emit: 'open-asset-library' },
-    { id: 'tool-style', label: '画布外观', icon: Palette, active: props.showAppearancePanel, emit: 'toggle-appearance-panel' },
+    { id: 'tool-assets', label: t('canvas.toolbar.toolAssets'), icon: FolderOpen, emit: 'open-asset-library' },
+    { id: 'tool-style', label: t('canvas.toolbar.toolStyle'), icon: Palette, active: props.showAppearancePanel, emit: 'toggle-appearance-panel' },
   ],
   // 组5：删除选中（仅选中时显示，红色）+ 清空画布（红色）
   [
-    { id: 'tool-delete', label: '删除选中', icon: Trash2, danger: true, conditional: true, emit: 'delete-selected' },
-    { id: 'tool-clear', label: '清空画布', icon: Eraser, danger: true, emit: 'clear-canvas' },
+    { id: 'tool-delete', label: t('canvas.toolbar.toolDelete'), icon: Trash2, danger: true, conditional: true, emit: 'delete-selected' },
+    { id: 'tool-clear', label: t('canvas.toolbar.toolClear'), icon: Eraser, danger: true, emit: 'clear-canvas' },
   ],
 ])
 
@@ -155,19 +158,19 @@ const activeStyle = computed(() => ({
 // tooltip 文案映射
 const tip = computed(() => {
   const map: Record<string, string> = {
-    'tool-hand': '移动/选择',
-    'tool-undo': '撤销',
-    'tool-redo': '重做',
-    'tool-text': '文本',
-    'tool-image': '图片',
-    'tool-video': '视频',
-    'tool-audio': '音频',
-    'tool-config': '生成配置',
-    'tool-upload': '上传素材',
-    'tool-assets': '我的素材',
-    'tool-style': '画布外观',
-    'tool-delete': '删除选中',
-    'tool-clear': '清空画布',
+    'tool-hand': t('canvas.toolbar.toolHand'),
+    'tool-undo': t('canvas.toolbar.toolUndo'),
+    'tool-redo': t('canvas.toolbar.toolRedo'),
+    'tool-text': t('canvas.toolbar.toolText'),
+    'tool-image': t('canvas.toolbar.toolImage'),
+    'tool-video': t('canvas.toolbar.toolVideo'),
+    'tool-audio': t('canvas.toolbar.toolAudio'),
+    'tool-config': t('canvas.toolbar.toolConfig'),
+    'tool-upload': t('canvas.toolbar.toolUpload'),
+    'tool-assets': t('canvas.toolbar.toolAssets'),
+    'tool-style': t('canvas.toolbar.toolStyle'),
+    'tool-delete': t('canvas.toolbar.toolDelete'),
+    'tool-clear': t('canvas.toolbar.toolClear'),
   }
   return map[hovered.value!] || ''
 })
