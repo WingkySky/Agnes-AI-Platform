@@ -188,7 +188,9 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail="用户不存在")
 
     if not user.is_active:
-        raise HTTPException(status_code=401, detail="账号已被禁用")
+        # 账号已被管理员停用：返回 403 并给出明确提示
+        # 前端 401 拦截器会跳登录页，这里用 403 区分，让前端给出更准确的提示
+        raise HTTPException(status_code=403, detail="账号已被停用，请联系管理员")
 
     return user
 

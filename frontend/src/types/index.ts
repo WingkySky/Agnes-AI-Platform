@@ -94,6 +94,7 @@ export interface GenerationRecord {
   result_url?: string | null
   status: string
   task_id?: string | null
+  credits_consumed?: number       // 本次任务消耗的积分数（与积分流水 ref_id 对应）
   created_at?: string | null
 }
 

@@ -12,11 +12,15 @@ import type {
 
 /**
  * 获取历史列表
+ * @param params.type   筛选类型：image / video / all（默认）
+ * @param params.task_id 按 task_id 精确匹配（用于从积分明细跳转）
+ * @param params.page    页码
+ * @param params.page_size 每页数量
  */
 export function getHistoryList(
-  { type = 'all', page = 1, page_size = 50 }: { type?: string; page?: number; page_size?: number } = {}
+  { type = 'all', task_id, page = 1, page_size = 50 }: { type?: string; task_id?: string; page?: number; page_size?: number } = {}
 ): Promise<HistoryListResponse> {
-  return client.get('/api/history', { params: { type, page, page_size } })
+  return client.get('/api/history', { params: { type, task_id, page, page_size } })
 }
 
 /**

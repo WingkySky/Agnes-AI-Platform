@@ -4,6 +4,7 @@
  * 管理员页：用户与角色管理 / 积分规则配置
  * - requiresAuth 路由：未登录时自动跳转到登录页
  * - requiresAdmin 路由：非管理员访问时 403 并跳转首页
+ * - 所有业务页（chat/images/videos/history/canvas/settings）均需登录
  * ===================================================== */
 
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
@@ -27,37 +28,43 @@ const routes: RouteRecordRaw[] = [
     path: '/chat',
     name: 'chat',
     component: () => import('@/views/ChatView.vue'),
-    meta: { titleKey: 'router.chat', requiresAuth: false }
+    meta: { titleKey: 'router.chat', requiresAuth: true }
   },
   {
     path: '/images',
     name: 'images',
     component: () => import('@/views/ImageView.vue'),
-    meta: { titleKey: 'router.images', requiresAuth: false }
+    meta: { titleKey: 'router.images', requiresAuth: true }
   },
   {
     path: '/videos',
     name: 'videos',
     component: () => import('@/views/VideoView.vue'),
-    meta: { titleKey: 'router.videos', requiresAuth: false }
+    meta: { titleKey: 'router.videos', requiresAuth: true }
   },
   {
     path: '/history',
     name: 'history',
     component: () => import('@/views/HistoryView.vue'),
-    meta: { titleKey: 'router.history', requiresAuth: false }
+    meta: { titleKey: 'router.history', requiresAuth: true }
   },
   {
     path: '/canvas',
     name: 'canvas',
     component: () => import('@/views/CanvasView.vue'),
-    meta: { titleKey: 'router.canvas', requiresAuth: false }
+    meta: { titleKey: 'router.canvas', requiresAuth: true }
+  },
+  {
+    path: '/credits',
+    name: 'credits',
+    component: () => import('@/views/CreditsView.vue'),
+    meta: { titleKey: 'router.credits', requiresAuth: true }
   },
   {
     path: '/settings',
     name: 'settings',
     component: () => import('@/views/SettingsView.vue'),
-    meta: { titleKey: 'router.settings', requiresAuth: false }
+    meta: { titleKey: 'router.settings', requiresAuth: true, requiresAdmin: true }
   },
   // ---------- 管理员页（需登录 + 管理员角色） ----------
   {
@@ -85,8 +92,12 @@ const router = createRouter({
 })
 
 // ---------- 全局前置守卫：登录 / 角色权限判断 ----------
-router.beforeEach((to, _from, next) => {
+// 异步守卫：等待 userStore.init() 完成后再判断登录状态
+// 否则刷新页面时 token/user 还没从 localStorage 恢复，会被误判为未登录
+router.beforeEach(async (to, _from, next) => {
   const userStore = useUserStore()
+  // 等待 init() 完成（首次刷新页面时关键）
+  await userStore.ready()
   const requiresAuth = to.meta?.requiresAuth === true
   const requiresAdmin = to.meta?.requiresAdmin === true
 

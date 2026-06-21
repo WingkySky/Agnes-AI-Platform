@@ -53,10 +53,14 @@ async function handleLogin() {
       : '/images'
     router.push(redirect)
   } catch (e: any) {
-    // 错误已在拦截器中提示，此处仅作为兜底
-    if (!e?.message?.includes('unauthorized')) {
-      ElMessage.warning(t('login.loginFailed'))
+    // 错误已在 client.ts 拦截器中提示（401 用户名/密码错误、403 账号停用等），
+    // 此处仅作为兜底：对未被拦截器处理的未知错误给一个通用提示
+    const msg = e?.message || ''
+    if (msg.includes('unauthorized') || msg.includes('停用') || msg.includes('用户名或密码错误')) {
+      // 拦截器已弹消息，跳过
+      return
     }
+    ElMessage.warning(t('login.loginFailed'))
   }
 }
 

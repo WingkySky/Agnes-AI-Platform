@@ -40,12 +40,14 @@ app.use(i18n)
 // 确保 body 使用深色主题类（Element Plus 会根据 class="dark" 应用深色变量）
 document.documentElement.classList.add('dark')
 
+// 初始化用户认证 Store（恢复本地 JWT + 尝试获取当前用户信息）
+// 不需要 await：路由守卫会通过 userStore.ready() 等待 init 完成
+// 这里只需在 mount 之前触发 init，让 ready promise 开始推进
+const userStore = useUserStore()
+userStore.init()
+
 app.mount('#app')
 
 // 初始化全局任务队列 Store（恢复历史任务 + 启动后台轮询）
 const taskQueue = useTaskQueueStore()
 taskQueue.init()
-
-// 初始化用户认证 Store（恢复本地 JWT + 尝试获取当前用户信息）
-const userStore = useUserStore()
-userStore.init()

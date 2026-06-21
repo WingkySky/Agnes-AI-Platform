@@ -120,6 +120,7 @@ class GenerationRecord(BaseModel):
     result_url: Optional[str] = None
     status: str
     task_id: Optional[str] = None
+    credits_consumed: int = 0       # 本次任务消耗的积分数（与积分流水 ref_id 对应）
     created_at: Optional[datetime] = None
 
     class Config:

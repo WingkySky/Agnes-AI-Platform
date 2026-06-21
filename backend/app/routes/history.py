@@ -47,6 +47,7 @@ router = APIRouter()
 @router.get("/history", response_model=HistoryListResponse, summary="获取生成历史列表")
 async def get_history(
     type: Optional[str] = Query(None, description="筛选类型: image / video / all（默认）"),
+    task_id: Optional[str] = Query(None, description="按 task_id 精确匹配（用于从积分明细跳转）"),
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     db: AsyncSession = Depends(get_async_db),
@@ -54,6 +55,7 @@ async def get_history(
 ):
     """
     分页获取生成历史记录（按用户隔离，异步查询，不阻塞事件循环），按创建时间倒序排列。
+    支持通过 task_id 精确匹配某条记录（用于积分明细跳转）。
     """
     stmt = select(Generation)
 
@@ -65,6 +67,10 @@ async def get_history(
 
     if type and type.lower() in ("image", "video"):
         stmt = stmt.filter(Generation.type == type.lower())
+
+    # 按 task_id 精确匹配（用于积分明细跳转到对应历史记录）
+    if task_id:
+        stmt = stmt.filter(Generation.task_id == task_id)
 
     # 总数查询（按筛选条件）
     count_stmt = select(func.count()).select_from(stmt.subquery())
@@ -107,6 +113,7 @@ async def get_history(
             result_url=item.result_url,
             status=item.status,
             task_id=item.task_id,
+            credits_consumed=getattr(item, "credits_consumed", 0) or 0,
             created_at=item.created_at,
         ))
 

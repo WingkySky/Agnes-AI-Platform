@@ -138,6 +138,19 @@
               <span>{{ t('generate.videoBtn') }}</span>
             </el-button>
 
+            <!-- 积分扣除提示：显示本次生成预估消耗的积分 -->
+            <div v-if="userStore.credits > 0" class="cost-hint">
+              <span v-if="costLoading" class="cost-loading">{{ t('generate.costLoading') }}</span>
+              <span v-else-if="cost !== null" :class="['cost-value', { insufficient: costInsufficient }]">
+                {{ t('generate.costHint').replace('{n}', String(cost)) }}
+              </span>
+            </div>
+
+            <!-- 积分不足提示：禁用生成按钮时引导用户充值 -->
+            <div v-if="userStore.credits <= 0" class="no-credits-hint">
+              {{ t('generate.noCreditsVideo') }}
+            </div>
+
             <div class="queue-hint">
               {{ t('generate.running') }}: {{ queue.runningVideoCount }} / 5 · {{ t('generate.submitted') }}: {{ queue.tasks && Object.keys(queue.tasks).length }}
             </div>
@@ -289,11 +302,14 @@ import ImageUploader from '@/components/ImageUploader.vue'
 import ParamSelector from '@/components/ParamSelector.vue'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useModelsStore } from '@/stores/models'
+import { useUserStore } from '@/stores/user'
 import { useI18n } from '@/i18n'
+import { useCreditEstimate } from '@/composables/useCreditEstimate'
 import { matchVideoAspectRatio, getVideoAspectRatioLabel } from '@/config/model-params'
 import type { FileInfo } from '@/types'
 
 const { t } = useI18n()
+const userStore = useUserStore()
 
 const videoTemplates = computed(() => ([
   { label: t('presets.cinematicShot'), prompt: '，电影镜头感，缓慢平移，平滑 dolly-in，戏剧性光影' },
@@ -318,6 +334,17 @@ const seconds = ref(modelsStore.defaultVideoDuration || 5)
 const frameRate = ref(modelsStore.defaultFrameRate || 24)
 const seed = ref('')
 const videoModel = ref('')  // 初始值在 store 加载后自动设置
+
+// ---------- 积分预估：根据 mode + seconds + frameRate 自动计算本次生成消耗 ----------
+// num_frames = seconds * frameRate，与后端计费逻辑保持一致
+const { cost, loading: costLoading, insufficient: costInsufficient } = useCreditEstimate(
+  () => ({
+    type: 'video' as const,
+    mode: mode.value,
+    seconds: seconds.value,
+    num_frames: seconds.value * frameRate.value,
+  })
+)
 
 // 视频时长选项从 store 配置获取
 const DURATION_OPTIONS = computed(() => modelsStore.videoDurations.length > 0
@@ -422,6 +449,7 @@ const progressColor = '#6b9cff'
 const canSubmit = computed(() => {
   if (!prompt.value.trim()) return false
   if (queue.runningVideoCount >= 5) return false
+  if (userStore.credits <= 0) return false
   return true
 })
 
@@ -490,6 +518,11 @@ async function startGenerate() {
   }
   if (queue.runningVideoCount >= 5) {
     ElMessage.warning(t('generate.concurrentVideoLimit'))
+    return
+  }
+  // 积分预检：避免无积分用户提交后被后端 402 拒绝
+  if (userStore.credits <= 0) {
+    ElMessage.warning(t('generate.noCreditsVideo'))
     return
   }
 
@@ -814,6 +847,32 @@ function handleVideoError(e: Event) {
   font-size: 12px;
   color: #8ba3c9;
   text-align: center;
+}
+
+/* 积分不足提示 */
+.no-credits-hint {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: rgba(255, 123, 123, 0.1);
+  border: 1px solid rgba(255, 123, 123, 0.3);
+  border-radius: 8px;
+  font-size: 12px;
+  color: #ff9b9b;
+  text-align: center;
+}
+
+/* 积分扣除提示 */
+.cost-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  text-align: center;
+  color: #ffd28a;
+}
+.cost-hint .cost-loading {
+  color: #8ba3c9;
+}
+.cost-hint .cost-value.insufficient {
+  color: #ff9b9b;
 }
 .section-title {
   font-size: 13px;

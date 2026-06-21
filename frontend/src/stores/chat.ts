@@ -274,7 +274,16 @@ export const useChatStore = defineStore('chat', {
           }
         }
       } catch (e: unknown) {
-        console.error('[Chat] 加载消息失败:', e)
+        // 会话不存在（404）：可能是用户切换后 localStorage 残留了上一个用户的 activeSessionId
+        // 静默清理失效的 activeSessionId，不打错误日志，避免干扰用户
+        const errMsg = e instanceof Error ? e.message : String(e)
+        if (errMsg.includes('会话不存在') || errMsg.includes('not found') || errMsg.includes('404')) {
+          this.activeSessionId = null
+          this.messages = []
+          this._saveToStorage()
+        } else {
+          console.error('[Chat] 加载消息失败:', e)
+        }
       } finally {
         this.loadingMessages = false
       }
@@ -762,15 +771,74 @@ export const useChatStore = defineStore('chat', {
       if (this._initialized) return
       this._initialized = true
 
+      // 注册用户登录/登出事件监听（用户切换时清理上一个用户的聊天状态）
+      if (typeof window !== 'undefined') {
+        window.addEventListener('agnes:user-login', (e: Event) => {
+          const ce = e as CustomEvent
+          const userId: number | null = (ce?.detail?.id as number) ?? null
+          this._switchUserStorage(userId, /* isLogin */ true)
+        })
+        window.addEventListener('agnes:user-logout', () => {
+          this._switchUserStorage(null, /* isLogin */ false)
+        })
+      }
+
       // 从 localStorage 恢复
       this._restoreFromStorage()
 
       // 加载会话列表
       await this.loadSessions()
 
-      // 如果有活跃会话，从数据库加载消息
+      // 如果有活跃会话，校验它是否属于当前用户（在 sessions 列表中）
+      // 不在列表中的会话 ID 视为失效（可能是上一个用户残留），直接丢弃
       if (this.activeSessionId) {
-        await this.loadMessages(this.activeSessionId)
+        const exists = this.sessions.some(s => s.id === this.activeSessionId)
+        if (exists) {
+          await this.loadMessages(this.activeSessionId)
+        } else {
+          // 失效的 activeSessionId：清理掉，避免下次再报错
+          this.activeSessionId = null
+          this.messages = []
+          this._saveToStorage()
+        }
+      }
+    },
+
+    /**
+     * 用户切换时清理聊天状态
+     * - 停止所有媒体轮询定时器
+     * - 清空会话列表 / 消息 / 活跃会话 ID / 会话缓存
+     * - 清理 localStorage 中残留的 activeSessionId
+     * - 登录时重新加载新用户的会话列表
+     */
+    async _switchUserStorage(userId: number | null, isLogin: boolean): Promise<void> {
+      // 1. 中止正在进行的流式请求
+      if (this._abortController) {
+        try { this._abortController.abort() } catch (_) { /* ignore */ }
+        this._abortController = null
+      }
+      // 2. 停止所有媒体轮询定时器
+      for (const id of Object.keys(this.mediaPollTimers)) {
+        clearInterval(this.mediaPollTimers[id])
+      }
+      this.mediaPollTimers = {}
+      this.mediaStatusMap = {}
+      this.mediaPollFailCounts = {}
+      this.mediaTaskToMessageId = {}
+      // 3. 清空所有聊天状态
+      this.sessions = []
+      this.sessionsTotal = 0
+      this.activeSessionId = null
+      this.messages = []
+      this.streamingContent = ''
+      this.streamingToolCalls = []
+      this.sending = false
+      this._sessionCache = {}
+      // 4. 清理 localStorage 中残留的 activeSessionId（避免下次恢复到上一个用户的会话）
+      try { localStorage.removeItem(STORAGE_KEY) } catch (_) { /* ignore */ }
+      // 5. 登录时重新加载新用户的会话列表；登出时不加载（匿名无会话）
+      if (isLogin && userId) {
+        await this.loadSessions()
       }
     },
   },

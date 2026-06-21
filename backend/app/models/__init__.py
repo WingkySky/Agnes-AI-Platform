@@ -7,3 +7,5 @@ from app.models.chat import ChatSession, ChatMessage
 from app.models.api_provider import ApiProvider
 from app.models.model_definition import ModelDefinition
 from app.models.user import User
+from app.models.credit_rule import CreditRule
+from app.models.credit_transaction import CreditTransaction

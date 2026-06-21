@@ -240,6 +240,11 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         task.status = 'processing'
         this._notifyTaskUpdate(taskId)
         this._startPolling(taskId)
+        // 【积分刷新】后端创建任务时已扣积分，立即刷新前端积分显示
+        try {
+          const userStore = useUserStore()
+          if (userStore.isAuthenticated) userStore.fetchCredits()
+        } catch (_) { /* 忽略 */ }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : 'Failed to create task'
         task.status = 'failed'
@@ -295,6 +300,11 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         task.status = 'processing'
         this._notifyTaskUpdate(taskId)
         this._startPolling(taskId)
+        // 【积分刷新】后端创建任务时已扣积分，立即刷新前端积分显示
+        try {
+          const userStore = useUserStore()
+          if (userStore.isAuthenticated) userStore.fetchCredits()
+        } catch (_) { /* 忽略 */ }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : 'Failed to create task'
         task.status = 'failed'

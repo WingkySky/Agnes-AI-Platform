@@ -44,6 +44,7 @@ from app.routes import images, videos, history as history_route, config as confi
 from app.routes import logs as logs_route
 from app.routes import providers as providers_route
 from app.routes import admin as admin_route
+from app.routes import credits as credits_route
 from app.services.video_poller import poller_manager
 from app.services.image_poller import image_poller_manager
 from app.services.agnes_client import agnes_client
@@ -223,6 +224,7 @@ app.include_router(chat_route.router, prefix="/api", tags=["AI 聊天"])
 app.include_router(logs_route.router, prefix="/api", tags=["日志查询"])
 app.include_router(auth_route.router, prefix="/api", tags=["用户认证"])
 app.include_router(admin_route.router, prefix="/api", tags=["管理员-积分规则"])
+app.include_router(credits_route.router, prefix="/api", tags=["积分明细"])
 
 
 # ---------- 健康检查 ----------

@@ -21,6 +21,7 @@ from typing import Dict, Optional, List
 from app.services.agnes_client import agnes_client
 from app.models.generation import Generation
 from app.core.database import new_async_session
+from app.services.credits_service import confirm_credits, refund_credits
 
 logger = logging.getLogger("agnes_platform")
 
@@ -203,6 +204,8 @@ class VideoPollerManager:
                             task.video_url,
                         )
                         await self._persist_result(task)
+                        # 生成成功：确认预扣的积分
+                        await self._confirm_if_needed(task)
                         return
 
                     elif status in ("failed", "error"):
@@ -213,10 +216,14 @@ class VideoPollerManager:
                             task.task_id,
                             task.error_message,
                         )
+                        # 生成失败：退还预扣的积分
+                        await self._refund_if_needed(task)
                         return
 
                     elif status == "cancelled":
                         task.status = "cancelled"
+                        # 任务取消：退还预扣的积分
+                        await self._refund_if_needed(task)
                         return
 
                     else:
@@ -230,6 +237,8 @@ class VideoPollerManager:
 
                 except asyncio.CancelledError:
                     task.status = "cancelled"
+                    # 任务取消：退还预扣的积分
+                    await self._refund_if_needed(task)
                     return
                 except Exception as e:
                     logger.warning("[视频轮询器] 单次查询异常: %s", e)
@@ -240,11 +249,44 @@ class VideoPollerManager:
             task.status = "failed"
             task.error_message = "轮询超时（超过配置时长）"
             logger.warning("[视频轮询器] 任务超时: task_id=%s", task.task_id)
+            # 超时也视为失败：退还预扣的积分
+            await self._refund_if_needed(task)
 
         except Exception as e:
             task.status = "failed"
             task.error_message = f"轮询器异常: {e}"
             logger.error("[视频轮询器] 异常退出: %s", e, exc_info=True)
+            # 异常退出：退还预扣的积分
+            await self._refund_if_needed(task)
+
+    async def _confirm_if_needed(self, task: VideoTask):
+        """生成成功后，把对应的预扣流水状态改为 confirmed（积分不变）"""
+        if not task.user_id or not task.credits_consumed:
+            return
+        ref_id = task.task_id or task.video_id
+        if not ref_id:
+            return
+        try:
+            async with new_async_session() as session:
+                await confirm_credits(session, task.user_id, ref_id)
+        except Exception as e:
+            logger.warning("[视频轮询器] 确认积分失败: ref_id=%s error=%s", ref_id, e)
+
+    async def _refund_if_needed(self, task: VideoTask):
+        """生成失败/取消/超时后，退还预扣的积分"""
+        if not task.user_id or not task.credits_consumed:
+            return
+        ref_id = task.task_id or task.video_id
+        if not ref_id:
+            return
+        try:
+            async with new_async_session() as session:
+                await refund_credits(
+                    session, task.user_id, ref_id,
+                    reason=f"视频生成失败：{task.error_message or '未知错误'}",
+                )
+        except Exception as e:
+            logger.error("[视频轮询器] 退还积分失败: ref_id=%s error=%s", ref_id, e)
 
     # ---------- 异步写入数据库 ----------
     async def _persist_result(self, task: VideoTask):

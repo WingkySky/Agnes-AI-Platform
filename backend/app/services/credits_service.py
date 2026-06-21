@@ -1,5 +1,5 @@
 # =====================================================
-# 积分服务：生成任务的积分计算与消耗
+# 积分服务：生成任务的积分计算、预扣、确认、退还与充值
 #
 # 关键约束：
 #   - 已登录用户：必须积分足够，否则 402 拒绝
@@ -8,6 +8,12 @@
 #     不存在时回落到默认值（见 DEFAULT_CREDIT_RULES）
 #   - 为兼容 SQLite（不支持 SELECT ... FOR UPDATE），采用原子 UPDATE WHERE
 #     方式实现并发安全：UPDATE ... SET credits = credits - amount WHERE id = ? AND credits >= amount
+#
+# 积分变动流程（"生成成功才扣分"语义）：
+#   1. 创建任务时：consume_credits() 预扣积分，写入 status=pending 的流水
+#   2. 任务成功时：confirm_credits() 把流水状态改为 confirmed（积分不变，因为已预扣）
+#   3. 任务失败时：refund_credits() 退还积分，流水状态改为 refunded
+#   4. 管理员充值：recharge_credits() 增加积分，写入 status=confirmed 的流水
 # =====================================================
 
 import logging
@@ -20,6 +26,7 @@ from sqlalchemy.future import select
 
 from app.models.user import User
 from app.models.credit_rule import DEFAULT_CREDIT_RULES, CreditRule
+from app.models.credit_transaction import CreditTransaction
 
 logger = logging.getLogger("agnes_platform")
 
@@ -139,18 +146,21 @@ def get_video_cost(
     return max(10, int(per_second * duration_factor * frame_factor * mode_factor))
 
 
-# ---------- 扣除积分 ----------
+# ---------- 预扣积分（生成任务创建时调用）----------
 async def consume_credits(
     db: AsyncSession,
     user: Optional[User],
     amount: int,
     description: str = "",
+    ref_type: Optional[str] = None,
+    ref_id: Optional[str] = None,
 ) -> int:
     """
-    从用户账户扣除 amount 积分，返回扣除后的余额。
+    从用户账户预扣 amount 积分，返回扣除后的余额。
     - user 为 None（匿名）：直接返回 0
     - amount <= 0：不扣除，直接返回原积分
     - 余额不足：抛出 HTTPException(402)
+    - 写入一条 status=pending 的 consume 流水（待生成结果确认后改为 confirmed/refunded）
     """
     if user is None:
         return 0
@@ -177,8 +187,166 @@ async def consume_credits(
 
     await db.refresh(user)
 
+    # 写入预扣流水（status=pending，待生成结果确认后改为 confirmed/refunded）
+    tx = CreditTransaction(
+        user_id=user.id,
+        type="consume",
+        amount=-amount,
+        balance_after=user.credits,
+        status="pending",
+        ref_type=ref_type,
+        ref_id=ref_id,
+        description=description or f"预扣积分（{ref_type or 'task'}/{ref_id or ''}）",
+    )
+    db.add(tx)
+    await db.commit()
+
     logger.info(
-        "[积分消耗] user=%s amount=%d remaining=%d description=%s",
-        user.username, amount, user.credits, description,
+        "[积分预扣] user=%s amount=%d remaining=%d description=%s ref=%s/%s",
+        user.username, amount, user.credits, description, ref_type or "-", ref_id or "-",
     )
     return user.credits
+
+
+# ---------- 确认扣分（生成任务成功时调用）----------
+async def confirm_credits(
+    db: AsyncSession,
+    user_id: int,
+    ref_id: str,
+) -> None:
+    """
+    生成任务成功后，把对应的预扣流水状态从 pending 改为 confirmed。
+    积分不变（已在预扣时扣除），仅更新流水状态。
+    """
+    result = await db.execute(
+        select(CreditTransaction)
+        .where(CreditTransaction.user_id == user_id)
+        .where(CreditTransaction.ref_id == ref_id)
+        .where(CreditTransaction.type == "consume")
+        .where(CreditTransaction.status == "pending")
+        .order_by(CreditTransaction.id.desc())
+        .limit(1)
+    )
+    tx = result.scalar_one_or_none()
+    if tx is None:
+        # 没找到对应流水（可能是匿名任务或已确认），跳过
+        return
+    tx.status = "confirmed"
+    await db.commit()
+    logger.info("[积分确认] user_id=%s ref_id=%s tx_id=%s", user_id, ref_id, tx.id)
+
+
+# ---------- 退还积分（生成任务失败时调用）----------
+async def refund_credits(
+    db: AsyncSession,
+    user_id: int,
+    ref_id: str,
+    reason: str = "",
+) -> None:
+    """
+    生成任务失败后，退还预扣的积分。
+    - 找到对应的 pending 预扣流水
+    - 原子增加用户积分
+    - 把预扣流水状态改为 refunded
+    - 写入一条 refund 流水（amount 为正数）
+    """
+    # 1. 查找对应的 pending 预扣流水
+    result = await db.execute(
+        select(CreditTransaction)
+        .where(CreditTransaction.user_id == user_id)
+        .where(CreditTransaction.ref_id == ref_id)
+        .where(CreditTransaction.type == "consume")
+        .where(CreditTransaction.status == "pending")
+        .order_by(CreditTransaction.id.desc())
+        .limit(1)
+    )
+    tx = result.scalar_one_or_none()
+    if tx is None:
+        # 没找到对应预扣流水（可能是匿名任务或已处理），跳过
+        logger.info("[积分退还] 跳过：未找到预扣流水 user_id=%s ref_id=%s", user_id, ref_id)
+        return
+
+    refund_amount = -tx.amount  # 预扣时 amount 为负数，退还数量为其绝对值
+
+    # 2. 原子增加用户积分
+    stmt = (
+        sa_update(User)
+        .where(User.id == user_id)
+        .values(credits=User.credits + refund_amount)
+    )
+    await db.execute(stmt)
+
+    # 3. 把预扣流水状态改为 refunded
+    tx.status = "refunded"
+
+    # 4. 查询退还后余额
+    result2 = await db.execute(select(User.credits).filter(User.id == user_id))
+    balance_after = result2.scalar_one_or_none() or 0
+
+    # 5. 写入退还流水
+    refund_tx = CreditTransaction(
+        user_id=user_id,
+        type="refund",
+        amount=refund_amount,
+        balance_after=balance_after,
+        status="confirmed",
+        ref_type=tx.ref_type,
+        ref_id=ref_id,
+        description=reason or f"生成失败退还积分（{tx.ref_type or 'task'}/{ref_id}）",
+    )
+    db.add(refund_tx)
+    await db.commit()
+
+    logger.info(
+        "[积分退还] user_id=%s ref_id=%s refund=%d balance=%d reason=%s",
+        user_id, ref_id, refund_amount, balance_after, reason,
+    )
+
+
+# ---------- 充值积分（管理员调用）----------
+async def recharge_credits(
+    db: AsyncSession,
+    user_id: int,
+    amount: int,
+    operator_id: Optional[int] = None,
+    description: str = "",
+) -> int:
+    """
+    管理员给用户充值积分。
+    - amount > 0：增加积分
+    - amount < 0：扣减积分（管理员手动调整）
+    - 写入一条 status=confirmed 的 recharge 流水
+    - 返回充值后的余额
+    """
+    if amount == 0:
+        # 无变动，直接返回当前余额
+        result = await db.execute(select(User.credits).filter(User.id == user_id))
+        return result.scalar_one_or_none() or 0
+
+    stmt = (
+        sa_update(User)
+        .where(User.id == user_id)
+        .values(credits=User.credits + amount)
+    )
+    await db.execute(stmt)
+
+    result = await db.execute(select(User.credits).filter(User.id == user_id))
+    balance_after = result.scalar_one_or_none() or 0
+
+    tx = CreditTransaction(
+        user_id=user_id,
+        type="recharge" if amount > 0 else "adjust",
+        amount=amount,
+        balance_after=balance_after,
+        status="confirmed",
+        description=description or ("管理员充值" if amount > 0 else "管理员调整"),
+        operator_id=operator_id,
+    )
+    db.add(tx)
+    await db.commit()
+
+    logger.info(
+        "[积分充值] user_id=%s amount=%d balance=%d operator=%s desc=%s",
+        user_id, amount, balance_after, operator_id, description,
+    )
+    return balance_after

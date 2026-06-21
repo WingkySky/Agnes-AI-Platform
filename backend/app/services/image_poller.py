@@ -23,6 +23,7 @@ from typing import Dict, Optional, List
 from app.services.agnes_client import agnes_client
 from app.models.generation import Generation
 from app.core.database import new_async_session
+from app.services.credits_service import confirm_credits, refund_credits
 
 logger = logging.getLogger("agnes_platform")
 
@@ -97,8 +98,11 @@ class ImagePollerManager:
         params: Dict,
         user_id: Optional[int] = None,
         credits_consumed: int = 0,
+        task_id: Optional[str] = None,
     ) -> ImageTask:
-        task_id = f"img_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
+        # 支持外部传入 task_id（便于路由层先扣分再创建任务时保持 ref_id 一致）
+        if not task_id:
+            task_id = f"img_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
         task = ImageTask(
             task_id=task_id,
             prompt=prompt,
@@ -170,6 +174,8 @@ class ImagePollerManager:
                 task.status = "failed"
                 task.error_message = "Agnes AI 返回异常，未找到图片数据"
                 logger.warning("[图片任务器] 无结果数据: task_id=%s", task_id)
+                # 生成失败：退还预扣的积分
+                await self._refund_if_needed(task)
                 return
 
             task.status = "success"
@@ -184,10 +190,14 @@ class ImagePollerManager:
             )
 
             await self._persist_result(task)
+            # 生成成功：确认预扣的积分
+            await self._confirm_if_needed(task)
 
         except asyncio.CancelledError:
             task.status = "cancelled"
             logger.info("[图片任务器] 任务被取消: task_id=%s", task_id)
+            # 任务取消：退还预扣的积分
+            await self._refund_if_needed(task)
         except Exception as e:
             task.status = "failed"
             task.error_message = str(e) or "生成失败，请稍后重试"
@@ -196,6 +206,31 @@ class ImagePollerManager:
                 "[图片任务器] 任务失败: task_id=%s error=%s",
                 task_id, str(e), exc_info=True,
             )
+            # 生成失败：退还预扣的积分
+            await self._refund_if_needed(task)
+
+    async def _confirm_if_needed(self, task: ImageTask):
+        """生成成功后，把对应的预扣流水状态改为 confirmed（积分不变）"""
+        if not task.user_id or not task.credits_consumed:
+            return
+        try:
+            async with new_async_session() as session:
+                await confirm_credits(session, task.user_id, task.task_id)
+        except Exception as e:
+            logger.warning("[图片任务器] 确认积分失败: task_id=%s error=%s", task.task_id, e)
+
+    async def _refund_if_needed(self, task: ImageTask):
+        """生成失败/取消后，退还预扣的积分"""
+        if not task.user_id or not task.credits_consumed:
+            return
+        try:
+            async with new_async_session() as session:
+                await refund_credits(
+                    session, task.user_id, task.task_id,
+                    reason=f"图片生成失败：{task.error_message or '未知错误'}",
+                )
+        except Exception as e:
+            logger.error("[图片任务器] 退还积分失败: task_id=%s error=%s", task.task_id, e)
 
     async def _persist_result(self, task: ImageTask):
         if task.status != "success":

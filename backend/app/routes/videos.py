@@ -6,6 +6,8 @@
 # DELETE /api/videos/{id}             - 中止视频任务
 #
 # 关键设计：
+#   - 必须登录，未登录返回 401
+#   - 积分不足返回 402（由 credits_service.consume_credits 抛出）
 #   - 视频创建后立即返回 task_id，不阻塞后续请求
 #   - 视频轮询在独立的 asyncio.Task 中进行，不影响图片生成任务
 #   - 图片/视频/历史三个路由模块**互不阻塞**
@@ -20,8 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.config import settings
-from app.core.database import get_async_db
-from app.core.security import get_current_user_optional
+from app.core.database import get_async_db, new_async_session
+from app.core.security import get_current_user, get_current_user_optional
 from app.models.generation import Generation
 from app.models.user import User
 from app.schemas.videos import (
@@ -74,10 +76,12 @@ def _validate_image_size(raw: str, label: str) -> None:
 async def create_video_task(
     req: VideoGenerationRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User | None = Depends(get_current_user_optional),
+    current_user: User = Depends(get_current_user),
 ):
     """
     创建视频生成异步任务。
+    - 必须登录，未登录返回 401
+    - 积分不足返回 402
     - text2video：只传 prompt
     - image2video: 额外传 image 字段
     - keyframes: 额外传 images 数组（1-2 张）
@@ -112,11 +116,19 @@ async def create_video_task(
                 img[:100],
             )
 
-    # --- 计算并消耗积分 ---
+    # --- 计算并预扣积分（必须登录，积分不足会抛 402）---
+    # 视频任务的 task_id 由 Agnes AI 返回，无法预先生成，先用临时 ref_id 扣分
+    # 拿到真实 task_id 后更新流水的 ref_id；若 Agnes 调用失败则退还预扣积分
     cost = await get_video_cost_async(db, mode=req.mode, seconds=req.seconds or 5, num_frames=req.num_frames)
-    if current_user is not None:
-        await consume_credits(db, current_user, cost, description=f"video/{req.mode}/{req.seconds}s")
-    user_id = current_user.id if current_user else None
+    import uuid as _uuid
+    _pending_ref_id = f"pending_{_uuid.uuid4().hex}"
+    await consume_credits(
+        db, current_user, cost,
+        description=f"video/{req.mode}/{req.seconds}s",
+        ref_type="video",
+        ref_id=_pending_ref_id,
+    )
+    user_id = current_user.id
 
     try:
         result = await agnes_client.create_video_task(
@@ -138,6 +150,16 @@ async def create_video_task(
         )
     except Exception as e:
         logger.exception("[视频生成] 创建任务失败（上游 Agnes 响应异常）: %s", e)
+        # Agnes 调用失败：退还预扣的积分
+        try:
+            from app.services.credits_service import refund_credits
+            async with new_async_session() as session:
+                await refund_credits(
+                    session, user_id, _pending_ref_id,
+                    reason=f"视频任务创建失败：{str(e)[:200]}",
+                )
+        except Exception as refund_err:
+            logger.error("[视频生成] 退还预扣积分失败: %s", refund_err)
         raise HTTPException(status_code=502, detail=str(e))
 
     result_data = result.get("data")
@@ -159,12 +181,38 @@ async def create_video_task(
     )
 
     if not video_id and not task_id:
+        # 拿不到 task_id 也视为失败：退还预扣积分
+        try:
+            from app.services.credits_service import refund_credits
+            async with new_async_session() as session:
+                await refund_credits(
+                    session, user_id, _pending_ref_id,
+                    reason="视频任务创建失败：Agnes AI 未返回 task_id",
+                )
+        except Exception as refund_err:
+            logger.error("[视频生成] 退还预扣积分失败: %s", refund_err)
         raise HTTPException(
             status_code=502,
             detail=f"Agnes AI 返回的数据中未找到 video_id 或 task_id: {str(result)[:200]}",
         )
 
     logger.info("[视频生成] 任务创建成功: video_id=%s task_id=%s", video_id, task_id)
+
+    # 拿到真实 task_id 后，更新积分流水的 ref_id（从临时 _pending_ref_id 改为真实 task_id）
+    # 这样后续 poller 的 confirm/refund 才能匹配到对应的预扣流水
+    real_ref_id = task_id or video_id
+    if real_ref_id != _pending_ref_id:
+        from app.models.credit_transaction import CreditTransaction
+        from sqlalchemy import update as sa_update
+        stmt = (
+            sa_update(CreditTransaction)
+            .where(CreditTransaction.user_id == user_id)
+            .where(CreditTransaction.ref_id == _pending_ref_id)
+            .where(CreditTransaction.status == "pending")
+            .values(ref_id=real_ref_id)
+        )
+        await db.execute(stmt)
+        await db.commit()
 
     # 启动后台轮询协程（独立 Task，不阻塞当前请求返回）
     params = {
@@ -185,7 +233,7 @@ async def create_video_task(
         prompt=req.prompt,
         params=params,
         user_id=user_id,
-        credits_consumed=cost if current_user else 0,
+        credits_consumed=cost,
     )
 
     return VideoTaskCreatedResponse(
@@ -201,8 +249,8 @@ async def create_video_task(
         aspect_ratio=req.aspect_ratio,
         seconds=req.seconds,
         mode=req.mode,
-        credits_consumed=cost if current_user else 0,
-        remaining_credits=current_user.credits if current_user else None,
+        credits_consumed=cost,
+        remaining_credits=current_user.credits,
         message="任务已创建，请轮询 GET /api/videos/{task_id} 获取最新状态",
     )
 

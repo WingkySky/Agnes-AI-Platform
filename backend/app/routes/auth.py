@@ -133,19 +133,27 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_async_db
 async def login(req: LoginRequest, db: AsyncSession = Depends(get_async_db)):
     """
     使用用户名 + 密码登录，返回 JWT token。
-    - 用户名不匹配 / 账号已禁用：均返回 401（避免泄漏用户存在性）
-    - 密码错误：返回 401
+    - 用户名不存在 / 密码错误：均返回 401（避免泄漏用户存在性）
+    - 密码正确但账号已被管理员停用：返回 403 并明确提示「账号已被停用」
     - 成功：更新 last_login_at，并返回 JWT
     """
     GENERIC_401 = HTTPException(status_code=401, detail="用户名或密码错误")
 
     result = await db.execute(select(User).filter(User.username == req.username))
     user = result.scalar_one_or_none()
-    if user is None or not user.is_active:
+    # 用户名不存在：返回通用 401，避免泄漏用户是否存在
+    if user is None:
         raise GENERIC_401
 
+    # 密码错误：返回通用 401
     if not verify_password(req.password, user.password_hash):
         raise GENERIC_401
+
+    # 密码正确但账号已被管理员停用：返回 403 并给出明确提示
+    # 此时已通过密码验证，不再需要隐藏用户存在性，应让用户知道停用状态
+    if not user.is_active:
+        logger.info("[登录拒绝] 账号已停用 user=%s id=%d", user.username, user.id)
+        raise HTTPException(status_code=403, detail="账号已被停用，请联系管理员")
 
     # 保证 role / is_admin 一致性
     user.sync_role_and_is_admin()
@@ -269,13 +277,20 @@ async def update_user_credits(
         raise HTTPException(status_code=404, detail="用户不存在")
 
     old_value = user.credits
-    user.credits = req.credits
-    await db.commit()
+    # 计算差额，通过 recharge_credits 写入流水（amount 可正可负）
+    delta = req.credits - old_value
+    if delta != 0:
+        from app.services.credits_service import recharge_credits
+        await recharge_credits(
+            db, user_id, delta,
+            operator_id=_admin.id,
+            description=f"管理员 {_admin.username} 调整积分 {old_value} -> {req.credits}",
+        )
     logger.info(
         "[管理员操作] %s 修改用户 id=%d 积分 %d -> %d",
         _admin.username, user.id, old_value, req.credits,
     )
-    return {"id": user.id, "credits": user.credits, "ok": True}
+    return {"id": user.id, "credits": req.credits, "ok": True}
 
 
 # =====================================================

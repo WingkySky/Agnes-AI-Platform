@@ -28,6 +28,11 @@ export const useUserStore = defineStore('user', () => {
   const user = ref<UserInfoResponse | null>(null)
   const loading = ref(false)
 
+  // ================ 初始化就绪 Promise ================
+  // 路由守卫需要等待 init() 完成，否则刷新页面时 token/user 还没恢复就被判定为未登录
+  let resolveReady: () => void = () => {}
+  const readyPromise = new Promise<void>((resolve) => { resolveReady = resolve })
+
   // ================ getters ================
   const isAuthenticated = computed(() => !!token.value && !!user.value)
   const username = computed(() => user.value?.username || '')
@@ -37,14 +42,25 @@ export const useUserStore = defineStore('user', () => {
 
   // ================ actions ================
 
-  /** 初始化：读取本地缓存 token，并尝试拉取用户信息 */
-  function init() {
+  /** 初始化：读取本地缓存 token，并尝试拉取用户信息（异步，需 await） */
+  async function init() {
     const saved = localStorage.getItem(TOKEN_STORAGE_KEY)
     if (saved) {
       token.value = saved
       // 尝试拉取用户信息；失败（例如 token 过期）则清理
-      fetchMe().catch(() => clearAll())
+      try {
+        await fetchMe()
+      } catch {
+        clearAll()
+      }
     }
+    // 无论是否登录，都标记初始化完成，路由守卫可以继续
+    resolveReady()
+  }
+
+  /** 等待 init() 完成（路由守卫使用） */
+  function ready() {
+    return readyPromise
   }
 
   /** 从后端拉取当前用户信息，失败返回 undefined */
@@ -160,6 +176,7 @@ export const useUserStore = defineStore('user', () => {
     isAdmin,
     // actions
     init,
+    ready,
     fetchMe,
     fetchCredits,
     login,

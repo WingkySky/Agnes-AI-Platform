@@ -59,6 +59,11 @@ client.interceptors.response.use(
         const userStore = useUserStore()
         userStore.clearAll()
       } catch (_) { /* ignore */ }
+      // 触发用户登出事件，让所有 store（chat / taskQueue / canvas / asset）清理各自状态
+      // 避免切换用户或 token 过期后残留上一个用户的数据
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('agnes:user-logout'))
+      }
       // 仅在非静默模式下提示
       if (!error.config?.silent) {
         ElMessage({ type: 'warning', message: '登录已过期，请重新登录', duration: 3000 })
@@ -68,6 +73,28 @@ client.interceptors.response.use(
         window.location.hash = '#/login'
       }
       return Promise.reject(new Error('unauthorized'))
+    }
+
+    // 403 账号已被停用：清理登录态并跳登录页，给出明确提示
+    // 区别于普通 403（权限不足），这里只处理 detail 含「停用」字样的情况
+    if (error?.response?.status === 403) {
+      const detail = error.response?.data?.detail || error.response?.data?.message || ''
+      if (typeof detail === 'string' && detail.includes('停用')) {
+        try {
+          const userStore = useUserStore()
+          userStore.clearAll()
+        } catch (_) { /* ignore */ }
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('agnes:user-logout'))
+        }
+        if (!error.config?.silent) {
+          ElMessage({ type: 'error', message: detail, duration: 5000, showClose: true })
+        }
+        if (typeof window !== 'undefined' && !window.location.hash.startsWith('#/login')) {
+          window.location.hash = '#/login'
+        }
+        return Promise.reject(new Error(detail))
+      }
     }
 
     // 统一错误提示（非静默失败时）

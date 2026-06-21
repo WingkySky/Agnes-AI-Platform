@@ -90,6 +90,19 @@
               <span>{{ t('generate.imageBtn') }}</span>
             </el-button>
 
+            <!-- 积分扣除提示：显示本次生成预估消耗的积分 -->
+            <div v-if="userStore.credits > 0" class="cost-hint">
+              <span v-if="costLoading" class="cost-loading">{{ t('generate.costLoading') }}</span>
+              <span v-else-if="cost !== null" :class="['cost-value', { insufficient: costInsufficient }]">
+                {{ t('generate.costHint').replace('{n}', String(cost)) }}
+              </span>
+            </div>
+
+            <!-- 积分不足提示：禁用生成按钮时引导用户充值 -->
+            <div v-if="userStore.credits <= 0" class="no-credits-hint">
+              {{ t('generate.noCreditsImage') }}
+            </div>
+
             <div class="queue-hint">
               {{ t('generate.running') }}: {{ queue.runningImageCount }} / 5 · {{ t('generate.submitted') }}: {{ taskCount }}
             </div>
@@ -236,11 +249,14 @@ import ImageViewer from '@/components/ImageViewer.vue'
 import ParamSelector from '@/components/ParamSelector.vue'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useModelsStore } from '@/stores/models'
+import { useUserStore } from '@/stores/user'
 import { useI18n } from '@/i18n'
+import { useCreditEstimate } from '@/composables/useCreditEstimate'
 import { matchImageSize, getImageSizeLabel } from '@/config/model-params'
 import type { FileInfo } from '@/types'
 
 const { t } = useI18n()
+const userStore = useUserStore()
 
 // ---------- 图片查看器：点击预览图片弹出 ----------
 const viewerVisible = ref(false)
@@ -275,6 +291,15 @@ const prompt = ref('')
 // 默认尺寸从 store 配置获取
 const size = ref(modelsStore.defaultImageSize || '1280x720')
 const model = ref('')  // 初始值在 store 加载后自动设置
+
+// ---------- 积分预估：根据 mode + size 自动计算本次生成消耗 ----------
+const { cost, loading: costLoading, insufficient: costInsufficient } = useCreditEstimate(
+  () => ({
+    type: 'image' as const,
+    mode: mode.value,
+    size: size.value,
+  })
+)
 
 // store 加载完成后自动设置默认模型和默认尺寸
 watch(() => modelsStore.defaultImageModel, (v) => {
@@ -346,10 +371,11 @@ const taskCount = computed(() => {
   return Object.keys(queue.tasks).length
 })
 
-// 能否提交：提示词不为空 + 未达并发上限
+// 能否提交：提示词不为空 + 未达并发上限 + 积分大于 0
 const canSubmit = computed(() => {
   if (!prompt.value.trim()) return false
   if (queue.runningImageCount >= 5) return false
+  if (userStore.credits <= 0) return false
   return true
 })
 
@@ -395,6 +421,11 @@ async function handleGenerate() {
   }
   if (queue.runningImageCount >= 5) {
     ElMessage.warning(t('generate.concurrentImageLimit'))
+    return
+  }
+  // 积分预检：避免无积分用户提交后被后端 402 拒绝
+  if (userStore.credits <= 0) {
+    ElMessage.warning(t('generate.noCreditsImage'))
     return
   }
 
@@ -651,6 +682,32 @@ function copyImageUrl() {
   font-size: 12px;
   color: #8ba3c9;
   text-align: center;
+}
+
+/* 积分不足提示 */
+.no-credits-hint {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: rgba(255, 123, 123, 0.1);
+  border: 1px solid rgba(255, 123, 123, 0.3);
+  border-radius: 8px;
+  font-size: 12px;
+  color: #ff9b9b;
+  text-align: center;
+}
+
+/* 积分扣除提示 */
+.cost-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  text-align: center;
+  color: #ffd28a;
+}
+.cost-hint .cost-loading {
+  color: #8ba3c9;
+}
+.cost-hint .cost-value.insufficient {
+  color: #ff9b9b;
 }
 
 /* 结果区 */

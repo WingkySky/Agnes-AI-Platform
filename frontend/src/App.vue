@@ -1,8 +1,9 @@
 <!-- =====================================================
      Agnes AI Platform 根组件
-     - 提供主布局（左侧导航 + 右侧内容）
+     - 提供主布局（顶部精简导航 + 右侧内容）
      - 通过 <el-config-provider> 响应式切换 Element Plus 语言
      - 右上角 LanguageSwitcher 切换界面语言
+     - 管理员菜单（用户管理 / 积分规则 / 配置管理）收起到「管理」下拉
      ===================================================== -->
 
 <template>
@@ -12,10 +13,7 @@
       <header class="app-header">
         <div class="app-brand">
           <span class="brand-icon">✨</span>
-          <div class="brand-text">
-            <h1>Agnes AI Platform</h1>
-            <p class="brand-sub">{{ t('app.title') }}</p>
-          </div>
+          <h1>Agnes AI Platform</h1>
         </div>
 
         <nav class="app-nav">
@@ -39,40 +37,55 @@
             <el-icon><Grid /></el-icon>
             <span>{{ t('nav.canvas') }}</span>
           </router-link>
-          <router-link to="/settings" class="nav-item" active-class="active">
-            <el-icon><Setting /></el-icon>
-            <span>{{ t('nav.settings') }}</span>
-          </router-link>
-          <!-- 管理员菜单（仅管理员可见） -->
-          <template v-if="userStore.isAuthenticated && userStore.isAdmin">
-            <router-link to="/admin/users" class="nav-item" active-class="active">
-              <el-icon><UserFilled /></el-icon>
-              <span>{{ t('nav.usersAdmin') }}</span>
-            </router-link>
-            <router-link to="/admin/credit-rules" class="nav-item" active-class="active">
-              <el-icon><Coin /></el-icon>
-              <span>{{ t('nav.creditRules') }}</span>
-            </router-link>
-          </template>
+          <!-- 管理员菜单：收起到「管理」下拉（用户管理 / 积分规则 / 配置管理） -->
+          <el-dropdown
+            v-if="userStore.isAuthenticated && userStore.isAdmin"
+            trigger="click"
+            @command="handleAdminCommand">
+            <div class="nav-item nav-item-dropdown" :class="{ active: isAdminRouteActive }">
+              <el-icon><Setting /></el-icon>
+              <span>{{ t('nav.admin') }}</span>
+              <el-icon class="caret"><CaretBottom /></el-icon>
+            </div>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="/admin/users">
+                  <el-icon><UserFilled /></el-icon>
+                  <span>{{ t('nav.usersAdmin') }}</span>
+                </el-dropdown-item>
+                <el-dropdown-item command="/admin/credit-rules">
+                  <el-icon><Coin /></el-icon>
+                  <span>{{ t('nav.creditRules') }}</span>
+                </el-dropdown-item>
+                <el-dropdown-item command="/settings" divided>
+                  <el-icon><Setting /></el-icon>
+                  <span>{{ t('nav.settings') }}</span>
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </nav>
 
         <div class="app-header-right">
-          <!-- 积分显示（仅登录后） -->
-          <div v-if="userStore.isAuthenticated" class="credits-chip" :title="t('userMenu.creditsTitle')">
-            <el-icon><Coin /></el-icon>
-            <span class="credits-value">{{ creditsText }}</span>
-            <span class="credits-label">{{ t('userMenu.creditsLabel') }}</span>
-          </div>
+          <!-- 积分显示（仅登录后）：点击跳转到积分明细页 -->
+          <el-tooltip
+            v-if="userStore.isAuthenticated"
+            :content="t('userMenu.creditsViewTip')"
+            placement="bottom"
+          >
+            <div class="credits-chip" @click="router.push('/credits')">
+              <el-icon><Coin /></el-icon>
+              <span class="credits-value">{{ creditsText }}</span>
+              <span class="credits-label">{{ t('userMenu.creditsLabel') }}</span>
+            </div>
+          </el-tooltip>
 
           <!-- 登录入口 / 用户菜单 -->
           <template v-if="userStore.isAuthenticated">
             <el-dropdown trigger="click" @command="handleUserCommand">
               <div class="user-chip">
-                <el-avatar :size="32" :icon="UserFilled" />
-                <div class="user-info">
-                  <span class="user-name">{{ userStore.username || t('userMenu.unnamed') }}</span>
-                  <span class="user-role">{{ userStore.isAdmin ? t('userMenu.roleAdmin') : t('userMenu.roleUser') }}</span>
-                </div>
+                <el-avatar :size="28" :icon="UserFilled" />
+                <span class="user-name">{{ userStore.username || t('userMenu.unnamed') }}</span>
                 <el-icon><CaretBottom /></el-icon>
               </div>
               <template #dropdown>
@@ -152,6 +165,11 @@ onMounted(() => {
 // canvas 路由时 app-main 全屏无边距
 const isCanvasRoute = computed(() => route.name === 'canvas')
 
+// 管理员下拉是否高亮：当前路由命中任一管理类页面时高亮
+const isAdminRouteActive = computed(() => {
+  return route.path.startsWith('/admin/') || route.path === '/settings'
+})
+
 // keep-alive 缓存的路由组件名称（切换标签页时保持状态不销毁）
 const cachedViews = ['ChatView', 'ImageView', 'VideoView', 'HistoryView', 'CanvasView', 'SettingsView', 'UsersAdminView', 'CreditRulesView']
 
@@ -168,6 +186,11 @@ function handleUserCommand(cmd: string) {
     userStore.logout()
     router.push('/login')
   }
+}
+
+// 管理员下拉菜单操作：跳转到对应管理页面
+function handleAdminCommand(path: string) {
+  router.push(path)
 }
 
 // 每当 locale 变化时返回对应的 Element Plus 语言对象
@@ -196,7 +219,8 @@ const epLocale = computed(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 18px 32px;
+  gap: 16px;
+  padding: 12px 24px;
   background: rgba(15, 22, 38, 0.75);
   border-bottom: 1px solid rgba(100, 150, 220, 0.18);
   backdrop-filter: blur(12px);
@@ -208,35 +232,31 @@ const epLocale = computed(() => {
 .app-brand {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
+  flex-shrink: 0;
 }
 
 .brand-icon {
-  font-size: 36px;
+  font-size: 28px;
   filter: drop-shadow(0 0 12px rgba(120, 180, 255, 0.45));
 }
 
-.brand-text h1 {
+.app-brand h1 {
   margin: 0;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 700;
   background: linear-gradient(90deg, #a0d4ff 0%, #c9b3ff 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
   letter-spacing: 0.5px;
-}
-
-.brand-sub {
-  margin: 4px 0 0;
-  font-size: 12px;
-  color: #8ba3c9;
+  white-space: nowrap;
 }
 
 /* ---- 导航 ---- */
 .app-nav {
   display: flex;
-  gap: 8px;
+  gap: 4px;
   background: rgba(20, 30, 50, 0.55);
   padding: 6px;
   border-radius: 12px;
@@ -246,13 +266,15 @@ const epLocale = computed(() => {
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
+  gap: 6px;
+  padding: 8px 14px;
   color: #a0b4d6;
   text-decoration: none;
   border-radius: 8px;
   font-size: 14px;
   transition: all 0.2s ease;
+  cursor: pointer;
+  white-space: nowrap;
 }
 
 .nav-item:hover {
@@ -266,43 +288,58 @@ const epLocale = computed(() => {
   box-shadow: 0 0 20px rgba(100, 150, 255, 0.18);
 }
 
+/* 管理员下拉触发器：复用 nav-item 样式，并加上小箭头 */
+.nav-item-dropdown .caret {
+  font-size: 11px;
+  margin-left: 2px;
+  color: #8ba3c9;
+}
+
 .app-header-right {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  flex-shrink: 0;
 }
 
-/* ---- 积分显示 chip ---- */
+/* ---- 积分显示 chip（可点击跳转到积分明细） ---- */
 .credits-chip {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 14px;
+  padding: 6px 12px;
   background: linear-gradient(135deg, rgba(255, 188, 90, 0.18) 0%, rgba(255, 152, 200, 0.12) 100%);
   border: 1px solid rgba(255, 190, 120, 0.3);
   border-radius: 10px;
   color: #ffd28a;
-  font-size: 14px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.credits-chip:hover {
+  background: linear-gradient(135deg, rgba(255, 188, 90, 0.28) 0%, rgba(255, 152, 200, 0.2) 100%);
+  border-color: rgba(255, 190, 120, 0.55);
+  box-shadow: 0 0 12px rgba(255, 190, 120, 0.2);
 }
 .credits-chip .el-icon {
-  font-size: 16px;
+  font-size: 15px;
 }
 .credits-value {
   font-weight: 700;
   color: #fff2cf;
 }
 .credits-label {
-  font-size: 12px;
+  font-size: 11px;
   color: rgba(255, 220, 160, 0.7);
   margin-left: 2px;
 }
 
-/* ---- 用户头像 chip ---- */
+/* ---- 用户头像 chip（精简版：仅头像 + 用户名 + 下拉箭头） ---- */
 .user-chip {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 12px 6px 6px;
+  gap: 8px;
+  padding: 4px 10px 4px 4px;
   background: rgba(20, 30, 50, 0.7);
   border: 1px solid rgba(100, 150, 220, 0.15);
   border-radius: 10px;
@@ -313,19 +350,14 @@ const epLocale = computed(() => {
   background: rgba(30, 45, 75, 0.8);
   border-color: rgba(100, 150, 220, 0.3);
 }
-.user-info {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.2;
-}
 .user-name {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: #e8eef7;
-}
-.user-role {
-  font-size: 11px;
-  color: #8ba3c9;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .user-chip .el-icon:last-child {
   color: #8ba3c9;

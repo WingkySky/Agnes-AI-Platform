@@ -1,24 +1,26 @@
 # =====================================================
 # 图片生成路由（支持异步任务模式）
-# POST /api/images/tasks        - 创建异步图片任务（登录用户会扣除积分）
+# POST /api/images/tasks        - 创建异步图片任务（登录用户扣除积分）
 # GET  /api/images/tasks/{id}   - 查询异步任务状态
 # POST /api/images/generations  - 同步生成（向后兼容，已不推荐）
 # GET  /api/images/{id}         - 获取单张图片历史记录
 #
 # 关键设计：
-#   - 未登录也允许创建（兼容旧行为），但积分不足时会返回 402
-#   - 若已登录，则把 user_id / credits_consumed 写入 generations 表
+#   - 必须登录，未登录返回 401
+#   - 积分不足时返回 402（由 credits_service.consume_credits 抛出）
+#   - user_id / credits_consumed 写入 generations 表
 # =====================================================
 
 import logging
 from datetime import datetime
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.database import get_async_db
-from app.core.security import get_current_user_optional
+from app.core.security import get_current_user, get_current_user_optional
 from app.models.generation import Generation
 from app.models.user import User
 from app.schemas.images import ImageGenerationRequest, ImageGenerationResponse, ImageRecordResponse
@@ -37,13 +39,14 @@ router = APIRouter()
 async def create_image_task_async(
     req: ImageGenerationRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User | None = Depends(get_current_user_optional),
+    current_user: User = Depends(get_current_user),
 ):
     """
     创建图片异步生成任务，立即返回 task_id。
 
-    - 未登录也允许创建（兼容旧行为），但积分不足会返回 402
-    - 若已登录，则把 user_id / credits_consumed 写入 generations 表
+    - 必须登录，未登录返回 401
+    - 积分不足返回 402（由 consume_credits 抛出）
+    - user_id / credits_consumed 写入 generations 表
     """
     # API Key 检查（从 agnes_client 读取当前配置，Provider 可能在前端配置页修改）
     if not agnes_client.api_key or agnes_client.api_key.startswith("sk-your"):
@@ -67,9 +70,17 @@ async def create_image_task_async(
     # --- 计算本次任务需要消耗的积分 ---
     cost = await get_image_cost_async(db, mode=mode, size=size)
 
-    # --- 若已登录，先扣除积分再发起生成（避免免费无限刷）---
-    if current_user is not None:
-        await consume_credits(db, current_user, cost, description=f"image/{mode}/{size}")
+    # --- 必须登录：先预扣积分再发起生成（积分不足会抛 402）---
+    # 预先生成 task_id，作为积分流水的 ref_id，确保后续 confirm/refund 能匹配到
+    import time as _time
+    import uuid as _uuid
+    task_id = f"img_{int(_time.time() * 1000)}_{_uuid.uuid4().hex[:8]}"
+    await consume_credits(
+        db, current_user, cost,
+        description=f"image/{mode}/{size}",
+        ref_type="image",
+        ref_id=task_id,
+    )
 
     # 【多图参考改造点】合并 all_reference_images，区分 URL 和 base64
     params = {
@@ -97,11 +108,12 @@ async def create_image_task_async(
     task = await image_poller_manager.create_task(
         prompt=req.prompt,
         params=params,
-        user_id=current_user.id if current_user else None,
-        credits_consumed=cost if current_user else 0,
+        user_id=current_user.id,
+        credits_consumed=cost,
+        task_id=task_id,
     )
 
-    logger.info("[图片生成] 异步任务已创建: task_id=%s user=%s cost=%d", task.task_id, current_user.username if current_user else "anonymous", cost)
+    logger.info("[图片生成] 异步任务已创建: task_id=%s user=%s cost=%d", task.task_id, current_user.username, cost)
 
     return {
         "task_id": task.task_id,
@@ -110,8 +122,8 @@ async def create_image_task_async(
         "prompt": req.prompt,
         "model": req.model,
         "size": size,
-        "credits_consumed": cost if current_user else 0,
-        "remaining_credits": current_user.credits if current_user else None,
+        "credits_consumed": cost,
+        "remaining_credits": current_user.credits,
         "created_at": datetime.utcnow().isoformat(),
         "message": "任务已创建，请使用 GET /api/images/tasks/{task_id} 轮询状态",
     }
@@ -196,10 +208,12 @@ async def cancel_image_task(
 async def create_image_generation(
     req: ImageGenerationRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User | None = Depends(get_current_user_optional),
+    current_user: User = Depends(get_current_user),
 ):
     """
     同步图片生成接口（保留以向后兼容）。新代码建议使用异步任务模式（POST /images/tasks）。
+    - 必须登录，未登录返回 401
+    - 积分不足返回 402
     """
     if not agnes_client.api_key or agnes_client.api_key.startswith("sk-your"):
         raise HTTPException(
@@ -220,12 +234,11 @@ async def create_image_generation(
                 detail=f"参考图总大小过大，最大允许 {settings.max_upload_size_mb}MB",
             )
 
-    # --- 计算并扣除积分 ---
+    # --- 计算并扣除积分（必须登录，积分不足会抛 402）---
     mode = "image2image" if req.is_image_to_image else "text2image"
     size = req.size or "1024x1024"
     cost = await get_image_cost_async(db, mode=mode, size=size)
-    if current_user is not None:
-        await consume_credits(db, current_user, cost, description=f"image/{mode}/{size}")
+    await consume_credits(db, current_user, cost, description=f"image/{mode}/{size}")
 
     # 调用 Agnes AI
     try:
@@ -270,19 +283,19 @@ async def create_image_generation(
     try:
         record = Generation(
             type="image",
-            user_id=current_user.id if current_user else None,
+            user_id=current_user.id,
             prompt=req.prompt,
             model=req.model,
             params={"size": size, "response_format": req.response_format, "mode": mode},
             mode=mode,
             result_url=output_url or "(base64)",
             status="success",
-            credits_consumed=cost if current_user else 0,
+            credits_consumed=cost,
         )
         db.add(record)
         await db.commit()
         await db.refresh(record)
-        logger.info("[图片生成] 同步模式记录已写入: id=%s user=%s cost=%d", record.id, current_user.username if current_user else "anonymous", cost)
+        logger.info("[图片生成] 同步模式记录已写入: id=%s user=%s cost=%d", record.id, current_user.username, cost)
     except Exception as e:
         logger.warning("[图片生成] 写入历史失败: %s", e)
 
@@ -295,8 +308,8 @@ async def create_image_generation(
         prompt=req.prompt,
         size=size,
         created_at=datetime.utcnow().isoformat(),
-        credits_consumed=cost if current_user else 0,
-        remaining_credits=current_user.credits if current_user else None,
+        credits_consumed=cost,
+        remaining_credits=current_user.credits,
     )
 
 

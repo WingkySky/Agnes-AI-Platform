@@ -234,6 +234,7 @@
           <div class="info-row" v-if="detailItem.model"><span class="label">{{ t('history.modelLabel') }}：</span><span>{{ detailItem.model }}</span></div>
           <div class="info-row" v-if="detailItem.mode"><span class="label">{{ t('history.modeLabel') }}：</span><span class="mode-text">{{ t('params.mode.' + detailItem.mode) || detailItem.mode }}</span></div>
           <div class="info-row"><span class="label">{{ t('history.statusLabel') }}：</span><span>{{ detailItem.status || 'success' }}</span></div>
+          <div class="info-row"><span class="label">{{ t('history.creditsConsumedLabel') }}：</span><span class="credits-value">{{ detailItem.credits_consumed ?? 0 }}</span></div>
           <div class="info-row"><span class="label">{{ t('history.createdAtLabel') }}：</span><span>{{ detailItem.created_at }}</span></div>
           <div class="info-row url-row">
             <span class="label">{{ t('history.linkLabel') }}：</span>
@@ -288,6 +289,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, reactive } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Refresh, Loading, Document, Delete, VideoPlay, CircleCloseFilled, Edit, Close, Download, ZoomIn } from '@element-plus/icons-vue'
 import ImageViewer from '@/components/ImageViewer.vue'
@@ -298,6 +300,11 @@ import { useI18n } from '@/i18n'
 import type { GenerationRecord } from '@/types'
 
 const { t } = useI18n()
+const route = useRoute()
+const router = useRouter()
+
+// ---------- 从积分明细跳转过来时，通过 task_id 自动定位并打开详情 ----------
+const pendingTaskId = ref<string>('')
 
 // ---------- 图片查看器：历史记录图片点击后弹出，支持缩放/平移/旋转/下载 ----------
 const viewerVisible = ref(false)
@@ -448,6 +455,19 @@ async function loadList(resetPage = false) {
     list.value.filter(i => i.type === 'video').forEach(item => {
       loadVideoThumbnail(item)
     })
+
+    // 如果是从积分明细跳转过来（带 task_id），自动定位并打开详情
+    if (pendingTaskId.value) {
+      const matched = list.value.find(i => i.task_id === pendingTaskId.value)
+      if (matched) {
+        showDetail(matched)
+      } else {
+        ElMessage.warning(t('history.taskIdNotFound'))
+      }
+      pendingTaskId.value = ''
+      // 清除 URL 上的 task_id 参数，避免刷新重复弹出
+      router.replace({ path: route.path, query: {} })
+    }
   } catch (e) {
     console.error('[History] ' + t('history.loadFail') + '：', e)
   } finally {
@@ -761,6 +781,11 @@ function handleUserSwitch() {
 }
 
 onMounted(() => {
+  // 读取 URL 查询参数 task_id（从积分明细跳转过来时携带）
+  const qTaskId = route.query.task_id
+  if (typeof qTaskId === 'string' && qTaskId) {
+    pendingTaskId.value = qTaskId
+  }
   loadList()
   if (typeof window !== 'undefined') {
     window.addEventListener('agnes:user-login', handleUserSwitch as EventListener)
@@ -1078,6 +1103,7 @@ onBeforeUnmount(() => {
 }
 .info-row { padding: 6px 0; font-size: 13px; line-height: 1.6; color: #d5e3f7; }
 .label { color: #8ba3c9; margin-right: 8px; font-weight: 500; }
+.credits-value { color: #ffd28a; font-weight: 600; }
 .url-row {
   margin-top: 8px;
   padding: 12px !important;
