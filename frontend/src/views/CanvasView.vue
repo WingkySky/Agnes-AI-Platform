@@ -303,6 +303,8 @@ import CanvasNodeHoverToolbar from '@/components/canvas/CanvasNodeHoverToolbar.v
 import CanvasContextMenu from '@/components/canvas/CanvasContextMenu.vue'
 import CanvasAssetLibrary from '@/components/canvas/CanvasAssetLibrary.vue'
 import MaskEditDialog from '@/components/canvas/MaskEditDialog.vue'
+// 画布积分预估与校验（生图/生视频/局部编辑前预检积分）
+import { checkCreditsBeforeGenerate, showCostConsumedMessage } from '@/lib/canvas-credits'
 
 const { t } = useI18n()
 
@@ -682,7 +684,13 @@ async function handleNodeRetry(panel: typeof store.panels[number]) {
 // - prompt: 提示词
 // - targetPanelId: 可选，若提供则更新该节点而不是创建新节点（用于重试场景）
 // - 同步注册到任务队列，让画布任务在队列面板中可见
+// - 生成前预检积分，余额不足时中止并提示
 async function generateImageFromPrompt(sourcePanel: typeof store.panels[number], prompt: string, targetPanelId: string | null = null) {
+  // 积分预检：余额不足直接中止，不创建 loading 节点
+  const size = '1024x1024'
+  const canGenerate = await checkCreditsBeforeGenerate({ type: 'image', mode: 'text2image', size })
+  if (!canGenerate) return
+
   let newPanelId: string | null = targetPanelId
 
   if (!targetPanelId) {
@@ -732,7 +740,8 @@ async function generateImageFromPrompt(sourcePanel: typeof store.panels[number],
         store.updatePanel(newPanelId!, { content: { content: imageUrl, status: 'success' } })
         store.pushSnapshot()
         taskQueue.updateCanvasTask(taskId, { status: 'success', resultUrl: imageUrl, progress: 100 })
-        ElMessage.success(t('canvas.messages.imageGenerationDone'))
+        // 成功提示附带消耗积分数量
+        showCostConsumedMessage({ type: 'image', mode: 'text2image', size }, t('canvas.messages.imageGenerationDone'))
         return
       }
       if (isFailed) {
@@ -776,6 +785,15 @@ async function retryGeneration(panel: typeof store.panels[number]) {
       const { executeMergeGeneration, executeMergeVideoGeneration } = await import('@/lib/canvas-generation')
       const isVideo = panel.type === 'video'
       const fn = isVideo ? executeMergeVideoGeneration : executeMergeGeneration
+
+      // 积分预检：根据 config 节点模式构造预估参数
+      const mode = (configNode.content?.mode || 'text2image') as string
+      const estimateParams = isVideo
+        ? { type: 'video' as const, mode, seconds: (configNode.content?.seconds as number) || 5 }
+        : { type: 'image' as const, mode, size: (configNode.content?.size as string) || '1024x1024' }
+      const canGenerate = await checkCreditsBeforeGenerate(estimateParams)
+      if (!canGenerate) return
+
       // 先把当前失败的节点设为 loading
       store.updatePanel(panel.id, { content: { status: 'loading', errorDetails: null } })
       ElMessage.info(t('canvas.messages.regenerate'))
@@ -783,7 +801,8 @@ async function retryGeneration(panel: typeof store.panels[number]) {
       fn(configNode.id, store as any, {
         onProgress: (stage, data) => {
           if (stage === 'done') {
-            ElMessage.success(t('canvas.messages.regenerateDone'))
+            // 成功提示附带消耗积分数量
+            showCostConsumedMessage(estimateParams, t('canvas.messages.regenerateDone'))
             const ids: string[] = data?.resultNodeIds || []
             if (ids.length > 0) {
               store.selectPanel(ids[0], { append: false })
@@ -818,6 +837,7 @@ function handleNodeUpload(panel: typeof store.panels[number]) {
 // 配置节点：点击生成按钮，根据模式调用图片或视频合并生成流程
 // - 点击后立刻创建 loading 状态的结果节点，异步执行生成
 // - 不阻塞配置面板，可连续点击生成多次
+// - 生成前预检积分，余额不足时中止并提示
 async function handleConfigGenerate(panel: typeof store.panels[number]) {
   const mode = (panel.content?.mode || 'text2image') as string
   const isVideo = mode.includes('video')
@@ -829,6 +849,21 @@ async function handleConfigGenerate(panel: typeof store.panels[number]) {
     return
   }
 
+  // 积分预检：根据模式构造预估参数
+  const estimateParams = isVideo
+    ? {
+        type: 'video' as const,
+        mode,
+        seconds: (panel.content?.seconds as number) || 5,
+      }
+    : {
+        type: 'image' as const,
+        mode,
+        size: (panel.content?.size as string) || '1024x1024',
+      }
+  const canGenerate = await checkCreditsBeforeGenerate(estimateParams)
+  if (!canGenerate) return
+
   try {
     const { executeMergeGeneration, executeMergeVideoGeneration } = await import('@/lib/canvas-generation')
     const fn = isVideo ? executeMergeVideoGeneration : executeMergeGeneration
@@ -837,7 +872,8 @@ async function handleConfigGenerate(panel: typeof store.panels[number]) {
     const newNodeId = await fn(panel.id, store as any, {
       onProgress: (stage, data) => {
         if (stage === 'done') {
-          ElMessage.success(isVideo ? t('canvas.messages.videoGenerationDone') : t('canvas.messages.imageGenerationDone'))
+          // 成功提示附带消耗积分数量
+          showCostConsumedMessage(estimateParams, isVideo ? t('canvas.messages.videoGenerationDone') : t('canvas.messages.imageGenerationDone'))
           // 选中新节点并定位视口
           const ids: string[] = data?.resultNodeIds || []
           if (ids.length > 0) {
@@ -1022,6 +1058,7 @@ function handleHoverEditText() {
 }
 
 // 悬停工具栏：生图
+// - 生成前预检积分，余额不足时中止并提示
 async function handleHoverGenerateImage() {
   const panel = hoveredPanel.value
   if (!panel) return
@@ -1030,6 +1067,9 @@ async function handleHoverGenerateImage() {
     ElMessage.warning(t('canvas.messages.textContentEmpty'))
     return
   }
+  // 积分预检
+  const canGenerate = await checkCreditsBeforeGenerate({ type: 'image', mode: 'text2image', size: '1024x1024' })
+  if (!canGenerate) return
   await generateImageFromPrompt(panel, prompt)
 }
 
@@ -1102,7 +1142,10 @@ function handleHoverCopyPrompt() {
   }
 }
 
-// 悬停工具栏：反推提示词（图生文）—— 将当前 hover 图片发给 AI，生成适合 AI 绘画的英文 prompt，写入节点 prompt 字段
+// 悬停工具栏：反推提示词（图生文）—— 将当前 hover 图片发给 AI，生成适合 AI 绘画的英文 prompt
+// 反推结果会同时：
+//   1. 写入图片节点的 content.prompt 字段（供 Copy Prompt 使用）
+//   2. 在图片右侧自动创建一个文字节点，把 prompt 作为可见文本展示，并用连线关联
 async function handleHoverDescribe() {
   const panel = hoveredPanel.value
   if (!panel) return
@@ -1117,6 +1160,26 @@ async function handleHoverDescribe() {
   // 设置节点为 loading 状态（updatePanel 对 content 深合并，不会覆盖图片地址）
   store.updatePanel(panel.id, { content: { describing: true } })
 
+  // 预先在图片右侧创建一个文字节点用于承载反推结果
+  // 流式更新时实时把增量文本写入这个文字节点，让用户看到生成过程
+  const textSize = NODE_DEFAULT_SIZES.text
+  store.pushSnapshot()
+  const textNodeId = store.addPanel({
+    type: 'text',
+    name: t('canvas.nodeNames.text') + ' · ' + (panel.name || ''),
+    x: panel.x + panel.width + 60,
+    y: panel.y,
+    width: textSize.width,
+    height: textSize.height,
+    content: { content: '', status: 'loading' },
+  })
+  // 用连线把图片和文字节点关联起来（type=flow 表示派生关系）
+  store.addConnection({
+    source_panel_id: panel.id,
+    target_panel_id: textNodeId,
+    type: 'flow',
+  })
+
   try {
     const { createChatSession, sendMessageStream, deleteChatSession } = await import('@/api/chat')
 
@@ -1125,9 +1188,36 @@ async function handleHoverDescribe() {
     const sessionId = (session as any).id || (session as any).session_id
 
     // 反推指令：让 AI 描述图片并输出适合 AI 绘画的英文提示词
-    const prompt = '请详细描述这张图片的内容、风格、构图、色彩等，生成一段适合 AI 绘画的英文提示词（prompt），只输出提示词本身，不要其他解释。'
-    // attachments 格式：{ source: 'url', url } —— sendMessageStream 内部会转成后端 image_url 格式
-    const attachments = [{ source: 'url' as const, url: imageUrl, name: 'image', size: 0, mime_type: 'image/url' }]
+    // 措辞要点：明确这是"看图描述"任务，不是"生成图片"任务，避免 AI 误触发生图工具
+    const prompt = [
+      '【任务】图片反推（Image Captioning / Reverse Prompting）',
+      '附件中已提供一张图片，请你仔细观察这张图片，然后用英文写一段详细的提示词（prompt），',
+      '让另一个 AI 绘画模型能根据这段提示词重新生成类似的图片。',
+      '',
+      '要求：',
+      '1. 这是图片理解任务，不要生成任何新图片，不要调用 generate_image 等工具',
+      '2. 只输出一段英文提示词，不要输出中文，不要解释，不要客套话',
+      '3. 提示词应包含：主体内容、风格、构图、光线、色彩、细节等关键信息',
+      '4. 以英文逗号分隔的关键词或短语为主，类似 "a cat sitting on a wooden table, warm lighting, ..."',
+    ].join('\n')
+    // 附件格式根据图片来源选择：
+    //   - data: URL（base64）→ base64_image 字段，传完整 data URI（后端要求以 "data:image/" 开头）
+    //   - http(s) URL → image_url 字段（后端拉取后传给 AI）
+    let attachments: any[]
+    if (imageUrl.startsWith('data:')) {
+      // 直接传完整 data URL，后端会作为多模态 image_url 注入给 AI
+      attachments = [{
+        name: 'image.png',
+        base64_image: imageUrl,
+        size: imageUrl.length,
+        mime_type: 'image/png',
+        source: 'base64' as const,
+      }]
+    } else {
+      // 远程 http(s) URL —— 直接传给后端，后端再传给 AI 服务
+      // （代理只用于浏览器 canvas 像素操作，AI 服务能直接访问远程 URL）
+      attachments = [{ source: 'url' as const, url: imageUrl, name: 'image', size: 0, mime_type: 'image/url' }]
+    }
 
     let resultText = ''
 
@@ -1139,7 +1229,9 @@ async function handleHoverDescribe() {
       (event) => {
         if (event.type === 'text' && event.content) {
           resultText += event.content
-          // 实时更新节点 prompt（saveCanvas 已防抖，频繁更新安全）
+          // 实时更新文字节点内容，让用户看到生成过程
+          store.updatePanel(textNodeId, { content: { content: resultText } })
+          // 同步写入图片节点的 prompt 字段（供 Copy Prompt 使用）
           store.updatePanel(panel.id, { content: { prompt: resultText } })
         }
         // done / 其他事件类型无需额外处理
@@ -1147,12 +1239,15 @@ async function handleHoverDescribe() {
     )
 
     // 最终写入 prompt 并清除 loading 状态
+    const finalText = resultText.trim()
     store.updatePanel(panel.id, {
       content: {
-        prompt: resultText.trim(),
+        prompt: finalText,
         describing: false,
       },
     })
+    // 文字节点也标记为成功
+    store.updatePanel(textNodeId, { content: { content: finalText, status: 'success' } })
     store.pushSnapshot()
     ElMessage.success(t('canvas.messages.promptGenerated'))
 
@@ -1165,6 +1260,13 @@ async function handleHoverDescribe() {
   } catch (err) {
     console.error('[canvas] describe error:', err)
     store.updatePanel(panel.id, { content: { describing: false } })
+    // 反推失败时把文字节点标记为错误状态并写入错误信息
+    store.updatePanel(textNodeId, {
+      content: {
+        content: `${t('canvas.messages.describeFailed')}: ${(err as Error).message || err}`,
+        status: 'error',
+      },
+    })
     ElMessage.error(`${t('canvas.messages.describeFailed')}: ${(err as Error).message || err}`)
   }
 }
@@ -1196,10 +1298,15 @@ function handleHoverMaskEdit() {
 
 // 蒙版编辑确认：调用 image2image 局部编辑
 // - 同步注册到任务队列，让画布任务在队列面板中可见
+// - 生成前预检积分，余额不足时中止并提示
 async function handleMaskConfirm({ mask, prompt }: { mask: string; prompt: string }) {
   const panelId = maskEditState.panelId
   const panel = store.panels.find(p => p.id === panelId)
   if (!panel) return
+
+  // 积分预检：局部编辑走 image2image 模式
+  const canGenerate = await checkCreditsBeforeGenerate({ type: 'image', mode: 'image2image', size: '1024x1024' })
+  if (!canGenerate) return
 
   const imageUrl = (panel.content?.content || panel.content?.url) as string | undefined
   maskEditState.visible = false
@@ -1259,7 +1366,8 @@ async function handleMaskConfirm({ mask, prompt }: { mask: string; prompt: strin
         store.updatePanel(panelId!, { content: { content: resultUrl, status: 'success' } })
         store.pushSnapshot()
         taskQueue.updateCanvasTask(taskId, { status: 'success', resultUrl, progress: 100 })
-        ElMessage.success(t('canvas.messages.maskEditDone'))
+        // 成功提示附带消耗积分数量
+        showCostConsumedMessage({ type: 'image', mode: 'image2image', size: '1024x1024' }, t('canvas.messages.maskEditDone'))
         return
       }
       if (isFailed) {

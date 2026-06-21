@@ -808,7 +808,7 @@ const zhCN = {
       promptCopied: '已复制提示词',
       copyFailed: '复制失败',
       noImageContent: '节点没有图片内容',
-      promptGenerated: '提示词已生成',
+      promptGenerated: '提示词已生成，已在图片右侧创建文字节点',
       describeFailed: '反推失败',
       maskEditDone: '局部编辑完成',
       maskEditFailed: '编辑失败',
@@ -846,6 +846,13 @@ const zhCN = {
       deleteCanvasTip: '删除当前画布',
       importJsonTip: '导入 JSON',
       exportJsonTip: '导出 JSON',
+      // 积分相关提示
+      costHint: '本次生成将消耗 {n} 积分',
+      costLoading: '积分计算中…',
+      insufficient: '积分不足（当前 {balance}，需要 {cost}），请联系管理员充值',
+      insufficientShort: '积分不足（需要 {cost}）',
+      estimateFailed: '积分预估失败',
+      costConsumed: '已消耗 {n} 积分',
     },
     // 画布帮助弹窗
     help: {

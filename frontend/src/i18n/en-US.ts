@@ -807,7 +807,7 @@ const enUS = {
       promptCopied: 'Prompt copied',
       copyFailed: 'Copy failed',
       noImageContent: 'Node has no image content',
-      promptGenerated: 'Prompt generated',
+      promptGenerated: 'Prompt generated, a text node has been created to the right of the image',
       describeFailed: 'Describe failed',
       maskEditDone: 'Mask edit complete',
       maskEditFailed: 'Mask edit failed',
@@ -845,6 +845,13 @@ const enUS = {
       deleteCanvasTip: 'Delete current canvas',
       importJsonTip: 'Import JSON',
       exportJsonTip: 'Export JSON',
+      // Credit-related prompts
+      costHint: 'This generation will cost {n} credits',
+      costLoading: 'Calculating credits…',
+      insufficient: 'Insufficient credits (current {balance}, need {cost}). Please contact admin to recharge',
+      insufficientShort: 'Insufficient credits (need {cost})',
+      estimateFailed: 'Credit estimate failed',
+      costConsumed: '{n} credits consumed',
     },
     // Canvas help modal
     help: {

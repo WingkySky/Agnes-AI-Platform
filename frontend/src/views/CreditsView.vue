@@ -162,7 +162,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Refresh, Coin } from '@element-plus/icons-vue'
+import { Refresh, Coin, Picture, VideoCamera, Link } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { useUserStore } from '@/stores/user'
 import {
