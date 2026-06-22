@@ -60,6 +60,8 @@
 <script setup lang="ts">
 import { ref, watch, nextTick } from 'vue'
 import { X, Eraser } from 'lucide-vue-next'
+import { ElMessage } from 'element-plus'
+import { loadImage, toBase64IfNeeded } from '@/lib/canvas-image-ops'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -76,6 +78,8 @@ const isDrawing = ref(false)
 const hasMask = ref(false)
 let ctx: CanvasRenderingContext2D | null = null
 let imageEl: HTMLImageElement | null = null
+// 预转换的图片 base64（供调用方直接传给 image2image API，避免重复下载）
+const loadedImageBase64 = ref<string>('')
 
 // 画布尺寸
 const CANVAS_MAX_WIDTH = 600
@@ -88,10 +92,12 @@ watch(() => props.visible, async (val) => {
   if (val) {
     prompt.value = ''
     hasMask.value = false
+    loadedImageBase64.value = ''
     await nextTick()
     await initCanvas()
     dialogStyle.value = {
-      background: props.theme.toolbar.panel,
+      // 弹窗需要不透明背景，避免与下方画布混在一起（toolbar.panel 是半透明的）
+      background: props.theme.toolbar.panel.startsWith('rgba(15,') ? '#0f1626' : '#ffffff',
       borderColor: props.theme.toolbar.border,
       color: props.theme.node.text,
     }
@@ -102,44 +108,52 @@ async function initCanvas() {
   const canvas = canvasRef.value
   if (!canvas || !props.imageUrl) return
 
-  // 加载图片
-  imageEl = new Image()
-  imageEl.crossOrigin = 'anonymous'
-  imageEl.onload = () => {
-    if (!imageEl) return
-    // 计算画布尺寸（保持比例）
-    let w = imageEl.width
-    let h = imageEl.height
-    if (w > CANVAS_MAX_WIDTH) {
-      h = h * (CANVAS_MAX_WIDTH / w)
-      w = CANVAS_MAX_WIDTH
-    }
-    if (h > CANVAS_MAX_HEIGHT) {
-      w = w * (CANVAS_MAX_HEIGHT / h)
-      h = CANVAS_MAX_HEIGHT
-    }
-    canvas.width = w
-    canvas.height = h
-
-    ctx = canvas.getContext('2d')
-    if (!ctx) return
-    // 绘制图片（半透明显示）
-    ctx.globalAlpha = 0.7
-    ctx.drawImage(imageEl, 0, 0, w, h)
-    ctx.globalAlpha = 1
-
-    // 创建离屏 mask canvas（纯黑白）
-    const maskEl = document.createElement('canvas')
-    maskEl.width = imageEl.width
-    maskEl.height = imageEl.height
-    maskCanvas.value = maskEl
-    const maskCtx = maskEl.getContext('2d')
-    if (maskCtx) {
-      maskCtx.fillStyle = '#000'
-      maskCtx.fillRect(0, 0, imageEl.width, imageEl.height)
-    }
+  try {
+    // 用统一的 loadImage 加载（远程 URL 自动走代理、自动设置 crossOrigin），
+    // 从而避免后续 canvas 像素操作出现 tainted canvas
+    imageEl = await loadImage(props.imageUrl)
+    // 同时在后台把图片转成 base64，供 confirm 时使用（不阻塞弹窗打开）
+    toBase64IfNeeded(props.imageUrl).then((b64) => {
+      loadedImageBase64.value = b64
+    }).catch(() => { /* 失败时 confirm 时会再转一次 */ })
+  } catch (err) {
+    console.error('[MaskEditDialog] 图片加载失败:', err)
+    ElMessage.error(`蒙版编辑：图片加载失败`)
+    return
   }
-  imageEl.src = props.imageUrl
+
+  if (!imageEl) return
+  // 计算画布尺寸（保持比例）
+  let w = imageEl.width
+  let h = imageEl.height
+  if (w > CANVAS_MAX_WIDTH) {
+    h = h * (CANVAS_MAX_WIDTH / w)
+    w = CANVAS_MAX_WIDTH
+  }
+  if (h > CANVAS_MAX_HEIGHT) {
+    w = w * (CANVAS_MAX_HEIGHT / h)
+    h = CANVAS_MAX_HEIGHT
+  }
+  canvas.width = w
+  canvas.height = h
+
+  ctx = canvas.getContext('2d')
+  if (!ctx) return
+  // 绘制图片（半透明显示）
+  ctx.globalAlpha = 0.7
+  ctx.drawImage(imageEl, 0, 0, w, h)
+  ctx.globalAlpha = 1
+
+  // 创建离屏 mask canvas（纯黑白）
+  const maskEl = document.createElement('canvas')
+  maskEl.width = imageEl.width
+  maskEl.height = imageEl.height
+  maskCanvas.value = maskEl
+  const maskCtx = maskEl.getContext('2d')
+  if (maskCtx) {
+    maskCtx.fillStyle = '#000'
+    maskCtx.fillRect(0, 0, imageEl.width, imageEl.height)
+  }
 }
 
 function getCanvasPos(event: PointerEvent) {
@@ -216,6 +230,9 @@ function confirm() {
 
   emit('confirm', {
     mask: maskBase64,
+    // 提供预下载好的 base64 原图，供调用方直接上传 image2image API，
+    // 避免再次从远端下载；若失败则回调方还可以回退到原 imageUrl
+    base64_image: loadedImageBase64.value || (imageEl && (imageEl as any).src) || '',
     prompt: prompt.value.trim(),
   })
 }
@@ -236,14 +253,15 @@ function confirm() {
 }
 
 .mask-edit-dialog {
-  width: 680px;
-  max-width: 90vw;
+  width: 980px;
+  max-width: 95vw;
   border: 1px solid;
   border-radius: 16px;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background-color: var(--agnes-bg-dialog); /* 不透明背景，避免与画布内容混在一起 */
 }
 
 .mask-header {

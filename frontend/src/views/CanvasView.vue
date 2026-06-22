@@ -240,6 +240,44 @@
         @cancel="maskEditState.visible = false"
       />
 
+      <!-- ============ 图片加工弹窗 ============ -->
+      <!-- 裁剪弹窗 -->
+      <CanvasImageCropDialog
+        v-if="imageOpsState.crop.visible"
+        :visible="imageOpsState.crop.visible"
+        :image-url="imageOpsState.crop.imageUrl"
+        :theme="store.canvasTheme"
+        @confirm="handleCropConfirm"
+        @cancel="imageOpsState.crop.visible = false"
+      />
+      <!-- 拆分弹窗 -->
+      <CanvasImageSplitDialog
+        v-if="imageOpsState.split.visible"
+        :visible="imageOpsState.split.visible"
+        :image-url="imageOpsState.split.imageUrl"
+        :theme="store.canvasTheme"
+        @confirm="handleSplitConfirm"
+        @cancel="imageOpsState.split.visible = false"
+      />
+      <!-- 放大弹窗 -->
+      <CanvasImageUpscaleDialog
+        v-if="imageOpsState.upscale.visible"
+        :visible="imageOpsState.upscale.visible"
+        :image-url="imageOpsState.upscale.imageUrl"
+        :theme="store.canvasTheme"
+        @confirm="handleUpscaleConfirm"
+        @cancel="imageOpsState.upscale.visible = false"
+      />
+      <!-- AI 多角度弹窗 -->
+      <CanvasImageAngleDialog
+        v-if="imageOpsState.angle.visible"
+        :visible="imageOpsState.angle.visible"
+        :image-url="imageOpsState.angle.imageUrl"
+        :theme="store.canvasTheme"
+        @confirm="handleAngleConfirm"
+        @cancel="imageOpsState.angle.visible = false"
+      />
+
       <!-- ============ 画布管理弹窗（批量操作、模板库） ============ -->
       <CanvasManagerPopover
         v-model="managerVisible"
@@ -338,6 +376,10 @@ import CanvasContextMenu from '@/components/canvas/CanvasContextMenu.vue'
 import CanvasAssetLibrary from '@/components/canvas/CanvasAssetLibrary.vue'
 import GenerationQuickPanel from '@/components/canvas/GenerationQuickPanel.vue'
 import MaskEditDialog from '@/components/canvas/MaskEditDialog.vue'
+import CanvasImageCropDialog from '@/components/canvas/CanvasImageCropDialog.vue'
+import CanvasImageSplitDialog from '@/components/canvas/CanvasImageSplitDialog.vue'
+import CanvasImageUpscaleDialog from '@/components/canvas/CanvasImageUpscaleDialog.vue'
+import CanvasImageAngleDialog from '@/components/canvas/CanvasImageAngleDialog.vue'
 // 画布模板库组件
 import CanvasManagerPopover from '@/components/canvas/CanvasManagerPopover.vue'
 // 画布积分预估与校验（生图/生视频/局部编辑前预检积分）
@@ -1218,6 +1260,14 @@ const maskEditState = reactive({
   imageUrl: '' as string,
 })
 
+// 图片加工弹窗状态（裁剪/拆分/放大/AI多角度）
+const imageOpsState = reactive({
+  crop: { visible: false, panelId: null as string | null, imageUrl: '' },
+  split: { visible: false, panelId: null as string | null, imageUrl: '' },
+  upscale: { visible: false, panelId: null as string | null, imageUrl: '' },
+  angle: { visible: false, panelId: null as string | null, imageUrl: '' },
+})
+
 // ============ 画布模板功能 ============
 // 画布管理弹窗显示状态（批量操作、模板库）
 const managerVisible = ref(false)
@@ -1657,8 +1707,21 @@ function handleHoverReplaceImage() {
 function handleHoverToggleRatio() {
   if (!hoveredPanelId.value) return
   const p = store.panels.find((pp) => pp.id === hoveredPanelId.value)
-  const cur = (p?.content?.freeResize ?? false) as boolean
-  store.updatePanel(hoveredPanelId.value, { content: { freeResize: !cur } })
+  if (!p) return
+  const cur = (p.content?.freeResize ?? false) as boolean
+  // 从自由比例 → 锁比例：根据当前宽高强制调整高度，保持中心不动
+  if (cur) {
+    const ratio = p.width / p.height
+    const newH = p.width / ratio
+    const dy = (newH - p.height) / 2
+    store.updatePanel(hoveredPanelId.value, {
+      content: { freeResize: false },
+      height: newH,
+      y: p.y - dy,
+    })
+  } else {
+    store.updatePanel(hoveredPanelId.value, { content: { freeResize: true } })
+  }
   ElMessage.success(cur ? t('canvas.hoverToolbar.lockRatio') : t('canvas.hoverToolbar.unlockRatio'))
 }
 
@@ -1678,7 +1741,9 @@ function handleHoverMaskEdit() {
 // 蒙版编辑确认：调用 image2image 局部编辑
 // - 同步注册到任务队列，让画布任务在队列面板中可见
 // - 生成前预检积分，余额不足时中止并提示
-async function handleMaskConfirm({ mask, prompt }: { mask: string; prompt: string }) {
+async function handleMaskConfirm(
+  { mask, prompt, base64_image }: { mask: string; prompt: string; base64_image?: string }
+) {
   const panelId = maskEditState.panelId
   const panel = store.panels.find(p => p.id === panelId)
   if (!panel) return
@@ -1696,29 +1761,19 @@ async function handleMaskConfirm({ mask, prompt }: { mask: string; prompt: strin
   try {
     const { createImageTask, getImageTaskStatus } = await import('@/api/images')
 
-    // 将图片转为 base64（如果还不是 base64）
-    let base64Image = imageUrl!
-    if (imageUrl && !imageUrl.startsWith('data:')) {
-      // URL 模式：走后端代理获取图片，绕过 CORS（远程图片服务器无 CORS 头）
-      const proxyUrl = imageUrl.startsWith('http')
-        ? `/api/proxy/image?url=${encodeURIComponent(imageUrl)}`
-        : imageUrl
-      const response = await fetch(proxyUrl)
-      const blob = await response.blob()
-      base64Image = await new Promise<string>((resolve) => {
-        const reader = new FileReader()
-        reader.onloadend = () => resolve(reader.result as string)
-        reader.readAsDataURL(blob)
-      })
-    }
+    // 优先使用弹窗组件预转换好的 base64（它已经走代理下载好）；否则统一走 toBase64IfNeeded 转换
+    const { toBase64IfNeeded } = await import('@/lib/canvas-image-ops')
+    const base64Image = (base64_image && base64_image.startsWith('data:'))
+      ? base64_image
+      : await toBase64IfNeeded(imageUrl || '')
 
-    // 创建 image2image 任务（带 mask 局部编辑）
+    // 创建 image2image 任务（带 mask 局部编辑），用数组形式传参与后端一致
     const resp = await createImageTask({
       prompt,
       model: useModelsStore().defaultImageModel,
       size: '1024x1024',
       response_format: 'url',
-      base64_image: base64Image,
+      base64_images: [base64Image],
       mask: mask,
     } as any)
 
@@ -1770,74 +1825,80 @@ async function handleMaskConfirm({ mask, prompt }: { mask: string; prompt: strin
   }
 }
 
-// 图片裁剪：弹出比例选择，按比例居中裁剪
-async function handleHoverCrop() {
+// 图片裁剪：打开可视化裁剪弹窗
+function handleHoverCrop() {
   const panel = hoveredPanel.value
   if (!panel?.content?.content) return
   const imageUrl = panel.content.content as string
+  imageOpsState.crop.visible = true
+  imageOpsState.crop.panelId = panel.id
+  imageOpsState.crop.imageUrl = imageUrl
+}
+
+// 裁剪确认：按相对坐标裁剪，新建子节点并连线
+async function handleCropConfirm(rect: { x: number; y: number; w: number; h: number }) {
+  const panelId = imageOpsState.crop.panelId
+  const panel = store.panels.find(p => p.id === panelId)
+  if (!panel) return
+  const imageUrl = imageOpsState.crop.imageUrl
+  imageOpsState.crop.visible = false
 
   try {
-    // 弹出比例选择
-    const { value } = await ElMessageBox.prompt(
-      t('canvas.messages.cropPromptMsg'),
-      t('canvas.messages.cropPromptTitle'),
-      {
-        inputValue: '1:1',
-        inputPattern: /^\d+:\d+$/,
-        inputErrorMessage: t('canvas.messages.cropFailed'),
-      }
-    ) as { value: string }
-    const [rw, rh] = value.split(':').map(Number)
-
     ElMessage.info(t('canvas.messages.cropProcessing'))
     const { cropImage, getImageSize } = await import('@/lib/canvas-image-ops')
     const { width, height } = await getImageSize(imageUrl)
-    // 计算居中裁剪区域
-    const targetRatio = rw / rh
-    const currentRatio = width / height
-    let cropX, cropY, cropW, cropH
-    if (currentRatio > targetRatio) {
-      cropH = height
-      cropW = height * targetRatio
-      cropX = (width - cropW) / 2
-      cropY = 0
-    } else {
-      cropW = width
-      cropH = width / targetRatio
-      cropX = 0
-      cropY = (height - cropH) / 2
-    }
-    const result = await cropImage(imageUrl, { x: cropX, y: cropY, width: cropW, height: cropH })
-    store.updatePanel(panel.id, { content: { content: result } })
+    // 相对坐标转像素坐标
+    const result = await cropImage(imageUrl, {
+      x: rect.x * width,
+      y: rect.y * height,
+      width: rect.w * width,
+      height: rect.h * height,
+    })
+    // 新建子节点并连线
+    createImageChildNode(panel, result, (panel.name || '') + ' · ' + t('canvas.imageOps.croppedSuffix'))
     store.pushSnapshot()
     ElMessage.success(t('canvas.messages.cropDone'))
   } catch (err) {
-    if (err !== 'cancel' && (err as any)?.message !== 'cancel') {
-      ElMessage.error(`${t('canvas.messages.cropFailed')}: ${(err as Error).message || err}`)
-    }
+    ElMessage.error(`${t('canvas.messages.cropFailed')}: ${(err as Error).message || err}`)
   }
 }
 
-// 图片拆分：2x2 拆分为 4 份，创建新节点并连线
-async function handleHoverSplit() {
+// 图片拆分：打开行列选择弹窗
+function handleHoverSplit() {
   const panel = hoveredPanel.value
   if (!panel?.content?.content) return
   const imageUrl = panel.content.content as string
+  imageOpsState.split.visible = true
+  imageOpsState.split.panelId = panel.id
+  imageOpsState.split.imageUrl = imageUrl
+}
+
+// 拆分确认：按行列网格拆分，新建多个子节点并连线
+async function handleSplitConfirm({ rows, cols }: { rows: number; cols: number }) {
+  const panelId = imageOpsState.split.panelId
+  const panel = store.panels.find(p => p.id === panelId)
+  if (!panel) return
+  const imageUrl = imageOpsState.split.imageUrl
+  imageOpsState.split.visible = false
 
   try {
     ElMessage.info(t('canvas.messages.splitProcessing'))
-    const { splitImage } = await import('@/lib/canvas-image-ops')
-    const pieces = await splitImage(imageUrl, 4) // 2x2 拆分为 4 份
-    // store.splitImagePanel 不接受 pieces 数组，手动创建 4 个新节点并连线
+    const { splitImageByGrid } = await import('@/lib/canvas-image-ops')
+    const pieces = await splitImageByGrid(imageUrl, rows, cols)
+    // 按网格排列子节点
+    const cellW = panel.width / cols
+    const cellH = panel.height / rows
     pieces.forEach((piece, i) => {
+      const r = Math.floor(i / cols)
+      const c = i % cols
       const newId = store.addPanel({
-        type: panel.type,
-        name: (panel.name || getNodeName(panel.type)) + ' (' + (i + 1) + '/' + pieces.length + ')',
-        x: panel.x + panel.width + 40 + i * 20,
-        y: panel.y + i * 20,
-        width: panel.width,
-        height: panel.height,
-        content: { ...panel.content, content: piece },
+        type: 'image',
+        name: `${panel.name || ''} ${r + 1}-${c + 1}`,
+        x: panel.x + panel.width + 60 + c * (cellW + 16),
+        y: panel.y + r * (cellH + 16),
+        width: cellW,
+        height: cellH,
+        content: { ...panel.content, content: piece, status: 'success' },
         meta: {},
         is_locked: false,
         is_hidden: false,
@@ -1855,17 +1916,29 @@ async function handleHoverSplit() {
   }
 }
 
-// 图片放大：等比放大 2 倍
-async function handleHoverUpscale() {
+// 图片放大：打开目标尺寸选择弹窗
+function handleHoverUpscale() {
   const panel = hoveredPanel.value
   if (!panel?.content?.content) return
   const imageUrl = panel.content.content as string
+  imageOpsState.upscale.visible = true
+  imageOpsState.upscale.panelId = panel.id
+  imageOpsState.upscale.imageUrl = imageUrl
+}
+
+// 放大确认：按目标长边放大，新建子节点并连线
+async function handleUpscaleConfirm({ targetLongEdge, algorithm }: { targetLongEdge: number; algorithm: 'high' | 'bilinear' | 'nearest' }) {
+  const panelId = imageOpsState.upscale.panelId
+  const panel = store.panels.find(p => p.id === panelId)
+  if (!panel) return
+  const imageUrl = imageOpsState.upscale.imageUrl
+  imageOpsState.upscale.visible = false
 
   try {
     ElMessage.info(t('canvas.messages.upscaleProcessing'))
-    const { upscaleImage } = await import('@/lib/canvas-image-ops')
-    const result = await upscaleImage(imageUrl, 2)
-    store.updatePanel(panel.id, { content: { content: result } })
+    const { upscaleToLongEdge } = await import('@/lib/canvas-image-ops')
+    const result = await upscaleToLongEdge(imageUrl, targetLongEdge, algorithm)
+    createImageChildNode(panel, result, (panel.name || '') + ' · ' + t('canvas.imageOps.upscaledSuffix'))
     store.pushSnapshot()
     ElMessage.success(t('canvas.messages.upscaleDone'))
   } catch (err) {
@@ -1873,53 +1946,137 @@ async function handleHoverUpscale() {
   }
 }
 
-// 图片超分：等比放大 4 倍
-async function handleHoverSuperResolution() {
+// 图片超分：复用放大弹窗，默认 4K + 高清算法
+function handleHoverSuperResolution() {
   const panel = hoveredPanel.value
   if (!panel?.content?.content) return
   const imageUrl = panel.content.content as string
+  imageOpsState.upscale.visible = true
+  imageOpsState.upscale.panelId = panel.id
+  imageOpsState.upscale.imageUrl = imageUrl
+}
+
+// AI 多角度：打开角度配置弹窗
+function handleHoverAngle() {
+  const panel = hoveredPanel.value
+  if (!panel?.content?.content) return
+  const imageUrl = panel.content.content as string
+  imageOpsState.angle.visible = true
+  imageOpsState.angle.panelId = panel.id
+  imageOpsState.angle.imageUrl = imageUrl
+}
+
+// AI 多角度确认：调用图生图 API，新建子节点并连线
+async function handleAngleConfirm({ prompt }: { prompt: string }) {
+  const panelId = imageOpsState.angle.panelId
+  const panel = store.panels.find(p => p.id === panelId)
+  if (!panel) return
+  const imageUrl = imageOpsState.angle.imageUrl
+  imageOpsState.angle.visible = false
+
+  // 积分预检：AI 多角度走 image2image 模式
+  const canGenerate = await checkCreditsBeforeGenerate({ type: 'image', mode: 'image2image', size: '1024x1024' })
+  if (!canGenerate) return
+
+  // 先创建 loading 状态的子节点
+  const newId = store.addPanel({
+    type: 'image',
+    name: (panel.name || '') + ' · ' + t('canvas.imageOps.angleSuffix'),
+    x: panel.x + panel.width + 60,
+    y: panel.y,
+    width: panel.width,
+    height: panel.height,
+    content: { content: '', status: 'loading', prompt },
+    meta: {},
+    is_locked: false,
+    is_hidden: false,
+  })
+  store.addConnection({
+    source_panel_id: panel.id,
+    target_panel_id: newId,
+    type: 'flow',
+  })
 
   try {
-    ElMessage.info(t('canvas.messages.superResProcessing'))
-    const { upscaleImage } = await import('@/lib/canvas-image-ops')
-    const result = await upscaleImage(imageUrl, 4)
-    store.updatePanel(panel.id, { content: { content: result } })
-    store.pushSnapshot()
-    ElMessage.success(t('canvas.messages.superResDone'))
+    const { createImageTask, getImageTaskStatus } = await import('@/api/images')
+    const { toBase64IfNeeded } = await import('@/lib/canvas-image-ops')
+    // 参考图转 base64（远程 URL 会自动走后端代理下载后再转）
+    const base64Image = await toBase64IfNeeded(imageUrl)
+
+    const resp = await createImageTask({
+      prompt,
+      model: useModelsStore().defaultImageModel,
+      size: '1024x1024',
+      response_format: 'url',
+      mode: 'image2image',
+      // 用数组形式传参，与当前后端 schema 对齐；旧字段也保留一份兜底
+      base64_images: [base64Image],
+      base64_image: base64Image,
+    } as any)
+
+    const taskId = resp.task_id
+    taskQueue.registerCanvasTask({
+      taskId,
+      type: 'image',
+      prompt,
+      backendTaskId: taskId,
+      panelId: newId,
+    })
+
+    // 轮询任务状态
+    for (let i = 0; i < 150; i++) {
+      await new Promise(r => setTimeout(r, 2000))
+      const status = await getImageTaskStatus(taskId)
+      const isSuccess = ['completed', 'succeeded', 'success', 'done'].includes(status.status)
+      const isFailed = ['failed', 'error'].includes(status.status)
+
+      if (isSuccess) {
+        const resultUrl = status.result_url || (status as any).image_url || status.url || (status as any).data?.[0]?.url
+        store.updatePanel(newId, { content: { content: resultUrl, status: 'success' } })
+        store.pushSnapshot()
+        taskQueue.updateCanvasTask(taskId, { status: 'success', resultUrl, progress: 100 })
+        showCostConsumedMessage({ type: 'image', mode: 'image2image', size: '1024x1024' }, t('canvas.messages.angleDone'))
+        return
+      }
+      if (isFailed) {
+        const errMsg = status.message || (status as any).error || t('canvas.messages.angleFailed')
+        store.updatePanel(newId, { content: { status: 'error', errorDetails: errMsg } })
+        taskQueue.updateCanvasTask(taskId, { status: 'failed' })
+        ElMessage.error(`${t('canvas.messages.angleFailed')}: ${errMsg}`)
+        return
+      }
+      const progress = typeof status.progress === 'number' ? status.progress : undefined
+      taskQueue.updateCanvasTask(taskId, { status: 'processing', progress })
+    }
+    ElMessage.warning(t('canvas.messages.generateTimeout'))
+    store.updatePanel(newId, { content: { status: 'error', errorDetails: t('canvas.messages.generateTimeout') } })
+    taskQueue.updateCanvasTask(taskId, { status: 'failed' })
   } catch (err) {
-    ElMessage.error(`${t('canvas.messages.superResFailed')}: ${(err as Error).message || err}`)
+    console.error('[canvas] angle error:', err)
+    store.updatePanel(newId, { content: { status: 'error', errorDetails: (err as Error).message } })
+    ElMessage.error(`${t('canvas.messages.angleFailed')}: ${(err as Error).message}`)
   }
 }
 
-// 角度调整：弹出输入框，支持 90/180/270 度旋转
-async function handleHoverAngle() {
-  const panel = hoveredPanel.value
-  if (!panel?.content?.content) return
-  const imageUrl = panel.content.content as string
-
-  try {
-    const { value } = await ElMessageBox.prompt(
-      t('canvas.messages.rotatePromptMsg'),
-      t('canvas.messages.rotatePromptTitle'),
-      {
-        inputValue: '90',
-        inputPattern: /^(90|180|270)$/,
-        inputErrorMessage: t('canvas.messages.rotateFailed'),
-      }
-    ) as { value: string }
-    const degrees = Number(value)
-
-    ElMessage.info(t('canvas.messages.rotateProcessing'))
-    const { rotateImage } = await import('@/lib/canvas-image-ops')
-    const result = await rotateImage(imageUrl, degrees)
-    store.updatePanel(panel.id, { content: { content: result } })
-    store.pushSnapshot()
-    ElMessage.success(`${t('canvas.messages.rotateDone')}: ${degrees}°`)
-  } catch (err) {
-    if (err !== 'cancel' && (err as any)?.message !== 'cancel') {
-      ElMessage.error(`${t('canvas.messages.rotateFailed')}: ${(err as Error).message || err}`)
-    }
-  }
+// 辅助：为图片节点创建子节点（加工结果），并连线
+function createImageChildNode(parentPanel: any, imageContent: string, name: string) {
+  const newId = store.addPanel({
+    type: 'image',
+    name,
+    x: parentPanel.x + parentPanel.width + 60,
+    y: parentPanel.y,
+    width: parentPanel.width,
+    height: parentPanel.height,
+    content: { ...parentPanel.content, content: imageContent, status: 'success' },
+    meta: {},
+    is_locked: false,
+    is_hidden: false,
+  })
+  store.addConnection({
+    source_panel_id: parentPanel.id,
+    target_panel_id: newId,
+    type: 'flow',
+  })
 }
 
 function handleHoverViewLarge() {

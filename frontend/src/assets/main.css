@@ -74,6 +74,9 @@
   --agnes-overlay-bg: rgba(0, 0, 0, 0.5);
   --agnes-overlay-strong: rgba(0, 0, 0, 0.85);
 
+  /* 弹窗/对话框背景（不透明，避免与下方画布内容混在一起） */
+  --agnes-bg-dialog: #151b2e;
+
   /* 深色区块（图片/视频预览背景，两套主题共用） */
   --agnes-bg-dark-surface: #0a0f1c;
 
@@ -155,6 +158,9 @@
   /* 遮罩层（两套主题共用深色遮罩，保证弹窗/预览遮罩一致性） */
   --agnes-overlay-bg: rgba(0, 0, 0, 0.5);
   --agnes-overlay-strong: rgba(0, 0, 0, 0.85);
+
+  /* 弹窗/对话框背景（不透明，避免与下方画布内容混在一起） */
+  --agnes-bg-dialog: #ffffff;
 
   /* 深色区块（图片/视频预览背景，两套主题共用） */
   --agnes-bg-dark-surface: #0a0f1c;
