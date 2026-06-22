@@ -43,7 +43,26 @@ The platform continues to grow, but the core principle remains the same: **a sel
 | **Python** | 3.10+ (3.11+ recommended) | Backend runtime |
 | **Node.js** | 18+ (20+ LTS recommended) | Frontend build |
 
-### 1. Backend
+### 1. One-Click Start
+
+Open a terminal in the project root and run:
+
+```bash
+# macOS / Linux
+./start.sh
+
+# Windows
+start.bat
+
+# Or use the Python launcher (cross-platform)
+python start.py
+```
+
+This automatically starts both the backend and frontend in one command. On first run it will prompt you to configure your API key.
+
+### 2. Manual Start
+
+#### Backend
 
 ```bash
 cd backend
@@ -62,19 +81,27 @@ cp .env.example .env
 # After first launch, you can manage providers from the frontend settings page.
 ```
 
-Start the backend:
+Start the backend (macOS/Linux):
 
 ```bash
-# Option A — startup script (recommended)
-chmod +x start.sh && ./start.sh
+./start.sh
+```
 
-# Option B — manual
+Start the backend (Windows):
+
+```batch
+start.bat
+```
+
+Or manually:
+
+```bash
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 Verify: http://localhost:8000/health or http://localhost:8000/docs
 
-### 2. Frontend
+#### Frontend
 
 Open a **new terminal**:
 
