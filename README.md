@@ -48,15 +48,22 @@ The platform continues to grow, but the core principle remains the same: **a sel
 Open a terminal in the project root and run:
 
 ```bash
-# macOS / Linux
+# macOS / Linux — first time: grant execute permission
+chmod +x start.sh
 ./start.sh
 
 # Windows
 start.bat
 
-# Or use the Python launcher (cross-platform)
+# Or use the Python launcher (cross-platform, no permission needed)
 python start.py
 ```
+
+> **macOS / Linux first run**: Shell scripts (`.sh`) downloaded from Git or copied between machines may not have execute permission. Run `chmod +x start.sh` once before the first `./start.sh`. If you skip this, you'll get a "permission denied" error.
+>
+> **macOS Gatekeeper**: If macOS blocks the script with "cannot be opened because it is from an unidentified developer", go to **System Settings → Privacy & Security** and click "Open Anyway", or run `xattr -d com.apple.quarantine start.sh` in Terminal.
+>
+> **Windows**: `.bat` files run directly without extra permission. If Windows SmartScreen blocks it, click "More info → Run anyway".
 
 This automatically starts both the backend and frontend in one command. On first run it will prompt you to configure your API key.
 
