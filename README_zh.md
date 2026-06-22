@@ -60,6 +60,12 @@ python start.py
 
 脚本会自动启动后端和前端，首次运行会提示你配置 API Key。
 
+> **默认管理员账号**：启动脚本会自动初始化数据库并创建超级管理员：
+> - 用户名：`admin`
+> - 密码：`admin123`
+>
+> 可在首次运行前通过环境变量 `ADMIN_USERNAME` / `ADMIN_PASSWORD` / `ADMIN_EMAIL` / `ADMIN_CREDITS` 自定义。首次登录后请及时修改默认密码。
+
 ### 2. 手动启动
 
 #### 后端

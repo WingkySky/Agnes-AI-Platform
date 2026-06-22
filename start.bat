@@ -77,6 +77,11 @@ if %errorlevel% neq 0 (
     %PY% -m pip install -r requirements.txt -q
 )
 
+:: 初始化数据库（幂等：表/管理员已存在则跳过）
+echo.
+echo  初始化数据库（创建表 + 默认超级管理员）...
+%PY% init_db.py
+
 echo.
 echo  后端启动中 (端口 %PORT%)...
 echo  API 文档: http://localhost:%PORT%/docs

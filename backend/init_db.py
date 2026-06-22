@@ -1,9 +1,11 @@
 # =====================================================
 # 数据库初始化脚本
 # 功能：
-#   1. 根据模型定义创建所有数据表（users / credit_rules / generations / chat_sessions / chat_messages 等）
+#   1. 根据模型定义创建所有数据表（幂等，不修改已有表结构）
+#      覆盖表：users / credit_rules / generations / chat_sessions /
+#              chat_messages / api_providers / model_definitions / credit_transactions
 #   2. 创建默认超级管理员（用户名/密码/邮箱可通过环境变量修改）
-#   3. 写入默认积分规则（若 rules 表为空则补全）
+#   3. 写入默认积分规则（若 rules 表中缺少则补全，已有规则不覆盖）
 #
 # 使用方式（在 backend 目录下）：
 #   python init_db.py
@@ -14,7 +16,8 @@
 #   ADMIN_EMAIL     超级管理员邮箱（默认 admin@example.com）
 #   ADMIN_CREDITS   超级管理员初始积分（默认 9999）
 #
-# 注意：
+# 安全保证（不会覆盖已有数据）：
+#   - create_all 只创建缺失的表，不修改/删除已有表结构和数据
 #   - 若超级管理员用户已存在，脚本不会重复创建，只打印提示
 #   - 若某条积分规则已存在，保留原值不会被覆盖（防止误改管理员配置）
 #   - 早期未绑定 user_id 的数据会自动归属于此管理员，新用户注册后将拥有独立数据空间
@@ -39,19 +42,30 @@ from app.core.database import Base, async_engine, async_session
 from app.core.security import hash_password
 
 # ---------- 模型 ----------
+# 逐个导入所有模型，确保 Base.metadata.create_all 能创建全部表
+# （create_all 只注册被导入过的模型对应的表）
+# 逐个导入而非一次性导入：某个非核心模型导入失败时不会中断整个脚本，
+# 核心表（users / credit_rules）仍能正常创建，失败项会打印明确警告
 from app.models.user import User, ROLE_ADMIN
 from app.models.credit_rule import CreditRule, DEFAULT_CREDIT_RULES
 
-# 其他模型（确保 SQLAlchemy 在 create_all 前能感知到这些表）
-try:
-    from app.models.generation import Generation  # noqa: F401
-except Exception:
-    pass
+# 非核心模型逐个导入，失败时记录警告但不中断
+_import_errors = []
 
-try:
-    from app.models.chat import ChatSession, ChatMessage  # noqa: F401
-except Exception:
-    pass
+def _safe_import(module_path: str, names: list[str]):
+    """安全导入模型模块，失败时记录到 _import_errors 但不抛异常"""
+    try:
+        mod = __import__(module_path, fromlist=names)
+        return {name: getattr(mod, name) for name in names}
+    except Exception as e:
+        _import_errors.append(f"{module_path}: {e}")
+        return {}
+
+_safe_import("app.models.generation", ["Generation"])
+_safe_import("app.models.chat", ["ChatSession", "ChatMessage"])
+_safe_import("app.models.api_provider", ["ApiProvider"])
+_safe_import("app.models.model_definition", ["ModelDefinition"])
+_safe_import("app.models.credit_transaction", ["CreditTransaction"])
 
 logging.basicConfig(
     level=logging.INFO,
@@ -59,12 +73,25 @@ logging.basicConfig(
 )
 logger = logging.getLogger("init_db")
 
+# 若有模型导入失败，打印明确警告（不中断流程，核心表仍会创建）
+if _import_errors:
+    logger.warning("以下模型导入失败（对应表不会被创建，请检查依赖）：")
+    for err in _import_errors:
+        logger.warning("  - %s", err)
+
 
 # =====================================================
 # 1. 创建所有表
 # =====================================================
 async def create_tables():
     """根据 Base.metadata 创建所有数据表（幂等，表已存在则跳过）"""
+    # 打印已注册的表名，方便用户确认覆盖范围
+    registered_tables = sorted(Base.metadata.tables.keys())
+    logger.info("已注册模型表（共 %d 张）：%s", len(registered_tables), ", ".join(registered_tables))
+    if _import_errors:
+        missing = [err.split(":")[0].split(".")[-1] for err in _import_errors]
+        logger.warning("因导入失败未注册的表：%s", ", ".join(missing))
+
     logger.info("开始创建数据表...")
     async with async_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

@@ -60,6 +60,12 @@ python start.py
 
 This automatically starts both the backend and frontend in one command. On first run it will prompt you to configure your API key.
 
+> **Default Admin Account**: The startup script automatically initializes the database and creates a super admin:
+> - Username: `admin`
+> - Password: `admin123`
+>
+> You can customize these via environment variables `ADMIN_USERNAME` / `ADMIN_PASSWORD` / `ADMIN_EMAIL` / `ADMIN_CREDITS` before first run. Please change the default password after first login.
+
 ### 2. Manual Start
 
 #### Backend

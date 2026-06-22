@@ -103,6 +103,11 @@ def start_backend(venv_python: str | None = None):
             cwd=backend_dir,
         )
 
+    # 初始化数据库（幂等：表/管理员已存在则跳过）
+    print("\n初始化数据库（创建表 + 默认超级管理员）...")
+    init_db = os.path.join(backend_dir, "init_db.py")
+    subprocess.run([venv_py, init_db], cwd=backend_dir)
+
     port = find_free_port(8000)
     print(f"后端启动中 (端口 {port})...")
     print(f"  API 文档: http://localhost:{port}/docs")

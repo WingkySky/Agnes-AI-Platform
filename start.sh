@@ -64,6 +64,11 @@ $PY -c "import fastapi" 2>/dev/null || {
     $PY -m pip install -r requirements.txt -q
 }
 
+# 初始化数据库（幂等：表/管理员已存在则跳过）
+echo ""
+echo "  初始化数据库（创建表 + 默认超级管理员）..."
+$PY init_db.py
+
 # 查找空闲端口
 PORT=8000
 while nc -z 127.0.0.1 $PORT >/dev/null 2>&1; do
