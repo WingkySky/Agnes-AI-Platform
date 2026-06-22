@@ -365,6 +365,7 @@ import { useI18n } from '@/i18n'
 import { useCanvasStore } from '@/stores/canvas'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useModelsStore } from '@/stores/models'
+import { usePreferencesStore } from '@/stores/preferences'
 import InfiniteCanvas from '@/components/canvas/InfiniteCanvas.vue'
 import CanvasConnectionsLayer from '@/components/canvas/CanvasConnectionsLayer.vue'
 import CanvasNode from '@/components/canvas/CanvasNode.vue'
@@ -828,7 +829,14 @@ async function handleNodeRetry(panel: typeof store.panels[number]) {
 // - 生成前预检积分，余额不足时中止并提示
 async function generateImageFromPrompt(sourcePanel: typeof store.panels[number], prompt: string, targetPanelId: string | null = null) {
   // 积分预检：余额不足直接中止，不创建 loading 节点
-  const size = '1024x1024'
+  // 根据偏好设置的比例匹配图片尺寸
+  const prefsStore = usePreferencesStore()
+  const ratio = prefsStore.generation.default_aspect_ratio || '1:1'
+  const { getModelParams } = await import('@/config/model-params')
+  const imgParams = getModelParams()
+  const [rw, rh] = ratio.split(':').map(Number)
+  const matchedSize = (rw && rh) ? imgParams.imageSizes.find(o => o.w === rw && o.h === rh) : null
+  const size = matchedSize?.value || '1024x1024'
   const canGenerate = await checkCreditsBeforeGenerate({ type: 'image', mode: 'text2image', size })
   if (!canGenerate) return
 
@@ -856,7 +864,7 @@ async function generateImageFromPrompt(sourcePanel: typeof store.panels[number],
   try {
     // 调用图片生成 API
     const { createImageTask, getImageTaskStatus } = await import('@/api/images')
-    const resp = await createImageTask({ prompt, model: useModelsStore().defaultImageModel, size: '1024x1024', response_format: 'url' })
+    const resp = await createImageTask({ prompt, model: useModelsStore().defaultImageModel, size, response_format: 'url' })
     const taskId = resp.task_id
 
     // 注册到任务队列（让画布任务在队列面板中可见）
@@ -883,6 +891,10 @@ async function generateImageFromPrompt(sourcePanel: typeof store.panels[number],
         taskQueue.updateCanvasTask(taskId, { status: 'success', resultUrl: imageUrl, progress: 100 })
         // 成功提示附带消耗积分数量
         showCostConsumedMessage({ type: 'image', mode: 'text2image', size }, t('canvas.messages.imageGenerationDone'))
+        // 【用户偏好】自动下载 + 完成通知
+        const prefsStore = usePreferencesStore()
+        prefsStore.autoDownload(imageUrl, 'image', { modelId: useModelsStore().defaultImageModel })
+        prefsStore.notifyComplete('image', { prompt, modelId: useModelsStore().defaultImageModel })
         return
       }
       if (isFailed) {
@@ -941,7 +953,7 @@ async function generateImageFromSource(
     let base64Images: string[] = []
     let imageUrls: string[] = []
     if (referenceImages.length > 0) {
-      const { toBase64IfNeeded } = await import('@/lib/canvas-generation')
+      const { toBase64IfNeeded } = await import('@/lib/canvas-image-ops')
       for (const img of referenceImages) {
         const processed = await toBase64IfNeeded(img)
         if (processed.startsWith('data:')) {
@@ -990,6 +1002,10 @@ async function generateImageFromSource(
         store.pushSnapshot()
         taskQueue.updateCanvasTask(taskId, { status: 'success', resultUrl: imageUrl, progress: 100 })
         showCostConsumedMessage({ type: 'image', mode, size }, t('canvas.messages.imageGenerationDone'))
+        // 【用户偏好】自动下载 + 完成通知
+        const prefsStore = usePreferencesStore()
+        prefsStore.autoDownload(imageUrl, 'image', { modelId: model || useModelsStore().defaultImageModel })
+        prefsStore.notifyComplete('image', { prompt, modelId: model || useModelsStore().defaultImageModel })
         return
       }
       if (isFailed) {
@@ -1047,7 +1063,7 @@ async function generateVideoFromSource(
     // 处理参考图（图生视频）：blob URL 转 base64
     let imageBase64: string | null = null
     if (referenceImages.length > 0) {
-      const { toBase64IfNeeded } = await import('@/lib/canvas-generation')
+      const { toBase64IfNeeded } = await import('@/lib/canvas-image-ops')
       imageBase64 = await toBase64IfNeeded(referenceImages[0])
     }
 
@@ -1062,6 +1078,9 @@ async function generateVideoFromSource(
       image: imageBase64,
     })
     const taskId = resp.task_id
+    if (!taskId) {
+      throw new Error('视频生成 API 未返回任务 ID')
+    }
 
     // 注册到任务队列
     taskQueue.registerCanvasTask({
@@ -1081,11 +1100,17 @@ async function generateVideoFromSource(
       const isFailed = ['failed', 'error'].includes(status.status)
 
       if (isSuccess) {
-        const videoUrl = status.result_url || (status as any).video_url || status.url || (status as any).data?.[0]?.url
+        const videoUrl = status.video_url || ''
+        if (!videoUrl) {
+          throw new Error('视频生成成功但未返回视频 URL')
+        }
         store.updatePanel(newPanelId, { content: { content: videoUrl, status: 'success' } })
         store.pushSnapshot()
         taskQueue.updateCanvasTask(taskId, { status: 'success', resultUrl: videoUrl, progress: 100 })
         showCostConsumedMessage({ type: 'video', mode, seconds }, t('canvas.messages.videoGenerationDone'))
+        const prefsStore = usePreferencesStore()
+        prefsStore.autoDownload(videoUrl, 'video', { modelId: model || useModelsStore().defaultVideoModel })
+        prefsStore.notifyComplete('video', { prompt, modelId: model || useModelsStore().defaultVideoModel })
         return
       }
       if (isFailed) {
@@ -1189,7 +1214,7 @@ async function handleConfigGenerate(panel: typeof store.panels[number]) {
   const prompt = (panel.content?.prompt || panel.content?.composerContent || '') as string
   if (!prompt.trim()) {
     // prompt 为空时，检查上游是否有文本节点（buildSimpleContext 会自动拼接上游文本）
-    const upstreamNodes = getUpstreamNodes(panel.id, store.panels, store.connections)
+    const upstreamNodes = getUpstreamNodes(panel.id, store.panels as any, store.connections)
     const hasUpstreamText = upstreamNodes.some(
       (p) => p.type === 'text' && ((p.content?.content as string) || '').trim(),
     )
@@ -1388,7 +1413,7 @@ function cancelHoverHide() {
 
 function handleHoverInfo() {
   const p = hoveredPanel.value
-  if (p) ElMessage.info(`${getNodeName(p.type)} | ID: ${p.id}`)
+  if (p) ElMessage.info(`${getNodeName(p.type ?? '')} | ID: ${p.id}`)
 }
 
 function handleHoverDelete() {
@@ -1470,7 +1495,7 @@ function handleHoverEdit() {
       ElMessage.info(`${getNodeName('config')} - ${t('canvas.messages.promptEmpty')}`)
       break
     default:
-      ElMessage.info(`${getNodeName(panel.type)} - ${t('canvas.messages.saveFailed')}`)
+      ElMessage.info(`${getNodeName(panel.type ?? '')} - ${t('canvas.messages.saveFailed')}`)
   }
 }
 
@@ -1802,6 +1827,10 @@ async function handleMaskConfirm(
         taskQueue.updateCanvasTask(taskId, { status: 'success', resultUrl, progress: 100 })
         // 成功提示附带消耗积分数量
         showCostConsumedMessage({ type: 'image', mode: 'image2image', size: '1024x1024' }, t('canvas.messages.maskEditDone'))
+        // 【用户偏好】自动下载 + 完成通知
+        const prefsStore = usePreferencesStore()
+        prefsStore.autoDownload(resultUrl, 'image', { modelId: useModelsStore().defaultImageModel })
+        prefsStore.notifyComplete('image', { prompt, modelId: useModelsStore().defaultImageModel })
         return
       }
       if (isFailed) {
@@ -2036,6 +2065,10 @@ async function handleAngleConfirm({ prompt }: { prompt: string }) {
         store.pushSnapshot()
         taskQueue.updateCanvasTask(taskId, { status: 'success', resultUrl, progress: 100 })
         showCostConsumedMessage({ type: 'image', mode: 'image2image', size: '1024x1024' }, t('canvas.messages.angleDone'))
+        // 【用户偏好】自动下载 + 完成通知
+        const prefsStore = usePreferencesStore()
+        prefsStore.autoDownload(resultUrl, 'image', { modelId: useModelsStore().defaultImageModel })
+        prefsStore.notifyComplete('image', { prompt, modelId: useModelsStore().defaultImageModel })
         return
       }
       if (isFailed) {
@@ -2473,8 +2506,8 @@ onMounted(async () => {
   window.addEventListener('keyup', handleKeyUp)
   window.addEventListener('click', handleGlobalClick)
   // 监听用户登录/退出，切换画布数据空间
-  window.addEventListener('agnes:user-login', handleUserSwitch as EventListener)
-  window.addEventListener('agnes:user-logout', handleUserLogout as EventListener)
+  window.addEventListener('agnes:user-login', handleUserSwitch as unknown as EventListener)
+  window.addEventListener('agnes:user-logout', handleUserLogout as unknown as EventListener)
 })
 
 onBeforeUnmount(() => {
@@ -2486,8 +2519,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointerup', handleSelectionUp)
   window.removeEventListener('pointermove', handleConnectingMove)
   window.removeEventListener('pointerup', handleConnectingUp)
-  window.removeEventListener('agnes:user-login', handleUserSwitch as EventListener)
-  window.removeEventListener('agnes:user-logout', handleUserLogout as EventListener)
+  window.removeEventListener('agnes:user-login', handleUserSwitch as unknown as EventListener)
+  window.removeEventListener('agnes:user-logout', handleUserLogout as unknown as EventListener)
   // 清理 hover 定时器
   cancelHoverHide()
 })

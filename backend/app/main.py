@@ -48,6 +48,7 @@ from app.routes import providers as providers_route
 from app.routes import admin as admin_route
 from app.routes import credits as credits_route
 from app.routes import proxy as proxy_route
+from app.routes import preferences as preferences_route
 from app.services.video_poller import poller_manager
 from app.services.image_poller import image_poller_manager
 from app.services.agnes_client import agnes_client
@@ -229,6 +230,7 @@ app.include_router(auth_route.router, prefix="/api", tags=["用户认证"])
 app.include_router(admin_route.router, prefix="/api", tags=["管理员-积分规则"])
 app.include_router(credits_route.router, prefix="/api", tags=["积分明细"])
 app.include_router(proxy_route.router, prefix="/api", tags=["图片代理"])
+app.include_router(preferences_route.router, prefix="/api", tags=["用户偏好设置"])
 
 
 # ---------- 健康检查 ----------

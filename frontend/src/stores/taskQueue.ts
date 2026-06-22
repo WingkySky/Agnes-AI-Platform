@@ -10,6 +10,7 @@
 
 import { defineStore } from 'pinia'
 import { useUserStore } from '@/stores/user'
+import { usePreferencesStore } from '@/stores/preferences'
 import {
   createVideoTask,
   getVideoStatus,
@@ -397,6 +398,16 @@ export const useTaskQueueStore = defineStore('taskQueue', {
           } catch (_) {
             // 忽略刷新失败
           }
+          // 【用户偏好】自动下载 + 完成通知（提示音 / 浏览器通知 / 自动复制提示词）
+          try {
+            const prefsStore = usePreferencesStore()
+            if (url) {
+              prefsStore.autoDownload(url, task.type === 'video' ? 'video' : 'image', { modelId: task.params?.model as string | undefined })
+            }
+            prefsStore.notifyComplete(task.type === 'video' ? 'video' : 'image', { prompt: task.prompt })
+          } catch (_) {
+            // 忽略偏好通知失败
+          }
         } else if (isCancelled) {
           task.status = 'cancelled'
           this._stopPolling(taskId)
@@ -523,6 +534,14 @@ export const useTaskQueueStore = defineStore('taskQueue', {
       if (status === 'success') {
         task.progress = 100
         try { useUserStore().fetchCredits() } catch (_) { /* 忽略 */ }
+        // 【用户偏好】自动下载 + 完成通知
+        try {
+          const prefsStore = usePreferencesStore()
+          if (task.resultUrl) {
+            prefsStore.autoDownload(task.resultUrl, task.type === 'video' ? 'video' : 'image', { modelId: task.params?.model as string | undefined })
+          }
+          prefsStore.notifyComplete(task.type === 'video' ? 'video' : 'image', { prompt: task.prompt })
+        } catch (_) { /* 忽略 */ }
       }
       this._saveToStorage()
     },
@@ -690,7 +709,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
           activeTaskId: this.activeTaskId,
           savedAt: Date.now(),
         }
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+        localStorage.setItem(storageKey(), JSON.stringify(data))
       } catch (_) {
         // localStorage 写入失败（如隐私模式），静默忽略
       }

@@ -300,7 +300,12 @@ async def batch_download_files(
                         headers={"User-Agent": "Agnes-Platform-Download"}
                     )
                     if response.status_code == 200:
-                        zf.writestr(filename, response.content)
+                        # 跳过源站返回的 HTML 错误页，避免把 HTML 当图片打包进 zip
+                        ct = response.headers.get("content-type", "")
+                        if ct and ("text/html" in ct or "application/xhtml" in ct):
+                            logger.warning("[批量下载] 跳过返回 HTML 的文件: id=%s", record.id)
+                        else:
+                            zf.writestr(filename, response.content)
                     else:
                         logger.warning("[批量下载] 跳过失败文件: id=%s, status=%s",
                                        record.id, response.status_code)
@@ -384,6 +389,12 @@ async def download_file(
 
             # 从响应中获取实际 Content-Type（如果有的话）
             actual_ct = response.headers.get("content-type", "")
+            # 源站返回 HTML（通常是错误页/鉴权页）时拒绝，避免把 HTML 当图片下载
+            if actual_ct and ("text/html" in actual_ct or "application/xhtml" in actual_ct):
+                raise HTTPException(
+                    status_code=502,
+                    detail="源文件返回了 HTML 页面（可能链接已失效或被拦截），无法下载",
+                )
             if actual_ct and actual_ct != "application/octet-stream":
                 content_type = actual_ct
 
@@ -477,6 +488,12 @@ async def download_by_url(
 
             # 从响应中获取实际 Content-Type
             actual_ct = response.headers.get("content-type", "")
+            # 源站返回 HTML（通常是错误页/鉴权页）时拒绝，避免把 HTML 当图片下载
+            if actual_ct and ("text/html" in actual_ct or "application/xhtml" in actual_ct):
+                raise HTTPException(
+                    status_code=502,
+                    detail="源文件返回了 HTML 页面（可能链接已失效或被拦截），无法下载",
+                )
             if actual_ct and actual_ct != "application/octet-stream":
                 content_type = actual_ct
 

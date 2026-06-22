@@ -232,6 +232,27 @@
           <div class="info-row"><span class="label">{{ t('history.promptLabel') }}：</span><span>{{ detailItem.prompt }}</span></div>
           <div class="info-row"><span class="label">{{ t('history.typeLabel') }}：</span><span>{{ detailItem.type === 'image' ? t('history.image') : t('history.video') }}</span></div>
           <div class="info-row" v-if="detailItem.model"><span class="label">{{ t('history.modelLabel') }}：</span><span>{{ detailItem.model }}</span></div>
+          <!-- 图片实际尺寸（通过浏览器 naturalWidth/naturalHeight 读取，无需 EXIF） -->
+          <div class="info-row" v-if="detailItem.type === 'image' && detailImageNatural">
+            <span class="label">{{ t('history.actualSizeLabel') }}：</span>
+            <span class="size-value">
+              {{ detailImageNatural.w }}×{{ detailImageNatural.h }}
+              <span class="size-mp" v-if="detailActualPixels">({{ formatPixels(detailActualPixels) }})</span>
+            </span>
+          </div>
+          <!-- 请求尺寸（从 params.size 提取）+ 清晰度等级 -->
+          <div class="info-row" v-if="detailItem.type === 'image' && detailRequestSize">
+            <span class="label">{{ t('history.requestSizeLabel') }}：</span>
+            <span class="size-value">
+              {{ detailRequestSize }}
+              <span class="size-tier" v-if="detailRequestTier" :style="{ color: IMAGE_TIER_CONFIG[detailRequestTier].color }">
+                · {{ IMAGE_TIER_CONFIG[detailRequestTier].label }}
+              </span>
+              <span class="size-mismatch" v-if="detailSizeMismatch">
+                · {{ t('history.sizeMismatchHint') }}
+              </span>
+            </span>
+          </div>
           <div class="info-row" v-if="detailItem.mode"><span class="label">{{ t('history.modeLabel') }}：</span><span class="mode-text">{{ t('params.mode.' + detailItem.mode) || detailItem.mode }}</span></div>
           <div class="info-row"><span class="label">{{ t('history.statusLabel') }}：</span><span>{{ detailItem.status || 'success' }}</span></div>
           <div class="info-row"><span class="label">{{ t('history.creditsConsumedLabel') }}：</span><span class="credits-value">{{ detailItem.credits_consumed ?? 0 }}</span></div>
@@ -295,8 +316,10 @@ import { Refresh, Loading, Document, Delete, VideoPlay, CircleCloseFilled, Edit,
 import ImageViewer from '@/components/ImageViewer.vue'
 import { getHistoryList, deleteHistoryRecord, batchDeleteHistory } from '@/api/history'
 import client from '@/api/client'
+import { useDownload } from '@/composables/useDownload'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useI18n } from '@/i18n'
+import { formatPixels, getTierBySize, IMAGE_TIER_CONFIG } from '@/config/model-params'
 import type { GenerationRecord } from '@/types'
 
 const { t } = useI18n()
@@ -321,6 +344,9 @@ function openImageViewer(item: GenerationRecord) {
 // 监听全局任务队列的刷新信号，实现生成按钮点击后自动刷新历史列表
 const queue = useTaskQueueStore()
 
+// 通用下载组合式函数（携带 JWT，避免 <a> 标签不带 token 导致鉴权失败）
+const { downloadViaProxy } = useDownload()
+
 // 图标别名：避免与本地方法同名
 const LoadingIcon = Loading
 const DeleteIcon = Delete
@@ -342,6 +368,8 @@ const detailVideoEl = ref<HTMLVideoElement | null>(null)
 const detailPoster = ref('')
 const detailVideoLoading = ref(false)
 const detailVideoFailed = ref(false)
+// 图片实际尺寸（通过 <img> @load 读取 naturalWidth/naturalHeight）
+const detailImageNatural = ref<{ w: number; h: number } | null>(null)
 
 const videoThumbnails = reactive<Record<string, string>>({})
 const videoPreviews = reactive<Record<string, string>>({})
@@ -488,10 +516,52 @@ function handleSizeChange(size: number) {
 function showDetail(item: GenerationRecord) {
   detailItem.value = item
   detailPoster.value = ''
+  detailImageNatural.value = null  // 重置实际尺寸，等图片 load 后回填
   detailVideoLoading.value = item.type === 'video' && !!item.result_url
   detailVideoFailed.value = false
   detailVisible.value = true
 }
+
+/**
+ * 图片加载完成回调：读取真实像素尺寸
+ * 不依赖 EXIF，直接用浏览器解码后的 naturalWidth/naturalHeight
+ */
+function onDetailImageLoad(e: Event) {
+  const img = e.target as HTMLImageElement
+  if (img.naturalWidth && img.naturalHeight) {
+    detailImageNatural.value = { w: img.naturalWidth, h: img.naturalHeight }
+  }
+}
+
+// 详情图片的请求尺寸（从 params.size 提取，如 "1024x1024"）
+const detailRequestSize = computed(() => {
+  const p = detailItem.value?.params as Record<string, unknown> | null
+  const s = p?.size
+  return typeof s === 'string' ? s : ''
+})
+
+// 详情图片请求尺寸对应的清晰度等级
+const detailRequestTier = computed(() => {
+  if (!detailRequestSize.value) return null
+  return getTierBySize(detailRequestSize.value) || null
+})
+
+// 详情图片实际像素数
+const detailActualPixels = computed(() => {
+  const n = detailImageNatural.value
+  if (!n) return 0
+  return n.w * n.h
+})
+
+// 实际尺寸与请求尺寸是否一致（不一致说明被 Agnes 降级）
+const detailSizeMismatch = computed(() => {
+  const n = detailImageNatural.value
+  const req = detailRequestSize.value
+  if (!n || !req) return false
+  const m = req.match(/^(\d+)x(\d+)$/i)
+  if (!m) return false
+  return parseInt(m[1], 10) !== n.w || parseInt(m[2], 10) !== n.h
+})
 
 function toggleEditMode() {
   editMode.value = !editMode.value
@@ -541,28 +611,20 @@ async function batchDownload() {
 
     if (selectedIds.value.length === 1) {
       // 单图：复用已有的单文件下载逻辑，直接下载
-      const downloadUrl = `${baseURL}/api/history/${selectedIds.value[0]}/download`
-      const a = document.createElement('a')
-      a.href = downloadUrl
-      a.download = ''
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
+      const id = selectedIds.value[0]
+      const proxyUrl = `${baseURL}/api/history/${id}/download`
+      // 默认文件名（后端 Content-Disposition 会返回带正确扩展名的文件名）
+      await downloadViaProxy(proxyUrl, `agnes-image-${id}.png`)
     } else {
       // 多图：打包为 zip 下载
       const ids = selectedIds.value.join(',')
-      const downloadUrl = `${baseURL}/api/history/batch-download?ids=${ids}`
-      const a = document.createElement('a')
-      a.href = downloadUrl
-      a.download = ''
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
+      const proxyUrl = `${baseURL}/api/history/batch-download?ids=${ids}`
+      await downloadViaProxy(proxyUrl, `agnes-batch-${Date.now()}.zip`)
     }
     ElMessage.success(t('history.downloadStarted'))
-  } catch (err) {
+  } catch (err: any) {
     console.warn('[History] 批量下载失败：', err)
-    ElMessage.warning(t('preview.videoCorsWarning'))
+    ElMessage.error(err?.message || t('preview.videoCorsWarning'))
   } finally {
     batchDownloading.value = false
   }
@@ -622,20 +684,20 @@ function copyLink(url: string) {
 }
 
 /** 卡片快捷下载（列表中直接点击下载图标） */
-function downloadItem(item: GenerationRecord) {
+async function downloadItem(item: GenerationRecord) {
   if (!item?.result_url) {
     ElMessage.warning(t('history.noValidResource'))
     return
   }
   const baseURL = import.meta.env.VITE_API_BASE_URL || ''
-  const downloadUrl = `${baseURL}/api/history/${item.id}/download`
-  const a = document.createElement('a')
-  a.href = downloadUrl
-  a.download = ''
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  ElMessage.success(t('history.downloadStarted'))
+  const proxyUrl = `${baseURL}/api/history/${item.id}/download`
+  const defaultName = `agnes-${item.type}-${item.id}.${item.type === 'video' ? 'mp4' : 'png'}`
+  try {
+    await downloadViaProxy(proxyUrl, defaultName)
+    ElMessage.success(t('history.downloadStarted'))
+  } catch (err: any) {
+    ElMessage.error(err?.message || t('preview.videoCorsWarning'))
+  }
 }
 
 /** 卡片快捷删除（列表中直接点击删除图标）——调用历史记录删除模块 */
@@ -651,23 +713,18 @@ async function downloadDetail() {
     ElMessage.warning(t('history.noValidResource'))
     return
   }
-  const url = detailItem.value.result_url
-  const type = detailItem.value.type
   const recordId = detailItem.value.id
+  const type = detailItem.value.type
   try {
-    // 通过后端代理下载（使用 record_id 端点），强制浏览器保存文件
+    // 通过后端代理下载（使用 record_id 端点），携带 JWT 强制浏览器保存文件
     const baseURL = import.meta.env.VITE_API_BASE_URL || ''
-    const downloadUrl = `${baseURL}/api/history/${recordId}/download`
-    const a = document.createElement('a')
-    a.href = downloadUrl
-    a.download = ''  // 让后端 Content-Disposition 控制文件名
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
+    const proxyUrl = `${baseURL}/api/history/${recordId}/download`
+    const defaultName = `agnes-${type}-${recordId}.${type === 'video' ? 'mp4' : 'png'}`
+    await downloadViaProxy(proxyUrl, defaultName)
     ElMessage.success(t('history.downloadStarted'))
-  } catch (err) {
+  } catch (err: any) {
     console.warn('[History] 下载失败：', err)
-    ElMessage.warning(t('preview.videoCorsWarning'))
+    ElMessage.error(err?.message || t('preview.videoCorsWarning'))
   }
 }
 
@@ -1114,6 +1171,16 @@ onBeforeUnmount(() => {
 .info-row { padding: 6px 0; font-size: 13px; line-height: 1.6; color: var(--agnes-text-primary); }
 .label { color: var(--agnes-text-muted); margin-right: 8px; font-weight: 500; }
 .credits-value { color: var(--agnes-credits-value); font-weight: 600; }
+/* 图片尺寸信息 */
+.size-value { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.size-mp { color: var(--agnes-text-muted); margin-left: 4px; font-size: 12px; }
+.size-tier { font-weight: 600; margin-left: 4px; }
+.size-mismatch {
+  color: var(--agnes-warning, #e6a23c);
+  margin-left: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
 .url-row {
   margin-top: 8px;
   padding: 12px !important;

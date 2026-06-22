@@ -51,6 +51,10 @@ export interface ImageSizeOption {
   h: number
   /** 显示标签，如 16:9 横屏 */
   label: string
+  /** 清晰度等级：sd=标清 / hd=超清 / 4k=4K */
+  tier?: 'sd' | 'hd' | '4k'
+  /** 实际输出像素数（用于 UI 展示） */
+  pixels?: number
 }
 
 /** 视频宽高比选项 */
@@ -377,6 +381,62 @@ export interface ChatSessionListResponse {
 export interface ChatMessageListResponse {
   items: ChatMessage[]
 }
+
+// =====================================================
+// 用户偏好设置类型（对齐后端 DEFAULT_PREFERENCES）
+// =====================================================
+
+/** 生成偏好 */
+export interface GenerationPreferences {
+  default_model_id: string
+  default_aspect_ratio: string
+  auto_copy_prompt: boolean
+  default_image_count: number
+}
+
+/** 下载偏好 */
+export interface DownloadPreferences {
+  auto_download: boolean
+  download_directory: string        // 空=默认下载目录；非空=File System Access API 指定目录
+  file_naming_pattern: string      // 支持 {type}/{timestamp}/{model}/{uuid}
+  classify_by: 'type' | 'date' | 'none'  // type=按图片/视频分类，date=按日期分类，none=不分类
+  default_format: 'original' | 'png' | 'jpg' | 'webp'
+}
+
+/** 界面偏好 */
+export interface UIPreferences {
+  theme: 'dark' | 'light' | 'system'
+  canvas_grid_visible: boolean
+  canvas_grid_size: number
+  canvas_snap_to_grid: boolean
+}
+
+/** 通知偏好 */
+export interface NotificationPreferences {
+  sound_on_complete: boolean
+  browser_notification: boolean
+}
+
+/** 用户全部偏好设置 */
+export interface UserPreferences {
+  user_id: number
+  preferences: {
+    generation: GenerationPreferences
+    download: DownloadPreferences
+    ui: UIPreferences
+    notification: NotificationPreferences
+  }
+  updated_at: string | null
+}
+
+/** 更新偏好时的请求结构（支持部分更新，深层每个字段均可选） */
+export type UserPreferencesUpdate = {
+  generation?: Partial<GenerationPreferences>
+  download?: Partial<DownloadPreferences>
+  ui?: Partial<UIPreferences>
+  notification?: Partial<NotificationPreferences>
+}
+
 
 // =====================================================
 // 任务队列类型

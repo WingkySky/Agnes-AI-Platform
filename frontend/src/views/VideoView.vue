@@ -306,11 +306,13 @@ import { useModelsStore } from '@/stores/models'
 import { useUserStore } from '@/stores/user'
 import { useI18n } from '@/i18n'
 import { useCreditEstimate } from '@/composables/useCreditEstimate'
+import { useDownload } from '@/composables/useDownload'
 import { matchVideoAspectRatio, getVideoAspectRatioLabel } from '@/config/model-params'
 import type { FileInfo } from '@/types'
 
 const { t } = useI18n()
 const userStore = useUserStore()
+const { downloadViaProxy } = useDownload()
 
 const videoTemplates = computed(() => ([
   { label: t('presets.cinematicShot'), prompt: '，电影镜头感，缓慢平移，平滑 dolly-in，戏剧性光影' },
@@ -614,19 +616,14 @@ async function downloadVideo() {
     return
   }
   try {
-    // 通过后端代理下载，设置 Content-Disposition: attachment 强制浏览器保存文件
+    // 通过后端代理下载，携带 JWT 并设置 Content-Disposition: attachment 强制浏览器保存文件
     const baseURL = import.meta.env.VITE_API_BASE_URL || ''
-    const downloadUrl = `${baseURL}/api/download?url=${encodeURIComponent(url)}&type=video`
-    const a = document.createElement('a')
-    a.href = downloadUrl
-    a.download = ''  // 让后端 Content-Disposition 控制文件名
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
+    const proxyUrl = `${baseURL}/api/download?url=${encodeURIComponent(url)}&type=video`
+    await downloadViaProxy(proxyUrl, `agnes-video-${Date.now()}.mp4`)
     ElMessage.success(t('preview.download'))
-  } catch (err) {
+  } catch (err: any) {
     console.warn('[VideoView] 下载失败：', err)
-    ElMessage.warning(t('preview.videoCorsWarning'))
+    ElMessage.error(err?.message || t('preview.videoCorsWarning'))
   }
 }
 

@@ -667,8 +667,8 @@ export const useCanvasStore = defineStore('canvas', {
               return newNodeId ? `@[node:${newNodeId}]` : match
             })
           }
-          if (panel.content.composerContent) panel.content.composerContent = updateRef(panel.content.composerContent)
-          if (panel.content.prompt) panel.content.prompt = updateRef(panel.content.prompt)
+          if (panel.content.composerContent) panel.content.composerContent = updateRef(panel.content.composerContent as string)
+          if (panel.content.prompt) panel.content.prompt = updateRef(panel.content.prompt as string)
         }
       })
 
@@ -1389,8 +1389,8 @@ export const useCanvasStore = defineStore('canvas', {
       this.panels = []
       this.connections = []
       this.selectedPanelId = null
-      this.historyStack = []
-      this.redoStack = []
+      this.history.past = []
+      this.history.future = []
       // 重新 hydrate 新用户数据
       this._storageReady = false
       await this._hydrateFromStorage()

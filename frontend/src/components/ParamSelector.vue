@@ -19,11 +19,19 @@
       trigger="click"
     >
       <template #reference>
-        <span class="param-tag">
+        <span class="param-tag" :title="sizeTagTitle">
+          <!-- 图片模式：清晰度等级小圆点 -->
+          <span
+            v-if="mode === 'image' && currentTierColor"
+            class="param-tag__tier-dot"
+            :style="{ background: currentTierColor }"
+          ></span>
           <span class="param-tag__icon">
             <span class="param-tag__shape" :style="currentShapeStyle"></span>
           </span>
           <span class="param-tag__text">{{ currentSizeLabel }}</span>
+          <!-- 图片模式：实际像素数 -->
+          <span v-if="mode === 'image' && currentPixels" class="param-tag__pixels">{{ formatPixels(currentPixels) }}</span>
           <el-icon class="param-tag__arrow"><ArrowDown /></el-icon>
         </span>
       </template>
@@ -119,12 +127,18 @@ import { ref, computed } from 'vue'
 import { ArrowDown, VideoCamera, Film } from '@element-plus/icons-vue'
 import RatioPicker from '@/components/RatioPicker.vue'
 import { useModelsStore } from '@/stores/models'
-import { getImageSizeLabel, getVideoAspectRatioLabel } from '@/config/model-params'
+import {
+  getImageSizeLabel,
+  getVideoAspectRatioLabel,
+  getTierBySize,
+  formatPixels,
+  IMAGE_TIER_CONFIG,
+} from '@/config/model-params'
 import type { ModelInfo } from '@/types'
 
 const props = defineProps<{
   mode: 'image' | 'video'
-  /** 图片尺寸，如 "1280x720" */
+  /** 图片尺寸，如 "1024x1024" */
   size?: string
   /** 视频宽高比，如 "16:9" */
   aspectRatio?: string
@@ -159,7 +173,7 @@ const sizeMode = computed(() => props.mode === 'video' ? 'video' : 'image')
 
 // 当前值的本地代理（双向绑定）
 const currentSize = computed({
-  get: () => props.mode === 'video' ? (props.aspectRatio || '16:9') : (props.size || '1280x720'),
+  get: () => props.mode === 'video' ? (props.aspectRatio || '16:9') : (props.size || '1024x1024'),
   set: (v) => {
     if (props.mode === 'video') emit('update:aspectRatio', v)
     else emit('update:size', v)
@@ -187,12 +201,34 @@ const modelList = computed(() => props.modelList || (
   props.mode === 'video' ? modelsStore.videoModels : modelsStore.imageModels
 ))
 
-// 当前尺寸/比例的友好标签（统一显示比例，如"16:9 横屏"）
+// 当前尺寸对应的清晰度等级（图片模式）
+const currentTier = computed(() => {
+  if (props.mode !== 'image') return null
+  return getTierBySize(currentSize.value) || null
+})
+
+// 当前尺寸对应的实际像素数（图片模式）
+const currentPixels = computed(() => {
+  if (props.mode !== 'image') return 0
+  const opt = config.value.imageSizes.find(o => o.value === currentSize.value)
+  return opt?.pixels || 0
+})
+
+// 当前尺寸/比例的友好标签
+// 图片模式：清晰度等级 + 比例（如"标清 · 1:1"）
+// 视频模式：直接显示比例（如"16:9 横屏"）
 const currentSizeLabel = computed(() => {
   if (props.mode === 'video') {
     return getVideoAspectRatioLabel(currentSize.value)
   }
-  return getImageSizeLabel(currentSize.value)
+  const tier = currentTier.value
+  const sizeLabel = getImageSizeLabel(currentSize.value)
+  // 提取比例部分（如 "1:1 方形" → "1:1"）
+  const ratioPart = sizeLabel.replace(/\s+.+$/, '')
+  if (tier) {
+    return `${IMAGE_TIER_CONFIG[tier].label} · ${ratioPart}`
+  }
+  return ratioPart
 })
 
 // 当前模型显示名
@@ -202,7 +238,6 @@ const currentModelLabel = computed(() => {
 })
 
 // 尺寸/比例小图标样式：统一用配置中的 w/h 绘制
-// 横屏约束宽度、竖屏约束高度，确保在 16x12 容器内正确渲染
 const currentShapeStyle = computed(() => {
   let w = 16, h = 9
   if (props.mode === 'video') {
@@ -220,6 +255,24 @@ const currentShapeStyle = computed(() => {
       ? { width: '100%', maxHeight: '100%' }
       : { height: '100%', maxWidth: '100%' }),
   }
+})
+
+// 清晰度等级小圆点颜色（图片模式）
+const currentTierColor = computed(() => {
+  const tier = currentTier.value
+  return tier ? IMAGE_TIER_CONFIG[tier].color : ''
+})
+
+// 尺寸标签的悬停提示：显示完整信息（清晰度 + 比例 + 像素 + 耗时）
+const sizeTagTitle = computed(() => {
+  if (props.mode === 'video') {
+    return getVideoAspectRatioLabel(currentSize.value)
+  }
+  const tier = currentTier.value
+  if (!tier) return currentSize.value
+  const cfg = IMAGE_TIER_CONFIG[tier]
+  const px = formatPixels(currentPixels.value)
+  return `${cfg.label} · ${cfg.desc}${px ? ' · ' + px : ''}`
 })
 
 // Popover 宽度
@@ -256,6 +309,22 @@ const popoverWidth = computed(() => props.mode === 'video' ? 320 : 400)
   border-color: var(--agnes-primary);
   background: var(--agnes-bg-hover);
   color: var(--agnes-text-primary);
+}
+
+/* 清晰度等级小圆点（图片模式） */
+.param-tag__tier-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* 实际像素数标签（图片模式） */
+.param-tag__pixels {
+  font-size: 10px;
+  opacity: 0.6;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  margin-left: 2px;
 }
 
 /* 标签内的小比例图标：**正方形容器**，内部图形按比例自然呈现

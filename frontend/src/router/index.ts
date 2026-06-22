@@ -69,6 +69,12 @@ const routes: RouteRecordRaw[] = [
     meta: { titleKey: 'router.profile', requiresAuth: true }
   },
   {
+    path: '/preferences',
+    name: 'preferences',
+    component: () => import('@/views/PreferencesView.vue'),
+    meta: { titleKey: 'router.preferences', requiresAuth: true }
+  },
+  {
     path: '/settings',
     name: 'settings',
     component: () => import('@/views/SettingsView.vue'),

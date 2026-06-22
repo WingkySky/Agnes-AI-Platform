@@ -20,6 +20,7 @@ import { createImageTask, getImageTaskStatus } from '@/api/images'
 import { createVideoTask, getVideoStatus } from '@/api/videos'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useModelsStore } from '@/stores/models'
+import { usePreferencesStore } from '@/stores/preferences'
 import { parseSize } from '@/config/model-params'
 import type { ImageGenerationRequest, VideoGenerationRequest } from '@/types'
 
@@ -631,6 +632,10 @@ export async function executeMergeGeneration(configId: string, store: CanvasStor
       })
       store.pushSnapshot()
       if (onProgress) onProgress('done', { resultNodeIds: [newNodeId] })
+      // 【用户偏好】自动下载 + 完成通知（不阻塞主流程）
+      const prefsStore = usePreferencesStore()
+      prefsStore.autoDownload(result.resultUrl, 'image', { modelId: config.model })
+      prefsStore.notifyComplete('image', { prompt: ctx.prompt, modelId: config.model })
     } catch (err) {
       // 失败：更新节点为 error 状态
       const errMsg = (err as Error).message || '生成失败'
@@ -863,6 +868,10 @@ export async function executeMergeVideoGeneration(configId: string, store: Canva
       })
       store.pushSnapshot()
       if (onProgress) onProgress('done', { resultNodeIds: [newNodeId] })
+      // 【用户偏好】自动下载 + 完成通知（不阻塞主流程）
+      const prefsStore = usePreferencesStore()
+      prefsStore.autoDownload(result.videoUrl, 'video', { modelId: config.model })
+      prefsStore.notifyComplete('video', { prompt: ctx.prompt, modelId: config.model })
     } catch (err) {
       // 失败：更新节点为 error 状态
       const errMsg = (err as Error).message || '视频生成失败'

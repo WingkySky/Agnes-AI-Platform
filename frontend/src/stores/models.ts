@@ -21,7 +21,7 @@ export const useModelsStore = defineStore('models', () => {
   // 图片尺寸选项（结构化，含比例信息）
   const imageSizeOptions = ref<ImageSizeOption[]>([])
   // 默认图片尺寸
-  const defaultImageSize = ref('1280x720')
+  const defaultImageSize = ref('1024x1024')
   // 视频宽高比选项
   const videoAspectRatios = ref<VideoAspectRatioOption[]>([])
   // 默认视频宽高比
@@ -55,7 +55,7 @@ export const useModelsStore = defineStore('models', () => {
       // 图片尺寸
       imageSizes.value = resp.image_sizes || []
       imageSizeOptions.value = resp.image_size_options || []
-      defaultImageSize.value = resp.default_image_size || '1280x720'
+      defaultImageSize.value = resp.default_image_size || '1024x1024'
       // 视频参数
       videoAspectRatios.value = resp.video_aspect_ratios || []
       defaultVideoAspectRatio.value = resp.default_video_aspect_ratio || '16:9'

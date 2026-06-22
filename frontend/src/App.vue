@@ -107,6 +107,10 @@
                     <el-icon><UserFilled /></el-icon>
                     <span>{{ t('userMenu.profile') }}</span>
                   </el-dropdown-item>
+                  <el-dropdown-item command="preferences">
+                    <el-icon><StarFilled /></el-icon>
+                    <span>{{ t('userMenu.preferences') }}</span>
+                  </el-dropdown-item>
                   <el-dropdown-item divided command="logout">
                     <el-icon><SwitchButton /></el-icon>
                     <span>{{ t('userMenu.logout') }}</span>
@@ -152,7 +156,7 @@ import { computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Picture, VideoPlay, Clock, ChatDotRound, Grid, Setting,
-  User, UserFilled, Coin, CaretBottom, SwitchButton, Sunny, Moon, MagicStick
+  User, UserFilled, Coin, CaretBottom, SwitchButton, Sunny, Moon, StarFilled,
 } from '@element-plus/icons-vue'
 import TaskQueuePanel from './components/TaskQueuePanel.vue'
 import LanguageSwitcher from './components/LanguageSwitcher.vue'
@@ -198,7 +202,7 @@ const isAdminRouteActive = computed(() => {
 })
 
 // keep-alive 缓存的路由组件名称（切换标签页时保持状态不销毁）
-const cachedViews = ['ChatView', 'ImageView', 'VideoView', 'HistoryView', 'CanvasView', 'SettingsView', 'UsersAdminView', 'CreditRulesView', 'ProfileView']
+const cachedViews = ['ChatView', 'ImageView', 'VideoView', 'HistoryView', 'CanvasView', 'SettingsView', 'UsersAdminView', 'CreditRulesView', 'ProfileView', 'PreferencesView']
 
 // 积分显示：数字千分位格式化
 const creditsText = computed(() => {
@@ -214,6 +218,8 @@ function handleUserCommand(cmd: string) {
     router.push('/login')
   } else if (cmd === 'profile') {
     router.push('/profile')
+  } else if (cmd === 'preferences') {
+    router.push('/preferences')
   }
 }
 

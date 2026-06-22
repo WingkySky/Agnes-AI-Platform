@@ -101,13 +101,11 @@ const hasImage = computed(() => isImage.value && hasContent.value)
 /* ---------- 容器样式 ---------- */
 
 /** 工具栏容器样式：背景 + 边框 + hover 背景变量 */
-function toolbarStyle() {
-  return {
-    background: props.theme.toolbar.panel,
-    border: `1px solid ${props.theme.toolbar.border}`,
-    '--hover-bg': props.theme.toolbar.itemHover,
-  }
-}
+const toolbarStyle = computed(() => ({
+  background: props.theme.toolbar.panel,
+  border: `1px solid ${props.theme.toolbar.border}`,
+  '--hover-bg': props.theme.toolbar.itemHover,
+}))
 
 /** 按钮 hover 样式 */
 function btnStyle(tool: any) {

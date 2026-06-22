@@ -250,13 +250,17 @@ import ParamSelector from '@/components/ParamSelector.vue'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useModelsStore } from '@/stores/models'
 import { useUserStore } from '@/stores/user'
+import { usePreferencesStore } from '@/stores/preferences'
 import { useI18n } from '@/i18n'
 import { useCreditEstimate } from '@/composables/useCreditEstimate'
-import { matchImageSize, getImageSizeLabel } from '@/config/model-params'
+import { useDownload } from '@/composables/useDownload'
+import { matchImageSize, getImageSizeLabel, getModelParams } from '@/config/model-params'
 import type { FileInfo } from '@/types'
 
 const { t } = useI18n()
 const userStore = useUserStore()
+const prefsStore = usePreferencesStore()
+const { downloadViaProxy } = useDownload()
 
 // ---------- 图片查看器：点击预览图片弹出 ----------
 const viewerVisible = ref(false)
@@ -288,8 +292,20 @@ const IMAGE_MODELS = computed(() => modelsStore.imageModels)
 // ---------- 表单参数 ----------
 const mode = ref('text2image')
 const prompt = ref('')
-// 默认尺寸从 store 配置获取
-const size = ref(modelsStore.defaultImageSize || '1280x720')
+
+/** 根据偏好设置的比例（如 "1:1"）匹配对应的图片尺寸（如 "1024x1024"） */
+function sizeFromAspectRatio(ratio: string): string {
+  const params = getModelParams()
+  const [w, h] = ratio.split(':').map(Number)
+  if (w && h) {
+    const matched = params.imageSizes.find(o => o.w === w && o.h === h)
+    if (matched) return matched.value
+  }
+  return modelsStore.defaultImageSize || '1024x1024'
+}
+
+// 默认尺寸：优先从偏好设置的比例匹配，其次从 store 配置获取
+const size = ref(sizeFromAspectRatio(prefsStore.generation.default_aspect_ratio) || modelsStore.defaultImageSize || '1024x1024')
 const model = ref('')  // 初始值在 store 加载后自动设置
 
 // ---------- 积分预估：根据 mode + size 自动计算本次生成消耗 ----------
@@ -306,7 +322,7 @@ watch(() => modelsStore.defaultImageModel, (v) => {
   if (v && !model.value) model.value = v
 }, { immediate: true })
 watch(() => modelsStore.defaultImageSize, (v) => {
-  if (v && size.value === '1280x720') size.value = v
+  if (v && size.value === '1024x1024') size.value = v
 })
 const referenceFileList = ref<FileInfo[]>([])   // 【多图】数组
 
@@ -448,9 +464,20 @@ async function handleGenerate() {
   }
 
   try {
-    const taskId = await queue.submitImageTask(params)
-    queue.setActiveTask(taskId)
-    ElMessage.success(t('generate.imageSubmitted'))
+    // 根据偏好设置中的默认生成数量提交多次任务
+    const count = prefsStore.generation.default_image_count || 1
+    const taskIds: string[] = []
+    for (let i = 0; i < count; i++) {
+      const taskId = await queue.submitImageTask(params)
+      taskIds.push(taskId)
+    }
+    // 选中最后一个任务作为当前预览
+    if (taskIds.length > 0) {
+      queue.setActiveTask(taskIds[taskIds.length - 1])
+    }
+    ElMessage.success(count > 1
+      ? `${t('generate.imageSubmitted')} (${count} 张)`
+      : t('generate.imageSubmitted'))
   } catch (e) {
     console.error('[ImageView] 提交任务失败：', e)
     ElMessage.error(t('generate.createTaskFailed') + ((e as Error).message || ''))
@@ -483,19 +510,14 @@ async function downloadImage() {
     return
   }
   try {
-    // 通过后端代理下载，设置 Content-Disposition: attachment 强制浏览器保存文件
+    // 通过后端代理下载，携带 JWT 并设置 Content-Disposition: attachment 强制浏览器保存文件
     const baseURL = import.meta.env.VITE_API_BASE_URL || ''
-    const downloadUrl = `${baseURL}/api/download?url=${encodeURIComponent(resultUrl.value)}&type=image`
-    const a = document.createElement('a')
-    a.href = downloadUrl
-    a.download = ''  // 让后端 Content-Disposition 控制文件名
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
+    const proxyUrl = `${baseURL}/api/download?url=${encodeURIComponent(resultUrl.value)}&type=image`
+    await downloadViaProxy(proxyUrl, `agnes-image-${Date.now()}.png`)
     ElMessage.success(t('preview.download'))
-  } catch (err) {
+  } catch (err: any) {
     console.warn('[ImageView] 下载失败：', err)
-    ElMessage.warning(t('preview.corsWarning'))
+    ElMessage.error(err?.message || t('preview.corsWarning'))
   }
 }
 

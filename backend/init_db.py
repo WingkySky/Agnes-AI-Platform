@@ -66,6 +66,7 @@ _safe_import("app.models.chat", ["ChatSession", "ChatMessage"])
 _safe_import("app.models.api_provider", ["ApiProvider"])
 _safe_import("app.models.model_definition", ["ModelDefinition"])
 _safe_import("app.models.credit_transaction", ["CreditTransaction"])
+_safe_import("app.models.user_preference", ["UserPreference"])
 
 logging.basicConfig(
     level=logging.INFO,

@@ -14,6 +14,9 @@
 // 类型定义
 // =====================================================
 
+/** 图片清晰度等级 */
+export type ImageTier = 'sd' | 'hd' | '4k'
+
 /** 图片尺寸选项 */
 export interface ImageSizeOption {
   /** 传给 API 的值，如 "1024x768" */
@@ -24,6 +27,10 @@ export interface ImageSizeOption {
   h: number
   /** 显示标签，如 "16:9 横屏" */
   label: string
+  /** 清晰度等级：sd=标清 / hd=超清 / 4k=4K */
+  tier?: ImageTier
+  /** 实际输出像素数（用于 UI 展示） */
+  pixels?: number
 }
 
 /** 视频宽高比选项 */
@@ -72,18 +79,22 @@ export interface ModelParams {
 // =====================================================
 
 const AGNES_PARAMS: ProviderParamPreset = {
-  // 图片尺寸：覆盖 Agnes Image 2.0/2.1 Flash 文档中所有示例尺寸
+  // 图片尺寸：基于 Agnes Image 2.0/2.1 Flash 实测真实输出尺寸
+  // 按清晰度等级分组：sd=标清 / hd=超清 / 4k=4K
+  // 实测发现：非标准尺寸会被 Agnes 自动降级到 ~1MP 标清档，故只保留真实输出尺寸
   imageSizes: [
-    { value: '1280x720',  w: 16, h: 9,  label: '16:9 横屏' },
-    { value: '1024x768',  w: 4,  h: 3,  label: '4:3 横屏' },
-    { value: '1536x1024', w: 3,  h: 2,  label: '3:2 横屏' },
-    { value: '1792x1024', w: 7,  h: 4,  label: '7:4 宽幅' },
-    { value: '1024x1024', w: 1,  h: 1,  label: '1:1 方形' },
-    { value: '1024x1536', w: 2,  h: 3,  label: '2:3 竖屏' },
-    { value: '720x1280',  w: 9,  h: 16, label: '9:16 竖屏' },
-    { value: '1024x1792', w: 4,  h: 7,  label: '4:7 窄幅' },
+    // 标清档 (~1MP, 耗时 ~20s)
+    { value: '1024x1024', w: 1,  h: 1,  label: '1:1 方形',  tier: 'sd', pixels: 1048576 },
+    { value: '1312x736',  w: 16, h: 9,  label: '16:9 横屏', tier: 'sd', pixels: 965632 },
+    { value: '1248x832',  w: 3,  h: 2,  label: '3:2 横屏',  tier: 'sd', pixels: 1038336 },
+    { value: '832x1248',  w: 2,  h: 3,  label: '2:3 竖屏',  tier: 'sd', pixels: 1038336 },
+    // 超清档 (2048x2048, 4MP, 耗时 ~56s)
+    { value: '2048x2048', w: 1,  h: 1,  label: '1:1 方形',  tier: 'hd', pixels: 4194304 },
+    // 4K 档 (~8MP, 耗时 ~150s)
+    { value: '3840x2160', w: 16, h: 9,  label: '16:9 横屏', tier: '4k', pixels: 8294400 },
+    { value: '4096x4096', w: 1,  h: 1,  label: '1:1 方形',  tier: '4k', pixels: 16777216 },
   ],
-  defaultImageSize: '1280x720',
+  defaultImageSize: '1024x1024',
 
   // 视频宽高比：匹配 Agnes Video V2.0 文档
   videoAspectRatios: [
@@ -256,4 +267,84 @@ export function getVideoAspectRatioLabel(value: string, provider?: string): stri
   const params = getModelParams(provider)
   const opt = params.videoAspectRatios.find(o => o.value === value)
   return opt?.label || value
+}
+
+// =====================================================
+// 清晰度等级相关工具函数
+// =====================================================
+
+/** 清晰度等级配置：标签 + 颜色 + 耗时提示 */
+export const IMAGE_TIER_CONFIG: Record<ImageTier, {
+  label: string
+  color: string
+  desc: string
+}> = {
+  sd: {
+    label: '标清',
+    color: '#909399',
+    desc: '约 1MP · 耗时 ~20s',
+  },
+  hd: {
+    label: '超清',
+    color: '#409eff',
+    desc: '约 4MP · 耗时 ~56s',
+  },
+  '4k': {
+    label: '4K',
+    color: '#9c27b0',
+    desc: '约 8MP · 耗时 ~150s',
+  },
+}
+
+/** 清晰度等级列表（按清晰度从低到高排序） */
+export const IMAGE_TIER_ORDER: ImageTier[] = ['sd', 'hd', '4k']
+
+/**
+ * 获取所有可选的清晰度等级
+ * 从 imageSizes 中提取实际存在的 tier，避免显示空等级
+ */
+export function getAvailableTiers(provider?: string): ImageTier[] {
+  const params = getModelParams(provider)
+  const tiers = new Set<ImageTier>()
+  for (const opt of params.imageSizes) {
+    if (opt.tier) tiers.add(opt.tier)
+  }
+  // 按预定义顺序返回
+  return IMAGE_TIER_ORDER.filter(t => tiers.has(t))
+}
+
+/**
+ * 获取指定清晰度等级下所有可选的图片尺寸
+ */
+export function getSizesByTier(tier: ImageTier, provider?: string): ImageSizeOption[] {
+  const params = getModelParams(provider)
+  return params.imageSizes.filter(o => o.tier === tier)
+}
+
+/**
+ * 获取指定尺寸的清晰度等级
+ */
+export function getTierBySize(value: string, provider?: string): ImageTier | undefined {
+  const params = getModelParams(provider)
+  return params.imageSizes.find(o => o.value === value)?.tier
+}
+
+/**
+ * 格式化像素数为易读字符串
+ * 1048576 → "1.05 MP" 或 "1024×1024"
+ */
+export function formatPixels(pixels?: number): string {
+  if (!pixels) return ''
+  const mp = pixels / 1e6
+  if (mp >= 1) return `${mp.toFixed(2)} MP`
+  return `${pixels} px`
+}
+
+/**
+ * 从尺寸值 "1024x1024" 提取宽高数值
+ */
+export function sizeToDimensions(value: string): { w: number; h: number } | null {
+  const m = value.match(/^(\d+)x(\d+)$/i)
+  if (!m) return null
+  return { w: parseInt(m[1], 10), h: parseInt(m[2], 10) }
 }

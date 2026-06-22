@@ -9,3 +9,4 @@ from app.models.model_definition import ModelDefinition
 from app.models.user import User
 from app.models.credit_rule import CreditRule
 from app.models.credit_transaction import CreditTransaction
+from app.models.user_preference import UserPreference, DEFAULT_PREFERENCES

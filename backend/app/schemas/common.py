@@ -31,6 +31,10 @@ class ImageSizeOption(BaseModel):
     w: int = Field(description="宽高比宽分量")
     h: int = Field(description="宽高比高分量")
     label: str = Field(description="显示标签，如 16:9 横屏")
+    # 清晰度等级：sd=标清 / hd=超清 / 4k=4K
+    tier: str = Field(default="sd", description="清晰度等级：sd=标清 / hd=超清 / 4k=4K")
+    # 实际输出像素数（用于 UI 展示，如 1024x1024 → 1048576）
+    pixels: int = Field(default=0, description="实际输出像素数（用于 UI 展示）")
 
 
 class VideoAspectRatioOption(BaseModel):

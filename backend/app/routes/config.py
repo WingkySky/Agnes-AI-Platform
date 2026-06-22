@@ -11,16 +11,20 @@ from app.services.model_registry import get_all_models
 
 router = APIRouter()
 
-# 图片尺寸预设（匹配 Agnes Image 2.0/2.1 Flash 文档）
+# 图片尺寸预设（基于 Agnes Image 2.0/2.1 Flash 实测真实输出尺寸）
+# 按清晰度等级分组：sd=标清 / hd=超清 / 4k=4K
+# 实测发现：非标准尺寸会被 Agnes 自动降级到 ~1MP 标清档，故只保留真实输出尺寸
 IMAGE_SIZE_OPTIONS = [
-    ImageSizeOption(value="1280x720",  w=16, h=9,  label="16:9 横屏"),
-    ImageSizeOption(value="1024x768",  w=4,  h=3,  label="4:3 横屏"),
-    ImageSizeOption(value="1536x1024", w=3,  h=2,  label="3:2 横屏"),
-    ImageSizeOption(value="1792x1024", w=7,  h=4,  label="7:4 宽幅"),
-    ImageSizeOption(value="1024x1024", w=1,  h=1,  label="1:1 方形"),
-    ImageSizeOption(value="1024x1536", w=2,  h=3,  label="2:3 竖屏"),
-    ImageSizeOption(value="720x1280",  w=9,  h=16, label="9:16 竖屏"),
-    ImageSizeOption(value="1024x1792", w=4,  h=7,  label="4:7 窄幅"),
+    # 标清档 (~1MP, 耗时 ~20s)
+    ImageSizeOption(value="1024x1024", w=1,  h=1,  label="1:1 方形",  tier="sd", pixels=1048576),
+    ImageSizeOption(value="1312x736",  w=16, h=9,  label="16:9 横屏", tier="sd", pixels=965632),
+    ImageSizeOption(value="1248x832",  w=3,  h=2,  label="3:2 横屏",  tier="sd", pixels=1038336),
+    ImageSizeOption(value="832x1248",  w=2,  h=3,  label="2:3 竖屏",  tier="sd", pixels=1038336),
+    # 超清档 (2048x2048, 4MP, 耗时 ~56s)
+    ImageSizeOption(value="2048x2048", w=1,  h=1,  label="1:1 方形",  tier="hd", pixels=4194304),
+    # 4K 档 (~8MP, 耗时 ~150s)
+    ImageSizeOption(value="3840x2160", w=16, h=9,  label="16:9 横屏", tier="4k", pixels=8294400),
+    ImageSizeOption(value="4096x4096", w=1,  h=1,  label="1:1 方形",  tier="4k", pixels=16777216),
 ]
 
 # 视频宽高比预设（匹配 Agnes Video V2.0 文档）
@@ -50,7 +54,7 @@ async def get_config():
         # 图片尺寸（兼容旧版 + 结构化新版）
         image_sizes=[opt.value for opt in IMAGE_SIZE_OPTIONS],
         image_size_options=IMAGE_SIZE_OPTIONS,
-        default_image_size="1280x720",
+        default_image_size="1024x1024",
         # 视频参数
         video_aspect_ratios=VIDEO_ASPECT_RATIO_OPTIONS,
         default_video_aspect_ratio="16:9",

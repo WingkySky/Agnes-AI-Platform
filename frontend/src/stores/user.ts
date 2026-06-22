@@ -17,6 +17,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { login as apiLogin, register as apiRegister, getMe, getCredits, updateMyProfile, uploadAvatar } from '@/api/auth'
+import { usePreferencesStore } from '@/stores/preferences'
 import type { AuthLoginRequest, AuthRegisterRequest, UserInfoResponse, UpdateProfileRequest } from '@/types'
 
 /** JWT 在 localStorage 中的 key（前端仅保存，不可篡改） */
@@ -117,6 +118,8 @@ export const useUserStore = defineStore('user', () => {
       localStorage.setItem(TOKEN_STORAGE_KEY, data.access_token)
       // 获取用户信息
       await fetchMe()
+      // 加载用户偏好设置
+      usePreferencesStore().fetchPreferences()
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('agnes:user-login', { detail: { id: user.value?.id, username: user.value?.username } }))
       }
@@ -138,6 +141,8 @@ export const useUserStore = defineStore('user', () => {
       token.value = data.access_token
       localStorage.setItem(TOKEN_STORAGE_KEY, data.access_token)
       await fetchMe()
+      // 加载用户偏好设置
+      usePreferencesStore().fetchPreferences()
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('agnes:user-login', { detail: { id: user.value?.id, username: user.value?.username } }))
       }

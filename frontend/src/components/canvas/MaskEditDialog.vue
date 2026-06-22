@@ -88,6 +88,9 @@ const CANVAS_MAX_HEIGHT = 400
 const dialogStyle = ref({})
 const maskCanvas = ref<HTMLCanvasElement | null>(null) // 离屏 mask canvas
 
+// 监听 visible 变化初始化画布
+// 注意：外层 CanvasView 用 v-if 控制 MaskEditDialog 挂载，组件每次显示都是全新挂载，
+// props.visible 初始即为 true，普通 watch 不会触发，必须加 immediate: true 才能初始化画布
 watch(() => props.visible, async (val) => {
   if (val) {
     prompt.value = ''
@@ -102,7 +105,7 @@ watch(() => props.visible, async (val) => {
       color: props.theme.node.text,
     }
   }
-})
+}, { immediate: true })
 
 async function initCanvas() {
   const canvas = canvasRef.value

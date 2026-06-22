@@ -579,15 +579,15 @@ onMounted(() => {
   loadHistory()
   window.addEventListener('resize', onResize)
   // 监听用户登录/退出，切换素材库数据空间
-  window.addEventListener('agnes:user-login', handleUserSwitch as EventListener)
-  window.addEventListener('agnes:user-logout', handleUserLogout as EventListener)
+  window.addEventListener('agnes:user-login', handleUserSwitch as unknown as EventListener)
+  window.addEventListener('agnes:user-logout', handleUserLogout as unknown as EventListener)
 })
 
 onBeforeUnmount(() => {
   clearVideoBlobUrls()
   window.removeEventListener('resize', onResize)
-  window.removeEventListener('agnes:user-login', handleUserSwitch as EventListener)
-  window.removeEventListener('agnes:user-logout', handleUserLogout as EventListener)
+  window.removeEventListener('agnes:user-login', handleUserSwitch as unknown as EventListener)
+  window.removeEventListener('agnes:user-logout', handleUserLogout as unknown as EventListener)
 })
 
 /** 登录/切换用户后，切换素材库数据空间 */

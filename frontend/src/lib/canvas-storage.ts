@@ -40,7 +40,7 @@ function getUserKey(): string {
   try {
     const userStore = useUserStore()
     const uid = userStore?.userId
-    if (uid != null && uid !== undefined && uid !== '') {
+    if (uid != null && uid !== undefined) {
       _currentUserKey = 'u_' + String(uid)
     } else {
       _currentUserKey = 'anon'
