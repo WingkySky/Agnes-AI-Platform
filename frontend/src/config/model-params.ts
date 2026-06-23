@@ -42,6 +42,16 @@ export interface VideoAspectRatioOption {
   label: string
 }
 
+/** 视频分辨率选项（以高度为基准，宽度按比例计算） */
+export interface VideoResolutionOption {
+  /** 高度像素值，如 768 */
+  value: number
+  /** 显示标签，如 720p 高清 */
+  label: string
+  /** 16:9 下的参考宽度 */
+  width_16_9: number
+}
+
 /** 单个 Provider 的参数预设 */
 export interface ProviderParamPreset {
   /** 图片尺寸选项 */
@@ -52,6 +62,10 @@ export interface ProviderParamPreset {
   videoAspectRatios: VideoAspectRatioOption[]
   /** 默认视频宽高比 */
   defaultVideoAspectRatio: string
+  /** 视频分辨率选项 */
+  videoResolutions: VideoResolutionOption[]
+  /** 默认视频分辨率（高度） */
+  defaultVideoResolution: number
   /** 视频时长选项（秒） */
   videoDurations: number[]
   /** 默认视频时长（秒） */
@@ -68,6 +82,8 @@ export interface ModelParams {
   defaultImageSize: string
   videoAspectRatios: VideoAspectRatioOption[]
   defaultVideoAspectRatio: string
+  videoResolutions: VideoResolutionOption[]
+  defaultVideoResolution: number
   videoDurations: number[]
   defaultVideoDuration: number
   videoFrameRates: number[]
@@ -106,6 +122,14 @@ const AGNES_PARAMS: ProviderParamPreset = {
   ],
   defaultVideoAspectRatio: '16:9',
 
+  // 视频分辨率：以高度为基准，宽度按比例自动计算
+  videoResolutions: [
+    { value: 480,  label: '480p 标清', width_16_9: 854 },
+    { value: 768,  label: '720p 高清', width_16_9: 1364 },
+    { value: 1080, label: '1080p 全高清', width_16_9: 1920 },
+  ],
+  defaultVideoResolution: 768,
+
   // 视频时长（秒）：覆盖常见创作场景
   // Agnes 官方 Q&A 限制：FPS 与时长联动：
   //   24 FPS 不超过 15s；30 FPS 不超过 10s；60 FPS 不超过 5s
@@ -133,6 +157,8 @@ const DEFAULT_PARAMS: ProviderParamPreset = {
   defaultImageSize: '1024x1024',
   videoAspectRatios: AGNES_PARAMS.videoAspectRatios,
   defaultVideoAspectRatio: '16:9',
+  videoResolutions: AGNES_PARAMS.videoResolutions,
+  defaultVideoResolution: 768,
   videoDurations: [3, 5, 8, 10],
   defaultVideoDuration: 5,
   videoFrameRates: [24, 30],
@@ -173,6 +199,8 @@ export function getModelParams(provider?: string): ModelParams {
     defaultImageSize: preset.defaultImageSize,
     videoAspectRatios: preset.videoAspectRatios,
     defaultVideoAspectRatio: preset.defaultVideoAspectRatio,
+    videoResolutions: preset.videoResolutions,
+    defaultVideoResolution: preset.defaultVideoResolution,
     videoDurations: preset.videoDurations,
     defaultVideoDuration: preset.defaultVideoDuration,
     videoFrameRates: preset.videoFrameRates,

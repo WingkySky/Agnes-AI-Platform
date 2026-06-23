@@ -203,7 +203,18 @@
         </div>
         <div class="card-meta">
           <div class="card-prompt">{{ truncate(item.prompt, 80) }}</div>
-          <div class="card-time">{{ formatTime(item.created_at ?? '') }}</div>
+          <!-- 视频参数：时长 + 帧率 -->
+          <div v-if="item.type === 'video' && getVideoCardParams(item)" class="card-video-params">
+            <el-icon size="11"><VideoPlay /></el-icon>
+            <span>{{ getVideoCardParams(item) }}</span>
+          </div>
+          <div class="card-footer-row">
+            <span class="card-id" @click="copyRecordId(item.id)" title="点击复制 ID">
+              <el-icon size="11"><Document /></el-icon>
+              ID: {{ item.id }}
+            </span>
+            <span class="card-time">{{ formatTime(item.created_at ?? '') }}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -300,17 +311,24 @@
               <span class="size-mp" v-if="detailVideoActualPixels">({{ formatPixels(detailVideoActualPixels) }})</span>
             </span>
           </div>
-          <!-- 视频请求参数：宽高比 + 时长 -->
-          <div class="info-row" v-if="detailItem.type === 'video' && detailRequestAspectRatio">
-            <span class="label">{{ t('history.requestRatioLabel') }}：</span>
+          <!-- 视频请求参数：宽高比 + 时长 + 帧率 -->
+          <div class="info-row" v-if="detailItem.type === 'video' && (detailRequestAspectRatio || detailRequestSeconds || detailRequestFrameRate)">
+            <span class="label">{{ t('history.requestVideoParamsLabel') }}：</span>
             <span class="size-value">
-              {{ detailRequestAspectRatio }}
-              <span class="size-mismatch" v-if="detailVideoRatioMismatch">
-                · {{ t('history.sizeMismatchHint') }}
-              </span>
-              <span class="size-mp" v-if="detailRequestSeconds">
-                · {{ detailRequestSeconds }}s
-              </span>
+              <template v-if="detailRequestAspectRatio">
+                {{ detailRequestAspectRatio }}
+                <span class="size-mismatch" v-if="detailVideoRatioMismatch">
+                  · {{ t('history.sizeMismatchHint') }}
+                </span>
+              </template>
+              <template v-if="detailRequestSeconds">
+                <span v-if="detailRequestAspectRatio"> · </span>
+                {{ detailRequestSeconds }}s
+              </template>
+              <template v-if="detailRequestFrameRate">
+                <span v-if="detailRequestAspectRatio || detailRequestSeconds"> · </span>
+                {{ detailRequestFrameRate }} FPS
+              </template>
             </span>
           </div>
           <div class="info-row" v-if="detailItem.mode"><span class="label">{{ t('history.modeLabel') }}：</span><span class="mode-text">{{ t('params.mode.' + detailItem.mode) || detailItem.mode }}</span></div>
@@ -645,6 +663,13 @@ const detailRequestSeconds = computed(() => {
   return typeof s === 'number' ? s : (typeof s === 'string' ? Number(s) || 0 : 0)
 })
 
+// 视频请求参数：帧率（FPS）
+const detailRequestFrameRate = computed(() => {
+  const p = detailItem.value?.params as Record<string, unknown> | null
+  const fps = p?.frame_rate ?? p?.fps
+  return typeof fps === 'number' ? fps : (typeof fps === 'string' ? Number(fps) || 0 : 0)
+})
+
 // 视频实际像素数
 const detailVideoActualPixels = computed(() => {
   const n = detailVideoNatural.value
@@ -755,6 +780,15 @@ async function doBatchDelete() {
   } finally {
     batchDeleting.value = false
   }
+}
+
+/** 复制记录 ID 到剪贴板 */
+function copyRecordId(id: number) {
+  navigator.clipboard.writeText(String(id)).then(() => {
+    ElMessage.success(`ID ${id} 已复制到剪贴板`)
+  }).catch(() => {
+    ElMessage.info(`ID: ${id}`)
+  })
 }
 
 // ---------- 广场分享状态管理：单条切换 / 批量设为公开 / 批量设为私有 ----------
@@ -990,6 +1024,29 @@ async function doDelete() {
 function truncate(text: string, max: number) {
   if (!text) return ''
   return text.length > max ? text.slice(0, max) + '…' : text
+}
+
+/**
+ * 获取视频卡片上显示的参数信息（时长 + 帧率）
+ * 从 item.params 中提取，格式如 "5s · 24FPS"
+ */
+function getVideoCardParams(item: GenerationRecord): string {
+  if (item.type !== 'video' || !item.params) return ''
+  const p = item.params as Record<string, unknown>
+  const parts: string[] = []
+  const seconds = p.seconds ?? p.duration
+  if (typeof seconds === 'number' && seconds > 0) {
+    parts.push(`${seconds}s`)
+  } else if (typeof seconds === 'string' && Number(seconds) > 0) {
+    parts.push(`${Number(seconds)}s`)
+  }
+  const fps = p.frame_rate ?? p.fps
+  if (typeof fps === 'number' && fps > 0) {
+    parts.push(`${fps}FPS`)
+  } else if (typeof fps === 'string' && Number(fps) > 0) {
+    parts.push(`${Number(fps)}FPS`)
+  }
+  return parts.join(' · ')
 }
 function formatTime(t: string) {
   if (!t) return ''
@@ -1385,8 +1442,35 @@ onBeforeUnmount(() => {
   min-height: 40px;
   overflow: hidden;
 }
-.card-time {
+.card-video-params {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--agnes-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.card-footer-row {
   margin-top: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.card-id {
+  font-size: 12px;
+  color: var(--agnes-text-faint);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.card-id:hover {
+  color: var(--agnes-text-secondary);
+}
+.card-time {
   font-size: 12px;
   color: var(--agnes-text-faint);
 }

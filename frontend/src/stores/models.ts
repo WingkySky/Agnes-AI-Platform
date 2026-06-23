@@ -7,7 +7,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getPlatformConfig } from '@/api/history'
-import type { ModelInfo, ConfigResponse, ImageSizeOption, VideoAspectRatioOption } from '@/types'
+import type { ModelInfo, ConfigResponse, ImageSizeOption, VideoAspectRatioOption, VideoResolutionOption } from '@/types'
 import {
   getModelParams as getLocalModelParams,
   type ModelParams,
@@ -26,6 +26,10 @@ export const useModelsStore = defineStore('models', () => {
   const videoAspectRatios = ref<VideoAspectRatioOption[]>([])
   // 默认视频宽高比
   const defaultVideoAspectRatio = ref('16:9')
+  // 视频分辨率选项
+  const videoResolutions = ref<VideoResolutionOption[]>([])
+  // 默认视频分辨率（高度）
+  const defaultVideoResolution = ref(768)
   // 视频时长选项（秒）
   const videoDurations = ref<number[]>([3, 5, 7, 10, 15])
   // 默认视频时长
@@ -59,6 +63,8 @@ export const useModelsStore = defineStore('models', () => {
       // 视频参数
       videoAspectRatios.value = resp.video_aspect_ratios || []
       defaultVideoAspectRatio.value = resp.default_video_aspect_ratio || '16:9'
+      videoResolutions.value = resp.video_resolutions || []
+      defaultVideoResolution.value = resp.default_video_resolution || 768
       videoDurations.value = resp.video_durations || [3, 5, 7, 10, 15]
       defaultVideoDuration.value = resp.default_video_duration || 5
       videoFrameRates.value = resp.video_frame_rates || [24, 30]
@@ -99,6 +105,8 @@ export const useModelsStore = defineStore('models', () => {
         defaultImageSize: defaultImageSize.value,
         videoAspectRatios: videoAspectRatios.value,
         defaultVideoAspectRatio: defaultVideoAspectRatio.value,
+        videoResolutions: videoResolutions.value,
+        defaultVideoResolution: defaultVideoResolution.value,
         videoDurations: videoDurations.value,
         defaultVideoDuration: defaultVideoDuration.value,
         videoFrameRates: videoFrameRates.value,
@@ -116,6 +124,8 @@ export const useModelsStore = defineStore('models', () => {
     defaultImageSize,
     videoAspectRatios,
     defaultVideoAspectRatio,
+    videoResolutions,
+    defaultVideoResolution,
     videoDurations,
     defaultVideoDuration,
     videoFrameRates,

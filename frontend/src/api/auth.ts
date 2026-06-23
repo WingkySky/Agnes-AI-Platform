@@ -27,6 +27,9 @@ import type {
   UpdateProfileRequest,
   CreditRuleResponse,
   CreditRuleUpdateRequest,
+  CaptchaResponse,
+  SendEmailCodeRequest,
+  ResetPasswordRequest,
 } from '@/types'
 
 /** 用户注册 */
@@ -37,6 +40,21 @@ export function register(params: AuthRegisterRequest): Promise<AuthTokenResponse
 /** 用户登录 */
 export function login(params: AuthLoginRequest): Promise<AuthTokenResponse> {
   return client.post('/api/auth/login', params)
+}
+
+/** 获取图片验证码 */
+export function getCaptcha(): Promise<CaptchaResponse> {
+  return client.get('/api/auth/captcha')
+}
+
+/** 发送邮箱验证码（重置密码用） */
+export function sendEmailCode(params: SendEmailCodeRequest): Promise<{ ok: boolean; message: string }> {
+  return client.post('/api/auth/send-email-code', params)
+}
+
+/** 重置密码 */
+export function resetPassword(params: ResetPasswordRequest): Promise<{ ok: boolean; message: string }> {
+  return client.post('/api/auth/reset-password', params)
 }
 
 /** 获取当前登录用户信息 */

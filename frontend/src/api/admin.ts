@@ -39,6 +39,8 @@ export interface ModerationWork {
   model: string
   result_url: string
   user_id: number
+  username?: string | null
+  nickname?: string | null
   is_public: boolean
   likes_count: number
   views_count: number
@@ -127,8 +129,12 @@ export function deleteRole(name: string): Promise<{ success: boolean }> {
 
 /** 获取待审核作品列表 */
 export function getModerationWorks(params: {
-  status?: 'pending' | 'approved' | 'rejected'
-  type?: 'image' | 'video'
+  status?: 'pending' | 'approved' | 'rejected' | 'all'
+  work_type?: 'image' | 'video'
+  keyword?: string
+  work_id?: number
+  user_id?: number
+  username?: string
   page?: number
   page_size?: number
 }): Promise<ModerationListResponse> {

@@ -69,6 +69,16 @@ export interface VideoAspectRatioOption {
   label: string
 }
 
+/** 视频分辨率选项（以高度为基准，宽度按比例计算） */
+export interface VideoResolutionOption {
+  /** 高度像素值，如 768 */
+  value: number
+  /** 显示标签，如 720p 高清 */
+  label: string
+  /** 16:9 下的参考宽度 */
+  width_16_9: number
+}
+
 /** 前端可用配置 — 对齐 ConfigResponse */
 export interface ConfigResponse {
   models: ModelInfo[]
@@ -77,6 +87,8 @@ export interface ConfigResponse {
   default_image_size: string
   video_aspect_ratios: VideoAspectRatioOption[]
   default_video_aspect_ratio: string
+  video_resolutions: VideoResolutionOption[]
+  default_video_resolution: number
   video_num_frames: number[]
   video_durations: number[]
   default_video_duration: number
@@ -615,16 +627,43 @@ export interface SyncAllResponse {
 export interface AuthRegisterRequest {
   /** 用户名（3-32 字符） */
   username: string
-  /** 邮箱（可选） */
-  email?: string | null
+  /** 邮箱（必填） */
+  email: string
   /** 密码（6-64 字符） */
   password: string
+  /** 图片验证码 ID（可选，前端应传） */
+  captcha_id?: string
+  /** 图片验证码（可选，前端应传） */
+  captcha_code?: string
 }
 
 /** 登录请求体 — 对齐 LoginRequest */
 export interface AuthLoginRequest {
   username: string
   password: string
+  /** 图片验证码 ID（可选，前端应传） */
+  captcha_id?: string
+  /** 图片验证码（可选，前端应传） */
+  captcha_code?: string
+}
+
+/** 图片验证码响应 — 对齐 CaptchaResponse */
+export interface CaptchaResponse {
+  captcha_id: string
+  image_base64: string
+}
+
+/** 发送邮箱验证码请求 — 对齐 SendEmailCodeRequest */
+export interface SendEmailCodeRequest {
+  email: string
+  purpose?: string
+}
+
+/** 重置密码请求 — 对齐 ResetPasswordRequest */
+export interface ResetPasswordRequest {
+  email: string
+  code: string
+  new_password: string
 }
 
 /** 登录/注册成功返回的 token 响应 — 对齐 TokenResponse */

@@ -596,22 +596,25 @@ class AgnesAIClient:
         # 1) 计算分辨率（width / height）
         #    优先使用显式传入的 width/height；否则根据 aspect_ratio 计算；
         #    默认 1152x768（16:9）
+        #    【重要】视频编码要求宽高必须是 8 的倍数，否则可能导致任务无响应或失败
         if width and height:
             _width, _height = int(width), int(height)
         elif aspect_ratio and isinstance(aspect_ratio, str) and ":" in aspect_ratio:
             ar_w, ar_h = aspect_ratio.split(":", 1)
             try:
                 ar_w_int, ar_h_int = int(ar_w), int(ar_h)
-                # 以高度 768 为基准，按比例计算宽度，确保为偶数
+                # 以高度 768 为基准，按比例计算宽度
                 base_h = 768
                 base_w = int(round(base_h * ar_w_int / ar_h_int))
-                if base_w % 2 != 0:
-                    base_w += 1
                 _width, _height = base_w, base_h
             except ValueError:
                 _width, _height = 1152, 768
         else:
             _width, _height = 1152, 768
+
+        # 确保宽高为 8 的倍数（视频编码硬性要求，向上取整）
+        _width = ((_width + 7) // 8) * 8
+        _height = ((_height + 7) // 8) * 8
 
         # 2) 计算 frame_rate（默认 24）
         _frame_rate = int(frame_rate) if frame_rate and frame_rate > 0 else 24
@@ -647,11 +650,11 @@ class AgnesAIClient:
         #   3) 用该 URL 调 /v1/videos
         # 同时用第一张参考图的真实宽高修正 width/height，避免与请求值不一致
         #
-        # 【Agnes 官方 API 传参规范】：
-        #   - 单图图生视频：image 放顶层（字符串），mode 可选（如 ti2vid）
-        #   - 多图 / 关键帧视频：image 放在 extra_body.image 数组中，
-        #     并在 extra_body.mode 显式指定 "keyframes"
-        #   - 尾帧通过 image 数组的第二个元素传入，不存在 image_end 字段
+        # 【Agnes Video API 传参规范】：
+        #   - 单图图生视频：image 放顶层（字符串），mode = "ti2vid"
+        #   - 多图 / 关键帧视频：image 放顶层（数组），mode = "keyframes"
+        #     （Video API 与 Image API 不同，所有参数直接放顶层，不使用 extra_body 包装）
+        #   - 尾帧通过 image 数组的第二个元素传入
 
         refs_with_mime: list = []
         if image and isinstance(image, str) and image.strip():
@@ -683,7 +686,9 @@ class AgnesAIClient:
             if pairs and pairs[0][1]:
                 w, h = pairs[0][1]
                 # 用第一张参考图的真实宽高修正输出分辨率
-                _width, _height = w, h
+                # 确保宽高为 8 的倍数（视频编码硬性要求）
+                _width = ((w + 7) // 8) * 8
+                _height = ((h + 7) // 8) * 8
 
         # ── 构建请求体 ──
         body: Dict[str, Any] = {
@@ -704,12 +709,9 @@ class AgnesAIClient:
         is_image2video = len(pairs) > 0 and not is_keyframes
 
         if is_keyframes:
-            # 多图 / 关键帧模式：image 数组放 extra_body，extra_body.mode = "keyframes"
-            extra_body: Dict[str, Any] = {
-                "image": [p[0] for p in pairs],
-                "mode": "keyframes",
-            }
-            body["extra_body"] = extra_body
+            # 多图 / 关键帧模式：image 数组放顶层，mode = "keyframes"
+            body["image"] = [p[0] for p in pairs]
+            body["mode"] = "keyframes"
             logger.info(
                 "[视频生成] 关键帧模式: model=%s, num_frames=%d, "
                 "frame_rate=%d, size=%dx%d, keyframes=%d, prompt=%s",
@@ -734,11 +736,45 @@ class AgnesAIClient:
 
         return await self._post(url, body)
 
+    @staticmethod
+    def _fit_image_size(w: int, h: int) -> str:
+        """
+        将任意尺寸映射到 Agnes Image API 支持的标准尺寸。
+        优先选择与原图比例最接近的标准尺寸，确保 pass-through 成功率。
+        支持的标准尺寸（参考 Agnes Image 2.0 文档）：
+          - 1024x1024 (1:1)
+          - 768x1024  (3:4 竖图)
+          - 1024x768  (4:3 横图)
+          - 576x1024  (9:16 竖图)
+          - 1024x576  (16:9 横图)
+        """
+        if w <= 0 or h <= 0:
+            return "1024x1024"
+        ratio = w / h
+        # 标准尺寸列表：(width, height, label)
+        standards = [
+            (1024, 1024, "1024x1024"),
+            (768, 1024, "768x1024"),
+            (1024, 768, "1024x768"),
+            (576, 1024, "576x1024"),
+            (1024, 576, "1024x576"),
+        ]
+        # 找比例最接近的标准尺寸
+        best_label = "1024x1024"
+        best_diff = float("inf")
+        for sw, sh, label in standards:
+            s_ratio = sw / sh
+            diff = abs(ratio - s_ratio)
+            if diff < best_diff:
+                best_diff = diff
+                best_label = label
+        return best_label
+
     async def _to_agnes_url(self, uri: str) -> str:
         """
         把任意参考图转换成 Agnes 平台托管的 URL。
         - 若是 Agnes 平台 URL (https://platform-outputs.agnes-ai.space/...)，直接返回
-        - 否则调用一次 Agnes Image 2.1 Flash 图生图做 pass-through，拿到平台托管 URL
+        - 否则调用一次 Agnes Image 图生图做 pass-through，拿到平台托管 URL
         """
         if not isinstance(uri, str) or not uri.strip():
             return uri
@@ -749,12 +785,12 @@ class AgnesAIClient:
         if lowered.startswith("https://") and "agnes-ai.space" in lowered:
             return uri
 
-        # 检测原图宽高，决定生成 size（与原图比例一致）
+        # 检测原图宽高，映射到最接近的标准尺寸（确保 pass-through 成功）
         try:
             _, size = self._normalize_image_input(uri)
             if size:
                 w, h = size
-                size_str = f"{w}x{h}"
+                size_str = self._fit_image_size(w, h)
             else:
                 size_str = "1024x1024"
         except Exception:

@@ -44,10 +44,134 @@ from app.schemas.user import (
     UpdateCreditsRequest,
     UpdateActiveRequest,
     UpdateProfileRequest,
+    CaptchaResponse,
+    SendEmailCodeRequest,
+    ResetPasswordRequest,
 )
 
 logger = logging.getLogger("agnes_platform")
 router = APIRouter(prefix="/auth", tags=["用户认证"])
+
+
+# =====================================================
+# 图片验证码
+# =====================================================
+
+@router.get("/captcha", response_model=CaptchaResponse, summary="获取图片验证码")
+async def get_captcha():
+    """
+    获取图片验证码。
+    - 返回 captcha_id 和 base64 编码的图片
+    - 验证码有效期由 settings.captcha_expire_seconds 控制（默认 5 分钟）
+    - 验证成功后自动删除，防止重复使用
+    """
+    from app.services.captcha_service import create_captcha
+    import base64
+
+    captcha_id, image_bytes = create_captcha()
+    image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+
+    return CaptchaResponse(
+        captcha_id=captcha_id,
+        image_base64=image_base64,
+    )
+
+
+# =====================================================
+# 发送邮箱验证码（重置密码用）
+# =====================================================
+
+@router.post("/send-email-code", summary="发送邮箱验证码")
+async def send_email_code(req: SendEmailCodeRequest):
+    """
+    发送邮箱验证码（用于重置密码）。
+    - 6 位数字验证码，有效期 10 分钟
+    - 发送间隔限制：默认 60 秒
+    - 只有已注册的邮箱才能收到验证码（避免泄漏哪些邮箱已注册）
+    """
+    from app.services.captcha_service import (
+        can_send_email_code,
+        generate_email_code,
+        set_email_code,
+    )
+    from app.services.email_service import send_email, build_reset_password_email, is_email_enabled
+    from app.core.config import settings
+
+    email = req.email.lower().strip()
+
+    # 检查邮件服务是否启用
+    if not is_email_enabled():
+        raise HTTPException(status_code=503, detail="邮件服务未配置，无法发送验证码")
+
+    # 检查重发间隔
+    can_send, msg = can_send_email_code(email)
+    if not can_send:
+        raise HTTPException(status_code=429, detail=msg)
+
+    # 检查邮箱是否已注册（不注册不发送，但返回成功，避免泄漏邮箱是否存在）
+    from sqlalchemy.future import select
+    from app.core.database import async_session
+    async with async_session() as db:
+        result = await db.execute(select(User).filter(User.email == email))
+        user = result.scalar_one_or_none()
+
+    if not user:
+        # 邮箱未注册：不发送，但返回成功，防止枚举用户
+        logger.info("[邮箱验证码] 邮箱未注册，不发送（安全考虑） email=%s", email)
+        return {"ok": True, "message": "验证码已发送，请查收邮箱"}
+
+    # 生成并保存验证码
+    code = generate_email_code()
+    set_email_code(email, code, purpose=req.purpose)
+
+    # 发送邮件
+    expire_minutes = settings.email_code_expire_seconds // 60
+    html_content, text_content = build_reset_password_email(code, expire_minutes)
+    success = await send_email(
+        to_email=email,
+        subject="Agnes AI Platform 重置密码验证码",
+        html_content=html_content,
+        text_content=text_content,
+    )
+
+    if not success:
+        raise HTTPException(status_code=500, detail="邮件发送失败，请稍后重试")
+
+    return {"ok": True, "message": "验证码已发送，请查收邮箱"}
+
+
+# =====================================================
+# 重置密码
+# =====================================================
+
+@router.post("/reset-password", summary="通过邮箱验证码重置密码")
+async def reset_password(req: ResetPasswordRequest, db: AsyncSession = Depends(get_async_db)):
+    """
+    通过邮箱验证码重置密码。
+    - 需要邮箱 + 验证码 + 新密码
+    - 验证成功后密码立即更新，并删除验证码（一次性使用）
+    """
+    from app.services.captcha_service import verify_email_code
+
+    email = req.email.lower().strip()
+
+    # 验证邮箱验证码
+    valid, msg = verify_email_code(email, req.code, purpose="reset_password")
+    if not valid:
+        raise HTTPException(status_code=400, detail=msg)
+
+    # 查找用户
+    result = await db.execute(select(User).filter(User.email == email))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    # 更新密码
+    user.password_hash = hash_password(req.new_password)
+    await db.commit()
+
+    logger.info("[重置密码] 成功 user=%s id=%d", user.username, user.id)
+    return {"ok": True, "message": "密码重置成功，请使用新密码登录"}
 
 
 # =====================================================
@@ -59,22 +183,29 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_async_db
     """
     注册新用户：
     - 检查用户名是否已被占用
-    - 检查邮箱是否已被占用（若提供）
+    - 检查邮箱是否已被占用（必填）
+    - 图片验证码验证
     - 将密码以 bcrypt 哈希形式存储
     - 成功后返回 JWT token（自动登录）
     - 新用户默认积分从 settings 或积分规则表中读取
     """
+    # 1. 验证图片验证码
+    from app.services.captcha_service import verify_captcha
+    if req.captcha_id and req.captcha_code:
+        if not verify_captcha(req.captcha_id, req.captcha_code):
+            raise HTTPException(status_code=400, detail="验证码错误或已过期")
+    # 验证码字段为空时不强制验证（兼容旧版调用），前端应始终传递
 
-    # 1. 检查用户名是否已存在
+    # 2. 检查用户名是否已存在
     existing = await db.execute(select(User).filter(User.username == req.username))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="该用户名已被占用")
 
-    # 2. 检查邮箱是否已被占用
-    if req.email:
-        existing_email = await db.execute(select(User).filter(User.email == req.email))
-        if existing_email.scalar_one_or_none():
-            raise HTTPException(status_code=409, detail="该邮箱已被注册")
+    # 3. 检查邮箱是否已被占用（邮箱必填）
+    email = req.email.lower().strip()
+    existing_email = await db.execute(select(User).filter(User.email == email))
+    if existing_email.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="该邮箱已被注册")
 
     # 3. 写入数据库 —— 新用户初始积分从 credit_rules 表读取（new_user.default_credits）
     #    缺失时回落到 settings.new_user_default_credits
@@ -92,7 +223,7 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_async_db
 
     user = User(
         username=req.username,
-        email=req.email or None,
+        email=email,
         password_hash=hash_password(req.password),
         credits=new_user_credits,
         role=ROLE_USER,
@@ -136,10 +267,18 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_async_db
 async def login(req: LoginRequest, db: AsyncSession = Depends(get_async_db)):
     """
     使用用户名 + 密码登录，返回 JWT token。
+    - 图片验证码验证（防止暴力破解）
     - 用户名不存在 / 密码错误：均返回 401（避免泄漏用户存在性）
     - 密码正确但账号已被管理员停用：返回 403 并明确提示「账号已被停用」
     - 成功：更新 last_login_at，并返回 JWT
     """
+    # 1. 验证图片验证码
+    from app.services.captcha_service import verify_captcha
+    if req.captcha_id and req.captcha_code:
+        if not verify_captcha(req.captcha_id, req.captcha_code):
+            raise HTTPException(status_code=400, detail="验证码错误或已过期")
+    # 验证码字段为空时不强制验证（兼容旧版调用），前端应始终传递
+
     GENERIC_401 = HTTPException(status_code=401, detail="用户名或密码错误")
 
     result = await db.execute(select(User).filter(User.username == req.username))

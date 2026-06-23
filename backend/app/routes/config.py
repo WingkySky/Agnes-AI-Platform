@@ -6,7 +6,7 @@
 
 from fastapi import APIRouter
 from app.core.config import settings
-from app.schemas.common import ConfigResponse, ImageSizeOption, VideoAspectRatioOption
+from app.schemas.common import ConfigResponse, ImageSizeOption, VideoAspectRatioOption, VideoResolutionOption
 from app.services.model_registry import get_all_models
 
 router = APIRouter()
@@ -36,6 +36,13 @@ VIDEO_ASPECT_RATIO_OPTIONS = [
     VideoAspectRatioOption(value="9:16", w=9,  h=16, label="9:16 竖屏"),
 ]
 
+# 视频分辨率预设（以高度为基准，16:9 宽度作为参考）
+VIDEO_RESOLUTION_OPTIONS = [
+    VideoResolutionOption(value=480,  label="480p 标清", width_16_9=854),
+    VideoResolutionOption(value=768,  label="720p 高清", width_16_9=1364),
+    VideoResolutionOption(value=1080, label="1080p 全高清", width_16_9=1920),
+]
+
 
 @router.get("/config", response_model=ConfigResponse, summary="获取前端配置")
 async def get_config():
@@ -58,6 +65,9 @@ async def get_config():
         # 视频参数
         video_aspect_ratios=VIDEO_ASPECT_RATIO_OPTIONS,
         default_video_aspect_ratio="16:9",
+        # 视频分辨率
+        video_resolutions=VIDEO_RESOLUTION_OPTIONS,
+        default_video_resolution=768,
         # 视频时长/帧率
         # 官方 Q&A 限制：视频时间与帧率联动限制
         #   24 FPS 不超过 15s；30 FPS 不超过 10s；60 FPS 不超过 5s

@@ -45,6 +45,13 @@ class VideoAspectRatioOption(BaseModel):
     label: str = Field(description="显示标签，如 16:9 横屏")
 
 
+class VideoResolutionOption(BaseModel):
+    """视频分辨率选项（以高度为基准，宽度按比例计算）"""
+    value: int = Field(description="高度像素值，如 768")
+    label: str = Field(description="显示标签，如 720p 高清")
+    width_16_9: int = Field(description="16:9 下的参考宽度")
+
+
 class ConfigResponse(BaseModel):
     """前端可用配置（不含敏感信息）"""
 
@@ -76,6 +83,16 @@ class ConfigResponse(BaseModel):
     default_video_aspect_ratio: str = Field(
         default="16:9",
         description="默认视频宽高比",
+    )
+
+    # 视频分辨率选项
+    video_resolutions: List[VideoResolutionOption] = Field(
+        default_factory=list,
+        description="视频分辨率选项（以高度为基准）",
+    )
+    default_video_resolution: int = Field(
+        default=768,
+        description="默认视频分辨率高度",
     )
 
     # 视频帧数选项（需满足 8n+1 规则）
@@ -130,6 +147,10 @@ class GenerationRecord(BaseModel):
     is_public: bool = False         # 是否公开到广场
     likes_count: int = 0            # 点赞数
     created_at: Optional[datetime] = None
+    # 内容审核相关
+    moderation_status: Optional[str] = None   # approved / pending / rejected
+    moderation_reason: Optional[str] = None   # 审核原因
+    moderation_flags: Optional[List[str]] = None  # 命中的敏感词/违规类别
 
     class Config:
         from_attributes = True    # Pydantic v2 对应原来的 orm_mode

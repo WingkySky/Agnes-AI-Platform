@@ -192,8 +192,16 @@
             <option v-for="s in imageSizeOptions" :key="s.value" :value="s.value">{{ s.label }}</option>
           </select>
 
-          <!-- 视频参数（视频模式）：比例 + 时长，显示友好标签 -->
+          <!-- 视频参数（视频模式）：分辨率 + 比例 + 帧率 + 时长，两行两列紧凑布局 -->
           <div v-if="isVideoMode" class="config-video-params">
+            <select
+              class="config-select"
+              :value="configContent.resolution"
+              @change="updateConfigContent('resolution', Number(($event.target as HTMLSelectElement)?.value))"
+              @mousedown.stop
+            >
+              <option v-for="r in videoResolutionOptions" :key="r.value" :value="r.value">{{ r.label }}</option>
+            </select>
             <select
               class="config-select"
               :value="configContent.aspect_ratio"
@@ -204,8 +212,16 @@
             </select>
             <select
               class="config-select"
+              :value="configContent.frame_rate"
+              @change="onFrameRateChange(Number(($event.target as HTMLSelectElement)?.value))"
+              @mousedown.stop
+            >
+              <option v-for="fr in videoFrameRateOptions" :key="fr" :value="fr">{{ fr }} FPS</option>
+            </select>
+            <select
+              class="config-select"
               :value="configContent.seconds"
-              @change="updateConfigContent('seconds', ($event.target as HTMLSelectElement)?.value)"
+              @change="updateConfigContent('seconds', Number(($event.target as HTMLSelectElement)?.value))"
               @mousedown.stop
             >
               <option v-for="s in availableDurations" :key="s" :value="s">{{ s }}{{ t('canvas.node.secondsSuffix') }}</option>
@@ -373,10 +389,23 @@ const videoAspectRatioOptions = computed(() => {
   const config = modelsStore.getModelParamsConfig()
   return config.videoAspectRatios
 })
-// 可用视频时长：从统一配置获取
+// 视频分辨率选项（以高度为基准）
+const videoResolutionOptions = computed(() => {
+  const config = modelsStore.getModelParamsConfig()
+  return config.videoResolutions || []
+})
+// 视频帧率选项
+const videoFrameRateOptions = computed(() => {
+  const config = modelsStore.getModelParamsConfig()
+  return config.videoFrameRates
+})
+// 可用视频时长：根据帧率自动过滤（FPS 越高时长越短）
+// 官方 Q&A 限制：24 FPS ≤ 15s；30 FPS ≤ 10s；60 FPS ≤ 5s
 const availableDurations = computed(() => {
   const config = modelsStore.getModelParamsConfig()
-  return config.videoDurations
+  const fps = configContent.value.frame_rate || 24
+  const maxDuration = fps >= 60 ? 5 : fps >= 30 ? 10 : 15
+  return config.videoDurations.filter((s: number) => s <= maxDuration)
 })
 
 /* ---------- 响应式状态 ---------- */
@@ -515,6 +544,11 @@ const configContent = computed(() => ({
   prompt: '',
   generating: false,
   progress: 0,
+  // 视频参数默认值
+  aspect_ratio: modelsStore.defaultVideoAspectRatio,
+  resolution: modelsStore.defaultVideoResolution,
+  frame_rate: modelsStore.defaultFrameRate,
+  seconds: modelsStore.defaultVideoDuration,
   ...(props.panel.content || {}),
 }))
 
@@ -781,6 +815,17 @@ function updateConfigContent(key: string, value: any) {
     if (!targetIds.includes(currentModel)) {
       updates.model = modelsStore.getDefaultModelByMode(value)
     }
+  }
+  store.updatePanel(props.panel.id, { content: updates })
+}
+
+/** 帧率变化：如果当前时长超过新帧率的最大限制，自动调整为最大可用时长 */
+function onFrameRateChange(newFps: number) {
+  const updates: Record<string, any> = { frame_rate: newFps }
+  const maxDuration = newFps >= 60 ? 5 : newFps >= 30 ? 10 : 15
+  const currentSeconds = configContent.value.seconds
+  if (currentSeconds > maxDuration) {
+    updates.seconds = maxDuration
   }
   store.updatePanel(props.panel.id, { content: updates })
 }
@@ -1097,14 +1142,16 @@ onUnmounted(() => {
   border-color: var(--agnes-primary);
 }
 
-/* 视频参数行：比例 + 时长并排 */
+/* 视频参数区：分辨率+比例 / 帧率+时长，两行两列网格布局 */
 .config-video-params {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
 
 .config-video-params .config-select {
-  flex: 1;
+  width: 100%;
+  min-width: 0;
 }
 
 /* 提示词输入框 */

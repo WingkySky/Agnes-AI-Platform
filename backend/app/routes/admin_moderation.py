@@ -22,7 +22,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import and_
+from sqlalchemy import and_, func
 
 from app.core.database import get_async_db
 from app.core.security import require_permission
@@ -42,12 +42,16 @@ router = APIRouter(prefix="/admin/moderation", tags=["管理员-内容审核"])
 async def list_moderation_works(
     status: Optional[str] = Query("pending", description="审核状态：pending/approved/rejected/all"),
     work_type: Optional[str] = Query(None, description="类型筛选：image/video"),
+    keyword: Optional[str] = Query(None, description="关键词搜索（匹配提示词）"),
+    work_id: Optional[int] = Query(None, description="按内容 ID 精确搜索"),
+    user_id: Optional[int] = Query(None, description="按创作者用户 ID 搜索"),
+    username: Optional[str] = Query(None, description="按用户名搜索（模糊匹配）"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
     _moderator: User = Depends(require_permission("plaza:moderate")),
 ):
-    """获取审核队列，支持按状态/类型筛选"""
+    """获取审核队列，支持按状态/类型/关键词/创作者搜索"""
     query = select(Generation)
 
     # 状态筛选
@@ -62,8 +66,30 @@ async def list_moderation_works(
             raise HTTPException(status_code=400, detail="无效的类型")
         query = query.filter(Generation.type == work_type)
 
+    # 按内容 ID 搜索
+    if work_id:
+        query = query.filter(Generation.id == work_id)
+
+    # 按创作者用户 ID 搜索
+    if user_id:
+        query = query.filter(Generation.user_id == user_id)
+
+    # 按用户名搜索
+    if username:
+        user_subq = select(User.id).filter(User.username.contains(username))
+        user_result = await db.execute(user_subq)
+        user_ids = [row[0] for row in user_result.all()]
+        if user_ids:
+            query = query.filter(Generation.user_id.in_(user_ids))
+        else:
+            query = query.filter(Generation.user_id == -1)  # 没找到匹配用户，返回空
+
+    # 关键词搜索（提示词）
+    if keyword:
+        query = query.filter(Generation.prompt.contains(keyword))
+
     # 只展示公开到广场的作品
-    query = query.filter(Generation.is_public == True)
+    query = query.filter(Generation.is_public == True)  # noqa: E712
 
     # 排序：待审核优先（pending 在前），然后按时间倒序
     from sqlalchemy import case
@@ -76,22 +102,23 @@ async def list_moderation_works(
     query = query.order_by(order_case, Generation.public_shared_at.desc())
 
     # 总数
-    count_query = select(Generation.id).where(
-        *([c for c in query.whereclause.get_children()] if query.whereclause is not None else [True])
-    )
-    # 简化：单独构建 count
-    count_q = select(Generation.id).filter(Generation.is_public == True)
-    if status and status != "all":
-        count_q = count_q.filter(Generation.moderation_status == status)
-    if work_type and work_type != "all":
-        count_q = count_q.filter(Generation.type == work_type)
-    total_result = await db.execute(count_q)
-    total = len(total_result.scalars().all())
+    count_q = select(func.count()).select_from(query.subquery())
+    count_result = await db.execute(count_q)
+    total = count_result.scalar_one() or 0
 
     # 分页
     query = query.offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(query)
     items = result.scalars().all()
+
+    # 批量查询作者信息
+    user_ids_set = {g.user_id for g in items if g.user_id is not None}
+    authors_map: dict = {}
+    if user_ids_set:
+        user_stmt = select(User).filter(User.id.in_(list(user_ids_set)))
+        user_result = await db.execute(user_stmt)
+        for u in user_result.scalars().all():
+            authors_map[u.id] = u
 
     return {
         "items": [
@@ -102,6 +129,8 @@ async def list_moderation_works(
                 "model": g.model,
                 "result_url": g.result_url,
                 "user_id": g.user_id,
+                "username": authors_map.get(g.user_id).username if g.user_id and authors_map.get(g.user_id) else None,
+                "nickname": getattr(authors_map.get(g.user_id), "nickname", None) if g.user_id and authors_map.get(g.user_id) else None,
                 "is_public": g.is_public,
                 "likes_count": getattr(g, "likes_count", 0),
                 "views_count": getattr(g, "views_count", 0),

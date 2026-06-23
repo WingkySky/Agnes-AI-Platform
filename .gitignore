@@ -40,4 +40,5 @@ huobao-canvas/
 # 上传的文件
 .uploads/
 .claude/
+.agents/
 uploads/

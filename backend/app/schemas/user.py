@@ -17,8 +17,10 @@ from pydantic import BaseModel, Field, field_validator
 class RegisterRequest(BaseModel):
     """注册请求体"""
     username: str = Field(..., min_length=3, max_length=32, description="用户名（3~32 字符）")
-    email: Optional[str] = Field(default=None, max_length=128, description="邮箱（可选）")
+    email: str = Field(..., min_length=5, max_length=128, description="邮箱（必填）")
     password: str = Field(..., min_length=6, max_length=64, description="密码（6~64 字符）")
+    captcha_id: Optional[str] = Field(default=None, description="图片验证码 ID")
+    captcha_code: Optional[str] = Field(default=None, description="图片验证码")
 
     @field_validator("username")
     @classmethod
@@ -28,11 +30,61 @@ class RegisterRequest(BaseModel):
             raise ValueError("用户名只能包含字母、数字、下划线和中文")
         return v
 
+    @field_validator("email")
+    @classmethod
+    def email_must_be_valid(cls, v: str) -> str:
+        # 简单邮箱格式校验
+        v = v.strip().lower()
+        if "@" not in v or "." not in v:
+            raise ValueError("邮箱格式不正确")
+        return v
+
 
 class LoginRequest(BaseModel):
     """登录请求体"""
     username: str = Field(..., min_length=3, max_length=32, description="用户名")
     password: str = Field(..., min_length=6, max_length=64, description="密码")
+    captcha_id: Optional[str] = Field(default=None, description="图片验证码 ID")
+    captcha_code: Optional[str] = Field(default=None, description="图片验证码")
+
+
+# =====================================================
+# 验证码相关
+# =====================================================
+
+class CaptchaResponse(BaseModel):
+    """图片验证码响应"""
+    captcha_id: str = Field(..., description="验证码 ID")
+    image_base64: str = Field(..., description="验证码图片（Base64 编码，不含 data:image/png;base64, 前缀）")
+
+
+class SendEmailCodeRequest(BaseModel):
+    """发送邮箱验证码请求"""
+    email: str = Field(..., min_length=5, max_length=128, description="邮箱地址")
+    purpose: str = Field(default="reset_password", description="验证码用途：reset_password")
+
+    @field_validator("email")
+    @classmethod
+    def email_must_be_valid(cls, v: str) -> str:
+        v = v.strip().lower()
+        if "@" not in v or "." not in v:
+            raise ValueError("邮箱格式不正确")
+        return v
+
+
+class ResetPasswordRequest(BaseModel):
+    """重置密码请求"""
+    email: str = Field(..., min_length=5, max_length=128, description="邮箱地址")
+    code: str = Field(..., min_length=6, max_length=6, description="邮箱验证码（6位数字）")
+    new_password: str = Field(..., min_length=6, max_length=64, description="新密码（6~64 字符）")
+
+    @field_validator("email")
+    @classmethod
+    def email_must_be_valid(cls, v: str) -> str:
+        v = v.strip().lower()
+        if "@" not in v or "." not in v:
+            raise ValueError("邮箱格式不正确")
+        return v
 
 
 # =====================================================

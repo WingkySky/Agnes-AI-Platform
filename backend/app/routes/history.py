@@ -124,6 +124,9 @@ async def get_history(
             is_public=getattr(item, "is_public", False) or False,
             likes_count=getattr(item, "likes_count", 0) or 0,
             created_at=item.created_at,
+            moderation_status=getattr(item, "moderation_status", "approved"),
+            moderation_reason=getattr(item, "moderation_reason", None),
+            moderation_flags=getattr(item, "moderation_flags", None),
         ))
 
     return HistoryListResponse(
@@ -966,6 +969,7 @@ async def update_share_status(
     切换单条记录的公开/私有状态（需登录，按用户隔离）。
     - false → true 且 public_shared_at 为空时，写入 public_shared_at = NOW()
     - true → false 时，保留 public_shared_at（方便二次公开时保留历史时间）
+    - 设为公开时，默认进入待审核状态（pending），需 AI 预审 + 人工复审通过后才在广场展示
     """
     stmt = select(Generation).filter(
         Generation.id == record_id,
@@ -991,26 +995,37 @@ async def update_share_status(
     if body.is_public and not was_public and not record.public_shared_at:
         record.public_shared_at = datetime.utcnow()
 
-    # ===== 首次设为公开时：自动预审（敏感词检测）=====
+    # ===== 设为公开时：进入待审核状态，先做敏感词快速筛查，再异步触发 AI 图像审核 =====
     if body.is_public and not was_public:
+        # 默认待审核
+        record.moderation_status = "pending"
+        record.moderation_flags = None
+        record.moderation_reason = "审核中：等待系统预审"
+
+        # 敏感词快速筛查（作为 flags 记录下来，供管理员参考）
         try:
             from app.services.moderation_service import check_sensitive_text
             hit, hit_words = await check_sensitive_text(db, record.prompt or "")
             if hit:
-                record.moderation_status = "pending"
                 record.moderation_flags = hit_words
-                record.moderation_reason = f"命中敏感词: {', '.join(hit_words[:5])}"
-            else:
-                record.moderation_status = "approved"
-                record.moderation_flags = None
-                record.moderation_reason = None
+                record.moderation_reason = f"审核中：提示词命中敏感词（{', '.join(hit_words[:3])}），等待图像审核"
         except Exception as mod_err:
-            logger.warning("[广场] 分享时自动预审失败: %s", mod_err)
+            logger.warning("[广场] 分享时敏感词检测失败: %s", mod_err)
+
+        # 异步触发 AI 图像/视频内容审核（不阻塞接口响应）
+        try:
+            import asyncio
+            asyncio.create_task(_async_ai_moderate(record.id, record.type, record.result_url, record.prompt))
+        except Exception as task_err:
+            logger.warning("[广场] 启动 AI 异步审核失败 id=%d: %s", record.id, task_err)
 
     await db.commit()
     await db.refresh(record)
 
-    msg = "已设为公开分享" if body.is_public else "已设为仅自己可见"
+    if body.is_public:
+        msg = "已提交分享，正在审核中，审核通过后将展示到广场"
+    else:
+        msg = "已设为仅自己可见"
     logger.info("[广场] 用户 %s 切换记录 %s 分享状态: %s", current_user.id, record_id, body.is_public)
 
     return UpdateShareStatusResponse(
@@ -1030,6 +1045,7 @@ async def batch_update_share_status(
     """
     批量设置多条记录的公开/私有状态（需登录，按用户隔离）。
     不属于当前用户的 ID 会被忽略并计入 failed_ids。
+    设为公开时默认进入待审核状态。
     """
     ids = body.ids or []
     if not ids:
@@ -1047,6 +1063,8 @@ async def batch_update_share_status(
 
     now = datetime.utcnow()
     updated_ids = []
+    newly_public_records = []  # 收集本次新公开的记录，用于触发异步 AI 审核
+
     for record in records:
         # ===== 被管理员屏蔽的作品，跳过，不允许再次公开 =====
         if body.is_public and record.moderation_status == "rejected":
@@ -1057,27 +1075,40 @@ async def batch_update_share_status(
         # 首次设为公开时记录时间
         if body.is_public and not was_public and not record.public_shared_at:
             record.public_shared_at = now
-        # ===== 首次设为公开时：自动预审（敏感词检测）=====
+
+        # ===== 设为公开时：进入待审核状态，敏感词快速筛查 =====
         if body.is_public and not was_public:
+            record.moderation_status = "pending"
+            record.moderation_flags = None
+            record.moderation_reason = "审核中：等待系统预审"
             try:
                 from app.services.moderation_service import check_sensitive_text
                 hit, hit_words = await check_sensitive_text(db, record.prompt or "")
                 if hit:
-                    record.moderation_status = "pending"
                     record.moderation_flags = hit_words
-                    record.moderation_reason = f"命中敏感词: {', '.join(hit_words[:5])}"
-                else:
-                    record.moderation_status = "approved"
-                    record.moderation_flags = None
-                    record.moderation_reason = None
+                    record.moderation_reason = f"审核中：提示词命中敏感词（{', '.join(hit_words[:3])}），等待图像审核"
             except Exception as mod_err:
-                logger.warning("[广场] 批量分享时自动预审失败 id=%d: %s", record.id, mod_err)
+                logger.warning("[广场] 批量分享时敏感词检测失败 id=%d: %s", record.id, mod_err)
+            newly_public_records.append(record)
+
         updated_ids.append(record.id)
 
     await db.commit()
 
+    # 批量触发异步 AI 审核
+    if newly_public_records:
+        try:
+            import asyncio
+            for rec in newly_public_records:
+                asyncio.create_task(_async_ai_moderate(rec.id, rec.type, rec.result_url, rec.prompt))
+        except Exception as task_err:
+            logger.warning("[广场] 批量启动 AI 异步审核失败: %s", task_err)
+
     failed_ids = [rid for rid in unique_ids if rid not in updated_ids]
-    msg = f"已将 {len(updated_ids)} 条记录设为{'公开分享' if body.is_public else '仅自己可见'}"
+    if body.is_public:
+        msg = f"已提交 {len(updated_ids)} 条作品分享，正在审核中，审核通过后将展示到广场"
+    else:
+        msg = f"已将 {len(updated_ids)} 条记录设为仅自己可见"
     logger.info("[广场] 用户 %s 批量切换 %d 条记录分享状态: %s", current_user.id, len(updated_ids), body.is_public)
 
     return BatchShareResponse(
@@ -1086,3 +1117,80 @@ async def batch_update_share_status(
         failed_ids=failed_ids,
         message=msg,
     )
+
+
+# =====================================================
+# 异步 AI 内容审核后台任务
+# =====================================================
+
+
+async def _async_ai_moderate(
+    record_id: int,
+    gen_type: str,
+    result_url: Optional[str],
+    prompt: Optional[str],
+):
+    """
+    后台异步任务：调用 AI 多模态模型审核图片/视频内容。
+    审核完成后更新记录的 moderation_status：
+    - 违规 → rejected
+    - 不违规 → pending（继续等待人工审核）
+    - 审核失败 → pending（保持待审核，由人工处理）
+    """
+    from app.core.database import async_session
+    from app.services.moderation_service import moderate_generation_with_ai
+
+    try:
+        result = await moderate_generation_with_ai(gen_type, result_url, prompt)
+
+        async with async_session() as db:
+            stmt = select(Generation).filter(Generation.id == record_id)
+            res = await db.execute(stmt)
+            record = res.scalar_one_or_none()
+            if not record:
+                return
+
+            if not result.get("success"):
+                # 审核失败，保持 pending，等人工审核
+                record.moderation_reason = "系统预审失败，等待人工审核"
+                await db.commit()
+                logger.info("[AI审核] 记录 %d 审核失败，保持待审核", record_id)
+                return
+
+            if result.get("is_violation"):
+                # AI 判定违规 → 直接设为 rejected
+                categories = result.get("categories", []) or []
+                reason = result.get("reason", "") or ""
+                confidence = result.get("confidence", 0)
+                record.moderation_status = "rejected"
+                # 把 AI 审核结果追加到 flags 里
+                existing_flags = record.moderation_flags or []
+                if isinstance(existing_flags, list):
+                    new_flags = list(existing_flags)
+                else:
+                    new_flags = []
+                for cat in categories:
+                    if cat not in new_flags:
+                        new_flags.append(cat)
+                record.moderation_flags = new_flags
+                reason_text = f"AI 预审不通过：{reason}"
+                if categories:
+                    reason_text += f"（{', '.join(categories[:3])}）"
+                reason_text += f"，置信度 {int(confidence * 100)}%"
+                record.moderation_reason = reason_text
+                record.moderated_at = datetime.utcnow()
+                await db.commit()
+                logger.info("[AI审核] 记录 %d 判定违规: %s", record_id, reason_text)
+            else:
+                # AI 判定没问题 → 保持 pending，等人工复审
+                reason = "AI 预审通过，等待人工复审"
+                flags = record.moderation_flags or []
+                if not flags:
+                    record.moderation_reason = reason
+                else:
+                    record.moderation_reason = f"{reason}（提示词含敏感词，需人工确认）"
+                await db.commit()
+                logger.info("[AI审核] 记录 %d AI 预审通过，等待人工复审", record_id)
+
+    except Exception as e:
+        logger.exception("[AI审核] 后台任务异常 id=%d: %s", record_id, e)

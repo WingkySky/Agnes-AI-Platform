@@ -98,6 +98,8 @@ interface GenerationConfig {
   response_format?: string
   seconds?: number
   aspect_ratio?: string
+  resolution?: number
+  frame_rate?: number
 }
 
 /** 生成任务选项 */
@@ -705,13 +707,34 @@ export async function createVideoGenerationTask(ctx: GenerationContext, config: 
     mode,
   }
 
+  // 视频帧率
+  if (config.frame_rate) {
+    params.frame_rate = config.frame_rate
+  }
+
   // 视频时长（秒）
   if (config.seconds) {
     params.seconds = config.seconds
   }
 
-  // 画面比例（如 "16:9"）
-  if (config.aspect_ratio) {
+  // 分辨率：根据高度（resolution）和宽高比计算 width/height
+  if (config.resolution && config.aspect_ratio) {
+    const arParts = config.aspect_ratio.split(':')
+    if (arParts.length === 2) {
+      const arW = parseInt(arParts[0], 10)
+      const arH = parseInt(arParts[1], 10)
+      if (arW > 0 && arH > 0) {
+        const height = config.resolution
+        const width = Math.round(height * arW / arH)
+        // 确保宽高为 8 的倍数（视频编码硬性要求，向上取整）
+        params.width = Math.floor((width + 7) / 8) * 8
+        params.height = Math.floor((height + 7) / 8) * 8
+      }
+    }
+  }
+
+  // 画面比例（如 "16:9"，如果没传具体宽高则后端会用默认高度按比例计算）
+  if (config.aspect_ratio && !params.width) {
     params.aspect_ratio = config.aspect_ratio
   }
 
@@ -835,6 +858,8 @@ export async function executeMergeVideoGeneration(configId: string, store: Canva
     model: configNode.content?.model || useModelsStore().defaultVideoModel,
     seconds: configNode.content?.seconds || 5,
     aspect_ratio: configNode.content?.aspect_ratio || '16:9',
+    resolution: configNode.content?.resolution || useModelsStore().defaultVideoResolution,
+    frame_rate: configNode.content?.frame_rate || useModelsStore().defaultFrameRate,
   }
 
   // 4. 异步执行生成 + 轮询 + 回填（不阻塞调用方）

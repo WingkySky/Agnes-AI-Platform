@@ -16,23 +16,41 @@
 
     <el-card class="filter-card" shadow="never">
       <div class="filter-row">
-        <el-select v-model="filterStatus" placeholder="全部状态" style="width: 140px" @change="onFilterChange">
-          <el-option label="全部" value="" />
+        <el-select v-model="filterStatus" placeholder="全部状态" style="width: 120px" @change="onFilterChange">
           <el-option label="待审核" value="pending" />
           <el-option label="已通过" value="approved" />
           <el-option label="已屏蔽" value="rejected" />
+          <el-option label="全部" value="all" />
         </el-select>
 
-        <el-select v-model="filterType" placeholder="全部类型" style="width: 120px" @change="onFilterChange">
+        <el-select v-model="filterType" placeholder="全部类型" style="width: 100px" @change="onFilterChange">
           <el-option label="全部" value="" />
           <el-option label="图片" value="image" />
           <el-option label="视频" value="video" />
         </el-select>
 
         <el-input
+          v-model="searchWorkId"
+          placeholder="内容 ID"
+          style="width: 110px"
+          clearable
+          @keyup.enter="onSearch"
+          @clear="onSearch"
+        />
+
+        <el-input
+          v-model="searchUsername"
+          placeholder="创作者用户名"
+          style="width: 140px"
+          clearable
+          @keyup.enter="onSearch"
+          @clear="onSearch"
+        />
+
+        <el-input
           v-model="keyword"
-          placeholder="搜索 prompt 或用户 ID"
-          style="width: 260px"
+          placeholder="搜索提示词"
+          style="width: 220px"
           clearable
           @keyup.enter="onSearch"
           @clear="onSearch"
@@ -99,9 +117,12 @@
             </el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column label="作者" width="120" align="center">
+        <el-table-column label="作者" width="140" align="center">
           <template #default="{ row }">
-            <span>{{ row.user_id }}</span>
+            <div class="author-cell">
+              <span class="author-name">{{ row.nickname || row.username || '匿名' }}</span>
+              <span class="author-id muted">ID: {{ row.user_id }}</span>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="审核状态" width="110" align="center">
@@ -230,7 +251,7 @@
           </div>
           <div class="info-row">
             <span class="info-label">作者：</span>
-            <span>{{ currentWork.user_id }}</span>
+            <span>{{ currentWork.nickname || currentWork.username || '匿名' }} (ID: {{ currentWork.user_id }})</span>
           </div>
           <div class="info-row">
             <span class="info-label">模型：</span>
@@ -292,9 +313,11 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
 
-const filterStatus = ref<string>('')
+const filterStatus = ref<string>('pending')
 const filterType = ref<string>('')
 const keyword = ref('')
+const searchWorkId = ref<string>('')
+const searchUsername = ref('')
 
 const selectedIds = ref<number[]>([])
 
@@ -355,8 +378,13 @@ async function fetchList() {
       page_size: pageSize.value
     }
     if (filterStatus.value) params.status = filterStatus.value
-    if (filterType.value) params.type = filterType.value
+    if (filterType.value) params.work_type = filterType.value
     if (keyword.value.trim()) params.keyword = keyword.value.trim()
+    if (searchWorkId.value.trim()) {
+      const id = parseInt(searchWorkId.value.trim())
+      if (!isNaN(id)) params.work_id = id
+    }
+    if (searchUsername.value.trim()) params.username = searchUsername.value.trim()
 
     const resp = await getModerationWorks(params)
     list.value = resp.items || []
@@ -578,6 +606,23 @@ onMounted(fetchList)
 .flags-wrap {
   display: flex;
   flex-wrap: wrap;
+}
+
+.author-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: center;
+}
+
+.author-name {
+  color: var(--agnes-text-primary);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.author-id {
+  font-size: 11px;
 }
 
 .pagination-wrap {
