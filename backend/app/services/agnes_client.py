@@ -617,6 +617,12 @@ class AgnesAIClient:
         #   2) 把非 Agnes-URL 的图调用一次 images/generations 做 pass-through，拿到平台托管 URL
         #   3) 用该 URL 调 video/generations
         # 同时用第一张参考图的真实宽高修正 aspect_ratio，避免与请求值不一致导致 Internal generation failed
+        #
+        # 【Agnes 官方 API 传参规范】（参考 Yacey/agnes-ai-generation-skill references/api.md）
+        #   - 单图图生视频：image 放顶层（字符串），mode 可选（如 ti2vid）
+        #   - 多图 / 关键帧视频：image 必须为数组，放在 extra_body.image 中，
+        #     并在 extra_body.mode 显式指定 "keyframes"
+        #   - Agnes API 不存在 image_end 字段，尾帧必须通过 image 数组的第二个元素传入
 
         refs_with_mime: list = []
         if image and isinstance(image, str) and image.strip():
@@ -669,19 +675,61 @@ class AgnesAIClient:
             body["seed"] = seed
 
         if pairs:
-            extra_body: Dict[str, Any] = {"image": pairs[0][0]}
-            if len(pairs) >= 2:
-                extra_body["image_end"] = pairs[-1][0]
-            body["extra_body"] = extra_body
-            logger.info(
-                "[视频生成] 图生视频模式: model=%s, image_count=%d, "
-                "duration=%ss, aspect_ratio=%s, fps=%d, prompt=%s",
-                model, len(pairs), _duration, _aspect_ratio, _fps, prompt[:80],
-            )
+            # 按 Agnes 官方 API 规范传参：
+            #   - 单图 + 非关键帧模式：image 放顶层（字符串）
+            #   - 多图 或 关键帧模式：image 数组放 extra_body，并显式指定 mode
+            is_keyframes = (mode == "keyframes")
+            if len(pairs) == 1 and not is_keyframes:
+                body["image"] = pairs[0][0]
+                if mode:
+                    body["mode"] = mode
+                logger.info(
+                    "[视频生成] 图生视频模式(单图): model=%s, "
+                    "duration=%ss, aspect_ratio=%s, fps=%d, prompt=%s",
+                    model, _duration, _aspect_ratio, _fps, prompt[:80],
+                )
+            else:
+                # 多图 / 关键帧模式：image 必须为数组，放在 extra_body 中
+                extra_body: Dict[str, Any] = {
+                    "image": [p[0] for p in pairs],
+                }
+                if mode:
+                    extra_body["mode"] = mode
+                body["extra_body"] = extra_body
+                logger.info(
+                    "[视频生成] %s模式: model=%s, image_count=%d, "
+                    "duration=%ss, aspect_ratio=%s, fps=%d, prompt=%s",
+                    "关键帧" if is_keyframes else "多图", model, len(pairs),
+                    _duration, _aspect_ratio, _fps, prompt[:80],
+                )
 
         # 额外打印一次真正发出去的 body（避免 safe_body 只看前 120 字符造成误判）
-        if "extra_body" in body and isinstance(body["extra_body"].get("image"), str):
-            img = body["extra_body"]["image"]
+        # 支持 image 为字符串（单图顶层）或数组（多图/关键帧 extra_body）两种形式
+        if "extra_body" in body:
+            img_val = body["extra_body"].get("image")
+            if isinstance(img_val, str):
+                logger.info(
+                    "[视频生成] 上游请求体摘要: aspect_ratio=%s, image_type=%s, image_len=%d, image_head=%s",
+                    _aspect_ratio,
+                    "agnes_url" if "platform-outputs.agnes-ai.space" in img_val else ("url" if img_val.lower().startswith("http") else "data_uri"),
+                    len(img_val),
+                    img_val[:160],
+                )
+            elif isinstance(img_val, list):
+                # 多图 / 关键帧模式：逐张打印摘要
+                for idx, one_img in enumerate(img_val):
+                    if not isinstance(one_img, str):
+                        continue
+                    logger.info(
+                        "[视频生成] 上游请求体摘要[%d]: aspect_ratio=%s, image_type=%s, image_len=%d, image_head=%s",
+                        idx,
+                        _aspect_ratio,
+                        "agnes_url" if "platform-outputs.agnes-ai.space" in one_img else ("url" if one_img.lower().startswith("http") else "data_uri"),
+                        len(one_img),
+                        one_img[:160],
+                    )
+        elif isinstance(body.get("image"), str):
+            img = body["image"]
             logger.info(
                 "[视频生成] 上游请求体摘要: aspect_ratio=%s, image_type=%s, image_len=%d, image_head=%s",
                 _aspect_ratio,

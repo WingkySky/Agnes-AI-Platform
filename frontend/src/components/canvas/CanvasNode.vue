@@ -99,6 +99,7 @@
             :class="{ 'object-fill': metadata.freeResize }"
             draggable="false"
             @dragstart.prevent
+            @load="onImageLoad"
           />
         </div>
 
@@ -120,6 +121,7 @@
             controls
             class="video-player"
             data-canvas-no-zoom
+            @loadedmetadata="onVideoMetadataLoaded"
           />
         </div>
 
@@ -665,6 +667,41 @@ function handleResizeStart(event: MouseEvent, corner: any) {
 function handleConnectStart(event: MouseEvent, anchorType: string) {
   event.stopPropagation()
   emit('start-connecting', anchorType)
+}
+
+/* ---------- 交互：媒体元数据读取 ---------- */
+
+/** 图片加载完成：读取原始像素尺寸写回 store，避免显示 340×240 这种画布缩放尺寸 */
+function onImageLoad(e: Event) {
+  const img = e.target as HTMLImageElement
+  if (!img?.naturalWidth || !img?.naturalHeight) return
+  const panel = props.panel
+  // 如果已经有正确的元数据就不用重复写，避免无意义的 store 更新
+  if (
+    panel.content?.naturalWidth === img.naturalWidth
+    && panel.content?.naturalHeight === img.naturalHeight
+  ) {
+    return
+  }
+  store.updatePanel(panel.id, {
+    content: { naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight },
+  })
+}
+
+/** 视频元数据加载完成：读取原始像素尺寸写回 store */
+function onVideoMetadataLoaded(e: Event) {
+  const video = e.target as HTMLVideoElement
+  if (!video?.videoWidth || !video?.videoHeight) return
+  const panel = props.panel
+  if (
+    panel.content?.naturalWidth === video.videoWidth
+    && panel.content?.naturalHeight === video.videoHeight
+  ) {
+    return
+  }
+  store.updatePanel(panel.id, {
+    content: { naturalWidth: video.videoWidth, naturalHeight: video.videoHeight },
+  })
 }
 
 /* ---------- 交互：双击 ---------- */

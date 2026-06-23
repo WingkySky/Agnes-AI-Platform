@@ -1,13 +1,16 @@
 import React, { useState } from 'react';
-import { User, Coins, Crown, Zap, ShieldAlert, BadgeCheck, Check, HelpCircle, ChevronRight, Sliders, Settings } from 'lucide-react';
+import { Coins, Crown, Zap, ShieldAlert, BadgeCheck, Check, HelpCircle, ChevronRight, Sliders, Settings, LogOut } from 'lucide-react';
+import { User } from '../types';
 
 interface ProfileTabProps {
+  user: User | null;
   userCredits: number;
   setUserCredits: React.Dispatch<React.SetStateAction<number>>;
+  onLogout: () => void;
   theme: 'dark' | 'light';
 }
 
-export default function ProfileTab({ userCredits, setUserCredits, theme }: ProfileTabProps) {
+export default function ProfileTab({ user, userCredits, setUserCredits, onLogout, theme }: ProfileTabProps) {
   const [hasCheckedIn, setHasCheckedIn] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [profileNotification, setProfileNotification] = useState<string | null>(null);
@@ -21,7 +24,7 @@ export default function ProfileTab({ userCredits, setUserCredits, theme }: Profi
   };
 
   const triggerBillingAction = (planName: string) => {
-    setProfileNotification(`BIllING PRE-FLIGHT AUTHENTICATION SUCCESSFUL FOR [${planName.toUpperCase()}]`);
+    setProfileNotification(`Billing auth success for [${planName.toUpperCase()}]`);
     setTimeout(() => setProfileNotification(null), 3500);
   };
 
@@ -56,26 +59,38 @@ export default function ProfileTab({ userCredits, setUserCredits, theme }: Profi
       {/* Main Account details scrolling viewport */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-none">
         
-        {/* User Card */}
+        {/* User Card - 展示真实用户信息 */}
         <div className="p-3 bg-[#161920] border border-white/5 rounded-xl flex items-center space-x-3 relative shadow-xl shrink-0">
-          <img
-            src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80"
-            alt="my-avatar"
-            className="w-11 h-11 rounded-full object-cover border border-blue-500/30"
-          />
+          {user?.avatar_url ? (
+            <img
+              src={user.avatar_url}
+              alt="my-avatar"
+              className="w-11 h-11 rounded-full object-cover border border-blue-500/30"
+            />
+          ) : (
+            <div className="w-11 h-11 rounded-full bg-blue-500/20 border border-blue-500/30 flex items-center justify-center">
+              <span className="text-base font-black text-blue-400">
+                {user?.username?.charAt(0).toUpperCase() || 'U'}
+              </span>
+            </div>
+          )}
           <div>
             <div className="flex items-center space-x-1">
-              <span className="text-[11px] font-black text-slate-50 tracking-wide font-mono">AGNES_CREATOR_X</span>
+              <span className="text-[11px] font-black text-slate-50 tracking-wide font-mono">
+                {user?.username || 'AGNES_USER'}
+              </span>
               <BadgeCheck className="w-3.5 h-3.5 text-blue-400" />
             </div>
-            <p className="text-[8px] text-slate-500 font-mono">ACCOUNT UID: #4928109-AG</p>
+            <p className="text-[8px] text-slate-500 font-mono">
+              UID: #{user?.id || '0'}-AG
+            </p>
             <span className="inline-block mt-1 px-1.5 py-0.5 bg-blue-500/10 border border-blue-500/20 text-blue-400 font-extrabold text-[7.5px] uppercase tracking-wider rounded">
-              👑 Agnes VIP Level II
+              {user?.is_admin ? '👑 ADMIN' : '⭐ MEMBER'}
             </span>
           </div>
 
           <div className="absolute top-2.5 right-2.5 flex items-center bg-blue-500/10 border border-blue-500/20 px-1.5 py-0.2 rounded text-[7.5px] text-blue-400 font-black font-mono">
-            PRO TIERS
+            {user?.is_active ? 'ACTIVE' : 'INACTIVE'}
           </div>
         </div>
 
@@ -206,6 +221,15 @@ export default function ProfileTab({ userCredits, setUserCredits, theme }: Profi
             <span className="text-[8.5px] font-bold text-slate-500 font-mono">CAMERA-GALLERY</span>
           </div>
         </div>
+
+        {/* Logout Button */}
+        <button
+          onClick={onLogout}
+          className="w-full py-2.5 bg-rose-500/10 border border-rose-500/20 text-rose-400 font-bold text-xs rounded-xl flex items-center justify-center gap-2 hover:bg-rose-500/20 transition-all"
+        >
+          <LogOut className="w-3.5 h-3.5" />
+          退出登录
+        </button>
 
       </div>
     </div>

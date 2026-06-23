@@ -253,6 +253,27 @@
               </span>
             </span>
           </div>
+          <!-- 视频实际分辨率（通过 <video> loadedmetadata 读取 videoWidth/videoHeight） -->
+          <div class="info-row" v-if="detailItem.type === 'video' && detailVideoNatural">
+            <span class="label">{{ t('history.actualSizeLabel') }}：</span>
+            <span class="size-value">
+              {{ detailVideoNatural.w }}×{{ detailVideoNatural.h }}
+              <span class="size-mp" v-if="detailVideoActualPixels">({{ formatPixels(detailVideoActualPixels) }})</span>
+            </span>
+          </div>
+          <!-- 视频请求参数：宽高比 + 时长 -->
+          <div class="info-row" v-if="detailItem.type === 'video' && detailRequestAspectRatio">
+            <span class="label">{{ t('history.requestRatioLabel') }}：</span>
+            <span class="size-value">
+              {{ detailRequestAspectRatio }}
+              <span class="size-mismatch" v-if="detailVideoRatioMismatch">
+                · {{ t('history.sizeMismatchHint') }}
+              </span>
+              <span class="size-mp" v-if="detailRequestSeconds">
+                · {{ detailRequestSeconds }}s
+              </span>
+            </span>
+          </div>
           <div class="info-row" v-if="detailItem.mode"><span class="label">{{ t('history.modeLabel') }}：</span><span class="mode-text">{{ t('params.mode.' + detailItem.mode) || detailItem.mode }}</span></div>
           <div class="info-row"><span class="label">{{ t('history.statusLabel') }}：</span><span>{{ detailItem.status || 'success' }}</span></div>
           <div class="info-row"><span class="label">{{ t('history.creditsConsumedLabel') }}：</span><span class="credits-value">{{ detailItem.credits_consumed ?? 0 }}</span></div>
@@ -370,6 +391,8 @@ const detailVideoLoading = ref(false)
 const detailVideoFailed = ref(false)
 // 图片实际尺寸（通过 <img> @load 读取 naturalWidth/naturalHeight）
 const detailImageNatural = ref<{ w: number; h: number } | null>(null)
+// 视频实际尺寸（通过 <video> loadedmetadata 读取 videoWidth/videoHeight）
+const detailVideoNatural = ref<{ w: number; h: number } | null>(null)
 
 const videoThumbnails = reactive<Record<string, string>>({})
 const videoPreviews = reactive<Record<string, string>>({})
@@ -516,7 +539,8 @@ function handleSizeChange(size: number) {
 function showDetail(item: GenerationRecord) {
   detailItem.value = item
   detailPoster.value = ''
-  detailImageNatural.value = null  // 重置实际尺寸，等图片 load 后回填
+  detailImageNatural.value = null  // 重置图片实际尺寸，等 img load 后回填
+  detailVideoNatural.value = null  // 重置视频实际尺寸，等 loadedmetadata 后回填
   detailVideoLoading.value = item.type === 'video' && !!item.result_url
   detailVideoFailed.value = false
   detailVisible.value = true
@@ -561,6 +585,41 @@ const detailSizeMismatch = computed(() => {
   const m = req.match(/^(\d+)x(\d+)$/i)
   if (!m) return false
   return parseInt(m[1], 10) !== n.w || parseInt(m[2], 10) !== n.h
+})
+
+// ---------- 视频实际分辨率相关 ----------
+// 视频请求参数：宽高比（如 "16:9"）
+const detailRequestAspectRatio = computed(() => {
+  const p = detailItem.value?.params as Record<string, unknown> | null
+  const r = p?.aspect_ratio
+  return typeof r === 'string' ? r : ''
+})
+
+// 视频请求参数：时长（秒）
+const detailRequestSeconds = computed(() => {
+  const p = detailItem.value?.params as Record<string, unknown> | null
+  const s = p?.seconds ?? p?.duration
+  return typeof s === 'number' ? s : (typeof s === 'string' ? Number(s) || 0 : 0)
+})
+
+// 视频实际像素数
+const detailVideoActualPixels = computed(() => {
+  const n = detailVideoNatural.value
+  if (!n) return 0
+  return n.w * n.h
+})
+
+// 视频实际宽高比是否匹配请求（如请求 16:9，实际 1920x1080 → 匹配）
+const detailVideoRatioMismatch = computed(() => {
+  const n = detailVideoNatural.value
+  const req = detailRequestAspectRatio.value
+  if (!n || !req) return false
+  const m = req.match(/^(\d+):(\d+)$/)
+  if (!m) return false
+  const rw = parseInt(m[1], 10)
+  const rh = parseInt(m[2], 10)
+  // 用交叉乘法比较比例，允许微小误差
+  return Math.abs(n.w * rh - n.h * rw) > 1
 })
 
 function toggleEditMode() {
@@ -740,6 +799,10 @@ function openInNewTab() {
 function captureDetailPoster() {
   const el = detailVideoEl.value
   if (!el || !el.videoWidth || detailPoster.value) return
+  // 顺便记录视频实际分辨率（videoWidth/videoHeight 在 loadedmetadata 后可用）
+  if (!detailVideoNatural.value && el.videoWidth && el.videoHeight) {
+    detailVideoNatural.value = { w: el.videoWidth, h: el.videoHeight }
+  }
   try {
     const canvas = document.createElement('canvas')
     const scale = Math.min(1, 720 / el.videoWidth)

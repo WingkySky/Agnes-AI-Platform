@@ -4,6 +4,20 @@
 
 export type AppTab = 'discover' | 'generate' | 'assistant' | 'creations' | 'profile';
 
+/**
+ * 用户信息类型
+ */
+export interface User {
+  id: number;
+  username: string;
+  email: string | null;
+  avatar_url: string | null;
+  credits: number;
+  role: string;
+  is_active: boolean;
+  is_admin: boolean;
+}
+
 export type GenType = 'image' | 'video';
 
 export interface AIModel {

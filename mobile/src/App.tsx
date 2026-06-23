@@ -1,167 +1,198 @@
-import React, { useState, useEffect } from 'react';
-import { Compass, Sparkles, MessageSquare, FolderHeart, User, Bell, AlertCircle } from 'lucide-react';
+/**
+ * Agnes AI Platform Mobile App
+ * 移动端应用主入口
+ */
+import React, { useState, useEffect, useCallback } from 'react';
+import { Compass, Sparkles, MessageSquare, FolderHeart, User, Loader2 } from 'lucide-react';
 import PhoneContainer from './components/PhoneContainer';
 import DiscoverTab from './components/DiscoverTab';
 import GenerateTab from './components/GenerateTab';
 import AssistantTab from './components/AssistantTab';
 import CreationsTab from './components/CreationsTab';
 import ProfileTab from './components/ProfileTab';
+import LoginView from './components/LoginView';
 
-import { AppTab, GenType, GenerationJob, GalleryItem, ChatMessage } from './types';
+import { AppTab, GenType, GenerationJob, User } from './types';
 import { INITIAL_GALLERY_ITEMS, INITIAL_CHAT_MESSAGES } from './data';
+import { getMe, getCredits } from './api/auth';
+import { createImageTask, getImageTaskStatus } from './api/images';
+import { createVideoTask, getVideoStatus } from './api/videos';
+import { getToken } from './api/client';
 
 export default function App() {
+  // 登录状态
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [user, setUser] = useState<User | null>(null);
+  const [userCredits, setUserCredits] = useState(0);
+
   const [activeTab, setActiveTab] = useState<AppTab>('discover');
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
-  const [userCredits, setUserCredits] = useState(240);
-  const [galleryItems, setGalleryItems] = useState<GalleryItem[]>(INITIAL_GALLERY_ITEMS);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(INITIAL_CHAT_MESSAGES);
-  
-  // Create preloaded past creation jobs so user has a rich experience immediately.
-  // We seed this with our pre-generated beautiful assets!
-  const [jobs, setJobs] = useState<GenerationJob[]>([
-    {
-      id: 'job-cyber-maiden',
-      prompt: 'A close up cinematic portrait of a cyberpunk female pilot with soft neon facial markings, reflective visor, intricate cybernetic headwear, wearing a vintage bomber jacket, glowing blue and pink ambient light, high-end photography, cinematic, 8k resolution, detailed texture',
-      type: 'image',
-      modelId: 'agnes-vision-ultra',
-      aspectRatio: '3:4',
-      status: 'completed',
-      progress: 100,
-      resultUrl: '/src/assets/images/cyber_girl_portrait_1781971382057.jpg',
-      createdAt: 'Today, 8:42 AM'
-    },
-    {
-      id: 'job-floating-temple',
-      prompt: 'A breathtaking fantasy landscape of an ancient floating stone temple carved into a massive levitating crystal rock, cascading waterfalls pouring down into infinite space, golden sunrays filtering through fluffy pink clouds, majestic birds soaring, ethereal and dreamy atmosphere, unreal engine 5 render, highly detailed, masterpieces',
-      type: 'image',
-      modelId: 'agnes-vision-ultra',
-      aspectRatio: '3:4',
-      status: 'completed',
-      progress: 100,
-      resultUrl: '/src/assets/images/floating_temple_fantasy_1781971398624.jpg',
-      createdAt: 'Yesterday, 4:15 PM'
-    },
-    {
-      id: 'job-retro-car',
-      prompt: 'A sleek retro-futuristic black hover sports car with glowing turquoise booster lights flying over a cyber-synthwave neon-lit highway at night, towering holographic buildings in the background, purple mist, vaporwave aesthetics, motion blur, extremely high resolution, cinematic framing',
-      type: 'video',
-      modelId: 'agnes-motion-cinematic',
-      aspectRatio: '16:9',
-      status: 'completed',
-      progress: 100,
-      resultUrl: '/src/assets/images/retro_cyber_car_1781971412978.jpg',
-      createdAt: 'Yesterday, 11:32 AM'
-    }
-  ]);
+  const [galleryItems, setGalleryItems] = useState(INITIAL_GALLERY_ITEMS);
+  const [chatMessages, setChatMessages] = useState(INITIAL_CHAT_MESSAGES);
 
-  // Form states inside generator console
+  // 生成任务队列
+  const [jobs, setJobs] = useState<GenerationJob[]>([]);
+
+  // 表单状态
   const [formPrompt, setFormPrompt] = useState('');
   const [formType, setFormType] = useState<GenType>('image');
   const [formModel, setFormModel] = useState('agnes-vision-ultra');
   const [formAspectRatio, setFormAspectRatio] = useState('3:4');
 
-  // Dynamic system toast notifications
+  // Toast通知
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Live render simulator scheduling loop
+  // 初始化检查登录状态
   useEffect(() => {
-    const hasActiveJobs = jobs.some((j) => j.status === 'pending' || j.status === 'processing');
-    if (!hasActiveJobs) return;
+    const checkAuth = async () => {
+      const token = getToken();
+      if (!token) {
+        setIsLoading(false);
+        return;
+      }
+      try {
+        const userInfo = await getMe();
+        setUser(userInfo);
+        setUserCredits(userInfo.credits);
+        setIsLoggedIn(true);
+      } catch (err) {
+        // token无效，清除
+        localStorage.removeItem('agnes_mobile_auth_token');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    checkAuth();
+  }, []);
 
-    const timer = setInterval(() => {
-      setJobs((prevJobs) => {
-        let updated = false;
-        const next = prevJobs.map((job) => {
-          if (job.status === 'pending') {
-            updated = true;
-            return { ...job, status: 'processing', progress: 12 };
-          }
-          if (job.status === 'processing') {
-            updated = true;
-            const step = Math.floor(Math.random() * 20) + 12;
-            const nextProgress = job.progress + step;
-            if (nextProgress >= 100) {
-              // Trigger final rendering asset photo assignment
-              let finalizedUrl = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80'; // fallback
-              const promptLower = job.prompt.toLowerCase();
-              
-              if (promptLower.includes('cyber') || promptLower.includes('girl') || promptLower.includes('mech')) {
-                finalizedUrl = '/src/assets/images/cyber_girl_portrait_1781971382057.jpg';
-              } else if (promptLower.includes('temple') || promptLower.includes('magic') || promptLower.includes('fantasy') || promptLower.includes('crystal')) {
-                finalizedUrl = '/src/assets/images/floating_temple_fantasy_1781971398624.jpg';
-              } else if (promptLower.includes('car') || promptLower.includes('highway') || promptLower.includes('road') || promptLower.includes('drift')) {
-                finalizedUrl = '/src/assets/images/retro_cyber_car_1781971412978.jpg';
-              } else if (job.type === 'video') {
-                finalizedUrl = 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=600&auto=format&fit=crop&q=80';
+  // 监听登出事件
+  useEffect(() => {
+    const handleLogout = () => {
+      setIsLoggedIn(false);
+      setUser(null);
+      setUserCredits(0);
+      setJobs([]);
+    };
+    window.addEventListener('mobile:logout', handleLogout);
+    return () => window.removeEventListener('mobile:logout', handleLogout);
+  }, []);
+
+  // 轮询任务状态
+  useEffect(() => {
+    const activeJobs = jobs.filter(j => j.status === 'pending' || j.status === 'processing');
+    if (activeJobs.length === 0) return;
+
+    const pollInterval = setInterval(async () => {
+      setJobs(prevJobs => {
+        let hasUpdate = false;
+        const next = [...prevJobs];
+
+        Promise.all(activeJobs.map(async (job) => {
+          try {
+            if (job.type === 'image') {
+              const status = await getImageTaskStatus(job.id);
+              if (status.status === 'success' || status.status === 'completed') {
+                const idx = next.findIndex(j => j.id === job.id);
+                if (idx !== -1) {
+                  next[idx] = { ...next[idx], status: 'completed', progress: 100, resultUrl: status.result_url || status.url };
+                  hasUpdate = true;
+                }
+              } else if (status.status === 'failed') {
+                const idx = next.findIndex(j => j.id === job.id);
+                if (idx !== -1) {
+                  next[idx] = { ...next[idx], status: 'failed' };
+                  hasUpdate = true;
+                }
               } else {
-                // Return a nice dynamic scenic nature picture
-                finalizedUrl = 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=600&auto=format&fit=crop&q=80';
+                const idx = next.findIndex(j => j.id === job.id);
+                if (idx !== -1 && status.progress !== undefined) {
+                  next[idx] = { ...next[idx], progress: status.progress, status: 'processing' };
+                  hasUpdate = true;
+                }
               }
-
-              // Show dynamic complete alert inside Dynamic Island Notch!
-              setToastMessage(`✨ GPU Synthesized Done: "${job.prompt.substring(0, 18)}..."`);
-              setTimeout(() => {
-                setToastMessage(null);
-              }, 4500);
-
-              return {
-                ...job,
-                status: 'completed',
-                progress: 100,
-                resultUrl: finalizedUrl
-              };
+            } else {
+              const status = await getVideoStatus(job.id);
+              if (status.status === 'success') {
+                const idx = next.findIndex(j => j.id === job.id);
+                if (idx !== -1) {
+                  next[idx] = { ...next[idx], status: 'completed', progress: 100, resultUrl: status.video_url };
+                  hasUpdate = true;
+                }
+              } else if (status.status === 'failed') {
+                const idx = next.findIndex(j => j.id === job.id);
+                if (idx !== -1) {
+                  next[idx] = { ...next[idx], status: 'failed' };
+                  hasUpdate = true;
+                }
+              } else {
+                const idx = next.findIndex(j => j.id === job.id);
+                if (idx !== -1 && status.progress !== undefined) {
+                  next[idx] = { ...next[idx], progress: status.progress, status: 'processing' };
+                  hasUpdate = true;
+                }
+              }
             }
-            return { ...job, progress: nextProgress };
+          } catch (err) {
+            console.error('轮询失败:', job.id, err);
           }
-          return job;
-        });
+        }));
 
-        return updated ? next : prevJobs;
+        return hasUpdate ? next : prevJobs;
       });
-    }, 1500);
+    }, 3000);
 
-    return () => clearInterval(timer);
+    return () => clearInterval(pollInterval);
   }, [jobs]);
 
-  // Command Action 1: Re-use prompt from discover list
+  // 刷新积分
+  const refreshCredits = useCallback(async () => {
+    try {
+      const resp = await getCredits();
+      setUserCredits(resp.credits);
+      if (user) {
+        setUser({ ...user, credits: resp.credits });
+      }
+    } catch (err) {
+      console.error('刷新积分失败:', err);
+    }
+  }, [user]);
+
+  // Toast提示
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  // 登录成功回调
+  const handleLoginSuccess = (userInfo: User) => {
+    setUser(userInfo);
+    setUserCredits(userInfo.credits);
+    setIsLoggedIn(true);
+  };
+
+  // 从Discover使用prompt
   const handleUsePrompt = (prompt: string, type: GenType, modelName: string, aspectRatio: string) => {
     setFormPrompt(prompt);
     setFormType(type);
-    
-    // Attempt matched models mapping
-    if (type === 'image') {
-      setFormModel('agnes-vision-ultra');
-    } else {
-      setFormModel('agnes-motion-cinematic');
-    }
-
+    setFormModel(type === 'image' ? 'agnes-vision-ultra' : 'agnes-motion-cinematic');
     setFormAspectRatio(aspectRatio);
     setActiveTab('generate');
-
-    // Mini bottom-slide notice
-    setToastMessage("📋 Prompt settings applied to Agnes Engine!");
-    setTimeout(() => setToastMessage(null), 3000);
+    showToast('Prompt settings applied!');
   };
 
-  // Command Action 2: Import prompt directly from Agnes AI Assistant chatbot
-  const handleImportPromptFromChatClient = (prompt: string, type: GenType) => {
+  // 从聊天导入prompt
+  const handleImportPromptFromChat = (prompt: string, type: GenType) => {
     setFormPrompt(prompt);
     setFormType(type);
-    if (type === 'image') {
-      setFormModel('agnes-vision-ultra');
-    } else {
-      setFormModel('agnes-motion-cinematic');
-    }
+    setFormModel(type === 'image' ? 'agnes-vision-ultra' : 'agnes-motion-cinematic');
     setFormAspectRatio('3:4');
     setActiveTab('generate');
-
-    setToastMessage("⚡ AI Optimized prompt exported to Generator!");
-    setTimeout(() => setToastMessage(null), 3000);
+    showToast('AI prompt exported!');
   };
 
-  // Command Action 3: Trigger the render synthesized click
-  const handleSynthesizeLaunch = (
+  // 发起生成任务
+  const handleSynthesizeLaunch = async (
     prompt: string,
     type: GenType,
     modelId: string,
@@ -170,191 +201,160 @@ export default function App() {
   ) => {
     const cost = type === 'image' ? 2 : 5;
     if (userCredits < cost) {
-      alert("❌ Insufficient Agnes Credits! Please visit the Tiers panel or make a Daily Check-In to secure more computing units.");
+      showToast('Insufficient credits!');
       return;
     }
 
-    // Deduct credits in state
-    setUserCredits((prev) => prev - cost);
+    try {
+      let taskId: string;
+      if (type === 'image') {
+        // 图片生成
+        const resp = await createImageTask({
+          prompt,
+          model: modelId,
+          size: aspectRatio === '1:1' ? '1024x1024' : aspectRatio === '3:4' ? '1024x1366' : '1366x1024',
+          aspect_ratio: aspectRatio,
+          response_format: 'url',
+        });
+        taskId = resp.task_id;
+      } else {
+        // 视频生成
+        const resp = await createVideoTask({
+          prompt,
+          model: modelId,
+          aspect_ratio: aspectRatio,
+          seconds: videoConfig?.duration || 4,
+        });
+        taskId = resp.task_id;
+      }
 
-    // Capture standard creation parameters
-    const newJob: GenerationJob = {
-      id: `job-${Date.now()}`,
-      prompt,
-      type,
-      modelId,
-      aspectRatio,
-      status: 'pending',
-      progress: 0,
-      createdAt: 'Today, Just Now',
-      ...(type === 'video' && videoConfig ? {
-        duration: videoConfig.duration,
-        motionStrength: videoConfig.motionStrength,
-        cameraMovement: videoConfig.cameraMovement
-      } : {})
-    };
+      // 创建新任务
+      const newJob: GenerationJob = {
+        id: taskId,
+        prompt,
+        type,
+        modelId,
+        aspectRatio,
+        status: 'pending',
+        progress: 0,
+        createdAt: new Date().toLocaleString(),
+        ...(type === 'video' && videoConfig ? {
+          duration: videoConfig.duration,
+          motionStrength: videoConfig.motionStrength,
+          cameraMovement: videoConfig.cameraMovement,
+        } : {}),
+      };
 
-    // Prepend job and switch tabs
-    setJobs((prev) => [newJob, ...prev]);
-    setActiveTab('creations');
-
-    setToastMessage("🚀 GPU Queue assigned. Synthesis started!");
-    setTimeout(() => setToastMessage(null), 3000);
+      setJobs(prev => [newJob, ...prev]);
+      setUserCredits(prev => prev - cost);
+      setActiveTab('creations');
+      showToast('GPU Queue assigned!');
+    } catch (err: any) {
+      showToast(err.message || 'Generation failed!');
+    }
   };
 
-  // Active creations rendering count indicator
-  const pendingJobsCount = jobs.filter(
-    (j) => j.status === 'pending' || j.status === 'processing'
-  ).length;
+  // 活跃任务数
+  const pendingJobsCount = jobs.filter(j => j.status === 'pending' || j.status === 'processing').length;
+
+  // 加载中
+  if (isLoading) {
+    return (
+      <div className="w-full min-h-screen bg-[#0F1115] flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+      </div>
+    );
+  }
+
+  // 未登录显示登录页
+  if (!isLoggedIn) {
+    return (
+      <div className="w-full min-h-screen bg-[#0F1115]">
+        <LoginView onLoginSuccess={handleLoginSuccess} />
+      </div>
+    );
+  }
 
   return (
     <div className="w-full min-h-screen">
       <PhoneContainer theme={theme} setTheme={setTheme}>
-        
-        {/* Dynamic Island System Floating Overlay Toast Notification Banner */}
+        {/* Toast通知 */}
         {toastMessage && (
-          <div className="absolute top-1 left-4 right-4 bg-slate-900/90 hover:bg-slate-900 border border-sky-400/25 p-2 px-3 rounded-2xl flex items-center gap-2.5 shadow-2xl z-50 text-[10px] text-sky-305 font-bold animate-pulse">
+          <div className="absolute top-1 left-4 right-4 bg-slate-900/90 border border-sky-400/25 p-2 px-3 rounded-2xl flex items-center gap-2.5 shadow-2xl z-50 text-[10px] text-sky-305 font-bold animate-pulse">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping shrink-0" />
             <span className="flex-1 text-left line-clamp-1">{toastMessage}</span>
           </div>
         )}
 
-        {/* Dynamic Main App Tab Content Views routing */}
+        {/* Tab内容 */}
         <div className="flex-1 overflow-hidden relative">
-          
-          {/* View Tab 1: Discover / Public Feed */}
           {activeTab === 'discover' && (
-            <DiscoverTab
-              items={galleryItems}
-              setItems={setGalleryItems}
-              onUsePrompt={handleUsePrompt}
-              theme={theme}
-            />
+            <DiscoverTab items={galleryItems} setItems={setGalleryItems} onUsePrompt={handleUsePrompt} theme={theme} />
           )}
-
-          {/* View Tab 2: Generator Workspace console */}
           {activeTab === 'generate' && (
             <GenerateTab
-              initialPrompt={formPrompt}
-              setInitialPrompt={setFormPrompt}
-              initialType={formType}
-              setInitialType={setFormType}
-              initialModel={formModel}
-              setInitialModel={setFormModel}
-              initialAspectRatio={formAspectRatio}
-              setInitialAspectRatio={setFormAspectRatio}
+              initialPrompt={formPrompt} setInitialPrompt={setFormPrompt}
+              initialType={formType} setInitialType={setFormType}
+              initialModel={formModel} setInitialModel={setFormModel}
+              initialAspectRatio={formAspectRatio} setInitialAspectRatio={setFormAspectRatio}
               onSynthesize={handleSynthesizeLaunch}
               userCredits={userCredits}
               theme={theme}
             />
           )}
-
-          {/* View Tab 3: Chat Assistant with Agnes GPT */}
           {activeTab === 'assistant' && (
             <AssistantTab
-              chatMessages={chatMessages}
-              setChatMessages={setChatMessages}
-              onImportPrompt={handleImportPromptFromChatClient}
+              chatMessages={chatMessages} setChatMessages={setChatMessages}
+              onImportPrompt={handleImportPromptFromChat}
               theme={theme}
             />
           )}
-
-          {/* View Tab 4: My Personal Creations portfolio list */}
           {activeTab === 'creations' && (
-            <CreationsTab
-              jobs={jobs}
-              setJobs={setJobs}
-              theme={theme}
-            />
+            <CreationsTab jobs={jobs} setJobs={setJobs} theme={theme} />
           )}
-
-          {/* View Tab 5: Profile manager and Credits center */}
           {activeTab === 'profile' && (
             <ProfileTab
-              userCredits={userCredits}
-              setUserCredits={setUserCredits}
+              user={user}
+              userCredits={userCredits} setUserCredits={setUserCredits}
+              onLogout={() => {
+                localStorage.removeItem('agnes_mobile_auth_token');
+                setIsLoggedIn(false);
+                setUser(null);
+              }}
               theme={theme}
             />
           )}
         </div>
 
-        {/* FIXED APP BAR: Bottom Mobile Nav Menu */}
+        {/* 底部导航 */}
         <div className={`h-14 border-t px-2.5 flex items-center justify-around shrink-0 z-40 relative select-none ${
           theme === 'dark' ? 'bg-slate-950 border-slate-900' : 'bg-white border-slate-150'
         }`}>
-          
-          {/* Tab Button 1: Discover */}
-          <button
-            onClick={() => setActiveTab('discover')}
-            className={`flex-1 py-1 flex flex-col items-center justify-center space-y-0.5 outline-none transition-all ${
-              activeTab === 'discover'
-                ? 'text-sky-400 font-extrabold translate-y-[-1px]'
-                : 'text-slate-500 hover:text-slate-300'
-            }`}
-          >
+          <button onClick={() => setActiveTab('discover')} className={`flex-1 py-1 flex flex-col items-center justify-center space-y-0.5 outline-none transition-all ${activeTab === 'discover' ? 'text-sky-400 font-extrabold translate-y-[-1px]' : 'text-slate-500 hover:text-slate-300'}`}>
             <Compass className={`w-4 h-4 ${activeTab === 'discover' ? 'stroke-[2.5px]' : 'stroke-[1.8px]'}`} />
             <span className="text-[8px] font-bold tracking-tight uppercase">Discover</span>
           </button>
-
-          {/* Tab Button 2: Generate Engine console */}
-          <button
-            onClick={() => setActiveTab('generate')}
-            className={`flex-1 py-1 flex flex-col items-center justify-center space-y-0.5 outline-none transition-all ${
-              activeTab === 'generate'
-                ? 'text-sky-400 font-extrabold translate-y-[-1px]'
-                : 'text-slate-500 hover:text-slate-300'
-            }`}
-          >
+          <button onClick={() => setActiveTab('generate')} className={`flex-1 py-1 flex flex-col items-center justify-center space-y-0.5 outline-none transition-all ${activeTab === 'generate' ? 'text-sky-400 font-extrabold translate-y-[-1px]' : 'text-slate-500 hover:text-slate-300'}`}>
             <Sparkles className={`w-4 h-4 ${activeTab === 'generate' ? 'stroke-[2.5px]' : 'stroke-[1.8px]'}`} />
             <span className="text-[8px] font-bold tracking-tight uppercase">Engine</span>
           </button>
-
-          {/* Tab Button 3: AI Assistant chatbot */}
-          <button
-            onClick={() => setActiveTab('assistant')}
-            className={`flex-1 py-1 flex flex-col items-center justify-center space-y-0.5 outline-none transition-all ${
-              activeTab === 'assistant'
-                ? 'text-sky-400 font-extrabold translate-y-[-1px]'
-                : 'text-slate-500 hover:text-slate-300'
-            }`}
-          >
+          <button onClick={() => setActiveTab('assistant')} className={`flex-1 py-1 flex flex-col items-center justify-center space-y-0.5 outline-none transition-all ${activeTab === 'assistant' ? 'text-sky-400 font-extrabold translate-y-[-1px]' : 'text-slate-500 hover:text-slate-300'}`}>
             <MessageSquare className={`w-4 h-4 ${activeTab === 'assistant' ? 'stroke-[2.5px]' : 'stroke-[1.8px]'}`} />
             <span className="text-[8px] font-bold tracking-tight uppercase">AI Coach</span>
           </button>
-
-          {/* Tab Button 4: My Creations */}
-          <button
-            onClick={() => setActiveTab('creations')}
-            className={`flex-1 py-1 flex flex-col items-center justify-center space-y-0.5 outline-none transition-all relative ${
-              activeTab === 'creations'
-                ? 'text-sky-400 font-extrabold translate-y-[-1px]'
-                : 'text-slate-500 hover:text-slate-300'
-            }`}
-          >
+          <button onClick={() => setActiveTab('creations')} className={`flex-1 py-1 flex flex-col items-center justify-center space-y-0.5 outline-none transition-all relative ${activeTab === 'creations' ? 'text-sky-400 font-extrabold translate-y-[-1px]' : 'text-slate-500 hover:text-slate-300'}`}>
             <FolderHeart className={`w-4 h-4 ${activeTab === 'creations' ? 'stroke-[2.5px]' : 'stroke-[1.8px]'}`} />
             <span className="text-[8px] font-bold tracking-tight uppercase">Creations</span>
-
-            {/* In-Progress GPU tasks badge indicators count count */}
             {pendingJobsCount > 0 && (
               <span className="absolute top-1 right-3.5 px-1 bg-sky-505 border border-slate-950 text-slate-950 font-black text-[7px] font-mono rounded-full animate-bounce">
                 {pendingJobsCount}
               </span>
             )}
           </button>
-
-          {/* Tab Button 5: Profiles */}
-          <button
-            onClick={() => setActiveTab('profile')}
-            className={`flex-1 py-1 flex flex-col items-center justify-center space-y-0.5 outline-none transition-all ${
-              activeTab === 'profile'
-                ? 'text-sky-400 font-extrabold translate-y-[-1px]'
-                : 'text-slate-500 hover:text-slate-300'
-            }`}
-          >
+          <button onClick={() => setActiveTab('profile')} className={`flex-1 py-1 flex flex-col items-center justify-center space-y-0.5 outline-none transition-all ${activeTab === 'profile' ? 'text-sky-400 font-extrabold translate-y-[-1px]' : 'text-slate-500 hover:text-slate-300'}`}>
             <User className={`w-4 h-4 ${activeTab === 'profile' ? 'stroke-[2.5px]' : 'stroke-[1.8px]'}`} />
             <span className="text-[8px] font-bold tracking-tight uppercase">Creator</span>
           </button>
-
         </div>
       </PhoneContainer>
     </div>

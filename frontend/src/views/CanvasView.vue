@@ -2340,31 +2340,20 @@ function handleFileSelect(event: Event) {
     return
   }
 
-  // 文件上传到节点
+  // 文件上传到节点（图片/视频元数据由 CanvasNode 的 @load 自动读取并回填）
   const url = URL.createObjectURL(file)
   const targetId = uploadTargetPanelId.value
 
   if (targetId) {
-    // 更新现有节点内容
     store.pushSnapshot()
-    store.updatePanel(targetId, {
-      content: {
-        content: url,
-        status: 'success',
-      },
-    })
-    ElMessage.success(t('canvas.messages.jsonLoadedToNode'))
+    store.updatePanel(targetId, { content: { content: url, status: 'success', bytes: file.size } })
   } else {
-    // 创建新节点
     const type = file.type.startsWith('image/') ? 'image'
       : file.type.startsWith('video/') ? 'video'
       : file.type.startsWith('audio/') ? 'audio'
       : 'text'
     const id = createNodeAtCenter(type)
-    store.updatePanel(id, {
-      content: { content: url, status: 'success' },
-    })
-    ElMessage.success(t('canvas.messages.nodeCreated'))
+    store.updatePanel(id, { content: { content: url, status: 'success', bytes: file.size } })
   }
 
   uploadTargetPanelId.value = null
