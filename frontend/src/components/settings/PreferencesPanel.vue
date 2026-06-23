@@ -34,22 +34,14 @@
       <div v-if="form.download.auto_download" class="pref-row sub">
         <div class="pref-info">
           <span class="pref-label">{{ t('prefs.download.directory') }}</span>
-          <span class="pref-hint">
-            <span v-if="prefsStore.hasDirectoryHandle">
-              ✓ {{ t('prefs.download.directorySelected') }}: <code>{{ form.download.download_directory }}</code>
-            </span>
-            <span v-else-if="!form.download.download_directory">
-              {{ t('prefs.download.browserDefaultHint') }}
-            </span>
-            <span v-else>
-              {{ t('prefs.download.directorySelected') }}: <code>{{ form.download.download_directory }}</code>
-            </span>
-          </span>
+          <span class="pref-hint">{{ prefsStore.hasDirectoryHandle
+            ? `${t('prefs.download.directorySelected')}：${prefsStore.downloadDirectory || prefsStore.directoryName}`
+            : t('prefs.download.browserDefaultHint') }}</span>
         </div>
         <div class="pref-actions">
           <el-button
             size="small"
-            :type="prefsStore.hasDirectoryHandle ? 'success' : 'primary'"
+            type="primary"
             @click="handlePickDirectory">
             <el-icon><FolderOpened /></el-icon>
             {{ prefsStore.hasDirectoryHandle ? t('prefs.download.changeDirectory') : t('prefs.download.selectDirectory') }}
@@ -63,17 +55,18 @@
         </div>
       </div>
 
-      <!-- 目录选择提示 -->
-      <div v-if="form.download.auto_download && !prefsStore.hasDirectoryHandle" class="pref-tip">
-        <el-icon><InfoFilled /></el-icon>
-        <span>{{ t('prefs.download.directoryTip') }}</span>
-      </div>
-
       <!-- 分类方式 -->
       <div v-if="form.download.auto_download" class="pref-row sub">
         <div class="pref-info">
           <span class="pref-label">{{ t('prefs.download.classifyBy') }}</span>
-          <span class="pref-hint">{{ t('prefs.download.classifyByHint') }}</span>
+          <span class="pref-hint">
+            <template v-if="prefsStore.hasDirectoryHandle">
+              {{ classifyByHintForCustomDir }}
+            </template>
+            <template v-else>
+              {{ classifyByHintForBrowserDefault }}
+            </template>
+          </span>
         </div>
         <el-select
           v-model="form.download.classify_by"
@@ -384,7 +377,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { FolderOpened, InfoFilled, Close } from '@element-plus/icons-vue'
+import { FolderOpened, Close } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { usePreferencesStore } from '@/stores/preferences'
 
@@ -467,6 +460,22 @@ let _dragSourceIndex = -1
 
 /** 命名 token 列表（本地 ref，操作时直接修改，保证拖拽 key 稳定） */
 const namingTokens = ref<NamingToken[]>([])
+
+/** 分类方式的提示文案：当用户已选择自定义目录时，告知会创建真实子目录 */
+const classifyByHintForCustomDir = computed<string>(() => {
+  const c = form.download.classify_by
+  if (c === 'type') return `文件会保存到 "${prefsStore.downloadDirectory || prefsStore.directoryName}/images/" 或 ".../videos/" 子目录中`
+  if (c === 'date') return `文件会按日期保存到 "你的目录/YYYY-MM-DD/" 子目录中`
+  return '不分类，直接保存到你选择的目录下'
+})
+
+/** 分类方式的提示文案：使用浏览器默认下载目录时，只能通过文件名前缀近似分类 */
+const classifyByHintForBrowserDefault = computed<string>(() => {
+  const c = form.download.classify_by
+  if (c === 'type') return '使用浏览器默认下载目录，只能通过文件名前缀（images_ / videos_）近似分类。如需真实子目录，请在上方"选择自定义下载目录"'
+  if (c === 'date') return '使用浏览器默认下载目录，只能通过文件名前缀（YYYY-MM-DD_）近似分类。如需真实子目录，请在上方"选择自定义下载目录"'
+  return '使用浏览器默认下载目录，文件直接保存在默认目录下'
+})
 
 /** 当前选中的预设方案（根据 file_naming_pattern 反推） */
 const namingPreset = computed<string>(() => {
@@ -610,15 +619,14 @@ async function handleReset() {
   }
 }
 
-// ================ 下载目录（File System Access API，需即时授权） ================
+// ================ 命名构建器操作（仅修改本地状态） ================
 
-/** 选择下载目录 */
+/** 选择自定义下载目录（File System Access API） */
 async function handlePickDirectory() {
   const result = await prefsStore.pickDirectory()
   if (result === 'ok') {
-    form.download.download_directory = prefsStore.download.download_directory
     markDirty()
-    ElMessage.success(t('prefs.download.directorySelected') + ': ' + form.download.download_directory)
+    ElMessage.success(`${t('prefs.download.directorySelected')}`)
   } else if (result === 'security') {
     ElMessage.warning(t('prefs.download.directorySecurityError'))
   } else if (result === 'unsupported') {
@@ -630,15 +638,11 @@ async function handlePickDirectory() {
   }
 }
 
-/** 切换回浏览器默认下载（仅清除本地 handle，数据点击保存才同步） */
-function handleUseBrowserDefault() {
-  prefsStore.clearDirectoryHandle()
-  form.download.download_directory = ''
-  markDirty()
+/** 切换回浏览器默认下载 */
+async function handleUseBrowserDefault() {
+  await prefsStore.useBrowserDefaultDownload()
   ElMessage.success(t('prefs.download.useBrowserDefault'))
 }
-
-// ================ 命名构建器操作（仅修改本地状态） ================
 
 /** 命名预设切换
  * - 切到预设方案：写入对应模板
@@ -830,6 +834,13 @@ code.tag {
 .pref-actions {
   display: flex;
   gap: 8px;
+  flex-shrink: 0;
+}
+
+/* 只读值文本 */
+.pref-value-text {
+  font-size: 13px;
+  color: var(--agnes-text-muted);
   flex-shrink: 0;
 }
 

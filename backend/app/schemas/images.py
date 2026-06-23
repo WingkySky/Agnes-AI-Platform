@@ -50,6 +50,9 @@ class ImageGenerationRequest(BaseModel):
         description="蒙版图 base64 data URI（黑白图，白色为编辑区域），用于局部编辑",
     )
 
+    # ── 广场分享：生成时可选择是否公开到广场 ──
+    is_public: bool = Field(default=False, description="是否分享到广场")
+
     @property
     def all_reference_images(self) -> List[str]:
         """

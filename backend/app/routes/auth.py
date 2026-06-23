@@ -188,6 +188,7 @@ async def get_me(current_user: User = Depends(get_current_user)):
     return UserInfoResponse(
         id=current_user.id,
         username=current_user.username,
+        nickname=current_user.nickname,
         email=current_user.email,
         avatar_url=current_user.avatar_url,
         credits=current_user.credits,
@@ -210,9 +211,9 @@ async def update_my_profile(
     current_user: User = Depends(get_current_user),
 ):
     """
-    更新当前登录用户的个人资料（目前仅支持修改邮箱）。
+    更新当前登录用户的个人资料（支持修改邮箱、昵称）。
     - 邮箱可选，传 null 清空
-    - 邮箱唯一，冲突返回 409
+    - 昵称可选，传 null 清空，最多 32 字符
     """
     if req.email is not None:
         # 检查邮箱是否已被其他用户占用
@@ -224,14 +225,20 @@ async def update_my_profile(
                 raise HTTPException(status_code=409, detail="该邮箱已被其他用户占用")
         current_user.email = req.email or None
 
+    # nickname 字段：None 代表不修改，空字符串代表清空
+    if req.nickname is not None:
+        trimmed = (req.nickname or "").strip()
+        current_user.nickname = trimmed if trimmed else None
+
     await db.commit()
     await db.refresh(current_user)
-    logger.info("[个人资料更新] user=%s id=%d email=%s", current_user.username, current_user.id, current_user.email)
+    logger.info("[个人资料更新] user=%s id=%d", current_user.username, current_user.id)
 
     is_admin = current_user.role == ROLE_ADMIN or current_user.is_admin
     return UserInfoResponse(
         id=current_user.id,
         username=current_user.username,
+        nickname=current_user.nickname,
         email=current_user.email,
         avatar_url=current_user.avatar_url,
         credits=current_user.credits,
@@ -318,6 +325,7 @@ async def upload_avatar(
     return UserInfoResponse(
         id=current_user.id,
         username=current_user.username,
+        nickname=current_user.nickname,
         email=current_user.email,
         avatar_url=current_user.avatar_url,
         credits=current_user.credits,
@@ -353,7 +361,7 @@ async def list_users(
     for u in rows:
         is_admin = u.role == ROLE_ADMIN or u.is_admin
         items.append(UserAdminRow(
-            id=u.id, username=u.username, email=u.email,
+            id=u.id, username=u.username, nickname=u.nickname, email=u.email,
             credits=u.credits, role=u.role, is_active=u.is_active, is_admin=is_admin,
             created_at=u.created_at, last_login_at=u.last_login_at,
         ))

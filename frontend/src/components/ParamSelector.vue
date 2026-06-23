@@ -55,7 +55,7 @@
       </template>
       <div class="param-btn-group">
         <button
-          v-for="sec in durationOptions"
+          v-for="sec in availableDurations"
           :key="sec"
           type="button"
           class="param-btn"
@@ -123,7 +123,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { ArrowDown, VideoCamera, Film } from '@element-plus/icons-vue'
 import RatioPicker from '@/components/RatioPicker.vue'
 import { useModelsStore } from '@/stores/models'
@@ -195,11 +195,41 @@ const currentModel = computed({
 
 // 选项列表
 const config = computed(() => modelsStore.getModelParamsConfig())
+
+// 视频时长（秒）：按 Agnes 官方 Q&A 限制随帧率联动
+//   24 FPS → 最多 15s；30 FPS → 最多 10s；60 FPS → 最多 5s
+// 返回当前 FPS 允许的最大时长（秒），找不到 fps 档位时不限
+function getMaxDurationForFps(fps: number): number {
+  if (fps >= 60) return 5
+  if (fps >= 30) return 10
+  if (fps >= 24) return 15
+  return Number.POSITIVE_INFINITY
+}
+
+// 当前帧率允许的时长选项
+const availableDurations = computed(() => {
+  const max = getMaxDurationForFps(currentFrameRate.value || 24)
+  return config.value.videoDurations.filter(sec => sec <= max)
+})
 const durationOptions = computed(() => config.value.videoDurations)
 const frameRateOptions = computed(() => config.value.videoFrameRates)
 const modelList = computed(() => props.modelList || (
   props.mode === 'video' ? modelsStore.videoModels : modelsStore.imageModels
 ))
+
+// 切换 FPS 时若当前时长超过新 FPS 的上限，自动降到允许的最大值
+watch(() => currentFrameRate.value, (fps) => {
+  const max = getMaxDurationForFps(fps || 24)
+  if (currentSeconds.value > max) {
+    // 在 videoDurations 列表中挑一个 ≤ max 的最大值
+    const fallback = [...config.value.videoDurations]
+      .filter(sec => sec <= max)
+      .pop()
+    if (fallback !== undefined) {
+      currentSeconds.value = fallback
+    }
+  }
+})
 
 // 当前尺寸对应的清晰度等级（图片模式）
 const currentTier = computed(() => {

@@ -100,6 +100,7 @@ export interface GenerationRecord {
   task_id?: string | null
   credits_consumed?: number       // 本次任务消耗的积分数（与积分流水 ref_id 对应）
   created_at?: string | null
+  is_public?: boolean             // 是否已公开分享到广场（Plaza）
 }
 
 /** 历史列表响应 — 对齐 HistoryListResponse */
@@ -634,6 +635,7 @@ export interface AuthTokenResponse {
 export interface UserInfoResponse {
   id: number
   username: string
+  nickname?: string | null
   email?: string | null
   avatar_url?: string | null
   credits: number
@@ -646,6 +648,7 @@ export interface UserInfoResponse {
 
 /** 更新个人资料请求体 */
 export interface UpdateProfileRequest {
+  nickname?: string | null
   email?: string | null
 }
 

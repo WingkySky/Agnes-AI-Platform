@@ -16,6 +16,7 @@
 import asyncio
 import logging
 import time
+from datetime import datetime
 from typing import Dict, Optional, List
 
 from app.services.agnes_client import agnes_client
@@ -304,6 +305,8 @@ class VideoPollerManager:
             return
         try:
             async with new_async_session() as session:
+                # 从 params 提取广场分享标记
+                is_public = task.params.get("is_public", False)
                 record = Generation(
                     type="video",
                     user_id=task.user_id,
@@ -315,6 +318,8 @@ class VideoPollerManager:
                     status=task.status,
                     credits_consumed=task.credits_consumed,
                     task_id=task.task_id or task.video_id,
+                    is_public=is_public,
+                    public_shared_at=datetime.utcnow() if is_public else None,
                 )
                 session.add(record)
                 await session.commit()

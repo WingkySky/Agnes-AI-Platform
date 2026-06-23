@@ -50,6 +50,7 @@ class UserInfoResponse(BaseModel):
     """当前用户信息（不含 password_hash）"""
     id: int
     username: str
+    nickname: Optional[str] = None
     email: Optional[str] = None
     avatar_url: Optional[str] = None
     credits: int
@@ -69,7 +70,8 @@ class UserCreditsResponse(BaseModel):
 
 
 class UpdateProfileRequest(BaseModel):
-    """更新个人资料请求体（目前仅支持修改邮箱）"""
+    """更新个人资料请求体（支持修改邮箱、昵称）"""
+    nickname: Optional[str] = Field(default=None, max_length=32, description="昵称（可选，广场等公开场景展示）")
     email: Optional[str] = Field(default=None, max_length=128, description="新邮箱（可选，传 null 清空）")
 
 
@@ -81,6 +83,7 @@ class UserAdminRow(BaseModel):
     """管理员在用户列表页看到的一行"""
     id: int
     username: str
+    nickname: Optional[str] = None
     email: Optional[str] = None
     credits: int
     role: str

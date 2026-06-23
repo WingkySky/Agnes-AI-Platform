@@ -4,7 +4,7 @@
 # =====================================================
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, JSON
+from sqlalchemy import Column, Integer, String, Text, DateTime, JSON, Boolean
 
 from app.core.database import Base
 
@@ -24,6 +24,10 @@ class Generation(Base):
     - status: 状态（success / failed / pending / cancelled）
     - task_id: Agnes AI 异步任务 ID（主要用于视频生成）
     - created_at: 创建时间
+    - is_public: 是否公开到广场（默认 False）
+    - public_shared_at: 首次设为公开的时间（用于广场「最新」排序）
+    - likes_count: 点赞数（反范式缓存，用于高性能排序）
+    - views_count: 浏览次数（打开详情即 +1）
     """
 
     __tablename__ = "generations"
@@ -42,6 +46,12 @@ class Generation(Base):
     task_id = Column(String(200), nullable=True, index=True)    # Agnes AI 异步任务 ID（主要用于视频生成）
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
+    # ===== 广场相关字段 =====
+    is_public = Column(Boolean, default=False, nullable=False, index=True)       # 是否公开到广场
+    public_shared_at = Column(DateTime, nullable=True)                           # 首次设为公开的时间
+    likes_count = Column(Integer, default=0, nullable=False)                     # 点赞数（反范式缓存）
+    views_count = Column(Integer, default=0, nullable=False)                     # 浏览次数
+
     def to_dict(self):
         """便捷转换为字典（用于 JSON 序列化）"""
         return {
@@ -56,4 +66,8 @@ class Generation(Base):
             "credits_consumed": self.credits_consumed,
             "task_id": self.task_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
+            "is_public": self.is_public,
+            "public_shared_at": self.public_shared_at.isoformat() if self.public_shared_at else None,
+            "likes_count": self.likes_count,
+            "views_count": self.views_count,
         }

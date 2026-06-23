@@ -85,9 +85,11 @@ class ConfigResponse(BaseModel):
     )
 
     # 视频时长选项（秒）
+    # 官方 Q&A 限制：FPS 与时长联动：
+    #   24 FPS 不超过 15s；30 FPS 不超过 10s；60 FPS 不超过 5s
     video_durations: List[int] = Field(
         default=[3, 5, 7, 10, 15],
-        description="视频时长选项（秒）",
+        description="视频时长选项（秒），前端会按 FPS 联动过滤",
     )
     default_video_duration: int = Field(
         default=5,
@@ -96,8 +98,8 @@ class ConfigResponse(BaseModel):
 
     # 视频帧率选项
     video_frame_rates: List[int] = Field(
-        default=[24, 30],
-        description="视频帧率选项",
+        default=[24, 30, 60],
+        description="视频帧率选项（FPS）",
     )
     default_frame_rate: int = 24
 
@@ -125,6 +127,8 @@ class GenerationRecord(BaseModel):
     status: str
     task_id: Optional[str] = None
     credits_consumed: int = 0       # 本次任务消耗的积分数（与积分流水 ref_id 对应）
+    is_public: bool = False         # 是否公开到广场
+    likes_count: int = 0            # 点赞数
     created_at: Optional[datetime] = None
 
     class Config:

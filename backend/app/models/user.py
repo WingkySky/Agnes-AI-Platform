@@ -44,6 +44,7 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(64), unique=True, index=True, nullable=False)
+    nickname = Column(String(32), nullable=True, index=True)              # 昵称（广场/公开场景展示，不设则回退到 username）
     email = Column(String(128), unique=True, index=True, nullable=True)
     password_hash = Column(String(255), nullable=False)
     # 头像 URL（用户上传的头像文件路径，为空则使用默认头像）
@@ -88,6 +89,7 @@ class User(Base):
         return {
             "id": self.id,
             "username": self.username,
+            "nickname": self.nickname,
             "email": self.email,
             "avatar_url": self.avatar_url,
             "credits": self.credits,

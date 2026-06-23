@@ -90,6 +90,13 @@
               <span>{{ t('generate.imageBtn') }}</span>
             </el-button>
 
+            <!-- 分享到广场开关：提交时携带 is_public 参数 -->
+            <div class="share-toggle">
+              <el-icon class="share-icon"><Share /></el-icon>
+              <span class="share-label">{{ t('plaza.shareToPlaza') }}</span>
+              <el-switch v-model="shareToPlaza" size="small" />
+            </div>
+
             <!-- 积分扣除提示：显示本次生成预估消耗的积分 -->
             <div v-if="userStore.credits > 0" class="cost-hint">
               <span v-if="costLoading" class="cost-loading">{{ t('generate.costLoading') }}</span>
@@ -241,7 +248,7 @@
 import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  MagicStick, Download, Link, PictureFilled, Edit, Loading, CircleCloseFilled, VideoPlay
+  MagicStick, Download, Link, PictureFilled, Edit, Loading, CircleCloseFilled, VideoPlay, Share
 } from '@element-plus/icons-vue'
 import PromptTemplates from '@/components/PromptTemplates.vue'
 import ImageUploader from '@/components/ImageUploader.vue'
@@ -292,6 +299,9 @@ const IMAGE_MODELS = computed(() => modelsStore.imageModels)
 // ---------- 表单参数 ----------
 const mode = ref('text2image')
 const prompt = ref('')
+
+// 分享到广场开关：是否将本次生成结果公开到广场
+const shareToPlaza = ref(false)
 
 /** 根据偏好设置的比例（如 "1:1"）匹配对应的图片尺寸（如 "1024x1024"） */
 function sizeFromAspectRatio(ratio: string): string {
@@ -450,6 +460,7 @@ async function handleGenerate() {
     model: model.value,
     size: size.value,
     mode: mode.value,
+    is_public: shareToPlaza.value,
   }
   // 【多图】图生图时：区分为 base64_images 与 image_urls
   if (mode.value === 'image2image' && referenceFileList.value.length > 0) {
@@ -698,6 +709,22 @@ function copyImageUrl() {
   font-weight: 600;
   margin-top: 8px;
   border-radius: 12px !important;
+}
+/* 分享到广场开关：低调显示在生成按钮下方 */
+.share-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--agnes-text-muted);
+}
+.share-toggle .share-icon {
+  font-size: 14px;
+}
+.share-toggle .share-label {
+  margin-right: 4px;
 }
 .queue-hint {
   margin-top: 8px;

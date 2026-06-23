@@ -35,6 +35,10 @@
             <el-icon><Clock /></el-icon>
             <span>{{ t('nav.history') }}</span>
           </router-link>
+          <router-link to="/plaza" class="nav-item" active-class="active">
+            <el-icon><Histogram /></el-icon>
+            <span>{{ t('nav.plaza') }}</span>
+          </router-link>
           <router-link to="/canvas" class="nav-item" active-class="active">
             <el-icon><Grid /></el-icon>
             <span>{{ t('nav.canvas') }}</span>
@@ -156,7 +160,7 @@ import { computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Picture, VideoPlay, Clock, ChatDotRound, Grid, Setting,
-  User, UserFilled, Coin, CaretBottom, SwitchButton, Sunny, Moon, StarFilled,
+  User, UserFilled, Coin, CaretBottom, SwitchButton, Sunny, Moon, StarFilled, Histogram,
 } from '@element-plus/icons-vue'
 import TaskQueuePanel from './components/TaskQueuePanel.vue'
 import LanguageSwitcher from './components/LanguageSwitcher.vue'
@@ -202,7 +206,7 @@ const isAdminRouteActive = computed(() => {
 })
 
 // keep-alive 缓存的路由组件名称（切换标签页时保持状态不销毁）
-const cachedViews = ['ChatView', 'ImageView', 'VideoView', 'HistoryView', 'CanvasView', 'SettingsView', 'UsersAdminView', 'CreditRulesView', 'ProfileView', 'PreferencesView']
+const cachedViews = ['ChatView', 'ImageView', 'VideoView', 'HistoryView', 'PlazaView', 'CanvasView', 'SettingsView', 'UsersAdminView', 'CreditRulesView', 'ProfileView', 'PreferencesView']
 
 // 积分显示：数字千分位格式化
 const creditsText = computed(() => {

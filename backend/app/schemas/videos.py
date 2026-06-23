@@ -42,6 +42,9 @@ class VideoGenerationRequest(BaseModel):
     # 种子（可选）
     seed: Optional[int] = Field(default=None, description="随机种子，不传则由 API 自动生成")
 
+    # ── 广场分享：生成时可选择是否公开到广场 ──
+    is_public: bool = Field(default=False, description="是否分享到广场")
+
     @field_validator("prompt")
     @classmethod
     def prompt_not_empty(cls, v):

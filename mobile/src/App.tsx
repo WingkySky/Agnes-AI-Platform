@@ -3,7 +3,7 @@
  * 移动端应用主入口
  */
 import React, { useState, useEffect, useCallback } from 'react';
-import { Compass, Sparkles, MessageSquare, FolderHeart, User, Loader2 } from 'lucide-react';
+import { Compass, Sparkles, MessageSquare, FolderHeart, User as UserIcon, Loader2 } from 'lucide-react';
 import PhoneContainer from './components/PhoneContainer';
 import DiscoverTab from './components/DiscoverTab';
 import GenerateTab from './components/GenerateTab';
@@ -12,7 +12,8 @@ import CreationsTab from './components/CreationsTab';
 import ProfileTab from './components/ProfileTab';
 import LoginView from './components/LoginView';
 
-import { AppTab, GenType, GenerationJob, User } from './types';
+import { AppTab, GenType, GenerationJob } from './types';
+import type { User } from './types';
 import { INITIAL_GALLERY_ITEMS, INITIAL_CHAT_MESSAGES } from './data';
 import { getMe, getCredits } from './api/auth';
 import { createImageTask, getImageTaskStatus } from './api/images';
@@ -352,7 +353,7 @@ export default function App() {
             )}
           </button>
           <button onClick={() => setActiveTab('profile')} className={`flex-1 py-1 flex flex-col items-center justify-center space-y-0.5 outline-none transition-all ${activeTab === 'profile' ? 'text-sky-400 font-extrabold translate-y-[-1px]' : 'text-slate-500 hover:text-slate-300'}`}>
-            <User className={`w-4 h-4 ${activeTab === 'profile' ? 'stroke-[2.5px]' : 'stroke-[1.8px]'}`} />
+            <UserIcon className={`w-4 h-4 ${activeTab === 'profile' ? 'stroke-[2.5px]' : 'stroke-[1.8px]'}`} />
             <span className="text-[8px] font-bold tracking-tight uppercase">Creator</span>
           </button>
         </div>

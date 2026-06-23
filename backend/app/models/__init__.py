@@ -3,6 +3,7 @@
 # =====================================================
 
 from app.models.generation import Generation
+from app.models.plaza_like import PlazaLike
 from app.models.chat import ChatSession, ChatMessage
 from app.models.api_provider import ApiProvider
 from app.models.model_definition import ModelDefinition

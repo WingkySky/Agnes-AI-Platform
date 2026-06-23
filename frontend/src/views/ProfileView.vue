@@ -56,6 +56,19 @@
             </el-input>
           </el-form-item>
 
+          <!-- 昵称（可编辑，用于广场等公开场景展示） -->
+          <el-form-item :label="t('profile.nickname')">
+            <el-input
+              v-model="nicknameValue"
+              :placeholder="t('profile.nicknamePlaceholder')"
+              maxlength="32"
+              show-word-limit
+            >
+              <template #prefix><el-icon><User /></el-icon></template>
+            </el-input>
+            <p class="form-hint">{{ t('profile.nicknameHint') }}</p>
+          </el-form-item>
+
           <!-- 邮箱（可编辑） -->
           <el-form-item :label="t('profile.email')">
             <el-input
@@ -89,7 +102,7 @@
             <el-button
               type="primary"
               :loading="saving"
-              :disabled="!emailDirty"
+              :disabled="!profileDirty"
               @click="handleSaveProfile"
             >
               <el-icon><Check /></el-icon>
@@ -157,23 +170,34 @@ async function handleAvatarChange(e: Event) {
 }
 
 // ============ 个人资料编辑 ============
+const nicknameValue = ref<string>(userStore.user?.nickname || '')
 const emailValue = ref<string>(userStore.user?.email || '')
 const saving = ref(false)
 
-// 切换用户时（登出/登录其他账号）同步邮箱字段，避免残留上一个用户的邮箱
+// 切换用户时（登出/登录其他账号）同步字段，避免残留上一个用户的资料
 // ProfileView 被 keep-alive 缓存，组件不会重建，需手动监听
+watch(() => userStore.user?.nickname, (newNickname) => {
+  nicknameValue.value = newNickname || ''
+})
 watch(() => userStore.user?.email, (newEmail) => {
   emailValue.value = newEmail || ''
 })
 
-// 邮箱是否被修改（与原值不同时才允许保存）
-const emailDirty = computed(() => (emailValue.value || '') !== (userStore.user?.email || ''))
+// 资料是否被修改（任一字段与原值不同时才允许保存）
+const profileDirty = computed(() => {
+  const nicknameChanged = (nicknameValue.value || '') !== (userStore.user?.nickname || '')
+  const emailChanged = (emailValue.value || '') !== (userStore.user?.email || '')
+  return nicknameChanged || emailChanged
+})
 
 async function handleSaveProfile() {
-  if (!emailDirty.value) return
+  if (!profileDirty.value) return
   saving.value = true
   try {
-    await userStore.updateProfile({ email: emailValue.value || null })
+    await userStore.updateProfile({
+      nickname: nicknameValue.value || null,
+      email: emailValue.value || null,
+    })
     ElMessage.success(t('profile.saveSuccess'))
   } catch (e) {
     ElMessage.error(t('profile.saveFailed'))
@@ -323,6 +347,12 @@ function formatTime(iso?: string | null): string {
   font-size: 13px;
   color: var(--agnes-text-secondary);
   padding-bottom: 4px;
+}
+.form-hint {
+  margin: 4px 0 0 0;
+  font-size: 12px;
+  color: var(--agnes-text-muted);
+  line-height: 1.5;
 }
 .readonly-text {
   font-size: 14px;

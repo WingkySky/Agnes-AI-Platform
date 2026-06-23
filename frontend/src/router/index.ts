@@ -51,6 +51,12 @@ const routes: RouteRecordRaw[] = [
     meta: { titleKey: 'router.history', requiresAuth: true }
   },
   {
+    path: '/plaza',
+    name: 'plaza',
+    component: () => import('@/views/PlazaView.vue'),
+    meta: { titleKey: 'router.plaza', requiresAuth: false }
+  },
+  {
     path: '/canvas',
     name: 'canvas',
     component: () => import('@/views/CanvasView.vue'),

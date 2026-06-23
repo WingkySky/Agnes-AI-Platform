@@ -20,6 +20,7 @@ import httpx
 import glob as glob_module
 import zipfile
 import io
+from datetime import datetime
 from typing import Optional, List
 
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
@@ -29,7 +30,7 @@ from sqlalchemy.future import select
 from sqlalchemy import desc, func
 
 from app.core.database import get_async_db
-from app.core.security import get_current_user_optional
+from app.core.security import get_current_user_optional, get_current_user
 from app.models.generation import Generation
 from app.models.user import User
 from app.schemas.common import (
@@ -38,6 +39,12 @@ from app.schemas.common import (
     DeleteResponse,
     BatchDeleteRequest,
     BatchDeleteResponse,
+)
+from app.schemas.plaza import (
+    UpdateShareStatusRequest,
+    UpdateShareStatusResponse,
+    BatchShareRequest,
+    BatchShareResponse,
 )
 
 logger = logging.getLogger("agnes_platform")
@@ -114,6 +121,8 @@ async def get_history(
             status=item.status,
             task_id=item.task_id,
             credits_consumed=getattr(item, "credits_consumed", 0) or 0,
+            is_public=getattr(item, "is_public", False) or False,
+            likes_count=getattr(item, "likes_count", 0) or 0,
             created_at=item.created_at,
         ))
 
@@ -435,6 +444,7 @@ async def download_file(
 async def download_by_url(
     url: str,
     type: str = Query("image", description="文件类型：image 或 video"),
+    filename: Optional[str] = Query(None, description="自定义文件名（含扩展名），不传则自动生成"),
 ):
     """
     通过 URL 代理下载文件。
@@ -445,6 +455,7 @@ async def download_by_url(
     参数：
     - url: 远程文件的公网 URL
     - type: 文件类型（image 或 video），用于确定文件扩展名
+    - filename: 自定义文件名（含扩展名），不传则自动生成
     """
     if not url:
         raise HTTPException(status_code=400, detail="缺少 url 参数")
@@ -477,7 +488,13 @@ async def download_by_url(
         ext = ".mp4"
         content_type = "video/mp4"
 
-    filename = f"agnes-{type}-{int(asyncio.get_event_loop().time())}{ext}"
+    # 优先使用前端传入的自定义文件名，否则自动生成
+    if filename:
+        # 确保文件名有扩展名
+        if not any(filename.lower().endswith(e) for e in ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.mp4']):
+            filename += ext
+    else:
+        filename = f"agnes-{type}-{int(asyncio.get_event_loop().time())}{ext}"
 
     try:
         async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
@@ -929,3 +946,101 @@ async def get_video_preview(
         # 清理临时视频文件
         if os.path.exists(tmp_video):
             os.remove(tmp_video)
+
+
+# =====================================================
+# 分享状态管理接口（广场功能）
+# PATCH  /api/history/{id}/share       - 单条切换分享状态（需登录，按用户隔离）
+# PATCH  /api/history/batch-share      - 批量设置分享状态（需登录，按用户隔离）
+# =====================================================
+
+
+@router.patch("/history/{record_id}/share", response_model=UpdateShareStatusResponse, summary="单条切换分享状态")
+async def update_share_status(
+    record_id: int,
+    body: UpdateShareStatusRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    切换单条记录的公开/私有状态（需登录，按用户隔离）。
+    - false → true 且 public_shared_at 为空时，写入 public_shared_at = NOW()
+    - true → false 时，保留 public_shared_at（方便二次公开时保留历史时间）
+    """
+    stmt = select(Generation).filter(
+        Generation.id == record_id,
+        Generation.user_id == current_user.id,
+    )
+    result = await db.execute(stmt)
+    record = result.scalar_one_or_none()
+
+    if not record:
+        raise HTTPException(status_code=404, detail="未找到对应记录或无权操作")
+
+    was_public = record.is_public
+    record.is_public = body.is_public
+
+    # 首次设为公开时记录时间
+    if body.is_public and not was_public and not record.public_shared_at:
+        record.public_shared_at = datetime.utcnow()
+
+    await db.commit()
+    await db.refresh(record)
+
+    msg = "已设为公开分享" if body.is_public else "已设为仅自己可见"
+    logger.info("[广场] 用户 %s 切换记录 %s 分享状态: %s", current_user.id, record_id, body.is_public)
+
+    return UpdateShareStatusResponse(
+        success=True,
+        id=record_id,
+        is_public=body.is_public,
+        message=msg,
+    )
+
+
+@router.patch("/history/batch-share", response_model=BatchShareResponse, summary="批量设置分享状态")
+async def batch_update_share_status(
+    body: BatchShareRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    批量设置多条记录的公开/私有状态（需登录，按用户隔离）。
+    不属于当前用户的 ID 会被忽略并计入 failed_ids。
+    """
+    ids = body.ids or []
+    if not ids:
+        raise HTTPException(status_code=400, detail="请提供至少一个记录 ID")
+
+    unique_ids = list(set(ids))
+
+    # 查询所有待更新记录（按用户隔离）
+    stmt = select(Generation).filter(
+        Generation.id.in_(unique_ids),
+        Generation.user_id == current_user.id,
+    )
+    result = await db.execute(stmt)
+    records = result.scalars().all()
+
+    now = datetime.utcnow()
+    updated_ids = []
+    for record in records:
+        was_public = record.is_public
+        record.is_public = body.is_public
+        # 首次设为公开时记录时间
+        if body.is_public and not was_public and not record.public_shared_at:
+            record.public_shared_at = now
+        updated_ids.append(record.id)
+
+    await db.commit()
+
+    failed_ids = [rid for rid in unique_ids if rid not in updated_ids]
+    msg = f"已将 {len(updated_ids)} 条记录设为{'公开分享' if body.is_public else '仅自己可见'}"
+    logger.info("[广场] 用户 %s 批量切换 %d 条记录分享状态: %s", current_user.id, len(updated_ids), body.is_public)
+
+    return BatchShareResponse(
+        success=True,
+        updated_count=len(updated_ids),
+        failed_ids=failed_ids,
+        message=msg,
+    )

@@ -138,6 +138,13 @@
               <span>{{ t('generate.videoBtn') }}</span>
             </el-button>
 
+            <!-- 分享到广场开关：提交时携带 is_public 参数 -->
+            <div class="share-toggle">
+              <el-icon class="share-icon"><Share /></el-icon>
+              <span class="share-label">{{ t('plaza.shareToPlaza') }}</span>
+              <el-switch v-model="shareToPlaza" size="small" />
+            </div>
+
             <!-- 积分扣除提示：显示本次生成预估消耗的积分 -->
             <div v-if="userStore.credits > 0" class="cost-hint">
               <span v-if="costLoading" class="cost-loading">{{ t('generate.costLoading') }}</span>
@@ -296,7 +303,7 @@ import { ref, computed, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   VideoPlay, Download, CopyDocument, CircleCloseFilled, VideoCameraFilled, Loading, MagicStick,
-  Edit, Film, PictureFilled, ArrowDownBold
+  Edit, Film, PictureFilled, ArrowDownBold, Share
 } from '@element-plus/icons-vue'
 import PromptTemplates from '@/components/PromptTemplates.vue'
 import ImageUploader from '@/components/ImageUploader.vue'
@@ -331,6 +338,9 @@ const VIDEO_MODELS = computed(() => modelsStore.videoModels)
 const mode = ref('text2video')
 const prompt = ref('')
 const negativePrompt = ref('')
+
+// 分享到广场开关：是否将本次生成结果公开到广场
+const shareToPlaza = ref(false)
 // 画面比例、时长、帧率均从 store 配置获取默认值
 const aspectRatio = ref(modelsStore.defaultVideoAspectRatio || '16:9')
 const seconds = ref(modelsStore.defaultVideoDuration || 5)
@@ -350,6 +360,7 @@ const { cost, loading: costLoading, insufficient: costInsufficient } = useCredit
 )
 
 // 视频时长选项从 store 配置获取
+// 默认全量候选项；按当前帧率过滤后的可选列表在 ParamSelector 内部实现
 const DURATION_OPTIONS = computed(() => modelsStore.videoDurations.length > 0
   ? modelsStore.videoDurations
   : [3, 5, 7, 10, 15])
@@ -538,6 +549,7 @@ async function startGenerate() {
     frame_rate: frameRate.value,
     mode: mode.value,
     seed: seed.value ? Number(seed.value) : undefined,
+    is_public: shareToPlaza.value,
   }
   if (mode.value === 'image2video' && referenceFile.value) {
     // 图生视频：单张参考图（优先纯 base64 → url → Data URI 兜底）
@@ -839,6 +851,22 @@ function handleVideoError(e: Event) {
   font-weight: 600;
   margin-top: 8px;
   border-radius: 12px !important;
+}
+/* 分享到广场开关：低调显示在生成按钮下方 */
+.share-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--agnes-text-muted);
+}
+.share-toggle .share-icon {
+  font-size: 14px;
+}
+.share-toggle .share-label {
+  margin-right: 4px;
 }
 .queue-hint {
   margin-top: 8px;

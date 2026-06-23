@@ -226,6 +226,7 @@ async def create_video_task(
         "negative_prompt": req.negative_prompt,
         "mode": req.mode,
         "seed": req.seed,
+        "is_public": req.is_public,
     }
     await poller_manager.start_polling(
         task_id=task_id,

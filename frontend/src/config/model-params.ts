@@ -107,11 +107,14 @@ const AGNES_PARAMS: ProviderParamPreset = {
   defaultVideoAspectRatio: '16:9',
 
   // 视频时长（秒）：覆盖常见创作场景
+  // Agnes 官方 Q&A 限制：FPS 与时长联动：
+  //   24 FPS 不超过 15s；30 FPS 不超过 10s；60 FPS 不超过 5s
+  // 前端 ParamSelector 会按当前 FPS 过滤可选时长，这里给出全量候选项
   videoDurations: [3, 5, 7, 10, 15],
   defaultVideoDuration: 5,
 
-  // 视频帧率：匹配 Agnes Video V2.0 文档示例
-  videoFrameRates: [24, 30],
+  // 视频帧率：匹配 Agnes Video V2.0 文档示例（FPS）
+  videoFrameRates: [24, 30, 60],
   defaultFrameRate: 24,
 }
 

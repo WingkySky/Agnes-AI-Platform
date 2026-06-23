@@ -54,6 +54,24 @@
           @click="batchDownload">
           {{ t('history.downloadSelected') }} ({{ selectedIds.length }})
         </el-button>
+        <!-- 批量设为公开：调用广场批量分享接口 -->
+        <el-button
+          type="success"
+          :icon="Share"
+          :disabled="selectedIds.length === 0"
+          :loading="batchSettingPublic"
+          @click="confirmBatchSetPublic">
+          {{ t('plaza.batchSetPublic') }} ({{ selectedIds.length }})
+        </el-button>
+        <!-- 批量设为私有：调用广场批量分享接口 -->
+        <el-button
+          type="info"
+          :icon="Share"
+          :disabled="selectedIds.length === 0"
+          :loading="batchSettingPrivate"
+          @click="confirmBatchSetPrivate">
+          {{ t('plaza.batchSetPrivate') }} ({{ selectedIds.length }})
+        </el-button>
         <el-button
           type="danger"
           :icon="DeleteIcon"
@@ -135,7 +153,12 @@
           <div v-if="item.mode" class="mode-badge" :class="'mode-' + item.type">
             {{ t('params.mode.' + item.mode) || item.mode }}
           </div>
-          <!-- 快捷操作按钮组（非编辑模式下显示）：放大 / 下载 / 删除，分别调用不同模块 -->
+          <!-- 已分享到广场的状态标签：公开时显示（编辑模式下隐藏，避免与选择框重叠） -->
+          <div v-if="item.is_public && !editMode" class="public-badge">
+            <el-icon size="10"><Share /></el-icon>
+            {{ t('plaza.isPublic') }}
+          </div>
+          <!-- 快捷操作按钮组（非编辑模式下显示）：放大 / 下载 / 分享 / 删除，分别调用不同模块 -->
           <!-- 放在 card-preview 内，z-index 足够高以确保不被其他蒙层遮挡 -->
           <div v-if="!editMode" class="card-actions">
             <!-- 放大：调用 ImageViewer 图片查看器模块 -->
@@ -152,6 +175,14 @@
               @click.stop="downloadItem(item)"
               :title="t('history.download')">
               <el-icon size="16"><Download /></el-icon>
+            </div>
+            <!-- 分享状态切换：点击切换公开/私有（公开时高亮） -->
+            <div
+              class="card-action-btn card-action-share"
+              :class="{ 'is-public': item.is_public }"
+              @click.stop="toggleShare(item)"
+              :title="item.is_public ? t('plaza.isPublic') : t('plaza.isPrivate')">
+              <el-icon size="16"><Share /></el-icon>
             </div>
             <!-- 删除：调用历史记录删除模块（带确认弹窗） -->
             <div
@@ -332,10 +363,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { Refresh, Loading, Document, Delete, VideoPlay, CircleCloseFilled, Edit, Close, Download, ZoomIn } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Refresh, Loading, Document, Delete, VideoPlay, CircleCloseFilled, Edit, Close, Download, ZoomIn, Share } from '@element-plus/icons-vue'
 import ImageViewer from '@/components/ImageViewer.vue'
 import { getHistoryList, deleteHistoryRecord, batchDeleteHistory } from '@/api/history'
+import { updateShareStatus, batchUpdateShareStatus } from '@/api/plaza'
 import client from '@/api/client'
 import { useDownload } from '@/composables/useDownload'
 import { useTaskQueueStore } from '@/stores/taskQueue'
@@ -406,6 +438,9 @@ const selectedIds = ref<number[]>([])
 const batchDeleteVisible = ref(false)
 const batchDeleting = ref(false)
 const batchDownloading = ref(false)
+// ---------- 广场分享状态管理：单条 / 批量切换公开与私有 ----------
+const batchSettingPublic = ref(false)
+const batchSettingPrivate = ref(false)
 
 const isAllSelected = computed(() => {
   if (!list.value.length) return false
@@ -711,6 +746,77 @@ async function doBatchDelete() {
     // 错误已在拦截器弹出
   } finally {
     batchDeleting.value = false
+  }
+}
+
+// ---------- 广场分享状态管理：单条切换 / 批量设为公开 / 批量设为私有 ----------
+
+/** 切换单条记录的分享状态（公开 ↔ 私有） */
+async function toggleShare(item: GenerationRecord) {
+  const newStatus = !item.is_public
+  try {
+    const res = await updateShareStatus(item.id, newStatus)
+    // 更新本地记录的公开状态
+    item.is_public = newStatus
+    ElMessage.success(res?.message || (newStatus ? t('plaza.setPublicSuccess') : t('plaza.setPrivateSuccess')))
+  } catch (e) {
+    // 错误已在拦截器弹出
+  }
+}
+
+/** 批量设为公开：弹出确认弹窗后调用批量接口 */
+async function confirmBatchSetPublic() {
+  if (selectedIds.value.length === 0) {
+    ElMessage.warning(t('history.pleaseSelectOne'))
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      t('plaza.confirmBatchPublic', { n: selectedIds.value.length }),
+      t('plaza.batchSetPublic'),
+      { type: 'warning', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') }
+    )
+  } catch {
+    return  // 用户取消
+  }
+  batchSettingPublic.value = true
+  try {
+    const res = await batchUpdateShareStatus(selectedIds.value, true)
+    ElMessage.success(res?.message || t('plaza.batchSuccess'))
+    selectedIds.value = []
+    loadList()
+  } catch (e) {
+    // 错误已在拦截器弹出
+  } finally {
+    batchSettingPublic.value = false
+  }
+}
+
+/** 批量设为私有：弹出确认弹窗后调用批量接口 */
+async function confirmBatchSetPrivate() {
+  if (selectedIds.value.length === 0) {
+    ElMessage.warning(t('history.pleaseSelectOne'))
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      t('plaza.confirmBatchPrivate', { n: selectedIds.value.length }),
+      t('plaza.batchSetPrivate'),
+      { type: 'warning', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') }
+    )
+  } catch {
+    return  // 用户取消
+  }
+  batchSettingPrivate.value = true
+  try {
+    const res = await batchUpdateShareStatus(selectedIds.value, false)
+    ElMessage.success(res?.message || t('plaza.batchSuccess'))
+    selectedIds.value = []
+    loadList()
+  } catch (e) {
+    // 错误已在拦截器弹出
+  } finally {
+    batchSettingPrivate.value = false
   }
 }
 
@@ -1184,6 +1290,40 @@ onBeforeUnmount(() => {
   background: var(--agnes-error-bg);
   border-color: var(--agnes-error);
   color: #fff;
+}
+/* 分享状态切换按钮：私有时灰色低调，公开时高亮 accent 色 */
+.card-action-btn.card-action-share {
+  color: var(--agnes-text-muted);
+  border-color: var(--agnes-primary-border-faint);
+}
+.card-action-btn.card-action-share.is-public {
+  color: var(--agnes-accent);
+  border-color: var(--agnes-accent);
+  opacity: 1;
+  pointer-events: auto;
+}
+.card-action-btn.card-action-share:hover {
+  background: var(--agnes-info-bg);
+  border-color: var(--agnes-accent);
+  color: var(--agnes-accent);
+}
+/* 已分享到广场的状态标签：叠在缩略图右上角，公开时显示 */
+.public-badge {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #ffffff;
+  background: var(--agnes-accent);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  backdrop-filter: blur(4px);
+  z-index: 3;
 }
 .card-meta { padding: 12px 14px; }
 .card-prompt {

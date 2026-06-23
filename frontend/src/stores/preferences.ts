@@ -6,7 +6,7 @@
  *   - 本地缓存偏好（避免每次访问都请求后端）
  *   - 自动下载核心逻辑（检测 auto_download 并触发下载）
  *   - 生成文件命名（含分类目录支持）
- *   - File System Access API 支持（用户指定下载目录）
+ *   - File System Access API 支持（用户指定下载目录，句柄持久化到 IndexedDB）
  *
  * 用法：
  *   const prefsStore = usePreferencesStore()
@@ -33,42 +33,155 @@ import type {
   NotificationPreferences,
 } from '@/types'
 
-/** File System Access API 的目录句柄（用户授权后持有） */
+// ================ IndexedDB：目录句柄持久化 ================
+// FileSystemDirectoryHandle 支持 structured clone，可以存入 IndexedDB
+// 这样用户授权一次后，刷新页面也能继续使用
+const DB_NAME = 'agnes-downloads'
+const DB_VERSION = 1
+const STORE_NAME = 'directory-handle'
+const HANDLE_KEY = 'download-dir'
+
+let _db: IDBDatabase | null = null
 let _directoryHandle: FileSystemDirectoryHandle | null = null
+let _directoryHandleLoaded = false
+
+/** 打开 IndexedDB */
+function openDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (_db) { resolve(_db); return }
+    const request = indexedDB.open(DB_NAME, DB_VERSION)
+    request.onupgradeneeded = () => {
+      const db = request.result
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME)
+      }
+    }
+    request.onsuccess = () => {
+      _db = request.result
+      resolve(_db)
+    }
+    request.onerror = () => reject(request.error)
+  })
+}
+
+/** 从 IndexedDB 加载目录句柄 */
+async function loadDirectoryHandleFromDB(): Promise<FileSystemDirectoryHandle | null> {
+  try {
+    const db = await openDB()
+    return new Promise((resolve) => {
+      const tx = db.transaction(STORE_NAME, 'readonly')
+      const store = tx.objectStore(STORE_NAME)
+      const request = store.get(HANDLE_KEY)
+      request.onsuccess = () => resolve(request.result || null)
+      request.onerror = () => resolve(null)
+    })
+  } catch (e) {
+    console.warn('[Preferences] IndexedDB 加载目录句柄失败:', e)
+    return null
+  }
+}
+
+/** 保存目录句柄到 IndexedDB */
+async function saveDirectoryHandleToDB(handle: FileSystemDirectoryHandle | null): Promise<void> {
+  try {
+    const db = await openDB()
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite')
+      const store = tx.objectStore(STORE_NAME)
+      if (handle) {
+        store.put(handle, HANDLE_KEY)
+      } else {
+        store.delete(HANDLE_KEY)
+      }
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+  } catch (e) {
+    console.warn('[Preferences] IndexedDB 保存目录句柄失败:', e)
+  }
+}
 
 /**
- * 获取用户授权的下载目录句柄（File System Access API）
+ * 验证目录句柄的读写权限（可能因为浏览器安全策略需要用户重新确认）
+ * @returns true 表示可以正常使用
+ */
+async function verifyDirectoryHandle(handle: FileSystemDirectoryHandle | null): Promise<boolean> {
+  if (!handle) return false
+  try {
+    const opts: any = { mode: 'readwrite' }
+    if ('queryPermission' in handle) {
+      const status = await (handle as any).queryPermission(opts)
+      if (status === 'granted') return true
+      if (status === 'denied') return false
+      const newStatus = await (handle as any).requestPermission(opts)
+      return newStatus === 'granted'
+    }
+    return true
+  } catch (e) {
+    console.warn('[Preferences] 目录句柄权限验证失败:', e)
+    return false
+  }
+}
+
+/** 懒加载目录句柄（从 IndexedDB 恢复），确保仅初始化一次 */
+async function getDirectoryHandle(): Promise<FileSystemDirectoryHandle | null> {
+  if (_directoryHandleLoaded) return _directoryHandle
+  _directoryHandleLoaded = true
+  const handle = await loadDirectoryHandleFromDB()
+  if (handle) {
+    const valid = await verifyDirectoryHandle(handle)
+    if (valid) {
+      _directoryHandle = handle
+      return handle
+    } else {
+      // 权限失效，清理掉
+      await saveDirectoryHandleToDB(null)
+      _directoryHandle = null
+    }
+  }
+  return null
+}
+
+/** 设置目录句柄（同时写入 IndexedDB） */
+async function setDirectoryHandle(handle: FileSystemDirectoryHandle | null): Promise<void> {
+  _directoryHandle = handle
+  await saveDirectoryHandleToDB(handle)
+}
+
+// ================ 目录选择（File System Access API） ================
+
+/**
+ * 选择下载目录并持久化
  * - 浏览器安全限制：不允许选择系统敏感目录（如 macOS 的 Downloads/Documents/Desktop 根目录）
- * - 返回 { handle, error } 让调用方区分失败原因
+ * - 返回详细的状态信息供 UI 层提示
  */
 async function pickDownloadDirectory(): Promise<{
   handle: FileSystemDirectoryHandle | null
   error?: 'security' | 'unsupported' | 'abort' | 'unknown'
+  errorMessage?: string
 }> {
   if (!('showDirectoryPicker' in window)) {
     return { handle: null, error: 'unsupported' }
   }
   try {
     const handle = await (window as any).showDirectoryPicker({ mode: 'readwrite' })
-    _directoryHandle = handle
+    await setDirectoryHandle(handle)
     return { handle }
   } catch (e: any) {
     if (e.name === 'AbortError') {
       return { handle: null, error: 'abort' }
     }
-    // SecurityError / NotAllowedError：用户选了系统敏感目录
     if (e.name === 'SecurityError' || e.name === 'NotAllowedError') {
-      console.warn('[Preferences] 目录被浏览器拒绝（可能是系统敏感目录）:', e)
-      return { handle: null, error: 'security' }
+      return { handle: null, error: 'security', errorMessage: e.message }
     }
     console.warn('[Preferences] showDirectoryPicker failed:', e)
-    return { handle: null, error: 'unknown' }
+    return { handle: null, error: 'unknown', errorMessage: e.message }
   }
 }
 
-/** 释放已持有的目录句柄 */
-function releaseDirectoryHandle(): void {
-  _directoryHandle = null
+/** 释放并清除目录句柄 */
+async function releaseDirectoryHandle(): Promise<void> {
+  await setDirectoryHandle(null)
 }
 
 /** 提示音播放器（Web Audio API 生成 beep，不依赖外部音频文件）*/
@@ -164,7 +277,12 @@ async function notifyComplete(
   }
 }
 
-/** 根据 classify_by 生成文件路径（含子目录） */
+/** 根据 classify_by 生成文件路径（含子目录）
+ *  - classify_by = 'type'：按类型分子目录（images/ 或 videos/）
+ *  - classify_by = 'date'：按日期分子目录（YYYY-MM-DD/）
+ *  - classify_by = 'none'：不分子目录，直接放在根目录
+ *  返回值："subdir/filename" 或 "filename"
+ */
 function buildFilePath(
   filename: string,
   fileType: 'image' | 'video',
@@ -174,13 +292,14 @@ function buildFilePath(
   const now = new Date()
   const dateStr = now.toISOString().slice(0, 10) // YYYY-MM-DD
 
-  // 生成子目录路径
+  // 生成子目录路径（none 时不创建子目录）
   let subDir = ''
   if (pattern.classify_by === 'type') {
     subDir = fileType === 'image' ? 'images' : 'videos'
   } else if (pattern.classify_by === 'date') {
     subDir = dateStr
   }
+  // 'none' 或未设置：subDir 保持空，不做分类
 
   // 处理文件命名（支持 {type}/{date}/{time}/{seq}/{model}/{timestamp}/{uuid}）
   const timeStr = now.toTimeString().slice(0, 8).replace(/:/g, '') // HHMMSS
@@ -201,7 +320,46 @@ function buildFilePath(
   return subDir ? `${subDir}/${name}` : name
 }
 
-/** 自动下载单个文件（支持 File System Access API 指定目录） */
+/**
+ * 从远程 URL 获取 blob（通过后端代理，避免 CORS 问题）
+ * @param url 资源 URL
+ * @param fileType image / video
+ * @param filename 自定义文件名
+ * @returns Blob
+ */
+async function fetchBlobViaProxy(
+  url: string,
+  fileType: 'image' | 'video',
+  filename: string,
+): Promise<Blob> {
+  const baseURL = import.meta.env.VITE_API_BASE_URL || ''
+  const proxyUrl = `${baseURL}/api/download?url=${encodeURIComponent(url)}&type=${fileType}&filename=${encodeURIComponent(filename)}`
+
+  let token: string | null = null
+  try {
+    token = localStorage.getItem('agnes.platform.auth.token')
+  } catch (_) { /* ignore */ }
+
+  const headers: Record<string, string> = {}
+  if (token) headers.Authorization = `Bearer ${token}`
+
+  const resp = await fetch(proxyUrl, { headers })
+  if (!resp.ok) {
+    let msg = `下载失败（HTTP ${resp.status}）`
+    try {
+      const data = await resp.json()
+      if (data?.detail) msg = data.detail
+    } catch (_) { /* 响应不是 JSON */ }
+    throw new Error(msg)
+  }
+  return await resp.blob()
+}
+
+/**
+ * 自动下载单个文件
+ * - 有目录句柄：写入子目录（通过 File System Access API）
+ * - 无目录句柄：回退到浏览器默认下载（文件名带分类前缀）
+ */
 async function triggerAutoDownload(
   url: string,
   fileType: 'image' | 'video',
@@ -213,36 +371,42 @@ async function triggerAutoDownload(
 ): Promise<void> {
   const prefs = usePreferencesStore()
   const pattern = metadata.namingPattern || prefs.download
-  const filename = buildFilePath('', fileType, pattern, { modelId: metadata.modelId })
-  const mimeType = metadata.mimeType || (fileType === 'image' ? 'image/png' : 'video/mp4')
+  const path = buildFilePath('', fileType, pattern, { modelId: metadata.modelId })
+  const flatFilename = path.replace(/\//g, '_')  // 浏览器下载时的扁平文件名
 
   try {
-    const resp = await fetch(url)
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-    const blob = await resp.blob()
+    // 先尝试恢复目录句柄（首次自动下载时触发）
+    const handle = await getDirectoryHandle()
 
-    if (_directoryHandle && 'getFileHandle' in _directoryHandle) {
-      // File System Access API：写入用户指定目录（支持创建子目录）
-      const pathParts = filename.split('/')
-      let dir = _directoryHandle as FileSystemDirectoryHandle
-      for (let i = 0; i < pathParts.length - 1; i++) {
-        dir = await dir.getDirectoryHandle(pathParts[i], { create: true })
+    // 获取文件内容
+    const blob = await fetchBlobViaProxy(url, fileType, flatFilename)
+
+    if (handle) {
+      // ========== 通道 A：File System Access API，写入用户指定目录 + 子目录 ==========
+      const parts = path.split('/')
+      let dir = handle as FileSystemDirectoryHandle
+      // 逐级创建子目录
+      for (let i = 0; i < parts.length - 1; i++) {
+        dir = await dir.getDirectoryHandle(parts[i], { create: true })
       }
-      const fileHandle = await dir.getFileHandle(pathParts[pathParts.length - 1], { create: true })
+      const fileName = parts[parts.length - 1]
+      const fileHandle = await dir.getFileHandle(fileName, { create: true })
+      // @ts-ignore - createWritable 是 File System Access API 方法，TS 类型定义可能缺失
       const writable = await fileHandle.createWritable()
       await writable.write(blob)
       await writable.close()
-      console.info(`[AutoDownload] Saved to user directory: ${filename}`)
+      console.info(`[AutoDownload] Saved to ${handle.name}/${path}`)
     } else {
-      // 兜底：浏览器默认下载目录（文件名含子目录会被展平）
+      // ========== 通道 B：浏览器默认下载目录，文件名带分类前缀 ==========
       const blobUrl = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = blobUrl
-      a.download = filename.replace(/\//g, '_') // 子目录用下划线替代
+      a.download = flatFilename
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
       URL.revokeObjectURL(blobUrl)
+      console.info(`[AutoDownload] Saved (browser default): ${flatFilename}`)
     }
   } catch (e: any) {
     console.error('[AutoDownload] failed:', e)
@@ -298,12 +462,33 @@ export const usePreferencesStore = defineStore('preferences', () => {
   /** 是否开启自动下载 */
   const isAutoDownload = computed(() => download.value.auto_download)
 
+  /** 是否已持有用户授权的下载目录（响应式） */
+  const directoryHandleRef = ref<{ name: string } | null>(null)
+
   /** 是否已持有用户授权的下载目录 */
-  const hasDirectoryHandle = computed(() => _directoryHandle !== null)
+  const hasDirectoryHandle = computed(() => directoryHandleRef.value !== null)
+
+  /** 当前下载目录名称 */
+  const directoryName = computed(() => directoryHandleRef.value?.name || '')
+
+  /** 从后端偏好读取的 download_directory（字符串形式，已选目录时与 directoryName 一致） */
+  const downloadDirectory = computed(() => download.value.download_directory || '')
 
   // ================ actions ================
 
-  /** 从后端拉取偏好（用户登录后自动调用）*/
+  /**
+   * 同步响应式状态（每次目录句柄变化时调用）
+   */
+  function syncDirectoryHandleState() {
+    if (_directoryHandle) {
+      // @ts-ignore - name 属性在 FileSystemDirectoryHandle 上存在
+      directoryHandleRef.value = { name: _directoryHandle.name }
+    } else {
+      directoryHandleRef.value = null
+    }
+  }
+
+  /** 从后端拉取偏好（用户登录后自动调用），同时尝试恢复目录句柄 */
   async function fetchPreferences() {
     loading.value = true
     try {
@@ -311,11 +496,12 @@ export const usePreferencesStore = defineStore('preferences', () => {
       initialized.value = true
     } catch (e) {
       console.warn('[Preferences] fetch failed:', e)
-      // 拉取失败不阻塞，useDefault 兜底
       initialized.value = true
     } finally {
       loading.value = false
     }
+    // 从 IndexedDB 恢复目录句柄（不阻塞主流程）
+    getDirectoryHandle().then(() => syncDirectoryHandleState())
   }
 
   /**
@@ -336,11 +522,14 @@ export const usePreferencesStore = defineStore('preferences', () => {
 
   /**
    * 选择下载目录（调用 File System Access API）
+   * 成功后会持久化到 IndexedDB，刷新页面后仍可使用
    * @returns 'ok' | 'security' | 'unsupported' | 'abort' | 'unknown'
    */
   async function pickDirectory(): Promise<'ok' | 'security' | 'unsupported' | 'abort' | 'unknown'> {
     const { handle, error } = await pickDownloadDirectory()
     if (handle) {
+      syncDirectoryHandleState()
+      // @ts-ignore - name 属性存在
       await updatePreferences({ download: { download_directory: handle.name } })
       return 'ok'
     }
@@ -348,17 +537,18 @@ export const usePreferencesStore = defineStore('preferences', () => {
   }
 
   /**
-   * 使用浏览器默认下载（不指定目录，用 <a download> 触发）
-   * 适用于 File System Access API 不可用或用户不愿授权的场景
+   * 切换回浏览器默认下载：清除目录句柄
    */
   async function useBrowserDefaultDownload(): Promise<void> {
-    _directoryHandle = null
+    await releaseDirectoryHandle()
+    syncDirectoryHandleState()
     await updatePreferences({ download: { download_directory: '' } })
   }
 
-  /** 释放已持有的下载目录 */
+  /** 释放已持有的下载目录句柄 */
   function clearDirectoryHandle() {
     releaseDirectoryHandle()
+    syncDirectoryHandleState()
   }
 
   /**
@@ -391,6 +581,8 @@ export const usePreferencesStore = defineStore('preferences', () => {
     notification,
     isAutoDownload,
     hasDirectoryHandle,
+    directoryName,
+    downloadDirectory,
     // actions
     fetchPreferences,
     updatePreferences,

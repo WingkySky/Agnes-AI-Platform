@@ -58,10 +58,14 @@ async def get_config():
         # 视频参数
         video_aspect_ratios=VIDEO_ASPECT_RATIO_OPTIONS,
         default_video_aspect_ratio="16:9",
+        # 视频时长/帧率
+        # 官方 Q&A 限制：视频时间与帧率联动限制
+        #   24 FPS 不超过 15s；30 FPS 不超过 10s；60 FPS 不超过 5s
+        # 前端 ParamSelector 会按当前 FPS 过滤可选时长，这里给出全量候选项
         video_num_frames=[9, 33, 49, 81, 121, 161, 241, 441],
         video_durations=[3, 5, 7, 10, 15],
         default_video_duration=5,
-        video_frame_rates=[24, 30],
+        video_frame_rates=[24, 30, 60],
         default_frame_rate=24,
         default_video_width=1152,
         default_video_height=768,

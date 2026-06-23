@@ -88,6 +88,7 @@ async def create_image_task_async(
         "size": size,
         "response_format": req.response_format,
         "mode": mode,
+        "is_public": req.is_public,
     }
 
     if req.is_image_to_image:

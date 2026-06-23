@@ -37,6 +37,7 @@ export const useUserStore = defineStore('user', () => {
   // ================ getters ================
   const isAuthenticated = computed(() => !!token.value && !!user.value)
   const username = computed(() => user.value?.username || '')
+  const nickname = computed(() => user.value?.nickname || '')
   const credits = computed(() => user.value?.credits ?? 0)
   const userId = computed(() => user.value?.id || null)
   const isAdmin = computed(() => !!user.value?.is_admin)
@@ -193,6 +194,7 @@ export const useUserStore = defineStore('user', () => {
     // getters
     isAuthenticated,
     username,
+    nickname,
     credits,
     userId,
     isAdmin,
