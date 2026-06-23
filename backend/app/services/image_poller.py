@@ -240,6 +240,22 @@ class ImagePollerManager:
             async with new_async_session() as session:
                 # 从 params 提取广场分享标记
                 is_public = task.params.get("is_public", False)
+
+                # ===== 自动预审：敏感词检测（针对公开作品）=====
+                moderation_status = "approved"
+                moderation_flags = None
+                moderation_reason = None
+                if is_public and task.prompt:
+                    try:
+                        from app.services.moderation_service import check_sensitive_text
+                        hit, hit_words = await check_sensitive_text(session, task.prompt)
+                        if hit:
+                            moderation_status = "pending"
+                            moderation_flags = hit_words
+                            moderation_reason = f"命中敏感词: {', '.join(hit_words[:5])}"
+                    except Exception as mod_err:
+                        logger.warning("[图片任务器] 自动预审失败: %s", mod_err)
+
                 record = Generation(
                     type="image",
                     user_id=task.user_id,
@@ -256,10 +272,13 @@ class ImagePollerManager:
                     task_id=task.task_id,
                     is_public=is_public,
                     public_shared_at=datetime.utcnow() if is_public else None,
+                    moderation_status=moderation_status,
+                    moderation_flags=moderation_flags,
+                    moderation_reason=moderation_reason,
                 )
                 session.add(record)
                 await session.commit()
-            logger.info("[图片任务器] 记录已异步写入数据库: task_id=%s", task.task_id)
+            logger.info("[图片任务器] 记录已异步写入数据库: task_id=%s moderation=%s", task.task_id, moderation_status)
         except Exception as e:
             logger.error("[图片任务器] 数据库写入失败: %s", e)
 

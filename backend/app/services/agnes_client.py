@@ -580,45 +580,63 @@ class AgnesAIClient:
         """
         创建视频生成异步任务。
 
-        Agnes Video V2.0 官方端点：POST /v1/videos/generations
-        接收 aspect_ratio、duration、fps。前端优先传入 aspect_ratio / seconds，
-        不再依赖 width/height / num_frames。
+        Agnes Video V2.0 官方端点：POST /v1/videos
+        参数规范（参考 Yacey/agnes-ai-generation-skill references/api.md）：
+          - 顶层参数：model, prompt, image(单图), mode, width, height,
+            num_frames, frame_rate, seed, negative_prompt
+          - 多图/关键帧：extra_body.image（数组）+ extra_body.mode = "keyframes"
+          - num_frames 必须 <= 441 且满足 8n + 1（81, 121, 161, 241, 441）
+          - frame_rate 范围 1-60，默认 24
+          - 默认分辨率：width=1152, height=768（16:9）
+
+        创建响应可能同时包含 video_id 和 task_id，推荐优先使用 video_id 轮询。
         """
-        url = f"{self.base_url}/videos/generations"
+        url = f"{self.base_url}/videos"
 
-        # 1) aspect_ratio：优先使用显式传入值；否则由 width/height 计算；最后回退到 16:9
-        if aspect_ratio and isinstance(aspect_ratio, str) and aspect_ratio.strip():
-            _aspect_ratio = aspect_ratio.strip()
-        elif width and height:
-            _aspect_ratio = self._aspect_ratio(width, height)
+        # 1) 计算分辨率（width / height）
+        #    优先使用显式传入的 width/height；否则根据 aspect_ratio 计算；
+        #    默认 1152x768（16:9）
+        if width and height:
+            _width, _height = int(width), int(height)
+        elif aspect_ratio and isinstance(aspect_ratio, str) and ":" in aspect_ratio:
+            ar_w, ar_h = aspect_ratio.split(":", 1)
+            try:
+                ar_w_int, ar_h_int = int(ar_w), int(ar_h)
+                # 以高度 768 为基准，按比例计算宽度，确保为偶数
+                base_h = 768
+                base_w = int(round(base_h * ar_w_int / ar_h_int))
+                if base_w % 2 != 0:
+                    base_w += 1
+                _width, _height = base_w, base_h
+            except ValueError:
+                _width, _height = 1152, 768
         else:
-            _aspect_ratio = "16:9"
+            _width, _height = 1152, 768
 
-        # 2) duration（秒）：优先使用显式传入的 seconds；否则用 num_frames / frame_rate 计算；最后回退 5s
-        if seconds and seconds > 0:
-            _duration = int(round(seconds))
-        elif num_frames and frame_rate:
-            _duration = max(1, round(num_frames / frame_rate))
-        elif num_frames:
-            _duration = max(1, round(num_frames / 24))
+        # 2) 计算 frame_rate（默认 24）
+        _frame_rate = int(frame_rate) if frame_rate and frame_rate > 0 else 24
+        _frame_rate = max(1, min(60, _frame_rate))
+
+        # 3) 计算 num_frames
+        #    优先使用显式传入的 num_frames；否则根据 seconds * frame_rate 计算；
+        #    默认 121 帧（约 5 秒 @ 24fps）
+        #    必须满足：<= 441 且 8n + 1
+        if num_frames and num_frames > 0:
+            raw_frames = int(num_frames)
+        elif seconds and seconds > 0:
+            raw_frames = int(round(seconds * _frame_rate))
         else:
-            _duration = 5
+            raw_frames = 121
 
-        # 3) fps：优先使用显式传入的 frame_rate；否则默认 24
-        _fps = int(frame_rate) if frame_rate and frame_rate > 0 else 24
+        # 对齐到 8n + 1 格式，且不超过 441
+        valid_frames_list = [81, 121, 161, 241, 441]
+        _num_frames = 121
+        for f in valid_frames_list:
+            if f <= raw_frames:
+                _num_frames = f
+        _num_frames = min(_num_frames, 441)
 
-        # 4) Agnes 官方 Q&A 限制：FPS 与时长联动（避免上游生成失败）
-        #   24 FPS → 最多 15s；30 FPS → 最多 10s；60 FPS → 最多 5s
-        # 越界时按上限截断，超过官方限制的请求绝不打给上游
-        if _fps >= 60:
-            _duration = min(_duration, 5)
-        elif _fps >= 30:
-            _duration = min(_duration, 10)
-        elif _fps >= 24:
-            _duration = min(_duration, 15)
-        _duration = max(1, _duration)
-
-        # ── 图生视频模式 / 关键帧动画处理（核心修正）
+        # ── 图生视频模式 / 关键帧动画处理 ──
         # 经实测 Agnes 对非平台托管 URL 均失败：
         #   - 外部公开图 URL（维基/示例） -> FAILURE ("Invalid image")
         #   - base64 Data URI -> 永远 NOT_START 不会启动
@@ -627,13 +645,13 @@ class AgnesAIClient:
         #   1) 先归一化 base64 / Data URI（_normalize_image_input）
         #   2) 把非 Agnes-URL 的图调用一次 images/generations 做 pass-through，拿到平台托管 URL
         #   3) 用该 URL 调 /v1/videos
-        # 同时用第一张参考图的真实宽高修正 aspect_ratio，避免与请求值不一致导致 Internal generation failed
+        # 同时用第一张参考图的真实宽高修正 width/height，避免与请求值不一致
         #
-        # 【Agnes 官方 API 传参规范】（参考 Yacey/agnes-ai-generation-skill references/api.md）
+        # 【Agnes 官方 API 传参规范】：
         #   - 单图图生视频：image 放顶层（字符串），mode 可选（如 ti2vid）
-        #   - 多图 / 关键帧视频：image 必须为数组，放在 extra_body.image 中，
+        #   - 多图 / 关键帧视频：image 放在 extra_body.image 数组中，
         #     并在 extra_body.mode 显式指定 "keyframes"
-        #   - Agnes API 不存在 image_end 字段，尾帧必须通过 image 数组的第二个元素传入
+        #   - 尾帧通过 image 数组的第二个元素传入，不存在 image_end 字段
 
         refs_with_mime: list = []
         if image and isinstance(image, str) and image.strip():
@@ -664,86 +682,56 @@ class AgnesAIClient:
 
             if pairs and pairs[0][1]:
                 w, h = pairs[0][1]
-                from math import gcd
-                _g = gcd(w, h)
-                detected = f"{w // _g}:{h // _g}"
-                if detected != _aspect_ratio:
-                    logger.info(
-                        "[视频生成] 图片真实宽高比 %s（%dx%d）与请求 aspect_ratio=%s 不一致，已自动覆盖",
-                        detected, w, h, _aspect_ratio,
-                    )
-                    _aspect_ratio = detected
+                # 用第一张参考图的真实宽高修正输出分辨率
+                _width, _height = w, h
 
-        body = {
+        # ── 构建请求体 ──
+        body: Dict[str, Any] = {
             "model": model,
             "prompt": prompt,
-            "aspect_ratio": _aspect_ratio,
-            "duration": _duration,
-            "fps": _fps,
+            "width": _width,
+            "height": _height,
+            "num_frames": _num_frames,
+            "frame_rate": _frame_rate,
         }
 
         if seed is not None:
             body["seed"] = seed
+        if negative_prompt and negative_prompt.strip():
+            body["negative_prompt"] = negative_prompt.strip()
 
-        if pairs:
-            # 按 Agnes 官方 API 文档（docs/agnes-ai-docs.md）传参：
-            #   - 单图图生视频：image 放 extra_body.image（字符串）
-            #   - 首尾帧模式：image 放 extra_body.image，image_end 放 extra_body.image_end
-            #   - 官方文档未提供 mode 字段，不传
-            is_keyframes = (mode == "keyframes") and len(pairs) >= 2
-            if is_keyframes:
-                # 首尾帧模式：起始帧 + 结束帧
-                extra_body: Dict[str, Any] = {
-                    "image": pairs[0][0],
-                    "image_end": pairs[1][0],
-                }
-                body["extra_body"] = extra_body
-                logger.info(
-                    "[视频生成] 首尾帧模式: model=%s, duration=%ss, "
-                    "aspect_ratio=%s, fps=%d, prompt=%s",
-                    model, _duration, _aspect_ratio, _fps, prompt[:80],
-                )
-            else:
-                # 单图图生视频：image 放在 extra_body 中（官方文档示例）
-                extra_body = {
-                    "image": pairs[0][0],
-                }
-                body["extra_body"] = extra_body
-                logger.info(
-                    "[视频生成] 图生视频模式(单图): model=%s, "
-                    "duration=%ss, aspect_ratio=%s, fps=%d, prompt=%s",
-                    model, _duration, _aspect_ratio, _fps, prompt[:80],
-                )
+        is_keyframes = (mode == "keyframes") and len(pairs) >= 2
+        is_image2video = len(pairs) > 0 and not is_keyframes
 
-        # 额外打印一次真正发出去的 body（避免 safe_body 只看前 120 字符造成误判）
-        # 按官方文档：所有图生视频模式都使用 extra_body.image（字符串），
-        # 首尾帧模式额外加 extra_body.image_end
-        if "extra_body" in body and isinstance(body["extra_body"], dict):
-            img_val = body["extra_body"].get("image")
-            if isinstance(img_val, str):
-                logger.info(
-                    "[视频生成] 上游请求体摘要: aspect_ratio=%s, image_type=%s, image_len=%d, image_head=%s",
-                    _aspect_ratio,
-                    "agnes_url" if "platform-outputs.agnes-ai.space" in img_val else ("url" if img_val.lower().startswith("http") else "data_uri"),
-                    len(img_val),
-                    img_val[:160],
-                )
-            if "image_end" in body["extra_body"]:
-                end_val = body["extra_body"]["image_end"]
-                if isinstance(end_val, str):
-                    logger.info(
-                        "[视频生成] 上游请求体摘要[end]: aspect_ratio=%s, image_type=%s, image_len=%d, image_head=%s",
-                        _aspect_ratio,
-                        "agnes_url" if "platform-outputs.agnes-ai.space" in end_val else ("url" if end_val.lower().startswith("http") else "data_uri"),
-                        len(end_val),
-                        end_val[:160],
-                    )
+        if is_keyframes:
+            # 多图 / 关键帧模式：image 数组放 extra_body，extra_body.mode = "keyframes"
+            extra_body: Dict[str, Any] = {
+                "image": [p[0] for p in pairs],
+                "mode": "keyframes",
+            }
+            body["extra_body"] = extra_body
+            logger.info(
+                "[视频生成] 关键帧模式: model=%s, num_frames=%d, "
+                "frame_rate=%d, size=%dx%d, keyframes=%d, prompt=%s",
+                model, _num_frames, _frame_rate, _width, _height, len(pairs), prompt[:80],
+            )
+        elif is_image2video:
+            # 单图图生视频：image 放顶层（字符串），mode = "ti2vid"
+            body["image"] = pairs[0][0]
+            body["mode"] = "ti2vid"
+            logger.info(
+                "[视频生成] 图生视频模式(单图): model=%s, num_frames=%d, "
+                "frame_rate=%d, size=%dx%d, prompt=%s",
+                model, _num_frames, _frame_rate, _width, _height, prompt[:80],
+            )
+        else:
+            # 文生视频
+            logger.info(
+                "[视频生成] 文生视频模式: model=%s, num_frames=%d, "
+                "frame_rate=%d, size=%dx%d, prompt=%s",
+                model, _num_frames, _frame_rate, _width, _height, prompt[:80],
+            )
 
-        logger.info(
-            "[视频生成] 创建任务: prompt=%s, mode=%s, duration=%ss, "
-            "aspect_ratio=%s, fps=%d, seed=%s",
-            prompt[:60], mode, _duration, _aspect_ratio, _fps, seed,
-        )
         return await self._post(url, body)
 
     async def _to_agnes_url(self, uri: str) -> str:
@@ -827,8 +815,8 @@ class AgnesAIClient:
     ) -> Dict[str, Any]:
         """
         查询视频任务状态。
-        优先使用 video_id 走 agnesapi 路径（直接返回视频结果对象，含公开可访问的 remixed_from_video_id），
-        否则回退到 /v1/videos/generations/{task_id} 路径（Agnes V2.0 官方端点）。
+        优先使用 video_id 走 agnesapi 路径（推荐，响应更快），
+        否则回退到 /v1/videos/{task_id} 路径（旧版兼容）。
         """
         if video_id:
             try:
@@ -842,7 +830,7 @@ class AgnesAIClient:
 
         if task_id:
             try:
-                data = await self._get(f"{self.base_url}/videos/generations/{task_id}")
+                data = await self._get(f"{self.base_url}/videos/{task_id}")
                 return self._normalize_video_status(data)
             except Exception as e:
                 raise RuntimeError(f"视频状态查询失败: {e}") from e

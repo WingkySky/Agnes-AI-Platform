@@ -977,12 +977,35 @@ async def update_share_status(
     if not record:
         raise HTTPException(status_code=404, detail="未找到对应记录或无权操作")
 
+    # ===== 被管理员屏蔽的作品，用户不能再次设为公开 =====
+    if body.is_public and record.moderation_status == "rejected":
+        raise HTTPException(
+            status_code=403,
+            detail="该作品已被管理员屏蔽，无法公开到广场",
+        )
+
     was_public = record.is_public
     record.is_public = body.is_public
 
     # 首次设为公开时记录时间
     if body.is_public and not was_public and not record.public_shared_at:
         record.public_shared_at = datetime.utcnow()
+
+    # ===== 首次设为公开时：自动预审（敏感词检测）=====
+    if body.is_public and not was_public:
+        try:
+            from app.services.moderation_service import check_sensitive_text
+            hit, hit_words = await check_sensitive_text(db, record.prompt or "")
+            if hit:
+                record.moderation_status = "pending"
+                record.moderation_flags = hit_words
+                record.moderation_reason = f"命中敏感词: {', '.join(hit_words[:5])}"
+            else:
+                record.moderation_status = "approved"
+                record.moderation_flags = None
+                record.moderation_reason = None
+        except Exception as mod_err:
+            logger.warning("[广场] 分享时自动预审失败: %s", mod_err)
 
     await db.commit()
     await db.refresh(record)
@@ -1025,11 +1048,30 @@ async def batch_update_share_status(
     now = datetime.utcnow()
     updated_ids = []
     for record in records:
+        # ===== 被管理员屏蔽的作品，跳过，不允许再次公开 =====
+        if body.is_public and record.moderation_status == "rejected":
+            continue
+
         was_public = record.is_public
         record.is_public = body.is_public
         # 首次设为公开时记录时间
         if body.is_public and not was_public and not record.public_shared_at:
             record.public_shared_at = now
+        # ===== 首次设为公开时：自动预审（敏感词检测）=====
+        if body.is_public and not was_public:
+            try:
+                from app.services.moderation_service import check_sensitive_text
+                hit, hit_words = await check_sensitive_text(db, record.prompt or "")
+                if hit:
+                    record.moderation_status = "pending"
+                    record.moderation_flags = hit_words
+                    record.moderation_reason = f"命中敏感词: {', '.join(hit_words[:5])}"
+                else:
+                    record.moderation_status = "approved"
+                    record.moderation_flags = None
+                    record.moderation_reason = None
+            except Exception as mod_err:
+                logger.warning("[广场] 批量分享时自动预审失败 id=%d: %s", record.id, mod_err)
         updated_ids.append(record.id)
 
     await db.commit()

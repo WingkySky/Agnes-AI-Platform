@@ -52,6 +52,15 @@ class Generation(Base):
     likes_count = Column(Integer, default=0, nullable=False)                     # 点赞数（反范式缓存）
     views_count = Column(Integer, default=0, nullable=False)                     # 浏览次数
 
+    # ===== 内容审核字段 =====
+    # 审核状态：approved（审核通过，正常展示）/ pending（待审核，系统自动标记）/ rejected（已屏蔽，不展示）
+    moderation_status = Column(String(20), default="approved", nullable=False, index=True)
+    moderation_reason = Column(String(255), nullable=True)                       # 屏蔽/待审核原因
+    moderated_by = Column(Integer, nullable=True)                                # 审核人用户 ID（管理员操作时记录）
+    moderated_at = Column(DateTime, nullable=True)                               # 最后审核时间
+    # 自动预审命中的敏感关键词（JSON 数组，便于管理员快速查看）
+    moderation_flags = Column(JSON, nullable=True)
+
     def to_dict(self):
         """便捷转换为字典（用于 JSON 序列化）"""
         return {
@@ -70,4 +79,7 @@ class Generation(Base):
             "public_shared_at": self.public_shared_at.isoformat() if self.public_shared_at else None,
             "likes_count": self.likes_count,
             "views_count": self.views_count,
+            "moderation_status": self.moderation_status,
+            "moderation_reason": self.moderation_reason,
+            "moderation_flags": self.moderation_flags,
         }

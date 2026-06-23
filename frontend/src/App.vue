@@ -43,9 +43,9 @@
             <el-icon><Grid /></el-icon>
             <span>{{ t('nav.canvas') }}</span>
           </router-link>
-          <!-- 管理员菜单：收起到「管理」下拉（用户管理 / 积分规则 / 配置管理） -->
+          <!-- 管理员菜单：收起到「管理」下拉 -->
           <el-dropdown
-            v-if="userStore.isAuthenticated && userStore.isAdmin"
+            v-if="userStore.isAuthenticated && (userStore.isAdmin || permissionStore.hasPermission('plaza:moderate') || permissionStore.hasPermission('role:manage') || permissionStore.hasPermission('moderation:config') || permissionStore.hasPermission('watermark:manage'))"
             trigger="click"
             @command="handleAdminCommand">
             <div class="nav-item nav-item-dropdown" :class="{ active: isAdminRouteActive }">
@@ -55,15 +55,31 @@
             </div>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item command="/admin/users">
+                <el-dropdown-item v-if="permissionStore.hasPermission('plaza:moderate')" command="/admin/moderation">
+                  <el-icon><View /></el-icon>
+                  <span>{{ t('nav.moderation') }}</span>
+                </el-dropdown-item>
+                <el-dropdown-item v-if="permissionStore.hasPermission('moderation:config')" command="/admin/sensitive-words">
+                  <el-icon><Warning /></el-icon>
+                  <span>{{ t('nav.sensitiveWords') }}</span>
+                </el-dropdown-item>
+                <el-dropdown-item v-if="permissionStore.hasPermission('role:manage')" command="/admin/roles">
+                  <el-icon><UserFilled /></el-icon>
+                  <span>{{ t('nav.roleManage') }}</span>
+                </el-dropdown-item>
+                <el-dropdown-item v-if="userStore.isAdmin" command="/admin/users">
                   <el-icon><UserFilled /></el-icon>
                   <span>{{ t('nav.usersAdmin') }}</span>
                 </el-dropdown-item>
-                <el-dropdown-item command="/admin/credit-rules">
+                <el-dropdown-item v-if="permissionStore.hasPermission('watermark:manage')" command="/admin/watermark">
+                  <el-icon><Picture /></el-icon>
+                  <span>{{ t('nav.watermarkConfig') }}</span>
+                </el-dropdown-item>
+                <el-dropdown-item v-if="userStore.isAdmin" command="/admin/credit-rules">
                   <el-icon><Coin /></el-icon>
                   <span>{{ t('nav.creditRules') }}</span>
                 </el-dropdown-item>
-                <el-dropdown-item command="/settings" divided>
+                <el-dropdown-item v-if="userStore.isAdmin" command="/settings" divided>
                   <el-icon><Setting /></el-icon>
                   <span>{{ t('nav.settings') }}</span>
                 </el-dropdown-item>
@@ -161,6 +177,7 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   Picture, VideoPlay, Clock, ChatDotRound, Grid, Setting,
   User, UserFilled, Coin, CaretBottom, SwitchButton, Sunny, Moon, StarFilled, Histogram,
+  View, Warning,
 } from '@element-plus/icons-vue'
 import TaskQueuePanel from './components/TaskQueuePanel.vue'
 import LanguageSwitcher from './components/LanguageSwitcher.vue'
@@ -169,6 +186,7 @@ import { useModelsStore } from '@/stores/models'
 import { useUserStore } from '@/stores/user'
 import { useThemeStore } from '@/stores/theme'
 import { useCanvasStore } from '@/stores/canvas'
+import { usePermissionStore } from '@/stores/permission'
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -178,6 +196,7 @@ const modelsStore = useModelsStore()
 const userStore = useUserStore()
 const themeStore = useThemeStore()
 const canvasStore = useCanvasStore()
+const permissionStore = usePermissionStore()
 
 // 应用启动时加载模型配置
 onMounted(() => {

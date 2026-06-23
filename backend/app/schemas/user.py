@@ -89,6 +89,8 @@ class UserAdminRow(BaseModel):
     role: str
     is_active: bool
     is_admin: bool
+    watermark_enabled: bool = False
+    content_safety_strict: bool = False
     created_at: Optional[datetime] = None
     last_login_at: Optional[datetime] = None
 
@@ -104,14 +106,14 @@ class UserListResponse(BaseModel):
 
 class UpdateRoleRequest(BaseModel):
     """修改用户角色"""
-    role: str = Field(..., description="新角色：admin / user")
+    role: str = Field(..., description="新角色：admin / moderator / user")
 
     @field_validator("role")
     @classmethod
     def role_must_be_valid(cls, v: str) -> str:
         v = (v or "").strip().lower()
-        if v not in ("admin", "user"):
-            raise ValueError("role 仅可取值 admin / user")
+        if v not in ("admin", "moderator", "user"):
+            raise ValueError("role 仅可取值 admin / moderator / user")
         return v
 
 

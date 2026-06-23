@@ -10,6 +10,7 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useI18n } from '@/i18n'
 import { useUserStore } from '@/stores/user'
+import { usePermissionStore } from '@/stores/permission'
 
 // ---------- 路由列表 ----------
 const routes: RouteRecordRaw[] = [
@@ -99,6 +100,30 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/CreditRulesView.vue'),
     meta: { title: '积分规则配置', requiresAuth: true, requiresAdmin: true }
   },
+  {
+    path: '/admin/moderation',
+    name: 'admin-moderation',
+    component: () => import('@/views/ModerationView.vue'),
+    meta: { title: '内容审核', requiresAuth: true, permission: 'plaza:moderate' }
+  },
+  {
+    path: '/admin/sensitive-words',
+    name: 'admin-sensitive-words',
+    component: () => import('@/views/SensitiveWordsView.vue'),
+    meta: { title: '敏感词管理', requiresAuth: true, permission: 'moderation:config' }
+  },
+  {
+    path: '/admin/roles',
+    name: 'admin-roles',
+    component: () => import('@/views/RolesAdminView.vue'),
+    meta: { title: '角色管理', requiresAuth: true, permission: 'role:manage' }
+  },
+  {
+    path: '/admin/watermark',
+    name: 'admin-watermark',
+    component: () => import('@/views/WatermarkConfigView.vue'),
+    meta: { title: '水印配置', requiresAuth: true, permission: 'watermark:manage' }
+  },
   // 兜底路由
   {
     path: '/:pathMatch(.*)*',
@@ -116,10 +141,12 @@ const router = createRouter({
 // 否则刷新页面时 token/user 还没从 localStorage 恢复，会被误判为未登录
 router.beforeEach(async (to, _from, next) => {
   const userStore = useUserStore()
+  const permissionStore = usePermissionStore()
   // 等待 init() 完成（首次刷新页面时关键）
   await userStore.ready()
   const requiresAuth = to.meta?.requiresAuth === true
   const requiresAdmin = to.meta?.requiresAdmin === true
+  const requiredPermission = to.meta?.permission as string | undefined
 
   // 已登录用户访问登录页 — 直接进入业务页
   if (to.name === 'login' && userStore.isAuthenticated) {
@@ -136,6 +163,11 @@ router.beforeEach(async (to, _from, next) => {
 
   // 需要管理员角色但当前用户不是管理员 — 跳转首页
   if (requiresAdmin && !userStore.isAdmin) {
+    return next('/chat')
+  }
+
+  // 需要特定权限但当前用户没有 — 跳转首页
+  if (requiredPermission && !permissionStore.hasPermission(requiredPermission)) {
     return next('/chat')
   }
 

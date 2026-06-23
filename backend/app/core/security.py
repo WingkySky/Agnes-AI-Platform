@@ -223,9 +223,48 @@ async def get_current_admin_user(
 ) -> User:
     """
     仅允许超级管理员访问。在普通用户访问时返回 403。
+    向后兼容：role == ROLE_ADMIN 或 is_admin == True 都视为管理员。
     """
-    # 统一判断：role == ROLE_ADMIN 或 is_admin == True 都视为管理员
     from app.models.user import ROLE_ADMIN
     if not (current_user.role == ROLE_ADMIN or getattr(current_user, "is_admin", False)):
         raise HTTPException(status_code=403, detail="仅超级管理员可访问此接口")
     return current_user
+
+
+def require_permission(perm: str):
+    """
+    生成一个 FastAPI 依赖：检查当前用户是否拥有指定权限。
+
+    用法：
+        @router.get("/something", dependencies=[Depends(require_permission("plaza:moderate"))])
+
+    权限检查逻辑（依次尝试）：
+    1. 若用户 role == "admin"，直接通过（超级管理员拥有全部权限）
+    2. 从数据库加载用户对应的角色（按 user.role 匹配 role.name）
+    3. 检查角色的 permissions 列表中是否包含目标权限
+    4. 支持通配符："*" 表示全部权限，"plaza:*" 表示 plaza 模块全部权限
+    """
+    async def _check_permission(
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_async_db),
+    ) -> User:
+        # 超级管理员直接放行（向后兼容）
+        from app.models.user import ROLE_ADMIN
+        if current_user.role == ROLE_ADMIN or getattr(current_user, "is_admin", False):
+            return current_user
+
+        # 查询角色表获取权限列表
+        from app.models.role import Role
+        result = await db.execute(select(Role).filter(Role.name == current_user.role))
+        role = result.scalar_one_or_none()
+
+        if not role:
+            # 角色不存在：拒绝访问
+            raise HTTPException(status_code=403, detail=f"无权限：{perm}")
+
+        if not role.has_permission(perm):
+            raise HTTPException(status_code=403, detail=f"无权限：{perm}")
+
+        return current_user
+
+    return _check_permission

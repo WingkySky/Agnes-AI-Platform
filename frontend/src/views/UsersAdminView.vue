@@ -1,7 +1,8 @@
 <!-- =====================================================
      用户与角色管理页（仅管理员可见）
      - 展示所有用户：用户名、邮箱、积分、角色、状态、创建时间
-     - 支持修改角色（普通用户 / 超级管理员）、调整积分、启用/禁用
+     - 支持修改角色、调整积分、启用/禁用
+     - 支持水印开关、严格内容安全开关
      ===================================================== -->
 
 <template>
@@ -9,7 +10,7 @@
     <header class="page-head">
       <div>
         <h2>{{ t('users.title') }}</h2>
-        <p class="muted">{{ t('users.title') }}</p>
+        <p class="muted">管理系统用户与权限配置</p>
       </div>
       <el-button :icon="Refresh" @click="fetchUsers" :loading="loading">{{ t('common.refresh') }}</el-button>
     </header>
@@ -40,17 +41,33 @@
             />
           </template>
         </el-table-column>
-        <el-table-column :label="t('users.colRole')" width="170" align="center">
+        <el-table-column :label="t('users.colRole')" width="160" align="center">
           <template #default="{ row }">
-            <el-select
-              :model-value="row.role"
-              size="small"
+            <el-dropdown
+              trigger="click"
               :disabled="isSelf(row)"
-              @change="(val: string) => onRoleChange(row, val)"
+              @command="(val: string) => onRoleChange(row, val)"
             >
-              <el-option :label="t('users.roleUser')" value="user" />
-              <el-option :label="t('users.roleAdmin')" value="admin" />
-            </el-select>
+              <span class="role-dropdown">
+                <el-tag :type="roleTagType(row.role)" size="small" effect="light">
+                  {{ roleDisplayName(row.role) }}
+                </el-tag>
+                <el-icon v-if="!isSelf(row)" class="arrow-icon"><ArrowDown /></el-icon>
+              </span>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="user">
+                    <el-tag type="info" size="small" effect="dark">普通用户</el-tag>
+                  </el-dropdown-item>
+                  <el-dropdown-item command="moderator">
+                    <el-tag type="warning" size="small" effect="dark">审核员</el-tag>
+                  </el-dropdown-item>
+                  <el-dropdown-item command="admin">
+                    <el-tag type="danger" size="small" effect="dark">管理员</el-tag>
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
             <div v-if="isSelf(row)" class="muted small">{{ t('users.cannotEditSelf') }}</div>
           </template>
         </el-table-column>
@@ -62,6 +79,26 @@
               :active-text="t('users.statusActive')"
               :inactive-text="t('users.statusInactive')"
               @change="(val: boolean) => onActiveChange(row, val)"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column label="水印开关" width="120" align="center">
+          <template #default="{ row }">
+            <el-switch
+              :model-value="row.watermark_enabled"
+              active-text="开"
+              inactive-text="关"
+              @change="(val: boolean) => onWatermarkChange(row, val)"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column label="严格内容安全" width="140" align="center">
+          <template #default="{ row }">
+            <el-switch
+              :model-value="row.content_safety_strict"
+              active-text="开"
+              inactive-text="关"
+              @change="(val: boolean) => onContentSafetyChange(row, val)"
             />
           </template>
         </el-table-column>
@@ -83,8 +120,9 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, UserFilled } from '@element-plus/icons-vue'
-import { listUsers, updateUserRole, updateUserCredits, updateUserActive } from '@/api/auth'
+import { Refresh, UserFilled, ArrowDown } from '@element-plus/icons-vue'
+import { listUsers, updateUserCredits, updateUserActive } from '@/api/auth'
+import { updateUserRole, updateUserWatermark, updateUserContentSafety } from '@/api/admin'
 import { useUserStore } from '@/stores/user'
 import type { UserAdminRow } from '@/types'
 import { useI18n } from '@/i18n'
@@ -109,6 +147,34 @@ function formatTime(val?: string | null) {
   }
 }
 
+/** 角色显示名称 */
+function roleDisplayName(role: string) {
+  switch (role) {
+    case 'admin':
+      return '管理员'
+    case 'moderator':
+      return '审核员'
+    case 'user':
+      return '普通用户'
+    default:
+      return role
+  }
+}
+
+/** 角色标签类型 */
+function roleTagType(role: string) {
+  switch (role) {
+    case 'admin':
+      return 'danger'
+    case 'moderator':
+      return 'warning'
+    case 'user':
+      return 'info'
+    default:
+      return 'info'
+  }
+}
+
 /** 拉取用户列表 */
 async function fetchUsers() {
   loading.value = true
@@ -125,25 +191,24 @@ async function fetchUsers() {
 /** 修改角色 */
 async function onRoleChange(row: UserAdminRow, newRole: string) {
   if (isSelf(row)) return
-  const roleName = newRole === 'admin' ? t('users.roleAdmin') : t('users.roleUser')
+  if (row.role === newRole) return
   try {
     await ElMessageBox.confirm(
-      `${t('users.confirmChangeRole')} ${roleName} ?`,
-      t('users.changeRole'),
-      { confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel'), type: 'warning' }
+      `确定将用户「${row.username}」的角色修改为「${roleDisplayName(newRole)}」吗？`,
+      '修改角色',
+      { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
     )
   } catch {
-    // 取消：恢复原值
-    fetchUsers()
     return
   }
   try {
-    await updateUserRole(row.id, { role: newRole })
+    await updateUserRole(row.id, newRole)
     row.role = newRole
     row.is_admin = newRole === 'admin'
-    ElMessage.success(t('users.changeRoleSuccess'))
-  } catch (e) {
+    ElMessage.success(`角色已修改为${roleDisplayName(newRole)}`)
+  } catch (e: any) {
     console.warn(e)
+    ElMessage.error(e?.message || '修改失败')
     fetchUsers()
   }
 }
@@ -173,64 +238,128 @@ async function onActiveChange(row: UserAdminRow, active: boolean) {
   }
 }
 
+/** 水印开关切换 */
+async function onWatermarkChange(row: UserAdminRow, enabled: boolean) {
+  try {
+    await updateUserWatermark(row.id, enabled)
+    row.watermark_enabled = enabled
+    ElMessage.success(enabled ? '水印已开启' : '水印已关闭')
+  } catch (e: any) {
+    console.warn(e)
+    ElMessage.error(e?.message || '操作失败')
+    fetchUsers()
+  }
+}
+
+/** 严格内容安全开关切换 */
+async function onContentSafetyChange(row: UserAdminRow, enabled: boolean) {
+  try {
+    await updateUserContentSafety(row.id, enabled)
+    row.content_safety_strict = enabled
+    ElMessage.success(enabled ? '严格内容安全已开启' : '严格内容安全已关闭')
+  } catch (e: any) {
+    console.warn(e)
+    ElMessage.error(e?.message || '操作失败')
+    fetchUsers()
+  }
+}
+
 onMounted(fetchUsers)
 </script>
 
 <style scoped>
 .users-admin-wrap {
-  max-width: 1400px;
+  max-width: 1600px;
   margin: 0 auto;
 }
+
 .page-head {
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
   margin-bottom: 16px;
 }
+
 .page-head h2 {
   margin: 0 0 4px;
   color: var(--agnes-text-primary);
   font-size: 20px;
 }
+
 .muted {
   color: var(--agnes-text-muted);
   font-size: 13px;
   margin: 0;
 }
+
 .small {
   font-size: 12px;
   margin-top: 4px;
 }
+
 .table-card {
   background: var(--agnes-bg-elevated);
   border: 1px solid var(--agnes-border);
   border-radius: 10px;
 }
+
 :deep(.el-table) {
   background: transparent;
   color: var(--agnes-text-secondary);
 }
+
 :deep(.el-table th.el-table__cell) {
   background: var(--agnes-bg-hover);
   color: var(--agnes-text-secondary);
 }
+
 :deep(.el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell) {
   background: var(--agnes-bg-hover);
 }
+
 .user-cell {
   display: flex;
   align-items: center;
   gap: 10px;
 }
+
 .user-cell-info {
   display: flex;
   flex-direction: column;
 }
+
 .user-cell-name {
   color: var(--agnes-text-primary);
   font-weight: 500;
 }
+
 .user-cell-email {
   font-size: 12px;
+}
+
+.role-dropdown {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.role-dropdown:hover .arrow-icon {
+  color: var(--agnes-text-primary);
+}
+
+.arrow-icon {
+  font-size: 12px;
+  color: var(--agnes-text-muted);
+  transition: color 0.2s;
+}
+
+:deep(.el-dropdown-menu__item) {
+  padding: 8px 16px;
+}
+
+:deep(.el-dropdown-menu__item .el-tag) {
+  width: 100%;
+  justify-content: center;
 }
 </style>

@@ -74,6 +74,10 @@ const zhCN = {
     usersAdmin: '用户管理',
     creditRules: '积分规则',
     admin: '管理',
+    moderation: '内容审核',
+    sensitiveWords: '敏感词管理',
+    roleManage: '角色管理',
+    watermarkConfig: '水印配置',
   },
 
   // ------ 通用视图 ------

@@ -67,6 +67,16 @@ async def create_image_task_async(
 
     mode = "image2image" if req.is_image_to_image else "text2image"
 
+    # ===== 严格内容安全模式：生成前拦截敏感词 =====
+    if getattr(current_user, "content_safety_strict", False) and req.prompt:
+        from app.services.moderation_service import check_sensitive_text
+        hit, hit_words = await check_sensitive_text(db, req.prompt)
+        if hit:
+            raise HTTPException(
+                status_code=403,
+                detail=f"内容包含敏感词，无法生成：{', '.join(hit_words[:5])}",
+            )
+
     # --- 计算本次任务需要消耗的积分 ---
     cost = await get_image_cost_async(db, mode=mode, size=size)
 
@@ -238,6 +248,17 @@ async def create_image_generation(
     # --- 计算并扣除积分（必须登录，积分不足会抛 402）---
     mode = "image2image" if req.is_image_to_image else "text2image"
     size = req.size or "1024x1024"
+
+    # ===== 严格内容安全模式：生成前拦截敏感词 =====
+    if getattr(current_user, "content_safety_strict", False) and req.prompt:
+        from app.services.moderation_service import check_sensitive_text
+        hit, hit_words = await check_sensitive_text(db, req.prompt)
+        if hit:
+            raise HTTPException(
+                status_code=403,
+                detail=f"内容包含敏感词，无法生成：{', '.join(hit_words[:5])}",
+            )
+
     cost = await get_image_cost_async(db, mode=mode, size=size)
     await consume_credits(db, current_user, cost, description=f"image/{mode}/{size}")
 

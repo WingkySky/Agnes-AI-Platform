@@ -85,6 +85,50 @@ class Settings(BaseSettings):
         description="新注册用户默认赠送的积分",
     )
 
+    # ---------- 邮件服务配置（用于发送验证码等） ----------
+    smtp_host: str = Field(
+        default="",
+        description="SMTP 服务器地址（留空则不启用邮件功能）",
+    )
+    smtp_port: int = Field(
+        default=587,
+        description="SMTP 服务器端口（默认 587）",
+    )
+    smtp_user: str = Field(
+        default="",
+        description="SMTP 用户名",
+    )
+    smtp_password: str = Field(
+        default="",
+        description="SMTP 密码",
+    )
+    smtp_from_email: str = Field(
+        default="",
+        description="发件人邮箱地址",
+    )
+    smtp_from_name: str = Field(
+        default="Agnes AI Platform",
+        description="发件人显示名称",
+    )
+    smtp_use_tls: bool = Field(
+        default=True,
+        description="是否使用 TLS 加密",
+    )
+
+    # ---------- 验证码配置 ----------
+    captcha_expire_seconds: int = Field(
+        default=300,
+        description="图片验证码有效期（秒），默认 5 分钟",
+    )
+    email_code_expire_seconds: int = Field(
+        default=600,
+        description="邮箱验证码有效期（秒），默认 10 分钟",
+    )
+    email_code_resend_interval: int = Field(
+        default=60,
+        description="邮箱验证码重发间隔（秒），默认 60 秒",
+    )
+
     # ---------- 日志配置 ----------
     log_level: str = Field(
         default="INFO",

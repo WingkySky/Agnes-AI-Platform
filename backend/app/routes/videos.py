@@ -119,6 +119,17 @@ async def create_video_task(
     # --- 计算并预扣积分（必须登录，积分不足会抛 402）---
     # 视频任务的 task_id 由 Agnes AI 返回，无法预先生成，先用临时 ref_id 扣分
     # 拿到真实 task_id 后更新流水的 ref_id；若 Agnes 调用失败则退还预扣积分
+
+    # ===== 严格内容安全模式：生成前拦截敏感词 =====
+    if getattr(current_user, "content_safety_strict", False) and req.prompt:
+        from app.services.moderation_service import check_sensitive_text
+        hit, hit_words = await check_sensitive_text(db, req.prompt)
+        if hit:
+            raise HTTPException(
+                status_code=403,
+                detail=f"内容包含敏感词，无法生成：{', '.join(hit_words[:5])}",
+            )
+
     cost = await get_video_cost_async(db, mode=req.mode, seconds=req.seconds or 5, num_frames=req.num_frames)
     import uuid as _uuid
     _pending_ref_id = f"pending_{_uuid.uuid4().hex}"

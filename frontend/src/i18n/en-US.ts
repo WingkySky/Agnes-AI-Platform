@@ -73,6 +73,10 @@ const enUS = {
     usersAdmin: 'User Management',
     creditRules: 'Credit Rules',
     admin: 'Admin',
+    moderation: 'Content Moderation',
+    sensitiveWords: 'Sensitive Words',
+    roleManage: 'Role Management',
+    watermarkConfig: 'Watermark Config',
   },
 
   // ------ Views ------

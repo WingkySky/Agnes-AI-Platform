@@ -15,10 +15,12 @@ from app.core.database import Base
 # 角色常量（前端/后端统一使用）
 ROLE_ADMIN = "admin"   # 超级管理员：可访问配置页面、修改用户、修改积分规则
 ROLE_USER = "user"     # 普通用户：可登录、生成、查看自己的记录
+ROLE_MODERATOR = "moderator"  # 审核员：可审核广场内容、管理敏感词
 
 # 角色展示名
 ROLE_LABELS = {
     ROLE_ADMIN: "超级管理员",
+    ROLE_MODERATOR: "审核员",
     ROLE_USER: "普通用户",
 }
 
@@ -53,13 +55,17 @@ class User(Base):
     # 积分余额（用于生成任务消耗）
     credits = Column(Integer, default=0, nullable=False)
 
-    # 角色：admin / user
+    # 角色：admin / moderator / user
     role = Column(String(16), default=ROLE_USER, nullable=False, index=True)
 
     # 权限标记
     is_active = Column(Boolean, default=True, nullable=False)
     # 向后兼容：若 role == ROLE_ADMIN，则 is_admin 自动为 True（也允许通过修改 is_admin 间接改 role）
     is_admin = Column(Boolean, default=False, nullable=False)
+
+    # ===== 内容安全与水印控制（管理员可配置）=====
+    watermark_enabled = Column(Boolean, default=False, nullable=False)  # 是否为该用户生成内容添加水印
+    content_safety_strict = Column(Boolean, default=False, nullable=False)  # 是否启用严格内容安全（敏感词拦截）
 
     # 时间字段
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -96,6 +102,8 @@ class User(Base):
             "role": self.role,
             "is_active": self.is_active,
             "is_admin": self.effective_is_admin,
+            "watermark_enabled": self.watermark_enabled,
+            "content_safety_strict": self.content_safety_strict,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "last_login_at": self.last_login_at.isoformat() if self.last_login_at else None,
         }

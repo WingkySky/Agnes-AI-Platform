@@ -18,6 +18,7 @@ import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { login as apiLogin, register as apiRegister, getMe, getCredits, updateMyProfile, uploadAvatar } from '@/api/auth'
 import { usePreferencesStore } from '@/stores/preferences'
+import { usePermissionStore } from '@/stores/permission'
 import type { AuthLoginRequest, AuthRegisterRequest, UserInfoResponse, UpdateProfileRequest } from '@/types'
 
 /** JWT 在 localStorage 中的 key（前端仅保存，不可篡改） */
@@ -72,6 +73,9 @@ export const useUserStore = defineStore('user', () => {
     try {
       const data = await getMe()
       user.value = data
+      // 加载用户权限
+      const permStore = usePermissionStore()
+      permStore.loadPermissions(data.role)
     } catch (e) {
       // 401 或其他错误，上层 api client 的拦截器已处理跳转/清除
       throw e
@@ -179,6 +183,9 @@ export const useUserStore = defineStore('user', () => {
   function clearAll() {
     token.value = ''
     user.value = null
+    // 重置权限
+    const permStore = usePermissionStore()
+    permStore.reset()
     try {
       localStorage.removeItem(TOKEN_STORAGE_KEY)
     } catch (e) {

@@ -50,6 +50,9 @@ from app.routes import credits as credits_route
 from app.routes import proxy as proxy_route
 from app.routes import preferences as preferences_route
 from app.routes import plaza as plaza_route
+from app.routes import admin_roles as admin_roles_route
+from app.routes import admin_moderation as admin_moderation_route
+from app.routes import admin_watermark as admin_watermark_route
 from app.services.video_poller import poller_manager
 from app.services.image_poller import image_poller_manager
 from app.services.agnes_client import agnes_client
@@ -149,6 +152,19 @@ async def lifespan(app: FastAPI):
     await image_poller_manager.start()
     logger.info("✓ 图片任务器已就绪")
 
+    # 初始化内置角色（admin / moderator / user）
+    from app.core.database import async_session
+    from app.routes.admin_roles import ensure_default_roles
+    async with async_session() as db:
+        await ensure_default_roles(db)
+    logger.info("✓ 内置角色已初始化")
+
+    # 初始化默认敏感词
+    from app.services.moderation_service import ensure_default_sensitive_words
+    async with async_session() as db:
+        await ensure_default_sensitive_words(db)
+    logger.info("✓ 默认敏感词已初始化")
+
     logger.info("🚀 Agnes AI Platform（全异步架构）后端服务已启动")
 
     yield  # 应用在此期间运行
@@ -233,6 +249,9 @@ app.include_router(credits_route.router, prefix="/api", tags=["积分明细"])
 app.include_router(proxy_route.router, prefix="/api", tags=["图片代理"])
 app.include_router(preferences_route.router, prefix="/api", tags=["用户偏好设置"])
 app.include_router(plaza_route.router, prefix="/api", tags=["作品广场"])
+app.include_router(admin_roles_route.router, prefix="/api", tags=["管理员-角色权限"])
+app.include_router(admin_moderation_route.router, prefix="/api", tags=["管理员-内容审核"])
+app.include_router(admin_watermark_route.router, prefix="/api", tags=["管理员-水印配置"])
 
 
 # ---------- 健康检查 ----------

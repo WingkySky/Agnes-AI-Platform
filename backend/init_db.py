@@ -67,6 +67,10 @@ _safe_import("app.models.api_provider", ["ApiProvider"])
 _safe_import("app.models.model_definition", ["ModelDefinition"])
 _safe_import("app.models.credit_transaction", ["CreditTransaction"])
 _safe_import("app.models.user_preference", ["UserPreference"])
+_safe_import("app.models.role", ["Role"])
+_safe_import("app.models.sensitive_word", ["SensitiveWord"])
+_safe_import("app.models.watermark", ["WatermarkConfig"])
+_safe_import("app.models.plaza_like", ["PlazaLike"])
 
 logging.basicConfig(
     level=logging.INFO,

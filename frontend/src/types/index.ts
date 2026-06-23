@@ -101,6 +101,12 @@ export interface GenerationRecord {
   credits_consumed?: number       // 本次任务消耗的积分数（与积分流水 ref_id 对应）
   created_at?: string | null
   is_public?: boolean             // 是否已公开分享到广场（Plaza）
+  public_shared_at?: string | null
+  likes_count?: number
+  views_count?: number
+  moderation_status?: 'pending' | 'approved' | 'rejected'  // 审核状态
+  moderation_reason?: string | null
+  moderation_flags?: string[] | null
 }
 
 /** 历史列表响应 — 对齐 HistoryListResponse */
@@ -665,6 +671,8 @@ export interface UserAdminRow {
   role: string
   is_active: boolean
   is_admin: boolean
+  watermark_enabled: boolean
+  content_safety_strict: boolean
   created_at?: string | null
   last_login_at?: string | null
 }

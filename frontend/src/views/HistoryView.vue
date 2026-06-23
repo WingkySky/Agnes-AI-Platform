@@ -158,6 +158,11 @@
             <el-icon size="10"><Share /></el-icon>
             {{ t('plaza.isPublic') }}
           </div>
+          <!-- 被管理员屏蔽的标签：屏蔽状态显示 -->
+          <div v-if="item.moderation_status === 'rejected' && !editMode" class="rejected-badge">
+            <el-icon size="10"><Warning /></el-icon>
+            已屏蔽
+          </div>
           <!-- 快捷操作按钮组（非编辑模式下显示）：放大 / 下载 / 分享 / 删除，分别调用不同模块 -->
           <!-- 放在 card-preview 内，z-index 足够高以确保不被其他蒙层遮挡 -->
           <div v-if="!editMode" class="card-actions">
@@ -176,12 +181,15 @@
               :title="t('history.download')">
               <el-icon size="16"><Download /></el-icon>
             </div>
-            <!-- 分享状态切换：点击切换公开/私有（公开时高亮） -->
+            <!-- 分享状态切换：点击切换公开/私有（公开时高亮；被屏蔽时禁用） -->
             <div
               class="card-action-btn card-action-share"
-              :class="{ 'is-public': item.is_public }"
+              :class="{
+                'is-public': item.is_public,
+                'is-disabled': item.moderation_status === 'rejected'
+              }"
               @click.stop="toggleShare(item)"
-              :title="item.is_public ? t('plaza.isPublic') : t('plaza.isPrivate')">
+              :title="item.moderation_status === 'rejected' ? '该作品已被管理员屏蔽，无法公开到广场' : (item.is_public ? t('plaza.isPublic') : t('plaza.isPrivate'))">
               <el-icon size="16"><Share /></el-icon>
             </div>
             <!-- 删除：调用历史记录删除模块（带确认弹窗） -->
@@ -364,7 +372,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Loading, Document, Delete, VideoPlay, CircleCloseFilled, Edit, Close, Download, ZoomIn, Share } from '@element-plus/icons-vue'
+import { Refresh, Loading, Document, Delete, VideoPlay, CircleCloseFilled, Edit, Close, Download, ZoomIn, Share, Warning } from '@element-plus/icons-vue'
 import ImageViewer from '@/components/ImageViewer.vue'
 import { getHistoryList, deleteHistoryRecord, batchDeleteHistory } from '@/api/history'
 import { updateShareStatus, batchUpdateShareStatus } from '@/api/plaza'
@@ -753,6 +761,11 @@ async function doBatchDelete() {
 
 /** 切换单条记录的分享状态（公开 ↔ 私有） */
 async function toggleShare(item: GenerationRecord) {
+  // 被管理员屏蔽的作品，不允许设为公开
+  if (item.moderation_status === 'rejected' && !item.is_public) {
+    ElMessage.warning('该作品已被管理员屏蔽，无法公开到广场')
+    return
+  }
   const newStatus = !item.is_public
   try {
     const res = await updateShareStatus(item.id, newStatus)
@@ -770,9 +783,25 @@ async function confirmBatchSetPublic() {
     ElMessage.warning(t('history.pleaseSelectOne'))
     return
   }
+  // 过滤掉已被屏蔽的作品
+  const rejectedItems = list.value.filter(item =>
+    selectedIds.value.includes(item.id) && item.moderation_status === 'rejected'
+  )
+  const rejectedCount = rejectedItems.length
+  const validIds = selectedIds.value.filter(id => {
+    const item = list.value.find(i => i.id === id)
+    return item?.moderation_status !== 'rejected'
+  })
+  if (validIds.length === 0) {
+    ElMessage.warning('选中的作品都已被管理员屏蔽，无法公开到广场')
+    return
+  }
   try {
+    const confirmText = rejectedCount > 0
+      ? `将 ${validIds.length} 条设为公开（${rejectedCount} 条已被屏蔽，将被跳过）`
+      : t('plaza.confirmBatchPublic', { n: selectedIds.value.length })
     await ElMessageBox.confirm(
-      t('plaza.confirmBatchPublic', { n: selectedIds.value.length }),
+      confirmText,
       t('plaza.batchSetPublic'),
       { type: 'warning', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') }
     )
@@ -781,7 +810,7 @@ async function confirmBatchSetPublic() {
   }
   batchSettingPublic.value = true
   try {
-    const res = await batchUpdateShareStatus(selectedIds.value, true)
+    const res = await batchUpdateShareStatus(validIds, true)
     ElMessage.success(res?.message || t('plaza.batchSuccess'))
     selectedIds.value = []
     loadList()
@@ -1307,6 +1336,11 @@ onBeforeUnmount(() => {
   border-color: var(--agnes-accent);
   color: var(--agnes-accent);
 }
+.card-action-btn.card-action-share.is-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
 /* 已分享到广场的状态标签：叠在缩略图右上角，公开时显示 */
 .public-badge {
   position: absolute;
@@ -1321,6 +1355,24 @@ onBeforeUnmount(() => {
   font-weight: 600;
   color: #ffffff;
   background: var(--agnes-accent);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  backdrop-filter: blur(4px);
+  z-index: 3;
+}
+
+.rejected-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #ffffff;
+  background: #ef4444;
   border: 1px solid rgba(255, 255, 255, 0.25);
   backdrop-filter: blur(4px);
   z-index: 3;

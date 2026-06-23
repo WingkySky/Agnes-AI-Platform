@@ -21,6 +21,8 @@ import { useThemeStore } from './stores/theme'
 
 // 国际化（i18n）插件
 import i18n from '@/i18n'
+// 权限插件
+import permissionPlugin from '@/plugins/permission'
 
 // 创建 Vue 应用
 const app = createApp(App)
@@ -37,6 +39,8 @@ app.use(router)
 app.use(ElementPlus)
 // 挂载 i18n 插件：提供 $t 全局属性
 app.use(i18n)
+// 挂载权限插件：提供 v-permission 指令和 $hasPerm 全局方法
+app.use(permissionPlugin)
 
 // 初始化全局主题（从 localStorage 恢复深色/浅色，同步到 <html> class）
 // 必须在 mount 之前完成，避免页面闪烁

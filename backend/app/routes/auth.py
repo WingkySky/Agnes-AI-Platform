@@ -18,7 +18,7 @@ import os
 import time
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -363,6 +363,8 @@ async def list_users(
         items.append(UserAdminRow(
             id=u.id, username=u.username, nickname=u.nickname, email=u.email,
             credits=u.credits, role=u.role, is_active=u.is_active, is_admin=is_admin,
+            watermark_enabled=u.watermark_enabled,
+            content_safety_strict=u.content_safety_strict,
             created_at=u.created_at, last_login_at=u.last_login_at,
         ))
     return UserListResponse(items=items, total=len(items))
@@ -400,6 +402,54 @@ async def update_user_role(
         "is_admin": is_admin,
         "ok": True,
     }
+
+
+# =====================================================
+# 管理员：修改用户水印开关
+# =====================================================
+
+@router.put("/users/{user_id}/watermark", summary="[管理员] 修改用户水印开关")
+async def update_user_watermark(
+    user_id: int,
+    req: dict = Body(...),
+    db: AsyncSession = Depends(get_async_db),
+    _admin: User = Depends(get_current_admin_user),
+):
+    result = await db.execute(select(User).filter(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    enabled = bool(req.get("enabled", False))
+    user.watermark_enabled = enabled
+    await db.commit()
+
+    logger.info("[管理员操作] %s 修改用户 id=%d 水印开关 -> %s", _admin.username, user.id, enabled)
+    return {"id": user.id, "watermark_enabled": enabled, "ok": True}
+
+
+# =====================================================
+# 管理员：修改用户内容安全严格模式
+# =====================================================
+
+@router.put("/users/{user_id}/content-safety", summary="[管理员] 修改用户内容安全严格模式")
+async def update_user_content_safety(
+    user_id: int,
+    req: dict = Body(...),
+    db: AsyncSession = Depends(get_async_db),
+    _admin: User = Depends(get_current_admin_user),
+):
+    result = await db.execute(select(User).filter(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    enabled = bool(req.get("enabled", False))
+    user.content_safety_strict = enabled
+    await db.commit()
+
+    logger.info("[管理员操作] %s 修改用户 id=%d 内容安全严格模式 -> %s", _admin.username, user.id, enabled)
+    return {"id": user.id, "content_safety_strict": enabled, "ok": True}
 
 
 # =====================================================
@@ -461,3 +511,53 @@ async def update_user_active(
         _admin.username, user.id, req.is_active,
     )
     return {"id": user.id, "is_active": user.is_active, "ok": True}
+
+
+# =====================================================
+# 管理员：用户水印开关
+# =====================================================
+
+@router.put("/users/{user_id}/watermark", summary="[管理员] 开启/关闭用户水印")
+async def update_user_watermark(
+    user_id: int,
+    req: UpdateActiveRequest,   # 复用 is_active 字段做布尔开关
+    db: AsyncSession = Depends(get_async_db),
+    _admin: User = Depends(get_current_admin_user),
+):
+    result = await db.execute(select(User).filter(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    user.watermark_enabled = req.is_active
+    await db.commit()
+    logger.info(
+        "[管理员操作] %s 将用户 id=%d watermark_enabled 改为 %s",
+        _admin.username, user.id, req.is_active,
+    )
+    return {"id": user.id, "watermark_enabled": user.watermark_enabled, "ok": True}
+
+
+# =====================================================
+# 管理员：用户内容安全严格模式开关
+# =====================================================
+
+@router.put("/users/{user_id}/content-safety", summary="[管理员] 开启/关闭用户严格内容安全")
+async def update_user_content_safety(
+    user_id: int,
+    req: UpdateActiveRequest,   # 复用 is_active 字段做布尔开关
+    db: AsyncSession = Depends(get_async_db),
+    _admin: User = Depends(get_current_admin_user),
+):
+    result = await db.execute(select(User).filter(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    user.content_safety_strict = req.is_active
+    await db.commit()
+    logger.info(
+        "[管理员操作] %s 将用户 id=%d content_safety_strict 改为 %s",
+        _admin.username, user.id, req.is_active,
+    )
+    return {"id": user.id, "content_safety_strict": user.content_safety_strict, "ok": True}

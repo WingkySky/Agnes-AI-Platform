@@ -108,11 +108,12 @@ async def get_plaza_works(
     - sort=latest 按 public_shared_at 倒序
     - sort=popular 按 likes_count 倒序
     """
-    # 基础查询：只返回公开且成功的作品
+    # 基础查询：只返回公开、成功、且审核通过的作品
     stmt = select(Generation).filter(
         Generation.is_public == True,       # noqa: E712
         Generation.status == "success",
         Generation.result_url.isnot(None),
+        Generation.moderation_status == "approved",  # 只展示审核通过的
     )
 
     # 类型筛选
@@ -190,6 +191,7 @@ async def get_plaza_work_detail(
         Generation.id == work_id,
         Generation.is_public == True,       # noqa: E712
         Generation.status == "success",
+        Generation.moderation_status == "approved",  # 只展示审核通过的
     )
     result = await db.execute(stmt)
     record = result.scalar_one_or_none()
