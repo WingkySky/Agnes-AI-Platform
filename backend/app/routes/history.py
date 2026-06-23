@@ -824,15 +824,13 @@ async def get_video_thumbnail(
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """
-    提取视频首帧作为缩略图（JPEG 格式，按用户隔离）。
+    提取视频首帧作为缩略图（JPEG 格式）。
+    - 视频所有者可访问
+    - 已公开且审核通过的作品，所有用户均可访问（用于广场展示）
     使用文件缓存，同一视频只提取一次。
     """
-    # 查询视频记录（按用户隔离）
+    # 查询视频记录
     stmt = select(Generation).filter(Generation.id == record_id)
-    if current_user:
-        stmt = stmt.filter(Generation.user_id == current_user.id)
-    else:
-        stmt = stmt.filter(Generation.user_id.is_(None))
     result = await db.execute(stmt)
     record = result.scalar_one_or_none()
 
@@ -841,6 +839,12 @@ async def get_video_thumbnail(
 
     if record.type != "video":
         raise HTTPException(status_code=400, detail="该记录不是视频类型")
+
+    # 权限校验：本人可看；已公开且审核通过的作品所有人可看
+    is_owner = current_user and record.user_id == current_user.id
+    is_public_approved = record.is_public and record.moderation_status == "approved"
+    if not is_owner and not is_public_approved:
+        raise HTTPException(status_code=404, detail="未找到对应视频记录")
 
     if not record.result_url:
         raise HTTPException(status_code=404, detail="视频资源链接不存在")

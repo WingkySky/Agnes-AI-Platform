@@ -53,22 +53,35 @@
             :src="work.result_url ?? ''"
             :alt="work.prompt"
             loading="lazy" />
-          <!-- 视频缩略图：走后端首帧代理；非本人作品会 404，回退到占位图标 -->
-          <template v-else>
+          <!-- 视频缩略图：首帧静态图 + 悬停 GIF 动态预览 -->
+          <div
+            v-else
+            class="video-thumb"
+            @mouseenter="onVideoCardHover(work)"
+            @mouseleave="onVideoCardLeave(work)">
+            <!-- 首帧缩略图（静态） -->
             <img
               v-if="!thumbFailed[work.id]"
               :src="`/api/history/video/${work.id}/thumbnail`"
               :alt="work.prompt"
+              class="video-thumb-img"
               loading="lazy"
               @error="thumbFailed[work.id] = true" />
             <div v-else class="thumb-placeholder">
               <el-icon :size="40"><VideoPlay /></el-icon>
             </div>
+            <!-- 悬停时的 GIF 动态预览 -->
+            <img
+              v-if="hoveredVideoId === work.id && videoPreviews[work.id]"
+              :src="videoPreviews[work.id]"
+              :alt="work.prompt"
+              class="video-preview-gif"
+            />
             <!-- 视频播放蒙层图标 -->
             <div class="video-play-overlay">
               <el-icon :size="32"><VideoPlay /></el-icon>
             </div>
-          </template>
+          </div>
 
           <!-- 视频类型角标 -->
           <div v-if="work.type === 'video'" class="type-badge">

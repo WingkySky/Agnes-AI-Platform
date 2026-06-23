@@ -9,20 +9,37 @@
     <header class="page-head">
       <div>
         <h2>内容审核</h2>
-        <p class="muted">审核广场公开作品</p>
+        <p class="muted">审核广场公开作品，支持按状态回看历史记录</p>
       </div>
       <el-button :icon="Refresh" @click="fetchList" :loading="loading">刷新</el-button>
     </header>
 
-    <el-card class="filter-card" shadow="never">
-      <div class="filter-row">
-        <el-select v-model="filterStatus" placeholder="全部状态" style="width: 120px" @change="onFilterChange">
-          <el-option label="待审核" value="pending" />
-          <el-option label="已通过" value="approved" />
-          <el-option label="已屏蔽" value="rejected" />
-          <el-option label="全部" value="all" />
-        </el-select>
+    <!-- 状态 Tab 切换 -->
+    <el-tabs v-model="filterStatus" class="status-tabs" @tab-change="onStatusTabChange">
+      <el-tab-pane label="待审核" name="pending" />
+      <el-tab-pane label="已通过" name="approved" />
+      <el-tab-pane label="已屏蔽" name="rejected" />
+      <el-tab-pane label="全部" name="all" />
+    </el-tabs>
 
+    <el-card class="filter-card" shadow="never">
+      <!-- 待审核 Tab 下的一键审核快捷操作 -->
+      <div v-if="filterStatus === 'pending'" class="quick-actions">
+        <span class="quick-label">
+          <el-icon size="14" color="#e6a23c"><Warning /></el-icon>
+          当前待审核 <b>{{ total }}</b> 条，可快速操作：
+        </span>
+        <el-button type="success" size="small" @click="onQuickApproveAll" :disabled="total === 0 || loading">
+          <el-icon><Check /></el-icon>
+          一键通过全部
+        </el-button>
+        <el-button type="danger" size="small" @click="onQuickRejectAll" :disabled="total === 0 || loading">
+          <el-icon><Close /></el-icon>
+          一键屏蔽全部
+        </el-button>
+      </div>
+
+      <div class="filter-row">
         <el-select v-model="filterType" placeholder="全部类型" style="width: 100px" @change="onFilterChange">
           <el-option label="全部" value="" />
           <el-option label="图片" value="image" />
@@ -204,7 +221,7 @@
       </div>
     </el-card>
 
-    <el-dialog v-model="rejectDialogVisible" title="驳回原因" width="420px">
+    <el-dialog v-model="rejectDialogVisible" :title="rejectDialogTitle" width="420px">
       <el-input
         v-model="rejectReason"
         type="textarea"
@@ -295,9 +312,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Search, VideoPlay } from '@element-plus/icons-vue'
+import { Refresh, Search, VideoPlay, Warning, Check, Close } from '@element-plus/icons-vue'
 import {
   getModerationWorks,
   approveWork,
@@ -326,6 +343,12 @@ const rejectReason = ref('')
 const rejectLoading = ref(false)
 const rejectTargetId = ref<number | null>(null)
 const isBatchReject = ref(false)
+
+const rejectDialogTitle = computed(() => {
+  if (rejectTargetId.value === -1) return '一键屏蔽全部'
+  if (isBatchReject.value) return '批量屏蔽'
+  return '驳回原因'
+})
 
 const previewVisible = ref(false)
 const currentWork = ref<ModerationWork | null>(null)
@@ -401,6 +424,12 @@ function onFilterChange() {
   fetchList()
 }
 
+function onStatusTabChange() {
+  page.value = 1
+  selectedIds.value = []
+  fetchList()
+}
+
 function onSearch() {
   page.value = 1
   fetchList()
@@ -443,7 +472,17 @@ function onReject(row: ModerationWork) {
 async function confirmReject() {
   rejectLoading.value = true
   try {
-    if (isBatchReject.value) {
+    if (rejectTargetId.value === -1) {
+      // 一键全部屏蔽
+      const ids = await fetchAllPendingIds()
+      if (ids.length === 0) {
+        ElMessage.info('没有待审核内容')
+        rejectDialogVisible.value = false
+        return
+      }
+      await batchReject(ids, rejectReason.value || undefined)
+      ElMessage.success(`已一键屏蔽 ${ids.length} 项作品`)
+    } else if (isBatchReject.value) {
       await batchReject(selectedIds.value, rejectReason.value || undefined)
       ElMessage.success(`已批量屏蔽 ${selectedIds.value.length} 项`)
       clearSelection()
@@ -489,6 +528,59 @@ function onBatchReject() {
   rejectDialogVisible.value = true
 }
 
+async function fetchAllPendingIds(): Promise<number[]> {
+  const allIds: number[] = []
+  let currentPage = 1
+  const size = 100
+  while (true) {
+    const res = await getModerationWorks({
+      status: filterStatus.value as any,
+      work_type: filterType.value || undefined,
+      keyword: keyword.value || undefined,
+      work_id: searchWorkId.value || undefined,
+      username: searchUsername.value || undefined,
+      page: currentPage,
+      page_size: size,
+    })
+    const items = (res as any).items || []
+    allIds.push(...items.map((it: ModerationWork) => it.id))
+    if (items.length < size) break
+    currentPage++
+  }
+  return allIds
+}
+
+async function onQuickApproveAll() {
+  try {
+    await ElMessageBox.confirm(
+      `确认一键通过当前筛选条件下的全部 ${total.value} 条待审核作品？`,
+      '一键通过全部',
+      { confirmButtonText: '确认通过', cancelButtonText: '取消', type: 'success' }
+    )
+  } catch {
+    return
+  }
+  try {
+    const ids = await fetchAllPendingIds()
+    if (ids.length === 0) {
+      ElMessage.info('没有待审核内容')
+      return
+    }
+    await batchApprove(ids)
+    ElMessage.success(`已一键通过 ${ids.length} 项作品`)
+    fetchList()
+  } catch (e) {
+    console.warn(e)
+  }
+}
+
+function onQuickRejectAll() {
+  isBatchReject.value = true
+  rejectTargetId.value = -1
+  rejectReason.value = ''
+  rejectDialogVisible.value = true
+}
+
 function openPreview(row: ModerationWork) {
   currentWork.value = row
   previewVisible.value = true
@@ -516,6 +608,25 @@ onMounted(fetchList)
   font-size: 20px;
 }
 
+.status-tabs {
+  margin-bottom: 12px;
+}
+
+.status-tabs :deep(.el-tabs__item) {
+  font-size: 15px;
+  padding: 0 20px;
+  height: 44px;
+  line-height: 44px;
+}
+
+.status-tabs :deep(.el-tabs__active-bar) {
+  height: 3px;
+}
+
+.status-tabs :deep(.el-tabs__nav-wrap::after) {
+  height: 1px;
+}
+
 .muted {
   color: var(--agnes-text-muted);
   font-size: 13px;
@@ -531,6 +642,31 @@ onMounted(fetchList)
 
 .filter-card {
   margin-bottom: 16px;
+}
+
+.quick-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  margin-bottom: 14px;
+  background: linear-gradient(90deg, #fff7e6 0%, #fffbe6 100%);
+  border: 1px solid #ffe58f;
+  border-radius: 8px;
+}
+
+.quick-label {
+  font-size: 13px;
+  color: #ad6800;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.quick-label b {
+  color: #d46b08;
+  font-weight: 600;
+  margin: 0 2px;
 }
 
 .filter-row {
