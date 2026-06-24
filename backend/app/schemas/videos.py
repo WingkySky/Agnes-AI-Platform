@@ -16,7 +16,7 @@ class VideoGenerationRequest(BaseModel):
     - keyframes: 额外提供 images 数组（首尾帧，起始帧必填 + 结束帧可选，最多2张）
     """
 
-    prompt: str = Field(..., min_length=1, max_length=2000, description="提示词")
+    prompt: str = Field(..., min_length=1, max_length=3000, description="提示词")
     negative_prompt: Optional[str] = Field(default=None, description="负向提示词")
     model: str = Field(default="", description="模型名称（前端从 /api/config 获取可用模型列表）")
 

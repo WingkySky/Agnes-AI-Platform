@@ -47,12 +47,25 @@
         class="plaza-card"
         @click="openDetail(work)">
         <div class="card-thumb">
-          <!-- 图片缩略图（result_url 为公开 CDN，可直接加载） -->
-          <img
-            v-if="work.type === 'image'"
-            :src="work.result_url ?? ''"
-            :alt="work.prompt"
-            loading="lazy" />
+          <!-- 模糊背景层：放大铺满，填充留白区域（所有卡片都有） -->
+          <div
+            v-if="work.type === 'image' || (work.type === 'video' && !thumbFailed[work.id])"
+            class="img-bg-blur"
+            :style="{
+              backgroundImage: work.type === 'image'
+                ? `url(${work.result_url})`
+                : `url(/api/history/video/${work.id}/thumbnail)`
+            }"
+          />
+
+          <!-- 图片缩略图（带水印） -->
+          <WatermarkOverlay v-if="work.type === 'image'" class="thumb-wrapper">
+            <img
+              :src="work.result_url ?? ''"
+              :alt="work.prompt"
+              class="card-img-contain"
+              loading="lazy" />
+          </WatermarkOverlay>
           <!-- 视频缩略图：首帧静态图 + 悬停 GIF 动态预览 -->
           <div
             v-else
@@ -64,7 +77,7 @@
               v-if="!thumbFailed[work.id]"
               :src="`/api/history/video/${work.id}/thumbnail`"
               :alt="work.prompt"
-              class="video-thumb-img"
+              class="card-img-contain"
               loading="lazy"
               @error="thumbFailed[work.id] = true" />
             <div v-else class="thumb-placeholder">
@@ -132,10 +145,11 @@
       <div v-if="detail" class="detail-content">
         <!-- 左：大图 / 视频播放器 -->
         <div class="detail-media">
-          <img
-            v-if="detail.type === 'image'"
-            :src="detail.result_url ?? ''"
-            :alt="detail.prompt" />
+          <WatermarkOverlay v-if="detail.type === 'image'" class="detail-image-wrapper">
+            <img
+              :src="detail.result_url ?? ''"
+              :alt="detail.prompt" />
+          </WatermarkOverlay>
           <!-- 视频：result_url 为公开 CDN，<video> 可直接播放（代理流需鉴权无法携带 JWT） -->
           <video
             v-else
@@ -231,6 +245,7 @@ import {
 } from '@/api/plaza'
 import { useUserStore } from '@/stores/user'
 import { useI18n } from '@/i18n'
+import WatermarkOverlay from '@/components/WatermarkOverlay.vue'
 
 // keep-alive 缓存匹配依赖组件名
 defineOptions({ name: 'PlazaView' })
@@ -248,6 +263,10 @@ const filterType = ref<'all' | 'image' | 'video'>('all')
 const sortType = ref<'latest' | 'popular'>('latest')
 // 视频缩略图加载失败标记（按 work.id 隔离）
 const thumbFailed = reactive<Record<number, boolean>>({})
+// 视频 GIF 预览（hover 时动态加载）
+const videoPreviews = reactive<Record<number, string>>({})
+const previewLoading = reactive<Record<number, boolean>>({})
+const hoveredVideoId = ref<number | null>(null)
 
 // 是否还有更多：已加载数量小于总数
 const hasMore = computed(() => list.value.length < total.value)
@@ -306,6 +325,37 @@ function openDetail(work: PlazaWork) {
       if (idx >= 0) list.value[idx] = fresh
     })
     .catch(() => { /* 静默：仍使用列表项数据展示 */ })
+}
+
+// ---------- 视频悬停 GIF 预览 ----------
+async function fetchBlobAsUrl(url: string): Promise<string> {
+  const res = await fetch(url, { credentials: 'include' })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const blob = await res.blob()
+  return URL.createObjectURL(blob)
+}
+
+async function loadVideoPreview(work: PlazaWork) {
+  if (videoPreviews[work.id] || previewLoading[work.id]) return
+  previewLoading[work.id] = true
+  try {
+    const url = `/api/history/video/${work.id}/preview`
+    const blobUrl = await fetchBlobAsUrl(url)
+    videoPreviews[work.id] = blobUrl
+  } catch (e) {
+    console.warn('[Plaza] 视频 GIF 预览加载失败 id=' + work.id, e)
+  } finally {
+    previewLoading[work.id] = false
+  }
+}
+
+function onVideoCardHover(work: PlazaWork) {
+  hoveredVideoId.value = work.id
+  loadVideoPreview(work)
+}
+
+function onVideoCardLeave(_work: PlazaWork) {
+  hoveredVideoId.value = null
 }
 
 // ---------- 点赞 / 取消点赞 ----------
@@ -453,15 +503,42 @@ onMounted(() => {
   background: var(--agnes-bg-base);
   overflow: hidden;
 }
-.card-thumb img {
+
+/* 模糊背景层：放大铺满，填充不同比例图片的留白区域 */
+.img-bg-blur {
+  position: absolute;
+  inset: -10%;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  filter: blur(20px) saturate(1.2);
+  opacity: 0.6;
+  z-index: 0;
+  transform: scale(1.1);
+}
+
+/* 图片/视频容器：撑满，层级在背景之上 */
+.thumb-wrapper {
+  position: relative;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  z-index: 1;
+}
+
+/* 前景图：完整展示，居中，不裁剪 */
+.card-img-contain {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
   display: block;
   transition: transform 0.3s ease;
 }
-.plaza-card:hover .card-thumb img {
-  transform: scale(1.04);
+.plaza-card:hover .card-img-contain {
+  transform: scale(1.03);
+}
+.plaza-card:hover .img-bg-blur {
+  transform: scale(1.15);
+  transition: transform 0.5s ease;
 }
 
 /* 视频缩略图加载失败时的占位 */
@@ -484,10 +561,34 @@ onMounted(() => {
   justify-content: center;
   background: rgba(10, 15, 30, 0.35);
   color: rgba(255, 255, 255, 0.9);
-  z-index: 1;
+  z-index: 2;
   transition: opacity 0.2s ease;
 }
 .plaza-card:hover .video-play-overlay { opacity: 0; }
+
+/* 视频缩略图容器 */
+.video-thumb {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+
+/* 悬停时的 GIF 预览：覆盖在首帧上面 */
+.video-preview-gif {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 2;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+.video-thumb:hover .video-preview-gif {
+  opacity: 1;
+}
 
 /* 视频类型角标 */
 .type-badge {

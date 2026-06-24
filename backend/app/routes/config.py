@@ -4,10 +4,12 @@
 # 模型列表从数据库 model_definitions 表读取（由 provider_registry 管理）
 # =====================================================
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from app.core.config import settings
-from app.schemas.common import ConfigResponse, ImageSizeOption, VideoAspectRatioOption, VideoResolutionOption
+from app.schemas.common import ConfigResponse, ImageSizeOption, VideoAspectRatioOption, VideoResolutionOption, WatermarkConfigPublic
 from app.services.model_registry import get_all_models
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.database import get_async_db
 
 router = APIRouter()
 
@@ -37,25 +39,50 @@ VIDEO_ASPECT_RATIO_OPTIONS = [
 ]
 
 # 视频分辨率预设（以高度为基准，16:9 宽度作为参考）
+# 注意：宽高会自动对齐到 8 的倍数（视频编码硬性要求）
 VIDEO_RESOLUTION_OPTIONS = [
-    VideoResolutionOption(value=480,  label="480p 标清", width_16_9=854),
-    VideoResolutionOption(value=768,  label="720p 高清", width_16_9=1364),
-    VideoResolutionOption(value=1080, label="1080p 全高清", width_16_9=1920),
+    VideoResolutionOption(value=480,  label="480p 流畅", width_16_9=856),
+    VideoResolutionOption(value=720,  label="720p 高清", width_16_9=1280),
+    VideoResolutionOption(value=1080, label="1080p 超清", width_16_9=1920),
+    VideoResolutionOption(value=1440, label="2K 极致", width_16_9=2560),
+    VideoResolutionOption(value=2160, label="4K 顶级", width_16_9=3840),
 ]
 
 
 @router.get("/config", response_model=ConfigResponse, summary="获取前端配置")
-async def get_config():
+async def get_config(db: AsyncSession = Depends(get_async_db)):
     """
     返回前端需要的非敏感配置：
     - 可用模型列表（从数据库 model_definitions 表读取，由 provider_registry 管理）
     - 图片尺寸选项（结构化，含比例信息）
     - 视频宽高比、时长、帧率选项
     - 上传大小限制
+    - 水印配置（前端 CSS 水印用）
 
     模型列表来源：Provider 的 /models API 同步 + 用户自定义模型。
     管理入口：前端配置页 /api/providers/* 和 /api/models/* 接口。
     """
+    # 获取水印配置
+    watermark_config = None
+    try:
+        from app.services.watermark_service import get_watermark_config
+        wm = await get_watermark_config(db)
+        watermark_config = WatermarkConfigPublic(
+            enabled=wm.force_all,  # 公开接口只返回全局强制状态，用户级开关在用户信息里
+            type=wm.type,
+            text=wm.text,
+            font_size=wm.font_size,
+            color=wm.color,
+            opacity=wm.opacity,
+            position=wm.position,
+            margin=wm.margin,
+            image_url=wm.image_url,
+            image_width=wm.image_width,
+        )
+    except Exception as e:
+        import logging
+        logging.getLogger("agnes_platform").warning("[config] 获取水印配置失败: %s", e)
+
     return ConfigResponse(
         models=await get_all_models(),
         # 图片尺寸（兼容旧版 + 结构化新版）
@@ -80,4 +107,5 @@ async def get_config():
         default_video_width=1152,
         default_video_height=768,
         max_upload_size_mb=settings.max_upload_size_mb,
+        watermark=watermark_config,
     )

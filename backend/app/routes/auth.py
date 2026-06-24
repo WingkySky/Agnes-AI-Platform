@@ -95,12 +95,18 @@ async def send_email_code(req: SendEmailCodeRequest):
         set_email_code,
     )
     from app.services.email_service import send_email, build_reset_password_email, is_email_enabled
+    from app.services.system_config_service import get_smtp_config
     from app.core.config import settings
 
     email = req.email.lower().strip()
 
+    # 从数据库读取 SMTP 配置
+    from app.core.database import async_session
+    async with async_session() as db:
+        smtp_config = await get_smtp_config(db)
+
     # 检查邮件服务是否启用
-    if not is_email_enabled():
+    if not is_email_enabled(smtp_config):
         raise HTTPException(status_code=503, detail="邮件服务未配置，无法发送验证码")
 
     # 检查重发间隔
@@ -110,7 +116,6 @@ async def send_email_code(req: SendEmailCodeRequest):
 
     # 检查邮箱是否已注册（不注册不发送，但返回成功，避免泄漏邮箱是否存在）
     from sqlalchemy.future import select
-    from app.core.database import async_session
     async with async_session() as db:
         result = await db.execute(select(User).filter(User.email == email))
         user = result.scalar_one_or_none()
@@ -132,6 +137,7 @@ async def send_email_code(req: SendEmailCodeRequest):
         subject="Agnes AI Platform 重置密码验证码",
         html_content=html_content,
         text_content=text_content,
+        smtp_config=smtp_config,
     )
 
     if not success:

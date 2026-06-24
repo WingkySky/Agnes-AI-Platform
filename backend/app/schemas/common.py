@@ -52,6 +52,20 @@ class VideoResolutionOption(BaseModel):
     width_16_9: int = Field(description="16:9 下的参考宽度")
 
 
+class WatermarkConfigPublic(BaseModel):
+    """公开的水印配置（前端 CSS 水印用，不含敏感信息）"""
+    enabled: bool = Field(description="是否启用水印（全局强制 或 对当前用户启用）")
+    type: str = Field(default="text", description="水印类型：text / image")
+    text: str = Field(default="Agnes AI", description="文字水印内容")
+    font_size: int = Field(default=24, description="字体大小")
+    color: str = Field(default="#FFFFFF", description="字体颜色（十六进制）")
+    opacity: int = Field(default=50, description="透明度（0-100）")
+    position: str = Field(default="bottom-right", description="位置：top-left / top-right / bottom-left / bottom-right / center")
+    margin: int = Field(default=20, description="边距（像素）")
+    image_url: Optional[str] = Field(default=None, description="图片水印 URL")
+    image_width: int = Field(default=120, description="图片水印宽度")
+
+
 class ConfigResponse(BaseModel):
     """前端可用配置（不含敏感信息）"""
 
@@ -126,6 +140,9 @@ class ConfigResponse(BaseModel):
 
     # 上传限制
     max_upload_size_mb: int = 10
+
+    # 水印配置（公开，前端 CSS 水印用）
+    watermark: Optional[WatermarkConfigPublic] = None
 
 
 # =====================================================

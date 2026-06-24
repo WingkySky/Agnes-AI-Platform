@@ -237,3 +237,32 @@ export function updateUserContentSafety(userId: number, enabled: boolean): Promi
 export function updateUserRole(userId: number, role: string): Promise<{ success: boolean }> {
   return client.put(`/api/auth/users/${userId}/role`, { role }) as any
 }
+
+// ---------- 系统配置 - SMTP ----------
+
+/** SMTP 配置 */
+export interface SmtpConfig {
+  smtp_host: string
+  smtp_port: number
+  smtp_user: string
+  smtp_password: string
+  smtp_from_email: string
+  smtp_from_name: string
+  smtp_use_tls: boolean
+  is_enabled: boolean
+}
+
+/** 获取 SMTP 配置 */
+export function getSmtpConfig(): Promise<SmtpConfig> {
+  return client.get('/api/admin/system-config/smtp') as any
+}
+
+/** 更新 SMTP 配置 */
+export function updateSmtpConfig(data: Partial<SmtpConfig>): Promise<{ message: string }> {
+  return client.put('/api/admin/system-config/smtp', data) as any
+}
+
+/** 测试 SMTP 邮件发送 */
+export function testSmtpConfig(testEmail: string): Promise<{ message: string }> {
+  return client.post('/api/admin/system-config/smtp/test', { test_email: testEmail }) as any
+}

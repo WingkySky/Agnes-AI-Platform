@@ -584,8 +584,9 @@ class AgnesAIClient:
         参数规范（参考 Yacey/agnes-ai-generation-skill references/api.md）：
           - 顶层参数：model, prompt, image(单图), mode, width, height,
             num_frames, frame_rate, seed, negative_prompt
-          - 多图/关键帧：extra_body.image（数组）+ extra_body.mode = "keyframes"
-          - num_frames 必须 <= 441 且满足 8n + 1（81, 121, 161, 241, 441）
+          - 图生视频（单图）：顶层 image（字符串） + mode = "ti2vid"
+          - 多图/关键帧：extra_body.image（数组） + extra_body.mode = "keyframes"
+          - num_frames 必须 <= 441 且满足 8n + 1（81, 121, 161, 241, 321, 401, 441）
           - frame_rate 范围 1-60，默认 24
           - 默认分辨率：width=1152, height=768（16:9）
 
@@ -595,7 +596,7 @@ class AgnesAIClient:
 
         # 1) 计算分辨率（width / height）
         #    优先使用显式传入的 width/height；否则根据 aspect_ratio 计算；
-        #    默认 1152x768（16:9）
+        #    默认 1280x720（16:9，720p）
         #    【重要】视频编码要求宽高必须是 8 的倍数，否则可能导致任务无响应或失败
         if width and height:
             _width, _height = int(width), int(height)
@@ -603,14 +604,14 @@ class AgnesAIClient:
             ar_w, ar_h = aspect_ratio.split(":", 1)
             try:
                 ar_w_int, ar_h_int = int(ar_w), int(ar_h)
-                # 以高度 768 为基准，按比例计算宽度
-                base_h = 768
+                # 以高度 720 为基准，按比例计算宽度
+                base_h = 720
                 base_w = int(round(base_h * ar_w_int / ar_h_int))
                 _width, _height = base_w, base_h
             except ValueError:
-                _width, _height = 1152, 768
+                _width, _height = 1280, 720
         else:
-            _width, _height = 1152, 768
+            _width, _height = 1280, 720
 
         # 确保宽高为 8 的倍数（视频编码硬性要求，向上取整）
         _width = ((_width + 7) // 8) * 8
@@ -632,11 +633,13 @@ class AgnesAIClient:
             raw_frames = 121
 
         # 对齐到 8n + 1 格式，且不超过 441
-        valid_frames_list = [81, 121, 161, 241, 441]
-        _num_frames = 121
+        # 向上取整：选择 >= raw_frames 的最小合法帧数，确保实际时长 >= 用户选择的时长
+        valid_frames_list = [81, 121, 161, 241, 321, 401, 441]
+        _num_frames = valid_frames_list[-1]  # 默认最大
         for f in valid_frames_list:
-            if f <= raw_frames:
+            if f >= raw_frames:
                 _num_frames = f
+                break
         _num_frames = min(_num_frames, 441)
 
         # ── 图生视频模式 / 关键帧动画处理 ──
@@ -709,9 +712,12 @@ class AgnesAIClient:
         is_image2video = len(pairs) > 0 and not is_keyframes
 
         if is_keyframes:
-            # 多图 / 关键帧模式：image 数组放顶层，mode = "keyframes"
-            body["image"] = [p[0] for p in pairs]
-            body["mode"] = "keyframes"
+            # 多图 / 关键帧模式：image 数组放 extra_body，mode = "keyframes"
+            # 注意：Video API 顶层 image 字段只接受字符串，数组必须放 extra_body
+            body["extra_body"] = {
+                "image": [p[0] for p in pairs],
+                "mode": "keyframes",
+            }
             logger.info(
                 "[视频生成] 关键帧模式: model=%s, num_frames=%d, "
                 "frame_rate=%d, size=%dx%d, keyframes=%d, prompt=%s",

@@ -53,6 +53,7 @@ from app.routes import plaza as plaza_route
 from app.routes import admin_roles as admin_roles_route
 from app.routes import admin_moderation as admin_moderation_route
 from app.routes import admin_watermark as admin_watermark_route
+from app.routes import admin_system_config as admin_system_config_route
 from app.services.video_poller import poller_manager
 from app.services.image_poller import image_poller_manager
 from app.services.agnes_client import agnes_client
@@ -165,6 +166,12 @@ async def lifespan(app: FastAPI):
         await ensure_default_sensitive_words(db)
     logger.info("✓ 默认敏感词已初始化")
 
+    # 初始化系统配置（SMTP等）
+    from app.services.system_config_service import ensure_default_configs
+    async with async_session() as db:
+        await ensure_default_configs(db)
+    logger.info("✓ 系统配置已初始化")
+
     logger.info("🚀 Agnes AI Platform（全异步架构）后端服务已启动")
 
     yield  # 应用在此期间运行
@@ -252,6 +259,7 @@ app.include_router(plaza_route.router, prefix="/api", tags=["作品广场"])
 app.include_router(admin_roles_route.router, prefix="/api", tags=["管理员-角色权限"])
 app.include_router(admin_moderation_route.router, prefix="/api", tags=["管理员-内容审核"])
 app.include_router(admin_watermark_route.router, prefix="/api", tags=["管理员-水印配置"])
+app.include_router(admin_system_config_route.router, prefix="/api", tags=["管理员-系统配置"])
 
 
 # ---------- 健康检查 ----------
@@ -260,10 +268,12 @@ async def health_check():
     return {"status": "ok", "service": "agnes-ai-platform"}
 
 
-# ---------- 静态文件：用户上传的头像 ----------
+# ---------- 静态文件：用户上传的头像、水印图片等 ----------
 # 通过 /uploads/avatars/<filename> 访问 backend/uploads/avatars/ 下的头像文件
+# 通过 /uploads/watermarked/<filename> 访问 backend/uploads/watermarked/ 下的水印图片
 UPLOADS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads")
 os.makedirs(os.path.join(UPLOADS_DIR, "avatars"), exist_ok=True)
+os.makedirs(os.path.join(UPLOADS_DIR, "watermarked"), exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 
 

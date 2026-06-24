@@ -157,87 +157,90 @@
 
         <!-- 配置节点：生成配置面板（模式切换 + 模型选择 + 参数 + 提示词 + 生成按钮） -->
         <div v-else-if="panel.type === 'config'" class="config-content">
-          <!-- 生成模式切换 -->
-          <div class="config-mode-tabs">
-            <button
-              v-for="m in configModes"
-              :key="m.value"
-              type="button"
-              :class="['config-mode-tab', { active: configContent.mode === m.value }]"
-              @click="updateConfigContent('mode', m.value)"
+          <!-- 上半部分：参数 + 提示词，可滚动 -->
+          <div class="config-scroll-area">
+            <!-- 生成模式切换 -->
+            <div class="config-mode-tabs">
+              <button
+                v-for="m in configModes"
+                :key="m.value"
+                type="button"
+                :class="['config-mode-tab', { active: configContent.mode === m.value }]"
+                @click="updateConfigContent('mode', m.value)"
+                @mousedown.stop
+              >
+                {{ m.label }}
+              </button>
+            </div>
+
+            <!-- 模型选择（按当前模式自动筛选对应类型模型） -->
+            <select
+              class="config-select"
+              :value="configContent.model"
+              @change="updateConfigContent('model', ($event.target as HTMLSelectElement)?.value)"
               @mousedown.stop
             >
-              {{ m.label }}
-            </button>
+              <option v-for="m in availableModels" :key="m.id" :value="m.id">{{ m.name }}</option>
+            </select>
+
+            <!-- 尺寸选择（图片模式）：显示友好标签 -->
+            <select
+              v-if="isImageMode"
+              class="config-select"
+              :value="configContent.size"
+              @change="updateConfigContent('size', ($event.target as HTMLSelectElement)?.value)"
+              @mousedown.stop
+            >
+              <option v-for="s in imageSizeOptions" :key="s.value" :value="s.value">{{ s.label }}</option>
+            </select>
+
+            <!-- 视频参数（视频模式）：分辨率 + 比例 + 帧率 + 时长，两行两列紧凑布局 -->
+            <div v-if="isVideoMode" class="config-video-params">
+              <select
+                class="config-select"
+                :value="configContent.resolution"
+                @change="updateConfigContent('resolution', Number(($event.target as HTMLSelectElement)?.value))"
+                @mousedown.stop
+              >
+                <option v-for="r in videoResolutionOptions" :key="r.value" :value="r.value">{{ r.label }}</option>
+              </select>
+              <select
+                class="config-select"
+                :value="configContent.aspect_ratio"
+                @change="updateConfigContent('aspect_ratio', ($event.target as HTMLSelectElement)?.value)"
+                @mousedown.stop
+              >
+                <option v-for="r in videoAspectRatioOptions" :key="r.value" :value="r.value">{{ r.label }}</option>
+              </select>
+              <select
+                class="config-select"
+                :value="configContent.frame_rate"
+                @change="onFrameRateChange(Number(($event.target as HTMLSelectElement)?.value))"
+                @mousedown.stop
+              >
+                <option v-for="fr in videoFrameRateOptions" :key="fr" :value="fr">{{ fr }} FPS</option>
+              </select>
+              <select
+                class="config-select"
+                :value="configContent.seconds"
+                @change="updateConfigContent('seconds', Number(($event.target as HTMLSelectElement)?.value))"
+                @mousedown.stop
+              >
+                <option v-for="s in availableDurations" :key="s" :value="s">{{ s }}{{ t('canvas.node.secondsSuffix') }}</option>
+              </select>
+            </div>
+
+            <!-- 提示词输入 -->
+            <textarea
+              class="config-prompt"
+              v-model="configPrompt"
+              :placeholder="t('canvas.node.configPromptPlaceholder')"
+              @mousedown.stop
+              @wheel.stop
+            />
           </div>
 
-          <!-- 模型选择（按当前模式自动筛选对应类型模型） -->
-          <select
-            class="config-select"
-            :value="configContent.model"
-            @change="updateConfigContent('model', ($event.target as HTMLSelectElement)?.value)"
-            @mousedown.stop
-          >
-            <option v-for="m in availableModels" :key="m.id" :value="m.id">{{ m.name }}</option>
-          </select>
-
-          <!-- 尺寸选择（图片模式）：显示友好标签 -->
-          <select
-            v-if="isImageMode"
-            class="config-select"
-            :value="configContent.size"
-            @change="updateConfigContent('size', ($event.target as HTMLSelectElement)?.value)"
-            @mousedown.stop
-          >
-            <option v-for="s in imageSizeOptions" :key="s.value" :value="s.value">{{ s.label }}</option>
-          </select>
-
-          <!-- 视频参数（视频模式）：分辨率 + 比例 + 帧率 + 时长，两行两列紧凑布局 -->
-          <div v-if="isVideoMode" class="config-video-params">
-            <select
-              class="config-select"
-              :value="configContent.resolution"
-              @change="updateConfigContent('resolution', Number(($event.target as HTMLSelectElement)?.value))"
-              @mousedown.stop
-            >
-              <option v-for="r in videoResolutionOptions" :key="r.value" :value="r.value">{{ r.label }}</option>
-            </select>
-            <select
-              class="config-select"
-              :value="configContent.aspect_ratio"
-              @change="updateConfigContent('aspect_ratio', ($event.target as HTMLSelectElement)?.value)"
-              @mousedown.stop
-            >
-              <option v-for="r in videoAspectRatioOptions" :key="r.value" :value="r.value">{{ r.label }}</option>
-            </select>
-            <select
-              class="config-select"
-              :value="configContent.frame_rate"
-              @change="onFrameRateChange(Number(($event.target as HTMLSelectElement)?.value))"
-              @mousedown.stop
-            >
-              <option v-for="fr in videoFrameRateOptions" :key="fr" :value="fr">{{ fr }} FPS</option>
-            </select>
-            <select
-              class="config-select"
-              :value="configContent.seconds"
-              @change="updateConfigContent('seconds', Number(($event.target as HTMLSelectElement)?.value))"
-              @mousedown.stop
-            >
-              <option v-for="s in availableDurations" :key="s" :value="s">{{ s }}{{ t('canvas.node.secondsSuffix') }}</option>
-            </select>
-          </div>
-
-          <!-- 提示词输入 -->
-          <textarea
-            class="config-prompt"
-            v-model="configPrompt"
-            :placeholder="t('canvas.node.configPromptPlaceholder')"
-            @mousedown.stop
-            @wheel.stop
-          />
-
-          <!-- 生成按钮（异步操作，点击后不阻塞，可连续点击） -->
+          <!-- 底部固定：生成按钮（异步操作，点击后不阻塞，可连续点击） -->
           <button
             type="button"
             class="config-generate-btn"
@@ -1083,12 +1086,38 @@ onUnmounted(() => {
 .config-content {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
   height: 100%;
   padding: 12px;
   box-sizing: border-box;
+}
+
+/* 上半部分可滚动区域：参数 + 提示词 */
+.config-scroll-area {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 2px;
+}
+
+/* 自定义滚动条：更细更淡，不干扰视觉 */
+.config-scroll-area::-webkit-scrollbar {
+  width: 4px;
+}
+.config-scroll-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+.config-scroll-area::-webkit-scrollbar-thumb {
+  background: var(--agnes-border);
+  border-radius: 2px;
+}
+.config-scroll-area::-webkit-scrollbar-thumb:hover {
+  background: var(--agnes-text-faint);
 }
 
 /* 生成模式切换标签栏 */
@@ -1157,18 +1186,19 @@ onUnmounted(() => {
 /* 提示词输入框 */
 .config-prompt {
   flex: 1;
-  min-height: 60px;
-  padding: 8px;
+  min-height: 120px;
+  padding: 8px 10px;
   border-radius: 8px;
   border: 1px solid var(--agnes-border);
   background: var(--agnes-bg-input);
   font-size: 12px;
   font-family: monospace;
   color: inherit;
-  resize: none;
+  resize: vertical;
   outline: none;
   box-sizing: border-box;
-  line-height: 1.5;
+  line-height: 1.6;
+  overflow-y: auto;
 }
 
 .config-prompt:focus {
@@ -1179,9 +1209,10 @@ onUnmounted(() => {
   color: var(--agnes-text-faint);
 }
 
-/* 生成按钮 */
+/* 生成按钮（底部固定，不随内容滚动消失） */
 .config-generate-btn {
-  height: 34px;
+  flex-shrink: 0;
+  height: 38px;
   border-radius: 10px;
   border: 1px solid var(--agnes-primary);
   background: var(--agnes-info-bg);
@@ -1189,12 +1220,19 @@ onUnmounted(() => {
   font-weight: 600;
   color: var(--agnes-primary);
   cursor: pointer;
-  transition: background 0.15s ease, transform 0.15s ease;
+  transition: background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+  margin-top: auto;
 }
 
 .config-generate-btn:hover {
-  background: var(--agnes-info-bg);
-  transform: scale(1.01);
+  background: var(--agnes-primary);
+  color: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(47, 128, 255, 0.25);
+}
+
+.config-generate-btn:active {
+  transform: translateY(0);
 }
 
 /* ===== 未知节点 ===== */

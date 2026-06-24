@@ -62,7 +62,7 @@ def apply_image_watermark(
     try:
         from PIL import Image, ImageDraw, ImageFont
     except ImportError:
-        logger.warning("[水印] Pillow 未安装，跳过敏词检测")
+        logger.warning("[水印] Pillow 未安装，跳过图片水印")
         return image_bytes
 
     try:

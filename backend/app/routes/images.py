@@ -15,7 +15,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -366,6 +366,82 @@ async def get_image_record(
         status=record.status,
         credits_consumed=record.credits_consumed,
         created_at=record.created_at.isoformat() if record.created_at else None,
+    )
+
+
+# =====================================================
+# 水印下载接口（动态加水印，不保存到磁盘）
+# =====================================================
+@router.get("/images/download/watermark", summary="下载带水印的图片")
+async def download_watermarked_image(
+    url: str = Query(..., description="原始图片 URL"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    """
+    下载带水印的图片（动态处理，不保存到磁盘）。
+    - 无需登录（广场匿名用户也可使用）
+    - 如果全局水印关闭且用户未开启水印，则返回原图
+    """
+    from fastapi.responses import Response
+    import httpx
+
+    # 校验 URL 格式
+    if not url.startswith(("http://", "https://", "/")):
+        raise HTTPException(status_code=400, detail="无效的图片 URL")
+
+    # 获取水印配置
+    try:
+        from app.services.watermark_service import get_watermark_config, should_apply_watermark, apply_image_watermark
+        wm_config = await get_watermark_config(db)
+        need_watermark = should_apply_watermark(wm_config, current_user)
+    except Exception as e:
+        logger.warning("[水印下载] 获取水印配置失败，返回原图: %s", e)
+        need_watermark = False
+
+    # 下载图片
+    try:
+        if url.startswith("/"):
+            # 本地路径，直接读文件
+            import os
+            local_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                url.lstrip("/"),
+            )
+            if not os.path.exists(local_path):
+                raise HTTPException(status_code=404, detail="图片不存在")
+            with open(local_path, "rb") as f:
+                image_bytes = f.read()
+        else:
+            # 远程 URL，下载图片
+            async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+                resp = await client.get(url)
+                if resp.status_code != 200:
+                    raise HTTPException(status_code=502, detail=f"下载图片失败: {resp.status_code}")
+                image_bytes = resp.content
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("[水印下载] 下载图片失败: %s", e)
+        raise HTTPException(status_code=502, detail="下载图片失败")
+
+    # 应用水印
+    if need_watermark:
+        try:
+            image_bytes = apply_image_watermark(image_bytes, wm_config)
+        except Exception as e:
+            logger.warning("[水印下载] 水印处理失败，返回原图: %s", e)
+
+    # 返回图片（触发下载）
+    import base64
+    import hashlib
+    filename = f"watermarked_{hashlib.md5(url.encode()).hexdigest()[:8]}.png"
+    return Response(
+        content=image_bytes,
+        media_type="image/png",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
     )
 
 

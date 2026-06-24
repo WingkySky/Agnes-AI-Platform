@@ -84,45 +84,64 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/settings',
     name: 'settings',
-    component: () => import('@/views/SettingsView.vue'),
-    meta: { titleKey: 'router.settings', requiresAuth: true, requiresAdmin: true }
+    redirect: '/admin/models'
   },
-  // ---------- 管理员页（需登录 + 管理员角色） ----------
+  // ---------- 管理员页（需登录 + 对应权限） ----------
+  // 统一使用 /admin 前缀，通过 AdminLayout 布局（左侧边栏 + 右侧内容）
   {
-    path: '/admin/users',
-    name: 'admin-users',
-    component: () => import('@/views/UsersAdminView.vue'),
-    meta: { title: '用户与角色管理', requiresAuth: true, requiresAdmin: true }
-  },
-  {
-    path: '/admin/credit-rules',
-    name: 'admin-credit-rules',
-    component: () => import('@/views/CreditRulesView.vue'),
-    meta: { title: '积分规则配置', requiresAuth: true, requiresAdmin: true }
-  },
-  {
-    path: '/admin/moderation',
-    name: 'admin-moderation',
-    component: () => import('@/views/ModerationView.vue'),
-    meta: { title: '内容审核', requiresAuth: true, permission: 'plaza:moderate' }
-  },
-  {
-    path: '/admin/sensitive-words',
-    name: 'admin-sensitive-words',
-    component: () => import('@/views/SensitiveWordsView.vue'),
-    meta: { title: '敏感词管理', requiresAuth: true, permission: 'moderation:config' }
-  },
-  {
-    path: '/admin/roles',
-    name: 'admin-roles',
-    component: () => import('@/views/RolesAdminView.vue'),
-    meta: { title: '角色管理', requiresAuth: true, permission: 'role:manage' }
-  },
-  {
-    path: '/admin/watermark',
-    name: 'admin-watermark',
-    component: () => import('@/views/WatermarkConfigView.vue'),
-    meta: { title: '水印配置', requiresAuth: true, permission: 'watermark:manage' }
+    path: '/admin',
+    component: () => import('@/views/AdminLayout.vue'),
+    meta: { requiresAuth: true },
+    children: [
+      {
+        path: 'moderation',
+        name: 'admin-moderation',
+        component: () => import('@/views/ModerationView.vue'),
+        meta: { title: '内容审核', permission: 'plaza:moderate' }
+      },
+      {
+        path: 'sensitive-words',
+        name: 'admin-sensitive-words',
+        component: () => import('@/views/SensitiveWordsView.vue'),
+        meta: { title: '敏感词管理', permission: 'moderation:config' }
+      },
+      {
+        path: 'roles',
+        name: 'admin-roles',
+        component: () => import('@/views/RolesAdminView.vue'),
+        meta: { title: '角色管理', permission: 'role:manage' }
+      },
+      {
+        path: 'users',
+        name: 'admin-users',
+        component: () => import('@/views/UsersAdminView.vue'),
+        meta: { title: '用户管理', requiresAdmin: true }
+      },
+      {
+        path: 'watermark',
+        name: 'admin-watermark',
+        component: () => import('@/views/WatermarkConfigView.vue'),
+        meta: { title: '水印配置', permission: 'watermark:manage' }
+      },
+      {
+        path: 'credit-rules',
+        name: 'admin-credit-rules',
+        component: () => import('@/views/CreditRulesView.vue'),
+        meta: { title: '积分规则', requiresAdmin: true }
+      },
+      {
+        path: 'models',
+        name: 'admin-models',
+        component: () => import('@/views/SettingsView.vue'),
+        meta: { title: '模型配置', requiresAdmin: true }
+      },
+      {
+        path: 'email',
+        name: 'admin-email',
+        component: () => import('@/views/EmailConfigView.vue'),
+        meta: { title: '邮件配置', requiresAdmin: true }
+      },
+    ]
   },
   // 兜底路由
   {

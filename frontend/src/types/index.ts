@@ -97,6 +97,21 @@ export interface ConfigResponse {
   default_video_width: number
   default_video_height: number
   max_upload_size_mb: number
+  watermark?: WatermarkConfigPublic | null
+}
+
+/** 公开水印配置（前端 CSS 水印用） */
+export interface WatermarkConfigPublic {
+  enabled: boolean
+  type: 'text' | 'image'
+  text: string
+  font_size: number
+  color: string
+  opacity: number
+  position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'center'
+  margin: number
+  image_url?: string | null
+  image_width: number
 }
 
 /** 生成记录 — 对齐 GenerationRecord */
@@ -687,6 +702,8 @@ export interface UserInfoResponse {
   role: string
   is_active: boolean
   is_admin: boolean
+  watermark_enabled: boolean
+  content_safety_strict: boolean
   created_at?: string | null
   last_login_at?: string | null
 }

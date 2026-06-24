@@ -65,6 +65,33 @@
       </div>
     </el-popover>
 
+    <!-- 分辨率标签（视频模式） -->
+    <el-popover
+      v-if="mode === 'video'"
+      v-model:visible="resolutionPopoverVisible"
+      placement="bottom-start"
+      :width="180"
+      trigger="click"
+    >
+      <template #reference>
+        <span class="param-tag">
+          <el-icon><Picture /></el-icon>
+          <span class="param-tag__text">{{ currentResolutionLabel }}</span>
+          <el-icon class="param-tag__arrow"><ArrowDown /></el-icon>
+        </span>
+      </template>
+      <div class="param-btn-group">
+        <button
+          v-for="res in resolutionOptions"
+          :key="res.value"
+          type="button"
+          class="param-btn"
+          :class="{ 'param-btn--active': currentResolution === res.value }"
+          @click="currentResolution = res.value; resolutionPopoverVisible = false"
+        >{{ res.label }}</button>
+      </div>
+    </el-popover>
+
     <!-- 帧率标签（视频模式） -->
     <el-popover
       v-if="mode === 'video'"
@@ -124,7 +151,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { ArrowDown, VideoCamera, Film } from '@element-plus/icons-vue'
+import { ArrowDown, VideoCamera, Film, Picture } from '@element-plus/icons-vue'
 import RatioPicker from '@/components/RatioPicker.vue'
 import { useModelsStore } from '@/stores/models'
 import {
@@ -142,6 +169,8 @@ const props = defineProps<{
   size?: string
   /** 视频宽高比，如 "16:9" */
   aspectRatio?: string
+  /** 视频分辨率高度（如 480/768/1080） */
+  resolution?: number
   /** 视频时长（秒） */
   seconds?: number
   /** 视频帧率 */
@@ -155,6 +184,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:size': [value: string]
   'update:aspectRatio': [value: string]
+  'update:resolution': [value: number]
   'update:seconds': [value: number]
   'update:frameRate': [value: number]
   'update:model': [value: string]
@@ -164,6 +194,7 @@ const modelsStore = useModelsStore()
 
 // Popover 显隐
 const sizePopoverVisible = ref(false)
+const resolutionPopoverVisible = ref(false)
 const durationPopoverVisible = ref(false)
 const fpsPopoverVisible = ref(false)
 const modelPopoverVisible = ref(false)
@@ -187,6 +218,10 @@ const currentSeconds = computed({
 const currentFrameRate = computed({
   get: () => props.frameRate ?? 24,
   set: (v) => emit('update:frameRate', v),
+})
+const currentResolution = computed({
+  get: () => props.resolution ?? 768,
+  set: (v) => emit('update:resolution', v),
 })
 const currentModel = computed({
   get: () => props.model || '',
@@ -213,6 +248,11 @@ const availableDurations = computed(() => {
 })
 const durationOptions = computed(() => config.value.videoDurations)
 const frameRateOptions = computed(() => config.value.videoFrameRates)
+const resolutionOptions = computed(() => config.value.videoResolutions)
+const currentResolutionLabel = computed(() => {
+  const opt = resolutionOptions.value.find(o => o.value === currentResolution.value)
+  return opt?.label || `${currentResolution.value}p`
+})
 const modelList = computed(() => props.modelList || (
   props.mode === 'video' ? modelsStore.videoModels : modelsStore.imageModels
 ))

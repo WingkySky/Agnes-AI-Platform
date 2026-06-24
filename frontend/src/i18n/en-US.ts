@@ -72,7 +72,7 @@ const enUS = {
     settings: 'Settings',
     usersAdmin: 'User Management',
     creditRules: 'Credit Rules',
-    admin: 'Admin',
+    admin: 'Admin Center',
     moderation: 'Content Moderation',
     sensitiveWords: 'Sensitive Words',
     roleManage: 'Role Management',
@@ -143,6 +143,10 @@ const enUS = {
     },
     startFrameImage: 'Start Frame Image',
     endFrameImage: 'End Frame Image',
+    // Prompt length tier hints
+    promptLengthGood: 'Prompt length is good',
+    promptLengthLong: 'Prompt is long — consider focusing on key elements',
+    promptLengthTooLong: 'Prompt is too long — may affect generation quality',
   },
 
   // ------ Generate button / queue ------
@@ -1216,6 +1220,18 @@ const enUS = {
     featSecurity: 'Unified backend authentication for security',
   },
 
+  // ------ Admin Center ------
+  admin: {
+    center: 'Admin Center',
+    groupModeration: 'Moderation',
+    groupUsers: 'Users & Permissions',
+    groupSystem: 'System Configuration',
+    modelConfig: 'Model Configuration',
+    emailConfig: 'Email Configuration',
+    emailService: 'Email Service',
+    smtpSettings: 'SMTP Server Settings',
+  },
+
   // ------ Top user menu ------
   userMenu: {
     creditsTitle: 'Current credits - consumed by generation tasks',
@@ -1387,6 +1403,30 @@ const enUS = {
     typeImage: 'Image',
     typeVideo: 'Video',
     typeChat: 'Chat',
+    // SMTP 邮件配置
+    smtpSection: 'SMTP Email Configuration',
+    smtpDesc: 'Configure SMTP email server for sending system emails like password reset verification codes. Click "Test Send" to verify the configuration.',
+    smtpHost: 'SMTP Server',
+    smtpHostPlaceholder: 'e.g. smtp.example.com',
+    smtpPort: 'Port',
+    smtpUser: 'Username',
+    smtpUserPlaceholder: 'SMTP login username',
+    smtpPassword: 'Password',
+    smtpPasswordPlaceholder: 'SMTP login password (leave empty to keep unchanged)',
+    smtpFromEmail: 'Sender Email',
+    smtpFromEmailPlaceholder: 'e.g. noreply@example.com',
+    smtpFromName: 'Sender Name',
+    smtpFromNamePlaceholder: 'e.g. Agnes AI Platform',
+    smtpUseTls: 'Enable TLS Encryption',
+    smtpTest: 'Test Send',
+    smtpTestEmail: 'Test Recipient Email',
+    smtpTestEmailPlaceholder: 'Enter recipient email address',
+    smtpTestSending: 'Sending...',
+    smtpTestSuccess: 'Test email sent successfully, please check your inbox',
+    smtpSave: 'Save Configuration',
+    smtpSaved: 'SMTP configuration saved',
+    smtpEnabled: 'Enabled',
+    smtpDisabled: 'Not Configured',
   },
   // ------ Ratio options ------
   ratio: {

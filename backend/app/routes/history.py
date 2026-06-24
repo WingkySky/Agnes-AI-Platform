@@ -276,6 +276,16 @@ async def batch_download_files(
     if not records:
         raise HTTPException(status_code=404, detail="未找到对应记录")
 
+    # 获取水印配置（只查一次，复用）
+    wm_config = None
+    need_watermark = False
+    try:
+        from app.services.watermark_service import get_watermark_config, should_apply_watermark
+        wm_config = await get_watermark_config(db)
+        need_watermark = should_apply_watermark(wm_config, current_user)
+    except Exception as e:
+        logger.warning("[批量下载] 获取水印配置失败，跳过水印: %s", e)
+
     # 在内存中构建 zip 文件
     zip_buffer = io.BytesIO()
 
@@ -316,8 +326,21 @@ async def batch_download_files(
                         ct = response.headers.get("content-type", "")
                         if ct and ("text/html" in ct or "application/xhtml" in ct):
                             logger.warning("[批量下载] 跳过返回 HTML 的文件: id=%s", record.id)
-                        else:
-                            zf.writestr(filename, response.content)
+                            continue
+
+                        file_content = response.content
+
+                        # 图片类型：动态应用水印
+                        if record.type == "image" and need_watermark and wm_config:
+                            try:
+                                from app.services.watermark_service import apply_image_watermark
+                                file_content = apply_image_watermark(file_content, wm_config)
+                                # 水印后统一为 PNG，更新文件名
+                                filename = f"agnes-{record.type}-{record.id}.png"
+                            except Exception as e:
+                                logger.warning("[批量下载] 水印处理失败，用原图: id=%s, error=%s", record.id, e)
+
+                        zf.writestr(filename, file_content)
                     else:
                         logger.warning("[批量下载] 跳过失败文件: id=%s, status=%s",
                                        record.id, response.status_code)
@@ -425,8 +448,24 @@ async def download_file(
                 if file_type != "video":
                     content_type = "image/webp"
 
+            file_content = response.content
+
+            # 图片类型：动态应用水印（不保存到磁盘）
+            if file_type == "image":
+                try:
+                    from app.services.watermark_service import get_watermark_config, should_apply_watermark, apply_image_watermark
+                    wm_config = await get_watermark_config(db)
+                    if should_apply_watermark(wm_config, current_user):
+                        file_content = apply_image_watermark(file_content, wm_config)
+                        # 水印处理后统一为 PNG，更新扩展名和 MIME
+                        ext = ".png"
+                        filename = f"agnes-{file_type}-{record_id}{ext}"
+                        content_type = "image/png"
+                except Exception as e:
+                    logger.warning("[历史记录下载] 水印处理失败，返回原图: %s", e)
+
             return FastAPIResponse(
-                content=response.content,
+                content=file_content,
                 media_type=content_type,
                 headers={
                     "Content-Disposition": f'attachment; filename="{filename}"',
@@ -448,6 +487,8 @@ async def download_by_url(
     url: str,
     type: str = Query("image", description="文件类型：image 或 video"),
     filename: Optional[str] = Query(None, description="自定义文件名（含扩展名），不传则自动生成"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """
     通过 URL 代理下载文件。
@@ -517,8 +558,30 @@ async def download_by_url(
             if actual_ct and actual_ct != "application/octet-stream":
                 content_type = actual_ct
 
+            file_content = response.content
+
+            # 图片类型：动态应用水印
+            if type == "image":
+                try:
+                    from app.services.watermark_service import get_watermark_config, should_apply_watermark, apply_image_watermark
+                    wm_config = await get_watermark_config(db)
+                    if should_apply_watermark(wm_config, current_user):
+                        file_content = apply_image_watermark(file_content, wm_config)
+                        # 水印后统一为 PNG
+                        ext = ".png"
+                        content_type = "image/png"
+                        if filename:
+                            # 替换扩展名
+                            from urllib.parse import urlparse
+                            base = filename.rsplit('.', 1)[0] if '.' in filename else filename
+                            filename = base + ext
+                        else:
+                            filename = f"agnes-{type}-{int(asyncio.get_event_loop().time())}{ext}"
+                except Exception as e:
+                    logger.warning("[下载代理] 水印处理失败，返回原图: %s", e)
+
             return FastAPIResponse(
-                content=response.content,
+                content=file_content,
                 media_type=content_type,
                 headers={
                     "Content-Disposition": f'attachment; filename="{filename}"',
@@ -897,15 +960,13 @@ async def get_video_preview(
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """
-    生成视频前 3 秒的 GIF 预览（按用户隔离），用于鼠标悬停时的动态效果。
+    生成视频前 3 秒的 GIF 预览，用于鼠标悬停时的动态效果。
+    - 视频所有者可访问
+    - 已公开且审核通过的作品，所有用户均可访问（用于广场展示）
     使用文件缓存，同一视频只生成一次。
     """
-    # 查询视频记录（按用户隔离）
+    # 查询视频记录
     stmt = select(Generation).filter(Generation.id == record_id)
-    if current_user:
-        stmt = stmt.filter(Generation.user_id == current_user.id)
-    else:
-        stmt = stmt.filter(Generation.user_id.is_(None))
     result = await db.execute(stmt)
     record = result.scalar_one_or_none()
 
@@ -914,6 +975,12 @@ async def get_video_preview(
 
     if record.type != "video":
         raise HTTPException(status_code=400, detail="该记录不是视频类型")
+
+    # 权限校验：本人可看；已公开且审核通过的作品所有人可看
+    is_owner = current_user and record.user_id == current_user.id
+    is_public_approved = record.is_public and record.moderation_status == "approved"
+    if not is_owner and not is_public_approved:
+        raise HTTPException(status_code=404, detail="未找到对应视频记录")
 
     if not record.result_url:
         raise HTTPException(status_code=404, detail="视频资源链接不存在")

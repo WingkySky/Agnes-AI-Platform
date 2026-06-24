@@ -73,7 +73,7 @@ const zhCN = {
     settings: '配置管理',
     usersAdmin: '用户管理',
     creditRules: '积分规则',
-    admin: '管理',
+    admin: '管理中心',
     moderation: '内容审核',
     sensitiveWords: '敏感词管理',
     roleManage: '角色管理',
@@ -144,6 +144,10 @@ const zhCN = {
     },
     startFrameImage: '起始帧图片',
     endFrameImage: '结束帧图片',
+    // 提示词长度分阶提示
+    promptLengthGood: '提示词长度适中',
+    promptLengthLong: '提示词较长，建议精简核心要素',
+    promptLengthTooLong: '提示词过长，可能影响生成质量',
   },
 
   // ------ 生成按钮 / 队列 ------
@@ -1217,6 +1221,18 @@ const zhCN = {
     featSecurity: '后端统一鉴权，保障账户安全',
   },
 
+  // ------ 管理中心 ------
+  admin: {
+    center: '管理中心',
+    groupModeration: '内容审核',
+    groupUsers: '用户与权限',
+    groupSystem: '系统配置',
+    modelConfig: '模型配置',
+    emailConfig: '邮件配置',
+    emailService: '邮件服务',
+    smtpSettings: 'SMTP 服务器设置',
+  },
+
   // ------ 顶部用户菜单 ------
   userMenu: {
     creditsTitle: '当前积分，生成任务会消耗积分',
@@ -1397,6 +1413,30 @@ const zhCN = {
     typeImage: '图片',
     typeVideo: '视频',
     typeChat: '对话',
+    // SMTP 邮件配置
+    smtpSection: 'SMTP 邮件配置',
+    smtpDesc: '配置 SMTP 邮件服务器，用于发送忘记密码验证码等系统邮件。配置后可点击「测试发送」验证配置是否正确。',
+    smtpHost: 'SMTP 服务器地址',
+    smtpHostPlaceholder: '如：smtp.example.com',
+    smtpPort: '端口',
+    smtpUser: '用户名',
+    smtpUserPlaceholder: 'SMTP 登录账号',
+    smtpPassword: '密码',
+    smtpPasswordPlaceholder: 'SMTP 登录密码（编辑时留空表示不修改）',
+    smtpFromEmail: '发件人邮箱',
+    smtpFromEmailPlaceholder: '如：noreply@example.com',
+    smtpFromName: '发件人名称',
+    smtpFromNamePlaceholder: '如：Agnes AI Platform',
+    smtpUseTls: '启用 TLS 加密',
+    smtpTest: '测试发送',
+    smtpTestEmail: '测试收件邮箱',
+    smtpTestEmailPlaceholder: '输入收件邮箱地址',
+    smtpTestSending: '发送中...',
+    smtpTestSuccess: '测试邮件发送成功，请查收',
+    smtpSave: '保存配置',
+    smtpSaved: 'SMTP 配置已保存',
+    smtpEnabled: '已启用',
+    smtpDisabled: '未配置',
   },
   // ------ 比例选项 ------
   ratio: {

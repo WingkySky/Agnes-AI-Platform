@@ -63,9 +63,13 @@
               type="textarea"
               :rows="4"
               :placeholder="t('params.promptPlaceholder')"
-              maxlength="2000"
+              maxlength="4000"
               show-word-limit
             />
+              <div :class="['prompt-length-hint', promptLengthLevel]">
+                <el-icon><InfoFilled /></el-icon>
+                <span>{{ promptLengthText }}</span>
+              </div>
             </el-form-item>
 
             <!-- 预设风格 -->
@@ -163,22 +167,24 @@
 
           <!-- 情况 B：有选中任务且已成功 -->
           <div v-else-if="activeTask && activeTask.status === 'success'" class="result-wrap">
-            <img
-              v-if="resultUrl"
-              :src="resultUrl"
-              class="result-img"
-              alt="generated"
-              @click="openViewerWithUrl(resultUrl)"
-              :title="t('imageViewer.title')"
-            />
-            <img
-              v-else-if="(activeTask as any).imageB64"
-              :src="'data:image/png;base64,' + (activeTask as any).imageB64"
-              class="result-img"
-              alt="generated"
-              @click="openViewerWithUrl('data:image/png;base64,' + (activeTask as any).imageB64)"
-              :title="t('imageViewer.title')"
-            />
+            <WatermarkOverlay v-if="resultUrl" class="result-img-wrapper">
+              <img
+                :src="resultUrl"
+                class="result-img"
+                alt="generated"
+                @click="openViewerWithUrl(resultUrl)"
+                :title="t('imageViewer.title')"
+              />
+            </WatermarkOverlay>
+            <WatermarkOverlay v-else-if="(activeTask as any).imageB64" class="result-img-wrapper">
+              <img
+                :src="'data:image/png;base64,' + (activeTask as any).imageB64"
+                class="result-img"
+                alt="generated"
+                @click="openViewerWithUrl('data:image/png;base64,' + (activeTask as any).imageB64)"
+                :title="t('imageViewer.title')"
+              />
+            </WatermarkOverlay>
             <div class="result-meta">
               <div class="meta-row">
               <span class="meta-label">{{ t('params.prompt') }}：</span>
@@ -248,11 +254,12 @@
 import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  MagicStick, Download, Link, PictureFilled, Edit, Loading, CircleCloseFilled, VideoPlay, Share
+  MagicStick, Download, Link, PictureFilled, Edit, Loading, CircleCloseFilled, VideoPlay, Share, InfoFilled
 } from '@element-plus/icons-vue'
 import PromptTemplates from '@/components/PromptTemplates.vue'
 import ImageUploader from '@/components/ImageUploader.vue'
 import ImageViewer from '@/components/ImageViewer.vue'
+import WatermarkOverlay from '@/components/WatermarkOverlay.vue'
 import ParamSelector from '@/components/ParamSelector.vue'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useModelsStore } from '@/stores/models'
@@ -276,7 +283,13 @@ const viewerDownloadUrl = ref('')
 function openViewerWithUrl(url: string) {
   if (!url) return
   viewerUrl.value = url
-  viewerDownloadUrl.value = url
+  // 网络图片走后端水印下载接口；base64 直接用原图
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    const baseURL = import.meta.env.VITE_API_BASE_URL || ''
+    viewerDownloadUrl.value = `${baseURL}/api/images/download/watermark?url=${encodeURIComponent(url)}`
+  } else {
+    viewerDownloadUrl.value = url
+  }
   viewerVisible.value = true
 }
 
@@ -299,6 +312,22 @@ const IMAGE_MODELS = computed(() => modelsStore.imageModels)
 // ---------- 表单参数 ----------
 const mode = ref('text2image')
 const prompt = ref('')
+
+// ---------- 提示词长度分阶提示 ----------
+// 图片：0-1000 适中，1000-2500 较长，2500+ 过长
+const promptLengthLevel = computed(() => {
+  const len = prompt.value.length
+  if (len <= 1000) return 'level-good'
+  if (len <= 2500) return 'level-long'
+  return 'level-too-long'
+})
+const promptLengthText = computed(() => {
+  const len = prompt.value.length
+  if (len === 0) return ''
+  if (len <= 1000) return t('params.promptLengthGood')
+  if (len <= 2500) return t('params.promptLengthLong')
+  return t('params.promptLengthTooLong')
+})
 
 // 分享到广场开关：是否将本次生成结果公开到广场
 const shareToPlaza = ref(false)
@@ -521,9 +550,8 @@ async function downloadImage() {
     return
   }
   try {
-    // 通过后端代理下载，携带 JWT 并设置 Content-Disposition: attachment 强制浏览器保存文件
     const baseURL = import.meta.env.VITE_API_BASE_URL || ''
-    const proxyUrl = `${baseURL}/api/download?url=${encodeURIComponent(resultUrl.value)}&type=image`
+    const proxyUrl = `${baseURL}/api/images/download/watermark?url=${encodeURIComponent(resultUrl.value)}`
     await downloadViaProxy(proxyUrl, `agnes-image-${Date.now()}.png`)
     ElMessage.success(t('preview.download'))
   } catch (err: any) {
@@ -650,6 +678,27 @@ function copyImageUrl() {
 }
 .mode-tabs { margin-bottom: 12px; }
 .param-form { margin-top: 12px; }
+
+/* 提示词长度分阶提示 */
+.prompt-length-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+.prompt-length-hint .el-icon {
+  font-size: 14px;
+}
+.prompt-length-hint.level-good {
+  color: var(--agnes-success);
+}
+.prompt-length-hint.level-long {
+  color: var(--agnes-warning);
+}
+.prompt-length-hint.level-too-long {
+  color: var(--agnes-error);
+}
 
 /* 统一表单标签：更醒目、更有视觉层级 */
 .param-form :deep(.el-form-item__label) {

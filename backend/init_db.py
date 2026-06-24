@@ -71,6 +71,7 @@ _safe_import("app.models.role", ["Role"])
 _safe_import("app.models.sensitive_word", ["SensitiveWord"])
 _safe_import("app.models.watermark", ["WatermarkConfig"])
 _safe_import("app.models.plaza_like", ["PlazaLike"])
+_safe_import("app.models.system_config", ["SystemConfig"])
 
 logging.basicConfig(
     level=logging.INFO,
@@ -207,6 +208,38 @@ async def seed_default_credit_rules(db: AsyncSession):
 
 
 # =====================================================
+# 4. 初始化系统配置（SMTP等）
+# =====================================================
+async def seed_system_configs(db: AsyncSession):
+    """初始化默认系统配置（缺失的补上，不覆盖已有）"""
+    try:
+        from app.models.system_config import DEFAULT_SYSTEM_CONFIGS, SystemConfig
+
+        result = await db.execute(select(SystemConfig.config_key))
+        existing_keys = {row[0] for row in result.all()}
+
+        added = 0
+        for key, info in DEFAULT_SYSTEM_CONFIGS.items():
+            if key not in existing_keys:
+                db.add(SystemConfig(
+                    config_key=key,
+                    config_value=info["value"],
+                    category=info["category"],
+                    description=info["description"],
+                ))
+                added += 1
+                logger.info("新增系统配置：%s = %s", key, info["value"])
+
+        if added:
+            await db.commit()
+            logger.info("系统配置初始化完成 ✓ 共新增 %s 条", added)
+        else:
+            logger.info("系统配置已完整，无需新增")
+    except Exception as e:
+        logger.warning("跳过系统配置初始化：%s", e)
+
+
+# =====================================================
 # 主入口
 # =====================================================
 async def main():
@@ -216,6 +249,7 @@ async def main():
     async with async_session() as session:
         await create_default_admin(session)
         await seed_default_credit_rules(session)
+        await seed_system_configs(session)
 
     logger.info("==== 初始化完成 ====")
     print("")

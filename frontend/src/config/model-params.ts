@@ -123,12 +123,15 @@ const AGNES_PARAMS: ProviderParamPreset = {
   defaultVideoAspectRatio: '16:9',
 
   // 视频分辨率：以高度为基准，宽度按比例自动计算
+  // 注意：宽高会自动对齐到 8 的倍数（视频编码硬性要求）
   videoResolutions: [
-    { value: 480,  label: '480p 标清', width_16_9: 854 },
-    { value: 768,  label: '720p 高清', width_16_9: 1364 },
-    { value: 1080, label: '1080p 全高清', width_16_9: 1920 },
+    { value: 480,  label: '480p 流畅', width_16_9: 856 },
+    { value: 720,  label: '720p 高清', width_16_9: 1280 },
+    { value: 1080, label: '1080p 超清', width_16_9: 1920 },
+    { value: 1440, label: '2K 极致', width_16_9: 2560 },
+    { value: 2160, label: '4K 顶级', width_16_9: 3840 },
   ],
-  defaultVideoResolution: 768,
+  defaultVideoResolution: 720,
 
   // 视频时长（秒）：覆盖常见创作场景
   // Agnes 官方 Q&A 限制：FPS 与时长联动：

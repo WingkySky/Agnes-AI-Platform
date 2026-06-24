@@ -98,7 +98,11 @@
           <el-form label-position="top" class="param-form">
             <el-form-item :label="t('params.prompt')">
               <el-input v-model="prompt" type="textarea" :rows="4"
-                :placeholder="t('params.videoPromptPlaceholder')" maxlength="2000" show-word-limit />
+                :placeholder="t('params.videoPromptPlaceholder')" maxlength="3000" show-word-limit />
+              <div :class="['prompt-length-hint', promptLengthLevel]">
+                <el-icon><InfoFilled /></el-icon>
+                <span>{{ promptLengthText }}</span>
+              </div>
             </el-form-item>
 
             <el-form-item :label="t('params.negativePrompt')">
@@ -108,11 +112,12 @@
 
             <PromptTemplates :templates="videoTemplates" @select="appendStylePrompt" />
 
-            <!-- 紧凑参数选择：比例 + 时长 + 帧率 + 模型，一行标签搞定 -->
+            <!-- 紧凑参数选择：比例 + 分辨率 + 时长 + 帧率 + 模型，一行标签搞定 -->
             <el-form-item :label="t('params.aspectRatio')">
               <ParamSelector
                 mode="video"
                 v-model:aspectRatio="aspectRatio"
+                v-model:resolution="resolution"
                 v-model:seconds="seconds"
                 v-model:frameRate="frameRate"
                 v-model:model="videoModel"
@@ -303,7 +308,7 @@ import { ref, computed, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   VideoPlay, Download, CopyDocument, CircleCloseFilled, VideoCameraFilled, Loading, MagicStick,
-  Edit, Film, PictureFilled, ArrowDownBold, Share
+  Edit, Film, PictureFilled, ArrowDownBold, Share, InfoFilled
 } from '@element-plus/icons-vue'
 import PromptTemplates from '@/components/PromptTemplates.vue'
 import ImageUploader from '@/components/ImageUploader.vue'
@@ -339,10 +344,27 @@ const mode = ref('text2video')
 const prompt = ref('')
 const negativePrompt = ref('')
 
+// ---------- 提示词长度分阶提示 ----------
+// 视频：0-800 适中，800-2000 较长，2000+ 过长
+const promptLengthLevel = computed(() => {
+  const len = prompt.value.length
+  if (len <= 800) return 'level-good'
+  if (len <= 2000) return 'level-long'
+  return 'level-too-long'
+})
+const promptLengthText = computed(() => {
+  const len = prompt.value.length
+  if (len === 0) return ''
+  if (len <= 800) return t('params.promptLengthGood')
+  if (len <= 2000) return t('params.promptLengthLong')
+  return t('params.promptLengthTooLong')
+})
+
 // 分享到广场开关：是否将本次生成结果公开到广场
 const shareToPlaza = ref(false)
 // 画面比例、时长、帧率均从 store 配置获取默认值
 const aspectRatio = ref(modelsStore.defaultVideoAspectRatio || '16:9')
+const resolution = ref(modelsStore.defaultVideoResolution || 768)
 const seconds = ref(modelsStore.defaultVideoDuration || 5)
 const frameRate = ref(modelsStore.defaultFrameRate || 24)
 const seed = ref('')
@@ -540,12 +562,33 @@ async function startGenerate() {
     return
   }
 
+  // 根据分辨率（高度）和宽高比计算具体的 width/height
+  // 宽高必须为 8 的倍数（视频编码硬性要求）
+  let videoWidth: number | undefined
+  let videoHeight: number | undefined
+  if (resolution.value && aspectRatio.value) {
+    const arParts = aspectRatio.value.split(':')
+    if (arParts.length === 2) {
+      const arW = parseInt(arParts[0], 10)
+      const arH = parseInt(arParts[1], 10)
+      if (arW > 0 && arH > 0) {
+        const h = resolution.value
+        const w = Math.round(h * arW / arH)
+        // 确保宽高为 8 的倍数（视频编码硬性要求，向上取整）
+        videoWidth = Math.floor((w + 7) / 8) * 8
+        videoHeight = Math.floor((h + 7) / 8) * 8
+      }
+    }
+  }
+
   const params: Record<string, any> = {
     prompt: prompt.value.trim(),
     negative_prompt: negativePrompt.value.trim() || undefined,
     model: videoModel.value,
-    aspect_ratio: aspectRatio.value,   // 直接传比例字符串，后端会映射为官方 aspect_ratio
-    seconds: seconds.value,             // 直接传时长（秒），后端会转换为 duration
+    aspect_ratio: aspectRatio.value,
+    width: videoWidth,
+    height: videoHeight,
+    seconds: seconds.value,
     frame_rate: frameRate.value,
     mode: mode.value,
     seed: seed.value ? Number(seed.value) : undefined,
@@ -843,6 +886,27 @@ function handleVideoError(e: Event) {
 }
 
 .param-form { margin-top: 12px; }
+
+/* 提示词长度分阶提示 */
+.prompt-length-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+.prompt-length-hint .el-icon {
+  font-size: 14px;
+}
+.prompt-length-hint.level-good {
+  color: var(--agnes-success);
+}
+.prompt-length-hint.level-long {
+  color: var(--agnes-warning);
+}
+.prompt-length-hint.level-too-long {
+  color: var(--agnes-error);
+}
 
 .generate-btn {
   width: 100%;

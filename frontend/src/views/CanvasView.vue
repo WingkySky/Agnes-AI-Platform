@@ -405,7 +405,7 @@ const NODE_DEFAULT_SIZES = {
   image: { width: 340, height: 240 },
   video: { width: 420, height: 236 },
   audio: { width: 340, height: 120 },
-  config: { width: 340, height: 240 },
+  config: { width: 360, height: 380 },
 }
 
 // ---------- 节点类型名称（国际化） ----------

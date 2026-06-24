@@ -7,7 +7,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getPlatformConfig } from '@/api/history'
-import type { ModelInfo, ConfigResponse, ImageSizeOption, VideoAspectRatioOption, VideoResolutionOption } from '@/types'
+import type { ModelInfo, ConfigResponse, ImageSizeOption, VideoAspectRatioOption, VideoResolutionOption, WatermarkConfigPublic } from '@/types'
 import {
   getModelParams as getLocalModelParams,
   type ModelParams,
@@ -38,6 +38,8 @@ export const useModelsStore = defineStore('models', () => {
   const videoFrameRates = ref<number[]>([24, 30])
   // 默认帧率
   const defaultFrameRate = ref(24)
+  // 水印配置
+  const watermark = ref<WatermarkConfigPublic | null>(null)
   // 是否已加载
   const loaded = ref(false)
 
@@ -69,6 +71,8 @@ export const useModelsStore = defineStore('models', () => {
       defaultVideoDuration.value = resp.default_video_duration || 5
       videoFrameRates.value = resp.video_frame_rates || [24, 30]
       defaultFrameRate.value = resp.default_frame_rate || 24
+      // 水印配置
+      watermark.value = resp.watermark || null
       loaded.value = true
     } catch (err) {
       console.error('[models store] 加载配置失败:', err)
@@ -130,6 +134,7 @@ export const useModelsStore = defineStore('models', () => {
     defaultVideoDuration,
     videoFrameRates,
     defaultFrameRate,
+    watermark,
     loaded,
     imageModels,
     videoModels,

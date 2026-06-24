@@ -43,49 +43,15 @@
             <el-icon><Grid /></el-icon>
             <span>{{ t('nav.canvas') }}</span>
           </router-link>
-          <!-- 管理员菜单：收起到「管理」下拉 -->
-          <el-dropdown
+          <!-- 管理中心：普通导航项，点击直接跳转 -->
+          <router-link
             v-if="userStore.isAuthenticated && (userStore.isAdmin || permissionStore.hasPermission('plaza:moderate') || permissionStore.hasPermission('role:manage') || permissionStore.hasPermission('moderation:config') || permissionStore.hasPermission('watermark:manage'))"
-            trigger="click"
-            @command="handleAdminCommand">
-            <div class="nav-item nav-item-dropdown" :class="{ active: isAdminRouteActive }">
-              <el-icon><Setting /></el-icon>
-              <span>{{ t('nav.admin') }}</span>
-              <el-icon class="caret"><CaretBottom /></el-icon>
-            </div>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item v-if="permissionStore.hasPermission('plaza:moderate')" command="/admin/moderation">
-                  <el-icon><View /></el-icon>
-                  <span>{{ t('nav.moderation') }}</span>
-                </el-dropdown-item>
-                <el-dropdown-item v-if="permissionStore.hasPermission('moderation:config')" command="/admin/sensitive-words">
-                  <el-icon><Warning /></el-icon>
-                  <span>{{ t('nav.sensitiveWords') }}</span>
-                </el-dropdown-item>
-                <el-dropdown-item v-if="permissionStore.hasPermission('role:manage')" command="/admin/roles">
-                  <el-icon><UserFilled /></el-icon>
-                  <span>{{ t('nav.roleManage') }}</span>
-                </el-dropdown-item>
-                <el-dropdown-item v-if="userStore.isAdmin" command="/admin/users">
-                  <el-icon><UserFilled /></el-icon>
-                  <span>{{ t('nav.usersAdmin') }}</span>
-                </el-dropdown-item>
-                <el-dropdown-item v-if="permissionStore.hasPermission('watermark:manage')" command="/admin/watermark">
-                  <el-icon><Picture /></el-icon>
-                  <span>{{ t('nav.watermarkConfig') }}</span>
-                </el-dropdown-item>
-                <el-dropdown-item v-if="userStore.isAdmin" command="/admin/credit-rules">
-                  <el-icon><Coin /></el-icon>
-                  <span>{{ t('nav.creditRules') }}</span>
-                </el-dropdown-item>
-                <el-dropdown-item v-if="userStore.isAdmin" command="/settings" divided>
-                  <el-icon><Setting /></el-icon>
-                  <span>{{ t('nav.settings') }}</span>
-                </el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
+            to="/admin"
+            class="nav-item"
+            :class="{ active: isAdminRouteActive }">
+            <el-icon><Setting /></el-icon>
+            <span>{{ t('nav.admin') }}</span>
+          </router-link>
         </nav>
 
         <div class="app-header-right">
@@ -177,7 +143,6 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   Picture, VideoPlay, Clock, ChatDotRound, Grid, Setting,
   User, UserFilled, Coin, CaretBottom, SwitchButton, Sunny, Moon, StarFilled, Histogram,
-  View, Warning,
 } from '@element-plus/icons-vue'
 import TaskQueuePanel from './components/TaskQueuePanel.vue'
 import LanguageSwitcher from './components/LanguageSwitcher.vue'
@@ -244,11 +209,6 @@ function handleUserCommand(cmd: string) {
   } else if (cmd === 'preferences') {
     router.push('/preferences')
   }
-}
-
-// 管理员下拉菜单操作：跳转到对应管理页面
-function handleAdminCommand(path: string) {
-  router.push(path)
 }
 
 // 每当 locale 变化时返回对应的 Element Plus 语言对象
@@ -353,13 +313,6 @@ const epLocale = computed(() => {
   color: var(--agnes-text-primary);
   background: var(--agnes-nav-active-bg);
   box-shadow: var(--agnes-nav-active-shadow);
-}
-
-/* 管理员下拉触发器：复用 nav-item 样式，并加上小箭头 */
-.nav-item-dropdown .caret {
-  font-size: 11px;
-  margin-left: 2px;
-  color: var(--agnes-text-muted);
 }
 
 .app-header-right {
