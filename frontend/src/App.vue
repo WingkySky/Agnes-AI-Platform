@@ -211,6 +211,7 @@ import {
   Picture, VideoPlay, Clock, ChatDotRound, Grid, Setting,
   User, UserFilled, Coin, CaretBottom, SwitchButton, Sunny, Moon, StarFilled, Histogram,
   MagicStick, Fold, Expand, ArrowDown, Message, EditPen, Connection,
+  Menu, More,
 } from '@element-plus/icons-vue'
 import TaskQueuePanel from './components/TaskQueuePanel.vue'
 import LanguageSwitcher from './components/LanguageSwitcher.vue'
@@ -255,6 +256,8 @@ const iconMap: Record<string, any> = {
   Message,
   EditPen,
   Connection,
+  Menu,
+  More,
 }
 
 /** 根据图标名称获取组件 */

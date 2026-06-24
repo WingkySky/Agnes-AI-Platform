@@ -139,7 +139,7 @@ const routes: RouteRecordRaw[] = [
         path: 'email',
         name: 'admin-email',
         component: () => import('@/views/EmailConfigView.vue'),
-        meta: { titleKey: 'admin.emailConfig', requiresAdmin: true }
+        meta: { titleKey: 'admin.smtp.title', requiresAdmin: true }
       },
       {
         path: 'menus',

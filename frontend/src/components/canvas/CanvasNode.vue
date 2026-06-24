@@ -243,14 +243,20 @@
               </el-tooltip>
             </div>
 
-            <!-- 提示词输入 -->
-            <textarea
-              class="config-prompt"
-              v-model="configPrompt"
-              :placeholder="t('canvas.node.configPromptPlaceholder')"
-              @mousedown.stop
-              @wheel.stop
-            />
+            <!-- 提示词输入（支持 @ 提及接入节点） -->
+            <div class="config-prompt-wrapper">
+              <textarea
+                ref="configPromptRef"
+                class="config-prompt"
+                v-model="configPrompt"
+                :placeholder="t('canvas.node.configPromptPlaceholder')"
+                @mousedown.stop
+                @wheel.stop
+                @input="handleConfigMentionInput"
+                @keydown="handleConfigMentionKeyDown"
+                @blur="handleConfigMentionBlur"
+              />
+            </div>
           </div>
 
           <!-- 底部固定：生成按钮（异步操作，点击后不阻塞，可连续点击） -->
@@ -317,6 +323,40 @@
     >
       <div class="connection-dot" :style="connectionDotStyle"></div>
     </div>
+
+    <!-- 输入序号标记：当节点作为输入连接到 config/multi-text 等节点时，显示接入序号（1,2,3...） -->
+    <div
+      v-for="badge in inputBadges"
+      :key="badge.targetId"
+      class="input-index-badge"
+      :style="inputBadgeStyle"
+      :title="badge.tooltip"
+    >
+      {{ badge.index }}
+    </div>
+
+    <!-- @ 提及候选项弹窗（通过 Teleport 传送到 body，使用 fixed 定位避免被面板/画布裁剪遮挡） -->
+    <Teleport to="body">
+      <div
+        v-if="configMentionVisible && configMentionCandidates.length > 0"
+        class="mention-popup"
+        :style="{ position: 'fixed', top: configMentionPosition.top + 'px', left: configMentionPosition.left + 'px', zIndex: 99999 }"
+        @mousedown="handleConfigPopupMouseDown"
+      >
+        <div
+          v-for="(candidate, idx) in configMentionCandidates"
+          :key="candidate.id"
+          class="mention-item"
+          :class="{ active: idx === configMentionActiveIndex }"
+          @mousedown.prevent.stop="selectConfigMention(candidate)"
+        >
+          <span class="mention-index">{{ candidate.index }}</span>
+          <span class="mention-icon">{{ getMentionTypeIcon(candidate.type) }}</span>
+          <span class="mention-name">{{ candidate.label }}</span>
+          <span v-if="candidate.preview" class="mention-preview">{{ candidate.preview }}</span>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -341,6 +381,7 @@ import { useI18n } from '@/i18n'
 import { useCanvasStore } from '@/stores/canvas'
 import { useModelsStore } from '@/stores/models'
 import ImageWithWatermark from '@/components/ImageWithWatermark.vue'
+import { useNodeMention } from '@/composables/useNodeMention'
 
 /* ---------- i18n ---------- */
 const { t } = useI18n()
@@ -429,7 +470,57 @@ const availableDurations = computed(() => {
 /* ---------- 响应式状态 ---------- */
 const hovered = ref(false) // 是否悬停
 const isEditingContent = ref(false) // 是否正在编辑文本
-const textareaRef = ref<HTMLTextAreaElement | null>(null) // 文本编辑区引用
+const textareaRef = ref<HTMLTextAreaElement | null>(null) // 文本节点编辑区引用
+const configPromptRef = ref<HTMLTextAreaElement | null>(null) // 配置节点提示词输入框引用
+
+/* ---------- @ 提及功能（配置节点提示词） ---------- */
+const {
+  mentionPopupVisible: configMentionVisible,
+  mentionActiveIndex: configMentionActiveIndex,
+  mentionCandidates: configMentionCandidates,
+  mentionPopupPosition: configMentionPosition,
+  handleInput: handleConfigMentionInput,
+  handleKeyDown: handleConfigMentionKeyDown,
+  handleBlur: handleConfigMentionBlur,
+  handlePopupMouseDown: handleConfigPopupMouseDown,
+  selectMention: selectConfigMention,
+  setCurrentPanel: setConfigMentionPanel,
+  getTypeIcon: getMentionTypeIcon,
+} = useNodeMention(configPromptRef)
+
+/* ---------- @ 提及功能（文本节点，暂不启用但保留初始化） ---------- */
+const {
+  mentionPopupVisible: textMentionVisible,
+  mentionActiveIndex: textMentionActiveIndex,
+  mentionCandidates: textMentionCandidates,
+  mentionPopupPosition: textMentionPosition,
+  handleInput: handleTextMentionInput,
+  handleKeyDown: handleTextMentionKeyDown,
+  handleBlur: handleTextMentionBlur,
+  handlePopupMouseDown: handleTextPopupMouseDown,
+  selectMention: selectTextMention,
+  setCurrentPanel: setTextMentionPanel,
+} = useNodeMention(textareaRef)
+
+// 监听 panel.id 变化，更新 mention 的当前面板（文本节点需要查找它连接到的 config 节点的上游？不，文本节点作为源时，@ 的是下游 config 的输入？
+// 实际上：@ 提及应该是在接收输入的节点（config）的 prompt 中使用，用来引用上游输入
+// 文本节点本身如果连接到 config，那它自己的编辑框中不需要 @；
+// 但用户说"多元素接入时多文本面板"，这里理解为：当多个文本节点连接到某个合并节点时，也需要支持 @
+// 为了简化：config 节点支持 @ 即可，文本节点暂时不支持（因为文本节点是源，不是接收输入的节点）
+// 所以文本节点的 mention 我们不初始化 panelId，只有 config 节点设置
+
+watch(
+  () => props.panel?.id,
+  (newId) => {
+    if (props.panel?.type === 'config' && newId) {
+      setConfigMentionPanel(newId)
+    } else {
+      setConfigMentionPanel(null)
+    }
+    setTextMentionPanel(null)
+  },
+  { immediate: true }
+)
 
 /* ---------- 四角缩放手柄配置 ---------- */
 const resizeCorners = [
@@ -526,6 +617,53 @@ const connectionDotStyle = computed(() => ({
   background: props.theme.node.panel,
   borderColor: props.theme.node.muted,
 }))
+
+/** 输入序号标记：当前节点作为源接入到哪些下游节点，显示对应序号 */
+const inputBadges = computed(() => {
+  const badges: Array<{ targetId: string; index: number; tooltip: string }> = []
+  // config 节点本身不显示标记（它是接收方）
+  if (props.panel.type === 'config') return badges
+
+  // 查找当前节点作为 source 的所有下游连接（目标节点为 config 或其他接收输入的节点类型）
+  const outgoingConns = store.connections.filter(c => c.source_panel_id === props.panel.id)
+  for (const conn of outgoingConns) {
+    const targetPanel = store.panels.find(p => p.id === conn.target_panel_id)
+    // 只对 config 等需要接收多输入的节点显示标记
+    if (!targetPanel || targetPanel.type !== 'config') continue
+
+    // 获取该目标节点的所有输入序号映射
+    const indexMap = store.getInputNodeIndices(conn.target_panel_id)
+    const idx = indexMap.get(props.panel.id)
+    if (idx) {
+      const targetName = targetPanel.name || getNodeTypeName(targetPanel.type)
+      badges.push({
+        targetId: conn.target_panel_id,
+        index: idx,
+        tooltip: `接入「${targetName}」的输入 #${idx}`,
+      })
+    }
+  }
+  return badges
+})
+
+/** 序号标记样式（固定在节点左上角，蓝色圆形徽章） */
+const inputBadgeStyle = computed(() => ({
+  background: props.theme.node.activeStroke,
+  color: '#fff',
+  borderColor: props.theme.node.panel,
+}))
+
+/** 获取节点类型中文名（用于 tooltip） */
+function getNodeTypeName(type: string): string {
+  const names: Record<string, string> = {
+    text: '文本',
+    image: '图片',
+    video: '视频',
+    audio: '音频',
+    config: '配置',
+  }
+  return names[type] || type
+}
 
 /** 左侧锚点是否可见：hover/选中/连线中 */
 const isLeftAnchorVisible = computed(
@@ -1424,5 +1562,105 @@ onUnmounted(() => {
 
 .connection-dot:hover {
   transform: scale(1.25);
+}
+
+/* ===== 输入序号标记：蓝色圆形徽章，显示在节点左上角 ===== */
+.input-index-badge {
+  position: absolute;
+  top: -10px;
+  left: -10px;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 12px;
+  border: 2px solid;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ===== 配置节点提示词包裹层（相对定位，用于放置 mention 弹窗） ===== */
+.config-prompt-wrapper {
+  position: relative;
+  flex: 1;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+}
+
+.config-prompt-wrapper .config-prompt {
+  flex: 1;
+}
+
+/* ===== @ 提及候选项弹窗 ===== */
+.mention-popup {
+  position: absolute;
+  z-index: 100;
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--agnes-bg-secondary);
+  border: 1px solid var(--agnes-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  padding: 4px;
+  min-width: 180px;
+}
+
+.mention-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.1s ease;
+}
+
+.mention-item:hover,
+.mention-item.active {
+  background: var(--agnes-info-bg);
+}
+
+.mention-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--agnes-primary);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.mention-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.mention-name {
+  font-weight: 500;
+  color: var(--agnes-text-primary);
+  flex-shrink: 0;
+}
+
+.mention-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--agnes-text-tertiary);
+  font-size: 11px;
 }
 </style>

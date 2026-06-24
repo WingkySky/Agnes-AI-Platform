@@ -89,7 +89,7 @@
               v-if="userStore.isAdmin"
               index="/admin/email">
               <el-icon><Message /></el-icon>
-              <span>{{ t('admin.emailConfig') }}</span>
+              <span>{{ t('admin.smtp.title') }}</span>
             </el-menu-item>
             <el-menu-item
               v-if="userStore.isAdmin"
@@ -102,12 +102,8 @@
       </el-menu>
     </aside>
 
-    <!-- 右侧内容区 -->
+    <!-- 右侧内容区（各页面自行渲染标题和操作按钮，避免重复标题） -->
     <main class="admin-content">
-      <!-- 动态页面标题 -->
-      <div v-if="currentPageTitle" class="page-title-bar">
-        <h1 class="page-title">{{ currentPageTitle }}</h1>
-      </div>
       <router-view v-slot="{ Component, route: currentRoute }">
         <keep-alive :include="cachedViews">
           <component :is="Component" />
@@ -136,15 +132,6 @@ const permissionStore = usePermissionStore()
 
 // 当前激活的菜单
 const activeMenu = computed(() => route.path)
-
-// 动态页面标题（从路由 meta.titleKey 获取）
-const currentPageTitle = computed(() => {
-  const titleKey = route.meta?.titleKey as string | undefined
-  if (titleKey) {
-    return t(titleKey)
-  }
-  return ''
-})
 
 // 内容审核组是否显示
 const showModerationGroup = computed(() => {
@@ -300,17 +287,6 @@ const firstAccessiblePage = computed(() => {
   flex: 1;
   min-width: 0;
   overflow: auto;
-}
-
-.page-title-bar {
-  margin-bottom: 20px;
-}
-
-.page-title {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 600;
-  color: var(--agnes-text-primary);
 }
 
 @media (max-width: 900px) {

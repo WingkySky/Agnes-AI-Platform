@@ -2,15 +2,18 @@
   菜单管理页面
   - 完全用户友好，不需要填写代码字段
   - 所有可用菜单项已预设好（名称、图标、路径固定）
-  - 管理员只需配置：是否在顶部显示、是否在侧边栏显示、侧边栏分组、排序
+  - 管理员只需配置：是否在顶部显示、是否在侧边栏显示、分组、排序
+  - 支持自定义顶部导航和侧边栏分组名称、图标
   - 带实时预览
+  - 使用标签页+分组切换布局，避免页面过长
 -->
 
 <template>
-  <div class="menu-admin-page">
-    <div class="page-header">
+  <div class="menu-admin-wrap">
+    <!-- 页面头部：标题+描述在左，操作按钮在右 -->
+    <header class="page-head">
       <div>
-        <h1>{{ t('menuAdmin.pageTitle') }}</h1>
+        <h2>{{ t('nav.menuAdmin') }}</h2>
         <p class="page-desc">{{ t('menuAdmin.pageDesc') }}</p>
       </div>
       <div class="header-actions">
@@ -23,210 +26,300 @@
           {{ t('common.save') }}
         </el-button>
       </div>
-    </div>
+    </header>
 
-    <el-table
-      :data="menuStore.allMenuItems"
-      stripe
-      border
-      style="width: 100%"
-      :row-key="'key'"
-    >
-      <el-table-column :label="t('menuAdmin.itemName')" min-width="220">
-        <template #default="{ row }">
-          <div class="menu-item-preview">
-            <el-icon v-if="row.icon" class="menu-icon">
-              <component :is="getIcon(row.icon)" />
-            </el-icon>
-            <div class="menu-info">
-              <div class="menu-name">{{ currentLang === 'zh' ? row.label_zh : row.label_en }}</div>
-              <div class="menu-path">{{ row.path }}</div>
-            </div>
-            <el-tag v-if="row.require_admin" type="warning" size="small">
-              {{ t('menuAdmin.adminOnly') }}
-            </el-tag>
+    <el-card class="content-card" shadow="never">
+      <el-tabs v-model="activeTab" class="menu-admin-tabs">
+        <!-- 分组配置标签页 -->
+        <el-tab-pane :label="t('menuAdmin.tabGroups')" name="groups">
+          <!-- 分组类型切换：顶部导航/侧边栏 -->
+          <div class="group-type-switch">
+            <el-radio-group v-model="activeGroupType" size="large">
+              <el-radio-button label="top">
+                <el-icon><Menu /></el-icon>
+                <span>{{ t('menuAdmin.topNavGroups') }}</span>
+              </el-radio-button>
+              <el-radio-button label="sidebar">
+                <el-icon><Grid /></el-icon>
+                <span>{{ t('menuAdmin.sidebarGroups') }}</span>
+              </el-radio-button>
+            </el-radio-group>
+            <p class="switch-desc">{{ activeGroupType === 'top' ? t('menuAdmin.topNavGroupsDesc') : t('menuAdmin.sidebarGroupsDesc') }}</p>
           </div>
-        </template>
-      </el-table-column>
 
-      <el-table-column :label="t('menuAdmin.showInTop')" width="120" align="center">
-        <template #default="{ row }">
-          <el-switch v-model="configMap[row.key].show_in_top" />
-        </template>
-      </el-table-column>
-
-      <el-table-column :label="t('menuAdmin.topGroup')" width="140">
-        <template #default="{ row }">
-          <el-select
-            v-model="configMap[row.key].top_group_key"
-            style="width: 100%"
-            :disabled="!configMap[row.key].show_in_top"
-            :placeholder="t('menuAdmin.selectTopGroup')"
-          >
-            <el-option
-              v-for="group in topNavGroups"
-              :key="group.key"
-              :label="currentLang === 'zh' ? group.label_zh : group.label_en"
-              :value="group.key"
-            />
-          </el-select>
-        </template>
-      </el-table-column>
-
-      <el-table-column :label="t('menuAdmin.topSort')" width="110" align="center">
-        <template #default="{ row }">
-          <el-input-number
-            v-model="configMap[row.key].top_sort_order"
-            :min="1"
-            :max="100"
-            size="small"
-            controls-position="right"
-            style="width: 100px"
-            :disabled="!configMap[row.key].show_in_top"
-          />
-        </template>
-      </el-table-column>
-
-      <el-table-column :label="t('menuAdmin.showInSidebar')" width="120" align="center">
-        <template #default="{ row }">
-          <el-switch v-model="configMap[row.key].show_in_sidebar" />
-        </template>
-      </el-table-column>
-
-      <el-table-column :label="t('menuAdmin.sidebarGroup')" width="160">
-        <template #default="{ row }">
-          <el-select
-            v-model="configMap[row.key].sidebar_group_key"
-            style="width: 100%"
-            :disabled="!configMap[row.key].show_in_sidebar"
-            :placeholder="t('menuAdmin.selectGroup')"
-          >
-            <el-option
-              v-for="group in sidebarGroups"
-              :key="group.key"
-              :label="currentLang === 'zh' ? group.label_zh : group.label_en"
-              :value="group.key"
-            />
-          </el-select>
-        </template>
-      </el-table-column>
-
-      <el-table-column :label="t('menuAdmin.sidebarSort')" width="110" align="center">
-        <template #default="{ row }">
-          <el-input-number
-            v-model="configMap[row.key].sidebar_sort_order"
-            :min="1"
-            :max="100"
-            size="small"
-            controls-position="right"
-            style="width: 100px"
-            :disabled="!configMap[row.key].show_in_sidebar"
-          />
-        </template>
-      </el-table-column>
-    </el-table>
-
-    <!-- 预览区域 -->
-    <div class="preview-section">
-      <h2>{{ t('menuAdmin.preview') }}</h2>
-      
-      <div class="preview-box">
-        <div class="preview-header">
-          <div class="preview-nav">
-            <span class="preview-brand">Agnes AI</span>
-            <div class="preview-nav-items">
-              <template v-for="group in previewTopNav" :key="group.key">
-                <!-- 单菜单项：直接显示标签 -->
-                <el-tag
-                  v-if="group.items.length === 1"
-                  size="small"
-                  type="primary"
-                  effect="plain"
-                  class="preview-tag"
-                >
-                  <el-icon v-if="group.items[0].icon"><component :is="getIcon(group.items[0].icon)" /></el-icon>
-                  {{ group.items[0].label }}
-                </el-tag>
-
-                <!-- 多菜单项：下拉分组 -->
-                <el-dropdown
-                  v-else
-                  trigger="hover"
-                  placement="bottom"
-                >
-                  <span class="preview-nav-group">
-                    <el-icon v-if="group.icon"><component :is="getIcon(group.icon)" /></el-icon>
-                    {{ group.label }}
-                    <el-icon class="preview-arrow"><ArrowDown /></el-icon>
-                  </span>
-                  <template #dropdown>
-                    <el-dropdown-menu>
-                      <el-dropdown-item
-                        v-for="item in group.items"
-                        :key="item.key"
+          <!-- 分组卡片网格 -->
+          <div class="group-config-grid">
+            <template v-for="group in activeGroups" :key="group.key">
+              <div class="group-config-card">
+                <div class="group-config-header">
+                  <el-icon class="group-icon" :size="18">
+                    <component :is="getIcon(group.custom_icon || group.icon)" />
+                  </el-icon>
+                  <span class="group-key">{{ group.key }}</span>
+                </div>
+                <el-form :model="group" label-position="top" size="small" class="group-form">
+                  <div class="form-row">
+                    <el-form-item :label="t('menuAdmin.groupNameZh')" class="form-item-compact">
+                      <el-input
+                        v-model="group.custom_label_zh"
+                        :placeholder="group.label_zh"
+                        clearable
+                      />
+                    </el-form-item>
+                    <el-form-item :label="t('menuAdmin.groupNameEn')" class="form-item-compact">
+                      <el-input
+                        v-model="group.custom_label_en"
+                        :placeholder="group.label_en"
+                        clearable
+                      />
+                    </el-form-item>
+                  </div>
+                  <el-form-item :label="t('menuAdmin.groupIcon')" class="form-item-compact">
+                    <el-select
+                      v-model="group.custom_icon"
+                      filterable
+                      allow-create
+                      default-first-option
+                      :placeholder="group.icon"
+                      clearable
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="iconName in availableIcons"
+                        :key="iconName"
+                        :label="iconName"
+                        :value="iconName"
                       >
-                        <el-icon v-if="item.icon"><component :is="getIcon(item.icon)" /></el-icon>
-                        {{ item.label }}
-                      </el-dropdown-item>
-                    </el-dropdown-menu>
-                  </template>
-                </el-dropdown>
+                        <div class="icon-option">
+                          <el-icon><component :is="getIcon(iconName)" /></el-icon>
+                          <span>{{ iconName }}</span>
+                        </div>
+                      </el-option>
+                    </el-select>
+                  </el-form-item>
+                  <div class="group-preview-name">
+                    {{ t('menuAdmin.previewName') }}:
+                    <strong>{{ getGroupDisplayName(group) }}</strong>
+                  </div>
+                </el-form>
+              </div>
+            </template>
+          </div>
+        </el-tab-pane>
+
+        <!-- 菜单项配置标签页 -->
+        <el-tab-pane :label="t('menuAdmin.tabItems')" name="items">
+          <el-table
+            :data="menuStore.allMenuItems"
+            stripe
+            border
+            style="width: 100%"
+            :row-key="'key'"
+            size="small"
+            :max-height="tableMaxHeight"
+          >
+            <el-table-column :label="t('menuAdmin.itemName')" min-width="200">
+              <template #default="{ row }">
+                <div class="menu-item-preview">
+                  <el-icon v-if="row.icon" class="menu-icon">
+                    <component :is="getIcon(row.icon)" />
+                  </el-icon>
+                  <div class="menu-info">
+                    <div class="menu-name">{{ currentLang === 'zh' ? row.label_zh : row.label_en }}</div>
+                    <div class="menu-path">{{ row.path }}</div>
+                  </div>
+                  <el-tag v-if="row.require_admin" type="warning" size="small">
+                    {{ t('menuAdmin.adminOnly') }}
+                  </el-tag>
+                </div>
               </template>
+            </el-table-column>
+
+            <el-table-column :label="t('menuAdmin.showInTop')" width="90" align="center">
+              <template #default="{ row }">
+                <el-switch v-model="configMap[row.key].show_in_top" size="small" />
+              </template>
+            </el-table-column>
+
+            <el-table-column :label="t('menuAdmin.topGroup')" width="140">
+              <template #default="{ row }">
+                <el-select
+                  v-model="configMap[row.key].top_group_key"
+                  size="small"
+                  style="width: 100%"
+                  :disabled="!configMap[row.key].show_in_top"
+                  :placeholder="t('menuAdmin.selectTopGroup')"
+                >
+                  <el-option
+                    v-for="group in topGroupConfigs"
+                    :key="group.key"
+                    :label="getGroupDisplayName(group)"
+                    :value="group.key"
+                  />
+                </el-select>
+              </template>
+            </el-table-column>
+
+            <el-table-column :label="t('menuAdmin.topSort')" width="90" align="center">
+              <template #default="{ row }">
+                <el-input-number
+                  v-model="configMap[row.key].top_sort_order"
+                  :min="1"
+                  :max="100"
+                  size="small"
+                  controls-position="right"
+                  style="width: 100%"
+                  :disabled="!configMap[row.key].show_in_top"
+                />
+              </template>
+            </el-table-column>
+
+            <el-table-column :label="t('menuAdmin.showInSidebar')" width="90" align="center">
+              <template #default="{ row }">
+                <el-switch v-model="configMap[row.key].show_in_sidebar" size="small" />
+              </template>
+            </el-table-column>
+
+            <el-table-column :label="t('menuAdmin.sidebarGroup')" width="140">
+              <template #default="{ row }">
+                <el-select
+                  v-model="configMap[row.key].sidebar_group_key"
+                  size="small"
+                  style="width: 100%"
+                  :disabled="!configMap[row.key].show_in_sidebar"
+                  :placeholder="t('menuAdmin.selectGroup')"
+                >
+                  <el-option
+                    v-for="group in sidebarGroupConfigs"
+                    :key="group.key"
+                    :label="getGroupDisplayName(group)"
+                    :value="group.key"
+                  />
+                </el-select>
+              </template>
+            </el-table-column>
+
+            <el-table-column :label="t('menuAdmin.sidebarSort')" width="90" align="center">
+              <template #default="{ row }">
+                <el-input-number
+                  v-model="configMap[row.key].sidebar_sort_order"
+                  :min="1"
+                  :max="100"
+                  size="small"
+                  controls-position="right"
+                  style="width: 100%"
+                  :disabled="!configMap[row.key].show_in_sidebar"
+                />
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-tab-pane>
+
+        <!-- 实时预览标签页 -->
+        <el-tab-pane :label="t('menuAdmin.tabPreview')" name="preview">
+          <div class="preview-box">
+            <div class="preview-header">
+              <div class="preview-nav">
+                <span class="preview-brand">Agnes AI</span>
+                <div class="preview-nav-items">
+                  <template v-for="group in previewTopNav" :key="group.key">
+                    <!-- 单菜单项：直接显示标签 -->
+                    <el-tag
+                      v-if="group.items.length === 1"
+                      size="small"
+                      type="primary"
+                      effect="plain"
+                      class="preview-tag"
+                    >
+                      <el-icon v-if="group.items[0].icon"><component :is="getIcon(group.items[0].icon)" /></el-icon>
+                      {{ group.items[0].label }}
+                    </el-tag>
+
+                    <!-- 多菜单项：下拉分组 -->
+                    <el-dropdown
+                      v-else
+                      trigger="hover"
+                      placement="bottom"
+                    >
+                      <span class="preview-nav-group">
+                        <el-icon v-if="group.icon"><component :is="getIcon(group.icon)" /></el-icon>
+                        {{ group.label }}
+                        <el-icon class="preview-arrow"><ArrowDown /></el-icon>
+                      </span>
+                      <template #dropdown>
+                        <el-dropdown-menu>
+                          <el-dropdown-item
+                            v-for="item in group.items"
+                            :key="item.key"
+                          >
+                            <el-icon v-if="item.icon"><component :is="getIcon(item.icon)" /></el-icon>
+                            {{ item.label }}
+                          </el-dropdown-item>
+                        </el-dropdown-menu>
+                      </template>
+                    </el-dropdown>
+                  </template>
+                </div>
+              </div>
+            </div>
+            <div class="preview-body">
+              <div class="preview-sidebar">
+                <el-menu
+                  class="preview-menu"
+                  background-color="#fafafa"
+                  text-color="#606266"
+                  active-text-color="#409eff"
+                  :unique-opened="false"
+                >
+                  <el-sub-menu
+                    v-for="groupData in previewSidebarGroups"
+                    :key="groupData.key"
+                    :index="`preview-group-${groupData.key}`"
+                    v-show="groupData.items.length > 0"
+                  >
+                    <template #title>
+                      <el-icon v-if="groupData.icon"><component :is="getIcon(groupData.icon)" /></el-icon>
+                      <span>{{ groupData.label }}</span>
+                    </template>
+                    <el-menu-item
+                      v-for="item in groupData.items"
+                      :key="item.key"
+                      :index="item.key"
+                    >
+                      <el-icon v-if="item.icon"><component :is="getIcon(item.icon)" /></el-icon>
+                      <template #title>{{ item.label }}</template>
+                    </el-menu-item>
+                  </el-sub-menu>
+                </el-menu>
+              </div>
+              <div class="preview-content">
+                <el-empty :description="t('menuAdmin.previewArea')" :image-size="80" />
+              </div>
             </div>
           </div>
-        </div>
-        <div class="preview-body">
-          <div class="preview-sidebar">
-            <el-menu
-              class="preview-menu"
-              background-color="#fafafa"
-              text-color="#606266"
-              active-text-color="#409eff"
-              :unique-opened="false"
-            >
-              <el-sub-menu
-                v-for="groupData in previewSidebarGroups"
-                :key="groupData.key"
-                :index="`preview-group-${groupData.key}`"
-                v-show="groupData.items.length > 0"
-              >
-                <template #title>
-                  <el-icon v-if="groupData.icon"><component :is="getIcon(groupData.icon)" /></el-icon>
-                  <span>{{ groupData.label }}</span>
-                </template>
-                <el-menu-item
-                  v-for="item in groupData.items"
-                  :key="item.key"
-                  :index="item.key"
-                >
-                  <el-icon v-if="item.icon"><component :is="getIcon(item.icon)" /></el-icon>
-                  <template #title>{{ item.label }}</template>
-                </el-menu-item>
-              </el-sub-menu>
-            </el-menu>
-          </div>
-          <div class="preview-content">
-            <el-empty :description="t('menuAdmin.previewArea')" :image-size="80" />
-          </div>
-        </div>
-      </div>
-    </div>
+        </el-tab-pane>
+      </el-tabs>
+    </el-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from '@/i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { RefreshRight, Check, ArrowDown } from '@element-plus/icons-vue'
+import {
+  RefreshRight, Check, ArrowDown, Menu, Grid,
+  EditPen, User, Connection, Setting, Picture, VideoPlay,
+  ChatDotRound, Clock, Coin, StarFilled, Histogram, Message,
+  UserFilled, MoreFilled,
+} from '@element-plus/icons-vue'
 import * as ElementPlusIcons from '@element-plus/icons-vue'
 import { useMenuStore } from '@/stores/menu'
 import {
-  SIDEBAR_GROUPS,
-  TOP_NAV_GROUPS,
   resolveMenus,
   type MenuItemConfig,
-  type AdminMenuItem,
+  type MenuGroupConfig,
+  type AdminMenuGroup,
 } from '@/config/menus'
 
 const { t, locale } = useI18n()
@@ -234,20 +327,75 @@ const menuStore = useMenuStore()
 
 const saving = ref(false)
 
-// 配置映射（key -> config），本地编辑用
+// 当前标签页
+const activeTab = ref<'groups' | 'items' | 'preview'>('groups')
+// 当前显示的分组类型（顶部导航/侧边栏）
+const activeGroupType = ref<'top' | 'sidebar'>('top')
+// 表格最大高度
+const tableMaxHeight = ref(500)
+
+// 可用图标列表（常用图标）
+const availableIcons = [
+  'EditPen', 'Picture', 'VideoPlay', 'ChatDotRound', 'Grid',
+  'User', 'UserFilled', 'Setting', 'Coin', 'StarFilled',
+  'Histogram', 'Clock', 'Connection', 'Message', 'Menu',
+  'MoreFilled', 'HomeFilled', 'Document', 'Folder', 'DataAnalysis',
+  'Platform', 'MagicStick', 'Compass', 'Medal', 'Trophy',
+]
+
+// 分组本地编辑状态
+interface EditableGroupConfig extends AdminMenuGroup {
+  custom_label_zh: string | null
+  custom_label_en: string | null
+  custom_icon: string | null
+}
+
+const topGroupConfigs = ref<EditableGroupConfig[]>([])
+const sidebarGroupConfigs = ref<EditableGroupConfig[]>([])
+
+/** 当前激活的分组列表（根据activeGroupType切换） */
+const activeGroups = computed(() => {
+  return activeGroupType.value === 'top' ? topGroupConfigs.value : sidebarGroupConfigs.value
+})
+
+// 菜单项配置映射（key -> config），本地编辑用
 const configMap = reactive<Record<string, MenuItemConfig>>({})
-
-// 侧边栏分组
-const sidebarGroups = SIDEBAR_GROUPS
-
-// 顶部导航分组
-const topNavGroups = TOP_NAV_GROUPS
 
 const currentLang = computed(() => locale.value.startsWith('zh') ? 'zh' : 'en')
 
-function getIcon(iconName: string | null) {
+function getIcon(iconName: string | null | undefined) {
   if (!iconName) return null
-  return (ElementPlusIcons as any)[iconName]
+  return (ElementPlusIcons as any)[iconName] || null
+}
+
+/** 获取分组显示名称（考虑自定义名称） */
+function getGroupDisplayName(group: EditableGroupConfig | AdminMenuGroup): string {
+  if (currentLang.value === 'zh') {
+    return (group as any).custom_label_zh || group.label_zh
+  }
+  return (group as any).custom_label_en || group.label_en
+}
+
+/** 计算表格最大高度 */
+function updateTableHeight() {
+  const viewportHeight = window.innerHeight
+  tableMaxHeight.value = Math.max(400, viewportHeight - 320)
+}
+
+/** 初始化分组配置编辑状态 */
+function initGroupConfigs() {
+  topGroupConfigs.value = menuStore.allTopNavGroups.map(g => ({
+    ...g,
+    custom_label_zh: g.custom_label_zh,
+    custom_label_en: g.custom_label_en,
+    custom_icon: g.custom_icon,
+  }))
+  sidebarGroupConfigs.value = menuStore.allSidebarGroups.map(g => ({
+    ...g,
+    custom_label_zh: g.custom_label_zh,
+    custom_label_en: g.custom_label_en,
+    custom_icon: g.custom_icon,
+  }))
 }
 
 // 初始化配置映射
@@ -265,6 +413,37 @@ function initConfigMap() {
   }
 }
 
+/** 从编辑状态构建分组配置数组 */
+function buildGroupConfigs(): MenuGroupConfig[] {
+  const groups: MenuGroupConfig[] = []
+
+  for (const g of topGroupConfigs.value) {
+    if (g.custom_label_zh || g.custom_label_en || g.custom_icon) {
+      groups.push({
+        key: g.key,
+        type: 'top',
+        label_zh: g.custom_label_zh || null,
+        label_en: g.custom_label_en || null,
+        icon: g.custom_icon || null,
+      })
+    }
+  }
+
+  for (const g of sidebarGroupConfigs.value) {
+    if (g.custom_label_zh || g.custom_label_en || g.custom_icon) {
+      groups.push({
+        key: g.key,
+        type: 'sidebar',
+        label_zh: g.custom_label_zh || null,
+        label_en: g.custom_label_en || null,
+        icon: g.custom_icon || null,
+      })
+    }
+  }
+
+  return groups
+}
+
 // 保存配置
 async function handleSave() {
   try {
@@ -275,8 +454,9 @@ async function handleSave() {
     )
 
     saving.value = true
-    const configs = Object.values(configMap)
-    await menuStore.saveConfigs(configs)
+    const itemConfigs = Object.values(configMap)
+    const groupConfigs = buildGroupConfigs()
+    await menuStore.saveConfigs(itemConfigs, groupConfigs)
   } catch (e: any) {
     if (e !== 'cancel') {
       ElMessage.error(e.message || t('menuAdmin.saveFailed'))
@@ -296,6 +476,7 @@ async function handleReset() {
     )
     await menuStore.resetToDefault()
     initConfigMap()
+    initGroupConfigs()
   } catch (e: any) {
     if (e !== 'cancel') {
       ElMessage.error(e.message || t('menuAdmin.resetFailed'))
@@ -303,8 +484,12 @@ async function handleReset() {
   }
 }
 
-// 预览数据
-const previewConfigs = computed<MenuItemConfig[]>(() => Object.values(configMap))
+// 预览数据：构建临时配置用于预览
+const previewConfigs = computed(() => {
+  const items: MenuItemConfig[] = Object.values(configMap)
+  const groups: MenuGroupConfig[] = buildGroupConfigs()
+  return { items, groups }
+})
 
 const previewTopNav = computed(() => {
   const { topNav } = resolveMenus(previewConfigs.value, true, locale.value)
@@ -318,91 +503,187 @@ const previewSidebarGroups = computed(() => {
 
 onMounted(() => {
   initConfigMap()
+  initGroupConfigs()
+  updateTableHeight()
+  window.addEventListener('resize', updateTableHeight)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', updateTableHeight)
 })
 </script>
 
 <style scoped>
-.menu-admin-page {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 20px;
+/* 参照其他管理页面的标准布局 */
+.menu-admin-wrap {
+  max-width: 100%;
 }
 
-.page-header {
-  margin-bottom: 20px;
+.page-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 16px;
+  gap: 12px;
+  margin-bottom: 16px;
 }
 
-.page-header h1 {
-  margin: 0 0 8px 0;
-  font-size: 24px;
+.page-head h2 {
+  margin: 0 0 6px 0;
+  font-size: 22px;
   font-weight: 600;
-  color: #303133;
+  color: var(--agnes-text-primary);
 }
 
 .page-desc {
   margin: 0;
-  color: #909399;
+  color: var(--agnes-text-secondary);
   font-size: 14px;
 }
 
 .header-actions {
   display: flex;
-  gap: 12px;
+  gap: 10px;
+  flex-shrink: 0;
 }
 
+.content-card {
+  border-radius: 10px;
+}
+
+/* 分组配置区域 */
+.group-type-switch {
+  margin-bottom: 20px;
+}
+
+.switch-desc {
+  margin: 10px 0 0 0;
+  color: var(--agnes-text-secondary);
+  font-size: 13px;
+}
+
+.group-config-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.group-config-card {
+  border: 1px solid var(--agnes-border);
+  border-radius: 10px;
+  padding: 14px;
+  background: var(--agnes-bg-base);
+  transition: all 0.2s ease;
+}
+
+.group-config-card:hover {
+  border-color: var(--agnes-accent);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+.group-config-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--agnes-border-faint);
+}
+
+.group-icon {
+  color: var(--agnes-accent);
+}
+
+.group-key {
+  font-size: 11px;
+  font-family: monospace;
+  color: var(--agnes-text-muted);
+  background: var(--agnes-bg-elevated);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.group-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.form-item-compact {
+  margin-bottom: 12px;
+}
+
+.form-item-compact:last-child {
+  margin-bottom: 8px;
+}
+
+.group-preview-name {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--agnes-text-secondary);
+}
+
+.group-preview-name strong {
+  color: var(--agnes-text-primary);
+  font-weight: 600;
+}
+
+.icon-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 菜单项预览 */
 .menu-item-preview {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .menu-icon {
-  font-size: 18px;
-  color: #409eff;
+  font-size: 16px;
+  color: var(--agnes-accent);
+  flex-shrink: 0;
 }
 
 .menu-info {
   flex: 1;
+  min-width: 0;
 }
 
 .menu-name {
   font-weight: 500;
-  color: #303133;
-  margin-bottom: 2px;
+  color: var(--agnes-text-primary);
+  margin-bottom: 1px;
+  font-size: 13px;
 }
 
 .menu-path {
-  font-size: 12px;
-  color: #909399;
+  font-size: 11px;
+  color: var(--agnes-text-muted);
   font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 预览区域 */
-.preview-section {
-  margin-top: 24px;
-}
-
-.preview-section h2 {
-  margin: 0 0 16px 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: #303133;
-}
-
 .preview-box {
-  border: 1px solid #dcdfe6;
-  border-radius: 8px;
+  border: 1px solid var(--agnes-border);
+  border-radius: 10px;
   overflow: hidden;
 }
 
 .preview-header {
-  background: #f5f7fa;
-  border-bottom: 1px solid #dcdfe6;
+  background: var(--agnes-bg-elevated);
+  border-bottom: 1px solid var(--agnes-border);
   padding: 0 16px;
 }
 
@@ -416,7 +697,7 @@ onMounted(() => {
 .preview-brand {
   font-weight: 600;
   font-size: 16px;
-  color: #303133;
+  color: var(--agnes-text-primary);
 }
 
 .preview-nav-items {
@@ -430,8 +711,8 @@ onMounted(() => {
   align-items: center;
   gap: 4px;
   padding: 6px 12px;
-  background: #ecf5ff;
-  color: #409eff;
+  background: var(--agnes-accent-light);
+  color: var(--agnes-accent);
   border-radius: 6px;
   font-size: 13px;
   cursor: pointer;
@@ -460,13 +741,14 @@ onMounted(() => {
 
 .preview-sidebar {
   width: 220px;
-  background: #fafafa;
-  border-right: 1px solid #dcdfe6;
+  background: var(--agnes-bg-base);
+  border-right: 1px solid var(--agnes-border);
   padding: 8px 0;
 }
 
 .preview-menu {
   border-right: none !important;
+  background: transparent !important;
 }
 
 .preview-menu :deep(.el-sub-menu__title) {
@@ -496,6 +778,6 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #fff;
+  background: var(--agnes-bg-elevated);
 }
 </style>

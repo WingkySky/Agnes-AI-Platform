@@ -623,7 +623,7 @@ onMounted(() => {
   z-index: 2;
 }
 
-/* 底部信息条：作者 + 点赞 */
+/* 底部信息条：作者 + 点赞（层级高于水印，确保可点击且不被遮挡） */
 .card-overlay {
   position: absolute;
   left: 0;
@@ -636,7 +636,23 @@ onMounted(() => {
   gap: 8px;
   background: linear-gradient(to top, rgba(10, 15, 30, 0.78), rgba(10, 15, 30, 0));
   color: #fff;
-  z-index: 2;
+  z-index: 10;
+}
+
+/* 带水印图片组件外层容器：撑满缩略图区域，层级低于底部信息条 */
+.card-thumb > :deep(.img-with-watermark) {
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+/* 水印文字/图片上移，避免被底部信息条和圆角截断 */
+.card-thumb > :deep(.wm-position-bottom-right .wm-text),
+.card-thumb > :deep(.wm-position-bottom-right .wm-image),
+.card-thumb > :deep(.wm-position-bottom-left .wm-text),
+.card-thumb > :deep(.wm-position-bottom-left .wm-image) {
+  bottom: calc(var(--wm-margin, 20px) + 52px) !important;
 }
 .author {
   display: flex;

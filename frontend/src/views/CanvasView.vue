@@ -693,16 +693,82 @@ function handleConnectingMove(event: PointerEvent) {
   store.updateConnecting(world.x, world.y)
 }
 
-// 连线结束：检测是否释放在节点上
+// 连线结束：检测是否释放在节点上（支持批量连接：选中多个节点时一次性全部连接到目标接收节点）
 function handleConnectingUp(event: PointerEvent) {
   window.removeEventListener('pointermove', handleConnectingMove)
   window.removeEventListener('pointerup', handleConnectingUp)
   if (!store.connecting) return
+  const connectingState = store.connecting
   const el = document.elementFromPoint(event.clientX, event.clientY)
   const nodeEl = el?.closest?.('[data-node-id]')
   if (nodeEl) {
     const targetId = nodeEl.getAttribute('data-node-id')!
-    store.endConnecting(targetId, 'target')
+    const sourceId = connectingState.sourcePanelId
+    const sourceAnchor = connectingState.sourceAnchorType
+
+    // 确定单个连接的 source 和 target（数据流方向：资源节点 → 配置/接收节点）
+    let realTarget: string // 实际的接收节点（target）
+    if (sourceAnchor === 'source') {
+      // 从源节点右侧锚点拖出：目标就是释放在的节点
+      realTarget = targetId
+    } else {
+      // 从目标节点左侧锚点拖出：源节点就是释放在的节点（反向连线）
+      realTarget = sourceId
+    }
+
+    // 判断目标节点是否为"接收多输入"类型（config、未来的 multi-text 等）
+    const targetPanel = store.panels.find(p => p.id === realTarget)
+    const isReceiverNode = targetPanel?.type === 'config' // 可扩展: || targetPanel?.type === 'multi-text'
+    const hasMultipleSelection = store.selectedPanelIds.length > 1
+    const isBatchConnect = isReceiverNode && hasMultipleSelection
+
+    if (isBatchConnect) {
+      store.pushSnapshot()
+      const connectedIds = new Set<string>()
+
+      // 确定本次连线的起始节点（拖拽发起的那个节点）
+      const dragSourceId = sourceAnchor === 'source' ? sourceId : targetId
+
+      // 批量连接：所有选中的非接收节点 → 目标接收节点
+      for (const selectedId of store.selectedPanelIds) {
+        const selectedPanel = store.panels.find(p => p.id === selectedId)
+        // 跳过接收节点本身，跳过非资源节点
+        if (!selectedPanel || selectedPanel.type === 'config') continue
+        if (selectedId === realTarget) continue
+        // 防止重复连接
+        const exists = store.connections.some(
+          c => c.source_panel_id === selectedId && c.target_panel_id === realTarget
+        )
+        if (exists) continue
+        store.addConnection({
+          source_panel_id: selectedId,
+          target_panel_id: realTarget,
+          type: 'flow',
+        })
+        connectedIds.add(selectedId)
+      }
+
+      // 如果拖拽起始节点本身不在选中列表中，也单独连接
+      if (!connectedIds.has(dragSourceId) && dragSourceId !== realTarget) {
+        const dragSourcePanel = store.panels.find(p => p.id === dragSourceId)
+        if (dragSourcePanel?.type !== 'config') {
+          const exists = store.connections.some(
+            c => c.source_panel_id === dragSourceId && c.target_panel_id === realTarget
+          )
+          if (!exists) {
+            store.addConnection({
+              source_panel_id: dragSourceId,
+              target_panel_id: realTarget,
+              type: 'flow',
+            })
+          }
+        }
+      }
+      store.cancelConnecting()
+    } else {
+      // 普通单连接
+      store.endConnecting(targetId, 'target')
+    }
   } else {
     store.cancelConnecting()
   }

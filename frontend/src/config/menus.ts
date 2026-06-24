@@ -216,6 +216,8 @@ export const SIDEBAR_GROUPS: SidebarGroup[] = [
   { key: 'personal', label_zh: '个人中心', label_en: 'Personal', icon: 'User', sort_order: 2 },
   { key: 'community', label_zh: '社区', label_en: 'Community', icon: 'Connection', sort_order: 3 },
   { key: 'admin', label_zh: '系统管理', label_en: 'Administration', icon: 'Setting', sort_order: 4 },
+  { key: 'group5', label_zh: '分组5', label_en: 'Group 5', icon: 'Menu', sort_order: 5 },
+  { key: 'group6', label_zh: '分组6', label_en: 'Group 6', icon: 'More', sort_order: 6 },
 ]
 
 /**
@@ -238,7 +240,34 @@ export const TOP_NAV_GROUPS: TopNavGroup[] = [
   { key: 'community', label_zh: '社区', label_en: 'Community', icon: 'Connection', sort_order: 2 },
   { key: 'personal', label_zh: '个人中心', label_en: 'Personal', icon: 'User', sort_order: 3 },
   { key: 'admin', label_zh: '系统管理', label_en: 'Administration', icon: 'Setting', sort_order: 4 },
+  { key: 'group5', label_zh: '分组5', label_en: 'Group 5', icon: 'Menu', sort_order: 5 },
+  { key: 'group6', label_zh: '分组6', label_en: 'Group 6', icon: 'More', sort_order: 6 },
 ]
+
+/**
+ * 分组自定义配置（允许管理员修改分组名称和图标）
+ */
+export interface MenuGroupConfig {
+  key: string
+  /** 分组类型：top 或 sidebar */
+  type: 'top' | 'sidebar'
+  /** 自定义中文名称（null 表示使用默认） */
+  label_zh: string | null
+  /** 自定义英文名称（null 表示使用默认） */
+  label_en: string | null
+  /** 自定义图标（null 表示使用默认） */
+  icon: string | null
+}
+
+/**
+ * 完整菜单配置（包含菜单项配置和分组配置）
+ */
+export interface MenuConfigData {
+  /** 菜单项配置 */
+  items: MenuItemConfig[]
+  /** 分组自定义配置 */
+  groups: MenuGroupConfig[]
+}
 
 /**
  * 菜单默认配置（首次使用时的默认显示/位置/分组/排序）
@@ -329,22 +358,108 @@ function getMenuLabel(menu: BuiltInMenuItem, locale: string): string {
   return locale.startsWith('zh') ? menu.label_zh : menu.label_en
 }
 
-function getSidebarGroupLabel(group: SidebarGroup, locale: string): string {
-  return locale.startsWith('zh') ? group.label_zh : group.label_en
+/**
+ * 应用分组自定义配置，返回最终的标签和图标
+ */
+function applyGroupCustomization<T extends { label_zh: string; label_en: string; icon: string }>(
+  defaultGroup: T,
+  customConfig: MenuGroupConfig | undefined,
+  locale: string
+): { label: string; icon: string } {
+  const useZh = locale.startsWith('zh')
+  let label = useZh ? defaultGroup.label_zh : defaultGroup.label_en
+  let icon = defaultGroup.icon
+
+  if (customConfig) {
+    if (useZh && customConfig.label_zh) {
+      label = customConfig.label_zh
+    } else if (!useZh && customConfig.label_en) {
+      label = customConfig.label_en
+    }
+    if (customConfig.icon) {
+      icon = customConfig.icon
+    }
+  }
+
+  return { label, icon }
 }
 
-function getTopNavGroupLabel(group: TopNavGroup, locale: string): string {
-  return locale.startsWith('zh') ? group.label_zh : group.label_en
+/**
+ * 兼容旧版配置数据：旧版只有菜单项数组，新版有 items 和 groups
+ */
+function normalizeConfigData(
+  configs: MenuItemConfig[] | MenuConfigData | undefined
+): { items: MenuItemConfig[]; groups: MenuGroupConfig[] } {
+  if (!configs) {
+    return { items: DEFAULT_MENU_CONFIG, groups: [] }
+  }
+  if (Array.isArray(configs)) {
+    return { items: configs, groups: [] }
+  }
+  return {
+    items: configs.items || DEFAULT_MENU_CONFIG,
+    groups: configs.groups || [],
+  }
+}
+
+/**
+ * 获取带自定义配置的顶部导航分组列表
+ */
+export function getTopNavGroupsWithCustomization(
+  customGroups: MenuGroupConfig[],
+  locale: string
+): Array<TopNavGroup & { display_label: string; display_icon: string }> {
+  const customMap = new Map(
+    customGroups.filter(g => g.type === 'top').map(g => [g.key, g])
+  )
+  return TOP_NAV_GROUPS.map(group => {
+    const { label, icon } = applyGroupCustomization(group, customMap.get(group.key), locale)
+    return {
+      ...group,
+      display_label: label,
+      display_icon: icon,
+    }
+  })
+}
+
+/**
+ * 获取带自定义配置的侧边栏分组列表
+ */
+export function getSidebarGroupsWithCustomization(
+  customGroups: MenuGroupConfig[],
+  locale: string
+): Array<SidebarGroup & { display_label: string; display_icon: string }> {
+  const customMap = new Map(
+    customGroups.filter(g => g.type === 'sidebar').map(g => [g.key, g])
+  )
+  return SIDEBAR_GROUPS.map(group => {
+    const { label, icon } = applyGroupCustomization(group, customMap.get(group.key), locale)
+    return {
+      ...group,
+      display_label: label,
+      display_icon: icon,
+    }
+  })
 }
 
 export function resolveMenus(
-  configs: MenuItemConfig[],
+  configs: MenuItemConfig[] | MenuConfigData,
   isAdmin: boolean,
   locale: string = 'zh-CN'
 ): { topNav: ResolvedTopNavGroup[]; sidebar: Record<string, ResolvedSidebarGroup> } {
+  const { items: itemConfigs, groups: groupConfigs } = normalizeConfigData(configs)
+
+  // 构建分组自定义配置映射
+  const topGroupCustomMap = new Map(
+    groupConfigs.filter(g => g.type === 'top').map(g => [g.key, g])
+  )
+  const sidebarGroupCustomMap = new Map(
+    groupConfigs.filter(g => g.type === 'sidebar').map(g => [g.key, g])
+  )
+
   // 先构建 key -> config 的映射
   const configMap = new Map<string, MenuItemConfig>()
-  for (const cfg of configs) {
+  for (const cfg of itemConfigs) {
     configMap.set(cfg.key, cfg)
   }
 
@@ -366,12 +481,13 @@ export function resolveMenus(
   // 构建顶部导航（按分组）
   const topNav: ResolvedTopNavGroup[] = []
   const topNavMap: Record<string, ResolvedTopNavGroup> = {}
-  // 先初始化所有顶部分组
+  // 先初始化所有顶部分组（应用自定义配置）
   for (const group of TOP_NAV_GROUPS) {
+    const { label, icon } = applyGroupCustomization(group, topGroupCustomMap.get(group.key), locale)
     topNavMap[group.key] = {
       key: group.key,
-      label: getTopNavGroupLabel(group, locale),
-      icon: group.icon,
+      label,
+      icon,
       sort_order: group.sort_order,
       items: [],
     }
@@ -379,12 +495,13 @@ export function resolveMenus(
 
   // 构建侧边栏按分组整理
   const sidebar: Record<string, ResolvedSidebarGroup> = {}
-  // 先初始化所有分组
+  // 先初始化所有分组（应用自定义配置）
   for (const group of SIDEBAR_GROUPS) {
+    const { label, icon } = applyGroupCustomization(group, sidebarGroupCustomMap.get(group.key), locale)
     sidebar[group.key] = {
       key: group.key,
-      label: getSidebarGroupLabel(group, locale),
-      icon: group.icon,
+      label,
+      icon,
       sort_order: group.sort_order,
       items: [],
     }
@@ -473,9 +590,25 @@ export interface AdminMenuItem extends BuiltInMenuItem {
   sidebar_sort_order: number
 }
 
-export function getAllMenuItemsForAdmin(configs: MenuItemConfig[]): AdminMenuItem[] {
+/**
+ * 管理界面用的分组配置
+ */
+export interface AdminMenuGroup {
+  key: string
+  type: 'top' | 'sidebar'
+  label_zh: string
+  label_en: string
+  icon: string
+  custom_label_zh: string | null
+  custom_label_en: string | null
+  custom_icon: string | null
+  sort_order: number
+}
+
+export function getAllMenuItemsForAdmin(configs: MenuItemConfig[] | MenuConfigData): AdminMenuItem[] {
+  const { items } = normalizeConfigData(configs)
   const configMap = new Map<string, MenuItemConfig>()
-  for (const cfg of configs) {
+  for (const cfg of items) {
     configMap.set(cfg.key, cfg)
   }
 
@@ -490,6 +623,52 @@ export function getAllMenuItemsForAdmin(configs: MenuItemConfig[]): AdminMenuIte
       sidebar_group_key: cfg?.sidebar_group_key ?? defaultCfg?.sidebar_group_key ?? 'create',
       top_sort_order: cfg?.top_sort_order ?? defaultCfg?.top_sort_order ?? 99,
       sidebar_sort_order: cfg?.sidebar_sort_order ?? defaultCfg?.sidebar_sort_order ?? 99,
+    }
+  })
+}
+
+/**
+ * 获取管理界面用的顶部分组列表（含自定义配置）
+ */
+export function getTopNavGroupsForAdmin(customGroups: MenuGroupConfig[]): AdminMenuGroup[] {
+  const customMap = new Map(
+    customGroups.filter(g => g.type === 'top').map(g => [g.key, g])
+  )
+  return TOP_NAV_GROUPS.map(group => {
+    const custom = customMap.get(group.key)
+    return {
+      key: group.key,
+      type: 'top' as const,
+      label_zh: group.label_zh,
+      label_en: group.label_en,
+      icon: group.icon,
+      custom_label_zh: custom?.label_zh ?? null,
+      custom_label_en: custom?.label_en ?? null,
+      custom_icon: custom?.icon ?? null,
+      sort_order: group.sort_order,
+    }
+  })
+}
+
+/**
+ * 获取管理界面用的侧边栏分组列表（含自定义配置）
+ */
+export function getSidebarGroupsForAdmin(customGroups: MenuGroupConfig[]): AdminMenuGroup[] {
+  const customMap = new Map(
+    customGroups.filter(g => g.type === 'sidebar').map(g => [g.key, g])
+  )
+  return SIDEBAR_GROUPS.map(group => {
+    const custom = customMap.get(group.key)
+    return {
+      key: group.key,
+      type: 'sidebar' as const,
+      label_zh: group.label_zh,
+      label_en: group.label_en,
+      icon: group.icon,
+      custom_label_zh: custom?.label_zh ?? null,
+      custom_label_en: custom?.label_en ?? null,
+      custom_icon: custom?.icon ?? null,
+      sort_order: group.sort_order,
     }
   })
 }

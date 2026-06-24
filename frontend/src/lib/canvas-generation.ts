@@ -110,13 +110,19 @@ interface GenerationOptions {
 
 // ---------- 常量 ----------
 
-/** @[node:xxx] 引用 token 的正则匹配模式 */
-const NODE_REFERENCE_PATTERN = /@\[node:([^\]]+)\]/g
+/** 节点类型中文名映射 */
+const TYPE_NAME_MAP: Record<string, string> = { image: '图片', text: '文本', video: '视频', audio: '音频' }
 
-/** 资源类型标签生成器：图片1、图片2、文本1、视频1... */
+/**
+ * @图片1 / @文本2 等可读标签的正则匹配模式
+ * 匹配：@图片1、@文本2、@视频3、@音频4
+ * 捕获组：[1]类型中文名, [2]序号数字
+ */
+const MENTION_PATTERN = /@(图片|文本|视频|音频)(\d+)/g
+
+/** 资源类型标签生成器：图片1、图片2、文本1、视频1...（与节点显示序号一致） */
 function resourceLabel(type: string, index: number): string {
-  const labels: Record<string, string> = { image: '图片', text: '文本', video: '视频', audio: '音频' }
-  return `${labels[type] || '资源'}${index + 1}`
+  return `${TYPE_NAME_MAP[type] || '资源'}${index}`
 }
 
 // ---------- 资源收集 ----------
@@ -134,18 +140,50 @@ export function isResourceNode(panel: Panel | null | undefined): boolean {
 /**
  * 获取指定节点的所有上游资源节点（根据连线查找）
  * - 查找 connections 中 target_panel_id === nodeId 的所有 source_panel_id
- * - 过滤掉非资源节点
+ * - 按连接创建时间排序（保证序号与节点显示的1、2、3标记一致）
+ * - 过滤掉非资源节点和重复连接
  */
 export function getUpstreamNodes(nodeId: string, panels: Panel[], connections: Connection[]): Panel[] {
-  const upstreamIds = connections
+  // 先按连接创建时间排序
+  const incomingConns = connections
     .filter((c) => c.target_panel_id === nodeId)
-    .map((c) => c.source_panel_id)
-    .filter(Boolean)
+    .sort((a, b) => {
+      const timeA = a.created_at ? new Date(a.created_at).getTime() : 0
+      const timeB = b.created_at ? new Date(b.created_at).getTime() : 0
+      return timeA - timeB
+    })
+
+  // 去重（同一节点可能有多条连线）
+  const seen = new Set<string>()
+  const upstreamIds: string[] = []
+  for (const conn of incomingConns) {
+    if (conn.source_panel_id && !seen.has(conn.source_panel_id)) {
+      seen.add(conn.source_panel_id)
+      upstreamIds.push(conn.source_panel_id)
+    }
+  }
 
   const panelMap = new Map(panels.map((p) => [p.id, p]))
   return upstreamIds
     .map((id) => panelMap.get(id))
     .filter((p): p is Panel => !!p && isResourceNode(p))
+}
+
+/**
+ * 获取上游资源节点及其统一序号（与节点上显示的1、2、3标记一致）
+ * - 返回 Array<{ panel, index, typeLabel }>，index 从 1 开始，按连接顺序
+ */
+export function getUpstreamNodesWithIndex(nodeId: string, panels: Panel[], connections: Connection[]): Array<{ panel: Panel; index: number; label: string }> {
+  const upstreamPanels = getUpstreamNodes(nodeId, panels, connections)
+  return upstreamPanels.map((panel, idx) => {
+    const labels: Record<string, string> = { image: '图片', text: '文本', video: '视频', audio: '音频' }
+    const typeName = labels[panel.type] || '资源'
+    return {
+      panel,
+      index: idx + 1,
+      label: `${typeName}${idx + 1}`,
+    }
+  })
 }
 
 /**
@@ -229,39 +267,58 @@ export function extractResourceContentForComposer(panel: Panel): ResourceContent
  *
  * 合并策略（参考 infinite-canvas 的 buildComposerGenerationContext）：
  * - 如果 configNode 有 composerContent（组装提示词），走引用解析路径：
- *   · 解析 @[node:xxx] token，把引用替换为标签（图片1、文本1...）
+ *   · 解析 @[node:xxx] token，把引用替换为标签（图片1、文本2...，序号与节点显示一致）
  *   · 文本资源：在 prompt 末尾追加 【文本1】\n内容 块
  *   · 图片资源：作为 referenceImages 数组传给 AI
  * - 如果没有 composerContent，走简单合并路径：
  *   · 所有上游文本拼到 prompt 末尾
  *   · 所有上游图片作为 referenceImages
+ * - 注意：prompt字段也会走引用解析（不一定非要composerContent）
  */
 export function buildGenerationContext(configNode: Panel, panels: Panel[], connections: Connection[]): GenerationContext | null {
   if (!configNode) return null
 
-  // 收集上游资源
-  const upstreamPanels = getUpstreamNodes(configNode.id, panels, connections)
-  const inputs = upstreamPanels.map(extractResourceContent).filter((r): r is ResourceContent => r !== null)
+  // 收集上游资源（带统一序号）
+  const upstreamWithIndex = getUpstreamNodesWithIndex(configNode.id, panels, connections)
+  const inputs: Array<ResourceContent & { index: number; label: string }> = upstreamWithIndex
+    .map(({ panel, index, label }) => {
+      const res = extractResourceContent(panel)
+      if (!res) return null
+      return { ...res, index, label }
+    })
+    .filter((r): r is ResourceContent & { index: number; label: string } => r !== null)
 
-  // 获取组装提示词（composerContent）或普通 prompt
+  // 兼容旧的ResourceContent格式（不带index的）
+  const plainInputs: ResourceContent[] = inputs.map(({ index, label, ...rest }) => rest)
+
+  // 获取提示词：优先用 composerContent，其次用 prompt
   const composerContent = configNode.content?.composerContent?.trim()
-  const basePrompt = composerContent || configNode.content?.prompt || ''
+  const promptContent = configNode.content?.prompt?.trim()
+  const hasComposer = !!composerContent
+  const contentToParse = composerContent || promptContent || ''
 
   // 输入摘要（供 UI 显示）
   const inputSummary: InputSummary = {
-    textCount: inputs.filter((i) => i.type === 'text').length,
-    imageCount: inputs.filter((i) => i.type === 'image').length,
-    videoCount: inputs.filter((i) => i.type === 'video').length,
-    total: inputs.length,
+    textCount: plainInputs.filter((i) => i.type === 'text').length,
+    imageCount: plainInputs.filter((i) => i.type === 'image').length,
+    videoCount: plainInputs.filter((i) => i.type === 'video').length,
+    total: plainInputs.length,
   }
 
-  // 如果没有 composerContent，走简单合并路径
-  if (!composerContent) {
-    return buildSimpleContext(inputs, basePrompt, inputSummary)
+  // 如果没有任何需要解析的内容，走简单合并路径
+  if (!contentToParse) {
+    return buildSimpleContext(plainInputs, '', inputSummary)
   }
 
-  // 有 composerContent，走引用解析路径
-  return buildComposerContext(inputs, composerContent, inputSummary)
+  // 如果有 @图片1/@文本2 等可读标签引用，或使用了composerContent，走引用解析路径
+  const hasMention = MENTION_PATTERN.test(contentToParse)
+  MENTION_PATTERN.lastIndex = 0 // 重置正则lastIndex
+  if (!hasMention && !hasComposer) {
+    return buildSimpleContext(plainInputs, contentToParse, inputSummary)
+  }
+
+  // 走引用解析路径
+  return buildComposerContext(inputs, contentToParse, inputSummary)
 }
 
 /**
@@ -288,54 +345,51 @@ function buildSimpleContext(inputs: ResourceContent[], basePrompt: string, input
 }
 
 /**
- * 引用解析路径：解析 @[node:xxx] token，按引用合并资源
+ * 引用解析路径：解析 @图片1/@文本2 等可读标签，按引用合并资源
  *
- * 解析规则：
- * - @[node:xxx] 中的 xxx 是节点 ID
- * - 文本资源：在 prompt 末尾追加 【文本1】\n内容 块，prompt 中替换为 【文本1】
- * - 图片资源：作为 referenceImages 数组，prompt 中替换为 图片1
+ * 解析规则（使用统一序号，与节点上显示的1、2、3标记一致）：
+ * - @图片1、@文本2 中的"图片"/"文本"是类型，数字是序号
+ * - 图片资源：作为 referenceImages 数组，严格按标签序号排列（图片1→[0], 图片2→[1]...）
+ * - 文本资源：在 prompt 中被@引用的位置保留 @文本N 标签，同时在末尾追加【文本N】\n内容块
  * - 视频/音频资源：暂不支持，跳过
- * - 未匹配到的 token 保留原样
+ * - 未匹配到的标签保留原样
+ * - 所有上游资源（无论是否被@引用）：文本按序号追加到末尾，图片全部加入参考图
  */
-function buildComposerContext(inputs: ResourceContent[], composerContent: string, inputSummary: InputSummary): GenerationContext {
-  const inputByNodeId = new Map(inputs.map((i) => [i.nodeId, i]))
-  const labelByNodeId = new Map<string, string>()
-  const selectedImages: string[] = []
-  const textBlocks: string[] = []
-  const counts: Record<string, number> = { image: 0, text: 0, video: 0, audio: 0 }
+function buildComposerContext(
+  inputs: Array<ResourceContent & { index: number; label: string }>,
+  composerContent: string,
+  inputSummary: InputSummary
+): GenerationContext {
+  // 建立 label -> input 的映射（如 "图片1" -> 对应input，"文本2" -> 对应input）
+  const inputByLabel = new Map<string, ResourceContent & { index: number; label: string }>()
+  for (const input of inputs) {
+    inputByLabel.set(input.label, input)
+  }
+  // 按序号排序的所有上游输入（用于最终收集，确保referenceImages顺序与标签序号一致）
+  const sortedInputs = [...inputs].sort((a, b) => a.index - b.index)
+
+  // 第一步：解析 @图片1/@文本2 引用标签
+  // - 图片标签（@图片1）：保留在prompt中不动，AI能直接理解
+  // - 文本标签（@文本2）：替换为【文本2】格式（与末尾追加的文本块标题一致）
   let nextPrompt = ''
   let lastIndex = 0
 
-  // 遍历所有 @[node:xxx] 匹配，替换为标签
-  for (const match of composerContent.matchAll(NODE_REFERENCE_PATTERN)) {
+  for (const match of composerContent.matchAll(MENTION_PATTERN)) {
     if (match.index === undefined) continue
-    const nodeId = match[1]
-    const input = inputByNodeId.get(nodeId)
+    const typeName = match[1] // "图片" / "文本" / "视频" / "音频"
+    const indexNum = parseInt(match[2], 10) // 1, 2, 3...
+    const label = `${typeName}${indexNum}`
+    const input = inputByLabel.get(label)
 
-    // 保留 token 之前的原文
+    // 保留匹配之前的原文
     nextPrompt += composerContent.slice(lastIndex, match.index)
 
     if (input) {
-      // 为该资源分配标签（图片1、文本1...）
-      let label = labelByNodeId.get(input.nodeId)
-      if (!label) {
-        label = resourceLabel(input.type, counts[input.type]++)
-        labelByNodeId.set(input.nodeId, label)
-
-        // 文本资源：拼到 prompt 末尾的 textBlocks
-        if (input.type === 'text' && input.text) {
-          textBlocks.push(`【${label}】\n${input.text}`)
-        }
-        // 图片资源：加入 referenceImages
-        else if (input.type === 'image' && input.imageUrl) {
-          selectedImages.push(input.imageUrl)
-        }
-      }
-
-      // prompt 中替换为标签
-      nextPrompt += input.type === 'text' ? `【${label}】` : label
+      // 图片/视频：保留 @图片N 标签（AI能自然理解"图片1"指代第一张参考图）
+      // 文本：替换为【文本N】格式，与末尾追加的文本块呼应
+      nextPrompt += input.type === 'text' ? `【${input.label}】` : match[0]
     } else {
-      // 未匹配到的 token 保留原样
+      // 未匹配到的标签保留原样
       nextPrompt += match[0]
     }
 
@@ -344,6 +398,21 @@ function buildComposerContext(inputs: ResourceContent[], composerContent: string
 
   // 追加最后一段原文
   nextPrompt += composerContent.slice(lastIndex)
+
+  // 第二步：按序号顺序收集所有文本块和图片
+  // 注意：所有上游资源（无论是否被@引用）都会被包含，确保AI能看到全部输入
+  // - 文本：按序号追加【标签】\n内容到prompt末尾
+  // - 图片：按序号加入referenceImages数组（图片1→第0位，图片2→第1位...）
+  const textBlocks: string[] = []
+  const selectedImages: string[] = []
+
+  for (const input of sortedInputs) {
+    if (input.type === 'text' && input.text) {
+      textBlocks.push(`【${input.label}】\n${input.text}`)
+    } else if (input.type === 'image' && input.imageUrl) {
+      selectedImages.push(input.imageUrl)
+    }
+  }
 
   // 把文本块追加到 prompt 末尾
   if (textBlocks.length > 0) {
