@@ -219,6 +219,26 @@ export const SIDEBAR_GROUPS: SidebarGroup[] = [
 ]
 
 /**
+ * 顶部导航分组定义
+ * - 顶部导航空间有限，仅设置少量核心分组
+ * - 每个分组下拉显示其下的菜单项
+ */
+export interface TopNavGroup {
+  key: string
+  label_zh: string
+  label_en: string
+  /** 分组图标 */
+  icon: string
+  /** 分组排序 */
+  sort_order: number
+}
+
+export const TOP_NAV_GROUPS: TopNavGroup[] = [
+  { key: 'create', label_zh: '创作工具', label_en: 'Create', icon: 'EditPen', sort_order: 1 },
+  { key: 'community', label_zh: '社区', label_en: 'Community', icon: 'Connection', sort_order: 2 },
+]
+
+/**
  * 菜单默认配置（首次使用时的默认显示/位置/分组/排序）
  * 支持菜单项同时显示在顶部导航和侧边栏
  */
@@ -228,6 +248,8 @@ export interface MenuItemConfig {
   show_in_top: boolean
   /** 是否在侧边栏显示 */
   show_in_sidebar: boolean
+  /** 顶部导航分组 key（仅当 show_in_top=true 时生效） */
+  top_group_key: string | null
   /** 侧边栏分组 key（仅当 show_in_sidebar=true 时生效） */
   sidebar_group_key: string | null
   /** 顶部导航排序序号 */
@@ -238,35 +260,35 @@ export interface MenuItemConfig {
 
 /**
  * 默认菜单配置
- * - 顶部导航：核心高频功能（创作类 + 广场）
+ * - 顶部导航：核心分组下拉显示（创作工具、社区）
  * - 侧边栏：所有功能按分组显示
  */
 export const DEFAULT_MENU_CONFIG: MenuItemConfig[] = [
   // ---------- 创作工具类：顶部 + 侧边栏都显示 ----------
-  { key: 'chat', show_in_top: true, show_in_sidebar: true, sidebar_group_key: 'create', top_sort_order: 1, sidebar_sort_order: 1 },
-  { key: 'images', show_in_top: true, show_in_sidebar: true, sidebar_group_key: 'create', top_sort_order: 2, sidebar_sort_order: 2 },
-  { key: 'videos', show_in_top: true, show_in_sidebar: true, sidebar_group_key: 'create', top_sort_order: 3, sidebar_sort_order: 3 },
-  { key: 'canvas', show_in_top: true, show_in_sidebar: true, sidebar_group_key: 'create', top_sort_order: 4, sidebar_sort_order: 4 },
+  { key: 'chat', show_in_top: true, show_in_sidebar: true, top_group_key: 'create', sidebar_group_key: 'create', top_sort_order: 1, sidebar_sort_order: 1 },
+  { key: 'images', show_in_top: true, show_in_sidebar: true, top_group_key: 'create', sidebar_group_key: 'create', top_sort_order: 2, sidebar_sort_order: 2 },
+  { key: 'videos', show_in_top: true, show_in_sidebar: true, top_group_key: 'create', sidebar_group_key: 'create', top_sort_order: 3, sidebar_sort_order: 3 },
+  { key: 'canvas', show_in_top: true, show_in_sidebar: true, top_group_key: 'create', sidebar_group_key: 'create', top_sort_order: 4, sidebar_sort_order: 4 },
 
   // ---------- 社区类：顶部 + 侧边栏都显示 ----------
-  { key: 'plaza', show_in_top: true, show_in_sidebar: true, sidebar_group_key: 'community', top_sort_order: 5, sidebar_sort_order: 1 },
+  { key: 'plaza', show_in_top: true, show_in_sidebar: true, top_group_key: 'community', sidebar_group_key: 'community', top_sort_order: 1, sidebar_sort_order: 1 },
 
   // ---------- 个人中心类：只在侧边栏显示 ----------
-  { key: 'history', show_in_top: false, show_in_sidebar: true, sidebar_group_key: 'personal', top_sort_order: 99, sidebar_sort_order: 1 },
-  { key: 'credits', show_in_top: false, show_in_sidebar: true, sidebar_group_key: 'personal', top_sort_order: 99, sidebar_sort_order: 2 },
-  { key: 'profile', show_in_top: false, show_in_sidebar: true, sidebar_group_key: 'personal', top_sort_order: 99, sidebar_sort_order: 3 },
-  { key: 'preferences', show_in_top: false, show_in_sidebar: true, sidebar_group_key: 'personal', top_sort_order: 99, sidebar_sort_order: 4 },
+  { key: 'history', show_in_top: false, show_in_sidebar: true, top_group_key: null, sidebar_group_key: 'personal', top_sort_order: 99, sidebar_sort_order: 1 },
+  { key: 'credits', show_in_top: false, show_in_sidebar: true, top_group_key: null, sidebar_group_key: 'personal', top_sort_order: 99, sidebar_sort_order: 2 },
+  { key: 'profile', show_in_top: false, show_in_sidebar: true, top_group_key: null, sidebar_group_key: 'personal', top_sort_order: 99, sidebar_sort_order: 3 },
+  { key: 'preferences', show_in_top: false, show_in_sidebar: true, top_group_key: null, sidebar_group_key: 'personal', top_sort_order: 99, sidebar_sort_order: 4 },
 
   // ---------- 管理类：只在侧边栏显示（仅管理员可见） ----------
-  { key: 'admin-models', show_in_top: false, show_in_sidebar: true, sidebar_group_key: 'admin', top_sort_order: 99, sidebar_sort_order: 1 },
-  { key: 'admin-users', show_in_top: false, show_in_sidebar: true, sidebar_group_key: 'admin', top_sort_order: 99, sidebar_sort_order: 2 },
-  { key: 'admin-roles', show_in_top: false, show_in_sidebar: true, sidebar_group_key: 'admin', top_sort_order: 99, sidebar_sort_order: 3 },
-  { key: 'admin-credit-rules', show_in_top: false, show_in_sidebar: true, sidebar_group_key: 'admin', top_sort_order: 99, sidebar_sort_order: 4 },
-  { key: 'admin-moderation', show_in_top: false, show_in_sidebar: true, sidebar_group_key: 'admin', top_sort_order: 99, sidebar_sort_order: 5 },
-  { key: 'admin-sensitive-words', show_in_top: false, show_in_sidebar: true, sidebar_group_key: 'admin', top_sort_order: 99, sidebar_sort_order: 6 },
-  { key: 'admin-watermark', show_in_top: false, show_in_sidebar: true, sidebar_group_key: 'admin', top_sort_order: 99, sidebar_sort_order: 7 },
-  { key: 'admin-email', show_in_top: false, show_in_sidebar: true, sidebar_group_key: 'admin', top_sort_order: 99, sidebar_sort_order: 8 },
-  { key: 'admin-menus', show_in_top: false, show_in_sidebar: true, sidebar_group_key: 'admin', top_sort_order: 99, sidebar_sort_order: 9 },
+  { key: 'admin-models', show_in_top: false, show_in_sidebar: true, top_group_key: null, sidebar_group_key: 'admin', top_sort_order: 99, sidebar_sort_order: 1 },
+  { key: 'admin-users', show_in_top: false, show_in_sidebar: true, top_group_key: null, sidebar_group_key: 'admin', top_sort_order: 99, sidebar_sort_order: 2 },
+  { key: 'admin-roles', show_in_top: false, show_in_sidebar: true, top_group_key: null, sidebar_group_key: 'admin', top_sort_order: 99, sidebar_sort_order: 3 },
+  { key: 'admin-credit-rules', show_in_top: false, show_in_sidebar: true, top_group_key: null, sidebar_group_key: 'admin', top_sort_order: 99, sidebar_sort_order: 4 },
+  { key: 'admin-moderation', show_in_top: false, show_in_sidebar: true, top_group_key: null, sidebar_group_key: 'admin', top_sort_order: 99, sidebar_sort_order: 5 },
+  { key: 'admin-sensitive-words', show_in_top: false, show_in_sidebar: true, top_group_key: null, sidebar_group_key: 'admin', top_sort_order: 99, sidebar_sort_order: 6 },
+  { key: 'admin-watermark', show_in_top: false, show_in_sidebar: true, top_group_key: null, sidebar_group_key: 'admin', top_sort_order: 99, sidebar_sort_order: 7 },
+  { key: 'admin-email', show_in_top: false, show_in_sidebar: true, top_group_key: null, sidebar_group_key: 'admin', top_sort_order: 99, sidebar_sort_order: 8 },
+  { key: 'admin-menus', show_in_top: false, show_in_sidebar: true, top_group_key: null, sidebar_group_key: 'admin', top_sort_order: 99, sidebar_sort_order: 9 },
 ]
 
 /**
@@ -293,11 +315,23 @@ export interface ResolvedSidebarGroup {
   items: ResolvedMenuItem[]
 }
 
+export interface ResolvedTopNavGroup {
+  key: string
+  label: string
+  icon: string
+  sort_order: number
+  items: ResolvedMenuItem[]
+}
+
 function getMenuLabel(menu: BuiltInMenuItem, locale: string): string {
   return locale.startsWith('zh') ? menu.label_zh : menu.label_en
 }
 
-function getGroupLabel(group: SidebarGroup, locale: string): string {
+function getSidebarGroupLabel(group: SidebarGroup, locale: string): string {
+  return locale.startsWith('zh') ? group.label_zh : group.label_en
+}
+
+function getTopNavGroupLabel(group: TopNavGroup, locale: string): string {
   return locale.startsWith('zh') ? group.label_zh : group.label_en
 }
 
@@ -305,7 +339,7 @@ export function resolveMenus(
   configs: MenuItemConfig[],
   isAdmin: boolean,
   locale: string = 'zh-CN'
-): { topNav: ResolvedMenuItem[]; sidebar: Record<string, ResolvedSidebarGroup> } {
+): { topNav: ResolvedTopNavGroup[]; sidebar: Record<string, ResolvedSidebarGroup> } {
   // 先构建 key -> config 的映射
   const configMap = new Map<string, MenuItemConfig>()
   for (const cfg of configs) {
@@ -320,21 +354,34 @@ export function resolveMenus(
       key: menu.key,
       show_in_top: cfg?.show_in_top ?? defaultCfg?.show_in_top ?? false,
       show_in_sidebar: cfg?.show_in_sidebar ?? defaultCfg?.show_in_sidebar ?? false,
+      top_group_key: cfg?.top_group_key ?? defaultCfg?.top_group_key ?? 'create',
       sidebar_group_key: cfg?.sidebar_group_key ?? defaultCfg?.sidebar_group_key ?? 'create',
       top_sort_order: cfg?.top_sort_order ?? defaultCfg?.top_sort_order ?? 99,
       sidebar_sort_order: cfg?.sidebar_sort_order ?? defaultCfg?.sidebar_sort_order ?? 99,
     }
   }
 
-  // 构建顶部导航菜单项
-  const topNav: ResolvedMenuItem[] = []
+  // 构建顶部导航（按分组）
+  const topNav: ResolvedTopNavGroup[] = []
+  const topNavMap: Record<string, ResolvedTopNavGroup> = {}
+  // 先初始化所有顶部分组
+  for (const group of TOP_NAV_GROUPS) {
+    topNavMap[group.key] = {
+      key: group.key,
+      label: getTopNavGroupLabel(group, locale),
+      icon: group.icon,
+      sort_order: group.sort_order,
+      items: [],
+    }
+  }
+
   // 构建侧边栏按分组整理
   const sidebar: Record<string, ResolvedSidebarGroup> = {}
   // 先初始化所有分组
   for (const group of SIDEBAR_GROUPS) {
     sidebar[group.key] = {
       key: group.key,
-      label: getGroupLabel(group, locale),
+      label: getSidebarGroupLabel(group, locale),
       icon: group.icon,
       sort_order: group.sort_order,
       items: [],
@@ -357,14 +404,21 @@ export function resolveMenus(
       is_visible: true,
     }
 
-    // 添加到顶部导航
+    // 添加到顶部导航（按分组）
     if (cfg.show_in_top) {
-      topNav.push({
+      const gk = cfg.top_group_key || 'create'
+      const item: ResolvedMenuItem = {
         ...baseItem,
         position: 'top',
-        group_key: null,
+        group_key: gk,
         sort_order: cfg.top_sort_order,
-      })
+      }
+      if (topNavMap[gk]) {
+        topNavMap[gk].items.push(item)
+      } else {
+        // 未知分组，放入第一个分组
+        topNavMap[TOP_NAV_GROUPS[0].key].items.push(item)
+      }
     }
 
     // 添加到侧边栏
@@ -385,8 +439,17 @@ export function resolveMenus(
     }
   }
 
-  // 顶部导航排序
+  // 顶部导航：先筛选有子项的分组，再排序
+  for (const key in topNavMap) {
+    if (topNavMap[key].items.length > 0) {
+      topNav.push(topNavMap[key])
+    }
+  }
   topNav.sort((a, b) => a.sort_order - b.sort_order)
+  // 每个顶部分组内排序
+  for (const group of topNav) {
+    group.items.sort((a, b) => a.sort_order - b.sort_order)
+  }
 
   // 每个侧边栏分组内排序
   for (const key in sidebar) {
@@ -402,6 +465,7 @@ export function resolveMenus(
 export interface AdminMenuItem extends BuiltInMenuItem {
   show_in_top: boolean
   show_in_sidebar: boolean
+  top_group_key: string | null
   sidebar_group_key: string | null
   top_sort_order: number
   sidebar_sort_order: number
@@ -420,6 +484,7 @@ export function getAllMenuItemsForAdmin(configs: MenuItemConfig[]): AdminMenuIte
       ...menu,
       show_in_top: cfg?.show_in_top ?? defaultCfg?.show_in_top ?? false,
       show_in_sidebar: cfg?.show_in_sidebar ?? defaultCfg?.show_in_sidebar ?? false,
+      top_group_key: cfg?.top_group_key ?? defaultCfg?.top_group_key ?? 'create',
       sidebar_group_key: cfg?.sidebar_group_key ?? defaultCfg?.sidebar_group_key ?? 'create',
       top_sort_order: cfg?.top_sort_order ?? defaultCfg?.top_sort_order ?? 99,
       sidebar_sort_order: cfg?.sidebar_sort_order ?? defaultCfg?.sidebar_sort_order ?? 99,

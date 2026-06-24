@@ -1889,6 +1889,8 @@ const enUS = {
     reset: 'Reset to Default',
     itemName: 'Menu Item',
     showInTop: 'Top Nav',
+    topGroup: 'Top Group',
+    selectTopGroup: 'Select top group',
     topSort: 'Top Sort',
     showInSidebar: 'Sidebar',
     sidebarGroup: 'Sidebar Group',

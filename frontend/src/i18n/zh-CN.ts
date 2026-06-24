@@ -1899,6 +1899,8 @@ const zhCN = {
     reset: '恢复默认',
     itemName: '菜单项',
     showInTop: '顶部导航',
+    topGroup: '顶部分组',
+    selectTopGroup: '选择顶部分组',
     topSort: '顶部排序',
     showInSidebar: '侧边栏',
     sidebarGroup: '侧边栏分组',

@@ -72,18 +72,38 @@
           </div>
         </div>
 
-        <!-- 中间：顶部大类导航（高频核心功能） -->
+        <!-- 中间：顶部大类导航（分组下拉） -->
         <nav class="app-nav">
-          <router-link
-            v-for="item in menuStore.topNav"
-            :key="item.key"
-            :to="item.path"
-            class="nav-item"
-            active-class="active"
+          <el-dropdown
+            v-for="group in menuStore.topNav"
+            :key="group.key"
+            trigger="hover"
+            placement="bottom"
+            popper-class="nav-dropdown-popper"
+            @command="handleNavCommand"
           >
-            <el-icon v-if="getIcon(item.icon)"><component :is="getIcon(item.icon)" /></el-icon>
-            <span>{{ item.label }}</span>
-          </router-link>
+            <span
+              class="nav-item nav-group"
+              :class="{ active: isTopGroupActive(group) }"
+            >
+              <el-icon><component :is="getIcon(group.icon)" /></el-icon>
+              <span>{{ group.label }}</span>
+              <el-icon class="dropdown-arrow"><ArrowDown /></el-icon>
+            </span>
+            <template #dropdown>
+              <el-dropdown-menu class="nav-dropdown-menu">
+                <el-dropdown-item
+                  v-for="item in group.items"
+                  :key="item.key"
+                  :command="item.path"
+                  class="nav-dropdown-item"
+                >
+                  <el-icon v-if="getIcon(item.icon)"><component :is="getIcon(item.icon)" /></el-icon>
+                  <span>{{ item.label }}</span>
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </nav>
 
         <!-- 右上角：全局操作区 -->
@@ -188,6 +208,7 @@ import { useThemeStore } from '@/stores/theme'
 import { useCanvasStore } from '@/stores/canvas'
 import { usePermissionStore } from '@/stores/permission'
 import { useMenuStore } from '@/stores/menu'
+import type { ResolvedTopNavGroup } from '@/config/menus'
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -295,6 +316,16 @@ function handleUserCommand(cmd: string) {
   } else if (cmd === 'preferences') {
     router.push('/preferences')
   }
+}
+
+// 顶部导航下拉菜单点击跳转
+function handleNavCommand(path: string) {
+  router.push(path)
+}
+
+// 判断当前路由是否属于某个顶部分组（用于高亮）
+function isTopGroupActive(group: ResolvedTopNavGroup): boolean {
+  return group.items.some(item => route.path.startsWith(item.path))
 }
 
 // 每当 locale 变化时返回对应的 Element Plus 语言对象
@@ -559,8 +590,13 @@ const epLocale = computed(() => {
   font-weight: 500;
 }
 
-.nav-item.has-dropdown {
+.nav-item.nav-group {
   padding-right: 10px;
+  user-select: none;
+}
+
+.nav-item.nav-group:hover .dropdown-arrow {
+  transform: translateY(1px);
 }
 
 .dropdown-arrow {
@@ -570,7 +606,7 @@ const epLocale = computed(() => {
 }
 
 /* 顶部导航下拉菜单样式 */
-:deep(.nav-dropdown-popper) {
+:deep(.el-popper.nav-dropdown-popper) {
   padding: 6px !important;
   border-radius: 10px !important;
   border: 1px solid var(--agnes-border) !important;
@@ -582,6 +618,12 @@ const epLocale = computed(() => {
   padding: 0;
   background: transparent;
   border: none;
+  min-width: 180px;
+}
+
+:deep(.nav-dropdown-menu .el-dropdown-menu__item) {
+  padding: 0;
+  background: transparent;
 }
 
 .nav-dropdown-item {
@@ -604,6 +646,7 @@ const epLocale = computed(() => {
 
 .nav-dropdown-item .el-icon {
   font-size: 16px;
+  flex-shrink: 0;
 }
 
 .app-header-right {

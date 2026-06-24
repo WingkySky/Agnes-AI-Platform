@@ -55,6 +55,24 @@
         </template>
       </el-table-column>
 
+      <el-table-column :label="t('menuAdmin.topGroup')" width="140">
+        <template #default="{ row }">
+          <el-select
+            v-model="configMap[row.key].top_group_key"
+            style="width: 100%"
+            :disabled="!configMap[row.key].show_in_top"
+            :placeholder="t('menuAdmin.selectTopGroup')"
+          >
+            <el-option
+              v-for="group in topNavGroups"
+              :key="group.key"
+              :label="currentLang === 'zh' ? group.label_zh : group.label_en"
+              :value="group.key"
+            />
+          </el-select>
+        </template>
+      </el-table-column>
+
       <el-table-column :label="t('menuAdmin.topSort')" width="110" align="center">
         <template #default="{ row }">
           <el-input-number
@@ -117,17 +135,29 @@
           <div class="preview-nav">
             <span class="preview-brand">Agnes AI</span>
             <div class="preview-nav-items">
-              <el-tag
-                v-for="item in previewTopNav"
-                :key="item.key"
-                size="small"
-                type="primary"
-                effect="plain"
-                class="preview-tag"
+              <el-dropdown
+                v-for="group in previewTopNav"
+                :key="group.key"
+                trigger="hover"
+                placement="bottom"
               >
-                <el-icon v-if="item.icon"><component :is="getIcon(item.icon)" /></el-icon>
-                {{ item.label }}
-              </el-tag>
+                <span class="preview-nav-group">
+                  <el-icon v-if="group.icon"><component :is="getIcon(group.icon)" /></el-icon>
+                  {{ group.label }}
+                  <el-icon class="preview-arrow"><ArrowDown /></el-icon>
+                </span>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item
+                    v-for="item in group.items"
+                    :key="item.key"
+                  >
+                    <el-icon v-if="item.icon"><component :is="getIcon(item.icon)" /></el-icon>
+                    {{ item.label }}
+                  </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </div>
           </div>
         </div>
@@ -174,11 +204,12 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from '@/i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { RefreshRight, Check } from '@element-plus/icons-vue'
+import { RefreshRight, Check, ArrowDown } from '@element-plus/icons-vue'
 import * as ElementPlusIcons from '@element-plus/icons-vue'
 import { useMenuStore } from '@/stores/menu'
 import {
   SIDEBAR_GROUPS,
+  TOP_NAV_GROUPS,
   resolveMenus,
   type MenuItemConfig,
   type AdminMenuItem,
@@ -195,6 +226,9 @@ const configMap = reactive<Record<string, MenuItemConfig>>({})
 // 侧边栏分组
 const sidebarGroups = SIDEBAR_GROUPS
 
+// 顶部导航分组
+const topNavGroups = TOP_NAV_GROUPS
+
 const currentLang = computed(() => locale.value.startsWith('zh') ? 'zh' : 'en')
 
 function getIcon(iconName: string | null) {
@@ -209,6 +243,7 @@ function initConfigMap() {
       key: item.key,
       show_in_top: item.show_in_top,
       show_in_sidebar: item.show_in_sidebar,
+      top_group_key: item.top_group_key,
       sidebar_group_key: item.sidebar_group_key,
       top_sort_order: item.top_sort_order,
       sidebar_sort_order: item.sidebar_sort_order,
@@ -376,10 +411,26 @@ onMounted(() => {
   flex-wrap: wrap;
 }
 
-.preview-tag {
+.preview-nav-group {
   display: flex;
   align-items: center;
   gap: 4px;
+  padding: 6px 12px;
+  background: #ecf5ff;
+  color: #409eff;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.preview-nav-group .el-icon {
+  font-size: 14px;
+}
+
+.preview-arrow {
+  font-size: 10px;
+  opacity: 0.7;
 }
 
 .preview-body {
