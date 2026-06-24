@@ -91,16 +91,17 @@
             <span class="empty-text">{{ t('canvas.node.emptyImage') }}</span>
           </div>
           <!-- 有图：显示图片（object-contain） -->
-          <img
-            v-else
-            :src="metadata.content"
-            :alt="panel.title || ''"
-            class="image-img"
-            :class="{ 'object-fill': metadata.freeResize }"
-            draggable="false"
-            @dragstart.prevent
-            @load="onImageLoad"
-          />
+          <WatermarkOverlay v-else class="canvas-image-wrapper">
+            <img
+              :src="metadata.content"
+              :alt="panel.title || ''"
+              class="image-img"
+              :class="{ 'object-fill': metadata.freeResize }"
+              draggable="false"
+              @dragstart.prevent
+              @load="onImageLoad"
+            />
+          </WatermarkOverlay>
         </div>
 
         <!-- 视频节点：空状态 / 有视频显示播放器 -->
@@ -326,6 +327,7 @@ import { Image as ImageIcon, Video, Music2, RefreshCw } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
 import { useCanvasStore } from '@/stores/canvas'
 import { useModelsStore } from '@/stores/models'
+import WatermarkOverlay from '@/components/WatermarkOverlay.vue'
 
 /* ---------- i18n ---------- */
 const { t } = useI18n()

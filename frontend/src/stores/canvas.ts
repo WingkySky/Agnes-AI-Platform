@@ -9,7 +9,7 @@
 
 import { defineStore } from 'pinia'
 import { canvasThemes } from '@/lib/canvas-theme'
-import { loadCanvas, saveCanvas, switchCanvasUser } from '@/lib/canvas-storage'
+import { loadCanvas, saveCanvas, switchCanvasUser, cancelSaveCanvas } from '@/lib/canvas-storage'
 import { useThemeStore } from './theme'
 
 // ---------- 本地类型定义 ----------
@@ -507,7 +507,7 @@ export const useCanvasStore = defineStore('canvas', {
     setThemeMode(mode: 'dark' | 'light'): void {
       if (mode === 'dark' || mode === 'light') {
         this.themeMode = mode
-        saveCanvas(this)
+        this._save()
         // 联动全局主题 store：同步切换 <html> class 和 Element Plus 主题
         // 这样标题栏、页脚、Element Plus 组件都会跟着画布一起变深/变浅
         useThemeStore().setMode(mode)
@@ -518,7 +518,7 @@ export const useCanvasStore = defineStore('canvas', {
     syncFromGlobalTheme(mode: 'dark' | 'light'): void {
       if ((mode === 'dark' || mode === 'light') && this.themeMode !== mode) {
         this.themeMode = mode
-        saveCanvas(this)
+        this._save()
       }
     },
 
@@ -526,14 +526,14 @@ export const useCanvasStore = defineStore('canvas', {
     setBackgroundMode(mode: 'dots' | 'lines' | 'blank'): void {
       if (['dots', 'lines', 'blank'].includes(mode)) {
         this.backgroundMode = mode
-        saveCanvas(this)
+        this._save()
       }
     },
 
     /** 切换图片信息显示开关 */
     toggleImageInfo(): void {
       this.showImageInfo = !this.showImageInfo
-      saveCanvas(this)
+      this._save()
     },
 
     // ==================== 工作区 ====================
@@ -557,19 +557,14 @@ export const useCanvasStore = defineStore('canvas', {
       this.selectedPanelIds = []
       this.selectedPanelId = null
       this.history = { past: [], future: [] }
-      saveCanvas(this)
+      this._save()
       return ws
     },
 
     /** 切换到指定工作区（保存当前、加载目标） */
     switchWorkspace(id: string): void {
-      const current = this.workspaces.find((w) => w.id === this.activeWorkspaceId)
-      if (current) {
-        current.viewport = { ...this.viewport }
-        current.panels = JSON.parse(JSON.stringify(this.panels))
-        current.connections = JSON.parse(JSON.stringify(this.connections))
-        current.updated_at = new Date().toISOString()
-      }
+      // 先保存当前工作区的数据到 workspaces
+      this._syncCurrentWorkspace()
 
       this.activeWorkspaceId = id
       const target = this.workspaces.find((w) => w.id === id)
@@ -585,7 +580,7 @@ export const useCanvasStore = defineStore('canvas', {
       this.selectedPanelIds = []
       this.selectedPanelId = null
       this.history = { past: [], future: [] }
-      saveCanvas(this)
+      this._save()
     },
 
     /** 删除工作区 */
@@ -606,7 +601,7 @@ export const useCanvasStore = defineStore('canvas', {
           this.history = { past: [], future: [] }
         }
       }
-      saveCanvas(this)
+      this._save()
     },
 
     /** 重命名工作区 */
@@ -617,7 +612,7 @@ export const useCanvasStore = defineStore('canvas', {
       if (!trimmed) return
       ws.name = trimmed
       ws.updated_at = new Date().toISOString()
-      saveCanvas(this)
+      this._save()
     },
 
     /**
@@ -633,13 +628,7 @@ export const useCanvasStore = defineStore('canvas', {
       if (!ws) return null
 
       // 先保存当前画布状态（避免复制的是旧数据）
-      const current = this.workspaces.find((w) => w.id === this.activeWorkspaceId)
-      if (current) {
-        current.viewport = { ...this.viewport }
-        current.panels = JSON.parse(JSON.stringify(this.panels))
-        current.connections = JSON.parse(JSON.stringify(this.connections))
-        current.updated_at = new Date().toISOString()
-      }
+      this._syncCurrentWorkspace()
 
       // 重新生成 panel id 和 connection id
       const idMap = new Map<string, string>()
@@ -725,7 +714,7 @@ export const useCanvasStore = defineStore('canvas', {
           this.history = { past: [], future: [] }
         }
       }
-      saveCanvas(this)
+      this._save()
     },
 
     // ==================== 视口 ====================
@@ -792,7 +781,7 @@ export const useCanvasStore = defineStore('canvas', {
         panel.content = {}
       }
       this.panels.push(panel as CanvasPanel)
-      saveCanvas(this)
+      this._save()
       return panel.id
     },
 
@@ -808,7 +797,7 @@ export const useCanvasStore = defineStore('canvas', {
         }
       }
       Object.assign(panel, mergedChanges, { updated_at: new Date().toISOString() })
-      saveCanvas(this)
+      this._save()
     },
 
     /** 直接写回（不压历史快照）：拖动/缩放等高频操作 */
@@ -826,7 +815,7 @@ export const useCanvasStore = defineStore('canvas', {
       this.panels = this.panels.filter((p) => p.id !== id)
       this.selectedPanelIds = this.selectedPanelIds.filter((pid) => pid !== id)
       if (this.selectedPanelId === id) this.selectedPanelId = null
-      saveCanvas(this)
+      this._save()
     },
 
     /** 清空所有面板 */
@@ -876,7 +865,7 @@ export const useCanvasStore = defineStore('canvas', {
       }
       this.selectedPanelIds = newIds
       this.selectedPanelId = newIds[0] ?? null
-      saveCanvas(this)
+      this._save()
       return newIds
     },
 
@@ -956,14 +945,14 @@ export const useCanvasStore = defineStore('canvas', {
         created_at: new Date().toISOString(),
       }
       this.connections.push(conn)
-      saveCanvas(this)
+      this._save()
       return conn
     },
 
     /** 删除连线 */
     deleteConnection(id: string): void {
       this.connections = this.connections.filter((c) => c.id !== id)
-      saveCanvas(this)
+      this._save()
     },
 
     /** 开始拖拽连线：记录源节点和锚点类型 */
@@ -1069,7 +1058,7 @@ export const useCanvasStore = defineStore('canvas', {
       this.selectedPanelId = panel.id
       this.pendingConnectionCreate = null
       this.pushSnapshot()
-      saveCanvas(this)
+      this._save()
       return panel
     },
 
@@ -1092,7 +1081,7 @@ export const useCanvasStore = defineStore('canvas', {
       this.history.future.push(currentSnap)
       const prevSnap = this.history.past.pop()!
       restoreFromSnapshot(this, prevSnap)
-      saveCanvas(this)
+      this._save()
     },
 
     /** 重做 */
@@ -1102,7 +1091,7 @@ export const useCanvasStore = defineStore('canvas', {
       this.history.past.push(currentSnap)
       const nextSnap = this.history.future.pop()!
       restoreFromSnapshot(this, nextSnap)
-      saveCanvas(this)
+      this._save()
     },
 
     // ==================== 搜索与定位 ====================
@@ -1241,7 +1230,7 @@ export const useCanvasStore = defineStore('canvas', {
         this.panels.push(newPanel)
         newIds.push(newPanel.id)
       }
-      saveCanvas(this)
+      this._save()
       return newIds
     },
 
@@ -1297,7 +1286,7 @@ export const useCanvasStore = defineStore('canvas', {
       }
       this.selectedPanelIds = newIds
       this.selectedPanelId = newIds[0] ?? null
-      saveCanvas(this)
+      this._save()
     },
 
     // ==================== 导入导出 ====================
@@ -1338,7 +1327,7 @@ export const useCanvasStore = defineStore('canvas', {
       this.connections = JSON.parse(JSON.stringify(ws.connections))
       this.selectedPanelIds = []
       this.selectedPanelId = null
-      saveCanvas(this)
+      this._save()
       return {
         panels: this.panels.length,
         connections: this.connections.length,
@@ -1368,6 +1357,9 @@ export const useCanvasStore = defineStore('canvas', {
           }
           if (Array.isArray(data.panels)) this.panels = data.panels as CanvasPanel[]
           if (Array.isArray(data.connections)) this.connections = data.connections as CanvasConnection[]
+          // 加载完成后同步一次：确保 workspaces 中当前工作区数据与顶层一致
+          // 避免旧版本数据中 workspaces 与顶层不同步，导致切换工作区时丢失数据
+          this._syncCurrentWorkspace()
         }
       } catch (err: unknown) {
         // eslint-disable-next-line no-console
@@ -1377,11 +1369,33 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /**
+     * 将顶层的 panels/connections/viewport 同步到 workspaces 中的当前工作区
+     * - 日常操作只修改顶层数据，保存前调用此函数确保 workspaces 数据同步
+     * - 避免切换工作区时丢失数据
+     */
+    _syncCurrentWorkspace(): void {
+      const current = this.workspaces.find((w) => w.id === this.activeWorkspaceId)
+      if (!current) return
+      current.viewport = { ...this.viewport }
+      current.panels = JSON.parse(JSON.stringify(this.panels))
+      current.connections = JSON.parse(JSON.stringify(this.connections))
+      current.updated_at = new Date().toISOString()
+    },
+
+    /** 统一保存入口：先同步当前工作区数据，再防抖写入存储 */
+    _save(): void {
+      this._syncCurrentWorkspace()
+      this._save()
+    },
+
+    /**
      * 用户切换时切换画布数据空间
      * - 切换 localforage 中的 user key
      * - 重置 _storageReady 并重新 hydrate
      */
     async _switchUserStorage(userId: number | string | null): Promise<void> {
+      // 先取消待执行的保存，避免清空数据过程中误写入空状态
+      cancelSaveCanvas()
       switchCanvasUser(userId)
       // 清空当前 state（避免看到上一个用户的数据）
       this.workspaces = []

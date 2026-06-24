@@ -112,6 +112,17 @@ export async function loadCanvas(): Promise<CanvasStorageData | null> {
 }
 
 /**
+ * 取消待执行的防抖保存
+ * - 切换用户/工作区等场景下调用，避免清空数据过程中误写入空状态
+ */
+export function cancelSaveCanvas(): void {
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+  }
+}
+
+/**
  * 防抖保存当前用户的画布状态到 localforage
  * - 400ms 内多次调用会合并为一次写入
  * - 不阻塞调用方，返回 undefined
