@@ -98,7 +98,7 @@
           <el-form label-position="top" class="param-form">
             <el-form-item :label="t('params.prompt')">
               <el-input v-model="prompt" type="textarea" :rows="4"
-                :placeholder="t('params.videoPromptPlaceholder')" maxlength="3000" show-word-limit />
+                :placeholder="t('params.videoPromptPlaceholder')" maxlength="15000" show-word-limit />
               <div :class="['prompt-length-hint', promptLengthLevel]">
                 <el-icon><InfoFilled /></el-icon>
                 <span>{{ promptLengthText }}</span>
@@ -345,18 +345,18 @@ const prompt = ref('')
 const negativePrompt = ref('')
 
 // ---------- 提示词长度分阶提示 ----------
-// 视频：0-800 适中，800-2000 较长，2000+ 过长
+// 视频：0-2000 适中，2000-6000 较长，6000+ 过长
 const promptLengthLevel = computed(() => {
   const len = prompt.value.length
-  if (len <= 800) return 'level-good'
-  if (len <= 2000) return 'level-long'
+  if (len <= 2000) return 'level-good'
+  if (len <= 6000) return 'level-long'
   return 'level-too-long'
 })
 const promptLengthText = computed(() => {
   const len = prompt.value.length
   if (len === 0) return ''
-  if (len <= 800) return t('params.promptLengthGood')
-  if (len <= 2000) return t('params.promptLengthLong')
+  if (len <= 2000) return t('params.promptLengthGood')
+  if (len <= 6000) return t('params.promptLengthLong')
   return t('params.promptLengthTooLong')
 })
 

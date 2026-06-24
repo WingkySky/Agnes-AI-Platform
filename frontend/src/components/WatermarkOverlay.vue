@@ -40,16 +40,32 @@ const userStore = useUserStore()
 /** 是否应该显示水印 */
 const shouldShow = computed(() => {
   const wm = modelsStore.watermark
-  if (!wm) return false
   // 全局强制开启
-  if (wm.enabled) return true
+  if (wm?.enabled) return true
   // 用户自己开启了水印
   if (userStore.user?.watermark_enabled) return true
   return false
 })
 
-/** 水印配置（合并全局 + 用户级，用户级优先？这里只用全局配置的样式） */
-const wmConfig = computed(() => modelsStore.watermark)
+/** 水印配置（全局配置 + 用户级兜底默认值） */
+const wmConfig = computed(() => {
+  if (modelsStore.watermark) return modelsStore.watermark
+  // 用户开了水印但没拿到全局配置时，给个默认配置
+  if (userStore.user?.watermark_enabled) {
+    return {
+      type: 'text' as const,
+      text: userStore.user.username || '',
+      font_size: 16,
+      color: '#ffffff',
+      opacity: 60,
+      position: 'bottom-right',
+      margin: 20,
+      image_url: '',
+      image_width: 100,
+    }
+  }
+  return null
+})
 
 /** 文字水印样式 */
 const textStyle = computed(() => {

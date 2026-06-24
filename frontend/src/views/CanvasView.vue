@@ -2152,16 +2152,17 @@ async function handleUseAsset(asset: Record<string, any>) {
   const nodeUrl = asset.source === 'history' && asset.type === 'video'
     ? `/api/history/video/${asset.id}/stream`
     : asset.url
-  store.updatePanel(id, {
+  const updates: Record<string, any> = {
     content: {
       content: nodeUrl,
       status: 'success',
       prompt: asset.prompt || '',
     },
-  })
-  if (asset.name) {
-    store.updatePanel(id, { name: asset.name })
   }
+  if (asset.name) {
+    updates.name = asset.name
+  }
+  store.updatePanel(id, updates)
   ElMessage.success(t('canvas.messages.nodeCreated'))
 }
 

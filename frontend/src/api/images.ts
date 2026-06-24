@@ -21,7 +21,7 @@ import type {
  * 创建图片异步生成任务（推荐使用）
  */
 export function createImageTask(params: ImageGenerationRequest): Promise<ImageTaskCreatedResponse> {
-  return client.post('/api/images/tasks', params)
+  return client.post('/api/images/tasks', params, { silent: true })
 }
 
 /**

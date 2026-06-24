@@ -223,6 +223,9 @@ interface CanvasState {
 
   // ---------- 持久化标记 ----------
   _storageReady: boolean
+
+  // ---------- 防递归标记 ----------
+  _isSaving: boolean
 }
 
 export const useCanvasStore = defineStore('canvas', {
@@ -291,6 +294,9 @@ export const useCanvasStore = defineStore('canvas', {
 
     // ---------- 持久化标记 ----------
     _storageReady: false,
+
+    // ---------- 防递归标记 ----------
+    _isSaving: false,
   }),
 
   getters: {
@@ -1384,8 +1390,15 @@ export const useCanvasStore = defineStore('canvas', {
 
     /** 统一保存入口：先同步当前工作区数据，再防抖写入存储 */
     _save(): void {
-      this._syncCurrentWorkspace()
-      this._save()
+      // 防递归保护：避免 _syncCurrentWorkspace 中响应式更新意外触发新的 _save 调用
+      if (this._isSaving) return
+      this._isSaving = true
+      try {
+        this._syncCurrentWorkspace()
+        saveCanvas(this)
+      } finally {
+        this._isSaving = false
+      }
     },
 
     /**

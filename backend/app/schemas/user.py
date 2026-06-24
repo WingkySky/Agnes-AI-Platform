@@ -109,6 +109,8 @@ class UserInfoResponse(BaseModel):
     role: str           # admin / user
     is_active: bool
     is_admin: bool      # 向后兼容：等价于 role == 'admin'
+    watermark_enabled: bool = False
+    content_safety_strict: bool = False
     created_at: Optional[datetime] = None
     last_login_at: Optional[datetime] = None
 

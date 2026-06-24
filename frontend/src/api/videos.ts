@@ -13,7 +13,7 @@ import type {
  * 创建视频生成任务
  */
 export function createVideoTask(params: VideoGenerationRequest): Promise<VideoTaskCreatedResponse> {
-  return client.post('/api/videos', params)
+  return client.post('/api/videos', params, { silent: true })
 }
 
 /**

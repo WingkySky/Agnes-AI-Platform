@@ -15,7 +15,7 @@ class ImageGenerationRequest(BaseModel):
     - 局部编辑模式：图生图基础上额外提供 mask（黑白图，白色为编辑区域）
     """
 
-    prompt: str = Field(..., min_length=1, max_length=4000, description="提示词")
+    prompt: str = Field(..., min_length=1, max_length=20000, description="提示词")
     model: str = Field(default="", description="模型名称（前端从 /api/config 获取可用模型列表）")
     size: str = Field(default="1024x1024", description="图片尺寸，格式: 宽x高")
     response_format: str = Field(default="url", description="响应格式: url 或 b64_json")

@@ -33,7 +33,8 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -226,6 +227,69 @@ app.add_middleware(
 app.add_middleware(RequestIdMiddleware)
 
 # ---------- 全局异常处理 ----------
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """
+    处理请求参数校验错误（Pydantic 验证失败），返回用户能看懂的中文提示。
+    
+    特别处理：
+    - prompt 超长：给出明确的字数提示
+    - 其他字段错误：给出友好的字段名和原因
+    """
+    errors = exc.errors()
+    messages = []
+    
+    for err in errors:
+        loc = err.get("loc", [])
+        msg = err.get("msg", "")
+        err_type = err.get("type", "")
+        ctx = err.get("ctx", {})
+        
+        # 提取字段名（loc 格式：["body", "prompt"] 或 ["query", "page"]）
+        field = ""
+        if len(loc) >= 2:
+            field = str(loc[-1])
+        
+        # 针对常见错误做友好翻译
+        if err_type == "string_too_long" and field == "prompt":
+            max_len = ctx.get("max_length", "?")
+            messages.append(f"提示词过长（最多 {max_len} 字），请精简后重试")
+        elif err_type == "string_too_short" and field == "prompt":
+            min_len = ctx.get("min_length", "?")
+            messages.append(f"提示词不能少于 {min_len} 字")
+        elif err_type == "string_too_long":
+            max_len = ctx.get("max_length", "?")
+            messages.append(f"{field} 过长（最多 {max_len} 字）")
+        elif err_type == "string_too_short":
+            min_len = ctx.get("min_length", "?")
+            messages.append(f"{field} 不能少于 {min_len} 字")
+        elif err_type == "value_error.missing":
+            messages.append(f"缺少必填参数：{field}")
+        elif err_type == "int_parsing":
+            messages.append(f"{field} 必须是整数")
+        elif err_type == "float_parsing":
+            messages.append(f"{field} 必须是数字")
+        elif "value is not a valid" in msg:
+            messages.append(f"{field} 格式不正确")
+        else:
+            # 兜底：返回原始错误信息（带字段名）
+            if field:
+                messages.append(f"{field}：{msg}")
+            else:
+                messages.append(msg)
+    
+    # 拼接最终错误消息
+    final_msg = "；".join(messages) if messages else "请求参数有误，请检查后重试"
+    
+    logger.warning("请求参数校验失败: %s, errors=%s", final_msg, str(errors)[:500])
+    
+    return JSONResponse(
+        status_code=400,
+        content={"status": "error", "message": final_msg},
+    )
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
     """

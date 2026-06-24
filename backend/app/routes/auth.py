@@ -340,6 +340,8 @@ async def get_me(current_user: User = Depends(get_current_user)):
         role=current_user.role,
         is_active=current_user.is_active,
         is_admin=is_admin,
+        watermark_enabled=current_user.watermark_enabled or False,
+        content_safety_strict=current_user.content_safety_strict or False,
         created_at=current_user.created_at,
         last_login_at=current_user.last_login_at,
     )
@@ -390,6 +392,8 @@ async def update_my_profile(
         role=current_user.role,
         is_active=current_user.is_active,
         is_admin=is_admin,
+        watermark_enabled=current_user.watermark_enabled or False,
+        content_safety_strict=current_user.content_safety_strict or False,
         created_at=current_user.created_at,
         last_login_at=current_user.last_login_at,
     )
@@ -477,6 +481,8 @@ async def upload_avatar(
         role=current_user.role,
         is_active=current_user.is_active,
         is_admin=is_admin,
+        watermark_enabled=current_user.watermark_enabled or False,
+        content_safety_strict=current_user.content_safety_strict or False,
         created_at=current_user.created_at,
         last_login_at=current_user.last_login_at,
     )

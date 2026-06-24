@@ -63,7 +63,7 @@
               type="textarea"
               :rows="4"
               :placeholder="t('params.promptPlaceholder')"
-              maxlength="4000"
+              maxlength="20000"
               show-word-limit
             />
               <div :class="['prompt-length-hint', promptLengthLevel]">
@@ -314,18 +314,18 @@ const mode = ref('text2image')
 const prompt = ref('')
 
 // ---------- 提示词长度分阶提示 ----------
-// 图片：0-1000 适中，1000-2500 较长，2500+ 过长
+// 图片：0-3000 适中，3000-8000 较长，8000+ 过长
 const promptLengthLevel = computed(() => {
   const len = prompt.value.length
-  if (len <= 1000) return 'level-good'
-  if (len <= 2500) return 'level-long'
+  if (len <= 3000) return 'level-good'
+  if (len <= 8000) return 'level-long'
   return 'level-too-long'
 })
 const promptLengthText = computed(() => {
   const len = prompt.value.length
   if (len === 0) return ''
-  if (len <= 1000) return t('params.promptLengthGood')
-  if (len <= 2500) return t('params.promptLengthLong')
+  if (len <= 3000) return t('params.promptLengthGood')
+  if (len <= 8000) return t('params.promptLengthLong')
   return t('params.promptLengthTooLong')
 })
 
