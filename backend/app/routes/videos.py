@@ -83,8 +83,8 @@ async def create_video_task(
     - 必须登录，未登录返回 401
     - 积分不足返回 402
     - text2video：只传 prompt
-    - image2video: 额外传 image 字段
-    - keyframes: 额外传 images 数组（1-2 张）
+    - image2video: 传 image（单张）或 images（多张参考图，自动识别）
+    - keyframes: 传 images 数组（1-2 张，起始帧+结束帧）
     """
     if not agnes_client.api_key or agnes_client.api_key.startswith("sk-your"):
         raise HTTPException(
@@ -93,15 +93,19 @@ async def create_video_task(
         )
 
     # ---------- 参考图 size 校验 + 类型日志（便于排查本地图/URL 是否混传）----------
-    if req.mode == "image2video" and req.image:
-        _validate_image_size(req.image, "image")
-        logger.info(
-            "[视频生成][image2video] image: type=%s, length=%d, mime=%s, preview=%s",
-            _classify_image(req.image),
-            len(req.image or ""),
-            req.image_mime_type or "image/png",
-            (req.image or "")[:100],
-        )
+    if req.mode == "image2video" and req.images:
+        for idx, img in enumerate(req.images):
+            if not img:
+                continue
+            _validate_image_size(img, f"images[{idx}]")
+            logger.info(
+                "[视频生成][image2video] images[%d]: type=%s, length=%d, mime=%s, preview=%s",
+                idx,
+                _classify_image(img),
+                len(img),
+                (req.image_mime_types[idx] if req.image_mime_types and idx < len(req.image_mime_types) else "image/png"),
+                img[:100],
+            )
     if req.mode == "keyframes" and req.images:
         for idx, img in enumerate(req.images):
             if not img:

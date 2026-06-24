@@ -106,9 +106,12 @@ class ImageGenerationRequest(BaseModel):
             w, h = int(parts[0]), int(parts[1])
             if w < 256 or h < 256 or w > 4096 or h > 4096:
                 raise ValueError("尺寸范围应在 256-4096 之间")
+            # 自动对齐到 16 的倍数（图片编码兼容要求）
+            aligned_w = ((w + 15) // 16) * 16
+            aligned_h = ((h + 15) // 16) * 16
+            return f"{aligned_w}x{aligned_h}"
         except ValueError as e:
             raise e
-        return v
 
     @field_validator("response_format")
     @classmethod

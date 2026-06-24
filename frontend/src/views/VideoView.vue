@@ -39,59 +39,29 @@
                     <el-icon class="mode-icon"><PictureFilled /></el-icon>
                     <span class="mode-text">
                       <span class="mode-title">{{ t('params.mode.image2video') }}</span>
-                      <span class="mode-sub">{{ t('params.mode.imageOnly') }}</span>
-                    </span>
-                  </span>
-                </template>
-              </el-tab-pane>
-              <el-tab-pane name="keyframes">
-                <template #label>
-                  <span class="mode-label">
-                    <el-icon class="mode-icon"><Film /></el-icon>
-                    <span class="mode-text">
-                      <span class="mode-title">{{ t('params.mode.keyframes') }}</span>
-                      <span class="mode-sub">{{ t('params.mode.keyframesHint') }}</span>
+                      <span class="mode-sub">{{ t('params.mode.singleOrMultiImage') }}</span>
                     </span>
                   </span>
                 </template>
               </el-tab-pane>
           </el-tabs>
 
-          <!-- 图生视频：单张参考图（限制1张，URL/文件混用） -->
-          <ImageUploader
-            v-if="mode === 'image2video'"
-            :max-count="1"
-            :title="t('params.startFrameImage')"
-            @change="handleImageChange"
-            @clear="handleImageClear"
-          />
-
-          <!-- 首尾帧模式：起始帧 + 结束帧（上下排列，各1张，URL/文件混用） -->
-          <div v-if="mode === 'keyframes'" class="frame-upload">
-            <div class="frame-section frame-section-start">
-              <ImageUploader
-                :max-count="1"
-                :title="t('params.startFrameImage')"
-                @change="(f) => handleFrameChange('start', f)"
-                @clear="() => handleFrameClear('start')"
-              />
-            </div>
-
-            <!-- 连接指示线：起始帧 → 结束帧 -->
-            <div class="frame-connector">
-              <div class="connector-line"></div>
-              <div class="connector-arrow"><el-icon><ArrowDownBold /></el-icon></div>
-              <div class="connector-line"></div>
-            </div>
-
-            <div class="frame-section frame-section-end">
-              <ImageUploader
-                :max-count="1"
-                :title="t('params.endFrameImage')"
-                :optional="true"
-                @change="(f) => handleFrameChange('end', f)"
-                @clear="() => handleFrameClear('end')"
-              />
+          <!-- 图生视频：支持单张或多张参考图，关键帧模式开关 -->
+          <div v-if="mode === 'image2video'" class="image-upload-section">
+            <ImageUploader
+              :max-count="isKeyframesMode ? 2 : undefined"
+              :title="isKeyframesMode ? t('params.keyframeImages') : t('params.referenceImages')"
+              :hint="isKeyframesMode ? t('params.keyframeImagesHint') : t('params.referenceImagesHint')"
+              @change="handleImageListChange"
+              @clear="handleImageListClear"
+            />
+            <!-- 关键帧模式开关 -->
+            <div class="keyframes-toggle">
+              <el-switch v-model="isKeyframesMode" @change="handleKeyframesToggle" />
+              <span class="toggle-label">{{ t('params.keyframesMode') }}</span>
+              <el-tooltip :content="t('params.keyframesModeHint')" placement="top">
+                <el-icon class="info-icon"><InfoFilled /></el-icon>
+              </el-tooltip>
             </div>
           </div>
 
@@ -308,7 +278,7 @@ import { ref, computed, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   VideoPlay, Download, CopyDocument, CircleCloseFilled, VideoCameraFilled, Loading, MagicStick,
-  Edit, Film, PictureFilled, ArrowDownBold, Share, InfoFilled
+  Edit, Film, PictureFilled, Picture, ArrowDownBold, Share, InfoFilled
 } from '@element-plus/icons-vue'
 import PromptTemplates from '@/components/PromptTemplates.vue'
 import ImageUploader from '@/components/ImageUploader.vue'
@@ -364,7 +334,7 @@ const promptLengthText = computed(() => {
 const shareToPlaza = ref(false)
 // 画面比例、时长、帧率均从 store 配置获取默认值
 const aspectRatio = ref(modelsStore.defaultVideoAspectRatio || '16:9')
-const resolution = ref(modelsStore.defaultVideoResolution || 768)
+const resolution = ref(modelsStore.defaultVideoResolution || 720)
 const seconds = ref(modelsStore.defaultVideoDuration || 5)
 const frameRate = ref(modelsStore.defaultFrameRate || 24)
 const seed = ref('')
@@ -406,10 +376,9 @@ watch(() => modelsStore.defaultFrameRate, (v) => {
   if (v && frameRate.value === 24) frameRate.value = v
 })
 
-// ---------- 图片状态（图生视频：单张；首尾帧：起始帧+结束帧）----------
-const referenceFile = ref<FileInfo | null>(null)         // image2video 模式的参考图
-const startFrameFile = ref<FileInfo | null>(null)        // keyframes 模式的起始帧
-const endFrameFile = ref<FileInfo | null>(null)          // keyframes 模式的结束帧
+// ---------- 图片状态（图生视频：支持单张/多张；关键帧模式：最多2张）----------
+const isKeyframesMode = ref(false)              // 是否开启关键帧模式
+const referenceFiles = ref<FileInfo[]>([])      // 图生视频/关键帧模式的参考图列表
 
 // ---------- 视频播放状态 ----------
 const videoEl = ref<HTMLVideoElement | null>(null)
@@ -495,39 +464,31 @@ function appendStylePrompt(tpl: string) {
   }
 }
 
-// ---------- 图片管理（图生视频 + 首尾帧）----------
-// 图生视频：单张参考图
-function handleImageChange(files: FileInfo[]) {
-  if (!files || !files.length) {
-    referenceFile.value = null
-    return
+// ---------- 图片管理（图生视频统一处理：单张/多张/关键帧）----------
+/** 参考图列表变更 */
+function handleImageListChange(files: FileInfo[]) {
+  referenceFiles.value = files || []
+  // 关键帧模式下最多保留2张图
+  if (isKeyframesMode.value && referenceFiles.value.length > 2) {
+    referenceFiles.value = referenceFiles.value.slice(0, 2)
+    ElMessage.warning(t('message.maxKeyframes'))
   }
-  referenceFile.value = files[0]
-  // 图生视频自适应比例：上传参考图后自动匹配最接近的预设比例
-  autoMatchAspectRatio(files[0])
+  // 第一张参考图上传后自动匹配比例
+  if (files && files.length > 0) {
+    autoMatchAspectRatio(files[0])
+  }
 }
-function handleImageClear() {
-  referenceFile.value = null
+function handleImageListClear() {
+  referenceFiles.value = []
 }
 
-// 首尾帧模式：起始帧 / 结束帧
-function handleFrameChange(frameType: string, files: FileInfo[]) {
-  if (!files || !files.length) {
-    if (frameType === 'start') startFrameFile.value = null
-    else endFrameFile.value = null
-    return
+/** 关键帧模式开关切换 */
+function handleKeyframesToggle(enabled: boolean) {
+  if (enabled && referenceFiles.value.length > 2) {
+    // 开启关键帧时如果已有超过2张图，截断到2张并提示
+    referenceFiles.value = referenceFiles.value.slice(0, 2)
+    ElMessage.warning(t('message.maxKeyframes'))
   }
-  if (frameType === 'start') {
-    startFrameFile.value = files[0]
-    // 起始帧上传后自动匹配比例
-    autoMatchAspectRatio(files[0])
-  } else {
-    endFrameFile.value = files[0]
-  }
-}
-function handleFrameClear(frameType: string) {
-  if (frameType === 'start') startFrameFile.value = null
-  else endFrameFile.value = null
 }
 
 /** 根据上传图片的实际尺寸自动匹配最接近的视频宽高比 */
@@ -548,9 +509,19 @@ async function startGenerate() {
     ElMessage.warning(t('message.pleaseFillPrompt'))
     return
   }
-  if (mode.value === 'image2video' && !referenceFile.value) {
-    ElMessage.warning(t('message.pleaseUploadRefImage'))
-    return
+  // 图生视频/关键帧模式需要上传参考图
+  const actualMode = (mode.value === 'image2video' && isKeyframesMode.value) ? 'keyframes' : mode.value
+  if (mode.value === 'image2video') {
+    const validFiles = referenceFiles.value.filter(f => f && (f.base64 || f.url || f.previewUrl))
+    if (validFiles.length < 1) {
+      ElMessage.warning(isKeyframesMode.value ? t('message.pleaseUploadStartFrame') : t('message.pleaseUploadRefImage'))
+      return
+    }
+    // 关键帧模式校验：最多2张图
+    if (isKeyframesMode.value && validFiles.length > 2) {
+      ElMessage.warning(t('message.maxKeyframes'))
+      return
+    }
   }
   if (queue.runningVideoCount >= 5) {
     ElMessage.warning(t('generate.concurrentVideoLimit'))
@@ -590,49 +561,26 @@ async function startGenerate() {
     height: videoHeight,
     seconds: seconds.value,
     frame_rate: frameRate.value,
-    mode: mode.value,
+    mode: actualMode,
     seed: seed.value ? Number(seed.value) : undefined,
     is_public: shareToPlaza.value,
   }
-  if (mode.value === 'image2video' && referenceFile.value) {
-    // 图生视频：单张参考图（优先纯 base64 → url → Data URI 兜底）
-    params.image = referenceFile.value.base64 || referenceFile.value.url || referenceFile.value.previewUrl
-    if (referenceFile.value.mimeType) {
-      params.image_mime_type = referenceFile.value.mimeType
-    }
-  }
-  if (mode.value === 'keyframes') {
-    // 首尾帧模式：起始帧必填，结束帧可选
-    if (!startFrameFile.value) {
-      ElMessage.warning(t('message.pleaseUploadStartFrame'))
-      return
-    }
-    // 收集起始帧和结束帧为 images 数组（后端统一处理）
+  if (mode.value === 'image2video') {
+    // 图生视频（单张/多张）或关键帧模式：统一用 images 数组
+    const validFiles = referenceFiles.value.filter(f => f && (f.base64 || f.url || f.previewUrl))
     const imgs = []
     const mimeTypes = []
-
-    // 起始帧
-    const startImg = startFrameFile.value.base64 || startFrameFile.value.url || startFrameFile.value.previewUrl
-    if (startImg) {
-      imgs.push(startImg.trim())
-      mimeTypes.push(startFrameFile.value.mimeType || 'image/png')
-    }
-
-    // 结束帧（可选）
-    if (endFrameFile.value) {
-      const endImg = endFrameFile.value.base64 || endFrameFile.value.url || endFrameFile.value.previewUrl
-      if (endImg) {
-        imgs.push(endImg.trim())
-        mimeTypes.push(endFrameFile.value.mimeType || 'image/png')
+    for (const f of validFiles) {
+      const img = f.base64 || f.url || f.previewUrl
+      if (img) {
+        imgs.push(img.trim())
+        mimeTypes.push(f.mimeType || 'image/png')
       }
     }
-
-    if (imgs.length === 0) {
-      ElMessage.warning(t('message.pleaseUploadStartFrame'))
-      return
+    if (imgs.length >= 1) {
+      params.images = imgs
+      params.image_mime_types = mimeTypes
     }
-    params.images = imgs
-    params.image_mime_types = mimeTypes
   }
 
   try {
@@ -1086,40 +1034,33 @@ function handleVideoError(e: Event) {
 }
 .tip-title { font-weight: 600; color: var(--agnes-text-primary); margin-bottom: 8px; }
 .tips-card ul { margin: 0; padding-left: 20px; line-height: 1.8; }
-/* 首尾帧上传布局（上下排列） */
-.frame-upload {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+/* 图生视频区域样式 */
+.image-upload-section {
   margin-bottom: 12px;
 }
-.frame-section {
-  width: 100%;
-}
-.frame-section-start .image-uploader,
-.frame-section-end .image-uploader {
-  margin-bottom: 0;
-}
 
-/* 连接线：起始帧 → 结束帧 */
-.frame-connector {
+/* 关键帧模式开关 */
+.keyframes-toggle {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  height: 26px;
-  gap: 2px;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: var(--agnes-bg-secondary);
+  border-radius: 8px;
 }
-.connector-line {
-  width: 2px;
-  height: 8px;
-  background: linear-gradient(to bottom, var(--agnes-primary), var(--agnes-primary-hover));
-  border-radius: 2px;
+.keyframes-toggle .toggle-label {
+  font-size: 13px;
+  color: var(--agnes-text-primary);
+  font-weight: 500;
 }
-.connector-arrow {
+.keyframes-toggle .info-icon {
   font-size: 14px;
+  color: var(--agnes-text-tertiary);
+  cursor: help;
+}
+.keyframes-toggle .info-icon:hover {
   color: var(--agnes-primary);
-  font-weight: bold;
 }
 
 

@@ -100,6 +100,7 @@ interface GenerationConfig {
   aspect_ratio?: string
   resolution?: number
   frame_rate?: number
+  use_keyframes?: boolean  // 是否使用关键帧模式（true=keyframes，false=image2video自动识别）
 }
 
 /** 生成任务选项 */
@@ -680,9 +681,9 @@ function normalizeSize(size: string | undefined): string {
 /**
  * 创建视频生成任务（调用 /api/videos）
  * - text2video：纯文本生成视频
- * - image2video：1 张参考图生成视频
- * - keyframes：2+ 张参考图自动触发关键帧动画（起始帧+结束帧）
- * - 模式根据参考图数量自动推断，无需手动指定
+ * - image2video：自动识别：1 张参考图=单图，2+ 张参考图=多图参考
+ * - keyframes：关键帧动画（需 config.use_keyframes=true，最多 2 张）
+ * - 模式根据参考图数量和 use_keyframes 开关自动推断
  */
 export async function createVideoGenerationTask(ctx: GenerationContext, config: GenerationConfig): Promise<{ task_id: string }> {
   const { prompt, referenceImages } = ctx
@@ -691,12 +692,14 @@ export async function createVideoGenerationTask(ctx: GenerationContext, config: 
   // 合并所有参考图（URL 和 base64 统一排列）
   const allImages = [...imageUrls, ...base64Images]
 
-  // 根据参考图数量自动推断模式
+  // 根据参考图数量 + use_keyframes 开关推断最终模式
   let mode: string
-  if (allImages.length >= 2) {
-    mode = 'keyframes'  // 2+ 张图 → 关键帧（起始帧+结束帧）
-  } else if (allImages.length === 1) {
-    mode = 'image2video'  // 1 张图 → 图生视频
+  if (allImages.length >= 1) {
+    if (config.use_keyframes) {
+      mode = 'keyframes'  // 开启关键帧：强制 keyframes 模式（最多2张）
+    } else {
+      mode = 'image2video'  // 图生视频：自动识别单张/多张
+    }
   } else {
     mode = 'text2video'  // 无图 → 文生视频
   }
@@ -740,13 +743,14 @@ export async function createVideoGenerationTask(ctx: GenerationContext, config: 
 
   // 根据模式传参考图
   if (mode === 'keyframes') {
-    // 关键帧模式：传 images 数组（起始帧 + 结束帧）
-    params.images = allImages.slice(0, 2)
-    params.image_mime_types = allImages.slice(0, 2).map(() => 'image/png')
+    // 关键帧模式：传 images 数组（最多 2 张：起始帧 + 结束帧）
+    const images = allImages.slice(0, 2)
+    params.images = images
+    params.image_mime_types = images.map(() => 'image/png')
   } else if (mode === 'image2video') {
-    // 图生视频模式：取第一张参考图
-    params.image = allImages[0]
-    params.image_mime_type = 'image/png'
+    // 图生视频模式：支持单张或多张参考图，统一用 images 数组
+    params.images = allImages
+    params.image_mime_types = allImages.map(() => 'image/png')
   }
 
   const resp = await createVideoTask(params as VideoGenerationRequest)
@@ -849,6 +853,12 @@ export async function executeMergeVideoGeneration(configId: string, store: Canva
     throw new Error('提示词为空，请填写 composerContent 或 prompt')
   }
 
+  // 关键帧模式校验：最多只能有2张参考图
+  const useKeyframes = configNode.content?.use_keyframes || false
+  if (useKeyframes && ctx.referenceImages && ctx.referenceImages.length > 2) {
+    throw new Error('关键帧模式最多只能连接 2 张图片（起始帧 + 结束帧）')
+  }
+
   if (onProgress) onProgress('building', { inputSummary: ctx.inputSummary })
 
   // 3. 立刻创建 loading 状态的结果节点
@@ -860,6 +870,7 @@ export async function executeMergeVideoGeneration(configId: string, store: Canva
     aspect_ratio: configNode.content?.aspect_ratio || '16:9',
     resolution: configNode.content?.resolution || useModelsStore().defaultVideoResolution,
     frame_rate: configNode.content?.frame_rate || useModelsStore().defaultFrameRate,
+    use_keyframes: useKeyframes,  // 是否使用关键帧模式
   }
 
   // 4. 异步执行生成 + 轮询 + 回填（不阻塞调用方）

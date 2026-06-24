@@ -12,8 +12,10 @@ class VideoGenerationRequest(BaseModel):
 
     模式说明:
     - text2video: 只需 prompt + 视频参数
-    - image2video: 额外提供 image 字段（单张参考图，起始帧）
-    - keyframes: 额外提供 images 数组（首尾帧，起始帧必填 + 结束帧可选，最多2张）
+    - image2video: 图生视频，支持单张或多张参考图
+      - 单张: image 字段（1张起始帧）
+      - 多张: images 数组（2+ 张参考图，指导视频生成）
+    - keyframes: 关键帧动画，额外提供 images 数组（最多2张：起始帧必填 + 结束帧可选）
     """
 
     prompt: str = Field(..., min_length=1, max_length=15000, description="提示词")
@@ -31,13 +33,13 @@ class VideoGenerationRequest(BaseModel):
     width: Optional[int] = Field(default=None, description="视频宽度")
     height: Optional[int] = Field(default=None, description="视频高度")
 
-    # 参考图 / 首尾帧
+    # 参考图 / 多图 / 首尾帧
     mode: Optional[str] = Field(default="text2video", description="模式: text2video | image2video | keyframes")
-    image: Optional[str] = Field(default=None, description="图生视频时的参考图（base64 或 URL）")
-    images: Optional[List[str]] = Field(default=None, description="首尾帧模式时的图片列表（最多2张：起始帧+结束帧）")
+    image: Optional[str] = Field(default=None, description="图生视频时的单张参考图（base64 或 URL）")
+    images: Optional[List[str]] = Field(default=None, description="图生视频多图/关键帧模式时的图片列表")
     # MIME 类型（前端传递，用于构建正确的 Data URI 前缀，避免统一用 image/png 导致格式不匹配）
-    image_mime_type: Optional[str] = Field(default=None, description="image2video 参考图的 MIME 类型（如 image/jpeg）")
-    image_mime_types: Optional[List[str]] = Field(default=None, description="keyframes 各图片的 MIME 类型列表")
+    image_mime_type: Optional[str] = Field(default=None, description="单张参考图的 MIME 类型（如 image/jpeg）")
+    image_mime_types: Optional[List[str]] = Field(default=None, description="多张图片各图片的 MIME 类型列表")
 
     # 种子（可选）
     seed: Optional[int] = Field(default=None, description="随机种子，不传则由 API 自动生成")
@@ -68,16 +70,41 @@ class VideoGenerationRequest(BaseModel):
             )
         return v
 
+    @field_validator("width", "height")
+    @classmethod
+    def validate_dimensions(cls, v):
+        """校验视频宽高：范围 256-3840，且会被自动对齐到 8 的倍数"""
+        if v is None:
+            return v
+        if v < 256 or v > 3840:
+            raise ValueError("视频宽高需在 256-3840 之间")
+        # 自动对齐到 8 的倍数（视频编码硬性要求）
+        aligned = ((v + 7) // 8) * 8
+        return aligned
+
     @model_validator(mode="after")
     def check_mode_requirements(self):
         """
         根据 mode 校验必填字段：
-        - image2video 必须有 image 字段且非空
-        - keyframes 必须有 images 数组且至少 1 张有效图片（最多 2 张：起始帧+结束帧）
+        - image2video: 必须有 image 或 images 字段（至少1张有效图片）
+        - keyframes: 必须有 images 数组且至少 1 张有效图片（最多 2 张：起始帧+结束帧）
         """
         if self.mode == "image2video":
-            if not self.image or not self.image.strip():
-                raise ValueError("image2video 模式需提供参考图（image 字段不能为空）")
+            # 过滤 images 中的空值
+            if self.images:
+                self.images = [img for img in self.images if img and isinstance(img, str) and img.strip()]
+            has_single = self.image and isinstance(self.image, str) and self.image.strip()
+            has_multi = self.images and len(self.images) >= 1
+            if not has_single and not has_multi:
+                raise ValueError("image2video 模式需提供参考图（image 或 images 字段不能为空）")
+            # 如果同时传了 image 和 images，以 images 为准（把 image 放进 images 开头）
+            if has_single and has_multi:
+                self.images = [self.image] + [img for img in self.images if img != self.image]
+                self.image = None
+            # 如果只传了 image 单张，转成 images 数组方便统一处理
+            if has_single and not has_multi:
+                self.images = [self.image]
+                self.image = None
         if self.mode == "keyframes":
             # 先过滤 images 中的空值/None/空字符串
             if self.images:

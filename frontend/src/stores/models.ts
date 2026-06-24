@@ -29,7 +29,7 @@ export const useModelsStore = defineStore('models', () => {
   // 视频分辨率选项
   const videoResolutions = ref<VideoResolutionOption[]>([])
   // 默认视频分辨率（高度）
-  const defaultVideoResolution = ref(768)
+  const defaultVideoResolution = ref(720)
   // 视频时长选项（秒）
   const videoDurations = ref<number[]>([3, 5, 7, 10, 15])
   // 默认视频时长
@@ -66,7 +66,7 @@ export const useModelsStore = defineStore('models', () => {
       videoAspectRatios.value = resp.video_aspect_ratios || []
       defaultVideoAspectRatio.value = resp.default_video_aspect_ratio || '16:9'
       videoResolutions.value = resp.video_resolutions || []
-      defaultVideoResolution.value = resp.default_video_resolution || 768
+      defaultVideoResolution.value = resp.default_video_resolution || 720
       videoDurations.value = resp.video_durations || [3, 5, 7, 10, 15]
       defaultVideoDuration.value = resp.default_video_duration || 5
       videoFrameRates.value = resp.video_frame_rates || [24, 30]

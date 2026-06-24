@@ -15,7 +15,7 @@
 // =====================================================
 
 /** 图片清晰度等级 */
-export type ImageTier = 'sd' | 'hd' | '4k'
+export type ImageTier = 'sd' | 'hd' | '4k' | 'custom'
 
 /** 图片尺寸选项 */
 export interface ImageSizeOption {
@@ -95,20 +95,34 @@ export interface ModelParams {
 // =====================================================
 
 const AGNES_PARAMS: ProviderParamPreset = {
-  // 图片尺寸：基于 Agnes Image 2.0/2.1 Flash 实测真实输出尺寸
-  // 按清晰度等级分组：sd=标清 / hd=超清 / 4k=4K
-  // 实测发现：非标准尺寸会被 Agnes 自动降级到 ~1MP 标清档，故只保留真实输出尺寸
+  // 图片尺寸：基于 Agnes Image 2.0/2.1 Flash 支持的尺寸配置
+  // 按清晰度等级分组：sd=标清 / hd=超清 / 4k=4K / custom=自定义
+  // 注意：宽高使用 16 的倍数对齐，保证编码兼容
   imageSizes: [
-    // 标清档 (~1MP, 耗时 ~20s)
+    // 标清档 (~1MP, 耗时 ~20s) - 完整比例覆盖
     { value: '1024x1024', w: 1,  h: 1,  label: '1:1 方形',  tier: 'sd', pixels: 1048576 },
-    { value: '1312x736',  w: 16, h: 9,  label: '16:9 横屏', tier: 'sd', pixels: 965632 },
-    { value: '1248x832',  w: 3,  h: 2,  label: '3:2 横屏',  tier: 'sd', pixels: 1038336 },
-    { value: '832x1248',  w: 2,  h: 3,  label: '2:3 竖屏',  tier: 'sd', pixels: 1038336 },
-    // 超清档 (2048x2048, 4MP, 耗时 ~56s)
+    { value: '1280x720',  w: 16, h: 9,  label: '16:9 横屏', tier: 'sd', pixels: 921600 },
+    { value: '720x1280',  w: 9,  h: 16, label: '9:16 竖屏', tier: 'sd', pixels: 921600 },
+    { value: '1216x832',  w: 3,  h: 2,  label: '3:2 横屏',  tier: 'sd', pixels: 1011712 },
+    { value: '832x1216',  w: 2,  h: 3,  label: '2:3 竖屏',  tier: 'sd', pixels: 1011712 },
+    { value: '1152x864',  w: 4,  h: 3,  label: '4:3 横屏',  tier: 'sd', pixels: 995328 },
+    { value: '864x1152',  w: 3,  h: 4,  label: '3:4 竖屏',  tier: 'sd', pixels: 995328 },
+    // 超清档 (2-4MP, 耗时 ~56s) - 完整比例覆盖
     { value: '2048x2048', w: 1,  h: 1,  label: '1:1 方形',  tier: 'hd', pixels: 4194304 },
-    // 4K 档 (~8MP, 耗时 ~150s)
-    { value: '3840x2160', w: 16, h: 9,  label: '16:9 横屏', tier: '4k', pixels: 8294400 },
+    { value: '2304x1296', w: 16, h: 9,  label: '16:9 横屏', tier: 'hd', pixels: 2985984 },
+    { value: '1296x2304', w: 9,  h: 16, label: '9:16 竖屏', tier: 'hd', pixels: 2985984 },
+    { value: '2176x1456', w: 3,  h: 2,  label: '3:2 横屏',  tier: 'hd', pixels: 3168256 },
+    { value: '1456x2176', w: 2,  h: 3,  label: '2:3 竖屏',  tier: 'hd', pixels: 3168256 },
+    { value: '2048x1536', w: 4,  h: 3,  label: '4:3 横屏',  tier: 'hd', pixels: 3145728 },
+    { value: '1536x2048', w: 3,  h: 4,  label: '3:4 竖屏',  tier: 'hd', pixels: 3145728 },
+    // 4K 档 (8-16MP, 耗时 ~150s) - 完整比例覆盖
     { value: '4096x4096', w: 1,  h: 1,  label: '1:1 方形',  tier: '4k', pixels: 16777216 },
+    { value: '3840x2160', w: 16, h: 9,  label: '16:9 横屏', tier: '4k', pixels: 8294400 },
+    { value: '2160x3840', w: 9,  h: 16, label: '9:16 竖屏', tier: '4k', pixels: 8294400 },
+    { value: '3840x2560', w: 3,  h: 2,  label: '3:2 横屏',  tier: '4k', pixels: 9830400 },
+    { value: '2560x3840', w: 2,  h: 3,  label: '2:3 竖屏',  tier: '4k', pixels: 9830400 },
+    { value: '3648x2736', w: 4,  h: 3,  label: '4:3 横屏',  tier: '4k', pixels: 9980928 },
+    { value: '2736x3648', w: 3,  h: 4,  label: '3:4 竖屏',  tier: '4k', pixels: 9980928 },
   ],
   defaultImageSize: '1024x1024',
 
@@ -382,3 +396,115 @@ export function sizeToDimensions(value: string): { w: number; h: number } | null
   if (!m) return null
   return { w: parseInt(m[1], 10), h: parseInt(m[2], 10) }
 }
+
+// =====================================================
+// 自定义尺寸相关工具函数
+// =====================================================
+
+/** 图片自定义尺寸范围 */
+export const CUSTOM_IMAGE_SIZE = {
+  minWidth: 256,
+  maxWidth: 4096,
+  minHeight: 256,
+  maxHeight: 4096,
+  align: 16, // 对齐倍数（图片）
+}
+
+/** 视频自定义尺寸范围 */
+export const CUSTOM_VIDEO_SIZE = {
+  minWidth: 256,
+  maxWidth: 3840,
+  minHeight: 256,
+  maxHeight: 2160,
+  align: 8, // 对齐倍数（视频必须是8的倍数）
+}
+
+/**
+ * 将数值对齐到指定倍数
+ */
+export function alignToMultiple(value: number, multiple: number): number {
+  return Math.round(value / multiple) * multiple
+}
+
+/**
+ * 验证自定义图片尺寸是否合法
+ */
+export function validateCustomImageSize(width: number, height: number): { valid: boolean; message?: string } {
+  if (width < CUSTOM_IMAGE_SIZE.minWidth || width > CUSTOM_IMAGE_SIZE.maxWidth) {
+    return { valid: false, message: `宽度需在 ${CUSTOM_IMAGE_SIZE.minWidth}-${CUSTOM_IMAGE_SIZE.maxWidth} 之间` }
+  }
+  if (height < CUSTOM_IMAGE_SIZE.minHeight || height > CUSTOM_IMAGE_SIZE.maxHeight) {
+    return { valid: false, message: `高度需在 ${CUSTOM_IMAGE_SIZE.minHeight}-${CUSTOM_IMAGE_SIZE.maxHeight} 之间` }
+  }
+  return { valid: true }
+}
+
+/**
+ * 验证自定义视频尺寸是否合法
+ */
+export function validateCustomVideoSize(width: number, height: number): { valid: boolean; message?: string } {
+  if (width < CUSTOM_VIDEO_SIZE.minWidth || width > CUSTOM_VIDEO_SIZE.maxWidth) {
+    return { valid: false, message: `宽度需在 ${CUSTOM_VIDEO_SIZE.minWidth}-${CUSTOM_VIDEO_SIZE.maxWidth} 之间` }
+  }
+  if (height < CUSTOM_VIDEO_SIZE.minHeight || height > CUSTOM_VIDEO_SIZE.maxHeight) {
+    return { valid: false, message: `高度需在 ${CUSTOM_VIDEO_SIZE.minHeight}-${CUSTOM_VIDEO_SIZE.maxHeight} 之间` }
+  }
+  return { valid: true }
+}
+
+/**
+ * 根据像素数估算图片积分消耗
+ * 规则：~1MP=1分，~3MP=2分，~8MP=4分，~16MP=6分
+ */
+export function estimateImageCredits(pixels: number): number {
+  const mp = pixels / 1e6
+  if (mp <= 1.5) return 1
+  if (mp <= 5) return 2
+  if (mp <= 12) return 4
+  return 6
+}
+
+/**
+ * 根据宽高创建自定义图片尺寸选项
+ */
+export function createCustomImageSize(width: number, height: number): ImageSizeOption | null {
+  const validation = validateCustomImageSize(width, height)
+  if (!validation.valid) return null
+  const alignedW = alignToMultiple(width, CUSTOM_IMAGE_SIZE.align)
+  const alignedH = alignToMultiple(height, CUSTOM_IMAGE_SIZE.align)
+  const pixels = alignedW * alignedH
+  return {
+    value: `${alignedW}x${alignedH}`,
+    w: 1,
+    h: 1,
+    label: `${alignedW}×${alignedH}`,
+    tier: 'custom',
+    pixels,
+  }
+}
+
+/**
+ * 根据宽高比和高度计算视频宽度（对齐到8的倍数）
+ */
+export function calculateVideoWidth(ratio: string, height: number): number {
+  const [rw, rh] = ratio.split(':').map(Number)
+  if (!rw || !rh) return height
+  const width = Math.round((height * rw) / rh)
+  return alignToMultiple(width, CUSTOM_VIDEO_SIZE.align)
+}
+
+/**
+ * 清晰度等级配置：标签 + 颜色 + 耗时提示（补充custom）
+ */
+export const CUSTOM_TIER_CONFIG = {
+  label: '自定义',
+  color: '#e6a23c',
+  desc: '用户自定义尺寸',
+}
+
+// 在 IMAGE_TIER_CONFIG 中添加 custom
+IMAGE_TIER_CONFIG.custom = CUSTOM_TIER_CONFIG
+IMAGE_TIER_ORDER.push('custom')
+
+/** 自定义分辨率标记 */
+export const CUSTOM_VIDEO_RESOLUTION_VALUE = -1

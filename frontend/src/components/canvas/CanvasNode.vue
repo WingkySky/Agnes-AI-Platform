@@ -230,6 +230,19 @@
                 <option v-for="s in availableDurations" :key="s" :value="s">{{ s }}{{ t('canvas.node.secondsSuffix') }}</option>
               </select>
             </div>
+            <!-- 关键帧模式开关（仅图生视频模式显示） -->
+            <div v-if="configContent.mode === 'image2video'" class="keyframes-toggle-row">
+              <el-switch
+                :model-value="configContent.use_keyframes || false"
+                @update:model-value="updateConfigContent('use_keyframes', $event)"
+                @mousedown.stop
+                size="small"
+              />
+              <span class="toggle-label">{{ t('canvas.node.keyframesMode') }}</span>
+              <el-tooltip :content="t('canvas.node.keyframesModeHint')" placement="top">
+                <el-icon class="info-icon"><InfoFilled /></el-icon>
+              </el-tooltip>
+            </div>
 
             <!-- 提示词输入 -->
             <textarea
@@ -324,6 +337,7 @@
 
 import { computed, ref, nextTick, watch, onMounted, onUnmounted } from 'vue'
 import { Image as ImageIcon, Video, Music2, RefreshCw } from 'lucide-vue-next'
+import { InfoFilled } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { useCanvasStore } from '@/stores/canvas'
 import { useModelsStore } from '@/stores/models'
@@ -1183,6 +1197,31 @@ onUnmounted(() => {
 .config-video-params .config-select {
   width: 100%;
   min-width: 0;
+}
+
+/* 关键帧模式开关行 */
+.keyframes-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 6px 8px;
+  background: var(--agnes-bg-secondary);
+  border-radius: 6px;
+  font-size: 12px;
+}
+.keyframes-toggle-row .toggle-label {
+  color: var(--agnes-text-primary);
+  font-weight: 500;
+}
+.keyframes-toggle-row .info-icon {
+  font-size: 13px;
+  color: var(--agnes-text-tertiary);
+  cursor: help;
+  margin-left: auto;
+}
+.keyframes-toggle-row .info-icon:hover {
+  color: var(--agnes-primary);
 }
 
 /* 提示词输入框 */

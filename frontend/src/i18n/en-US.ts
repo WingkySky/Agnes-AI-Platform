@@ -27,6 +27,30 @@ const enUS = {
     all: 'All',
     optional: 'optional',
     preview: 'preview',
+    credits: 'credits',
+  },
+
+  // ------ Image generation ------
+  image: {
+    landscape: 'Landscape',
+    portrait: 'Portrait',
+    square: 'Square',
+    custom: 'Custom',
+    customSize: 'Custom Size',
+    customInput: 'Custom Size',
+    usePreset: 'Use Preset',
+    width: 'Width',
+    height: 'Height',
+    alignTo16: 'Dimensions auto-aligned to multiple of 16 for compatibility',
+  },
+
+  // ------ Video generation ------
+  video: {
+    customResolution: 'Custom',
+    height: 'Height',
+    alignTo8: 'Dimensions auto-aligned to multiple of 8 (required for video encoding)',
+    resolutionRange: 'Height must be between {min} and {max}',
+    usePresetResolution: 'Use Preset',
   },
 
   // ------ App title / brand ------
@@ -77,6 +101,17 @@ const enUS = {
     sensitiveWords: 'Sensitive Words',
     roleManage: 'Role Management',
     watermarkConfig: 'Watermark Config',
+    credits: 'Credits',
+  },
+
+  // ------ Sidebar menu ------
+  sidebar: {
+    groups: {
+      create: 'Create',
+      personal: 'Personal',
+      community: 'Community',
+      admin: 'Administration',
+    },
   },
 
   // ------ Views ------
@@ -136,13 +171,18 @@ const enUS = {
       image2image: 'Image to Image',
       text2video: 'Text to Video',
       image2video: 'Image to Video',
-      keyframes: 'Start-End Frame',
+      keyframes: 'Keyframe Animation',
       textOnly: 'Prompt only',
       imageOnly: 'Plus image',
-      keyframesHint: 'Start+End',
+      singleOrMultiImage: 'Single/Multi',
+      keyframesHint: 'Start+End frames',
     },
-    startFrameImage: 'Start Frame Image',
-    endFrameImage: 'End Frame Image',
+    referenceImages: 'Reference Images',
+    referenceImagesHint: 'Upload one or more reference images to guide video generation',
+    keyframeImages: 'Keyframe Images',
+    keyframeImagesHint: 'Upload start and end frames (max 2 images)',
+    keyframesMode: 'Keyframe Mode',
+    keyframesModeHint: 'Enable to generate smooth transition between uploaded images (start→end frame), max 2 images supported',
     // Prompt length tier hints
     promptLengthGood: 'Prompt length is good',
     promptLengthLong: 'Prompt is long — consider focusing on key elements',
@@ -396,9 +436,8 @@ const enUS = {
   message: {
     pleaseFillPrompt: 'Please fill in the prompt first',
     pleaseUploadRefImage: 'Please upload a reference image first',
-    pleaseUploadStartFrame: 'Please upload a start frame image',
-    pleaseUploadKeyframeImages: 'Please upload at least one keyframe image',
-    maxKeyframes: 'Maximum 6 keyframes allowed',
+    pleaseUploadStartFrame: 'Please upload keyframe images (at least 1 start frame)',
+    maxKeyframes: 'Maximum 2 images allowed in keyframe mode (start + end frame)',
   },
 
   // ------ Router / page titles ------
@@ -804,6 +843,9 @@ const enUS = {
       generateVideoBtn: 'Generate Video',
       // Video duration unit suffix
       secondsSuffix: 's',
+      // Keyframe mode toggle
+      keyframesMode: 'Keyframe Mode',
+      keyframesModeHint: 'Enable to generate smooth transition between uploaded images (start→end frame), uses max 2 images',
       // Audio node default title
       audio: 'Audio',
       // Default text for generation failure

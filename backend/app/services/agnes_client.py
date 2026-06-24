@@ -655,7 +655,8 @@ class AgnesAIClient:
         #
         # 【Agnes Video API 传参规范】：
         #   - 单图图生视频：image 放顶层（字符串），mode = "ti2vid"
-        #   - 多图 / 关键帧视频：image 放顶层（数组），mode = "keyframes"
+        #   - 多图视频生成：image 数组放 extra_body，不加 mode（或不加 keyframes 标记）
+        #   - 多图 / 关键帧视频：image 放 extra_body（数组），extra_body.mode = "keyframes"
         #     （Video API 与 Image API 不同，所有参数直接放顶层，不使用 extra_body 包装）
         #   - 尾帧通过 image 数组的第二个元素传入
 
@@ -708,11 +709,13 @@ class AgnesAIClient:
         if negative_prompt and negative_prompt.strip():
             body["negative_prompt"] = negative_prompt.strip()
 
-        is_keyframes = (mode == "keyframes") and len(pairs) >= 2
-        is_image2video = len(pairs) > 0 and not is_keyframes
+        is_keyframes = (mode == "keyframes")
+        is_image2video = (mode == "image2video") and len(pairs) >= 1
+        is_single_image = is_image2video and len(pairs) == 1
+        is_multi_ref = is_image2video and len(pairs) >= 2
 
         if is_keyframes:
-            # 多图 / 关键帧模式：image 数组放 extra_body，mode = "keyframes"
+            # 关键帧模式：image 数组放 extra_body，mode = "keyframes"
             # 注意：Video API 顶层 image 字段只接受字符串，数组必须放 extra_body
             body["extra_body"] = {
                 "image": [p[0] for p in pairs],
@@ -723,12 +726,22 @@ class AgnesAIClient:
                 "frame_rate=%d, size=%dx%d, keyframes=%d, prompt=%s",
                 model, _num_frames, _frame_rate, _width, _height, len(pairs), prompt[:80],
             )
-        elif is_image2video:
-            # 单图图生视频：image 放顶层（字符串），mode = "ti2vid"
+        elif is_multi_ref:
+            # 图生视频-多参考图模式：image 数组放 extra_body，不加 mode: keyframes
+            body["extra_body"] = {
+                "image": [p[0] for p in pairs],
+            }
+            logger.info(
+                "[视频生成] 图生视频(多参考图): model=%s, num_frames=%d, "
+                "frame_rate=%d, size=%dx%d, images=%d, prompt=%s",
+                model, _num_frames, _frame_rate, _width, _height, len(pairs), prompt[:80],
+            )
+        elif is_single_image:
+            # 图生视频-单参考图：image 放顶层（字符串），mode = "ti2vid"
             body["image"] = pairs[0][0]
             body["mode"] = "ti2vid"
             logger.info(
-                "[视频生成] 图生视频模式(单图): model=%s, num_frames=%d, "
+                "[视频生成] 图生视频(单图): model=%s, num_frames=%d, "
                 "frame_rate=%d, size=%dx%d, prompt=%s",
                 model, _num_frames, _frame_rate, _width, _height, prompt[:80],
             )

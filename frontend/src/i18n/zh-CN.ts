@@ -28,6 +28,30 @@ const zhCN = {
     all: '全部',
     optional: '可选',
     preview: '预览',
+    credits: '积分',
+  },
+
+  // ------ 图片生成页面 ------
+  image: {
+    landscape: '横屏',
+    portrait: '竖屏',
+    square: '方形',
+    custom: '自定义',
+    customSize: '自定义尺寸',
+    customInput: '自定义尺寸',
+    usePreset: '使用预设',
+    width: '宽度',
+    height: '高度',
+    alignTo16: '宽高自动对齐到 16 的倍数以保证兼容性',
+  },
+
+  // ------ 视频生成页面 ------
+  video: {
+    customResolution: '自定义',
+    height: '高度',
+    alignTo8: '宽高自动对齐到 8 的倍数（视频编码要求）',
+    resolutionRange: '高度需在 {min}-{max} 之间',
+    usePresetResolution: '使用预设',
   },
 
   // ------ 应用标题 / 品牌 ------
@@ -78,6 +102,17 @@ const zhCN = {
     sensitiveWords: '敏感词管理',
     roleManage: '角色管理',
     watermarkConfig: '水印配置',
+    credits: '积分明细',
+  },
+
+  // ------ 侧边栏菜单 ------
+  sidebar: {
+    groups: {
+      create: '创作工具',
+      personal: '个人中心',
+      community: '社区',
+      admin: '系统管理',
+    },
   },
 
   // ------ 通用视图 ------
@@ -137,13 +172,18 @@ const zhCN = {
       image2image: '图生图',
       text2video: '文生视频',
       image2video: '图生视频',
-      keyframes: '首尾帧生成',
+      keyframes: '关键帧动画',
       textOnly: '纯提示',
       imageOnly: '加参考图',
-      keyframesHint: '首帧+尾帧',
+      singleOrMultiImage: '单张/多张',
+      keyframesHint: '首帧+尾帧插值',
     },
-    startFrameImage: '起始帧图片',
-    endFrameImage: '结束帧图片',
+    referenceImages: '参考图片',
+    referenceImagesHint: '上传1张或多张参考图片，指导视频生成',
+    keyframeImages: '关键帧图片',
+    keyframeImagesHint: '上传起始帧和结束帧（最多2张）',
+    keyframesMode: '关键帧模式',
+    keyframesModeHint: '开启后将在上传的图片之间生成平滑过渡动画（起始帧→结束帧），最多支持2张图片',
     // 提示词长度分阶提示
     promptLengthGood: '提示词长度适中',
     promptLengthLong: '提示词较长，建议精简核心要素',
@@ -397,9 +437,8 @@ const zhCN = {
   message: {
     pleaseFillPrompt: '请先填写提示词',
     pleaseUploadRefImage: '请先上传参考图',
-    pleaseUploadStartFrame: '请上传起始帧图片',
-    pleaseUploadKeyframeImages: '请至少上传一张关键帧图片',
-    maxKeyframes: '最多添加 6 张关键帧',
+    pleaseUploadStartFrame: '请上传关键帧图片（至少1张起始帧）',
+    maxKeyframes: '关键帧模式最多上传2张图片（起始帧+结束帧）',
   },
 
   // ------ 路由 / 页面标题 ------
@@ -805,6 +844,9 @@ const zhCN = {
       generateVideoBtn: '生成视频',
       // 视频时长单位后缀
       secondsSuffix: '秒',
+      // 关键帧模式开关
+      keyframesMode: '关键帧模式',
+      keyframesModeHint: '开启后将在上传的图片之间生成平滑过渡动画（起始帧→结束帧），最多使用2张图片',
       // 音频节点默认标题
       audio: '音频',
       // 生成失败默认文案
