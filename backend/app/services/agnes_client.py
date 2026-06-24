@@ -424,11 +424,25 @@ class AgnesAIClient:
 
     @classmethod
     def _normalize_image_input(
-        cls, raw: str, default_mime: str = "image/png"
+        cls, raw: str, default_mime: str = "image/png", return_pure_b64: bool = False
     ) -> tuple:
         """
         统一归一化图像输入：URL / Data URI / 纯 base64 都走这个入口。
+
+        参数:
+            raw: 原始输入字符串（URL / Data URI / 纯 base64）
+            default_mime: 纯 base64 时默认 MIME 类型
+            return_pure_b64:
+                - False（默认，图片 API 用）: 返回 Data URI 格式 (data:image/xxx;base64,XXXX)
+                - True（视频 API 用）: 对 base64 输入返回纯 base64 字符串（不带 data: 前缀）
+
         返回 (normalized_value, size)，size 为 (width, height) 或 None（URL 无法本地解码）。
+
+        【重要格式差异】经实测（2026-06）：
+            - 图片 API (images/generations): 接受 Data URI 格式，放 extra_body.image 数组
+            - 视频 API (videos) 单图图生视频: 只接受纯 base64（不带 data: 前缀），
+              放顶层 image 字段（字符串），mode="ti2vid"
+              传 Data URI 会报 "Invalid image: Incorrect padding"
         """
         if not raw or not isinstance(raw, str):
             return ("", None)
@@ -442,14 +456,20 @@ class AgnesAIClient:
             if comma_idx < 0:
                 # 异常 Data URI：退化为纯 base64 分支
                 b64 = cls._clean_and_pad_base64(s)
+                if return_pure_b64:
+                    return (b64, cls._detect_image_size(b64))
                 out = f"data:{default_mime};base64,{b64}"
                 return (out, cls._detect_image_size(b64))
-            prefix = s[:comma_idx + 1]
             b64 = cls._clean_and_pad_base64(s[comma_idx + 1:])
+            if return_pure_b64:
+                return (b64, cls._detect_image_size(b64))
+            prefix = s[:comma_idx + 1]
             out = f"{prefix}{b64}"
             return (out, cls._detect_image_size(b64))
         # 纯 base64
         b64 = cls._clean_and_pad_base64(s)
+        if return_pure_b64:
+            return (b64, cls._detect_image_size(b64))
         out = f"data:{default_mime};base64,{b64}"
         return (out, cls._detect_image_size(b64))
 
@@ -643,21 +663,20 @@ class AgnesAIClient:
         _num_frames = min(_num_frames, 441)
 
         # ── 图生视频模式 / 关键帧动画处理 ──
-        # 经实测 Agnes 对非平台托管 URL 均失败：
-        #   - 外部公开图 URL（维基/示例） -> FAILURE ("Invalid image")
-        #   - base64 Data URI -> 永远 NOT_START 不会启动
-        # 仅接受 Agnes 自己平台返回的 URL（形如 https://platform-outputs.agnes-ai.space/...jpg）
-        # 因此：
-        #   1) 先归一化 base64 / Data URI（_normalize_image_input）
-        #   2) 把非 Agnes-URL 的图调用一次 images/generations 做 pass-through，拿到平台托管 URL
-        #   3) 用该 URL 调 /v1/videos
-        # 同时用第一张参考图的真实宽高修正 width/height，避免与请求值不一致
+        #
+        # 【经实测确认（2026-06）】Agnes Video V2.0 对图片输入的支持：
+        #   ✅ 单图图生视频（mode=ti2vid）：顶层 image 字段支持**纯 base64** 字符串（不带 data: 前缀），
+        #      无需先调 images/generations 做 pass-through！直接传即可成功。
+        #      —— 这彻底解决了自上传图片生视频"先跑一次图生图拿公网URL"导致的缓慢和出错问题。
+        #   ❌ 单图图生视频传 Data URI（带 data:image/xxx;base64, 前缀）会报："Invalid image: Incorrect padding"
+        #   ⚠️  外部非 Agnes 公网 URL 仍可能失败，保持原有 pass-through 逻辑兜底
+        #   ❓ 多图/关键帧模式的 base64 支持未实测，保持原有 pass-through 逻辑
+        #   ✅ Agnes 平台托管 URL（https://platform-outputs.agnes-ai.space/...）直接可用
         #
         # 【Agnes Video API 传参规范】：
-        #   - 单图图生视频：image 放顶层（字符串），mode = "ti2vid"
+        #   - 单图图生视频：image 放顶层（纯 base64 字符串或 Agnes URL），mode = "ti2vid"
         #   - 多图视频生成：image 数组放 extra_body，不加 mode（或不加 keyframes 标记）
         #   - 多图 / 关键帧视频：image 放 extra_body（数组），extra_body.mode = "keyframes"
-        #     （Video API 与 Image API 不同，所有参数直接放顶层，不使用 extra_body 包装）
         #   - 尾帧通过 image 数组的第二个元素传入
 
         refs_with_mime: list = []
@@ -673,16 +692,39 @@ class AgnesAIClient:
                     )
                     refs_with_mime.append((img.strip(), mime or "image/png"))
 
+        # 判断是否为【单图图生视频】模式：此模式支持纯 base64 直传，跳过 pass-through
+        is_single_i2v_direct = (mode == "image2video") and len(refs_with_mime) == 1
+
         pairs: list = []  # [(要写入 body 的 uri, 真实宽高 or None)]
         if refs_with_mime:
-            for raw, _mime in refs_with_mime:
-                _uri, _size = self._normalize_image_input(raw, default_mime=_mime)
+            for idx, (raw, _mime) in enumerate(refs_with_mime):
+                # 判断输入是否为 base64/Data URI（非 URL）
+                raw_stripped = raw.strip()
+                raw_lower = raw_stripped.lower()
+                is_b64_input = not raw_lower.startswith(("http://", "https://"))
+
+                if is_single_i2v_direct and is_b64_input and idx == 0:
+                    # 单图图生视频 + base64 输入：直接归一化为纯 base64（不带 data: 前缀），
+                    # 跳过 _to_agnes_url 的图生图 pass-through，显著提速
+                    _pure_b64, _size = self._normalize_image_input(
+                        raw_stripped, default_mime=_mime, return_pure_b64=True
+                    )
+                    if _pure_b64:
+                        pairs.append((_pure_b64, _size))
+                        logger.info(
+                            "[视频生成] 单图图生视频: 使用纯 base64 直传（跳过 pass-through）, b64_len=%d",
+                            len(_pure_b64),
+                        )
+                    continue
+
+                # 其他情况（外部 URL / 多图 / 关键帧）：保持原有逻辑
+                _uri, _size = self._normalize_image_input(raw_stripped, default_mime=_mime)
                 if not _uri:
                     continue
+                # URL 输入走 pass-through；如果 pass-through 失败，兜底用原始 uri
                 try:
                     final_uri = await self._to_agnes_url(_uri)
                 except Exception as e:
-                    # 即使转换失败，也继续用归一化的 uri（不阻断任务）
                     logger.warning("[视频生成] 参考图转 Agnes URL 失败: %s", e)
                     final_uri = _uri
                 pairs.append((final_uri, _size))
