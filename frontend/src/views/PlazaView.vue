@@ -59,13 +59,13 @@
           />
 
           <!-- 图片缩略图（带水印） -->
-          <WatermarkOverlay v-if="work.type === 'image'" class="thumb-wrapper">
-            <img
-              :src="work.result_url ?? ''"
-              :alt="work.prompt"
-              class="card-img-contain"
-              loading="lazy" />
-          </WatermarkOverlay>
+          <ImageWithWatermark
+            v-if="work.type === 'image'"
+            :src="work.result_url ?? ''"
+            :alt="work.prompt"
+            :img-class="'card-img-contain'"
+            loading="lazy"
+            fit="cover" />
           <!-- 视频缩略图：首帧静态图 + 悬停 GIF 动态预览 -->
           <div
             v-else
@@ -145,11 +145,12 @@
       <div v-if="detail" class="detail-content">
         <!-- 左：大图 / 视频播放器 -->
         <div class="detail-media">
-          <WatermarkOverlay v-if="detail.type === 'image'" class="detail-image-wrapper">
-            <img
-              :src="detail.result_url ?? ''"
-              :alt="detail.prompt" />
-          </WatermarkOverlay>
+          <ImageWithWatermark
+            v-if="detail.type === 'image'"
+            :src="detail.result_url ?? ''"
+            :alt="detail.prompt"
+            :img-class="'detail-image'"
+            fit="contain" />
           <!-- 视频：result_url 为公开 CDN，<video> 可直接播放（代理流需鉴权无法携带 JWT） -->
           <video
             v-else
@@ -245,7 +246,7 @@ import {
 } from '@/api/plaza'
 import { useUserStore } from '@/stores/user'
 import { useI18n } from '@/i18n'
-import WatermarkOverlay from '@/components/WatermarkOverlay.vue'
+import ImageWithWatermark from '@/components/ImageWithWatermark.vue'
 
 // keep-alive 缓存匹配依赖组件名
 defineOptions({ name: 'PlazaView' })

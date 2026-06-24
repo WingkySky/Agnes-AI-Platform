@@ -72,38 +72,51 @@
           </div>
         </div>
 
-        <!-- 中间：顶部大类导航（分组下拉） -->
+        <!-- 中间：顶部导航（智能显示：单菜单项直接显示，多菜单项下拉分组） -->
         <nav class="app-nav">
-          <el-dropdown
-            v-for="group in menuStore.topNav"
-            :key="group.key"
-            trigger="hover"
-            placement="bottom"
-            popper-class="nav-dropdown-popper"
-            @command="handleNavCommand"
-          >
-            <span
-              class="nav-item nav-group"
-              :class="{ active: isTopGroupActive(group) }"
+          <template v-for="group in menuStore.topNav" :key="group.key">
+            <!-- 单菜单项分组：直接显示为一级菜单，点击跳转 -->
+            <router-link
+              v-if="group.items.length === 1"
+              :to="group.items[0].path"
+              class="nav-item"
+              active-class="active"
             >
-              <el-icon><component :is="getIcon(group.icon)" /></el-icon>
-              <span>{{ group.label }}</span>
-              <el-icon class="dropdown-arrow"><ArrowDown /></el-icon>
-            </span>
-            <template #dropdown>
-              <el-dropdown-menu class="nav-dropdown-menu">
-                <el-dropdown-item
-                  v-for="item in group.items"
-                  :key="item.key"
-                  :command="item.path"
-                  class="nav-dropdown-item"
-                >
-                  <el-icon v-if="getIcon(item.icon)"><component :is="getIcon(item.icon)" /></el-icon>
-                  <span>{{ item.label }}</span>
-                </el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
+              <el-icon v-if="getIcon(group.items[0].icon)"><component :is="getIcon(group.items[0].icon)" /></el-icon>
+              <span>{{ group.items[0].label }}</span>
+            </router-link>
+
+            <!-- 多菜单项分组：显示为下拉菜单 -->
+            <el-dropdown
+              v-else
+              trigger="hover"
+              placement="bottom"
+              popper-class="nav-dropdown-popper"
+              @command="handleNavCommand"
+            >
+              <span
+                class="nav-item nav-group"
+                :class="{ active: isTopGroupActive(group) }"
+              >
+                <el-icon><component :is="getIcon(group.icon)" /></el-icon>
+                <span>{{ group.label }}</span>
+                <el-icon class="dropdown-arrow"><ArrowDown /></el-icon>
+              </span>
+              <template #dropdown>
+                <el-dropdown-menu class="nav-dropdown-menu">
+                  <el-dropdown-item
+                    v-for="item in group.items"
+                    :key="item.key"
+                    :command="item.path"
+                    class="nav-dropdown-item"
+                  >
+                    <el-icon v-if="getIcon(item.icon)"><component :is="getIcon(item.icon)" /></el-icon>
+                    <span>{{ item.label }}</span>
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </template>
         </nav>
 
         <!-- 右上角：全局操作区 -->
@@ -325,7 +338,7 @@ function handleNavCommand(path: string) {
 
 // 判断当前路由是否属于某个顶部分组（用于高亮）
 function isTopGroupActive(group: ResolvedTopNavGroup): boolean {
-  return group.items.some(item => route.path.startsWith(item.path))
+  return group.items.some(item => route.path === item.path || route.path.startsWith(item.path + '/'))
 }
 
 // 每当 locale 变化时返回对应的 Element Plus 语言对象

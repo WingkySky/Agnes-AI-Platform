@@ -91,17 +91,16 @@
             <span class="empty-text">{{ t('canvas.node.emptyImage') }}</span>
           </div>
           <!-- 有图：显示图片（object-contain） -->
-          <WatermarkOverlay v-else class="canvas-image-wrapper">
-            <img
-              :src="metadata.content"
-              :alt="panel.title || ''"
-              class="image-img"
-              :class="{ 'object-fill': metadata.freeResize }"
-              draggable="false"
-              @dragstart.prevent
-              @load="onImageLoad"
-            />
-          </WatermarkOverlay>
+          <ImageWithWatermark
+            v-else
+            :src="metadata.content"
+            :alt="panel.title || ''"
+            :img-class="['image-img', { 'object-fill': metadata.freeResize }]"
+            :fit="metadata.freeResize ? 'fill' : 'contain'"
+            draggable="false"
+            @dragstart.prevent
+            @load="onImageLoad"
+          />
         </div>
 
         <!-- 视频节点：空状态 / 有视频显示播放器 -->
@@ -341,7 +340,7 @@ import { InfoFilled } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { useCanvasStore } from '@/stores/canvas'
 import { useModelsStore } from '@/stores/models'
-import WatermarkOverlay from '@/components/WatermarkOverlay.vue'
+import ImageWithWatermark from '@/components/ImageWithWatermark.vue'
 
 /* ---------- i18n ---------- */
 const { t } = useI18n()

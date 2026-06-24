@@ -236,6 +236,8 @@ export interface TopNavGroup {
 export const TOP_NAV_GROUPS: TopNavGroup[] = [
   { key: 'create', label_zh: '创作工具', label_en: 'Create', icon: 'EditPen', sort_order: 1 },
   { key: 'community', label_zh: '社区', label_en: 'Community', icon: 'Connection', sort_order: 2 },
+  { key: 'personal', label_zh: '个人中心', label_en: 'Personal', icon: 'User', sort_order: 3 },
+  { key: 'admin', label_zh: '系统管理', label_en: 'Administration', icon: 'Setting', sort_order: 4 },
 ]
 
 /**

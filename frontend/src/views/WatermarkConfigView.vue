@@ -162,7 +162,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { useI18n } from 'vue-i18n'
+import { useI18n } from '@/i18n'
 import { ElMessage } from 'element-plus'
 import { Upload, Picture } from '@element-plus/icons-vue'
 import { getWatermarkConfig, updateWatermarkConfig } from '@/api/admin'

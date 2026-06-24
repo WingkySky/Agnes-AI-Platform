@@ -46,6 +46,24 @@ export function useDownload() {
     const match = cd.match(/filename="?([^"]+)"?/)
     if (match) filename = match[1]
 
+    triggerDownload(blob, filename)
+  }
+
+  /**
+   * 通过后端水印接口下载带水印的图片（任意 URL）
+   * @param imageUrl 原始图片 URL
+   * @param defaultFilename 默认文件名
+   */
+  async function downloadWatermarkedImage(imageUrl: string, defaultFilename: string): Promise<void> {
+    const baseURL = import.meta.env.VITE_API_BASE_URL || ''
+    const proxyUrl = `${baseURL}/api/images/download/watermark?url=${encodeURIComponent(imageUrl)}`
+    await downloadViaProxy(proxyUrl, defaultFilename)
+  }
+
+  /**
+   * 触发浏览器下载 Blob 文件
+   */
+  function triggerDownload(blob: Blob, filename: string): void {
     const blobUrl = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = blobUrl
@@ -56,5 +74,5 @@ export function useDownload() {
     URL.revokeObjectURL(blobUrl)
   }
 
-  return { downloadViaProxy }
+  return { downloadViaProxy, downloadWatermarkedImage, triggerDownload }
 }

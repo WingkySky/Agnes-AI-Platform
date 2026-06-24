@@ -135,29 +135,43 @@
           <div class="preview-nav">
             <span class="preview-brand">Agnes AI</span>
             <div class="preview-nav-items">
-              <el-dropdown
-                v-for="group in previewTopNav"
-                :key="group.key"
-                trigger="hover"
-                placement="bottom"
-              >
-                <span class="preview-nav-group">
-                  <el-icon v-if="group.icon"><component :is="getIcon(group.icon)" /></el-icon>
-                  {{ group.label }}
-                  <el-icon class="preview-arrow"><ArrowDown /></el-icon>
-                </span>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item
-                    v-for="item in group.items"
-                    :key="item.key"
-                  >
-                    <el-icon v-if="item.icon"><component :is="getIcon(item.icon)" /></el-icon>
-                    {{ item.label }}
-                  </el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
+              <template v-for="group in previewTopNav" :key="group.key">
+                <!-- 单菜单项：直接显示标签 -->
+                <el-tag
+                  v-if="group.items.length === 1"
+                  size="small"
+                  type="primary"
+                  effect="plain"
+                  class="preview-tag"
+                >
+                  <el-icon v-if="group.items[0].icon"><component :is="getIcon(group.items[0].icon)" /></el-icon>
+                  {{ group.items[0].label }}
+                </el-tag>
+
+                <!-- 多菜单项：下拉分组 -->
+                <el-dropdown
+                  v-else
+                  trigger="hover"
+                  placement="bottom"
+                >
+                  <span class="preview-nav-group">
+                    <el-icon v-if="group.icon"><component :is="getIcon(group.icon)" /></el-icon>
+                    {{ group.label }}
+                    <el-icon class="preview-arrow"><ArrowDown /></el-icon>
+                  </span>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item
+                        v-for="item in group.items"
+                        :key="item.key"
+                      >
+                        <el-icon v-if="item.icon"><component :is="getIcon(item.icon)" /></el-icon>
+                        {{ item.label }}
+                      </el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </template>
             </div>
           </div>
         </div>
@@ -431,6 +445,12 @@ onMounted(() => {
 .preview-arrow {
   font-size: 10px;
   opacity: 0.7;
+}
+
+.preview-tag {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .preview-body {

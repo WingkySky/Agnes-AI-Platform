@@ -324,8 +324,19 @@
 
       <!-- ============ 图片预览弹窗 ============ -->
       <div v-if="previewImage" class="preview-overlay" @click="previewImage = null">
-        <img :src="previewImage" class="preview-img" @click.stop />
+        <!-- 关闭按钮 -->
         <button class="preview-close" @click="previewImage = null">×</button>
+        <!-- 下载按钮（走后端带水印下载） -->
+        <button class="preview-download" @click.stop="downloadPreviewImage" :title="t('history.download')">
+          <el-icon><Download /></el-icon>
+        </button>
+        <!-- 使用带水印的图片组件，自带防右键另存保护 -->
+        <ImageWithWatermark
+          :src="previewImage"
+          fit="contain"
+          class="preview-img"
+          @click.stop
+        />
       </div>
 
       <!-- ============ 快捷生成配置弹窗（从文本/图片节点快速触发生图/生视频） ============ -->
@@ -362,6 +373,7 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'v
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Download, Pencil, Plus, LayoutGrid } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
+import { useDownload } from '@/composables/useDownload'
 import { useCanvasStore } from '@/stores/canvas'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useModelsStore } from '@/stores/models'
@@ -381,6 +393,8 @@ import CanvasImageCropDialog from '@/components/canvas/CanvasImageCropDialog.vue
 import CanvasImageSplitDialog from '@/components/canvas/CanvasImageSplitDialog.vue'
 import CanvasImageUpscaleDialog from '@/components/canvas/CanvasImageUpscaleDialog.vue'
 import CanvasImageAngleDialog from '@/components/canvas/CanvasImageAngleDialog.vue'
+// 带水印的图片组件（预览大图时显示水印）
+import ImageWithWatermark from '@/components/ImageWithWatermark.vue'
 // 画布模板库组件
 import CanvasManagerPopover from '@/components/canvas/CanvasManagerPopover.vue'
 // 画布积分预估与校验（生图/生视频/局部编辑前预检积分）
@@ -395,6 +409,7 @@ import {
 import { getUpstreamNodes } from '@/lib/canvas-generation'
 
 const { t } = useI18n()
+const { downloadViaProxy, downloadWatermarkedImage } = useDownload()
 
 const store = useCanvasStore()
 const taskQueue = useTaskQueueStore()
@@ -1460,13 +1475,38 @@ async function handleHoverSaveAsset() {
   }
 }
 
-function handleHoverDownload() {
+/**
+ * 悬停工具栏：下载节点内容
+ * - 图片：走后端水印代理接口，下载带水印版本
+ * - 视频：直接代理下载（视频水印暂未实现）
+ */
+async function handleHoverDownload() {
   const p = hoveredPanel.value
-  if (p?.content?.content) {
-    const a = document.createElement('a')
-    a.href = p.content.content as string
-    a.download = `download-${Date.now()}`
-    a.click()
+  if (!p?.content?.content) {
+    ElMessage.warning(t('canvas.messages.noDownloadContent'))
+    return
+  }
+
+  const contentUrl = p.content.content as string
+  const isVideo = p.type === 'video'
+  const ext = isVideo ? 'mp4' : 'png'
+  const defaultName = `agnes-${p.type}-${p.id.slice(0, 8)}.${ext}`
+
+  try {
+    if (isVideo) {
+      // 视频：暂时通过通用代理下载（视频水印后续再实现）
+      // 注意：当前没有通用视频代理接口，先提示用户
+      // 直接打开新页签作为临时方案，后续添加视频水印接口后替换
+      window.open(contentUrl, '_blank', 'noopener,noreferrer')
+      ElMessage.info(t('canvas.messages.videoDownloadTip'))
+    } else {
+      // 图片：通过后端水印接口下载带水印版本
+      await downloadWatermarkedImage(contentUrl, defaultName)
+      ElMessage.success(t('canvas.messages.downloadStarted'))
+    }
+  } catch (err: any) {
+    console.warn('[Canvas] 下载失败：', err)
+    ElMessage.error(err?.message || t('canvas.messages.downloadFailed'))
   }
 }
 
@@ -2117,6 +2157,21 @@ function handleHoverViewLarge() {
   if (p?.content?.content) previewImage.value = p.content.content as string
 }
 
+/**
+ * 预览大图弹窗：下载按钮（走后端带水印下载）
+ */
+async function downloadPreviewImage() {
+  if (!previewImage.value) return
+  try {
+    const defaultName = `agnes-preview-${Date.now()}.png`
+    await downloadWatermarkedImage(previewImage.value, defaultName)
+    ElMessage.success(t('canvas.messages.downloadStarted'))
+  } catch (err: any) {
+    console.warn('[Canvas Preview] 下载失败：', err)
+    ElMessage.error(err?.message || t('canvas.messages.downloadFailed'))
+  }
+}
+
 // ==================== 底部工具栏事件 ====================
 
 const showAppearancePanel = ref(false)
@@ -2727,9 +2782,32 @@ async function handleUserLogout() {
   display: flex;
   align-items: center;
   justify-content: center;
+  z-index: 10;
 }
 
 .preview-close:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.preview-download {
+  position: absolute;
+  top: 16px;
+  right: 66px;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.preview-download:hover {
   background: rgba(255, 255, 255, 0.25);
 }
 

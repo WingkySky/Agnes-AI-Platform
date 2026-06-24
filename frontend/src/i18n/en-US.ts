@@ -33,6 +33,11 @@ const enUS = {
     error: 'Error',
   },
 
+  // ------ Watermark ------
+  watermark: {
+    useDownloadButton: 'This image is watermarked. Please use the download button to save the watermarked version.',
+  },
+
   // ------ Image generation ------
   image: {
     landscape: 'Landscape',
@@ -939,6 +944,10 @@ const enUS = {
       noSaveContent: 'Node has no savable content',
       savedToAssets: 'Saved to asset library',
       saveFailed: 'Save failed',
+      noDownloadContent: 'Node has no downloadable content',
+      downloadStarted: 'Download started',
+      downloadFailed: 'Download failed',
+      videoDownloadTip: 'Video watermark is not yet implemented, opening original video in new tab',
       textContentEmpty: 'Text content is empty',
       promptCopied: 'Prompt copied',
       copyFailed: 'Copy failed',

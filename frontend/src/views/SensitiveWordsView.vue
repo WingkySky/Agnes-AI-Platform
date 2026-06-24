@@ -210,7 +210,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Plus, Search, Refresh, Upload } from '@element-plus/icons-vue'
-import { useI18n } from 'vue-i18n'
+import { useI18n } from '@/i18n'
 import {
   getSensitiveWords,
   createSensitiveWord,

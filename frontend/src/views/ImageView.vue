@@ -167,24 +167,26 @@
 
           <!-- 情况 B：有选中任务且已成功 -->
           <div v-else-if="activeTask && activeTask.status === 'success'" class="result-wrap">
-            <WatermarkOverlay v-if="resultUrl" class="result-img-wrapper">
-              <img
-                :src="resultUrl"
-                class="result-img"
-                alt="generated"
-                @click="openViewerWithUrl(resultUrl)"
-                :title="t('imageViewer.title')"
-              />
-            </WatermarkOverlay>
-            <WatermarkOverlay v-else-if="(activeTask as any).imageB64" class="result-img-wrapper">
-              <img
-                :src="'data:image/png;base64,' + (activeTask as any).imageB64"
-                class="result-img"
-                alt="generated"
-                @click="openViewerWithUrl('data:image/png;base64,' + (activeTask as any).imageB64)"
-                :title="t('imageViewer.title')"
-              />
-            </WatermarkOverlay>
+            <ImageWithWatermark
+              v-if="resultUrl"
+              :src="resultUrl"
+              :alt="'generated'"
+              :img-class="'result-img'"
+              fit="contain"
+              :title="t('imageViewer.title')"
+              style="cursor: zoom-in"
+              @click="openViewerWithUrl(resultUrl)"
+            />
+            <ImageWithWatermark
+              v-else-if="(activeTask as any).imageB64"
+              :src="'data:image/png;base64,' + (activeTask as any).imageB64"
+              :alt="'generated'"
+              :img-class="'result-img'"
+              fit="contain"
+              :title="t('imageViewer.title')"
+              style="cursor: zoom-in"
+              @click="openViewerWithUrl('data:image/png;base64,' + (activeTask as any).imageB64)"
+            />
             <div class="result-meta">
               <div class="meta-row">
               <span class="meta-label">{{ t('params.prompt') }}：</span>
@@ -259,7 +261,7 @@ import {
 import PromptTemplates from '@/components/PromptTemplates.vue'
 import ImageUploader from '@/components/ImageUploader.vue'
 import ImageViewer from '@/components/ImageViewer.vue'
-import WatermarkOverlay from '@/components/WatermarkOverlay.vue'
+import ImageWithWatermark from '@/components/ImageWithWatermark.vue'
 import ParamSelector from '@/components/ParamSelector.vue'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useModelsStore } from '@/stores/models'

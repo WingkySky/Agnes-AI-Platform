@@ -108,13 +108,14 @@
           <el-checkbox :model-value="selectedIds.includes(item.id)" />
         </div>
         <div class="card-preview">
-          <WatermarkOverlay v-if="item.type === 'image'" class="card-image-wrapper">
-            <img
-              :src="item.result_url ?? ''"
-              :alt="t('history.thumbnailAlt')"
-              loading="lazy"
-            />
-          </WatermarkOverlay>
+          <ImageWithWatermark
+            v-if="item.type === 'image'"
+            :src="item.result_url ?? ''"
+            :alt="t('history.thumbnailAlt')"
+            loading="lazy"
+            fit="cover"
+            class="card-image-wrapper"
+          />
           <!-- 视频卡片：首帧缩略图 + 悬停 GIF 预览 -->
           <div
             v-else-if="item.type === 'video'"
@@ -243,14 +244,15 @@
       destroy-on-close>
       <div v-if="detailItem" class="detail-content">
         <div class="detail-media">
-          <WatermarkOverlay v-if="detailItem.type === 'image'" class="detail-image-wrapper">
-            <img
-              :src="detailItem.result_url ?? ''"
-              :alt="t('history.imageDetailAlt')"
-              @click="openImageViewer(detailItem)"
-              class="detail-image"
-            />
-          </WatermarkOverlay>
+          <ImageWithWatermark
+            v-if="detailItem.type === 'image'"
+            :src="detailItem.result_url ?? ''"
+            :alt="t('history.imageDetailAlt')"
+            :img-class="'detail-image'"
+            fit="contain"
+            style="cursor: zoom-in"
+            @click="openImageViewer(detailItem)"
+          />
           <div v-else class="detail-video-wrap">
             <video
               v-if="detailItem.result_url"
@@ -402,7 +404,7 @@ import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useI18n } from '@/i18n'
 import { formatPixels, getTierBySize, IMAGE_TIER_CONFIG } from '@/config/model-params'
 import type { GenerationRecord } from '@/types'
-import WatermarkOverlay from '@/components/WatermarkOverlay.vue'
+import ImageWithWatermark from '@/components/ImageWithWatermark.vue'
 
 const { t } = useI18n()
 const route = useRoute()

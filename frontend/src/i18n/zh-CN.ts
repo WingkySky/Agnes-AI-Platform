@@ -34,6 +34,11 @@ const zhCN = {
     error: '错误',
   },
 
+  // ------ 水印相关 ------
+  watermark: {
+    useDownloadButton: '图片已加水印，请使用下载按钮保存带水印图片',
+  },
+
   // ------ 图片生成页面 ------
   image: {
     landscape: '横屏',
@@ -940,6 +945,10 @@ const zhCN = {
       noSaveContent: '节点没有可保存的内容',
       savedToAssets: '已保存到素材库',
       saveFailed: '保存失败',
+      noDownloadContent: '节点没有可下载的内容',
+      downloadStarted: '下载已开始',
+      downloadFailed: '下载失败',
+      videoDownloadTip: '视频水印功能暂未实现，已在新标签页打开原视频',
       textContentEmpty: '文本内容为空',
       promptCopied: '已复制提示词',
       copyFailed: '复制失败',

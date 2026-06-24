@@ -7,13 +7,14 @@
        - 按钮左右 / 上下 翻转
        - 双击图片一键放大到 100% / 还原
        - 右上角关闭按钮 + ESC 键
-       - 底部工具栏：缩放按钮 / 旋转 / 下载 / 新标签页 / 重置
+       - 底部工具栏：缩放按钮 / 旋转 / 下载 / 重置
        - 点击背景遮罩关闭
+       - 图片水印显示 + 防右键另存保护
      使用方式：
        <ImageViewer v-model:visible="show" :url="imageUrl" :download-url="downloadUrl" />
      其中：
-       - url：图片显示的 URL（必填）
-       - download-url：下载时使用的 URL（可选，缺省与 url 相同）
+       - url：图片显示的 URL（必填，显示带水印）
+       - download-url：下载时使用的 URL（可选，应为后端带水印下载接口）
      ===================================================== -->
 
 <template>
@@ -37,17 +38,50 @@
         @touchmove.prevent="onTouchMove"
         @touchend="onTouchEnd"
         @dblclick="onDblClick"
+        @contextmenu.prevent="handleContextMenu"
       >
-        <img
-          ref="imgEl"
-          :src="url"
-          class="viewer-img"
-          :style="imgStyle"
-          draggable="false"
-          @load="onImgLoaded"
-          @error="onImgError"
+        <!-- 图片容器：应用缩放/旋转/翻转 transform -->
+        <div
+          ref="imgContainerEl"
+          class="viewer-img-container"
+          :class="[`wm-position-${wmConfig?.position || 'bottom-right'}`]"
+          :style="imgContainerStyle"
           @click.stop
-        />
+          @dragstart.prevent
+        >
+          <!-- 原图 -->
+          <img
+            ref="imgEl"
+            :src="url"
+            class="viewer-img"
+            draggable="false"
+            @load="onImgLoaded"
+            @error="onImgError"
+          />
+          <!-- 文字水印 -->
+          <div
+            v-if="shouldShowWatermark && wmConfig?.type === 'text' && wmConfig.text"
+            class="viewer-wm-text"
+            :style="wmTextStyle"
+          >
+            {{ wmConfig.text }}
+          </div>
+          <!-- 图片水印 -->
+          <img
+            v-else-if="shouldShowWatermark && wmConfig?.type === 'image' && wmConfig.image_url"
+            class="viewer-wm-image"
+            :src="wmConfig.image_url"
+            :style="wmImageStyle"
+            alt="watermark"
+            draggable="false"
+          />
+          <!-- 透明拦截层：覆盖在图片上方，阻止右键直接保存原图 -->
+          <div
+            v-if="shouldShowWatermark"
+            class="viewer-wm-intercept"
+            :title="interceptTitle"
+          />
+        </div>
         <!-- 图片加载失败提示 -->
         <div v-if="loadFailed" class="viewer-load-failed">
           <el-icon :size="36"><Warning></Warning></el-icon>
@@ -91,9 +125,6 @@
             <el-icon :size="18"><Refresh></Refresh></el-icon>
           </button>
           <span class="btn-divider"></span>
-          <button class="viewer-btn" @click="openInNewTab" :title="t('imageViewer.openInNewTab')">
-            <el-icon :size="18"><Link></Link></el-icon>
-          </button>
           <button class="viewer-btn viewer-btn-primary" @click="handleDownload" :title="t('imageViewer.download')">
             <el-icon :size="18"><Download></Download></el-icon>
           </button>
@@ -112,8 +143,9 @@
  * 1. 接收 visible（双向）与 url 控制显示
  * 2. 通过 ref(stageEl) 监听 mouse / wheel / touch 事件
  * 3. 使用 scale / translate / rotate / flip 组合 transform
- * 4. 计算 style 绑定到 img 元素
+ * 4. transform 绑定到图片容器（imgContainerEl），水印和拦截层一起变换
  * 5. ESC 键关闭；打开时自动锁定 body 滚动
+ * 6. 显示 CSS 水印 + 透明拦截层防右键另存
  * ===================================================== */
 
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
@@ -126,12 +158,15 @@ import {
   RefreshLeft,
   RefreshRight,
   Download,
-  Link,
   Warning,
 } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
+import { useModelsStore } from '@/stores/models'
+import { useUserStore } from '@/stores/user'
 
 const { t } = useI18n()
+const modelsStore = useModelsStore()
+const userStore = useUserStore()
 
 /* ---------- Props / Emits ---------- */
 const props = defineProps({
@@ -145,6 +180,7 @@ const emit = defineEmits(['update:visible', 'close'])
 /* ---------- 状态 ---------- */
 const stageEl = ref<HTMLElement | null>(null)
 const imgEl = ref<HTMLImageElement | null>(null)
+const imgContainerEl = ref<HTMLDivElement | null>(null)
 const scale = ref(1)
 const translateX = ref(0)
 const translateY = ref(0)
@@ -166,11 +202,80 @@ const MIN_SCALE = 0.1
 const MAX_SCALE = 5
 const ZOOM_STEP = 0.15
 
-/* ---------- 计算图片样式 ---------- */
-const imgStyle = computed(() => ({
+/* ---------- 计算图片容器样式（transform 应用到容器，水印一起变换） ---------- */
+const imgContainerStyle = computed(() => ({
   transform: 'translate(' + translateX.value + 'px, ' + translateY.value + 'px) scale(' + scale.value + ') rotate(' + rotate.value + 'deg) scaleX(' + (flippedX.value ? -1 : 1) + ') scaleY(' + (flippedY.value ? -1 : 1) + ')',
   transition: dragging.value ? 'none' : 'transform 0.18s ease-out',
 }))
+
+/* ---------- 水印相关配置 ---------- */
+/** 拦截层标题提示 */
+const interceptTitle = computed(() => t('watermark.useDownloadButton'))
+
+/** 是否应该显示水印 */
+const shouldShowWatermark = computed(() => {
+  const wm = modelsStore.watermark
+  // 全局强制开启
+  if (wm?.enabled) return true
+  // 用户自己开启了水印
+  if (userStore.user?.watermark_enabled) return true
+  return false
+})
+
+/** 水印配置（全局配置 + 用户级兜底默认值） */
+const wmConfig = computed(() => {
+  if (modelsStore.watermark) return modelsStore.watermark
+  // 用户开了水印但没拿到全局配置时，给个默认配置
+  if (userStore.user?.watermark_enabled) {
+    return {
+      type: 'text' as const,
+      text: userStore.user.username || userStore.user.nickname || '',
+      font_size: 16,
+      color: '#ffffff',
+      opacity: 60,
+      position: 'bottom-right' as const,
+      margin: 20,
+      image_url: '',
+      image_width: 100,
+    }
+  }
+  return null
+})
+
+/** 文字水印样式 */
+const wmTextStyle = computed(() => {
+  const wm = wmConfig.value
+  if (!wm) return {}
+  return {
+    fontSize: `${wm.font_size}px`,
+    color: wm.color,
+    opacity: wm.opacity / 100,
+    textShadow: '1px 1px 2px rgba(0,0,0,0.5)',
+    '--wm-margin': `${wm.margin}px`,
+    fontWeight: 600,
+    whiteSpace: 'nowrap',
+  }
+})
+
+/** 图片水印样式 */
+const wmImageStyle = computed(() => {
+  const wm = wmConfig.value
+  if (!wm) return {}
+  return {
+    width: `${wm.image_width}px`,
+    opacity: wm.opacity / 100,
+    '--wm-margin': `${wm.margin}px`,
+  }
+})
+
+/**
+ * 右键菜单处理：提示用户使用下载按钮下载带水印图片
+ */
+const handleContextMenu = () => {
+  if (shouldShowWatermark.value) {
+    ElMessage.warning(t('watermark.useDownloadButton'))
+  }
+}
 
 /* ---------- 打开/关闭 ---------- */
 function close() {
@@ -364,27 +469,34 @@ function onImgError() {
   console.warn('[ImageViewer] 图片加载失败：', props.url)
 }
 
-/* ---------- 下载 / 新标签页 ---------- */
-function openInNewTab() {
-  if (!props.url) return
-  window.open(props.url, '_blank', 'noopener,noreferrer')
-  ElMessage.success(t('imageViewer.openedInNewTab'))
-}
-
-function handleDownload() {
+/* ---------- 下载 ---------- */
+async function handleDownload() {
   const target = props.downloadUrl || props.url
   if (!target) {
     ElMessage.warning(t('imageViewer.emptyUrl'))
     return
   }
-  const a = document.createElement('a')
-  a.href = target
-  a.target = '_blank'
-  a.rel = 'noopener,noreferrer'
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  ElMessage.success(t('imageViewer.downloadStarted'))
+  try {
+    // 使用 fetch + blob 方式触发下载，避免直接打开图片
+    const response = await fetch(target)
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const blob = await response.blob()
+    const blobUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = blobUrl
+    // 从 URL 中尝试提取文件名，否则使用默认名
+    const urlPath = target.split('?')[0]
+    const fileName = urlPath.split('/').pop() || `agnes-image-${Date.now()}.png`
+    a.download = fileName
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(blobUrl)
+    ElMessage.success(t('imageViewer.downloadStarted'))
+  } catch (err) {
+    console.warn('[ImageViewer] 下载失败：', err)
+    ElMessage.error(t('canvas.messages.downloadFailed'))
+  }
 }
 </script>
 
@@ -457,17 +569,81 @@ function handleDownload() {
   cursor: grabbing;
 }
 
-/* 图片：使用 transform 实现所有操作 */
+/* 图片容器：包含原图、水印、拦截层，统一应用 transform */
+.viewer-img-container {
+  position: relative;
+  display: inline-block;
+  transform-origin: center center;
+  will-change: transform;
+}
+
+/* 图片 */
 .viewer-img {
   max-width: 90vw;
   max-height: 75vh;
   display: block;
-  transform-origin: center center;
-  will-change: transform;
   box-shadow: var(--viewer-img-shadow);
   border-radius: 4px;
-  pointer-events: auto;
   background: var(--agnes-bg-dark-surface);
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+/* 透明拦截层：覆盖在图片上方，阻止右键直接保存原图 */
+.viewer-wm-intercept {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  cursor: default;
+  background: transparent;
+}
+
+/* 水印位置默认（右下） */
+.viewer-img-container .viewer-wm-text,
+.viewer-img-container .viewer-wm-image {
+  position: absolute;
+  pointer-events: none;
+  user-select: none;
+  z-index: 2;
+}
+
+/* 位置：左上 */
+.wm-position-top-left .viewer-wm-text,
+.wm-position-top-left .viewer-wm-image {
+  top: var(--wm-margin, 20px);
+  left: var(--wm-margin, 20px);
+}
+
+/* 位置：右上 */
+.wm-position-top-right .viewer-wm-text,
+.wm-position-top-right .viewer-wm-image {
+  top: var(--wm-margin, 20px);
+  right: var(--wm-margin, 20px);
+}
+
+/* 位置：左下 */
+.wm-position-bottom-left .viewer-wm-text,
+.wm-position-bottom-left .viewer-wm-image {
+  bottom: var(--wm-margin, 20px);
+  left: var(--wm-margin, 20px);
+}
+
+/* 位置：右下（默认） */
+.wm-position-bottom-right .viewer-wm-text,
+.wm-position-bottom-right .viewer-wm-image {
+  bottom: var(--wm-margin, 20px);
+  right: var(--wm-margin, 20px);
+}
+
+/* 位置：居中 */
+.wm-position-center .viewer-wm-text,
+.wm-position-center .viewer-wm-image {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
 }
 
 /* 加载失败 */
