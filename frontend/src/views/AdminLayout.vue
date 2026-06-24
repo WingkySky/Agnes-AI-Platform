@@ -91,6 +91,12 @@
               <el-icon><Message /></el-icon>
               <span>{{ t('admin.emailConfig') }}</span>
             </el-menu-item>
+            <el-menu-item
+              v-if="userStore.isAdmin"
+              index="/admin/menus">
+              <el-icon><Menu /></el-icon>
+              <span>{{ t('nav.menuAdmin') }}</span>
+            </el-menu-item>
           </el-menu-item-group>
         </template>
       </el-menu>
@@ -98,7 +104,11 @@
 
     <!-- 右侧内容区 -->
     <main class="admin-content">
-      <router-view v-slot="{ Component }">
+      <!-- 动态页面标题 -->
+      <div v-if="currentPageTitle" class="page-title-bar">
+        <h1 class="page-title">{{ currentPageTitle }}</h1>
+      </div>
+      <router-view v-slot="{ Component, route: currentRoute }">
         <keep-alive :include="cachedViews">
           <component :is="Component" />
         </keep-alive>
@@ -112,7 +122,7 @@ import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Setting, View, Warning, UserFilled, User,
-  Picture, Coin, Cpu, Message,
+  Picture, Coin, Cpu, Message, Menu,
 } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { useUserStore } from '@/stores/user'
@@ -126,6 +136,15 @@ const permissionStore = usePermissionStore()
 
 // 当前激活的菜单
 const activeMenu = computed(() => route.path)
+
+// 动态页面标题（从路由 meta.titleKey 获取）
+const currentPageTitle = computed(() => {
+  const titleKey = route.meta?.titleKey as string | undefined
+  if (titleKey) {
+    return t(titleKey)
+  }
+  return ''
+})
 
 // 内容审核组是否显示
 const showModerationGroup = computed(() => {
@@ -153,6 +172,7 @@ const cachedViews = [
   'CreditRulesView',
   'SettingsView',
   'EmailConfigView',
+  'MenuAdminView',
 ]
 
 // 菜单点击跳转
@@ -182,6 +202,7 @@ const firstAccessiblePage = computed(() => {
   if (userStore.isAdmin) return '/admin/credit-rules'
   if (userStore.isAdmin) return '/admin/models'
   if (userStore.isAdmin) return '/admin/email'
+  if (userStore.isAdmin) return '/admin/menus'
   return null
 })
 </script>
@@ -279,6 +300,17 @@ const firstAccessiblePage = computed(() => {
   flex: 1;
   min-width: 0;
   overflow: auto;
+}
+
+.page-title-bar {
+  margin-bottom: 20px;
+}
+
+.page-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--agnes-text-primary);
 }
 
 @media (max-width: 900px) {

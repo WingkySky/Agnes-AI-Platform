@@ -97,49 +97,55 @@ const routes: RouteRecordRaw[] = [
         path: 'moderation',
         name: 'admin-moderation',
         component: () => import('@/views/ModerationView.vue'),
-        meta: { title: '内容审核', permission: 'plaza:moderate' }
+        meta: { titleKey: 'nav.moderation', permission: 'plaza:moderate' }
       },
       {
         path: 'sensitive-words',
         name: 'admin-sensitive-words',
         component: () => import('@/views/SensitiveWordsView.vue'),
-        meta: { title: '敏感词管理', permission: 'moderation:config' }
+        meta: { titleKey: 'nav.sensitiveWords', permission: 'moderation:config' }
       },
       {
         path: 'roles',
         name: 'admin-roles',
         component: () => import('@/views/RolesAdminView.vue'),
-        meta: { title: '角色管理', permission: 'role:manage' }
+        meta: { titleKey: 'nav.roleManage', permission: 'role:manage' }
       },
       {
         path: 'users',
         name: 'admin-users',
         component: () => import('@/views/UsersAdminView.vue'),
-        meta: { title: '用户管理', requiresAdmin: true }
+        meta: { titleKey: 'nav.usersAdmin', requiresAdmin: true }
       },
       {
         path: 'watermark',
         name: 'admin-watermark',
         component: () => import('@/views/WatermarkConfigView.vue'),
-        meta: { title: '水印配置', permission: 'watermark:manage' }
+        meta: { titleKey: 'nav.watermarkConfig', permission: 'watermark:manage' }
       },
       {
         path: 'credit-rules',
         name: 'admin-credit-rules',
         component: () => import('@/views/CreditRulesView.vue'),
-        meta: { title: '积分规则', requiresAdmin: true }
+        meta: { titleKey: 'nav.creditRules', requiresAdmin: true }
       },
       {
         path: 'models',
         name: 'admin-models',
         component: () => import('@/views/SettingsView.vue'),
-        meta: { title: '模型配置', requiresAdmin: true }
+        meta: { titleKey: 'admin.modelConfig', requiresAdmin: true }
       },
       {
         path: 'email',
         name: 'admin-email',
         component: () => import('@/views/EmailConfigView.vue'),
-        meta: { title: '邮件配置', requiresAdmin: true }
+        meta: { titleKey: 'admin.emailConfig', requiresAdmin: true }
+      },
+      {
+        path: 'menus',
+        name: 'admin-menus',
+        component: () => import('@/views/MenuAdminView.vue'),
+        meta: { titleKey: 'nav.menuAdmin', requiresAdmin: true }
       },
     ]
   },

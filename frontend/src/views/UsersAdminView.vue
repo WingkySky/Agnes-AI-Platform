@@ -10,7 +10,7 @@
     <header class="page-head">
       <div>
         <h2>{{ t('users.title') }}</h2>
-        <p class="muted">管理系统用户与权限配置</p>
+        <p class="muted">{{ t('admin.users.pageDesc') }}</p>
       </div>
       <el-button :icon="Refresh" @click="fetchUsers" :loading="loading">{{ t('common.refresh') }}</el-button>
     </header>
@@ -57,13 +57,13 @@
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item command="user">
-                    <el-tag type="info" size="small" effect="dark">普通用户</el-tag>
+                    <el-tag type="info" size="small" effect="dark">{{ t('admin.users.roleUser') }}</el-tag>
                   </el-dropdown-item>
                   <el-dropdown-item command="moderator">
-                    <el-tag type="warning" size="small" effect="dark">审核员</el-tag>
+                    <el-tag type="warning" size="small" effect="dark">{{ t('admin.users.roleModerator') }}</el-tag>
                   </el-dropdown-item>
                   <el-dropdown-item command="admin">
-                    <el-tag type="danger" size="small" effect="dark">管理员</el-tag>
+                    <el-tag type="danger" size="small" effect="dark">{{ t('admin.users.roleAdmin') }}</el-tag>
                   </el-dropdown-item>
                 </el-dropdown-menu>
               </template>
@@ -82,22 +82,22 @@
             />
           </template>
         </el-table-column>
-        <el-table-column label="水印开关" width="120" align="center">
+        <el-table-column :label="t('admin.users.colWatermark')" width="120" align="center">
           <template #default="{ row }">
             <el-switch
               :model-value="row.watermark_enabled"
-              active-text="开"
-              inactive-text="关"
+              :active-text="t('admin.users.switchOn')"
+              :inactive-text="t('admin.users.switchOff')"
               @change="(val: boolean) => onWatermarkChange(row, val)"
             />
           </template>
         </el-table-column>
-        <el-table-column label="严格内容安全" width="140" align="center">
+        <el-table-column :label="t('admin.users.colContentSafety')" width="140" align="center">
           <template #default="{ row }">
             <el-switch
               :model-value="row.content_safety_strict"
-              active-text="开"
-              inactive-text="关"
+              :active-text="t('admin.users.switchOn')"
+              :inactive-text="t('admin.users.switchOff')"
               @change="(val: boolean) => onContentSafetyChange(row, val)"
             />
           </template>
@@ -151,11 +151,11 @@ function formatTime(val?: string | null) {
 function roleDisplayName(role: string) {
   switch (role) {
     case 'admin':
-      return '管理员'
+      return t('admin.users.roleAdmin')
     case 'moderator':
-      return '审核员'
+      return t('admin.users.roleModerator')
     case 'user':
-      return '普通用户'
+      return t('admin.users.roleUser')
     default:
       return role
   }
@@ -194,9 +194,9 @@ async function onRoleChange(row: UserAdminRow, newRole: string) {
   if (row.role === newRole) return
   try {
     await ElMessageBox.confirm(
-      `确定将用户「${row.username}」的角色修改为「${roleDisplayName(newRole)}」吗？`,
-      '修改角色',
-      { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
+      t('admin.users.confirmChangeRole', { username: row.username, role: roleDisplayName(newRole) }),
+      t('admin.users.changeRole'),
+      { confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel'), type: 'warning' }
     )
   } catch {
     return
@@ -205,10 +205,10 @@ async function onRoleChange(row: UserAdminRow, newRole: string) {
     await updateUserRole(row.id, newRole)
     row.role = newRole
     row.is_admin = newRole === 'admin'
-    ElMessage.success(`角色已修改为${roleDisplayName(newRole)}`)
+    ElMessage.success(t('admin.users.changeRoleSuccess', { role: roleDisplayName(newRole) }))
   } catch (e: any) {
     console.warn(e)
-    ElMessage.error(e?.message || '修改失败')
+    ElMessage.error(t('admin.users.changeRoleFailed', { error: e?.message || t('common.error') }))
     fetchUsers()
   }
 }
@@ -243,10 +243,10 @@ async function onWatermarkChange(row: UserAdminRow, enabled: boolean) {
   try {
     await updateUserWatermark(row.id, enabled)
     row.watermark_enabled = enabled
-    ElMessage.success(enabled ? '水印已开启' : '水印已关闭')
+    ElMessage.success(enabled ? t('admin.users.watermarkEnabled') : t('admin.users.watermarkDisabled'))
   } catch (e: any) {
     console.warn(e)
-    ElMessage.error(e?.message || '操作失败')
+    ElMessage.error(t('admin.users.operationFailed', { error: e?.message || t('common.error') }))
     fetchUsers()
   }
 }
@@ -256,10 +256,10 @@ async function onContentSafetyChange(row: UserAdminRow, enabled: boolean) {
   try {
     await updateUserContentSafety(row.id, enabled)
     row.content_safety_strict = enabled
-    ElMessage.success(enabled ? '严格内容安全已开启' : '严格内容安全已关闭')
+    ElMessage.success(enabled ? t('admin.users.contentSafetyEnabled') : t('admin.users.contentSafetyDisabled'))
   } catch (e: any) {
     console.warn(e)
-    ElMessage.error(e?.message || '操作失败')
+    ElMessage.error(t('admin.users.operationFailed', { error: e?.message || t('common.error') }))
     fetchUsers()
   }
 }

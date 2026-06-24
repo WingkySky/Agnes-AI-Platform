@@ -10,7 +10,7 @@
       <el-icon><Message /></el-icon>
       {{ t('admin.emailConfig') }}
     </h2>
-    <p class="page-desc">{{ t('settings.smtpDesc') }}</p>
+    <p class="page-desc">{{ t('settings.smtp.desc') }}</p>
 
     <!-- 状态卡片 -->
     <div class="status-card" :class="{ enabled: smtpConfig.is_enabled }">
@@ -19,12 +19,12 @@
         <div>
           <div class="status-title">{{ t('admin.emailService') }}</div>
           <div class="status-desc">
-            {{ smtpConfig.is_enabled ? t('settings.smtpEnabled') : t('settings.smtpDisabled') }}
+            {{ smtpConfig.is_enabled ? t('settings.smtp.enabled') : t('settings.smtp.disabled') }}
           </div>
         </div>
       </div>
       <el-tag :type="smtpConfig.is_enabled ? 'success' : 'info'" size="large">
-        {{ smtpConfig.is_enabled ? t('settings.smtpEnabled') : t('settings.smtpDisabled') }}
+        {{ smtpConfig.is_enabled ? t('settings.smtp.enabled') : t('settings.smtp.disabled') }}
       </el-tag>
     </div>
 
@@ -34,54 +34,54 @@
       <el-form :model="smtpConfig" label-width="140px" class="smtp-form">
         <el-row :gutter="24">
           <el-col :span="16">
-            <el-form-item :label="t('settings.smtpHost')">
-              <el-input v-model="smtpConfig.smtp_host" :placeholder="t('settings.smtpHostPlaceholder')" />
+            <el-form-item :label="t('settings.smtp.host')">
+              <el-input v-model="smtpConfig.smtp_host" :placeholder="t('settings.smtp.hostPlaceholder')" />
             </el-form-item>
           </el-col>
           <el-col :span="8">
-            <el-form-item :label="t('settings.smtpPort')">
+            <el-form-item :label="t('settings.smtp.port')">
               <el-input-number v-model="smtpConfig.smtp_port" :min="1" :max="65535" style="width: 100%;" />
             </el-form-item>
           </el-col>
         </el-row>
         <el-row :gutter="24">
           <el-col :span="12">
-            <el-form-item :label="t('settings.smtpUser')">
-              <el-input v-model="smtpConfig.smtp_user" :placeholder="t('settings.smtpUserPlaceholder')" />
+            <el-form-item :label="t('settings.smtp.user')">
+              <el-input v-model="smtpConfig.smtp_user" :placeholder="t('settings.smtp.userPlaceholder')" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item :label="t('settings.smtpPassword')">
+            <el-form-item :label="t('settings.smtp.password')">
               <el-input
                 v-model="smtpConfig.smtp_password"
                 type="password"
                 show-password
-                :placeholder="t('settings.smtpPasswordPlaceholder')" />
+                :placeholder="t('settings.smtp.passwordPlaceholder')" />
             </el-form-item>
           </el-col>
         </el-row>
         <el-row :gutter="24">
           <el-col :span="12">
-            <el-form-item :label="t('settings.smtpFromEmail')">
-              <el-input v-model="smtpConfig.smtp_from_email" :placeholder="t('settings.smtpFromEmailPlaceholder')" />
+            <el-form-item :label="t('settings.smtp.fromEmail')">
+              <el-input v-model="smtpConfig.smtp_from_email" :placeholder="t('settings.smtp.fromEmailPlaceholder')" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item :label="t('settings.smtpFromName')">
-              <el-input v-model="smtpConfig.smtp_from_name" :placeholder="t('settings.smtpFromNamePlaceholder')" />
+            <el-form-item :label="t('settings.smtp.fromName')">
+              <el-input v-model="smtpConfig.smtp_from_name" :placeholder="t('settings.smtp.fromNamePlaceholder')" />
             </el-form-item>
           </el-col>
         </el-row>
-        <el-form-item :label="t('settings.smtpUseTls')">
+        <el-form-item :label="t('settings.smtp.useTls')">
           <el-switch v-model="smtpConfig.smtp_use_tls" />
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="saving" @click="saveConfig">
             <el-icon><Check /></el-icon>
-            {{ t('settings.smtpSave') }}
+            {{ t('settings.smtp.save') }}
           </el-button>
           <el-button :icon="Message" :loading="testing" @click="openTestDialog">
-            {{ t('settings.smtpTest') }}
+            {{ t('settings.smtp.test') }}
           </el-button>
         </el-form-item>
       </el-form>
@@ -90,18 +90,18 @@
     <!-- 测试邮件弹窗 -->
     <el-dialog
       v-model="testDialogVisible"
-      :title="t('settings.smtpTest')"
+      :title="t('settings.smtp.test')"
       width="420px"
       :close-on-click-modal="false">
       <el-form label-width="100px">
-        <el-form-item :label="t('settings.smtpTestEmail')">
-          <el-input v-model="testEmail" :placeholder="t('settings.smtpTestEmailPlaceholder')" />
+        <el-form-item :label="t('settings.smtp.testEmail')">
+          <el-input v-model="testEmail" :placeholder="t('settings.smtp.testEmailPlaceholder')" />
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="testDialogVisible = false">{{ t('common.cancel') }}</el-button>
         <el-button type="primary" :loading="testing" @click="sendTestEmail">
-          {{ t('settings.smtpTest') }}
+          {{ t('settings.smtp.test') }}
         </el-button>
       </template>
     </el-dialog>
@@ -157,7 +157,7 @@ async function saveConfig() {
       smtp_from_name: smtpConfig.smtp_from_name,
       smtp_use_tls: smtpConfig.smtp_use_tls,
     })
-    ElMessage.success(t('settings.smtpSaved'))
+    ElMessage.success(t('settings.smtp.saveSuccess'))
     await fetchConfig() // 刷新状态
   } finally {
     saving.value = false
@@ -172,13 +172,13 @@ function openTestDialog() {
 // 发送测试邮件
 async function sendTestEmail() {
   if (!testEmail.value) {
-    ElMessage.warning(t('settings.smtpTestEmailPlaceholder'))
+    ElMessage.warning(t('settings.smtp.testEmailPlaceholder'))
     return
   }
   testing.value = true
   try {
     await testSmtpConfig(testEmail.value)
-    ElMessage.success(t('settings.smtpTestSuccess'))
+    ElMessage.success(t('settings.smtp.testSuccess'))
     testDialogVisible.value = false
   } finally {
     testing.value = false

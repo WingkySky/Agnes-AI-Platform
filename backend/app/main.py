@@ -55,6 +55,7 @@ from app.routes import admin_roles as admin_roles_route
 from app.routes import admin_moderation as admin_moderation_route
 from app.routes import admin_watermark as admin_watermark_route
 from app.routes import admin_system_config as admin_system_config_route
+from app.routes import menu as menu_route
 from app.services.video_poller import poller_manager
 from app.services.image_poller import image_poller_manager
 from app.services.agnes_client import agnes_client
@@ -324,6 +325,7 @@ app.include_router(admin_roles_route.router, prefix="/api", tags=["管理员-角
 app.include_router(admin_moderation_route.router, prefix="/api", tags=["管理员-内容审核"])
 app.include_router(admin_watermark_route.router, prefix="/api", tags=["管理员-水印配置"])
 app.include_router(admin_system_config_route.router, prefix="/api", tags=["管理员-系统配置"])
+app.include_router(menu_route.router, prefix="/api", tags=["菜单配置"])
 
 
 # ---------- 健康检查 ----------

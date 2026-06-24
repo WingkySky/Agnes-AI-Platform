@@ -8,18 +8,18 @@
   <div class="moderation-wrap">
     <header class="page-head">
       <div>
-        <h2>内容审核</h2>
-        <p class="muted">审核广场公开作品，支持按状态回看历史记录</p>
+        <h2>{{ t('admin.moderation.title') }}</h2>
+        <p class="muted">{{ t('admin.moderation.desc') }}</p>
       </div>
-      <el-button :icon="Refresh" @click="fetchList" :loading="loading">刷新</el-button>
+      <el-button :icon="Refresh" @click="fetchList" :loading="loading">{{ t('common.refresh') }}</el-button>
     </header>
 
     <!-- 状态 Tab 切换 -->
     <el-tabs v-model="filterStatus" class="status-tabs" @tab-change="onStatusTabChange">
-      <el-tab-pane label="待审核" name="pending" />
-      <el-tab-pane label="已通过" name="approved" />
-      <el-tab-pane label="已屏蔽" name="rejected" />
-      <el-tab-pane label="全部" name="all" />
+      <el-tab-pane :label="t('admin.moderation.tabPending')" name="pending" />
+      <el-tab-pane :label="t('admin.moderation.tabApproved')" name="approved" />
+      <el-tab-pane :label="t('admin.moderation.tabRejected')" name="rejected" />
+      <el-tab-pane :label="t('admin.moderation.tabAll')" name="all" />
     </el-tabs>
 
     <el-card class="filter-card" shadow="never">
@@ -27,28 +27,28 @@
       <div v-if="filterStatus === 'pending'" class="quick-actions">
         <span class="quick-label">
           <el-icon size="14" color="#e6a23c"><Warning /></el-icon>
-          当前待审核 <b>{{ total }}</b> 条，可快速操作：
+          {{ t('admin.moderation.pendingTip', { count: total }) }}
         </span>
         <el-button type="success" size="small" @click="onQuickApproveAll" :disabled="total === 0 || loading">
           <el-icon><Check /></el-icon>
-          一键通过全部
+          {{ t('admin.moderation.quickApprove') }}
         </el-button>
         <el-button type="danger" size="small" @click="onQuickRejectAll" :disabled="total === 0 || loading">
           <el-icon><Close /></el-icon>
-          一键屏蔽全部
+          {{ t('admin.moderation.quickReject') }}
         </el-button>
       </div>
 
       <div class="filter-row">
-        <el-select v-model="filterType" placeholder="全部类型" style="width: 100px" @change="onFilterChange">
-          <el-option label="全部" value="" />
-          <el-option label="图片" value="image" />
-          <el-option label="视频" value="video" />
+        <el-select v-model="filterType" :placeholder="t('admin.moderation.filterAll')" style="width: 100px" @change="onFilterChange">
+          <el-option :label="t('admin.moderation.filterAll')" value="" />
+          <el-option :label="t('admin.moderation.filterImage')" value="image" />
+          <el-option :label="t('admin.moderation.filterVideo')" value="video" />
         </el-select>
 
         <el-input
           v-model="searchWorkId"
-          placeholder="内容 ID"
+          :placeholder="t('admin.moderation.contentId')"
           style="width: 110px"
           clearable
           @keyup.enter="onSearch"
@@ -57,7 +57,7 @@
 
         <el-input
           v-model="searchUsername"
-          placeholder="创作者用户名"
+          :placeholder="t('admin.moderation.creator')"
           style="width: 140px"
           clearable
           @keyup.enter="onSearch"
@@ -66,7 +66,7 @@
 
         <el-input
           v-model="keyword"
-          placeholder="搜索提示词"
+          :placeholder="t('admin.moderation.searchPrompt')"
           style="width: 220px"
           clearable
           @keyup.enter="onSearch"
@@ -77,14 +77,14 @@
           </template>
         </el-input>
 
-        <el-button type="primary" @click="onSearch">搜索</el-button>
+        <el-button type="primary" @click="onSearch">{{ t('common.search') }}</el-button>
       </div>
 
       <div v-if="selectedIds.length > 0" class="batch-bar">
-        <span class="batch-tip">已选择 {{ selectedIds.length }} 项</span>
-        <el-button type="success" size="small" @click="onBatchApprove">批量通过</el-button>
-        <el-button type="danger" size="small" @click="onBatchReject">批量屏蔽</el-button>
-        <el-button size="small" @click="clearSelection">取消选择</el-button>
+        <span class="batch-tip">{{ t('admin.moderation.selected', { count: selectedIds.length }) }}</span>
+        <el-button type="success" size="small" @click="onBatchApprove">{{ t('admin.moderation.batchApprove') }}</el-button>
+        <el-button type="danger" size="small" @click="onBatchReject">{{ t('admin.moderation.batchReject') }}</el-button>
+        <el-button size="small" @click="clearSelection">{{ t('admin.moderation.clearSelection') }}</el-button>
       </div>
     </el-card>
 
@@ -97,8 +97,8 @@
         @selection-change="onSelectionChange"
       >
         <el-table-column type="selection" width="50" align="center" />
-        <el-table-column prop="id" label="ID" width="70" align="center" />
-        <el-table-column label="预览" width="100" align="center">
+        <el-table-column prop="id" :label="t('admin.moderation.id')" width="70" align="center" />
+        <el-table-column :label="t('admin.moderation.preview')" width="100" align="center">
           <template #default="{ row }">
             <div class="preview-cell" @click="openPreview(row)">
               <el-image
@@ -120,36 +120,36 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="类型" width="80" align="center">
+        <el-table-column :label="t('admin.moderation.type')" width="80" align="center">
           <template #default="{ row }">
             <el-tag :type="row.type === 'image' ? 'primary' : 'warning'" size="small">
-              {{ row.type === 'image' ? '图片' : '视频' }}
+              {{ row.type === 'image' ? t('admin.moderation.filterImage') : t('admin.moderation.filterVideo') }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="内容" min-width="200">
+        <el-table-column :label="t('admin.moderation.prompt')" min-width="200">
           <template #default="{ row }">
             <el-tooltip :content="row.prompt" placement="top" :show-after="300">
               <span class="prompt-text">{{ truncatePrompt(row.prompt) }}</span>
             </el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column label="作者" width="140" align="center">
+        <el-table-column :label="t('admin.moderation.author')" width="140" align="center">
           <template #default="{ row }">
             <div class="author-cell">
-              <span class="author-name">{{ row.nickname || row.username || '匿名' }}</span>
+              <span class="author-name">{{ row.nickname || row.username || t('admin.moderation.anonymous') }}</span>
               <span class="author-id muted">ID: {{ row.user_id }}</span>
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="审核状态" width="110" align="center">
+        <el-table-column :label="t('admin.moderation.status')" width="110" align="center">
           <template #default="{ row }">
             <el-tag :type="statusTagType(row.moderation_status)" size="small">
               {{ statusText(row.moderation_status) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="命中敏感词" min-width="150">
+        <el-table-column :label="t('admin.moderation.hitWords')" min-width="150">
           <template #default="{ row }">
             <div v-if="row.moderation_flags && row.moderation_flags.length > 0" class="flags-wrap">
               <el-tag
@@ -166,21 +166,21 @@
             <span v-else class="muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column label="点赞/浏览" width="120" align="center">
+        <el-table-column :label="t('admin.moderation.likesViews')" width="120" align="center">
           <template #default="{ row }">
             <div class="stats-text">
-              <span>{{ row.likes_count }} 赞</span>
+              <span>{{ row.likes_count }} {{ t('admin.moderation.likes') }}</span>
               <span class="muted">/</span>
-              <span>{{ row.views_count }} 览</span>
+              <span>{{ row.views_count }} {{ t('admin.moderation.views') }}</span>
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="发布时间" width="170" align="center">
+        <el-table-column prop="created_at" :label="t('admin.moderation.createTime')" width="170" align="center">
           <template #default="{ row }">
             <span class="muted">{{ formatTime(row.created_at) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200" align="center" fixed="right">
+        <el-table-column :label="t('admin.moderation.actions')" width="200" align="center" fixed="right">
           <template #default="{ row }">
             <el-button
               v-if="row.moderation_status !== 'approved'"
@@ -189,7 +189,7 @@
               link
               @click="onApprove(row)"
             >
-              通过
+              {{ t('admin.moderation.approve') }}
             </el-button>
             <el-button
               v-if="row.moderation_status !== 'rejected'"
@@ -198,10 +198,10 @@
               link
               @click="onReject(row)"
             >
-              屏蔽
+              {{ t('admin.moderation.reject') }}
             </el-button>
             <el-button type="primary" size="small" link @click="openPreview(row)">
-              详情
+              {{ t('admin.moderation.detail') }}
             </el-button>
           </template>
         </el-table-column>
@@ -226,19 +226,19 @@
         v-model="rejectReason"
         type="textarea"
         :rows="4"
-        placeholder="请输入驳回原因（可选）"
+        :placeholder="t('admin.moderation.rejectReasonPlaceholder')"
         maxlength="200"
         show-word-limit
       />
       <template #footer>
-        <el-button @click="rejectDialogVisible = false">取消</el-button>
+        <el-button @click="rejectDialogVisible = false">{{ t('common.cancel') }}</el-button>
         <el-button type="primary" :loading="rejectLoading" @click="confirmReject">
-          确认屏蔽
+          {{ t('admin.moderation.confirmReject') }}
         </el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="previewVisible" title="作品详情" width="640px">
+    <el-dialog v-model="previewVisible" :title="t('admin.moderation.workDetail')" width="640px">
       <div v-if="currentWork" class="preview-detail">
         <div class="preview-media">
           <el-image
@@ -251,43 +251,43 @@
         </div>
         <div class="preview-info">
           <div class="info-row">
-            <span class="info-label">ID：</span>
+            <span class="info-label">{{ t('admin.moderation.id') }}：</span>
             <span>{{ currentWork.id }}</span>
           </div>
           <div class="info-row">
-            <span class="info-label">类型：</span>
+            <span class="info-label">{{ t('admin.moderation.type') }}：</span>
             <el-tag :type="currentWork.type === 'image' ? 'primary' : 'warning'" size="small">
-              {{ currentWork.type === 'image' ? '图片' : '视频' }}
+              {{ currentWork.type === 'image' ? t('admin.moderation.filterImage') : t('admin.moderation.filterVideo') }}
             </el-tag>
           </div>
           <div class="info-row">
-            <span class="info-label">状态：</span>
+            <span class="info-label">{{ t('admin.moderation.status') }}：</span>
             <el-tag :type="statusTagType(currentWork.moderation_status)" size="small">
               {{ statusText(currentWork.moderation_status) }}
             </el-tag>
           </div>
           <div class="info-row">
-            <span class="info-label">作者：</span>
-            <span>{{ currentWork.nickname || currentWork.username || '匿名' }} (ID: {{ currentWork.user_id }})</span>
+            <span class="info-label">{{ t('admin.moderation.author') }}：</span>
+            <span>{{ currentWork.nickname || currentWork.username || t('admin.moderation.anonymous') }} (ID: {{ currentWork.user_id }})</span>
           </div>
           <div class="info-row">
-            <span class="info-label">模型：</span>
+            <span class="info-label">{{ t('admin.moderation.model') }}：</span>
             <span>{{ currentWork.model }}</span>
           </div>
           <div class="info-row">
-            <span class="info-label">点赞/浏览：</span>
+            <span class="info-label">{{ t('admin.moderation.likesViews') }}：</span>
             <span>{{ currentWork.likes_count }} / {{ currentWork.views_count }}</span>
           </div>
           <div class="info-row">
-            <span class="info-label">发布时间：</span>
+            <span class="info-label">{{ t('admin.moderation.createTime') }}：</span>
             <span>{{ formatTime(currentWork.created_at) }}</span>
           </div>
           <div v-if="currentWork.moderation_reason" class="info-row">
-            <span class="info-label">驳回原因：</span>
+            <span class="info-label">{{ t('admin.moderation.rejectReason') }}：</span>
             <span>{{ currentWork.moderation_reason }}</span>
           </div>
           <div v-if="currentWork.moderation_flags && currentWork.moderation_flags.length > 0" class="info-row">
-            <span class="info-label">命中敏感词：</span>
+            <span class="info-label">{{ t('admin.moderation.hitWords') }}：</span>
             <div class="flags-wrap">
               <el-tag
                 v-for="flag in currentWork.moderation_flags"
@@ -315,6 +315,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, Search, VideoPlay, Warning, Check, Close } from '@element-plus/icons-vue'
+import { useI18n } from '@/i18n'
 import {
   getModerationWorks,
   approveWork,
@@ -323,6 +324,8 @@ import {
   batchReject
 } from '@/api/admin'
 import type { ModerationWork } from '@/api/admin'
+
+const { t } = useI18n()
 
 const loading = ref(false)
 const list = ref<ModerationWork[]>([])
@@ -345,9 +348,9 @@ const rejectTargetId = ref<number | null>(null)
 const isBatchReject = ref(false)
 
 const rejectDialogTitle = computed(() => {
-  if (rejectTargetId.value === -1) return '一键屏蔽全部'
-  if (isBatchReject.value) return '批量屏蔽'
-  return '驳回原因'
+  if (rejectTargetId.value === -1) return t('admin.moderation.quickReject')
+  if (isBatchReject.value) return t('admin.moderation.batchReject')
+  return t('admin.moderation.rejectReason')
 })
 
 const previewVisible = ref(false)
@@ -383,11 +386,11 @@ function statusTagType(status: string) {
 function statusText(status: string) {
   switch (status) {
     case 'pending':
-      return '待审核'
+      return t('admin.moderation.tabPending')
     case 'approved':
-      return '已通过'
+      return t('admin.moderation.tabApproved')
     case 'rejected':
-      return '已屏蔽'
+      return t('admin.moderation.tabRejected')
     default:
       return status
   }
@@ -445,9 +448,9 @@ function clearSelection() {
 
 async function onApprove(row: ModerationWork) {
   try {
-    await ElMessageBox.confirm('确认通过该作品的审核？', '通过审核', {
-      confirmButtonText: '确认',
-      cancelButtonText: '取消',
+    await ElMessageBox.confirm(t('admin.moderation.approveConfirm'), t('admin.moderation.approveTitle'), {
+      confirmButtonText: t('common.confirm'),
+      cancelButtonText: t('common.cancel'),
       type: 'success'
     })
   } catch {
@@ -455,7 +458,7 @@ async function onApprove(row: ModerationWork) {
   }
   try {
     await approveWork(row.id)
-    ElMessage.success('已通过')
+    ElMessage.success(t('admin.moderation.approveSuccess'))
     fetchList()
   } catch (e) {
     console.warn(e)
@@ -473,22 +476,21 @@ async function confirmReject() {
   rejectLoading.value = true
   try {
     if (rejectTargetId.value === -1) {
-      // 一键全部屏蔽
       const ids = await fetchAllPendingIds()
       if (ids.length === 0) {
-        ElMessage.info('没有待审核内容')
+        ElMessage.info(t('admin.moderation.noPending'))
         rejectDialogVisible.value = false
         return
       }
       await batchReject(ids, rejectReason.value || undefined)
-      ElMessage.success(`已一键屏蔽 ${ids.length} 项作品`)
+      ElMessage.success(t('admin.moderation.quickRejectSuccess', { count: ids.length }))
     } else if (isBatchReject.value) {
       await batchReject(selectedIds.value, rejectReason.value || undefined)
-      ElMessage.success(`已批量屏蔽 ${selectedIds.value.length} 项`)
+      ElMessage.success(t('admin.moderation.batchRejectSuccess', { count: selectedIds.value.length }))
       clearSelection()
     } else if (rejectTargetId.value !== null) {
       await rejectWork(rejectTargetId.value, rejectReason.value || undefined)
-      ElMessage.success('已屏蔽')
+      ElMessage.success(t('admin.moderation.rejectSuccess'))
     }
     rejectDialogVisible.value = false
     fetchList()
@@ -503,16 +505,16 @@ async function onBatchApprove() {
   if (selectedIds.value.length === 0) return
   try {
     await ElMessageBox.confirm(
-      `确认通过选中的 ${selectedIds.value.length} 项作品？`,
-      '批量通过',
-      { confirmButtonText: '确认', cancelButtonText: '取消', type: 'success' }
+      t('admin.moderation.batchApproveConfirm', { count: selectedIds.value.length }),
+      t('admin.moderation.batchApproveTitle'),
+      { confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel'), type: 'success' }
     )
   } catch {
     return
   }
   try {
     await batchApprove(selectedIds.value)
-    ElMessage.success(`已批量通过 ${selectedIds.value.length} 项`)
+    ElMessage.success(t('admin.moderation.batchApproveSuccess', { count: selectedIds.value.length }))
     clearSelection()
     fetchList()
   } catch (e) {
@@ -553,9 +555,9 @@ async function fetchAllPendingIds(): Promise<number[]> {
 async function onQuickApproveAll() {
   try {
     await ElMessageBox.confirm(
-      `确认一键通过当前筛选条件下的全部 ${total.value} 条待审核作品？`,
-      '一键通过全部',
-      { confirmButtonText: '确认通过', cancelButtonText: '取消', type: 'success' }
+      t('admin.moderation.quickApproveConfirm', { count: total.value }),
+      t('admin.moderation.quickApproveTitle'),
+      { confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel'), type: 'success' }
     )
   } catch {
     return
@@ -563,11 +565,11 @@ async function onQuickApproveAll() {
   try {
     const ids = await fetchAllPendingIds()
     if (ids.length === 0) {
-      ElMessage.info('没有待审核内容')
+      ElMessage.info(t('admin.moderation.noPending'))
       return
     }
     await batchApprove(ids)
-    ElMessage.success(`已一键通过 ${ids.length} 项作品`)
+    ElMessage.success(t('admin.moderation.quickApproveSuccess', { count: ids.length }))
     fetchList()
   } catch (e) {
     console.warn(e)

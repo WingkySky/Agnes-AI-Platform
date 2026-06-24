@@ -25,70 +25,37 @@
         </div>
 
         <div class="sidebar-content">
-          <!-- 创作工具分组 -->
-          <div class="sidebar-group">
-            <div class="sidebar-group-title">{{ t('sidebar.groups.create') }}</div>
-            <router-link
-              v-for="item in menuItems.create"
-              :key="item.path"
-              :to="item.path"
-              class="sidebar-item"
-              active-class="active"
-              @click="sidebarOpen = false"
-            >
-              <el-icon><component :is="item.icon" /></el-icon>
-              <span>{{ t(item.labelKey) }}</span>
-            </router-link>
-          </div>
-
-          <!-- 个人中心分组 -->
-          <div class="sidebar-group">
-            <div class="sidebar-group-title">{{ t('sidebar.groups.personal') }}</div>
-            <router-link
-              v-for="item in menuItems.personal"
-              :key="item.path"
-              :to="item.path"
-              class="sidebar-item"
-              active-class="active"
-              @click="sidebarOpen = false"
-            >
-              <el-icon><component :is="item.icon" /></el-icon>
-              <span>{{ t(item.labelKey) }}</span>
-            </router-link>
-          </div>
-
-          <!-- 社区分组 -->
-          <div class="sidebar-group">
-            <div class="sidebar-group-title">{{ t('sidebar.groups.community') }}</div>
-            <router-link
-              v-for="item in menuItems.community"
-              :key="item.path"
-              :to="item.path"
-              class="sidebar-item"
-              active-class="active"
-              @click="sidebarOpen = false"
-            >
-              <el-icon><component :is="item.icon" /></el-icon>
-              <span>{{ t(item.labelKey) }}</span>
-            </router-link>
-          </div>
-
-          <!-- 管理分组（仅管理员/审核员可见） -->
-          <div
-            v-if="userStore.isAuthenticated && (userStore.isAdmin || permissionStore.hasPermission('plaza:moderate') || permissionStore.hasPermission('role:manage') || permissionStore.hasPermission('moderation:config') || permissionStore.hasPermission('watermark:manage'))"
-            class="sidebar-group"
+          <!-- 动态渲染侧边栏：一级分组可收缩，二级是菜单项 -->
+          <el-menu
+            :default-active="route.path"
+            class="sidebar-menu"
+            background-color="transparent"
+            text-color="var(--agnes-text-secondary)"
+            active-text-color="var(--agnes-text-primary)"
+            :unique-opened="false"
+            router
           >
-            <div class="sidebar-group-title">{{ t('sidebar.groups.admin') }}</div>
-            <router-link
-              to="/admin"
-              class="sidebar-item"
-              :class="{ active: isAdminRouteActive }"
-              @click="sidebarOpen = false"
+            <el-sub-menu
+              v-for="groupData in menuStore.sidebarGroups"
+              :key="groupData.key"
+              :index="`group-${groupData.key}`"
+              v-show="groupData.items.length > 0"
             >
-              <el-icon><Setting /></el-icon>
-              <span>{{ t('nav.admin') }}</span>
-            </router-link>
-          </div>
+              <template #title>
+                <el-icon><component :is="getIcon(groupData.icon)" /></el-icon>
+                <span>{{ groupData.label }}</span>
+              </template>
+              <el-menu-item
+                v-for="item in groupData.items"
+                :key="item.key"
+                :index="item.path"
+                @click="sidebarOpen = false"
+              >
+                <el-icon v-if="getIcon(item.icon)"><component :is="getIcon(item.icon)" /></el-icon>
+                <template #title>{{ item.label }}</template>
+              </el-menu-item>
+            </el-sub-menu>
+          </el-menu>
         </div>
       </aside>
 
@@ -107,49 +74,16 @@
 
         <!-- 中间：顶部大类导航（高频核心功能） -->
         <nav class="app-nav">
-          <template v-for="item in topNavItems" :key="item.path">
-            <!-- 带子菜单的项：hover 下拉 -->
-            <el-dropdown
-              v-if="item.children && item.children.length > 0"
-              trigger="hover"
-              placement="bottom"
-              popper-class="nav-dropdown-popper"
-            >
-              <router-link
-                :to="item.path"
-                class="nav-item"
-                active-class="active"
-                :class="{ 'has-dropdown': true }"
-              >
-                <el-icon><component :is="item.icon" /></el-icon>
-                <span>{{ t(item.labelKey) }}</span>
-                <el-icon class="dropdown-arrow"><ArrowDown /></el-icon>
-              </router-link>
-              <template #dropdown>
-                <el-dropdown-menu class="nav-dropdown-menu">
-                  <router-link
-                    v-for="child in item.children"
-                    :key="child.path"
-                    :to="child.path"
-                    class="nav-dropdown-item"
-                  >
-                    <el-icon><component :is="child.icon" /></el-icon>
-                    <span>{{ t(child.labelKey) }}</span>
-                  </router-link>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
-            <!-- 普通导航项 -->
-            <router-link
-              v-else
-              :to="item.path"
-              class="nav-item"
-              active-class="active"
-            >
-              <el-icon><component :is="item.icon" /></el-icon>
-              <span>{{ t(item.labelKey) }}</span>
-            </router-link>
-          </template>
+          <router-link
+            v-for="item in menuStore.topNav"
+            :key="item.key"
+            :to="item.path"
+            class="nav-item"
+            active-class="active"
+          >
+            <el-icon v-if="getIcon(item.icon)"><component :is="getIcon(item.icon)" /></el-icon>
+            <span>{{ item.label }}</span>
+          </router-link>
         </nav>
 
         <!-- 右上角：全局操作区 -->
@@ -239,10 +173,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import {
   Picture, VideoPlay, Clock, ChatDotRound, Grid, Setting,
   User, UserFilled, Coin, CaretBottom, SwitchButton, Sunny, Moon, StarFilled, Histogram,
-  MagicStick, Fold, Expand, ArrowDown,
+  MagicStick, Fold, Expand, ArrowDown, Message, EditPen, Connection,
 } from '@element-plus/icons-vue'
 import TaskQueuePanel from './components/TaskQueuePanel.vue'
 import LanguageSwitcher from './components/LanguageSwitcher.vue'
@@ -252,6 +187,7 @@ import { useUserStore } from '@/stores/user'
 import { useThemeStore } from '@/stores/theme'
 import { useCanvasStore } from '@/stores/canvas'
 import { usePermissionStore } from '@/stores/permission'
+import { useMenuStore } from '@/stores/menu'
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -262,70 +198,53 @@ const userStore = useUserStore()
 const themeStore = useThemeStore()
 const canvasStore = useCanvasStore()
 const permissionStore = usePermissionStore()
+const menuStore = useMenuStore()
 
 // 侧边栏展开状态
 const sidebarOpen = ref(false)
 
 // =====================================================
-// 菜单配置（预留后续菜单管理功能接口）
-// 结构：顶部导航放高频核心功能，侧边栏放完整功能分组
+// 图标组件映射（字符串 → 组件）
 // =====================================================
-
-// 顶部大类导航（核心高频功能，带子菜单）
-const topNavItems = [
-  {
-    path: '/chat',
-    labelKey: 'nav.chat',
-    icon: ChatDotRound,
-  },
-  {
-    path: '/images',
-    labelKey: 'nav.images',
-    icon: Picture,
-    children: [
-      { path: '/images', labelKey: 'nav.images', icon: Picture },
-    ],
-  },
-  {
-    path: '/videos',
-    labelKey: 'nav.videos',
-    icon: VideoPlay,
-    children: [
-      { path: '/videos', labelKey: 'nav.videos', icon: VideoPlay },
-    ],
-  },
-  {
-    path: '/canvas',
-    labelKey: 'nav.canvas',
-    icon: Grid,
-  },
-  {
-    path: '/plaza',
-    labelKey: 'nav.plaza',
-    icon: Histogram,
-  },
-]
-
-// 侧边栏完整菜单（分组管理）
-const menuItems = {
-  create: [
-    { path: '/chat', labelKey: 'nav.chat', icon: ChatDotRound },
-    { path: '/images', labelKey: 'nav.images', icon: Picture },
-    { path: '/videos', labelKey: 'nav.videos', icon: VideoPlay },
-    { path: '/canvas', labelKey: 'nav.canvas', icon: Grid },
-  ],
-  personal: [
-    { path: '/history', labelKey: 'nav.history', icon: Clock },
-    { path: '/credits', labelKey: 'nav.credits', icon: Coin },
-  ],
-  community: [
-    { path: '/plaza', labelKey: 'nav.plaza', icon: Histogram },
-  ],
+const iconMap: Record<string, any> = {
+  ChatDotRound,
+  Picture,
+  VideoPlay,
+  Clock,
+  Grid,
+  Setting,
+  Coin,
+  Histogram,
+  User,
+  UserFilled,
+  StarFilled,
+  Message,
+  EditPen,
+  Connection,
 }
 
-// 应用启动时加载模型配置
-onMounted(() => {
+/** 根据图标名称获取组件 */
+function getIcon(iconName: string | null | undefined) {
+  if (!iconName) return null
+  // 优先使用本地映射，找不到则从全部图标中取
+  return iconMap[iconName] || (ElementPlusIconsVue as any)[iconName] || null
+}
+
+// 应用启动时加载模型配置和菜单
+onMounted(async () => {
   modelsStore.fetchConfig()
+  await menuStore.fetchMenus()
+})
+
+// 用户登录状态变化时刷新菜单（确保管理员菜单正确显示）
+watch(() => userStore.isAuthenticated, async (isAuth) => {
+  if (isAuth) {
+    menuStore.clearCache()
+    await menuStore.fetchMenus(false)
+  } else {
+    menuStore.clearCache()
+    await menuStore.fetchMenus(false)
+  }
 })
 
 // 全局主题变化时同步到画布（标题栏切换主题 → 画布跟着变）
@@ -477,51 +396,66 @@ const epLocale = computed(() => {
 .sidebar-content {
   flex: 1;
   overflow-y: auto;
-  padding: 12px 8px;
+  padding: 8px 8px;
 }
 
-.sidebar-group {
-  margin-bottom: 20px;
+/* 侧边栏菜单样式（覆盖 Element Plus 默认样式适配主题） */
+.sidebar-menu {
+  border-right: none !important;
 }
 
-.sidebar-group-title {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--agnes-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  padding: 8px 12px;
-  margin-bottom: 4px;
-}
-
-.sidebar-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  color: var(--agnes-text-secondary);
-  text-decoration: none;
+.sidebar-menu :deep(.el-sub-menu__title) {
+  height: 40px;
+  line-height: 40px;
   border-radius: 8px;
-  font-size: 14px;
-  transition: all 0.15s ease;
-  cursor: pointer;
   margin-bottom: 2px;
-}
-
-.sidebar-item:hover {
-  color: var(--agnes-text-primary);
-  background: var(--agnes-nav-hover-bg);
-}
-
-.sidebar-item.active {
-  color: var(--agnes-text-primary);
-  background: var(--agnes-nav-active-bg);
+  color: var(--agnes-text-secondary);
   font-weight: 500;
 }
 
-.sidebar-item .el-icon {
+.sidebar-menu :deep(.el-sub-menu__title:hover) {
+  background: var(--agnes-nav-hover-bg) !important;
+  color: var(--agnes-text-primary) !important;
+}
+
+.sidebar-menu :deep(.el-sub-menu.is-active > .el-sub-menu__title) {
+  color: var(--agnes-text-primary) !important;
+}
+
+.sidebar-menu :deep(.el-menu-item) {
+  height: 38px;
+  line-height: 38px;
+  border-radius: 8px;
+  margin: 0 4px 2px 4px;
+  color: var(--agnes-text-secondary);
+  font-size: 14px;
+}
+
+.sidebar-menu :deep(.el-menu-item:hover) {
+  background: var(--agnes-nav-hover-bg) !important;
+  color: var(--agnes-text-primary) !important;
+}
+
+.sidebar-menu :deep(.el-menu-item.is-active) {
+  background: var(--agnes-nav-active-bg) !important;
+  color: var(--agnes-text-primary) !important;
+  font-weight: 500;
+}
+
+.sidebar-menu :deep(.el-sub-menu .el-menu) {
+  background: transparent !important;
+}
+
+.sidebar-menu :deep(.el-menu-item .el-icon),
+.sidebar-menu :deep(.el-sub-menu__title .el-icon) {
   font-size: 18px;
-  flex-shrink: 0;
+  margin-right: 10px;
+  color: inherit;
+}
+
+.sidebar-menu :deep(.el-sub-menu__icon-arrow) {
+  font-size: 12px;
+  color: var(--agnes-text-muted);
 }
 
 /* ---- 顶部栏 ---- */

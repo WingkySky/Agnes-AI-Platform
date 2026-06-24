@@ -8,48 +8,48 @@
   <div class="roles-admin-wrap">
     <header class="page-head">
       <div>
-        <h2>角色管理</h2>
-        <p class="muted">管理系统角色与权限配置</p>
+        <h2>{{ t('admin.roles.title') }}</h2>
+        <p class="muted">{{ t('admin.roles.desc') }}</p>
       </div>
-      <el-button type="primary" :icon="Plus" @click="openCreateDialog">新建角色</el-button>
+      <el-button type="primary" :icon="Plus" @click="openCreateDialog">{{ t('admin.roles.createRole') }}</el-button>
     </header>
 
     <el-card class="table-card" shadow="never">
       <el-table :data="roles" style="width: 100%" stripe v-loading="loading">
-        <el-table-column prop="name" label="角色名" min-width="140">
+        <el-table-column prop="name" :label="t('admin.roles.colRoleName')" min-width="140">
           <template #default="{ row }">
             <span class="role-name">{{ row.name }}</span>
             <el-tag v-if="row.is_system" type="info" size="small" effect="light" style="margin-left: 8px">
-              系统角色
+              {{ t('admin.roles.systemRoleTag') }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="display_name" label="显示名称" min-width="140" />
-        <el-table-column prop="description" label="描述" min-width="200">
+        <el-table-column prop="display_name" :label="t('admin.roles.colDisplayName')" min-width="140" />
+        <el-table-column prop="description" :label="t('admin.roles.colDescription')" min-width="200">
           <template #default="{ row }">
             <span class="muted">{{ row.description || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="权限数量" width="120" align="center">
+        <el-table-column :label="t('admin.roles.colPermissionCount')" width="120" align="center">
           <template #default="{ row }">
             <el-tag type="primary" size="small">{{ row.permissions?.length || 0 }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="系统角色" width="100" align="center">
+        <el-table-column :label="t('admin.roles.colSystemRole')" width="100" align="center">
           <template #default="{ row }">
             <el-tag :type="row.is_system ? 'warning' : 'info'" size="small">
-              {{ row.is_system ? '是' : '否' }}
+              {{ row.is_system ? t('admin.roles.yes') : t('admin.roles.no') }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="190" align="center">
+        <el-table-column prop="created_at" :label="t('admin.roles.colCreatedAt')" width="190" align="center">
           <template #default="{ row }">
             <span class="muted">{{ formatTime(row.created_at) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" align="center" fixed="right">
+        <el-table-column :label="t('admin.roles.colActions')" width="180" align="center" fixed="right">
           <template #default="{ row }">
-            <el-button type="primary" size="small" link @click="openEditDialog(row)">编辑</el-button>
+            <el-button type="primary" size="small" link @click="openEditDialog(row)">{{ t('admin.roles.edit') }}</el-button>
             <el-button
               type="danger"
               size="small"
@@ -57,7 +57,7 @@
               :disabled="row.is_system"
               @click="onDelete(row)"
             >
-              删除
+              {{ t('admin.roles.delete') }}
             </el-button>
           </template>
         </el-table-column>
@@ -67,38 +67,38 @@
     <!-- 新建/编辑角色弹窗 -->
     <el-dialog
       v-model="dialogVisible"
-      :title="isEdit ? '编辑角色' : '新建角色'"
+      :title="isEdit ? t('admin.roles.dialogEditTitle') : t('admin.roles.dialogCreateTitle')"
       width="680px"
       :close-on-click-modal="false"
     >
       <el-form :model="form" label-width="100px" label-position="right">
-        <el-form-item label="角色名" prop="name">
+        <el-form-item :label="t('admin.roles.formRoleName')" prop="name">
           <el-input
             v-model="form.name"
-            placeholder="请输入角色名"
+            :placeholder="t('admin.roles.formRoleNamePlaceholder')"
             :disabled="isEdit && currentRole?.is_system"
           />
           <div v-if="isEdit && currentRole?.is_system" class="form-tip">
-            系统角色不可修改角色名
+            {{ t('admin.roles.formRoleNameTip') }}
           </div>
         </el-form-item>
 
-        <el-form-item label="显示名称" prop="display_name">
-          <el-input v-model="form.display_name" placeholder="请输入显示名称" />
+        <el-form-item :label="t('admin.roles.formDisplayName')" prop="display_name">
+          <el-input v-model="form.display_name" :placeholder="t('admin.roles.formDisplayNamePlaceholder')" />
         </el-form-item>
 
-        <el-form-item label="描述" prop="description">
+        <el-form-item :label="t('admin.roles.formDescription')" prop="description">
           <el-input
             v-model="form.description"
             type="textarea"
             :rows="3"
-            placeholder="请输入角色描述"
+            :placeholder="t('admin.roles.formDescriptionPlaceholder')"
             maxlength="200"
             show-word-limit
           />
         </el-form-item>
 
-        <el-form-item label="权限配置">
+        <el-form-item :label="t('admin.roles.formPermissionConfig')">
           <div class="permissions-wrap">
             <div v-for="group in permissionGroups" :key="group.key" class="permission-group">
               <div class="group-header">
@@ -129,8 +129,8 @@
       </el-form>
 
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="onSubmit">确认</el-button>
+        <el-button @click="dialogVisible = false">{{ t('admin.roles.cancel') }}</el-button>
+        <el-button type="primary" :loading="saving" @click="onSubmit">{{ t('admin.roles.confirm') }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -138,10 +138,13 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { getRoles, createRole, updateRole, deleteRole } from '@/api/admin'
 import type { RoleItem } from '@/api/admin'
+
+const { t } = useI18n()
 
 const loading = ref(false)
 const saving = ref(false)
@@ -160,15 +163,15 @@ const form = reactive({
 
 /** 内置权限列表（前端硬编码，后续从接口获取） */
 const builtinPermissions = [
-  { key: 'content:generate', name: '内容生成', group: 'content', groupName: '内容生成组' },
-  { key: 'plaza:view', name: '查看广场', group: 'plaza', groupName: '广场组' },
-  { key: 'plaza:share', name: '分享到广场', group: 'plaza', groupName: '广场组' },
-  { key: 'plaza:moderate', name: '广场审核', group: 'plaza', groupName: '广场组' },
-  { key: 'moderation:config', name: '审核配置', group: 'moderation', groupName: '审核组' },
-  { key: 'user:manage', name: '用户管理', group: 'user', groupName: '用户管理组' },
-  { key: 'role:manage', name: '角色管理', group: 'role', groupName: '角色管理组' },
-  { key: 'watermark:manage', name: '水印配置', group: 'watermark', groupName: '水印配置组' },
-  { key: 'system:config', name: '系统设置', group: 'system', groupName: '系统设置组' }
+  { key: 'content:generate', group: 'content' },
+  { key: 'plaza:view', group: 'plaza' },
+  { key: 'plaza:share', group: 'plaza' },
+  { key: 'plaza:moderate', group: 'plaza' },
+  { key: 'moderation:config', group: 'moderation' },
+  { key: 'user:manage', group: 'user' },
+  { key: 'role:manage', group: 'role' },
+  { key: 'watermark:manage', group: 'watermark' },
+  { key: 'system:config', group: 'system' }
 ]
 
 interface PermissionGroup {
@@ -183,13 +186,13 @@ const permissionGroups = computed<PermissionGroup[]>(() => {
     if (!groups[perm.group]) {
       groups[perm.group] = {
         key: perm.group,
-        name: perm.groupName,
+        name: t(`admin.roles.permissionGroups.${perm.group}` as any),
         permissions: []
       }
     }
     groups[perm.group].permissions.push({
       key: perm.key,
-      name: perm.name
+      name: t(`admin.roles.permissions.${perm.key}` as any)
     })
   })
   return Object.values(groups)
@@ -291,11 +294,11 @@ function openEditDialog(row: RoleItem) {
 /** 提交表单 */
 async function onSubmit() {
   if (!form.name.trim()) {
-    ElMessage.warning('请输入角色名')
+    ElMessage.warning(t('admin.roles.validationRoleNameRequired'))
     return
   }
   if (!form.display_name.trim()) {
-    ElMessage.warning('请输入显示名称')
+    ElMessage.warning(t('admin.roles.validationDisplayNameRequired'))
     return
   }
 
@@ -307,7 +310,7 @@ async function onSubmit() {
         description: form.description,
         permissions: form.permissions
       })
-      ElMessage.success('角色更新成功')
+      ElMessage.success(t('admin.roles.roleUpdateSuccess'))
     } else {
       await createRole({
         name: form.name.trim(),
@@ -315,13 +318,13 @@ async function onSubmit() {
         description: form.description,
         permissions: form.permissions
       })
-      ElMessage.success('角色创建成功')
+      ElMessage.success(t('admin.roles.roleCreateSuccess'))
     }
     dialogVisible.value = false
     fetchRoles()
   } catch (e: any) {
     console.warn(e)
-    ElMessage.error(e?.message || '操作失败')
+    ElMessage.error(e?.message || t('admin.roles.operationFailed'))
   } finally {
     saving.value = false
   }
@@ -332,11 +335,11 @@ async function onDelete(row: RoleItem) {
   if (row.is_system) return
   try {
     await ElMessageBox.confirm(
-      `确定要删除角色「${row.display_name}」吗？删除后关联该角色的用户将失去对应权限。`,
-      '删除确认',
+      t('admin.roles.deleteConfirmMessage', { name: row.display_name }),
+      t('admin.roles.deleteConfirmTitle'),
       {
-        confirmButtonText: '确认删除',
-        cancelButtonText: '取消',
+        confirmButtonText: t('admin.roles.confirmDelete'),
+        cancelButtonText: t('admin.roles.cancel'),
         type: 'warning'
       }
     )
@@ -345,11 +348,11 @@ async function onDelete(row: RoleItem) {
   }
   try {
     await deleteRole(row.name)
-    ElMessage.success('角色删除成功')
+    ElMessage.success(t('admin.roles.roleDeleteSuccess'))
     fetchRoles()
   } catch (e: any) {
     console.warn(e)
-    ElMessage.error(e?.message || '删除失败')
+    ElMessage.error(e?.message || t('admin.roles.deleteFailed'))
   }
 }
 

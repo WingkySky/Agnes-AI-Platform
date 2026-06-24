@@ -42,3 +42,6 @@ huobao-canvas/
 .claude/
 .agents/
 uploads/
+
+#agn-sdk
+agn-sdk/

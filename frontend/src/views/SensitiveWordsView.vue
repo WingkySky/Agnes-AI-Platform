@@ -8,19 +8,19 @@
   <div class="sensitive-words-wrap">
     <header class="page-head">
       <div>
-        <h2>敏感词管理</h2>
-        <p class="muted">管理内容审核敏感词库</p>
+        <h2>{{ t('admin.sensitiveWords.title') }}</h2>
+        <p class="muted">{{ t('admin.sensitiveWords.desc') }}</p>
       </div>
       <div class="head-actions">
-        <el-button :icon="Upload" @click="openImportDialog">批量导入</el-button>
-        <el-button type="primary" :icon="Plus" @click="openCreateDialog">新增敏感词</el-button>
+        <el-button :icon="Upload" @click="openImportDialog">{{ t('admin.sensitiveWords.importWords') }}</el-button>
+        <el-button type="primary" :icon="Plus" @click="openCreateDialog">{{ t('admin.sensitiveWords.addWord') }}</el-button>
       </div>
     </header>
 
     <el-card class="filter-card" shadow="never">
       <div class="filter-row">
-        <el-select v-model="filterCategory" placeholder="全部分类" style="width: 160px" @change="onFilterChange">
-          <el-option label="全部" value="" />
+        <el-select v-model="filterCategory" :placeholder="t('admin.sensitiveWords.filterCategory')" style="width: 160px" @change="onFilterChange">
+          <el-option :label="t('common.all')" value="" />
           <el-option
             v-for="(name, key) in categories"
             :key="key"
@@ -29,15 +29,15 @@
           />
         </el-select>
 
-        <el-select v-model="filterStatus" placeholder="全部状态" style="width: 140px" @change="onFilterChange">
-          <el-option label="全部" value="" />
-          <el-option label="启用" value="active" />
-          <el-option label="停用" value="inactive" />
+        <el-select v-model="filterStatus" :placeholder="t('admin.sensitiveWords.filterStatus')" style="width: 140px" @change="onFilterChange">
+          <el-option :label="t('common.all')" value="" />
+          <el-option :label="t('admin.sensitiveWords.statusActive')" value="active" />
+          <el-option :label="t('admin.sensitiveWords.statusInactive')" value="inactive" />
         </el-select>
 
         <el-input
           v-model="keyword"
-          placeholder="搜索关键词"
+          :placeholder="t('admin.sensitiveWords.searchKeyword')"
           style="width: 260px"
           clearable
           @keyup.enter="onSearch"
@@ -48,49 +48,49 @@
           </template>
         </el-input>
 
-        <el-button type="primary" @click="onSearch">搜索</el-button>
-        <el-button :icon="Refresh" @click="fetchList" :loading="loading">刷新</el-button>
+        <el-button type="primary" @click="onSearch">{{ t('common.search') }}</el-button>
+        <el-button :icon="Refresh" @click="fetchList" :loading="loading">{{ t('common.refresh') }}</el-button>
       </div>
     </el-card>
 
     <el-card class="table-card" shadow="never">
       <el-table :data="list" style="width: 100%" stripe v-loading="loading">
         <el-table-column prop="id" label="ID" width="70" align="center" />
-        <el-table-column prop="word" label="关键词" min-width="160">
+        <el-table-column prop="word" :label="t('admin.sensitiveWords.word')" min-width="160">
           <template #default="{ row }">
             <span class="word-text">{{ row.word }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="category" label="分类" width="140" align="center">
+        <el-table-column prop="category" :label="t('admin.sensitiveWords.category')" width="140" align="center">
           <template #default="{ row }">
             <el-tag type="info" size="small">{{ row.category }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="description" label="说明" min-width="200">
+        <el-table-column prop="description" :label="t('admin.sensitiveWords.description')" min-width="200">
           <template #default="{ row }">
             <span v-if="row.description" class="desc-text">{{ row.description }}</span>
             <span v-else class="muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="110" align="center">
+        <el-table-column :label="t('admin.sensitiveWords.status')" width="110" align="center">
           <template #default="{ row }">
             <el-switch
               :model-value="row.is_active"
               @change="(val: boolean) => onToggleActive(row, val)"
-              active-text="启用"
-              inactive-text="停用"
+              :active-text="t('admin.sensitiveWords.statusActive')"
+              :inactive-text="t('admin.sensitiveWords.statusInactive')"
             />
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="170" align="center">
+        <el-table-column prop="created_at" :label="t('admin.sensitiveWords.createTime')" width="170" align="center">
           <template #default="{ row }">
             <span class="muted">{{ formatTime(row.created_at) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="150" align="center" fixed="right">
+        <el-table-column :label="t('admin.sensitiveWords.actions')" width="150" align="center" fixed="right">
           <template #default="{ row }">
-            <el-button type="primary" size="small" link @click="openEditDialog(row)">编辑</el-button>
-            <el-button type="danger" size="small" link @click="onDelete(row)">删除</el-button>
+            <el-button type="primary" size="small" link @click="openEditDialog(row)">{{ t('admin.sensitiveWords.edit') }}</el-button>
+            <el-button type="danger" size="small" link @click="onDelete(row)">{{ t('admin.sensitiveWords.delete') }}</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -111,18 +111,18 @@
 
     <el-dialog
       v-model="dialogVisible"
-      :title="isEdit ? '编辑敏感词' : '新增敏感词'"
+      :title="isEdit ? t('admin.sensitiveWords.dialogEdit') : t('admin.sensitiveWords.dialogAdd')"
       width="480px"
       @close="resetForm"
     >
       <el-form :model="form" :rules="formRules" ref="formRef" label-width="80px">
-        <el-form-item label="关键词" prop="word">
-          <el-input v-model="form.word" placeholder="请输入敏感词" maxlength="100" show-word-limit />
+        <el-form-item :label="t('admin.sensitiveWords.word')" prop="word">
+          <el-input v-model="form.word" :placeholder="t('admin.sensitiveWords.inputWord')" maxlength="100" show-word-limit />
         </el-form-item>
-        <el-form-item label="分类" prop="category">
+        <el-form-item :label="t('admin.sensitiveWords.category')" prop="category">
           <el-select
             v-model="form.category"
-            placeholder="请选择或输入分类"
+            :placeholder="t('admin.sensitiveWords.inputCategory')"
             filterable
             allow-create
             default-first-option
@@ -136,24 +136,24 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="说明" prop="description">
+        <el-form-item :label="t('admin.sensitiveWords.description')" prop="description">
           <el-input
             v-model="form.description"
             type="textarea"
             :rows="3"
-            placeholder="请输入说明（可选）"
+            :placeholder="t('admin.sensitiveWords.inputDesc')"
             maxlength="200"
             show-word-limit
           />
         </el-form-item>
-        <el-form-item label="启用状态" prop="is_active">
-          <el-switch v-model="form.is_active" active-text="启用" inactive-text="停用" />
+        <el-form-item :label="t('admin.sensitiveWords.status')" prop="is_active">
+          <el-switch v-model="form.is_active" :active-text="t('admin.sensitiveWords.statusActive')" :inactive-text="t('admin.sensitiveWords.statusInactive')" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
         <el-button type="primary" :loading="submitLoading" @click="onSubmit">
-          {{ isEdit ? '保存' : '创建' }}
+          {{ isEdit ? t('common.save') : t('admin.sensitiveWords.create') }}
         </el-button>
       </template>
     </el-dialog>
@@ -161,23 +161,23 @@
     <!-- 批量导入弹窗 -->
     <el-dialog
       v-model="importDialogVisible"
-      title="批量导入敏感词"
+      :title="t('admin.sensitiveWords.importTitle')"
       width="560px"
       @close="resetImportForm"
     >
       <el-form :model="importForm" label-width="100px" label-position="right">
-        <el-form-item label="敏感词列表">
+        <el-form-item :label="t('admin.sensitiveWords.wordList')">
           <el-input
             v-model="importForm.words"
             type="textarea"
             :rows="10"
-            placeholder="请输入敏感词，支持换行、逗号、分号、空格分隔&#10;例如：&#10;敏感词1&#10;敏感词2,敏感词3；敏感词4"
+            :placeholder="t('admin.sensitiveWords.importInputHint')"
             maxlength="5000"
             show-word-limit
           />
-          <div class="form-tip">支持换行、逗号、分号、顿号、空格分隔，自动去重和跳过已存在的词</div>
+          <div class="form-tip">{{ t('admin.sensitiveWords.importFormatTip') }}</div>
         </el-form-item>
-        <el-form-item label="默认分类">
+        <el-form-item :label="t('admin.sensitiveWords.importCategory')">
           <el-select v-model="importForm.category" style="width: 200px">
             <el-option
               v-for="(name, key) in categories"
@@ -187,19 +187,19 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="跳过已存在">
+        <el-form-item :label="t('admin.sensitiveWords.skipExisting')">
           <el-switch
             v-model="importForm.skip_existing"
-            active-text="是"
-            inactive-text="否"
+            :active-text="t('common.yes')"
+            :inactive-text="t('common.no')"
           />
-          <div class="form-tip">关闭后会覆盖已存在词的分类（暂未实现，建议保持开启）</div>
+          <div class="form-tip">{{ t('admin.sensitiveWords.skipExistingTip') }}</div>
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="importDialogVisible = false">取消</el-button>
+        <el-button @click="importDialogVisible = false">{{ t('common.cancel') }}</el-button>
         <el-button type="primary" :loading="importLoading" @click="onImportSubmit">
-          开始导入
+          {{ t('admin.sensitiveWords.startImport') }}
         </el-button>
       </template>
     </el-dialog>
@@ -207,9 +207,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Plus, Search, Refresh, Upload } from '@element-plus/icons-vue'
+import { useI18n } from 'vue-i18n'
 import {
   getSensitiveWords,
   createSensitiveWord,
@@ -218,6 +219,8 @@ import {
   batchImportSensitiveWords
 } from '@/api/admin'
 import type { SensitiveWordItem } from '@/api/admin'
+
+const { t } = useI18n()
 
 const loading = ref(false)
 const list = ref<SensitiveWordItem[]>([])
@@ -244,15 +247,15 @@ const form = ref({
   is_active: true
 })
 
-const formRules: FormRules = {
+const formRules = computed<FormRules>(() => ({
   word: [
-    { required: true, message: '请输入关键词', trigger: 'blur' },
-    { min: 1, max: 100, message: '长度在 1 到 100 个字符', trigger: 'blur' }
+    { required: true, message: t('admin.sensitiveWords.inputWordRequired'), trigger: 'blur' },
+    { min: 1, max: 100, message: t('admin.sensitiveWords.inputWordLength'), trigger: 'blur' }
   ],
   category: [
-    { required: true, message: '请选择或输入分类', trigger: 'change' }
+    { required: true, message: t('admin.sensitiveWords.inputCategoryRequired'), trigger: 'change' }
   ]
-}
+}))
 
 function formatTime(val?: string | null) {
   if (!val) return ''
@@ -302,7 +305,7 @@ async function onToggleActive(row: SensitiveWordItem, active: boolean) {
   try {
     await updateSensitiveWord(row.id, { is_active: active })
     row.is_active = active
-    ElMessage.success(active ? '已启用' : '已停用')
+    ElMessage.success(active ? t('admin.sensitiveWords.enabled') : t('admin.sensitiveWords.disabled'))
   } catch (e) {
     console.warn(e)
     fetchList()
@@ -355,14 +358,14 @@ async function onSubmit() {
         description: form.value.description || undefined,
         is_active: form.value.is_active
       })
-      ElMessage.success('修改成功')
+      ElMessage.success(t('admin.sensitiveWords.updateSuccess'))
     } else {
       await createSensitiveWord(
         form.value.word,
         form.value.category,
         form.value.description || undefined
       )
-      ElMessage.success('创建成功')
+      ElMessage.success(t('admin.sensitiveWords.createSuccess'))
     }
     dialogVisible.value = false
     fetchList()
@@ -376,16 +379,16 @@ async function onSubmit() {
 async function onDelete(row: SensitiveWordItem) {
   try {
     await ElMessageBox.confirm(
-      `确认删除敏感词「${row.word}」？`,
-      '删除确认',
-      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+      t('admin.sensitiveWords.deleteConfirmMessage', { word: row.word }),
+      t('admin.sensitiveWords.deleteConfirmTitle'),
+      { confirmButtonText: t('admin.sensitiveWords.confirmDelete'), cancelButtonText: t('common.cancel'), type: 'warning' }
     )
   } catch {
     return
   }
   try {
     await deleteSensitiveWord(row.id)
-    ElMessage.success('已删除')
+    ElMessage.success(t('admin.sensitiveWords.deleteSuccess'))
     fetchList()
   } catch (e) {
     console.warn(e)
@@ -421,14 +424,14 @@ function resetImportForm() {
 
 async function onImportSubmit() {
   if (!importForm.value.words.trim()) {
-    ElMessage.warning('请输入要导入的敏感词')
+    ElMessage.warning(t('admin.sensitiveWords.importEmptyWarning'))
     return
   }
   importLoading.value = true
   try {
     const resp = await batchImportSensitiveWords(importForm.value)
     ElMessage.success(
-      `导入完成：新增 ${resp.inserted_count} 条，跳过 ${resp.skipped_count} 条`
+      t('admin.sensitiveWords.importResult', { inserted: resp.inserted_count, skipped: resp.skipped_count })
     )
     importDialogVisible.value = false
     fetchList()

@@ -8,8 +8,8 @@
   <div class="watermark-config-wrap">
     <header class="page-head">
       <div>
-        <h2>水印配置</h2>
-        <p class="muted">配置图片生成水印效果，支持文字和图片两种模式</p>
+        <h2>{{ t('admin.watermark.title') }}</h2>
+        <p class="muted">{{ t('admin.watermark.desc') }}</p>
       </div>
     </header>
 
@@ -18,34 +18,34 @@
         <!-- 左侧配置区 -->
         <div class="config-left">
           <el-form :model="form" label-width="100px" label-position="right" size="default">
-            <el-form-item label="水印类型">
+            <el-form-item :label="t('admin.watermark.type')">
               <el-radio-group v-model="form.type">
-                <el-radio value="text">文字水印</el-radio>
-                <el-radio value="image">图片水印</el-radio>
+                <el-radio value="text">{{ t('admin.watermark.typeText') }}</el-radio>
+                <el-radio value="image">{{ t('admin.watermark.typeImage') }}</el-radio>
               </el-radio-group>
             </el-form-item>
 
             <!-- 文字水印配置 -->
             <template v-if="form.type === 'text'">
-              <el-form-item label="水印文字">
-                <el-input v-model="form.text" placeholder="请输入水印文字" maxlength="50" show-word-limit style="max-width: 320px" />
+              <el-form-item :label="t('admin.watermark.text')">
+                <el-input v-model="form.text" :placeholder="t('admin.watermark.textPlaceholder')" maxlength="50" show-word-limit style="max-width: 320px" />
               </el-form-item>
 
-              <el-form-item label="字体大小">
+              <el-form-item :label="t('admin.watermark.fontSize')">
                 <div class="field-with-unit">
                   <el-input-number v-model="form.font_size" :min="12" :max="120" :step="1" controls-position="right" />
                   <span class="unit">px</span>
                 </div>
               </el-form-item>
 
-              <el-form-item label="字体颜色">
+              <el-form-item :label="t('admin.watermark.fontColor')">
                 <el-color-picker v-model="form.color" show-alpha size="default" />
               </el-form-item>
             </template>
 
             <!-- 图片水印配置 -->
             <template v-if="form.type === 'image'">
-              <el-form-item label="水印图片">
+              <el-form-item :label="t('admin.watermark.image')">
                 <div class="image-upload-field">
                   <el-upload
                     class="image-uploader"
@@ -57,18 +57,18 @@
                     accept="image/*"
                   >
                     <div v-if="form.image_url" class="image-preview">
-                      <img :src="form.image_url" alt="水印图片" />
+                      <img :src="form.image_url" :alt="t('admin.watermark.image')" />
                     </div>
-                    <el-button v-else type="primary" :icon="Upload">上传图片</el-button>
+                    <el-button v-else type="primary" :icon="Upload">{{ t('admin.watermark.upload') }}</el-button>
                   </el-upload>
                   <div class="url-input-row">
-                    <span class="url-label">图片 URL</span>
+                    <span class="url-label">{{ t('admin.watermark.imageUrl') }}</span>
                     <el-input v-model="form.image_url" placeholder="https://..." />
                   </div>
                 </div>
               </el-form-item>
 
-              <el-form-item label="图片宽度">
+              <el-form-item :label="t('admin.watermark.imageWidth')">
                 <div class="field-with-unit">
                   <el-input-number v-model="form.image_width" :min="20" :max="500" :step="1" controls-position="right" />
                   <span class="unit">px</span>
@@ -76,14 +76,14 @@
               </el-form-item>
             </template>
 
-            <el-form-item label="透明度">
+            <el-form-item :label="t('admin.watermark.opacity')">
               <div class="slider-field">
                 <el-slider v-model="form.opacity" :min="0" :max="100" :step="1" class="slider-control" />
                 <span class="slider-value">{{ form.opacity }}%</span>
               </div>
             </el-form-item>
 
-            <el-form-item label="水印位置">
+            <el-form-item :label="t('admin.watermark.position')">
               <div class="position-picker">
                 <div
                   v-for="pos in positionOptions"
@@ -98,21 +98,21 @@
               </div>
             </el-form-item>
 
-            <el-form-item label="边距">
+            <el-form-item :label="t('admin.watermark.margin')">
               <div class="field-with-unit">
                 <el-input-number v-model="form.margin" :min="0" :max="200" :step="1" controls-position="right" />
                 <span class="unit">px</span>
               </div>
             </el-form-item>
 
-            <el-form-item label="全局强制">
+            <el-form-item :label="t('admin.watermark.forceAll')">
               <div class="switch-field">
                 <el-switch
                   v-model="form.force_all"
-                  active-text="开启"
-                  inactive-text="关闭"
+                  :active-text="t('admin.watermark.enabled')"
+                  :inactive-text="t('admin.watermark.disabled')"
                 />
-                <div class="form-tip">开启后所有用户生成的图片都会添加水印，覆盖用户个人设置</div>
+                <div class="form-tip">{{ t('admin.watermark.forceAllTip') }}</div>
               </div>
             </el-form-item>
           </el-form>
@@ -122,13 +122,13 @@
         <div class="config-right">
           <div class="preview-card">
             <div class="preview-header">
-              <span class="preview-title">预览效果</span>
+              <span class="preview-title">{{ t('admin.watermark.preview') }}</span>
             </div>
             <div class="preview-body">
               <div class="preview-image">
                 <div class="placeholder-bg">
                   <el-icon :size="48" color="rgba(255,255,255,0.3)"><Picture /></el-icon>
-                  <span class="placeholder-text">示例图片</span>
+                  <span class="placeholder-text">{{ t('admin.watermark.placeholder') }}</span>
                 </div>
                 <!-- 文字水印预览 -->
                 <div
@@ -144,7 +144,7 @@
                   class="watermark-preview image-watermark"
                   :style="imageWatermarkStyle"
                 >
-                  <img :src="form.image_url" alt="水印" />
+                  <img :src="form.image_url" :alt="t('admin.watermark.image')" />
                 </div>
               </div>
             </div>
@@ -153,8 +153,8 @@
       </div>
 
       <div class="form-actions">
-        <el-button @click="fetchConfig">重置</el-button>
-        <el-button type="primary" :loading="saving" @click="onSave">保存配置</el-button>
+        <el-button @click="fetchConfig">{{ t('admin.watermark.reset') }}</el-button>
+        <el-button type="primary" :loading="saving" @click="onSave">{{ t('admin.watermark.save') }}</el-button>
       </div>
     </el-card>
   </div>
@@ -162,10 +162,13 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { Upload, Picture } from '@element-plus/icons-vue'
 import { getWatermarkConfig, updateWatermarkConfig } from '@/api/admin'
 import type { WatermarkConfig } from '@/api/admin'
+
+const { t } = useI18n()
 
 const uploadUrl = '/api/admin/upload'
 const uploadHeaders = {
@@ -188,15 +191,15 @@ const form = reactive<Partial<WatermarkConfig>>({
 })
 
 const positionOptions = [
-  { value: 'top-left', label: '左上' },
-  { value: 'top-center', label: '中上' },
-  { value: 'top-right', label: '右上' },
-  { value: 'center-left', label: '左中' },
-  { value: 'center', label: '居中' },
-  { value: 'center-right', label: '右中' },
-  { value: 'bottom-left', label: '左下' },
-  { value: 'bottom-center', label: '中下' },
-  { value: 'bottom-right', label: '右下' }
+  { value: 'top-left', label: computed(() => t('admin.watermark.positions.topLeft')) },
+  { value: 'top-center', label: computed(() => t('admin.watermark.positions.topCenter')) },
+  { value: 'top-right', label: computed(() => t('admin.watermark.positions.topRight')) },
+  { value: 'center-left', label: computed(() => t('admin.watermark.positions.centerLeft')) },
+  { value: 'center', label: computed(() => t('admin.watermark.positions.center')) },
+  { value: 'center-right', label: computed(() => t('admin.watermark.positions.centerRight')) },
+  { value: 'bottom-left', label: computed(() => t('admin.watermark.positions.bottomLeft')) },
+  { value: 'bottom-center', label: computed(() => t('admin.watermark.positions.bottomCenter')) },
+  { value: 'bottom-right', label: computed(() => t('admin.watermark.positions.bottomRight')) }
 ]
 
 /** 根据位置计算样式 */
@@ -279,24 +282,24 @@ async function fetchConfig() {
 function onUploadSuccess(response: any) {
   if (response?.url) {
     form.image_url = response.url
-    ElMessage.success('图片上传成功')
+    ElMessage.success(t('admin.watermark.uploadSuccess'))
   } else {
-    ElMessage.error('上传失败')
+    ElMessage.error(t('admin.watermark.uploadFailed'))
   }
 }
 
 function onUploadError() {
-  ElMessage.error('图片上传失败')
+  ElMessage.error(t('admin.watermark.imageUploadFailed'))
 }
 
 async function onSave() {
   saving.value = true
   try {
     await updateWatermarkConfig(form)
-    ElMessage.success('配置保存成功')
+    ElMessage.success(t('admin.watermark.saveSuccess'))
   } catch (e) {
     console.warn(e)
-    ElMessage.error('保存失败')
+    ElMessage.error(t('admin.watermark.saveFailed'))
   } finally {
     saving.value = false
   }
