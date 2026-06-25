@@ -81,17 +81,27 @@ class JsonFormatter(logging.Formatter):
 class HumanFormatter(logging.Formatter):
     """
     人类可读的日志格式，在标准格式基础上增加 request_id 和模块信息。
-    格式：2024-01-01 12:00:00 [INFO] [req-xxx] module.func:12: 消息内容
+    格式：2026-06-25 15:30:45.123 [INFO] [req-xxx] module.func:12: 消息内容
+    包含毫秒精度，便于排查性能问题和请求耗时
     """
 
-    def format(self, record: logging.LogRecord) -> str:
-        # 注入 request_id 到格式字符串
-        record._fmt = (
-            "%(asctime)s [%(levelname)s] "
+    def __init__(self, datefmt: str = None):
+        # 正确设置格式字符串到 self._fmt（而不是 record._fmt）
+        # 增加毫秒显示（%(msecs)03d）
+        fmt = (
+            "%(asctime)s.%(msecs)03d [%(levelname)s] "
             "[%(request_id)s] "
             "%(module)s.%(funcName)s:%(lineno)d: "
             "%(message)s"
         )
+        # 默认日期格式：年-月-日 时:分:秒
+        default_datefmt = "%Y-%m-%d %H:%M:%S"
+        super().__init__(fmt=fmt, datefmt=datefmt or default_datefmt)
+
+    def format(self, record: logging.LogRecord) -> str:
+        # 确保 request_id 属性存在（防止没有经过 RequestIdFilter 的日志报错）
+        if not hasattr(record, "request_id"):
+            record.request_id = "-"  # type: ignore[attr-defined]
         return super().format(record)
 
 
@@ -168,6 +178,29 @@ def setup_logging(
 
     # 禁止日志向上传播，避免重复输出
     logger.propagate = False
+
+    # ---------- 统一配置 uvicorn 相关 logger，使用相同格式 ----------
+    # 解决 uvicorn 默认访问日志格式不一致、重复输出、无 request_id 的问题
+    # - uvicorn / uvicorn.error：使用和业务日志相同的级别和格式
+    # - uvicorn.access：设置为 WARNING 级别，不打印 INFO 访问日志
+    #   （因为我们自己的 RequestIdMiddleware 已经在打印更详细的请求日志，包含 request_id 和精确耗时）
+    for uvicorn_logger_name in ("uvicorn", "uvicorn.error"):
+        uvicorn_logger = logging.getLogger(uvicorn_logger_name)
+        uvicorn_logger.handlers.clear()
+        uvicorn_logger.setLevel(getattr(logging, log_level.upper(), logging.INFO))
+        uvicorn_logger.addHandler(console_handler)
+        if log_file_enabled:
+            uvicorn_logger.addHandler(file_handler)
+        uvicorn_logger.propagate = False
+
+    # uvicorn.access：只保留 WARNING 及以上级别的日志（避免重复打印访问日志）
+    access_logger = logging.getLogger("uvicorn.access")
+    access_logger.handlers.clear()
+    access_logger.setLevel(logging.WARNING)
+    access_logger.addHandler(console_handler)
+    if log_file_enabled:
+        access_logger.addHandler(file_handler)
+    access_logger.propagate = False
 
     return logger
 

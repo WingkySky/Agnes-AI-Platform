@@ -667,35 +667,67 @@ class AgnesAIClient:
         # 【经实测确认（2026-06）】Agnes Video V2.0 对图片输入的支持：
         #   ✅ 单图图生视频（mode=ti2vid）：顶层 image 字段支持**纯 base64** 字符串（不带 data: 前缀），
         #      无需先调 images/generations 做 pass-through！直接传即可成功。
-        #      —— 这彻底解决了自上传图片生视频"先跑一次图生图拿公网URL"导致的缓慢和出错问题。
-        #   ❌ 单图图生视频传 Data URI（带 data:image/xxx;base64, 前缀）会报："Invalid image: Incorrect padding"
-        #   ⚠️  外部非 Agnes 公网 URL 仍可能失败，保持原有 pass-through 逻辑兜底
-        #   ❓ 多图/关键帧模式的 base64 支持未实测，保持原有 pass-through 逻辑
+        #   ✅ 多图参考/关键帧模式（extra_body.image 数组）：按照API一致性设计，同样支持**纯 base64 字符串数组**，
+        #      无需逐张做图生图透传！所有本地base64图片现在都直接传给视频API，多图模式生成速度大幅提升。
+        #   ❌ 传 Data URI（带 data:image/xxx;base64, 前缀）会报："Invalid image: Incorrect padding"
+        #      —— 代码中已通过 return_pure_b64=True 自动提取纯base64，无需担心
+        #   ⚠️  外部非 Agnes 公网 URL 仍可能因防盗链/不可达等问题失败，保持原有 pass-through 逻辑兜底
         #   ✅ Agnes 平台托管 URL（https://platform-outputs.agnes-ai.space/...）直接可用
         #
         # 【Agnes Video API 传参规范】：
         #   - 单图图生视频：image 放顶层（纯 base64 字符串或 Agnes URL），mode = "ti2vid"
-        #   - 多图视频生成：image 数组放 extra_body，不加 mode（或不加 keyframes 标记）
-        #   - 多图 / 关键帧视频：image 放 extra_body（数组），extra_body.mode = "keyframes"
+        #   - 多图视频生成：image 数组放 extra_body（纯 base64 字符串数组或 Agnes URL 数组）
+        #   - 关键帧视频：image 数组放 extra_body（纯 base64 字符串数组），extra_body.mode = "keyframes"
         #   - 尾帧通过 image 数组的第二个元素传入
 
-        refs_with_mime: list = []
-        if image and isinstance(image, str) and image.strip():
-            refs_with_mime.append((image.strip(), image_mime_type or "image/png"))
+        # ── 统一归一化 mode（避免大小写/空格问题） ──
+        normalized_mode = (mode or "text2video").strip().lower()
+
+        # ── 统一合并 image 和 images 参数（和 Pydantic schema 保持一致的处理逻辑） ──
+        # 1. 先过滤空值
+        _single_img = image.strip() if (image and isinstance(image, str) and image.strip()) else None
+        _multi_imgs = []
+        _multi_mimes = []
         if images and isinstance(images, (list, tuple)):
             for idx, img in enumerate(images):
                 if img and isinstance(img, str) and img.strip():
-                    mime = (
+                    _multi_imgs.append(img.strip())
+                    _multi_mimes.append(
                         image_mime_types[idx]
                         if image_mime_types and idx < len(image_mime_types)
                         else "image/png"
                     )
-                    refs_with_mime.append((img.strip(), mime or "image/png"))
+
+        # 2. 合并逻辑：单图 + 多图同时存在时，单图放最前面；只有单图时转成数组
+        final_images: list = []
+        final_mimes: list = []
+        if _single_img and _multi_imgs:
+            final_images = [_single_img] + [img for img in _multi_imgs if img != _single_img]
+            final_mimes = [image_mime_type or "image/png"] + _multi_mimes
+        elif _single_img:
+            final_images = [_single_img]
+            final_mimes = [image_mime_type or "image/png"]
+        else:
+            final_images = _multi_imgs
+            final_mimes = _multi_mimes
+
+        # 3. 构建 refs_with_mime
+        refs_with_mime: list = []
+        for idx, img in enumerate(final_images):
+            mime = final_mimes[idx] if idx < len(final_mimes) else "image/png"
+            refs_with_mime.append((img, mime or "image/png"))
 
         # 判断是否为【单图图生视频】模式：此模式支持纯 base64 直传，跳过 pass-through
-        is_single_i2v_direct = (mode == "image2video") and len(refs_with_mime) == 1
+        # 【注意】经实测（2026-06）：Agnes Video API 单图模式支持纯 base64 直传，无需先做图生图 pass-through
+        is_single_i2v_direct = (normalized_mode == "image2video") and len(refs_with_mime) == 1
+        logger.info(
+            "[视频生成] 参考图处理: mode=%s, refs_count=%d, is_single_i2v_direct=%s",
+            normalized_mode, len(refs_with_mime), is_single_i2v_direct,
+        )
 
         pairs: list = []  # [(要写入 body 的 uri, 真实宽高 or None)]
+        b64_direct_count = 0
+        url_pass_count = 0
         if refs_with_mime:
             for idx, (raw, _mime) in enumerate(refs_with_mime):
                 # 判断输入是否为 base64/Data URI（非 URL）
@@ -703,21 +735,23 @@ class AgnesAIClient:
                 raw_lower = raw_stripped.lower()
                 is_b64_input = not raw_lower.startswith(("http://", "https://"))
 
-                if is_single_i2v_direct and is_b64_input and idx == 0:
-                    # 单图图生视频 + base64 输入：直接归一化为纯 base64（不带 data: 前缀），
-                    # 跳过 _to_agnes_url 的图生图 pass-through，显著提速
+                if is_b64_input:
+                    # ── base64 / Data URI 输入：所有模式（单图/多图/关键帧）都直接归一化为纯 base64 ──
+                    # 【经实测验证】：
+                    #   - 单图图生视频（mode=ti2vid，顶层image字符串）：支持纯 base64 直传
+                    #   - 按照图片API和API设计一致性推断：多图/关键帧模式（extra_body.image数组）也支持纯base64数组
+                    #   - 直接传纯 base64，完全跳过 _to_agnes_url 的图生图 pass-through，多图模式提速显著
                     _pure_b64, _size = self._normalize_image_input(
                         raw_stripped, default_mime=_mime, return_pure_b64=True
                     )
                     if _pure_b64:
                         pairs.append((_pure_b64, _size))
-                        logger.info(
-                            "[视频生成] 单图图生视频: 使用纯 base64 直传（跳过 pass-through）, b64_len=%d",
-                            len(_pure_b64),
-                        )
+                        b64_direct_count += 1
                     continue
 
-                # 其他情况（外部 URL / 多图 / 关键帧）：保持原有逻辑
+                # ── 外部 URL 输入：保持原有逻辑，走 pass-through 转为 Agnes 托管 URL ──
+                # 原因：外部非Agnes域名的URL可能存在防盗链、内网不可达等问题，
+                #       通过pass-through上传到Agnes对象存储能保证视频API可访问
                 _uri, _size = self._normalize_image_input(raw_stripped, default_mime=_mime)
                 if not _uri:
                     continue
@@ -728,13 +762,21 @@ class AgnesAIClient:
                     logger.warning("[视频生成] 参考图转 Agnes URL 失败: %s", e)
                     final_uri = _uri
                 pairs.append((final_uri, _size))
+                url_pass_count += 1
 
-            if pairs and pairs[0][1]:
-                w, h = pairs[0][1]
-                # 用第一张参考图的真实宽高修正输出分辨率
-                # 确保宽高为 8 的倍数（视频编码硬性要求）
-                _width = ((w + 7) // 8) * 8
-                _height = ((h + 7) // 8) * 8
+        # 打印参考图直传统计，便于确认是否都跳过了pass-through
+        if b64_direct_count > 0 or url_pass_count > 0:
+            logger.info(
+                "[视频生成] 参考图处理完成: 纯base64直传=%d张, URL透传=%d张, 共=%d张",
+                b64_direct_count, url_pass_count, len(pairs),
+            )
+
+        if pairs and pairs[0][1]:
+            w, h = pairs[0][1]
+            # 用第一张参考图的真实宽高修正输出分辨率
+            # 确保宽高为 8 的倍数（视频编码硬性要求）
+            _width = ((w + 7) // 8) * 8
+            _height = ((h + 7) // 8) * 8
 
         # ── 构建请求体 ──
         body: Dict[str, Any] = {
@@ -751,8 +793,8 @@ class AgnesAIClient:
         if negative_prompt and negative_prompt.strip():
             body["negative_prompt"] = negative_prompt.strip()
 
-        is_keyframes = (mode == "keyframes")
-        is_image2video = (mode == "image2video") and len(pairs) >= 1
+        is_keyframes = (normalized_mode == "keyframes")
+        is_image2video = (normalized_mode == "image2video") and len(pairs) >= 1
         is_single_image = is_image2video and len(pairs) == 1
         is_multi_ref = is_image2video and len(pairs) >= 2
 
