@@ -176,8 +176,10 @@ export const useMenuStore = defineStore('menu', () => {
     // 再异步从后端拉取用户配置覆盖
     loading.value = true
     try {
-      const { data } = await getMenuConfigs()
-      if (data.configs && Array.isArray(data.configs)) {
+      // 注意：client.ts 响应拦截器已返回 response.data（即后端响应体本身）
+      // 后端 GET /menu-configs 直接返回 { configs, groups }，无需再解构 data
+      const data = await getMenuConfigs()
+      if (data?.configs && Array.isArray(data.configs)) {
         menuConfigs.value = data.configs
         groupConfigs.value = data.groups || []
         saveToCache()

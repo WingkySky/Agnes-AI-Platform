@@ -43,5 +43,5 @@ huobao-canvas/
 .agents/
 uploads/
 
-#agn-sdk
-agn-sdk/
+#数据
+backend/data/

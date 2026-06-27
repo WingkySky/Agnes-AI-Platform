@@ -1,12 +1,15 @@
 # =====================================================
 # 水印处理服务
 # - 图片水印：使用 Pillow 在图片上叠加文字或图片水印
-# - 视频水印：暂不处理（视频水印复杂度高，先做图片）
+# - 视频水印：使用 ffmpeg drawtext/overlay 滤镜实时处理（apply_video_watermark）
 # =====================================================
 
+import asyncio
+import hashlib
 import logging
 import os
 import io
+import tempfile
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -238,3 +241,226 @@ def _hex_to_rgb(hex_color) -> tuple:
         return (r, g, b)
     except Exception:
         return (255, 255, 255)
+
+
+# =====================================================
+# 视频水印（ffmpeg drawtext / overlay）
+# =====================================================
+
+def _calc_ffmpeg_position(
+    position: str,
+    video_width: int,
+    video_height: int,
+    wm_width: int,
+    wm_height: int,
+    margin: int,
+) -> str:
+    """
+    根据位置字符串计算 ffmpeg overlay 滤镜的坐标表达式
+
+    ffmpeg overlay 坐标系：左上角为原点，支持表达式（W/H 为主视频宽高，w/h 为水印宽高）
+
+    Returns:
+        ffmpeg 坐标表达式字符串，如 "x=W-w-20:y=H-h-20"
+    """
+    position_str = str(position or "bottom-right").lower()
+    # 安全转换
+    try:
+        margin = max(0, int(margin or 20))
+    except (ValueError, TypeError):
+        margin = 20
+
+    if position_str == "top-left":
+        return f"x={margin}:y={margin}"
+    elif position_str == "top-right":
+        return f"x=W-w-{margin}:y={margin}"
+    elif position_str == "bottom-left":
+        return f"x={margin}:y=H-h-{margin}"
+    elif position_str == "center":
+        return f"x=(W-w)/2:y=(H-h)/2"
+    else:  # bottom-right（默认）
+        return f"x=W-w-{margin}:y=H-h-{margin}"
+
+
+def _find_video_font() -> str:
+    """查找系统中可用的中文字体文件（与 ffmpeg_composite._find_font 逻辑一致）"""
+    candidates = [
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/STHeiti Light.ttc",
+        "/Library/Fonts/Arial Unicode.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+        "/usr/share/fonts/wqy-zenhei/wqy-zenhei.ttc",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ]
+    for f in candidates:
+        if os.path.exists(f):
+            return f
+    return ""
+
+
+def _escape_drawtext_text(text: str) -> str:
+    """转义 drawtext 文本中的特殊字符（与 ffmpeg_composite 一致）"""
+    text = text.replace("\\", "\\\\")
+    text = text.replace(":", "\\:")
+    text = text.replace("'", "\\'")
+    text = text.replace("%", "\\%")
+    text = text.replace("\n", " ").replace("\r", " ")
+    return text
+
+
+_video_watermark_logger = logging.getLogger("agnes_platform.watermark")
+
+
+async def apply_video_watermark(
+    video_path: str,
+    config: "WatermarkConfig",
+    output_path: str,
+) -> str:
+    """
+    给视频加水印（文字或图片），返回输出文件路径
+
+    实现策略：
+    - 文字水印：ffmpeg drawtext 滤镜
+    - 图片水印：ffmpeg overlay 滤镜
+    - 必须重编码视频流（drawtext/overlay 需要 -filter_complex，不能用 -c:v copy）
+    - 用 libx264 -preset fast 平衡速度与质量
+
+    Args:
+        video_path: 输入视频文件路径
+        config: 水印配置（WatermarkConfig ORM 对象）
+        output_path: 输出文件路径
+
+    Returns:
+        输出文件路径（处理失败时返回原 video_path，不阻断下载）
+    """
+    if not os.path.exists(video_path):
+        _video_watermark_logger.warning(f"[视频水印] 输入视频不存在: {video_path}")
+        return video_path
+
+    opacity = max(0, min(100, int(config.opacity or 50)))
+    alpha = opacity / 100.0  # 0.0~1.0
+    margin = int(getattr(config, "margin", 20) or 20)
+    position = str(getattr(config, "position", "bottom-right") or "bottom-right")
+
+    wm_type = str(getattr(config, "type", "text") or "text").lower()
+    fontfile = _find_video_font()
+    font_opt = f":fontfile='{fontfile}'" if fontfile else ""
+
+    # 构建 filter_complex
+    if wm_type == "image" and getattr(config, "image_url", None):
+        # 图片水印：用 overlay 滤镜
+        from urllib.parse import urlparse
+        image_url = str(config.image_url or "")
+        parsed = urlparse(image_url)
+        local_path = parsed.path
+        if not local_path or not os.path.exists(local_path):
+            _video_watermark_logger.warning(
+                f"[视频水印] 水印图片不存在或为远程URL: {image_url}，跳过"
+            )
+            return video_path
+
+        # 计算水印图片缩放后的尺寸（用于位置计算）
+        wm_width = int(getattr(config, "image_width", 120) or 120)
+        if wm_width <= 0:
+            wm_width = 120
+        # overlay 表达式不直接知道缩放后的高，用 -filter_complex 链
+        pos_expr = _calc_ffmpeg_position(
+            position, 0, 0, 0, 0, margin  # video_width/height 用 W/H 表达式
+        )
+        # 注意：图片水印的高需要从输入读取，这里用 w/h 表达式
+        # 替换占位为 ffmpeg 表达式
+        if "W-w-" in pos_expr:
+            pos_expr = pos_expr.replace("W-w-", "W-w-")
+        elif "W-w" in pos_expr:
+            pass  # 已是表达式
+        # 简化：overlay 直接用 W/H/w/h 表达式
+        if position == "top-left":
+            overlay_pos = f"x={margin}:y={margin}"
+        elif position == "top-right":
+            overlay_pos = f"x=W-w-{margin}:y={margin}"
+        elif position == "bottom-left":
+            overlay_pos = f"x={margin}:y=H-h-{margin}"
+        elif position == "center":
+            overlay_pos = f"x=(W-w)/2:y=(H-h)/2"
+        else:  # bottom-right
+            overlay_pos = f"x=W-w-{margin}:y=H-h-{margin}"
+
+        filter_complex = (
+            f"[1:v]scale={wm_width}:-1[wm];"
+            f"[0:v][wm]overlay={overlay_pos}:format=auto[outv]"
+        )
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", video_path,
+            "-i", local_path,
+            "-filter_complex", filter_complex,
+            "-map", "[outv]",
+            "-map", "0:a?",  # 保留原音轨（如有）
+            "-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p",
+            "-c:a", "copy",
+            "-movflags", "+faststart",
+            output_path,
+        ]
+    else:
+        # 文字水印：用 drawtext 滤镜
+        text = str(getattr(config, "text", None) or "Agnes AI")
+        escaped = _escape_drawtext_text(text)
+        font_size = int(getattr(config, "font_size", 24) or 24)
+        if font_size <= 0:
+            font_size = 24
+        color_hex = str(getattr(config, "color", None) or "#FFFFFF").lstrip("#")
+        color_rgb = _hex_to_rgb(color_hex)
+        # drawtext fontcolor 用 0xRRGGBB@alpha 格式
+        fontcolor = f"0x{color_rgb[0]:02X}{color_rgb[1]:02X}{color_rgb[2]:02X}@{alpha:.2f}"
+
+        # 位置表达式
+        if position == "top-left":
+            pos = f"x={margin}:y={margin}"
+        elif position == "top-right":
+            pos = f"x=w-text_w-{margin}:y={margin}"
+        elif position == "bottom-left":
+            pos = f"x={margin}:y=h-text_h-{margin}"
+        elif position == "center":
+            pos = f"x=(w-text_w)/2:y=(h-text_h)/2"
+        else:  # bottom-right
+            pos = f"x=w-text_w-{margin}:y=h-text_h-{margin}"
+
+        drawtext = (
+            f"drawtext=text='{escaped}'{font_opt}"
+            f":fontcolor={fontcolor}:fontsize={font_size}"
+            f":{pos}"
+        )
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", video_path,
+            "-vf", drawtext,
+            "-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p",
+            "-c:a", "copy",
+            "-movflags", "+faststart",
+            output_path,
+        ]
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=300.0)
+        if proc.returncode != 0:
+            err_text = stderr.decode(errors="ignore")[-300:]
+            _video_watermark_logger.warning(f"[视频水印] ffmpeg 失败: {err_text}")
+            return video_path
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            return output_path
+        _video_watermark_logger.warning("[视频水印] 输出文件为空")
+        return video_path
+    except asyncio.TimeoutError:
+        _video_watermark_logger.warning("[视频水印] ffmpeg 超时（5min）")
+        return video_path
+    except Exception as e:
+        _video_watermark_logger.warning(f"[视频水印] 异常: {e}")
+        return video_path

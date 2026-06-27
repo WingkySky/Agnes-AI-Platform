@@ -256,6 +256,14 @@ class ImagePollerManager:
                     except Exception as mod_err:
                         logger.warning("[图片任务器] 自动预审失败: %s", mod_err)
 
+                # 构建 result_url：优先 Agnes CDN URL；若仅有 base64，则包装为 data URI，确保前端 <img> 可直接显示
+                if task.result_url:
+                    result_url = task.result_url
+                elif task.image_b64:
+                    result_url = f"data:image/png;base64,{task.image_b64}"
+                else:
+                    result_url = ""
+
                 record = Generation(
                     type="image",
                     user_id=task.user_id,
@@ -266,7 +274,7 @@ class ImagePollerManager:
                         if k not in ("base64_image", "image_url", "base64_images", "image_urls", "mask", "is_public")
                     },
                     mode=task.params.get("mode"),
-                    result_url=task.result_url or "(base64)",
+                    result_url=result_url,
                     status=task.status,
                     credits_consumed=task.credits_consumed,
                     task_id=task.task_id,

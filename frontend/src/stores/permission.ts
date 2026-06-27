@@ -11,8 +11,14 @@ import { ref } from 'vue'
 /** 内置角色权限映射 */
 const ROLE_PERMISSIONS: Record<string, string[]> = {
   admin: ['*'],
-  moderator: ['plaza:moderate', 'moderation:config', 'content:generate', 'plaza:share'],
-  user: ['content:generate', 'plaza:share'],
+  moderator: [
+    'plaza:moderate', 'moderation:config', 'content:generate', 'plaza:share',
+    'pipeline:run', 'pipeline:save_asset',
+  ],
+  user: [
+    'content:generate', 'plaza:share',
+    'pipeline:run', 'pipeline:save_asset',
+  ],
 }
 
 export const usePermissionStore = defineStore('permission', () => {

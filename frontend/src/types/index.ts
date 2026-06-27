@@ -498,7 +498,7 @@ export interface QueueTask {
   pollIntervalMs: number
   rawResponse: unknown
   backendTaskId: string | null
-  source?: 'chat' | 'canvas' | null
+  source?: 'chat' | 'canvas' | 'pipeline' | null
   /** 画布来源任务的节点 ID，用于任务完成后回填结果 */
   panelId?: string | null
 }
@@ -773,4 +773,251 @@ export interface CreditRuleUpdateRequest {
   value: number
   name?: string | null
   description?: string | null
+}
+
+// =====================================================
+// 创意流水线（Creative Pipeline）类型
+// 注意：字段命名保持 snake_case，与后端 API 返回一致
+// =====================================================
+
+/** 流水线步骤类型（与后端 steps/*.py 的 step_type 一致） */
+export type PipelineStepType =
+  | 'llm_generate'
+  | 'image_batch'
+  | 'video_batch'
+  | 'ffmpeg_composite'
+  | 'tts_generate'
+  | 'human_review'
+
+/** 流水线运行状态 */
+export type PipelineRunStatus =
+  | 'pending' | 'running' | 'success' | 'failed' | 'cancelled' | 'waiting_review'
+
+/** 步骤状态 */
+export type PipelineStepStatus =
+  | 'pending' | 'running' | 'success' | 'failed' | 'skipped' | 'waiting_review'
+
+/** 资产类型（与后端 VALID_ASSET_TYPES 一致） */
+export type AssetType = 'character' | 'prop' | 'scene' | 'brand'
+
+/** 流水线输入配置项 */
+export interface PipelineInputConfig {
+  key: string
+  label: string
+  type: 'text' | 'number' | 'style_select' | 'boolean' | 'select' | 'textarea' | 'image_upload'
+  required?: boolean
+  default?: any
+  placeholder?: string
+  min?: number
+  max?: number
+  description?: string
+  options?: Array<{ label: string; value: any }>
+}
+
+/** 流水线模板 */
+export interface PipelineTemplate {
+  id: number
+  key: string
+  name: string
+  description: string
+  category: string
+  thumbnail: string
+  estimated_credits: number
+  estimated_time: string
+  estimated_time_minutes?: number
+  is_builtin: boolean
+  inputs_config: PipelineInputConfig[]
+  steps_config: any[]
+  tags: string[]
+  created_at: string
+  updated_at: string
+}
+
+/** 流水线运行实例 */
+export interface PipelineRun {
+  id: number
+  template_id: number
+  template_name?: string
+  name: string
+  status: PipelineRunStatus | string
+  total_credits: number
+  inputs: Record<string, any>
+  current_step: string | null
+  current_step_key?: string
+  progress: number
+  error_message: string | null
+  output_summary?: Record<string, any>
+  started_at: string | null
+  finished_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** 步骤执行记录 */
+export interface PipelineStep {
+  id: number
+  run_id: number
+  step_key: string
+  name: string
+  step_type: PipelineStepType | string
+  status: PipelineStepStatus | string
+  depends_on: string[]
+  sort_order: number
+  output_data: Record<string, any>
+  input_data?: Record<string, any>
+  error_message: string | null
+  retry_count: number
+  max_retries: number
+  timeout_sec?: number
+  credits_consumed: number
+  started_at: string | null
+  finished_at: string | null
+  created_at: string
+  // ===== 以下字段由 SSE 实时推送，API 返回的 step 不含这些字段 =====
+  /** 步骤内整体百分比（0~1 或 0~100，取决于后端实现；前端做兼容处理） */
+  progress?: number
+  /** 步骤内逐元素进度详情（current/total/phase/phase_text 等） */
+  progress_detail?: {
+    current?: number
+    total?: number
+    percent?: number
+    phase?: string
+    phase_text?: string
+    message?: string
+  }
+  /** 步骤输出摘要文案（运行中显示阶段描述，完成时显示统计摘要） */
+  output_summary?: string
+}
+
+/** 风格预设 */
+export interface StylePreset {
+  id: number
+  key: string
+  name: string
+  category: string
+  description: string
+  visual_prefix: string
+  lighting: string
+  color_palette: string
+  quality_suffix: string
+  negative_prompt: string
+  camera_language: string
+  mood_keywords: string
+  preview_image: string
+  tags: string[]
+  is_builtin: boolean
+  is_public?: boolean
+  use_count: number
+  created_at: string
+}
+
+/** 剧本模板 */
+export interface ScriptTemplate {
+  id: number
+  key: string
+  name: string
+  category: string
+  structure: string
+  description: string
+  prompt_template: string
+  scenes_min: number
+  scenes_max: number
+  default_scene_duration: number
+  tags: string[]
+  is_builtin: boolean
+  created_at: string
+}
+
+/** 创意资产（流水线资产库，区别于画布素材库 AssetItem） */
+export interface Asset {
+  id: number
+  type: AssetType | string
+  name: string
+  description: string
+  visual_description: string
+  reference_images: string[]
+  style_id: number | null
+  user_id: number | null
+  is_public: boolean
+  tags: string[]
+  version: number
+  parent_id?: number | null
+  moderation_status?: string
+  likes_count?: number
+  views_count?: number
+  use_count?: number
+  created_at: string
+  updated_at: string
+}
+
+/** 积分预估结果 */
+export interface CreditEstimateResult {
+  estimated_total: number
+  breakdown: Array<{
+    step_key: string
+    step_name: string
+    step_type: string
+    estimated_credits: number
+  }>
+  note: string
+}
+
+/** 创建运行请求 */
+export interface CreateRunRequest {
+  template_id: number
+  inputs: Record<string, any>
+  name?: string
+}
+
+/** 从生成结果保存到资产库 */
+export interface SaveAssetFromGenerationRequest {
+  generation_id: number
+  type: AssetType | string
+  name: string
+  description?: string
+  visual_description?: string
+  style_id?: number
+  tags?: string[]
+}
+
+/** 列表查询参数 */
+export interface PipelineListParams {
+  page?: number
+  page_size?: number
+  category?: string
+  search?: string
+  is_builtin?: boolean
+}
+
+/** 列表返回结果 */
+export interface ListResult<T> {
+  items: T[]
+  total: number
+  page: number
+  page_size: number
+}
+
+/** SSE 事件类型 */
+export type PipelineSSEEventType =
+  | 'state_snapshot' | 'pipeline_started' | 'step_started'
+  | 'step_progress' | 'step_completed' | 'step_failed'
+  | 'step_skipped' | 'pipeline_completed' | 'pipeline_failed'
+
+/** pipeline 任务注册参数（taskQueue 用） */
+export interface RegisterPipelineTaskParams {
+  runId: number
+  templateName: string
+}
+
+/** pipeline 任务更新参数（taskQueue 用） */
+export interface UpdatePipelineTaskParams {
+  status?: PipelineRunStatus | string
+  progress?: number
+  currentStep?: string
+  totalSteps?: number
+  completedSteps?: number
+  // 元素级进度（步骤内逐个产物计数，如"3/8 视频已生成"）
+  itemCurrent?: number
+  itemTotal?: number
+  phaseText?: string
 }

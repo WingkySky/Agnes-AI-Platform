@@ -163,7 +163,7 @@
           <!-- 被管理员屏蔽的标签：屏蔽状态显示 -->
           <div v-if="item.moderation_status === 'rejected' && !editMode" class="rejected-badge">
             <el-icon size="10"><Warning /></el-icon>
-            已屏蔽
+            {{ t('history.rejected') }}
           </div>
           <!-- 快捷操作按钮组（非编辑模式下显示）：放大 / 下载 / 分享 / 删除，分别调用不同模块 -->
           <!-- 放在 card-preview 内，z-index 足够高以确保不被其他蒙层遮挡 -->
@@ -191,7 +191,7 @@
                 'is-disabled': item.moderation_status === 'rejected'
               }"
               @click.stop="toggleShare(item)"
-              :title="item.moderation_status === 'rejected' ? '该作品已被管理员屏蔽，无法公开到广场' : (item.is_public ? t('plaza.isPublic') : t('plaza.isPrivate'))">
+              :title="item.moderation_status === 'rejected' ? t('history.rejectedShareWarning') : (item.is_public ? t('plaza.isPublic') : t('plaza.isPrivate'))">
               <el-icon size="16"><Share /></el-icon>
             </div>
             <!-- 删除：调用历史记录删除模块（带确认弹窗） -->
@@ -211,9 +211,9 @@
             <span>{{ getVideoCardParams(item) }}</span>
           </div>
           <div class="card-footer-row">
-            <span class="card-id" @click="copyRecordId(item.id)" title="点击复制 ID">
+            <span class="card-id" @click="copyRecordId(item.id)" :title="t('history.clickToCopyId')">
               <el-icon size="11"><Document /></el-icon>
-              ID: {{ item.id }}
+              {{ t('history.idLabel') }}: {{ item.id }}
             </span>
             <span class="card-time">{{ formatTime(item.created_at ?? '') }}</span>
           </div>
@@ -790,9 +790,9 @@ async function doBatchDelete() {
 /** 复制记录 ID 到剪贴板 */
 function copyRecordId(id: number) {
   navigator.clipboard.writeText(String(id)).then(() => {
-    ElMessage.success(`ID ${id} 已复制到剪贴板`)
+    ElMessage.success(t('history.idCopied', { id }))
   }).catch(() => {
-    ElMessage.info(`ID: ${id}`)
+    ElMessage.info(`${t('history.idLabel')}: ${id}`)
   })
 }
 
@@ -802,7 +802,7 @@ function copyRecordId(id: number) {
 async function toggleShare(item: GenerationRecord) {
   // 被管理员屏蔽的作品，不允许设为公开
   if (item.moderation_status === 'rejected' && !item.is_public) {
-    ElMessage.warning('该作品已被管理员屏蔽，无法公开到广场')
+    ElMessage.warning(t('history.rejectedShareWarning'))
     return
   }
   const newStatus = !item.is_public
@@ -832,12 +832,12 @@ async function confirmBatchSetPublic() {
     return item?.moderation_status !== 'rejected'
   })
   if (validIds.length === 0) {
-    ElMessage.warning('选中的作品都已被管理员屏蔽，无法公开到广场')
+    ElMessage.warning(t('history.allSelectedRejected'))
     return
   }
   try {
     const confirmText = rejectedCount > 0
-      ? `将 ${validIds.length} 条设为公开（${rejectedCount} 条已被屏蔽，将被跳过）`
+      ? t('history.confirmBatchPublicWithRejected', { valid: validIds.length, rejected: rejectedCount })
       : t('plaza.confirmBatchPublic', { n: selectedIds.value.length })
     await ElMessageBox.confirm(
       confirmText,

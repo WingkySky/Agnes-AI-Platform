@@ -62,7 +62,7 @@
 import { ref, computed } from 'vue'
 import {
   Hand, MousePointer2, Undo2, Redo2, Type, Image, Video, Music2, Settings2, Upload,
-  FolderOpen, Palette, Trash2, Eraser, Keyboard,
+  FolderOpen, Palette, Trash2, Eraser, Keyboard, Film,
 } from 'lucide-vue-next'
 import CanvasAppearancePanel from './CanvasAppearancePanel.vue'
 import { useI18n } from '@/i18n'
@@ -95,6 +95,7 @@ const emit = defineEmits([
   'set-background',
   'toggle-image-info',
   'show-shortcuts',
+  'pipeline-launch',
 ])
 
 // 工具栏容器引用，用于计算 tooltip 水平位置
@@ -124,6 +125,10 @@ const buttonGroups = computed<any[][]>(() => [
     { id: 'tool-audio', label: t('canvas.toolbar.toolAudio'), icon: Music2, emit: 'add-node', payload: 'audio' },
     { id: 'tool-config', label: t('canvas.toolbar.toolConfig'), icon: Settings2, emit: 'add-node', payload: 'config' },
     { id: 'tool-upload', label: t('canvas.toolbar.toolUpload'), icon: Upload, emit: 'upload-asset' },
+  ],
+  // 组4：漫剧生成（从画布节点生成视频）
+  [
+    { id: 'tool-pipeline', label: t('canvas.toolbar.toolPipeline'), icon: Film, emit: 'pipeline-launch' },
   ],
   // 组4：我的素材/画布外观
   [
@@ -181,6 +186,7 @@ const tip = computed(() => {
     'tool-help': t('canvas.toolbar.toolHelp'),
     'tool-delete': t('canvas.toolbar.toolDelete'),
     'tool-clear': t('canvas.toolbar.toolClear'),
+    'tool-pipeline': t('canvas.toolbar.toolPipeline'),
   }
   return map[hovered.value!] || ''
 })

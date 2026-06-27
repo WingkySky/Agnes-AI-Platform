@@ -61,6 +61,12 @@ class Generation(Base):
     # 自动预审命中的敏感关键词（JSON 数组，便于管理员快速查看）
     moderation_flags = Column(JSON, nullable=True)
 
+    # ===== 流水线相关字段 =====
+    # 关联的流水线运行 ID（用于追溯生成来源）
+    pipeline_run_id = Column(Integer, nullable=True, index=True)
+    # 关联的流水线步骤 key（标识是哪个步骤生成的）
+    pipeline_step_key = Column(String(100), nullable=True, index=True)
+
     def to_dict(self):
         """便捷转换为字典（用于 JSON 序列化）"""
         return {

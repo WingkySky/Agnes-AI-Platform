@@ -145,7 +145,11 @@
         @set-background="(mode) => store.setBackgroundMode(mode)"
         @toggle-image-info="(val) => handleToggleImageInfo(val)"
         @show-shortcuts="handleShowShortcuts"
+        @pipeline-launch="handlePipelineLaunch"
       />
+
+      <!-- 漫剧生成对话框 -->
+      <PipelineLaunchDialog v-model="showPipelineLaunchDialog" />
 
       <!-- ============ 左下角缩放控件 ============ -->
       <CanvasZoomControls
@@ -382,6 +386,7 @@ import InfiniteCanvas from '@/components/canvas/InfiniteCanvas.vue'
 import CanvasConnectionsLayer from '@/components/canvas/CanvasConnectionsLayer.vue'
 import CanvasNode from '@/components/canvas/CanvasNode.vue'
 import CanvasToolbar from '@/components/canvas/CanvasToolbar.vue'
+import PipelineLaunchDialog from '@/components/pipeline/PipelineLaunchDialog.vue'
 import CanvasZoomControls from '@/components/canvas/CanvasZoomControls.vue'
 import CanvasMinimap from '@/components/canvas/CanvasMinimap.vue'
 import CanvasNodeHoverToolbar from '@/components/canvas/CanvasNodeHoverToolbar.vue'
@@ -1526,7 +1531,7 @@ async function handleHoverSaveAsset() {
   }
 
   try {
-    const { useAssetStore } = await import('@/stores/asset')
+    const { useAssetStore } = await import('@/stores/canvasAsset')
     const assetStore = useAssetStore()
     assetStore.registerAsset({
       type: panel.type as 'image' | 'video',
@@ -2241,6 +2246,8 @@ async function downloadPreviewImage() {
 // ==================== 底部工具栏事件 ====================
 
 const showAppearancePanel = ref(false)
+// 漫剧生成对话框
+const showPipelineLaunchDialog = ref(false)
 // 素材库面板显示开关
 const showAssetLibrary = ref(false)
 
@@ -2319,7 +2326,7 @@ function handleCanvasDropAsset({ asset, worldX, worldY }: { asset: Record<string
 async function handleDeleteAsset(id: string) {
   if (!id) return
   try {
-    const { useAssetStore } = await import('@/stores/asset')
+    const { useAssetStore } = await import('@/stores/canvasAsset')
     const assetStore = useAssetStore()
     await assetStore.removeAsset(id)
     ElMessage.success(t('canvas.messages.assetDeleted'))
@@ -2332,7 +2339,7 @@ async function handleDeleteAsset(id: string) {
 async function handleUploadAssetFiles(files: FileList | File[]) {
   if (!files || files.length === 0) return
   try {
-    const { useAssetStore } = await import('@/stores/asset')
+    const { useAssetStore } = await import('@/stores/canvasAsset')
     const assetStore = useAssetStore()
     let count = 0
     for (const file of files) {
@@ -2396,6 +2403,11 @@ const canvasSize = computed(() => ({
 // 打开快捷键帮助弹窗（由底部工具栏的快捷键按钮触发）
 function handleShowShortcuts() {
   zoomControlsRef.value?.openShortcuts()
+}
+
+/** 打开漫剧生成对话框 */
+function handlePipelineLaunch() {
+  showPipelineLaunchDialog.value = true
 }
 
 // 小地图定位：将视口中心移动到指定世界坐标

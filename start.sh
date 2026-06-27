@@ -81,8 +81,8 @@ echo "  API 文档: http://localhost:$PORT/docs"
 echo "  健康检查: http://localhost:$PORT/health"
 echo ""
 
-# 后台启动后端
-$PY -m uvicorn app.main:app --host 0.0.0.0 --port $PORT --reload &
+# 后台启动后端（--reload-delay 3 防止热重载检测到启动时的临时文件导致快速重启循环）
+$PY -m uvicorn app.main:app --host 0.0.0.0 --port $PORT --reload --reload-delay 3 &
 BACKEND_PID=$!
 
 # 等待后端启动

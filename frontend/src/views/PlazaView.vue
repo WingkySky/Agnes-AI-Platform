@@ -107,7 +107,7 @@
           <div class="card-overlay">
             <span class="author">
               <el-avatar :size="24" :src="avatarFullUrl(work.author_avatar_url)" :icon="UserFilled" />
-              <span class="author-name">{{ work.author_nickname || 'Anonymous' }}</span>
+              <span class="author-name">{{ work.author_nickname || t('plaza.anonymous') }}</span>
             </span>
             <div
               class="like-btn"

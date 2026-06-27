@@ -72,6 +72,15 @@ _safe_import("app.models.sensitive_word", ["SensitiveWord"])
 _safe_import("app.models.watermark", ["WatermarkConfig"])
 _safe_import("app.models.plaza_like", ["PlazaLike"])
 _safe_import("app.models.system_config", ["SystemConfig"])
+_safe_import("app.models.pipeline", [
+    "PipelineTemplate",
+    "PipelineRun",
+    "PipelineStep",
+    "StylePreset",
+    "ScriptTemplate",
+])
+_safe_import("app.models.style_element", ["StyleElement"])
+_safe_import("app.models.asset", ["Asset"])
 
 logging.basicConfig(
     level=logging.INFO,

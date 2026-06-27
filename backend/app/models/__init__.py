@@ -16,3 +16,12 @@ from app.models.credit_transaction import CreditTransaction
 from app.models.user_preference import UserPreference, DEFAULT_PREFERENCES
 from app.models.system_config import SystemConfig, DEFAULT_SYSTEM_CONFIGS
 from app.models.menu_item import MenuItem, DEFAULT_MENU_ITEMS
+from app.models.pipeline import (
+    PipelineTemplate,
+    ScriptTemplate,
+    StylePreset,
+    PipelineRun,
+    PipelineStep,
+)
+from app.models.style_element import StyleElement
+from app.models.asset import Asset

@@ -17,3 +17,9 @@ bcrypt>=4.1.0          # 密码哈希（替代 passlib，更轻量）
 Pillow>=10.0.0         # 图片验证码生成
 # 邮件发送
 aiosmtplib>=3.0.0      # 异步 SMTP 邮件发送
+# LLM 输出 JSON 修复（流水线 LLM 步骤解析容错）
+json_repair>=0.30.0    # 修复 LLM 输出的不规范 JSON（字段值未加引号等）
+# TTS 语音合成（流水线 tts_generate 步骤）
+# 使用 AGN-SDK 统一 SDK，内置 Edge TTS adapter（免费、无需 API Key）
+# agn-sdk[edge-tts] 会自动安装 edge-tts 作为依赖
+agn-sdk[edge-tts]>=1.1.0  # 统一 AI SDK：https://github.com/WingkySky/AGN-SDK

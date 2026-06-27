@@ -257,6 +257,41 @@ export const useAssetStore = defineStore('asset', {
       this._storageReady = true
     },
 
+    /**
+     * 从流水线结果导入素材到画布
+     * @param data - 导出数据 { video: string, scenes: string[] }
+     * @returns 创建的资产列表
+     */
+    async importFromPipeline(data: { video: string; scenes: string[] }): Promise<AssetItem[]> {
+      const created: AssetItem[] = []
+
+      // 导入视频
+      if (data.video) {
+        const asset = await this.registerAsset({
+          type: 'video',
+          url: data.video,
+          name: '流水线生成视频',
+          sourceNodeId: null,
+        })
+        if (asset) created.push(asset)
+      }
+
+      // 导入分镜图片
+      for (let i = 0; i < data.scenes.length; i++) {
+        const url = data.scenes[i]
+        if (!url) continue
+        const asset = await this.registerAsset({
+          type: 'image',
+          url,
+          name: `分镜 ${i + 1}`,
+          sourceNodeId: null,
+        })
+        if (asset) created.push(asset)
+      }
+
+      return created
+    },
+
     /** 写回 localforage（内部方法；外部增删改都会调用） */
     async _persist(): Promise<void> {
       try {

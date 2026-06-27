@@ -28,6 +28,8 @@ import type {
   RegisterChatTaskParams,
   UpdateChatTaskParams,
   RegisterCanvasTaskParams,
+  RegisterPipelineTaskParams,
+  UpdatePipelineTaskParams,
   ImageTaskStatusResponse,
   VideoStatusResponse,
 } from '@/types'
@@ -164,7 +166,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
 
       // 3. 启动所有未完成任务的轮询（跳过聊天/画布来源的任务，由各自 store 自己管理）
       for (const task of Object.values(this.tasks)) {
-        if (!isFinalStatus(task.status) && task.source !== 'chat' && task.source !== 'canvas') {
+        if (!isFinalStatus(task.status) && task.source !== 'chat' && task.source !== 'canvas' && task.source !== 'pipeline') {
           this._startPolling(task.taskId)
         }
       }
@@ -602,6 +604,80 @@ export const useTaskQueueStore = defineStore('taskQueue', {
     },
 
     // =====================================================
+    // 【流水线任务集成】— 供 pipeline store 调用，注册流水线运行
+    // =====================================================
+
+    /** 注册流水线运行到队列（仅展示，不启动 taskQueue 自己的轮询） */
+    registerPipelineTask({ runId, templateName }: RegisterPipelineTaskParams): void {
+      if (!runId) return
+      const taskId = `pipeline-${runId}`
+      // 避免重复注册
+      if (this.tasks[taskId]) return
+
+      this.tasks[taskId] = {
+        taskId,
+        type: 'image', // 占位类型，TaskCard 根据 source='pipeline' 分支展示
+        status: 'processing',
+        prompt: templateName,
+        params: { runId, templateName },
+        resultUrl: null,
+        posterUrl: null,
+        progress: 0,
+        errorMessage: '',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        pollIntervalMs: 0, // pipeline 不参与 taskQueue 轮询
+        rawResponse: null,
+        backendTaskId: taskId,
+        source: 'pipeline',
+      }
+      this._saveToStorage()
+    },
+
+    /** 更新流水线任务的状态（由 usePipelineSSE 的回调调用） */
+    updatePipelineTask(runId: number, { status, progress, currentStep, totalSteps, completedSteps, itemCurrent, itemTotal, phaseText }: UpdatePipelineTaskParams): void {
+      const taskId = `pipeline-${runId}`
+      const task = this.tasks[taskId]
+      if (!task) return
+
+      // 更新 payload
+      if (currentStep) task.params.currentStep = currentStep
+      if (totalSteps) task.params.totalSteps = totalSteps
+      if (completedSteps) task.params.completedSteps = completedSteps
+      if (typeof progress === 'number') task.progress = progress
+      // 元素级进度：允许显式置空（步骤切换时清空旧值）
+      if (itemCurrent !== undefined) task.params.itemCurrent = itemCurrent
+      else delete task.params.itemCurrent
+      if (itemTotal !== undefined) task.params.itemTotal = itemTotal
+      else delete task.params.itemTotal
+      if (phaseText !== undefined) task.params.phaseText = phaseText
+      else delete task.params.phaseText
+
+      // 状态映射：pipeline 状态 → taskQueue 状态
+      if (status) {
+        const statusMap: Record<string, string> = {
+          pending: 'queued',
+          running: 'processing',
+          success: 'success',
+          failed: 'failed',
+          cancelled: 'failed',
+          waiting_review: 'processing',
+        }
+        task.status = statusMap[status] || 'processing'
+      }
+
+      task.updatedAt = Date.now()
+
+      // 完成时刷新积分 + 触发历史刷新
+      if (task.status === 'success' || task.status === 'failed') {
+        try { useUserStore().fetchCredits() } catch (_) { /* 忽略 */ }
+        this.historyRefreshSignal++
+      }
+
+      this._saveToStorage()
+    },
+
+    // =====================================================
     // 【面板/选中】
     // =====================================================
     setActiveTask(taskId: string): void {
@@ -759,7 +835,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
       this._restoreFromStorage()
       // 用户切换后，重启对进行中任务的轮询
       for (const task of Object.values(this.tasks)) {
-        if (!isFinalStatus(task.status) && task.source !== 'chat' && task.source !== 'canvas') {
+        if (!isFinalStatus(task.status) && task.source !== 'chat' && task.source !== 'canvas' && task.source !== 'pipeline') {
           this._startPolling(task.taskId)
         }
       }

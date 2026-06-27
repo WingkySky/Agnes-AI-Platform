@@ -13,15 +13,20 @@
 
 import { ref, watch, onActivated } from 'vue'
 import { estimateCost, type CreditEstimateResponse } from '@/api/credits'
+import { estimatePipelineCredits } from '@/api/pipeline'
 
 /** 积分预估参数（响应式 getter，便于依赖响应式数据） */
 export interface EstimateParamsGetter {
   (): {
-    type: 'image' | 'video'
+    type: 'image' | 'video' | 'pipeline'
+    // image/video 用
     mode?: string
     size?: string
     seconds?: number
     num_frames?: number
+    // pipeline 用
+    templateId?: number
+    inputs?: Record<string, unknown>
   }
 }
 
@@ -48,7 +53,23 @@ export function useCreditEstimate(paramsGetter: EstimateParamsGetter) {
     loading.value = true
     error.value = null
     try {
-      const data: CreditEstimateResponse = await estimateCost(params)
+      let data: CreditEstimateResponse
+      if (params.type === 'pipeline') {
+        // pipeline 走专用预估接口
+        if (!params.templateId) {
+          cost.value = null
+          return
+        }
+        const result = await estimatePipelineCredits(params.templateId, params.inputs || {})
+        // pipeline 预估返回 { estimated_total, sufficient }，适配为 CreditEstimateResponse 结构
+        data = {
+          cost: result.estimated_total,
+          sufficient: true, // pipeline 预估不返回 sufficient，默认 true，由后端创建时再校验
+        } as CreditEstimateResponse
+      } else {
+        // image/video 走通用预估接口
+        data = await estimateCost(params)
+      }
       // 避免竞态：仅采用最新一次请求的结果
       if (myId !== reqId) return
       cost.value = data.cost

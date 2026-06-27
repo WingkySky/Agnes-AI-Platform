@@ -64,6 +64,48 @@ const routes: RouteRecordRaw[] = [
     meta: { titleKey: 'router.canvas', requiresAuth: true }
   },
   {
+    path: '/workshop',
+    name: 'workshop',
+    component: () => import('@/views/WorkshopView.vue'),
+    meta: { titleKey: 'router.workshop', requiresAuth: true, permission: 'pipeline:run' }
+  },
+  {
+    path: '/workshop/run/:templateId',
+    name: 'pipeline-run',
+    component: () => import('@/views/PipelineRunView.vue'),
+    meta: { titleKey: 'router.pipelineRun', requiresAuth: true, permission: 'pipeline:run' }
+  },
+  {
+    path: '/workshop/result/:runId',
+    name: 'pipeline-result',
+    component: () => import('@/views/PipelineResultView.vue'),
+    meta: { titleKey: 'router.pipelineResult', requiresAuth: true, permission: 'pipeline:run' }
+  },
+  {
+    path: '/workshop/template/create',
+    name: 'template-create',
+    component: () => import('@/views/TemplateEditorView.vue'),
+    meta: { titleKey: 'router.templateCreate', requiresAuth: true, permission: 'pipeline:run' }
+  },
+  {
+    path: '/workshop/template/:id/edit',
+    name: 'template-edit',
+    component: () => import('@/views/TemplateEditorView.vue'),
+    meta: { titleKey: 'router.templateEdit', requiresAuth: true, permission: 'pipeline:run' }
+  },
+  {
+    path: '/workshop/history',
+    name: 'pipeline-history',
+    component: () => import('@/views/PipelineHistoryView.vue'),
+    meta: { titleKey: 'router.pipelineHistory', requiresAuth: true, permission: 'pipeline:run' }
+  },
+  {
+    path: '/assets',
+    name: 'assets',
+    component: () => import('@/views/AssetsView.vue'),
+    meta: { titleKey: 'router.assets', requiresAuth: true, permission: 'pipeline:save_asset' }
+  },
+  {
     path: '/credits',
     name: 'credits',
     component: () => import('@/views/CreditsView.vue'),

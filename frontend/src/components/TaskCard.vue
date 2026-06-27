@@ -11,9 +11,9 @@
     class="task-card"
     :class="[
       `status-${task.status}`,
-      { 'is-active': isActive, 'is-compact': compact }
+      { 'is-active': isActive, 'is-compact': compact, 'task-card--pipeline': task.source === 'pipeline' }
     ]"
-    @click="$emit('select', task.taskId)"
+    @click="task.source === 'pipeline' ? handlePipelineClick(task) : $emit('select', task.taskId)"
   >
     <!-- 左侧图标 -->
     <div class="task-icon" :class="task.type">
@@ -31,6 +31,20 @@
           {{ task.type === 'video' ? t('taskStatus.video') : t('taskStatus.image') }}
         </span>
         <span class="task-time">{{ formatTime(task.createdAt) }}</span>
+      </div>
+
+      <!-- pipeline 任务额外展示步骤进度 + 元素级进度 -->
+      <div v-if="task.source === 'pipeline' && task.params?.currentStep" class="pipeline-step-info">
+        <el-icon><Loading v-if="task.status === 'processing'" /><Check v-else /></el-icon>
+        <span class="step-name">{{ task.params.currentStep }}</span>
+        <!-- 元素级计数（如"3/8"），来自 SSE step_progress 事件的 current/total -->
+        <span v-if="task.params.itemTotal" class="item-count">
+          {{ task.params.itemCurrent || 0 }}/{{ task.params.itemTotal }}
+        </span>
+        <!-- 阶段文案（如"创建视频任务中"），来自 SSE step_progress 事件的 phase_text -->
+        <span v-if="task.params.phaseText" class="phase-text">
+          · {{ task.params.phaseText }}
+        </span>
       </div>
 
       <!-- 提示词 -->
@@ -103,11 +117,14 @@
 <script setup lang="ts">
 // ------ 引入 i18n composable ------
 import { computed } from 'vue'
-import { VideoPlay, PictureFilled, Check, Close, Remove } from '@element-plus/icons-vue'
+import { useRouter } from 'vue-router'
+import { VideoPlay, PictureFilled, Check, Close, Remove, Loading } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { useTaskQueueStore } from '@/stores/taskQueue'
+import type { QueueTask } from '@/types'
 
 const { t } = useI18n()
+const router = useRouter()
 
 const props = defineProps({
   task: {
@@ -174,6 +191,27 @@ function handleRetry() {
 
 function handleRemove() {
   queue.removeTask(props.task.taskId)
+}
+
+// ------ pipeline 任务：点击跳转与状态文案 ------
+/** pipeline 任务点击跳转 */
+function handlePipelineClick(task: QueueTask) {
+  if (task.source === 'pipeline' && task.params?.runId) {
+    router.push({ name: 'pipeline-result', params: { runId: task.params.runId as number } })
+  }
+}
+
+/** pipeline 状态徽章文本 */
+function getPipelineStatusText(status: string): string {
+  const map: Record<string, string> = {
+    pending: t('taskStatus.pending'),
+    running: t('taskStatus.running'),
+    success: t('taskStatus.success'),
+    failed: t('taskStatus.failed'),
+    cancelled: t('taskStatus.cancelled'),
+    waiting_review: t('taskStatus.waiting_review'),
+  }
+  return map[status] || status
 }
 </script>
 
@@ -373,5 +411,42 @@ function handleRemove() {
 }
 .task-card.is-compact .task-prompt {
   font-size: 12px;
+}
+
+/* pipeline 任务卡片样式 */
+.task-card--pipeline {
+  cursor: pointer;
+  border-left: 3px solid var(--agnes-primary);
+}
+.pipeline-step-info {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--agnes-text-secondary);
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.pipeline-step-info .step-name {
+  color: var(--agnes-text-regular);
+  font-weight: 500;
+}
+/* 元素级计数（如 3/8），用主色调高亮，让用户一眼看到进度 */
+.item-count {
+  color: var(--agnes-primary, #409eff);
+  font-weight: 600;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  padding: 0 6px;
+  background: var(--agnes-primary-light-9, rgba(64, 158, 255, 0.1));
+  border-radius: 8px;
+}
+.phase-text {
+  color: var(--agnes-text-placeholder, #909399);
+  font-size: 11px;
+  /* 文案过长时省略号，避免卡片高度跳动 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
 }
 </style>

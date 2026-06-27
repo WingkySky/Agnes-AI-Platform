@@ -28,7 +28,18 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
-        secure: false
+        secure: false,
+        // SSE 流式响应需要禁用缓冲和压缩
+        configure: (proxy) => {
+          proxy.on('proxyRes', (proxyRes) => {
+            if (proxyRes.headers['content-type']?.includes('text/event-stream')) {
+              // 禁用 Nginx/代理缓冲，确保 SSE 事件实时推送
+              proxyRes.headers['cache-control'] = 'no-cache'
+              proxyRes.headers['x-accel-buffering'] = 'no'
+              delete proxyRes.headers['content-length']
+            }
+          })
+        },
       },
       // 健康检查接口也走代理
       '/health': {

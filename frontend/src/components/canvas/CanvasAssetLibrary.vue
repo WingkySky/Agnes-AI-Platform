@@ -239,7 +239,7 @@
  * ===================================================== */
 import { ref, computed, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { X, Trash2, Music2, Inbox, Loader2, History, FolderOpen, Upload, Play, ChevronLeft, ChevronRight } from 'lucide-vue-next'
-import { useAssetStore } from '@/stores/asset'
+import { useAssetStore } from '@/stores/canvasAsset'
 import { getHistoryList } from '@/api/history'
 import client from '@/api/client'
 
