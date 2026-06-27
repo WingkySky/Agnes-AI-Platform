@@ -15,6 +15,10 @@ from pydantic import BaseModel, Field
 class ProviderCreateRequest(BaseModel):
     """创建 Provider 请求体"""
     name: str = Field(..., description="Provider 名称，如 Agnes AI（默认）")
+    provider_type: str = Field(
+        default="agnes",
+        description="agn-sdk adapter 标识：agnes / volcengine_cv / kling / runway / pika 等",
+    )
     base_url: str = Field(..., description="API 基础地址，如 https://apihub.agnes-ai.com/v1")
     api_key: str = Field(..., description="API Key（明文传入，后端加密存储）")
     poll_url: str = Field(default="", description="异步任务轮询专用接口（如视频轮询）")
@@ -26,6 +30,9 @@ class ProviderCreateRequest(BaseModel):
 class ProviderUpdateRequest(BaseModel):
     """更新 Provider 请求体（所有字段可选）"""
     name: Optional[str] = Field(default=None, description="Provider 名称")
+    provider_type: Optional[str] = Field(
+        default=None, description="agn-sdk adapter 标识"
+    )
     base_url: Optional[str] = Field(default=None, description="API 基础地址")
     api_key: Optional[str] = Field(default=None, description="API Key（留空表示不修改）")
     poll_url: Optional[str] = Field(default=None, description="异步任务轮询接口")
@@ -38,6 +45,7 @@ class ProviderResponse(BaseModel):
     """Provider 响应体（不含明文 API Key）"""
     id: int
     name: str
+    provider_type: str = "agnes"
     base_url: str
     api_key: str = Field(description="API Key 脱敏后的展示值，如 sk-a****b123")
     poll_url: str = ""

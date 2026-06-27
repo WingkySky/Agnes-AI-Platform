@@ -294,7 +294,7 @@ export const useChatStore = defineStore('chat', {
     // =====================================================
 
     /** 发送消息并处理流式响应 */
-    async sendMessage(content: string, attachments: MessageAttachment[] = []): Promise<void> {
+    async sendMessage(content: string, attachments: MessageAttachment[] = [], cameraParams?: Record<string, any> | null, presetRef?: number | null): Promise<void> {
       if (!this.activeSessionId) {
         // 自动创建新会话（标题用默认的"新对话"，等 AI 回复完成后自动总结）
         await this.newSession()
@@ -344,6 +344,8 @@ export const useChatStore = defineStore('chat', {
           attachments,
           (event: SSEEvent) => this._handleSSEEvent(event),
           this._abortController.signal,
+          cameraParams,
+          presetRef,
         )
       } catch (e: unknown) {
         if (e instanceof Error && e.name === 'AbortError') {

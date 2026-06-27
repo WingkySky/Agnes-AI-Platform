@@ -87,6 +87,7 @@ def _build_plaza_work(
         public_shared_at=getattr(record, "public_shared_at", None),
         is_mine=is_mine,
         is_liked=is_liked,
+        preset_id=getattr(record, "preset_id", None),
     )
 
 
@@ -99,6 +100,7 @@ async def get_plaza_works(
     sort: str = Query("latest", description="排序: latest（最新）/ popular（最热门）"),
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
     page_size: int = Query(24, ge=1, le=100, description="每页数量"),
+    preset_id: Optional[int] = Query(None, description="按预设 ID 筛选作品（用于'按预设浏览'入口）"),
     db: AsyncSession = Depends(get_async_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
@@ -107,6 +109,7 @@ async def get_plaza_works(
     - 按 is_public=True 且 status=success 筛选
     - sort=latest 按 public_shared_at 倒序
     - sort=popular 按 likes_count 倒序
+    - preset_id 不为空时，按预设筛选作品
     """
     # 基础查询：只返回公开、成功、且审核通过的作品
     stmt = select(Generation).filter(
@@ -119,6 +122,10 @@ async def get_plaza_works(
     # 类型筛选
     if type and type.lower() in ("image", "video"):
         stmt = stmt.filter(Generation.type == type.lower())
+
+    # ── 按预设筛选：仅返回使用指定预设生成的作品 ──
+    if preset_id is not None:
+        stmt = stmt.filter(Generation.preset_id == preset_id)
 
     # 总数
     count_stmt = select(func.count()).select_from(stmt.subquery())

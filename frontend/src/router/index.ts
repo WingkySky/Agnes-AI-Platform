@@ -105,6 +105,13 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/AssetsView.vue'),
     meta: { titleKey: 'router.assets', requiresAuth: true, permission: 'pipeline:save_asset' }
   },
+  // ---------- 提示词预设中心（统一入口，覆盖 camera/prompt/style/script/pipeline 全类型） ----------
+  {
+    path: '/presets',
+    name: 'presets',
+    component: () => import('@/views/presets/PresetCenter.vue'),
+    meta: { titleKey: 'router.presets', requiresAuth: true }
+  },
   {
     path: '/credits',
     name: 'credits',
@@ -188,6 +195,18 @@ const routes: RouteRecordRaw[] = [
         name: 'admin-menus',
         component: () => import('@/views/MenuAdminView.vue'),
         meta: { titleKey: 'nav.menuAdmin', requiresAdmin: true }
+      },
+      {
+        path: 'presets',
+        name: 'admin-presets',
+        component: () => import('@/views/presets/PresetCenter.vue'),
+        meta: { titleKey: 'nav.presetsAdmin', requiresAdmin: true }
+      },
+      {
+        path: 'presets/audit',
+        name: 'admin-presets-audit',
+        component: () => import('@/views/admin/PresetAudit.vue'),
+        meta: { titleKey: 'nav.presetAudit', requiresAdmin: true }
       },
     ]
   },

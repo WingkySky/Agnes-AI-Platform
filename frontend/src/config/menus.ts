@@ -82,6 +82,15 @@ export const BUILT_IN_MENUS: BuiltInMenuItem[] = [
     require_admin: false,
     is_group: false,
   },
+  {
+    key: 'presets',
+    label_zh: '预设中心',
+    label_en: 'Preset Center',
+    icon: 'Collection',
+    path: '/presets',
+    require_admin: false,
+    is_group: false,
+  },
 
   // ========== 社区类 ==========
   {
@@ -214,6 +223,24 @@ export const BUILT_IN_MENUS: BuiltInMenuItem[] = [
     require_admin: true,
     is_group: false,
   },
+  {
+    key: 'admin-presets',
+    label_zh: '预设管理',
+    label_en: 'Preset Management',
+    icon: 'Collection',
+    path: '/admin/presets',
+    require_admin: true,
+    is_group: false,
+  },
+  {
+    key: 'admin-presets-audit',
+    label_zh: '预设审核',
+    label_en: 'Preset Audit',
+    icon: 'CircleCheck',
+    path: '/admin/presets/audit',
+    require_admin: true,
+    is_group: false,
+  },
 ]
 
 /**
@@ -320,6 +347,7 @@ export const DEFAULT_MENU_CONFIG: MenuItemConfig[] = [
   { key: 'canvas', show_in_top: true, show_in_sidebar: true, top_group_key: 'create', sidebar_group_key: 'create', top_sort_order: 4, sidebar_sort_order: 4 },
   { key: 'workshop', show_in_top: true, show_in_sidebar: true, top_group_key: 'create', sidebar_group_key: 'create', top_sort_order: 5, sidebar_sort_order: 5 },
   { key: 'assets', show_in_top: false, show_in_sidebar: true, top_group_key: null, sidebar_group_key: 'personal', top_sort_order: 99, sidebar_sort_order: 5 },
+  { key: 'presets', show_in_top: false, show_in_sidebar: true, top_group_key: null, sidebar_group_key: 'create', top_sort_order: 99, sidebar_sort_order: 6 },
 
   // ---------- 社区类：顶部 + 侧边栏都显示 ----------
   { key: 'plaza', show_in_top: true, show_in_sidebar: true, top_group_key: 'community', sidebar_group_key: 'community', top_sort_order: 1, sidebar_sort_order: 1 },
@@ -340,6 +368,8 @@ export const DEFAULT_MENU_CONFIG: MenuItemConfig[] = [
   { key: 'admin-watermark', show_in_top: false, show_in_sidebar: true, top_group_key: null, sidebar_group_key: 'admin', top_sort_order: 99, sidebar_sort_order: 7 },
   { key: 'admin-email', show_in_top: false, show_in_sidebar: true, top_group_key: null, sidebar_group_key: 'admin', top_sort_order: 99, sidebar_sort_order: 8 },
   { key: 'admin-menus', show_in_top: false, show_in_sidebar: true, top_group_key: null, sidebar_group_key: 'admin', top_sort_order: 99, sidebar_sort_order: 9 },
+  { key: 'admin-presets', show_in_top: false, show_in_sidebar: true, top_group_key: null, sidebar_group_key: 'admin', top_sort_order: 99, sidebar_sort_order: 10 },
+  { key: 'admin-presets-audit', show_in_top: false, show_in_sidebar: true, top_group_key: null, sidebar_group_key: 'admin', top_sort_order: 99, sidebar_sort_order: 11 },
 ]
 
 /**

@@ -67,6 +67,11 @@ class Generation(Base):
     # 关联的流水线步骤 key（标识是哪个步骤生成的）
     pipeline_step_key = Column(String(100), nullable=True, index=True)
 
+    # ===== 预设来源字段 =====
+    # 生成时使用的预设 ID（来自 PresetQuickPanel 选择或 Chat preset_ref 透传）
+    # 不加外键，因为预设可能来自 prompt_presets 或 camera_presets 多表
+    preset_id = Column(Integer, nullable=True, index=True)
+
     def to_dict(self):
         """便捷转换为字典（用于 JSON 序列化）"""
         return {
@@ -88,4 +93,5 @@ class Generation(Base):
             "moderation_status": self.moderation_status,
             "moderation_reason": self.moderation_reason,
             "moderation_flags": self.moderation_flags,
+            "preset_id": self.preset_id,
         }

@@ -37,6 +37,13 @@
         stripe
         class="settings-table">
         <el-table-column :label="t('settings.colName')" prop="name" min-width="140" />
+        <el-table-column :label="t('settings.colProviderType')" prop="provider_type" width="150" align="center">
+          <template #default="{ row }">
+            <el-tag :type="providerTypeTagType(row.provider_type)" size="small">
+              {{ providerTypeLabel(row.provider_type) }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column :label="t('settings.colBaseUrl')" prop="base_url" min-width="240" show-overflow-tooltip />
         <el-table-column :label="t('settings.colApiKey')" prop="api_key" min-width="160" show-overflow-tooltip />
         <el-table-column :label="t('settings.colPollUrl')" prop="poll_url" min-width="200" show-overflow-tooltip>
@@ -160,6 +167,21 @@
         <el-form-item :label="t('settings.formName')" prop="name">
           <el-input v-model="providerForm.name" :placeholder="t('settings.formNamePlaceholder')" />
         </el-form-item>
+        <el-form-item :label="t('settings.formProviderType')" prop="provider_type">
+          <el-select
+            v-model="providerForm.provider_type"
+            :placeholder="t('settings.formProviderTypePlaceholder')"
+            filterable
+            allow-create
+            default-first-option>
+            <el-option
+              v-for="opt in PROVIDER_TYPE_OPTIONS"
+              :key="opt.value"
+              :label="opt.label"
+              :value="opt.value" />
+          </el-select>
+          <div class="form-item-hint">{{ t('settings.formProviderTypeHint') }}</div>
+        </el-form-item>
         <el-form-item :label="t('settings.formBaseUrl')" prop="base_url">
           <el-input v-model="providerForm.base_url" :placeholder="t('settings.formBaseUrlPlaceholder')" />
         </el-form-item>
@@ -260,12 +282,39 @@ const modelsStore = useModelsStore()
 const syncingProviderId = ref<number | null>(null)
 const submitting = ref(false)
 
+// ---------- Provider Type 选项（对齐 agn-sdk 已注册的 adapter） ----------
+// 仅展示常见的视频/图像/对话类 Provider，其他可通过 allow-create 自由输入
+const PROVIDER_TYPE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'agnes', label: 'Agnes AI（默认）' },
+  { value: 'volcengine_cv', label: '火山引擎（Seedance / Seedream）' },
+  { value: 'seedance', label: 'Seedance（火山引擎视频）' },
+  { value: 'seedream', label: 'Seedream（火山引擎图像）' },
+  { value: 'doubao', label: '豆包（字节跳动）' },
+  { value: 'kling', label: '可灵 AI（Kling）' },
+  { value: 'runway', label: 'Runway' },
+  { value: 'pika', label: 'Pika' },
+  { value: 'luma', label: 'Luma AI' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'azure', label: 'Azure OpenAI' },
+  { value: 'gemini', label: 'Google Gemini' },
+  { value: 'anthropic', label: 'Anthropic Claude' },
+  { value: 'deepseek', label: 'DeepSeek' },
+  { value: 'qwen', label: '阿里云通义千问' },
+  { value: 'glm', label: '智谱 GLM' },
+  { value: 'hunyuan', label: '腾讯混元' },
+  { value: 'ernie', label: '百度文心一言' },
+  { value: 'minimax', label: 'MiniMax' },
+  { value: 'stability', label: 'Stability AI' },
+  { value: 'ideogram', label: 'Ideogram' },
+]
+
 // ---------- Provider 弹窗 ----------
 const providerDialogVisible = ref(false)
 const providerFormRef = ref<FormInstance>()
 const editingProvider = ref<ApiProvider | null>(null)
 const providerForm = reactive({
   name: '',
+  provider_type: 'agnes',
   base_url: '',
   api_key: '',
   poll_url: '',
@@ -275,6 +324,7 @@ const providerForm = reactive({
 })
 const providerRules: FormRules = {
   name: [{ required: true, message: t('settings.formName'), trigger: 'blur' }],
+  provider_type: [{ required: true, message: t('settings.formProviderType'), trigger: 'change' }],
   base_url: [{ required: true, message: t('settings.formBaseUrl'), trigger: 'blur' }],
 }
 
@@ -319,8 +369,10 @@ function typeLabel(type: string): string {
 function openProviderDialog(provider?: ApiProvider) {
   editingProvider.value = provider || null
   if (provider) {
+    // 编辑：回填 provider_type（数据库保证非空，此处兜底为 'agnes'）
     Object.assign(providerForm, {
       name: provider.name,
+      provider_type: provider.provider_type || 'agnes',
       base_url: provider.base_url,
       api_key: '',
       poll_url: provider.poll_url || '',
@@ -329,8 +381,10 @@ function openProviderDialog(provider?: ApiProvider) {
       sort_order: provider.sort_order,
     })
   } else {
+    // 新增：默认 agnes 类型，走业务适配层
     Object.assign(providerForm, {
       name: '',
+      provider_type: 'agnes',
       base_url: '',
       api_key: '',
       poll_url: '',
@@ -342,6 +396,20 @@ function openProviderDialog(provider?: ApiProvider) {
   providerDialogVisible.value = true
 }
 
+/** Adapter 类型表格标签文案：优先匹配预置选项，未匹配则原样返回 */
+function providerTypeLabel(type: string): string {
+  const opt = PROVIDER_TYPE_OPTIONS.find((o) => o.value === type)
+  return opt ? opt.label : type
+}
+
+/** Adapter 类型表格标签颜色：agnes=primary，国内主流=success，视频类=warning，其他=info */
+function providerTypeTagType(type: string): 'primary' | 'success' | 'warning' | 'info' {
+  if (type === 'agnes') return 'primary'
+  if (['kling', 'doubao', 'qwen', 'glm', 'hunyuan', 'ernie', 'minimax', 'seedance', 'seedream', 'volcengine_cv'].includes(type)) return 'success'
+  if (['runway', 'pika', 'luma', 'stability', 'ideogram'].includes(type)) return 'warning'
+  return 'info'
+}
+
 async function submitProvider() {
   if (!providerFormRef.value) return
   await providerFormRef.value.validate(async (valid) => {
@@ -349,9 +417,10 @@ async function submitProvider() {
     submitting.value = true
     try {
       if (editingProvider.value) {
-        // 编辑：api_key 留空表示不修改
+        // 编辑：api_key 留空表示不修改；provider_type 变更会触发后端重建 client
         const data: Record<string, unknown> = {
           name: providerForm.name,
+          provider_type: providerForm.provider_type,
           base_url: providerForm.base_url,
           poll_url: providerForm.poll_url,
           is_active: providerForm.is_active,
@@ -364,13 +433,14 @@ async function submitProvider() {
         await providersStore.editProvider(editingProvider.value.id, data)
         ElMessage.success(t('settings.providerUpdated'))
       } else {
-        // 新增：api_key 必填
+        // 新增：api_key 必填；provider_type 决定后端走哪个适配器
         if (!providerForm.api_key) {
           ElMessage.warning(t('settings.formApiKeyPlaceholder'))
           return
         }
         await providersStore.addProvider({
           name: providerForm.name,
+          provider_type: providerForm.provider_type,
           base_url: providerForm.base_url,
           api_key: providerForm.api_key,
           poll_url: providerForm.poll_url,
@@ -589,6 +659,14 @@ async function handleDeleteModel(model: ModelDefinition) {
 
 .settings-table {
   width: 100%;
+}
+
+/* 表单项提示文案：adapter 类型说明等 */
+.form-item-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--agnes-text-muted);
+  line-height: 1.5;
 }
 
 .cap-tag {

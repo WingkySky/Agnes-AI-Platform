@@ -48,6 +48,7 @@ async def create_provider(req: ProviderCreateRequest):
 
     provider = await provider_registry.create_provider(
         name=req.name.strip(),
+        provider_type=req.provider_type.strip() or "agnes",
         base_url=req.base_url.strip(),
         api_key=req.api_key.strip(),
         poll_url=req.poll_url.strip(),
@@ -61,6 +62,7 @@ async def create_provider(req: ProviderCreateRequest):
     return ProviderResponse(
         id=provider.id,
         name=provider.name,
+        provider_type=provider.provider_type or "agnes",
         base_url=provider.base_url,
         api_key=mask_api_key(decrypted),
         poll_url=provider.poll_url or "",
@@ -78,6 +80,7 @@ async def update_provider(provider_id: int, req: ProviderUpdateRequest):
     provider = await provider_registry.update_provider(
         provider_id=provider_id,
         name=req.name,
+        provider_type=req.provider_type,
         base_url=req.base_url,
         api_key=req.api_key,
         poll_url=req.poll_url,
@@ -93,6 +96,7 @@ async def update_provider(provider_id: int, req: ProviderUpdateRequest):
     return ProviderResponse(
         id=provider.id,
         name=provider.name,
+        provider_type=provider.provider_type or "agnes",
         base_url=provider.base_url,
         api_key=mask_api_key(decrypted),
         poll_url=provider.poll_url or "",

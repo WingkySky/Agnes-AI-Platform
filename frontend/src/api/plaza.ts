@@ -24,6 +24,8 @@ export interface PlazaWork {
   public_shared_at?: string
   is_mine: boolean
   is_liked: boolean
+  // 预设来源：作品使用了哪个预设
+  preset_id?: number | null
 }
 
 export interface PlazaListResponse {
@@ -64,6 +66,7 @@ export function getPlazaWorks(params: {
   sort?: 'latest' | 'popular'
   page?: number
   page_size?: number
+  preset_id?: number
 }): Promise<PlazaListResponse> {
   return client.get('/api/plaza/works', { params }) as any
 }

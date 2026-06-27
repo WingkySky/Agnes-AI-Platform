@@ -687,6 +687,126 @@ class PipelineEngine:
             style_elements=self._style_elements,
         )
 
+        # 摄像机参数拼接：若步骤执行时 inputs 中含 camera_params 且 enabled=True，
+        # 则将摄像机参数转为自然语言描述并追加到 prompt 末尾
+        camera_params = context.inputs.get("camera_params") if context.inputs else None
+        if (
+            camera_params
+            and isinstance(camera_params, dict)
+            and camera_params.get("enabled")
+        ):
+            from app.services.camera_prompt import build_camera_prompt_suffix
+            suffix = build_camera_prompt_suffix(camera_params)
+            if suffix and isinstance(context.inputs, dict):
+                if "prompt" in context.inputs:
+                    context.inputs["prompt"] = (context.inputs["prompt"] or "") + suffix
+                    logger.info(
+                        "[流水线] 已拼接摄像机参数到 prompt: step_key=%s",
+                        step_key,
+                    )
+
+        # ---------- 预设引用解析 + 变量替换 ----------
+        # preset_ref 支持 prompt / camera 两种类型预设
+        # 变量替换规则（Phase 2 §7.4）：
+        #   {frame_index}     → 当前帧序号（从 1 开始）
+        #   {frame_index:04d} → 4 位补零
+        #   {frame_count}     → 总帧数
+        # 优先级：preset_ref 实时查询 > preset_snapshot 兜底
+        preset_ref = step_config.get("preset_ref") or context.extra.get("preset_ref")
+        preset_snapshot = step_config.get("preset_snapshot") or context.extra.get("preset_snapshot")
+
+        if preset_ref:
+            prompt_text = None
+            camera_params_from_preset = None
+            preset_type = None
+
+            # preset_ref 可以是 dict {preset_id, preset_type} 或裸 ID
+            if isinstance(preset_ref, dict):
+                ref_id = preset_ref.get("preset_id") or preset_ref.get("id")
+                preset_type = preset_ref.get("preset_type") or preset_ref.get("type")
+            else:
+                ref_id = preset_ref
+                preset_type = None
+
+            # 尝试从数据库查询最新预设
+            try:
+                # 先按 PromptPreset 查（覆盖 prompt/style/script/pipeline 类型）
+                from app.models.prompt_preset import PromptPreset
+                result = await self.db.execute(
+                    select(PromptPreset).filter(PromptPreset.id == ref_id)
+                )
+                preset = result.scalar_one_or_none()
+                if preset:
+                    prompt_text = preset.prompt_text
+                    preset_type = preset.type or "prompt"
+                    # camera_params 可能存在 PromptPreset.camera_params 字段
+                    if preset.camera_params:
+                        camera_params_from_preset = preset.camera_params
+                    logger.info("[流水线] preset_ref=%s 命中 PromptPreset，type=%s", ref_id, preset_type)
+                else:
+                    # PromptPreset 没命中，尝试查 CameraPreset
+                    from app.models.camera_preset import CameraPreset
+                    result = await self.db.execute(
+                        select(CameraPreset).filter(CameraPreset.id == ref_id)
+                    )
+                    cp = result.scalar_one_or_none()
+                    if cp:
+                        preset_type = "camera"
+                        camera_params_from_preset = {
+                            "enabled": True,
+                            "camera_model": cp.camera_model,
+                            "focal_length": cp.focal_length,
+                            "aperture": cp.aperture,
+                            "depth_of_field": cp.depth_of_field,
+                            "shutter_speed": cp.shutter_speed,
+                            "shutter_angle": cp.shutter_angle,
+                            "camera_movement": cp.camera_movement,
+                            "camera_angle": cp.camera_angle,
+                            "aspect_ratio": cp.aspect_ratio,
+                            "visual_style": cp.visual_style,
+                        }
+                        logger.info("[流水线] preset_ref=%s 命中 CameraPreset", ref_id)
+                    elif preset_snapshot and isinstance(preset_snapshot, dict):
+                        prompt_text = preset_snapshot.get("prompt_text", "")
+                        camera_params_from_preset = preset_snapshot.get("camera_params")
+                        preset_type = preset_snapshot.get("type") or "prompt"
+                        logger.info("[流水线] preset_ref=%s 未命中，降级使用 snapshot", ref_id)
+            except Exception as e:
+                logger.warning("[流水线] preset_ref=%s 查询失败: %s，降级 snapshot", ref_id, e)
+                if preset_snapshot and isinstance(preset_snapshot, dict):
+                    prompt_text = preset_snapshot.get("prompt_text", "")
+                    camera_params_from_preset = preset_snapshot.get("camera_params")
+                    preset_type = preset_snapshot.get("type") or "prompt"
+
+            if isinstance(context.inputs, dict):
+                # 变量替换：{frame_index} / {frame_index:04d} / {frame_count}
+                # frame_index 从 1 开始（Phase 2 §7.4 规定）
+                frame_index_raw = context.inputs.get("frame_index", 0)
+                frame_index_1based = int(frame_index_raw) + 1 if frame_index_raw is not None else 1
+                frame_count = context.inputs.get("frame_count", 1)
+
+                if prompt_text:
+                    try:
+                        prompt_text = prompt_text.format(
+                            frame_index=frame_index_1based,
+                            frame_count=frame_count,
+                        )
+                    except (KeyError, IndexError, ValueError) as e:
+                        # 未知变量或格式错误 → 保留原文，避免阻断流水线
+                        logger.warning(
+                            "[流水线] preset prompt_text 变量替换失败: %s，保留原文", e
+                        )
+                    context.inputs["prompt"] = prompt_text
+                    logger.info(
+                        "[流水线] preset_ref 变量替换完成: frame_index=%s (1-based)",
+                        frame_index_1based,
+                    )
+
+                # camera 类型预设：将 camera_params 注入到 inputs（与摄像机参数拼接逻辑配合）
+                if camera_params_from_preset and not context.inputs.get("camera_params"):
+                    context.inputs["camera_params"] = camera_params_from_preset
+                    logger.info("[流水线] preset_ref 已注入 camera_params")
+
         executor = None
         step_credits = 0
         actual_credits = 0

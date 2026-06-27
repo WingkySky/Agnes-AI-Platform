@@ -147,6 +147,19 @@
             <el-divider v-if="idx < template.inputs_config.length - 1" />
           </template>
 
+          <!-- 摄像机参数（步骤级，适用于 ImageBatch / VideoBatch） -->
+          <el-divider />
+          <div class="form-item">
+            <label class="form-label">{{ t('pipelineRun.cameraParams') || '摄像机参数' }}</label>
+            <CameraPresetSelector
+              :model-value="cameraPresetId"
+              @update:model-value="onCameraPresetSelect($event as number | null)" />
+            <div class="camera-toggle-row">
+              <el-switch v-model="cameraEnabled" size="small" />
+              <span class="toggle-label">启用摄像机参数</span>
+            </div>
+          </div>
+
           <!-- 积分预估：来自 useCreditEstimate -->
           <el-divider />
           <div class="credit-estimate">
@@ -256,12 +269,15 @@ import { useCreditEstimate } from '@/composables/useCreditEstimate'
 import StyleSelector from '@/components/pipeline/StyleSelector.vue'
 import StyleElementPicker from '@/components/pipeline/StyleElementPicker.vue'
 import StyleElementEditor from '@/components/pipeline/StyleElementEditor.vue'
+import CameraPresetSelector from '@/components/CameraPresetSelector.vue'
+import { useCameraStore } from '@/stores/camera'
 import type { ResolvedElementItem } from '@/api/styleElement'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const pipelineStore = usePipelineStore()
+const cameraStore = useCameraStore()
 
 // ---------- 状态 ----------
 const loading = ref(false)
@@ -276,6 +292,18 @@ const styleMode = ref<'preset' | 'elements'>('preset')
 const styleElements = ref<ResolvedElementItem[]>([])
 // 用户自建风格元素弹窗显隐
 const showElementEditor = ref(false)
+
+// 摄像机参数状态
+const cameraEnabled = ref(false)
+const cameraPresetId = ref<number | null>(null)
+
+/** 摄像机预设选择回调 */
+function onCameraPresetSelect(presetId: number | null) {
+  cameraPresetId.value = presetId
+  if (presetId !== null) {
+    cameraStore.selectPreset(presetId)
+  }
+}
 
 /** 分层组合模式下，传给 StyleElementPicker 的 basePrompt（从 topic/prompt 字段取值） */
 const basePromptForStyle = computed(() => {
@@ -390,6 +418,11 @@ function collectInputs(): Record<string, unknown> {
       result[field.key] = val
     }
   })
+
+  // 摄像机参数：启用时注入 camera_params
+  if (cameraEnabled.value) {
+    result['camera_params'] = { ...cameraStore.cameraParams, enabled: true }
+  }
 
   return result
 }

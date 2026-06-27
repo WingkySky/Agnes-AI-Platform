@@ -78,6 +78,26 @@
               @select="appendStylePrompt"
             />
 
+            <!-- 统一预设快捷面板（Popover 触发，选中后填充 prompt） -->
+            <el-popover
+              placement="bottom-start"
+              :width="340"
+              trigger="click"
+              :teleported="true"
+            >
+              <template #reference>
+                <el-button
+                  :icon="Folder"
+                  size="small"
+                  plain
+                  style="margin-top: 6px"
+                >
+                  {{ t('presets.usePresetBtn') }}
+                </el-button>
+              </template>
+              <PresetQuickPanel @select="onPresetSelect" />
+            </el-popover>
+
             <!-- 紧凑参数选择：尺寸 + 模型，一行标签搞定 -->
             <el-form-item :label="t('params.size')">
               <ParamSelector mode="image" v-model:size="size" v-model:model="model" />
@@ -256,9 +276,10 @@
 import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  MagicStick, Download, Link, PictureFilled, Edit, Loading, CircleCloseFilled, VideoPlay, Share, InfoFilled
+  MagicStick, Download, Link, PictureFilled, Edit, Loading, CircleCloseFilled, VideoPlay, Share, InfoFilled, Folder
 } from '@element-plus/icons-vue'
 import PromptTemplates from '@/components/PromptTemplates.vue'
+import PresetQuickPanel from '@/components/presets/PresetQuickPanel.vue'
 import ImageUploader from '@/components/ImageUploader.vue'
 import ImageViewer from '@/components/ImageViewer.vue'
 import ImageWithWatermark from '@/components/ImageWithWatermark.vue'
@@ -439,6 +460,14 @@ const canSubmit = computed(() => {
 function appendStylePrompt(tpl: string) {
   if (!prompt.value.trim().endsWith(tpl)) {
     prompt.value = prompt.value.trim() + tpl
+  }
+}
+
+/** 预设快捷面板应用回调：将预设的 prompt_text 覆盖填入提示词输入框 */
+function onPresetSelect(preset: any) {
+  if (preset.prompt_text) {
+    prompt.value = preset.prompt_text
+    ElMessage.success(t('presets.applied'))
   }
 }
 

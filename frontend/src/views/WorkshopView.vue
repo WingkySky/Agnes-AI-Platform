@@ -33,6 +33,17 @@
           {{ t(`workshop.category.${cat}`) }}
         </el-radio-button>
       </el-radio-group>
+      <!-- 模板导入/导出按钮 -->
+      <div class="filter-actions">
+        <el-button v-permission="'pipeline:run'" link size="small" @click="openImportDialog">
+          <el-icon><Upload /></el-icon>
+          {{ t('workshop.importExport.importButton') }}
+        </el-button>
+        <el-button v-permission="'pipeline:run'" link size="small" @click="openExportDialog">
+          <el-icon><Download /></el-icon>
+          {{ t('workshop.importExport.exportButton') }}
+        </el-button>
+      </div>
     </div>
 
     <!-- 模板网格 -->
@@ -40,11 +51,11 @@
       <div class="section-header">
         <h3 class="section-title">{{ t('workshop.templateMarket') }}</h3>
         <div class="section-actions">
-          <el-button type="primary" size="small" @click="goToHistory">
+          <el-button type="primary" link size="small" @click="goToHistory">
             <el-icon><PictureFilled /></el-icon>
             {{ t('workshop.creationHistory') }}
           </el-button>
-          <el-button type="primary" size="small" @click="goToCreateTemplate">
+          <el-button type="primary" link size="small" @click="goToCreateTemplate">
             <el-icon><Plus /></el-icon>
             {{ t('workshop.createTemplate') }}
           </el-button>
@@ -94,15 +105,34 @@
                 {{ tag }}
               </el-tag>
             </div>
-            <!-- 使用此模板按钮（受 pipeline:run 权限控制） -->
+            <!-- 使用此模板按钮（受 pipeline:run 权限控制，link 风格保持卡片轻量） -->
             <div class="card-footer">
               <el-button
                 v-permission="'pipeline:run'"
                 type="primary"
+                link
                 size="small"
                 @click.stop="goToRun(tpl)">
                 {{ t('workshop.useTemplate') }}
               </el-button>
+              <!-- 自定义模板操作菜单：仅非内置模板显示，含"导出此模板" -->
+              <el-dropdown
+                v-if="!tpl.is_builtin"
+                trigger="click"
+                @command="(cmd: string) => onCardCommand(cmd, tpl)"
+                @click.stop>
+                <el-button link size="small" @click.stop>
+                  <el-icon><MoreFilled /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="export">
+                      <el-icon><Download /></el-icon>
+                      {{ t('workshop.importExport.exportThis') }}
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </div>
           </div>
         </div>
@@ -164,6 +194,14 @@
         </div>
       </div>
     </div>
+
+    <!-- 模板导入/导出对话框 -->
+    <TemplateImportExportDialog
+      v-model="ioDialogVisible"
+      :preset-template-ids="presetExportIds"
+      :initial-tab="ioDialogTab"
+      @imported="onImported"
+    />
   </div>
 </template>
 
@@ -173,10 +211,12 @@ import { useI18n } from '@/i18n'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Search, MagicStick, Coin, Clock, Refresh, ArrowRight, Delete, Plus, PictureFilled
+  Search, MagicStick, Coin, Clock, Refresh, ArrowRight, Delete, Plus, PictureFilled,
+  Upload, Download, MoreFilled,
 } from '@element-plus/icons-vue'
 import { usePipelineStore } from '@/stores/pipeline'
 import type { PipelineTemplate, PipelineRun } from '@/api/pipeline'
+import TemplateImportExportDialog from '@/components/pipeline/TemplateImportExportDialog.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -185,6 +225,36 @@ const pipelineStore = usePipelineStore()
 // ---------- 状态 ----------
 const searchKeyword = ref('')
 const activeCategory = ref('all')
+
+// ---------- 模板导入/导出 ----------
+const ioDialogVisible = ref(false)
+const ioDialogTab = ref<'export' | 'import'>('export')
+const presetExportIds = ref<number[]>([])
+
+function openExportDialog() {
+  presetExportIds.value = []
+  ioDialogTab.value = 'export'
+  ioDialogVisible.value = true
+}
+
+function openImportDialog() {
+  presetExportIds.value = []
+  ioDialogTab.value = 'import'
+  ioDialogVisible.value = true
+}
+
+function onCardCommand(cmd: string, tpl: PipelineTemplate) {
+  if (cmd === 'export') {
+    presetExportIds.value = [tpl.id]
+    ioDialogTab.value = 'export'
+    ioDialogVisible.value = true
+  }
+}
+
+function onImported() {
+  // 导入成功后刷新模板列表
+  loadTemplates()
+}
 
 // ---------- 计算属性 ----------
 const templatesLoading = computed(() => pipelineStore.templatesLoading)
@@ -257,7 +327,7 @@ function goToHistory() {
 async function deleteRunConfirm(run: PipelineRun) {
   try {
     await ElMessageBox.confirm(
-      `确定要删除运行记录「${run.name || run.template_name}」吗？此操作不可恢复。`,
+      t('workshop.deleteRunConfirm', { name: run.name || run.template_name }),
       t('workshop.deleteRun'),
       { confirmButtonText: t('common.delete'), cancelButtonText: t('common.cancel'), type: 'warning' }
     )
@@ -285,10 +355,11 @@ function formatTime(timeStr: string): string {
   const date = new Date(timeStr)
   const now = new Date()
   const diff = now.getTime() - date.getTime()
-  if (diff < 60000) return '刚刚'
-  if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)} 小时前`
-  return date.toLocaleDateString('zh-CN')
+  if (diff < 60000) return t('workshop.justNow')
+  if (diff < 3600000) return t('workshop.minutesAgo', { n: Math.floor(diff / 60000) })
+  if (diff < 86400000) return t('workshop.hoursAgo', { n: Math.floor(diff / 3600000) })
+  // 超过 1 天，显示相对天数
+  return t('workshop.daysAgo', { n: Math.floor(diff / 86400000) })
 }
 
 // ---------- 生命周期 ----------
@@ -308,18 +379,7 @@ onMounted(() => {
   margin: 0 auto;
 }
 
-.page-title {
-  font-size: 28px;
-  font-weight: 600;
-  margin: 0 0 8px 0;
-  color: var(--agnes-text-primary);
-}
-
-.page-desc {
-  font-size: 14px;
-  color: var(--agnes-text-secondary);
-  margin: 0 0 24px 0;
-}
+/* page-title / page-desc / section-title 沿用全局工具类（main.css），不再重复定义 */
 
 .filter-bar {
   display: flex;
@@ -337,11 +397,17 @@ onMounted(() => {
   flex: 1;
 }
 
-.section-title {
-  font-size: 18px;
-  font-weight: 600;
-  margin: 0;
-  color: var(--agnes-text-primary);
+.filter-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
 }
 
 .section-header {
@@ -349,6 +415,13 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 16px;
+}
+
+/* 标题旁的操作按钮统一为 link 风格，避免抢卡片视觉焦点 */
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .templates-section {
@@ -457,11 +530,6 @@ onMounted(() => {
   margin-bottom: 12px;
 }
 
-.card-footer {
-  display: flex;
-  justify-content: flex-end;
-}
-
 .history-section {
   margin-top: 32px;
 }
@@ -521,6 +589,9 @@ onMounted(() => {
 }
 
 .run-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: var(--agnes-text-placeholder);
   flex-shrink: 0;
 }

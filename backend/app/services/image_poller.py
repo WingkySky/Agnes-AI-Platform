@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Dict, Optional, List
 
 from app.services.agnes_client import agnes_client
+from app.services.provider_registry import provider_registry
 from app.models.generation import Generation
 from app.core.database import new_async_session
 from app.services.credits_service import confirm_credits, refund_credits
@@ -42,12 +43,15 @@ class ImageTask:
         params: Dict,
         user_id: Optional[int] = None,
         credits_consumed: int = 0,
+        preset_id: Optional[int] = None,
     ):
         self.task_id = task_id
         self.prompt = prompt
         self.params = params or {}
         self.user_id = user_id
         self.credits_consumed = credits_consumed
+        # 生成时使用的预设 ID（用于追溯作品来源预设）
+        self.preset_id = preset_id
         self.status = "queued"
         self.progress = 0
         self.result_url: Optional[str] = None
@@ -100,6 +104,7 @@ class ImagePollerManager:
         user_id: Optional[int] = None,
         credits_consumed: int = 0,
         task_id: Optional[str] = None,
+        preset_id: Optional[int] = None,
     ) -> ImageTask:
         # 支持外部传入 task_id（便于路由层先扣分再创建任务时保持 ref_id 一致）
         if not task_id:
@@ -110,6 +115,7 @@ class ImagePollerManager:
             params=params,
             user_id=user_id,
             credits_consumed=credits_consumed,
+            preset_id=preset_id,
         )
         task.status = "pending"
 
@@ -144,9 +150,13 @@ class ImagePollerManager:
             task.progress = 10
             task.last_updated = time.time()
 
-            result = await agnes_client.create_image(
+            # 按模型 ID 自动路由到对应 Provider 的 client
+            # （agnes → AgnesAIClient 业务适配层；volcengine_cv 等 → AGNSDKClientWrapper 统一协议层）
+            model_id = task.params.get("model", "")
+            client = await provider_registry.get_client_for_model(model_id)
+            result = await client.create_image(
                 prompt=task.prompt,
-                model=task.params.get("model", ""),
+                model=model_id,
                 size=task.params.get("size", "1024x1024"),
                 response_format=task.params.get("response_format", "url"),
                 base64_image=task.params.get("base64_image"),
@@ -283,6 +293,7 @@ class ImagePollerManager:
                     moderation_status=moderation_status,
                     moderation_flags=moderation_flags,
                     moderation_reason=moderation_reason,
+                    preset_id=task.preset_id,
                 )
                 session.add(record)
                 await session.commit()

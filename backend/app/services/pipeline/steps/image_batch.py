@@ -352,9 +352,12 @@ class ImageBatchExecutor(BaseStepExecutor):
         all_refs.extend(reference_images)
 
         try:
+            # 按模型 ID 路由到对应 Provider 的 client
+            from app.services.provider_registry import provider_registry
+            _img_client = await provider_registry.get_client_for_model(model)
             # 如有参考图（风格图 + 角色图），走图生图模式；否则文生图
             if all_refs:
-                result = await agnes_client.create_image(
+                result = await _img_client.create_image(
                     prompt=prompt,
                     model=model,
                     size=size,
@@ -362,7 +365,7 @@ class ImageBatchExecutor(BaseStepExecutor):
                     image_urls=all_refs,
                 )
             else:
-                result = await agnes_client.create_image(
+                result = await _img_client.create_image(
                     prompt=prompt,
                     model=model,
                     size=size,

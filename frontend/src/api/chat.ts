@@ -102,7 +102,9 @@ export async function sendMessageStream(
   content: string,
   attachments: MessageAttachment[],
   onEvent: (event: SSEEvent) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  cameraParams?: Record<string, any> | null,
+  presetRef?: number | null
 ): Promise<void> {
   const baseURL: string = import.meta.env.VITE_API_BASE_URL || ''
   const url = `${baseURL}/api/chat/sessions/${sessionId}/messages`
@@ -159,6 +161,16 @@ export async function sendMessageStream(
         mime_type: a.mime_type || 'image/png',
       }
     })
+  }
+
+  // 摄像机参数：若启用则随请求一并发送
+  if (cameraParams && cameraParams.enabled) {
+    body.camera_params = cameraParams
+  }
+
+  // 预设引用（仅当前轮有效）
+  if (presetRef) {
+    body.preset_ref = presetRef
   }
 
   const response = await fetch(url, {

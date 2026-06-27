@@ -269,18 +269,26 @@ function getIcon(iconName: string | null | undefined) {
 
 // 应用启动时加载模型配置和菜单
 onMounted(async () => {
-  modelsStore.fetchConfig()
-  await menuStore.fetchMenus()
+  try {
+    modelsStore.fetchConfig()
+    await menuStore.fetchMenus()
+  } catch (err) {
+    console.error('onMounted initialization error:', err)
+  }
 })
 
 // 用户登录状态变化时刷新菜单（确保管理员菜单正确显示）
 watch(() => userStore.isAuthenticated, async (isAuth) => {
-  if (isAuth) {
-    menuStore.clearCache()
-    await menuStore.fetchMenus(false)
-  } else {
-    menuStore.clearCache()
-    await menuStore.fetchMenus(false)
+  try {
+    if (isAuth) {
+      menuStore.clearCache()
+      await menuStore.fetchMenus(false)
+    } else {
+      menuStore.clearCache()
+      await menuStore.fetchMenus(false)
+    }
+  } catch (err) {
+    console.error('watch isAuthenticated error:', err)
   }
 })
 
@@ -324,19 +332,27 @@ const creditsText = computed(() => {
 
 // 用户下拉菜单操作
 function handleUserCommand(cmd: string) {
-  if (cmd === 'logout') {
-    userStore.logout()
-    router.push('/login')
-  } else if (cmd === 'profile') {
-    router.push('/profile')
-  } else if (cmd === 'preferences') {
-    router.push('/preferences')
+  try {
+    if (cmd === 'logout') {
+      userStore.logout()
+      router.push('/login')
+    } else if (cmd === 'profile') {
+      router.push('/profile')
+    } else if (cmd === 'preferences') {
+      router.push('/preferences')
+    }
+  } catch (err) {
+    console.error('handleUserCommand error:', err)
   }
 }
 
 // 顶部导航下拉菜单点击跳转
 function handleNavCommand(path: string) {
-  router.push(path)
+  try {
+    router.push(path)
+  } catch (err) {
+    console.error('handleNavCommand error:', err)
+  }
 }
 
 // 判断当前路由是否属于某个顶部分组（用于高亮）

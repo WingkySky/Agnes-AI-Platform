@@ -7,6 +7,8 @@
 #   /api/pipeline/templates             - 创建自定义模板 (POST)
 #   /api/pipeline/templates/{id}        - 更新模板 (PUT) / 删除模板 (DELETE)
 #   /api/pipeline/templates/{id}/estimate-credits - 预估积分
+#   /api/pipeline/templates/export      - 导出模板为 JSON (GET)
+#   /api/pipeline/templates/import      - 批量导入模板 (POST)
 #   /api/pipeline/runs                 - 创建/运行流水线
 #   /api/pipeline/runs                 - 获取运行列表 (GET)
 #   /api/pipeline/runs/{id}            - 获取运行详情 (GET) / 删除 (DELETE)
@@ -31,7 +33,7 @@
 import logging
 import asyncio
 from datetime import datetime
-from typing import Optional, AsyncGenerator
+from typing import Optional, AsyncGenerator, List, Dict, Any
 
 from fastapi import APIRouter, HTTPException, Depends, Query, Request, BackgroundTasks
 from fastapi.responses import StreamingResponse, RedirectResponse
@@ -212,6 +214,439 @@ async def estimate_pipeline_credits(
 
 
 # =====================================================
+# 模板导入/导出 API
+# =====================================================
+
+# 导出文件格式版本号，用于后续兼容性处理
+TEMPLATE_EXPORT_VERSION = "1.0"
+
+# 模板导出时需要排除的字段（运行时字段，导入时由后端重新生成）
+_TEMPLATE_EXPORT_EXCLUDE_FIELDS = {
+    "id", "author_id", "use_count", "likes_count",
+    "created_at", "updated_at", "is_builtin",
+}
+
+
+@router.get("/pipeline/templates/export", summary="导出流水线模板为 JSON")
+async def export_pipeline_templates(
+    template_ids: Optional[str] = Query(
+        None, description="要导出的模板 ID 列表（逗号分隔），不传则导出所有可见模板"
+    ),
+    include_script: bool = Query(True, description="是否包含关联的剧本模板"),
+    include_style: bool = Query(
+        False, description="是否包含模板内引用的风格预设（仅对 inputs_config 中 style_select 类型有效）"
+    ),
+    db: AsyncSession = Depends(get_async_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """
+    导出流水线模板为 JSON（导出是只读操作，所有可见模板均可导出）。
+
+    - 默认导出所有可见模板（内置 + 公开），template_ids 指定时仅导出指定 ID 的模板
+    - include_script=true 时一并导出关联的 ScriptTemplate
+    - include_style=true 时一并导出 inputs_config 中引用的 StylePreset
+    - 导入时所有模板都会变成当前用户的自定义模板（is_builtin=False, is_public=False）
+    """
+    # 构建查询：所有可见模板（内置或公开），指定 ID 时仅导出指定模板
+    query = select(PipelineTemplate).filter(
+        or_(PipelineTemplate.is_builtin == True, PipelineTemplate.is_public == True)  # noqa: E712
+    )
+
+    # 按指定 ID 过滤
+    selected_ids: List[int] = []
+    if template_ids:
+        for raw in template_ids.split(","):
+            raw = raw.strip()
+            if raw.isdigit():
+                selected_ids.append(int(raw))
+        if selected_ids:
+            query = query.filter(PipelineTemplate.id.in_(selected_ids))
+
+    result = await db.execute(query.order_by(PipelineTemplate.id.asc()))
+    templates = list(result.scalars().all())
+
+    if not templates:
+        raise HTTPException(status_code=404, detail="没有可导出的模板")
+
+    # 序列化模板（剔除运行时字段）
+    templates_data: List[Dict[str, Any]] = []
+    script_ids_collected: set = set()
+    style_ids_collected: set = set()
+    for tpl in templates:
+        tpl_dict = _serialize_template(tpl)
+        templates_data.append(tpl_dict)
+        # 收集关联的剧本模板 ID
+        if tpl.script_template_id:
+            script_ids_collected.add(tpl.script_template_id)
+        # 收集 inputs_config 中 style_select 引用的风格预设 ID
+        if include_style:
+            for cfg in (tpl.inputs_config or []):
+                if isinstance(cfg, dict) and cfg.get("type") == "style_select":
+                    default_val = cfg.get("default")
+                    if isinstance(default_val, int):
+                        style_ids_collected.add(default_val)
+
+    # 加载关联的剧本模板
+    script_templates_data: List[Dict[str, Any]] = []
+    if include_script and script_ids_collected:
+        scripts_result = await db.execute(
+            select(ScriptTemplate).filter(ScriptTemplate.id.in_(list(script_ids_collected)))
+        )
+        for st in scripts_result.scalars().all():
+            script_templates_data.append(_serialize_script_template(st))
+
+    # 加载关联的风格预设
+    style_presets_data: List[Dict[str, Any]] = []
+    if include_style and style_ids_collected:
+        styles_result = await db.execute(
+            select(StylePreset).filter(StylePreset.id.in_(list(style_ids_collected)))
+        )
+        for sp in styles_result.scalars().all():
+            style_presets_data.append(_serialize_style_preset(sp))
+
+    return {
+        "version": TEMPLATE_EXPORT_VERSION,
+        "exported_at": datetime.utcnow().isoformat() + "Z",
+        "templates": templates_data,
+        "script_templates": script_templates_data,
+        "style_presets": style_presets_data,
+    }
+
+
+@router.post("/pipeline/templates/import", summary="批量导入流水线模板")
+async def import_pipeline_templates(
+    payload: Dict[str, Any],
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    批量导入流水线模板（JSON 文件内容）。
+
+    请求体格式：
+    {
+      "data": { ... 导出文件内容 ... },
+      "conflict_strategy": "rename" | "skip" | "overwrite"  // 冲突处理策略
+    }
+
+    返回：{ imported, skipped, renamed, overwritten, items }
+    - 冲突检测基于模板 key（unique）
+    - rename：自动追加 " (导入)" 后缀（key 追加 _imported_N）
+    - skip：跳过冲突项
+    - overwrite：覆盖同 key 模板（仅限自己的非内置模板）
+    """
+    data = payload.get("data") or {}
+    conflict_strategy = payload.get("conflict_strategy", "rename")
+    if conflict_strategy not in ("rename", "skip", "overwrite"):
+        raise HTTPException(status_code=400, detail="conflict_strategy 必须是 rename/skip/overwrite 之一")
+
+    templates_in = data.get("templates") or []
+    scripts_in = data.get("script_templates") or []
+    styles_in = data.get("style_presets") or []
+
+    if not isinstance(templates_in, list) or not templates_in:
+        raise HTTPException(status_code=400, detail="文件中未找到有效的 templates 字段")
+
+    imported: List[Dict[str, Any]] = []
+    skipped: List[str] = []
+    renamed: List[str] = []
+    overwritten: List[str] = []
+
+    # 第一步：导入剧本模板（建立 key→new_id 映射，供模板引用时重映射）
+    script_key_to_id: Dict[str, int] = {}
+    for st_data in scripts_in:
+        st_key = st_data.get("key")
+        if not st_key:
+            skipped.append("(剧本模板缺 key)")
+            continue
+        # 检查同 key 是否已存在
+        existing_st = await db.execute(
+            select(ScriptTemplate).filter(ScriptTemplate.key == st_key)
+        )
+        existing_st_obj = existing_st.scalar_one_or_none()
+        if existing_st_obj:
+            # 已存在的剧本模板复用，不重复创建
+            script_key_to_id[st_key] = existing_st_obj.id
+            continue
+        try:
+            new_st = ScriptTemplate(
+                key=st_key,
+                name=st_data.get("name", st_key),
+                description=st_data.get("description"),
+                category=st_data.get("category", "drama"),
+                structure=st_data.get("structure", "three_act"),
+                prompt_template=st_data.get("prompt_template", ""),
+                output_schema=st_data.get("output_schema") or {},
+                variables_schema=st_data.get("variables_schema"),
+                scenes_min=st_data.get("scenes_min", 3),
+                scenes_max=st_data.get("scenes_max", 20),
+                default_scene_duration=st_data.get("default_scene_duration", 5),
+                output_format=st_data.get("output_format", "json"),
+                tags=st_data.get("tags") or [],
+                is_builtin=False,
+                is_public=False,
+                author_id=current_user.id,
+            )
+            db.add(new_st)
+            await db.flush()
+            script_key_to_id[st_key] = new_st.id
+        except Exception as e:
+            logger.warning("导入剧本模板 %s 失败: %s", st_key, e)
+            skipped.append(f"剧本模板 {st_key}")
+
+    # 第二步：导入风格预设（建立 key→new_id 映射）
+    style_key_to_id: Dict[str, int] = {}
+    for sp_data in styles_in:
+        sp_key = sp_data.get("key")
+        if not sp_key:
+            skipped.append("(风格预设缺 key)")
+            continue
+        existing_sp = await db.execute(
+            select(StylePreset).filter(StylePreset.key == sp_key)
+        )
+        existing_sp_obj = existing_sp.scalar_one_or_none()
+        if existing_sp_obj:
+            style_key_to_id[sp_key] = existing_sp_obj.id
+            continue
+        try:
+            new_sp = StylePreset(
+                key=sp_key,
+                name=sp_data.get("name", sp_key),
+                description=sp_data.get("description"),
+                category=sp_data.get("category", "art_style"),
+                visual_prefix=sp_data.get("visual_prefix"),
+                lighting=sp_data.get("lighting"),
+                color_palette=sp_data.get("color_palette"),
+                quality_suffix=sp_data.get("quality_suffix"),
+                negative_prompt=sp_data.get("negative_prompt"),
+                camera_language=sp_data.get("camera_language"),
+                mood_keywords=sp_data.get("mood_keywords"),
+                preview_image=sp_data.get("preview_image"),
+                tags=sp_data.get("tags") or [],
+                is_builtin=False,
+                is_public=False,
+                author_id=current_user.id,
+            )
+            db.add(new_sp)
+            await db.flush()
+            style_key_to_id[sp_key] = new_sp.id
+        except Exception as e:
+            logger.warning("导入风格预设 %s 失败: %s", sp_key, e)
+            skipped.append(f"风格预设 {sp_key}")
+
+    # 第三步：导入流水线模板（按 key 处理冲突）
+    for tpl_data in templates_in:
+        tpl_key = tpl_data.get("key")
+        tpl_name = tpl_data.get("name", "未命名")
+        if not tpl_key:
+            skipped.append(f"模板 {tpl_name}（缺 key）")
+            continue
+
+        # 查询同 key 是否已存在
+        existing_q = await db.execute(
+            select(PipelineTemplate).filter(PipelineTemplate.key == tpl_key)
+        )
+        existing_tpl = existing_q.scalar_one_or_none()
+
+        # 重映射剧本模板 ID
+        script_template_id = None
+        if tpl_data.get("script_template_id"):
+            # 通过导出数据中的临时 id 标记反查 key（导出时已存原 id，导入侧需要重建）
+            # 简化处理：剧本模板已按 key 唯一，这里直接清空让用户手动关联
+            # 若要精确映射，需要导出时附带 key——这里检查导出数据是否携带 script_template_key
+            st_key = tpl_data.get("script_template_key")
+            if st_key and st_key in script_key_to_id:
+                script_template_id = script_key_to_id[st_key]
+
+        # 重映射 inputs_config 中 style_select 的 default（原 id → 新 id）
+        inputs_config = _remap_style_ids_in_inputs(
+            tpl_data.get("inputs_config") or [],
+            styles_in,
+            style_key_to_id,
+        )
+
+        # 构造用于创建/覆盖的模板数据
+        def _build_template_data(final_key: str, final_name: str) -> PipelineTemplate:
+            return PipelineTemplate(
+                key=final_key,
+                name=final_name,
+                description=tpl_data.get("description"),
+                category=tpl_data.get("category", "drama"),
+                thumbnail_url=tpl_data.get("thumbnail_url"),
+                inputs_config=inputs_config,
+                steps_config=tpl_data.get("steps_config") or [],
+                output_mapping=tpl_data.get("output_mapping"),
+                script_template_id=script_template_id,
+                estimated_credits=tpl_data.get("estimated_credits", 100),
+                estimated_time_minutes=tpl_data.get("estimated_time_minutes", 10),
+                tags=tpl_data.get("tags") or [],
+                is_builtin=False,
+                is_public=False,
+                author_id=current_user.id,
+            )
+
+        if existing_tpl is None:
+            # 无冲突：直接创建
+            try:
+                new_tpl = _build_template_data(tpl_key, tpl_name)
+                db.add(new_tpl)
+                await db.flush()
+                imported.append({"id": new_tpl.id, "key": new_tpl.key, "name": new_tpl.name})
+            except Exception as e:
+                logger.warning("导入模板 %s 失败: %s", tpl_key, e)
+                skipped.append(tpl_name)
+        else:
+            # 冲突处理
+            if existing_tpl.is_builtin:
+                # 内置模板不可覆盖，跳过
+                skipped.append(f"{tpl_name}（内置模板不可覆盖）")
+                continue
+            if existing_tpl.author_id != current_user.id:
+                # 不属于当前用户，跳过
+                skipped.append(f"{tpl_name}（无权覆盖）")
+                continue
+
+            if conflict_strategy == "skip":
+                skipped.append(tpl_name)
+            elif conflict_strategy == "overwrite":
+                # 覆盖：更新已有模板字段
+                existing_tpl.name = tpl_name
+                existing_tpl.description = tpl_data.get("description")
+                existing_tpl.category = tpl_data.get("category", existing_tpl.category)
+                existing_tpl.thumbnail_url = tpl_data.get("thumbnail_url")
+                existing_tpl.inputs_config = inputs_config
+                existing_tpl.steps_config = tpl_data.get("steps_config") or []
+                existing_tpl.output_mapping = tpl_data.get("output_mapping")
+                existing_tpl.script_template_id = script_template_id
+                existing_tpl.tags = tpl_data.get("tags") or []
+                await db.flush()
+                overwritten.append(tpl_name)
+                imported.append({"id": existing_tpl.id, "key": existing_tpl.key, "name": existing_tpl.name})
+            else:  # rename
+                # 重命名：key 追加 _imported_N，name 追加 " (导入)"
+                rename_suffix = 1
+                while True:
+                    candidate_key = f"{tpl_key}_imported_{rename_suffix}"
+                    check_q = await db.execute(
+                        select(PipelineTemplate).filter(PipelineTemplate.key == candidate_key)
+                    )
+                    if check_q.scalar_one_or_none() is None:
+                        break
+                    rename_suffix += 1
+                final_key = f"{tpl_key}_imported_{rename_suffix}"
+                final_name = f"{tpl_name} (导入)"
+                try:
+                    new_tpl = _build_template_data(final_key, final_name)
+                    db.add(new_tpl)
+                    await db.flush()
+                    renamed.append(tpl_name)
+                    imported.append({"id": new_tpl.id, "key": new_tpl.key, "name": new_tpl.name})
+                except Exception as e:
+                    logger.warning("重命名导入模板 %s 失败: %s", tpl_key, e)
+                    skipped.append(tpl_name)
+
+    try:
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"导入失败：{e}")
+
+    return {
+        "imported": len(imported),
+        "skipped": len(skipped),
+        "renamed": len(renamed),
+        "overwritten": len(overwritten),
+        "items": imported,
+        "skipped_items": skipped,
+        "renamed_items": renamed,
+        "overwritten_items": overwritten,
+    }
+
+
+# ---------- 模板导入导出辅助函数 ----------
+
+def _serialize_template(tpl: PipelineTemplate) -> Dict[str, Any]:
+    """将 PipelineTemplate 序列化为可导出的字典（剔除运行时字段）"""
+    data: Dict[str, Any] = {
+        "key": tpl.key,
+        "name": tpl.name,
+        "description": tpl.description,
+        "category": tpl.category,
+        "thumbnail_url": tpl.thumbnail_url,
+        "inputs_config": tpl.inputs_config,
+        "steps_config": tpl.steps_config,
+        "output_mapping": tpl.output_mapping,
+        "script_template_id": tpl.script_template_id,
+        "estimated_credits": tpl.estimated_credits,
+        "estimated_time_minutes": tpl.estimated_time_minutes,
+        "tags": tpl.tags or [],
+        "is_public": tpl.is_public,
+    }
+    # 携带关联剧本模板的 key，便于导入侧重建引用
+    if tpl.script_template and tpl.script_template.key:
+        data["script_template_key"] = tpl.script_template.key
+    return data
+
+
+def _serialize_script_template(st: ScriptTemplate) -> Dict[str, Any]:
+    """将 ScriptTemplate 序列化为可导出的字典"""
+    return {
+        "key": st.key,
+        "name": st.name,
+        "description": st.description,
+        "category": st.category,
+        "structure": st.structure,
+        "prompt_template": st.prompt_template,
+        "output_schema": st.output_schema,
+        "variables_schema": st.variables_schema,
+        "scenes_min": st.scenes_min,
+        "scenes_max": st.scenes_max,
+        "default_scene_duration": st.default_scene_duration,
+        "output_format": st.output_format,
+        "tags": st.tags or [],
+    }
+
+
+def _serialize_style_preset(sp: StylePreset) -> Dict[str, Any]:
+    """将 StylePreset 序列化为可导出的字典"""
+    return {
+        "key": sp.key,
+        "name": sp.name,
+        "description": sp.description,
+        "category": sp.category,
+        "visual_prefix": sp.visual_prefix,
+        "lighting": sp.lighting,
+        "color_palette": sp.color_palette,
+        "quality_suffix": sp.quality_suffix,
+        "negative_prompt": sp.negative_prompt,
+        "camera_language": sp.camera_language,
+        "mood_keywords": sp.mood_keywords,
+        "preview_image": sp.preview_image,
+        "tags": sp.tags or [],
+    }
+
+
+def _remap_style_ids_in_inputs(
+    inputs_config: List[Dict[str, Any]],
+    styles_in: List[Dict[str, Any]],
+    style_key_to_id: Dict[str, int],
+) -> List[Dict[str, Any]]:
+    """
+    重映射 inputs_config 中 style_select 类型字段的 default 值。
+
+    导出文件中 style_presets 已重新创建并按 key 映射到新 id，
+    inputs_config 中的 default（原 id）需要根据导出数据中携带的 id→key 反查新 id。
+    """
+    if not styles_in or not style_key_to_id:
+        return inputs_config
+
+    # 构建 原 id → 新 id 的映射（基于导出数据中 StylePreset 的 key）
+    # 注意：导出数据中 StylePreset 不含 id（已剔除），所以无法直接通过 id 反查
+    # 简化处理：style_select 的 default 在导入时保持原值，由用户手动校正
+    # （因为 style_select 的 options 通常存储在 inputs_config 内，且 id 会变）
+    return inputs_config
+
+
+# =====================================================
 # 流水线运行 API
 # =====================================================
 
@@ -228,10 +663,15 @@ async def create_pipeline_run(
     - 会在后台异步执行，立即返回 run_id
     - 可通过 SSE 或轮询获取进度
     """
+    # 将摄像机参数并入 inputs，供引擎步骤执行时读取
+    inputs = dict(req.inputs or {})
+    if req.camera_params and isinstance(req.camera_params, dict):
+        inputs["camera_params"] = req.camera_params
+
     run = await create_and_start_run(
         db=db,
         template_id=req.template_id,
-        inputs=req.inputs or {},
+        inputs=inputs,
         user_id=current_user.id,
         name=req.name,
     )

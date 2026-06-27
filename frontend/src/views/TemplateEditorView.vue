@@ -12,6 +12,18 @@
             {{ isEdit ? t('templateEditor.editTitle') : t('templateEditor.createTitle') }}
           </span>
         </template>
+        <!-- 编辑模式下提供导出当前模板入口 -->
+        <template #extra>
+          <el-button
+            v-if="isEdit"
+            link
+            type="primary"
+            size="small"
+            @click="openExportCurrent">
+            <el-icon><Download /></el-icon>
+            {{ t('workshop.importExport.exportThis') }}
+          </el-button>
+        </template>
       </el-page-header>
     </div>
 
@@ -119,6 +131,13 @@
         </el-form-item>
       </el-form>
     </div>
+
+    <!-- 模板导入/导出对话框（编辑模式下用于导出当前模板） -->
+    <TemplateImportExportDialog
+      v-model="ioDialogVisible"
+      :preset-template-ids="presetExportIds"
+      :initial-tab="ioDialogTab"
+    />
   </div>
 </template>
 
@@ -126,6 +145,7 @@
 import { ref, computed, onMounted, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { Download } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import {
   createTemplate,
@@ -133,6 +153,7 @@ import {
   getPipelineTemplateDetail,
 } from '@/api/pipeline'
 import type { FormInstance, FormRules } from 'element-plus'
+import TemplateImportExportDialog from '@/components/pipeline/TemplateImportExportDialog.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -145,6 +166,18 @@ const isEdit = computed(() => !!templateId.value)
 const loading = ref(false)
 const saving = ref(false)
 const formRef = ref<FormInstance>()
+
+// 模板导入/导出对话框状态
+const ioDialogVisible = ref(false)
+const ioDialogTab = ref<'export' | 'import'>('export')
+const presetExportIds = ref<number[]>([])
+
+function openExportCurrent() {
+  if (!templateId.value) return
+  presetExportIds.value = [Number(templateId.value)]
+  ioDialogTab.value = 'export'
+  ioDialogVisible.value = true
+}
 
 // 分类选项
 const categoryOptions = [

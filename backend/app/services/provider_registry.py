@@ -1,8 +1,11 @@
 # =====================================================
 # Provider 注册表（核心预处理层）
 # 职责：
-#   1. 管理多个 API Provider（不同 base_url / api_key 的 Agnes 兼容 API）
-#   2. 为每个 Provider 维护独立的 AgnesAIClient 实例（连接池隔离）
+#   1. 管理多个 API Provider（不同 base_url / api_key / provider_type 的 API 接入）
+#   2. 为每个 Provider 按 provider_type 路由到对应的 client 实现：
+#      - "agnes" → AgnesAIClient（保留业务适配层：8n+1 / 8 倍数 / mode 归一化等 Agnes-specific 经验）
+#      - 其他 provider_type（volcengine_cv / kling / runway / pika 等）→ AGNSDKClientWrapper
+#        （封装 agn-sdk Client，统一协议层接入，无业务字段适配）
 #   3. 从数据库加载 Provider 配置和模型定义，支持运行时增删改
 #   4. 调用 Provider 的 /models API 自动同步模型列表（保留用户自定义模型）
 #   5. 启动时配置全局 agnes_client 单例指向默认 Provider（兼容现有代码）
@@ -10,15 +13,15 @@
 # 数据流：
 #   数据库 api_providers / model_definitions 表
 #     ↓ 启动时加载
-#   ProviderRegistry._clients: {provider_id: AgnesAIClient}
+#   ProviderRegistry._clients: {provider_id: AgnesAIClient | AGNSDKClientWrapper}
 #   ProviderRegistry._models_cache: List[ModelInfo]
-#     ↓ 全局单例兼容
+#     ↓ 全局单例兼容（仅默认 Provider，类型仍为 AgnesAIClient）
 #   agnes_client.configure(default_provider_config)
 # =====================================================
 
 import logging
 import time
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 
 from sqlalchemy import select, update, delete, and_
 
@@ -29,8 +32,14 @@ from app.models.api_provider import ApiProvider
 from app.models.model_definition import ModelDefinition
 from app.schemas.common import ModelInfo
 from app.services.agnes_client import AgnesAIClient, agnes_client
+from app.services.agn_sdk_client import AGNSDKClientWrapper
 
 logger = logging.getLogger("agnes_platform")
+
+# ---------- agn-sdk Adapter 类型与 client 实现的映射 ----------
+# "agnes" 走现有 AgnesAIClient（业务适配层 + 协议层一体）
+# 其他 provider_type 走 AGNSDKClientWrapper（agn-sdk 统一协议层）
+_PROVIDER_TYPE_AGNES = "agnes"
 
 # ---------- 模型类型推断规则（与原 model_registry 保持一致） ----------
 
@@ -125,8 +134,10 @@ class ProviderRegistry:
     """
 
     def __init__(self):
-        # {provider_id: AgnesAIClient} - 每个 Provider 一个独立 client
-        self._clients: Dict[int, AgnesAIClient] = {}
+        # {provider_id: AgnesAIClient | AGNSDKClientWrapper} - 每个 Provider 一个独立 client
+        # provider_type="agnes" 用 AgnesAIClient（保留业务适配层）
+        # 其他 provider_type 用 AGNSDKClientWrapper（agn-sdk 统一协议层）
+        self._clients: Dict[int, Union[AgnesAIClient, AGNSDKClientWrapper]] = {}
         # 默认 Provider 的 ID（用于 agnes_client 单例兼容）
         self._default_provider_id: Optional[int] = None
         # 模型列表缓存（聚合所有 Provider 的 active 模型）
@@ -219,6 +230,7 @@ class ProviderRegistry:
         async with new_async_session() as session:
             provider = ApiProvider(
                 name="Agnes AI（默认）",
+                provider_type=_PROVIDER_TYPE_AGNES,
                 base_url=settings.agnes_api_base_url,
                 api_key_encrypted=encrypt_api_key(settings.agnes_api_key),
                 poll_url=settings.agnes_api_poll_url,
@@ -233,24 +245,47 @@ class ProviderRegistry:
             return [provider]
 
     async def _init_client_for_provider(self, provider: ApiProvider) -> None:
-        """为指定 Provider 创建并启动 AgnesAIClient 实例"""
+        """
+        为指定 Provider 创建并启动 client 实例。
+
+        按 provider_type 路由：
+        - "agnes" → AgnesAIClient（保留业务适配层：8n+1 / 8 倍数 / mode 归一化等 Agnes-specific 经验）
+        - 其他 provider_type → AGNSDKClientWrapper（封装 agn-sdk Client，统一协议层接入）
+        """
         decrypted_key = decrypt_api_key(provider.api_key_encrypted or "")
-        client = AgnesAIClient(
-            base_url=provider.base_url,
-            api_key=decrypted_key,
-            poll_url=provider.poll_url or "",
-        )
+        provider_type = (provider.provider_type or _PROVIDER_TYPE_AGNES).strip().lower()
+
+        if provider_type == _PROVIDER_TYPE_AGNES:
+            # Agnes 走现有业务适配层 + 协议层一体实现
+            client: Union[AgnesAIClient, AGNSDKClientWrapper] = AgnesAIClient(
+                base_url=provider.base_url,
+                api_key=decrypted_key,
+                poll_url=provider.poll_url or "",
+            )
+        else:
+            # 其他 provider_type 走 agn-sdk 统一协议层
+            client = AGNSDKClientWrapper(
+                provider_type=provider_type,
+                base_url=provider.base_url,
+                api_key=decrypted_key,
+                poll_url=provider.poll_url or "",
+            )
         await client.start()
         self._clients[provider.id] = client
         logger.info(
-            "[ProviderRegistry] Provider %s (id=%s) client 已启动: base_url=%s",
-            provider.name, provider.id, provider.base_url,
+            "[ProviderRegistry] Provider %s (id=%s, type=%s) client 已启动: base_url=%s",
+            provider.name, provider.id, provider_type, provider.base_url,
         )
 
     async def _configure_default_client(self) -> None:
         """
         确定默认 Provider，用其配置全局 agnes_client 单例。
         优先选择 is_default=True 的 Provider，否则选第一个 active Provider。
+
+        注意：agnes_client 单例的类型固定为 AgnesAIClient，只有 provider_type="agnes"
+        的默认 Provider 才会 configure 该单例。如果默认 Provider 是其他 provider_type
+        （如 volcengine_cv / kling），则跳过 agnes_client 单例配置，业务层需通过
+        provider_registry.get_client(provider_id) 路由到对应的 AGNSDKClientWrapper。
         """
         if not self._clients:
             logger.warning("[ProviderRegistry] 无可用 Provider，agnes_client 单例保持引导配置")
@@ -282,6 +317,19 @@ class ProviderRegistry:
             return
 
         self._default_provider_id = default_provider.id
+        default_provider_type = (default_provider.provider_type or _PROVIDER_TYPE_AGNES).strip().lower()
+
+        if default_provider_type != _PROVIDER_TYPE_AGNES:
+            # 默认 Provider 不是 agnes 类型，不 configure agnes_client 单例
+            # （agnes_client 是 AgnesAIClient 类型，无法承载其他 provider_type 的协议）
+            # 业务层需通过 provider_registry.get_client(provider_id) 路由到对应的 AGNSDKClientWrapper
+            logger.warning(
+                "[ProviderRegistry] 默认 Provider (id=%s, name=%s, type=%s) 非 agnes 类型，"
+                "跳过 agnes_client 单例配置（业务层需通过 get_client 路由）",
+                default_provider.id, default_provider.name, default_provider_type,
+            )
+            return
+
         decrypted_key = decrypt_api_key(default_provider.api_key_encrypted or "")
         # 配置全局 agnes_client 单例（兼容现有代码）
         agnes_client.configure(
@@ -298,10 +346,13 @@ class ProviderRegistry:
 
     # ---------- Client 获取 ----------
 
-    def get_client(self, provider_id: Optional[int] = None) -> AgnesAIClient:
+    def get_client(self, provider_id: Optional[int] = None) -> Union[AgnesAIClient, AGNSDKClientWrapper]:
         """
         获取指定 Provider 的 client。
         provider_id 为 None 时返回默认 Provider 的 client（即全局 agnes_client 单例）。
+
+        返回类型可能是 AgnesAIClient（provider_type="agnes"）或 AGNSDKClientWrapper（其他 provider_type），
+        两者都暴露 list_models / create_image / create_video_task / poll_video_status 等兼容方法。
         """
         if provider_id is None:
             return agnes_client
@@ -310,7 +361,7 @@ class ProviderRegistry:
             raise RuntimeError(f"Provider {provider_id} 不存在或未激活")
         return client
 
-    def get_default_client(self) -> AgnesAIClient:
+    def get_default_client(self) -> Union[AgnesAIClient, AGNSDKClientWrapper]:
         """获取默认 Provider 的 client（即全局 agnes_client 单例）"""
         return agnes_client
 
@@ -318,12 +369,82 @@ class ProviderRegistry:
         """列出所有已激活 Provider 的 ID"""
         return list(self._clients.keys())
 
+    # ---------- 模型→Provider 自动路由 ----------
+
+    # 模型 ID → Provider ID 的内存缓存（避免每次生图都查库）
+    # key: model_id (str), value: provider_id (int)
+    # 启动时 refresh_models_cache 会自动填充；增删 Provider/模型时也会刷新
+    _model_provider_map: Dict[str, int] = {}
+
+    async def get_client_for_model(
+        self,
+        model_id: str,
+    ) -> Union[AgnesAIClient, AGNSDKClientWrapper]:
+        """
+        根据模型 ID 自动路由到对应 Provider 的 client。
+
+        路由逻辑：
+        1. 先查内存缓存 _model_provider_map（由 refresh_models_cache 填充）
+        2. 缓存未命中时查数据库 ModelDefinition 表
+        3. 找到 provider_id 后返回 self._clients[provider_id]
+        4. 找不到时回退到默认 agnes_client 单例（兼容旧行为）
+
+        Args:
+            model_id: 模型标识（如 doubao-seedream-4-0-250828 / agnes-image-2.1-flash）
+
+        Returns:
+            对应 Provider 的 client（AgnesAIClient 或 AGNSDKClientWrapper）
+        """
+        if not model_id:
+            return agnes_client
+
+        # 1) 内存缓存命中
+        provider_id = self._model_provider_map.get(model_id)
+        if provider_id is not None:
+            client = self._clients.get(provider_id)
+            if client is not None:
+                return client
+
+        # 2) 缓存未命中，查数据库
+        if provider_id is None:
+            try:
+                async with new_async_session() as session:
+                    result = await session.execute(
+                        select(ModelDefinition.provider_id)
+                        .where(and_(ModelDefinition.model_id == model_id,
+                                    ModelDefinition.is_active == True))
+                        .limit(1)
+                    )
+                    row = result.first()
+                    if row is not None:
+                        provider_id = row[0]
+                        # 回填缓存
+                        self._model_provider_map[model_id] = provider_id
+            except Exception as e:
+                logger.warning("[ProviderRegistry] 查询模型 %s 的 Provider 失败: %s", model_id, e)
+
+        # 3) 找到 provider_id，返回对应 client
+        if provider_id is not None:
+            client = self._clients.get(provider_id)
+            if client is not None:
+                return client
+            logger.warning(
+                "[ProviderRegistry] 模型 %s 对应的 Provider %s 未激活或未启动，回退到默认 client",
+                model_id, provider_id,
+            )
+
+        # 4) 兜底：回退到默认 agnes_client 单例
+        return agnes_client
+
     # ---------- 模型列表管理 ----------
 
     async def refresh_models_cache(self) -> List[ModelInfo]:
         """
         从数据库重新加载所有 active 模型到缓存。
         返回聚合后的模型列表（所有 Provider 的 active 模型）。
+
+        同时刷新 _model_provider_map（模型 ID → Provider ID 映射），
+        供 get_client_for_model 自动路由使用。
         """
         async with new_async_session() as session:
             result = await session.execute(
@@ -335,7 +456,19 @@ class ProviderRegistry:
 
         self._models_cache = [_build_model_info_from_definition(d) for d in definitions]
         self._models_cache_time = time.time()
-        logger.info("[ProviderRegistry] 模型缓存已刷新: %d 个模型", len(self._models_cache))
+
+        # 同步刷新 模型→Provider 路由缓存
+        # 注意：用类属性赋值而非 self._model_provider_map.clear() + update，
+        # 避免多实例间共享可变状态时出现并发问题
+        new_map: Dict[str, int] = {}
+        for d in definitions:
+            new_map[d.model_id] = d.provider_id
+        ProviderRegistry._model_provider_map = new_map
+
+        logger.info(
+            "[ProviderRegistry] 模型缓存已刷新: %d 个模型, 路由映射 %d 条",
+            len(self._models_cache), len(new_map),
+        )
         return self._models_cache
 
     async def list_all_models(self, use_cache: bool = True) -> List[ModelInfo]:
@@ -485,6 +618,7 @@ class ProviderRegistry:
         name: str,
         base_url: str,
         api_key: str,
+        provider_type: str = _PROVIDER_TYPE_AGNES,
         poll_url: str = "",
         is_active: bool = True,
         is_default: bool = False,
@@ -493,9 +627,13 @@ class ProviderRegistry:
         """
         新增 Provider。
         - api_key 会用 Fernet 加密后存储
+        - provider_type 决定走 AgnesAIClient（agnes）还是 AGNSDKClientWrapper（其他 adapter）
         - 如果 is_default=True，会把其他 Provider 的 is_default 置为 False
         - 创建后立即初始化 client 实例
         """
+        # 规范化 provider_type（默认 agnes）
+        normalized_provider_type = (provider_type or _PROVIDER_TYPE_AGNES).strip().lower() or _PROVIDER_TYPE_AGNES
+
         # 如果设为默认，先取消其他默认
         async with new_async_session() as session:
             if is_default:
@@ -505,6 +643,7 @@ class ProviderRegistry:
 
             provider = ApiProvider(
                 name=name,
+                provider_type=normalized_provider_type,
                 base_url=base_url,
                 api_key_encrypted=encrypt_api_key(api_key) if api_key else "",
                 poll_url=poll_url,
@@ -523,13 +662,17 @@ class ProviderRegistry:
             if is_default:
                 await self._configure_default_client()
 
-        logger.info("[ProviderRegistry] Provider 已创建: id=%s, name=%s", provider.id, provider.name)
+        logger.info(
+            "[ProviderRegistry] Provider 已创建: id=%s, name=%s, provider_type=%s",
+            provider.id, provider.name, normalized_provider_type,
+        )
         return provider
 
     async def update_provider(
         self,
         provider_id: int,
         name: Optional[str] = None,
+        provider_type: Optional[str] = None,
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
         poll_url: Optional[str] = None,
@@ -540,8 +683,9 @@ class ProviderRegistry:
         """
         更新 Provider 配置。
         - api_key 非空时才更新（避免误清空）
+        - provider_type 变更后会重建 client（切换 AgnesAIClient ↔ AGNSDKClientWrapper）
         - is_default=True 时取消其他默认
-        - base_url/api_key/poll_url 变更后重建 client
+        - base_url/api_key/poll_url/provider_type 变更后重建 client
         """
         async with new_async_session() as session:
             result = await session.execute(
@@ -562,6 +706,12 @@ class ProviderRegistry:
             need_rebuild = False
             if name is not None:
                 provider.name = name
+            # provider_type 变更：规范化后比对，变更则触发 client 重建
+            if provider_type is not None:
+                normalized_pt = (provider_type or _PROVIDER_TYPE_AGNES).strip().lower() or _PROVIDER_TYPE_AGNES
+                if normalized_pt != (provider.provider_type or _PROVIDER_TYPE_AGNES).lower():
+                    provider.provider_type = normalized_pt
+                    need_rebuild = True
             if base_url is not None and base_url != provider.base_url:
                 provider.base_url = base_url
                 need_rebuild = True

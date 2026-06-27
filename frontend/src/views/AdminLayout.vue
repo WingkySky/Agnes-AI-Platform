@@ -97,6 +97,12 @@
               <el-icon><Menu /></el-icon>
               <span>{{ t('nav.menuAdmin') }}</span>
             </el-menu-item>
+            <el-menu-item
+              v-if="userStore.isAdmin"
+              index="/admin/presets/audit">
+              <el-icon><Checked /></el-icon>
+              <span>{{ t('nav.presetAudit') }}</span>
+            </el-menu-item>
           </el-menu-item-group>
         </template>
       </el-menu>
@@ -118,7 +124,7 @@ import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Setting, View, Warning, UserFilled, User,
-  Picture, Coin, Cpu, Message, Menu,
+  Picture, Coin, Cpu, Message, Menu, Checked,
 } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { useUserStore } from '@/stores/user'

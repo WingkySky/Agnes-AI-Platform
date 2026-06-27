@@ -62,11 +62,21 @@ class SendMessageRequest(BaseModel):
     """发送消息请求
     - content: 消息文本（可为空字符串，此时以附件为主）
     - attachments: 可选的参考图列表（单张 ≤ 5MB，总数 ≤ 10）
+    - camera_params: 可选的摄像机参数，前端 camera store 当前值
+    - preset_ref: 可选，用户选择的预设 ID（仅当前轮有效）
     """
     content: str = Field(default="", description="消息内容（可为空字符串）")
     attachments: Optional[List[Dict[str, Any]]] = Field(
         default=None,
         description="参考图列表，每项: {name, base64_image, size, mime_type"
+    )
+    camera_params: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="摄像机参数，含 enabled(bool) 及各摄像参数字段"
+    )
+    preset_ref: Optional[int] = Field(
+        default=None,
+        description="用户选择的预设 ID（仅当前轮有效）"
     )
 
 
@@ -625,6 +635,8 @@ async def send_message(
                 session_id,
                 attachments=validated_attachments if validated_attachments else None,
                 user_id=current_user.id if current_user else None,
+                camera_params=req.camera_params,
+                preset_ref=req.preset_ref,
             ):
                 yield f"data: {chunk}\n\n"
 

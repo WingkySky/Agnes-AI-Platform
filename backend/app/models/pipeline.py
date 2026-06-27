@@ -50,6 +50,10 @@ class PipelineTemplate(Base):
     - tags: 标签（JSON 数组）
     - is_builtin: 是否内置模板
     - is_public: 是否公开（用户分享的模板）
+    - is_approved: 是否通过审核（公开模板需审核通过才可见）
+    - is_rejected: 是否已被驳回（驳回后不可再次提交公开）
+    - submit_reason: 提交公开时的说明文字
+    - reject_reason: 驳回理由
     - author_id: 作者用户 ID（内置模板为 NULL）
     - use_count: 使用次数统计
     - likes_count: 点赞数
@@ -72,6 +76,10 @@ class PipelineTemplate(Base):
     tags = Column(JSON, default=list, nullable=False)
     is_builtin = Column(Boolean, default=False, nullable=False)
     is_public = Column(Boolean, default=False, nullable=False, index=True)
+    is_approved = Column(Boolean, default=False, nullable=False, index=True)
+    is_rejected = Column(Boolean, default=False, nullable=False)
+    submit_reason = Column(String(500), nullable=True)
+    reject_reason = Column(String(500), nullable=True)
     author_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     use_count = Column(Integer, default=0, nullable=False)
     likes_count = Column(Integer, default=0, nullable=False)

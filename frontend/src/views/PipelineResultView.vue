@@ -336,7 +336,7 @@ const finalVttUrl = computed(() => {
   return vtt
 })
 
-// 下载 URL（走带水印路由，FinalVideoPlayer 内部用 window.open 触发下载）
+// 下载 URL（走带水印路由，FinalVideoPlayer 内部用 <a> 标签触发下载）
 const downloadUrl = computed(() => {
   if (!run.value) return ''
   return buildDownloadUrl(Number(runId.value), true)

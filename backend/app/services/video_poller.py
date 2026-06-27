@@ -20,6 +20,7 @@ from datetime import datetime
 from typing import Dict, Optional, List
 
 from app.services.agnes_client import agnes_client
+from app.services.provider_registry import provider_registry
 from app.models.generation import Generation
 from app.core.database import new_async_session
 from app.services.credits_service import confirm_credits, refund_credits
@@ -45,6 +46,7 @@ class VideoTask:
         params: Dict,
         user_id: Optional[int] = None,
         credits_consumed: int = 0,
+        preset_id: Optional[int] = None,
     ):
         self.task_id = task_id
         self.video_id = video_id
@@ -52,6 +54,8 @@ class VideoTask:
         self.params = params or {}
         self.user_id = user_id
         self.credits_consumed = credits_consumed
+        # 生成时使用的预设 ID（用于追溯作品来源预设）
+        self.preset_id = preset_id
         self.status = "processing"
         self.progress = 0
         self.video_url: Optional[str] = None
@@ -112,6 +116,7 @@ class VideoPollerManager:
         params: Dict,
         user_id: Optional[int] = None,
         credits_consumed: int = 0,
+        preset_id: Optional[int] = None,
     ) -> VideoTask:
         """
         创建 VideoTask 并启动后台协程轮询，不阻塞当前请求。
@@ -121,6 +126,7 @@ class VideoPollerManager:
         task = VideoTask(
             task_id=task_id, video_id=video_id, prompt=prompt, params=params,
             user_id=user_id, credits_consumed=credits_consumed,
+            preset_id=preset_id,
         )
 
         async with self._lock:
@@ -187,9 +193,12 @@ class VideoPollerManager:
                     return
 
                 try:
-                    status_data = await agnes_client.poll_video_status(
+                    # 按模型 ID 路由到对应 Provider 的 client
+                    model_id = task.params.get("model", "")
+                    client = await provider_registry.get_client_for_model(model_id)
+                    status_data = await client.poll_video_status(
                         video_id=task.video_id, task_id=task.task_id,
-                        model_name=task.params.get("model", ""),
+                        model_name=model_id,
                     )
 
                     status = status_data.get("status", "unknown")
@@ -339,6 +348,7 @@ class VideoPollerManager:
                     moderation_status=moderation_status,
                     moderation_flags=moderation_flags,
                     moderation_reason=moderation_reason,
+                    preset_id=task.preset_id,
                 )
                 session.add(record)
                 await session.commit()

@@ -259,6 +259,32 @@
             </div>
           </div>
 
+          <!-- 摄像机参数面板 -->
+          <CanvasCameraPanel
+            v-if="isImageMode || isVideoMode"
+            v-model="configCameraParams"
+            class="config-camera-panel"
+          />
+
+          <!-- 预设快捷入口 -->
+          <el-popover
+            v-if="isImageMode || isVideoMode"
+            placement="bottom-start"
+            :width="320"
+            trigger="click"
+            :teleported="true"
+          >
+            <template #reference>
+              <button type="button" class="preset-trigger-btn">
+                预设
+              </button>
+            </template>
+            <PresetQuickPanel
+              @select="onQuickPanelSelect"
+              :exclude-types="[]"
+            />
+          </el-popover>
+
           <!-- 底部固定：生成按钮（异步操作，点击后不阻塞，可连续点击） -->
           <button
             type="button"
@@ -381,6 +407,8 @@ import { useI18n } from '@/i18n'
 import { useCanvasStore } from '@/stores/canvas'
 import { useModelsStore } from '@/stores/models'
 import ImageWithWatermark from '@/components/ImageWithWatermark.vue'
+import CanvasCameraPanel from '@/components/CanvasCameraPanel.vue'
+import PresetQuickPanel from '@/components/presets/PresetQuickPanel.vue'
 import { useNodeMention } from '@/composables/useNodeMention'
 
 /* ---------- i18n ---------- */
@@ -722,6 +750,48 @@ const configPrompt = computed({
   set: (val) => updateConfigContent('prompt', val),
 })
 
+/** 摄像机参数 — 与 CanvasCameraPanel 双向绑定 */
+const configCameraParams = ref<Record<string, any>>({
+  enabled: false,
+  camera_model: undefined,
+  focal_length: undefined,
+  aperture: undefined,
+  depth_of_field: undefined,
+  shutter_speed: undefined,
+  shutter_angle: undefined,
+  camera_movement: undefined,
+  camera_angle: undefined,
+  aspect_ratio: undefined,
+  visual_style: undefined,
+})
+
+/** 预设快捷面板选中回调 — 将 preset 内容填入当前节点 */
+function onQuickPanelSelect(preset: PromptPreset) {
+  // 填充提示词文本
+  if (preset.prompt_text) {
+    configText.value = preset.prompt_text
+  }
+  // 填充摄像机参数
+  if (preset.camera_params && typeof preset.camera_params === 'object') {
+    const cp = preset.camera_params as Record<string, any>
+    configCameraParams.value = {
+      enabled: true,
+      camera_model: cp.camera_model || undefined,
+      focal_length: cp.focal_length || undefined,
+      aperture: cp.aperture || undefined,
+      depth_of_field: cp.depth_of_field || undefined,
+      shutter_speed: cp.shutter_speed || undefined,
+      shutter_angle: cp.shutter_angle || undefined,
+      camera_movement: cp.camera_movement || undefined,
+      camera_angle: cp.camera_angle || undefined,
+      aspect_ratio: cp.aspect_ratio || undefined,
+      visual_style: cp.visual_style || undefined,
+    }
+  }
+}
+
+import type { PromptPreset } from '@/types/preset'
+
 /* ---------- 工具函数 ---------- */
 
 /** 格式化字节数为可读字符串 */
@@ -988,6 +1058,8 @@ function onFrameRateChange(newFps: number) {
 
 /** 点击配置节点的生成按钮：emit generate 事件交由父组件执行生成流程 */
 function handleConfigGenerate() {
+  // 将摄像机参数注入 panel content 供父组件读取
+  store.updatePanel(props.panel.id, { content: { camera_params: { ...configCameraParams.value } } })
   emit('generate', props.panel)
 }
 

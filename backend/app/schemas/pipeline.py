@@ -103,6 +103,10 @@ class PipelineRunCreate(BaseModel):
     template_id: int = Field(..., description="使用的模板 ID")
     name: Optional[str] = Field(None, max_length=200, description="本次运行名称")
     inputs: Dict[str, Any] = Field(default_factory=dict, description="用户输入参数值")
+    camera_params: Optional[dict] = Field(
+        default=None,
+        description="摄像机参数，含 enabled 子字段。enabled=True 时拼接到 prompt 末尾",
+    )
 
 
 class PipelineRunResponse(BaseModel):

@@ -43,6 +43,17 @@
     <template v-if="step === 2">
       <div class="launch-section">
         <p class="launch-desc">{{ t('canvas.pipelineLaunch.configParams') }}</p>
+        <!-- 预设快速插入 -->
+        <div class="preset-pick-row">
+          <el-popover trigger="click" placement="bottom-start" :width="320">
+            <template #reference>
+              <el-button size="small" :icon="Folder">
+                从预设填充
+              </el-button>
+            </template>
+            <PresetQuickPanel @select="onQuickPanelSelect" />
+          </el-popover>
+        </div>
         <el-form label-position="top" class="param-form">
           <el-form-item
             v-for="input in selectedTemplate?.inputs_config"
@@ -164,9 +175,10 @@ import {
   ElSwitch, ElSelect, ElOption, ElDescriptions, ElDescriptionsItem,
   ElTag, ElButton, ElAlert, ElMessage,
 } from 'element-plus'
-import { Film } from 'lucide-vue-next'
+import { Film, Folder } from 'lucide-vue-next'
 import { getPipelineTemplates, createPipelineRun } from '@/api/pipeline'
-import type { PipelineTemplate } from '@/types'
+import PresetQuickPanel from '@/components/presets/PresetQuickPanel.vue'
+import type { PipelineTemplate, PromptPreset } from '@/types'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -251,6 +263,23 @@ async function handleSubmit() {
     errorMessage.value = e?.message || t('canvas.pipelineLaunch.createFailed')
   } finally {
     submitting.value = false
+  }
+}
+
+// 预设快速填充
+function onQuickPanelSelect(preset: PromptPreset) {
+  if (preset.prompt_text) {
+    // 填充第一个 prompt/story 类字段
+    const cfg = selectedTemplate.value?.inputs_config || []
+    const promptField = cfg.find(
+      (f: any) => f.key === 'prompt' || f.key === 'story' || f.type === 'text'
+    )
+    if (promptField) {
+      formInputs.value[promptField.key] = preset.prompt_text
+    }
+  }
+  if (preset.camera_params) {
+    formInputs.value['camera_params'] = preset.camera_params
   }
 }
 
@@ -350,6 +379,9 @@ watch(visible, (val) => {
   max-height: 380px;
   overflow-y: auto;
   padding-right: 4px;
+}
+.preset-pick-row {
+  margin-bottom: 12px;
 }
 .launch-footer {
   display: flex;

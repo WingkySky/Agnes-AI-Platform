@@ -14,13 +14,33 @@
     <h2 class="page-title">{{ t('plaza.title') }}</h2>
     <p class="page-desc">{{ t('plaza.desc') }}</p>
 
-    <!-- 筛选区：类型 Tab + 排序选择器 -->
+    <!-- 筛选区：类型 Tab + 预设筛选 + 排序选择器 -->
     <div class="filter-wrap">
       <el-radio-group v-model="filterType" @change="reload">
         <el-radio-button value="all">{{ t('plaza.all') }}</el-radio-button>
         <el-radio-button value="image">{{ t('plaza.image') }}</el-radio-button>
         <el-radio-button value="video">{{ t('plaza.video') }}</el-radio-button>
       </el-radio-group>
+      <!-- 按预设筛选（远程搜索） -->
+      <el-select
+        v-model="filterPresetId"
+        filterable
+        remote
+        clearable
+        reserve-keyword
+        :remote-method="searchPresets"
+        :loading="presetSearchLoading"
+        :placeholder="t('plaza.filterByPreset')"
+        class="preset-filter-select"
+        @change="reload"
+      >
+        <el-option
+          v-for="p in presetOptions"
+          :key="p.id"
+          :label="p.name"
+          :value="p.id"
+        />
+      </el-select>
       <el-select v-model="sortType" class="sort-select" @change="reload">
         <el-option value="latest" :label="t('plaza.latest')" />
         <el-option value="popular" :label="t('plaza.popular')" />
@@ -244,6 +264,7 @@ import {
   getPlazaWorks, getPlazaWorkDetail, likePlazaWork, unlikePlazaWork,
   type PlazaWork,
 } from '@/api/plaza'
+import client from '@/api/client'
 import { useUserStore } from '@/stores/user'
 import { useI18n } from '@/i18n'
 import ImageWithWatermark from '@/components/ImageWithWatermark.vue'
@@ -262,6 +283,11 @@ const pageSize = 24
 const total = ref(0)
 const filterType = ref<'all' | 'image' | 'video'>('all')
 const sortType = ref<'latest' | 'popular'>('latest')
+
+// ---------- 预设筛选状态 ----------
+const filterPresetId = ref<number | null>(null)
+const presetOptions = ref<Array<{ id: number; name: string; type: string }>>([])
+const presetSearchLoading = ref(false)
 // 视频缩略图加载失败标记（按 work.id 隔离）
 const thumbFailed = reactive<Record<number, boolean>>({})
 // 视频 GIF 预览（hover 时动态加载）
@@ -286,6 +312,7 @@ async function fetchPage(append = false) {
       sort: sortType.value,
       page: page.value,
       page_size: pageSize,
+      preset_id: filterPresetId.value || undefined,
     })
     if (append) {
       list.value.push(...(data.items || []))
@@ -297,6 +324,28 @@ async function fetchPage(append = false) {
     // 错误已由 axios 拦截器统一提示
   } finally {
     loading.value = false
+  }
+}
+
+// ---------- 远程搜索预设（用于按预设筛选） ----------
+async function searchPresets(query: string) {
+  presetSearchLoading.value = true
+  try {
+    const params: Record<string, any> = {
+      sort: 'usage',
+      limit: 50,
+      offset: 0,
+    }
+    if (query) params.search = query
+    const res = await client.get('/api/presets', { params })
+    // 只展示公开审核通过的预设
+    presetOptions.value = (res.data.items || [])
+      .filter((item: any) => item.is_public && item.is_approved)
+      .map((item: any) => ({ id: item.id, name: item.name, type: item.type }))
+  } catch (e) {
+    presetOptions.value = []
+  } finally {
+    presetSearchLoading.value = false
   }
 }
 
@@ -462,6 +511,7 @@ onMounted(() => {
   border: 1px solid var(--agnes-border-faint);
 }
 .sort-select { width: 140px; }
+.preset-filter-select { width: 240px; }
 
 /* 状态占位（加载中 / 空状态） */
 .state-box {

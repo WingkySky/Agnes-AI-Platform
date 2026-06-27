@@ -29,6 +29,8 @@ class PlazaWork(BaseModel):
     public_shared_at: Optional[datetime] = None
     is_mine: bool = False                                        # 当前用户是否为作者
     is_liked: bool = False                                       # 当前用户是否已点赞
+    # ── 预设来源：作品使用了哪个预设（用于"按预设浏览"和抽屉作品效果展示） ──
+    preset_id: Optional[int] = None
 
     class Config:
         from_attributes = True

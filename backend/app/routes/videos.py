@@ -32,6 +32,7 @@ from app.schemas.videos import (
     VideoStatusResponse,
 )
 from app.services.agnes_client import agnes_client
+from app.services.provider_registry import provider_registry
 from app.services.credits_service import consume_credits, get_video_cost_async
 from app.services.video_poller import poller_manager
 
@@ -145,9 +146,22 @@ async def create_video_task(
     )
     user_id = current_user.id
 
+    # 摄像机参数拼接：若 camera_params.enabled=True，追加到 prompt 末尾
+    prompt = req.prompt or ""
+    if (
+        req.camera_params
+        and isinstance(req.camera_params, dict)
+        and req.camera_params.get("enabled")
+    ):
+        from app.services.camera_prompt import build_camera_prompt_suffix
+        suffix = build_camera_prompt_suffix(req.camera_params)
+        if suffix:
+            prompt = prompt + suffix
+
     try:
-        result = await agnes_client.create_video_task(
-            prompt=req.prompt,
+        client = await provider_registry.get_client_for_model(req.model)
+        result = await client.create_video_task(
+            prompt=prompt,
             model=req.model,
             num_frames=req.num_frames,
             frame_rate=req.frame_rate,
@@ -246,17 +260,18 @@ async def create_video_task(
     await poller_manager.start_polling(
         task_id=task_id,
         video_id=video_id,
-        prompt=req.prompt,
+        prompt=prompt,
         params=params,
         user_id=user_id,
         credits_consumed=cost,
+        preset_id=req.preset_id,
     )
 
     return VideoTaskCreatedResponse(
         task_id=task_id,
         video_id=video_id,
         status="pending",
-        prompt=req.prompt,
+        prompt=prompt,
         model=req.model,
         num_frames=req.num_frames,
         frame_rate=req.frame_rate,

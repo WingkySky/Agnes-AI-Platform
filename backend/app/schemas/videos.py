@@ -44,6 +44,18 @@ class VideoGenerationRequest(BaseModel):
     # 种子（可选）
     seed: Optional[int] = Field(default=None, description="随机种子，不传则由 API 自动生成")
 
+    # ── 摄像机参数：拼接到 prompt 末尾 ──
+    camera_params: Optional[dict] = Field(
+        default=None,
+        description="摄像机参数，含 enabled 子字段。enabled=True 时拼接到 prompt 末尾",
+    )
+
+    # ── 预设来源：用于追溯作品使用了哪个预设 ──
+    preset_id: Optional[int] = Field(
+        default=None,
+        description="生成时使用的预设 ID（来自 PresetQuickPanel 选择），用于作品来源追溯",
+    )
+
     # ── 广场分享：生成时可选择是否公开到广场 ──
     is_public: bool = Field(default=False, description="是否分享到广场")
 

@@ -25,6 +25,7 @@ from app.models.generation import Generation
 from app.models.user import User
 from app.schemas.images import ImageGenerationRequest, ImageGenerationResponse, ImageRecordResponse
 from app.services.agnes_client import agnes_client
+from app.services.provider_registry import provider_registry
 from app.services.credits_service import consume_credits, get_image_cost_async
 from app.services.image_poller import image_poller_manager
 
@@ -92,6 +93,18 @@ async def create_image_task_async(
         ref_id=task_id,
     )
 
+    # 摄像机参数拼接：若 camera_params.enabled=True，追加到 prompt 末尾
+    prompt = req.prompt or ""
+    if (
+        req.camera_params
+        and isinstance(req.camera_params, dict)
+        and req.camera_params.get("enabled")
+    ):
+        from app.services.camera_prompt import build_camera_prompt_suffix
+        suffix = build_camera_prompt_suffix(req.camera_params)
+        if suffix:
+            prompt = prompt + suffix
+
     # 【多图参考改造点】合并 all_reference_images，区分 URL 和 base64
     params = {
         "model": req.model,
@@ -117,11 +130,12 @@ async def create_image_task_async(
         )
 
     task = await image_poller_manager.create_task(
-        prompt=req.prompt,
+        prompt=prompt,
         params=params,
         user_id=current_user.id,
         credits_consumed=cost,
         task_id=task_id,
+        preset_id=req.preset_id,
     )
 
     logger.info("[图片生成] 异步任务已创建: task_id=%s user=%s cost=%d", task.task_id, current_user.username, cost)
@@ -130,7 +144,7 @@ async def create_image_task_async(
         "task_id": task.task_id,
         "id": task.task_id,
         "status": "pending",
-        "prompt": req.prompt,
+        "prompt": prompt,
         "model": req.model,
         "size": size,
         "credits_consumed": cost,
@@ -262,13 +276,26 @@ async def create_image_generation(
     cost = await get_image_cost_async(db, mode=mode, size=size)
     await consume_credits(db, current_user, cost, description=f"image/{mode}/{size}")
 
-    # 调用 Agnes AI
+    # 摄像机参数拼接
+    prompt = req.prompt or ""
+    if (
+        req.camera_params
+        and isinstance(req.camera_params, dict)
+        and req.camera_params.get("enabled")
+    ):
+        from app.services.camera_prompt import build_camera_prompt_suffix
+        suffix = build_camera_prompt_suffix(req.camera_params)
+        if suffix:
+            prompt = prompt + suffix
+
+    # 调用 Provider（按模型 ID 自动路由）
     try:
         ref_imgs = req.all_reference_images
         b64_imgs = [img for img in ref_imgs if not img.strip().lower().startswith("http")]
         url_imgs = [img.strip() for img in ref_imgs if img.strip().lower().startswith("http")]
-        result = await agnes_client.create_image(
-            prompt=req.prompt,
+        client = await provider_registry.get_client_for_model(req.model)
+        result = await client.create_image(
+            prompt=prompt,
             model=req.model,
             size=size,
             response_format=req.response_format,
@@ -277,7 +304,7 @@ async def create_image_generation(
             mask=req.mask,
         )
     except Exception as e:
-        logger.error("[图片生成] Agnes AI 调用失败: %s", e)
+        logger.error("[图片生成] Provider 调用失败: %s", e)
         raise HTTPException(status_code=502, detail=str(e))
 
     # 解析结果
@@ -306,13 +333,14 @@ async def create_image_generation(
         record = Generation(
             type="image",
             user_id=current_user.id,
-            prompt=req.prompt,
+            prompt=prompt,
             model=req.model,
             params={"size": size, "response_format": req.response_format, "mode": mode},
             mode=mode,
             result_url=output_url or "(base64)",
             status="success",
             credits_consumed=cost,
+            preset_id=req.preset_id,
         )
         db.add(record)
         await db.commit()

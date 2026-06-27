@@ -18,6 +18,9 @@ class ApiProvider(Base):
     字段说明:
     - id: 主键
     - name: 显示名称（如 "Agnes 官方" / "自建代理"）
+    - provider_type: agn-sdk 的 adapter 标识（如 agnes / volcengine_cv / kling 等），
+                    决定 provider_registry 用哪个 agn-sdk Adapter 路由请求。
+                    默认 "agnes"，兼容历史 Provider 数据。
     - base_url: API Base URL（如 https://apihub.agnes-ai.com/v1）
     - api_key_encrypted: 加密后的 API Key（Fernet）
     - poll_url: 异步任务轮询 URL（可选，Agnes 用 /agnesapi）
@@ -31,6 +34,13 @@ class ApiProvider(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), nullable=False, comment="显示名称")
+    provider_type = Column(
+        String(50),
+        nullable=False,
+        default="agnes",
+        server_default="agnes",
+        comment="agn-sdk adapter 标识：agnes / volcengine_cv / kling / runway / pika 等",
+    )
     base_url = Column(String(500), nullable=False, comment="API Base URL")
     api_key_encrypted = Column(Text, nullable=True, comment="加密后的 API Key")
     poll_url = Column(String(500), nullable=True, comment="异步任务轮询 URL")
@@ -50,6 +60,7 @@ class ApiProvider(Base):
         return {
             "id": self.id,
             "name": self.name,
+            "provider_type": self.provider_type or "agnes",
             "base_url": self.base_url,
             "api_key": decrypted_key if include_key else mask_api_key(decrypted_key),
             "poll_url": self.poll_url or "",

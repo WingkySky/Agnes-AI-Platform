@@ -382,7 +382,10 @@ class VideoBatchExecutor(BaseStepExecutor):
         frame_rate = config.get("frame_rate", 24)
 
         try:
-            result = await agnes_client.create_video_task(
+            # 按模型 ID 路由到对应 Provider 的 client
+            from app.services.provider_registry import provider_registry
+            _video_client = await provider_registry.get_client_for_model(model)
+            result = await _video_client.create_video_task(
                 prompt=prompt,
                 model=model,
                 mode=mode,
@@ -424,7 +427,7 @@ class VideoBatchExecutor(BaseStepExecutor):
                         f"rewritten={rewritten_prompt[:120]}..."
                     )
                     try:
-                        result = await agnes_client.create_video_task(
+                        result = await _video_client.create_video_task(
                             prompt=rewritten_prompt,
                             model=model,
                             mode=mode,
@@ -580,7 +583,11 @@ class VideoBatchExecutor(BaseStepExecutor):
         video_id = task.get("video_id") or task.get("task_id")
 
         try:
-            result = await agnes_client.poll_video_status(
+            # 按模型 ID 路由到对应 Provider 的 client
+            from app.services.provider_registry import provider_registry
+            _model_id = task.get("model", "")
+            _poll_client = await provider_registry.get_client_for_model(_model_id)
+            result = await _poll_client.poll_video_status(
                 task_id=task_id,
                 video_id=video_id,
             )

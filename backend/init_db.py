@@ -112,6 +112,9 @@ async def create_tables():
         await conn.run_sync(Base.metadata.create_all)
     logger.info("数据表创建完成 ✓")
 
+    # 老库兼容：create_all 不会修改已有表结构，应用启动时由 main.py 的
+    # _auto_migrate_missing_columns() 统一兜底新增 provider_type 等新字段
+
 
 # =====================================================
 # 2. 创建默认超级管理员并绑定早期数据

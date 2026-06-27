@@ -351,6 +351,7 @@
               class="send-btn"
             />
           </div>
+
           <p class="input-hint">按 Enter 发送，Shift+Enter 换行 · 粘贴图片或图片链接自动识别</p>
         </div>
       </template>
@@ -363,6 +364,7 @@
 defineOptions({ name: 'ChatView' })
 
 import { ref, onMounted, onActivated, onBeforeUnmount, nextTick, watch, computed } from 'vue'
+import { useRoute } from 'vue-router'
 import type { ChatMessage, ChatSession, MessageAttachment, MediaItem } from '@/types'
 import {
   Plus, Delete, User, Monitor, Picture, VideoPlay,
@@ -371,13 +373,17 @@ import {
 } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { useChatStore } from '@/stores/chat'
+import { getPreset } from '@/api/presets'
 import { ElMessageBox, ElMessage } from 'element-plus'
 
 const { t } = useI18n()
+const route = useRoute()
 const chatStore = useChatStore()
 
 // 输入框文本
 const inputText = ref('')
+// 当前应用的预设 ID（来自 ?applyPreset=<id> 路由参数，发送消息时透传给后端 Tool Calling）
+const pendingPresetId = ref<number | null>(null)
 // 消息列表 DOM 引用
 const messagesRef = ref<HTMLElement | null>(null)
 // 隐藏的文件上传 input（点击"+"按钮触发）
@@ -407,7 +413,27 @@ onMounted(async () => {
   await chatStore.init()
   // 全局粘贴监听：聊天框任意位置 Ctrl+V 自动识别图片/图片 URL（无感）
   window.addEventListener('paste', handleGlobalPaste)
+  // 预设中心跳转调用：?applyPreset=<id> 触发，加载预设内容填入输入框并缓存 presetId
+  await loadPresetFromQuery()
 })
+
+/** 从路由 query 读取 applyPreset，加载预设并填充输入框 */
+async function loadPresetFromQuery() {
+  const presetIdStr = route.query.applyPreset as string | undefined
+  if (!presetIdStr) return
+  const presetId = Number(presetIdStr)
+  if (!Number.isFinite(presetId) || presetId <= 0) return
+  try {
+    const preset = await getPreset(presetId)
+    if (preset.prompt_text) {
+      inputText.value = preset.prompt_text
+    }
+    pendingPresetId.value = presetId
+    ElMessage.success(t('presets.applied'))
+  } catch (e: unknown) {
+    ElMessage.error((e instanceof Error ? e.message : '') || t('presets.applyFailed'))
+  }
+}
 
 onBeforeUnmount(() => {
   window.removeEventListener('paste', handleGlobalPaste)
@@ -530,7 +556,11 @@ async function handleSend() {
   inputText.value = ''
   pendingAttachments.value = []
   try {
-    await chatStore.sendMessage(content, attachments)
+    // 若来自预设中心跳转调用，透传 presetRef 给后端 Tool Calling（仅本轮有效）
+    const presetRef = pendingPresetId.value
+    await chatStore.sendMessage(content, attachments, null, presetRef)
+    // 发送完成后清空 presetId（仅本轮有效，不跨轮持久化）
+    pendingPresetId.value = null
   } catch (e: unknown) {
     ElMessage.error((e instanceof Error ? e.message : '') || t('chat.sendFailed'))
   }
