@@ -15,6 +15,7 @@
 
 import logging
 import httpx
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse

@@ -74,6 +74,16 @@
             <el-icon><PictureFilled /></el-icon>
             {{ t('workshop.creationHistory') }}
           </el-button>
+          <!-- 快速创建按钮：打开场景化向导 -->
+          <el-button
+            v-if="isLoggedIn"
+            type="primary"
+            link
+            size="small"
+            @click="goToWizard">
+            <el-icon><MagicStick /></el-icon>
+            {{ t('workshop.quickCreate') }}
+          </el-button>
           <el-button
             v-if="activeTab === 'my' && isLoggedIn"
             type="primary" link size="small" @click="goToCreateTemplate">
@@ -157,6 +167,15 @@
                 size="small"
                 @click.stop="goToRun(tpl)">
                 {{ t('workshop.useTemplate') }}
+              </el-button>
+              <!-- 市场模板：改进模板按钮（仅登录用户可见） -->
+              <el-button
+                v-if="activeTab === 'market' && isLoggedIn && !tpl.is_builtin"
+                link
+                size="small"
+                @click.stop="goToImprove(tpl)">
+                <el-icon><Edit /></el-icon>
+                {{ t('workshop.improveTemplate') }}
               </el-button>
               <!-- 我的模板：操作菜单 -->
               <template v-if="activeTab === 'my'">
@@ -322,7 +341,7 @@ const userStore = useUserStore()
 const activeTab = ref<'market' | 'my'>('market')
 const searchKeyword = ref('')
 const activeCategory = ref('all')
-const isLoggedIn = computed(() => userStore.isLoggedIn)
+const isLoggedIn = computed(() => userStore.isAuthenticated)
 
 // ---------- 模板导入/导出 ----------
 const ioDialogVisible = ref(false)
@@ -534,6 +553,14 @@ function goToResult(run: PipelineRun) {
 
 function goToCreateTemplate() {
   router.push('/workshop/template/create')
+}
+
+function goToWizard() {
+  router.push('/workshop/wizard')
+}
+
+function goToImprove(tpl: PipelineTemplate) {
+  router.push(`/workshop/template/${tpl.id}/edit`)
 }
 
 function goToHistory() {

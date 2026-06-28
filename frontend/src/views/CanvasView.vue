@@ -80,6 +80,28 @@
         @pointerdown="handleCanvasPointerDown"
         @drop-asset="handleCanvasDropAsset"
       >
+        <!-- 流程模式指示条 -->
+        <div v-if="store.isFlowMode" class="flow-mode-indicator">
+          <svg class="flow-icon" viewBox="0 0 16 16" width="14" height="14"><path fill="currentColor" d="M8 1a2 2 0 110 4 2 2 0 010-4zM5 7a2 2 0 100 4 2 2 0 000-4zm6 0a2 2 0 100 4 2 2 0 000-4zM3 13h10M6 9l2-2m2 2l-2-2"/></svg>
+          <span class="flow-text">流程模式 · {{ store.analyzedSteps.length }} 个步骤</span>
+          <button class="flow-btn" @click.stop="store.analyzeCurrentFlow()" :title="t('canvas.reanalyze')">↻</button>
+          <button class="flow-close" @click.stop="store.toggleFlowMode()" title="关闭流程模式">×</button>
+        </div>
+
+        <!-- 流程模式：步骤分组可视化 -->
+        <template v-if="store.isFlowMode">
+          <CanvasStepGroup
+            v-for="step in store.analyzedSteps"
+            :key="step.id"
+            :step="step"
+            :panels="store.panels"
+            :is-active="selectedStepId === step.id"
+            @click="handleStepClick(step.id)"
+            @edit="handleStepEdit(step.id)"
+            @delete="handleStepDelete(step.id)"
+          />
+        </template>
+
         <!-- 连线层（不传 props 时自动使用 store 数据） -->
         <CanvasConnectionsLayer />
 
@@ -132,6 +154,7 @@
         :background-mode="store.backgroundMode"
         :show-image-info="store.showImageInfo"
         :active-tool="activeTool"
+        :is-flow-mode="store.isFlowMode"
         @select-tool="handleSelectTool"
         @undo="store.undo()"
         @redo="store.redo()"
@@ -146,6 +169,7 @@
         @toggle-image-info="(val) => handleToggleImageInfo(val)"
         @show-shortcuts="handleShowShortcuts"
         @pipeline-launch="handlePipelineLaunch"
+        @toggle-flow-mode="handleToggleFlowMode"
       />
 
       <!-- 漫剧生成对话框 -->
@@ -281,6 +305,22 @@
         @confirm="handleAngleConfirm"
         @cancel="imageOpsState.angle.visible = false"
       />
+      <!-- 步骤编辑弹窗（流程模式） -->
+      <StepEditDialog
+        v-if="stepEditState.visible"
+        :visible="stepEditState.visible"
+        :step="stepEditState.step"
+        @close="stepEditState.visible = false"
+        @save="handleStepEditSave"
+      />
+
+      <!-- 保存为创意工坊模板弹窗 -->
+      <SaveAsWorkshopTemplateDialog
+        v-if="saveAsWorkshopTemplateVisible"
+        :visible="saveAsWorkshopTemplateVisible"
+        @close="saveAsWorkshopTemplateVisible = false"
+        @saved="handleWorkshopTemplateSaved"
+      />
 
       <!-- ============ 画布管理弹窗（批量操作、模板库） ============ -->
       <CanvasManagerPopover
@@ -288,6 +328,7 @@
         @new-canvas="newCanvas"
         @import-json="importJson"
         @save-as-template="openSaveTemplateDialog"
+        @save-as-workshop-template="handleSaveAsWorkshopTemplate"
         @use-template="handleUseTemplate"
       />
 
@@ -398,6 +439,11 @@ import CanvasImageCropDialog from '@/components/canvas/CanvasImageCropDialog.vue
 import CanvasImageSplitDialog from '@/components/canvas/CanvasImageSplitDialog.vue'
 import CanvasImageUpscaleDialog from '@/components/canvas/CanvasImageUpscaleDialog.vue'
 import CanvasImageAngleDialog from '@/components/canvas/CanvasImageAngleDialog.vue'
+// 流程步骤分组组件
+import CanvasStepGroup from '@/components/canvas/CanvasStepGroup.vue'
+import StepEditDialog from '@/components/canvas/StepEditDialog.vue'
+// 保存为创意工坊模板弹窗
+import SaveAsWorkshopTemplateDialog from '@/components/canvas/SaveAsWorkshopTemplateDialog.vue'
 // 带水印的图片组件（预览大图时显示水印）
 import ImageWithWatermark from '@/components/ImageWithWatermark.vue'
 // 画布模板库组件
@@ -491,6 +537,63 @@ function cancelTitle() {
 // ==================== 画布主体引用 ====================
 
 const canvasRef = ref(null)
+
+// ==================== 流程模式状态 ====================
+
+// 当前选中的步骤 ID
+const selectedStepId = ref<string | null>(null)
+
+// 步骤编辑弹窗状态
+const stepEditState = reactive({
+  visible: false,
+  step: null as any | null,
+})
+
+// 流程模式：步骤操作
+function handleStepClick(stepId: string) {
+  selectedStepId.value = stepId
+  // 选中该步骤的所有节点
+  const step = store.steps.find(s => s.id === stepId)
+  if (step) {
+    store.selectPanel(null)
+    store.selectedPanelIds = [...step.panel_ids]
+    if (step.panel_ids.length > 0) {
+      store.selectedPanelId = step.panel_ids[0]
+    }
+  }
+}
+
+function handleStepEdit(stepId: string) {
+  const step = store.steps.find(s => s.id === stepId)
+  if (step) {
+    stepEditState.step = { ...step }
+    stepEditState.visible = true
+  }
+}
+
+function handleStepEditSave(data: { id: string; name: string; color: string; description?: string }) {
+  store.updateStep(data.id, {
+    name: data.name,
+    color: data.color,
+    description: data.description,
+  })
+  stepEditState.visible = false
+  ElMessage.success(t('canvas.messages.stepUpdated'))
+}
+
+function handleStepDelete(stepId: string) {
+  ElMessageBox.confirm(
+    t('canvas.messages.confirmDeleteStep'),
+    t('common.confirm'),
+    { confirmButtonText: t('common.delete'), cancelButtonText: t('common.cancel'), type: 'warning' }
+  ).then(() => {
+    store.removeStep(stepId)
+    if (selectedStepId.value === stepId) {
+      selectedStepId.value = null
+    }
+    ElMessage.success(t('canvas.messages.stepDeleted'))
+  }).catch(() => {})
+}
 
 // ==================== 背景点击处理 ====================
 
@@ -1391,6 +1494,8 @@ const saveTemplateForm = reactive({
   name: '',
   description: '',
 })
+// 保存为创意工坊模板对话框状态
+const saveAsWorkshopTemplateVisible = ref(false)
 
 /** 打开"保存为模板"对话框，预填当前画布名称 */
 function openSaveTemplateDialog() {
@@ -1401,6 +1506,21 @@ function openSaveTemplateDialog() {
   saveTemplateForm.name = store.activeWorkspace?.name || ''
   saveTemplateForm.description = ''
   saveTemplateVisible.value = true
+}
+
+/** 打开"保存为创意工坊模板"对话框 */
+function handleSaveAsWorkshopTemplate() {
+  if (store.panels.length === 0) {
+    ElMessage.warning(t('canvas.templates.emptyCanvas'))
+    return
+  }
+  saveAsWorkshopTemplateVisible.value = true
+}
+
+/** 创意工坊模板保存成功 */
+function handleWorkshopTemplateSaved(template: any) {
+  saveAsWorkshopTemplateVisible.value = false
+  ElMessage.success(t('workshop.templateCreated'))
 }
 
 /** 把当前画布保存为用户自定义模板 */
@@ -2410,6 +2530,16 @@ function handlePipelineLaunch() {
   showPipelineLaunchDialog.value = true
 }
 
+/** 切换流程模式 */
+function handleToggleFlowMode() {
+  store.toggleFlowMode()
+  if (store.isFlowMode) {
+    ElMessage.success(t('canvas.messages.flowModeEnabled'))
+  } else {
+    ElMessage.info(t('canvas.messages.flowModeDisabled'))
+  }
+}
+
 // 小地图定位：将视口中心移动到指定世界坐标
 function handleMinimapLocate(worldX: number, worldY: number) {
   const { zoom } = store.viewport
@@ -2784,6 +2914,68 @@ async function handleUserLogout() {
   width: 100%;
   height: 100%;
 }
+
+/* ==================== 流程模式指示条 ==================== */
+.flow-mode-indicator {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  background: rgba(64, 158, 255, 0.9);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  box-shadow: 0 4px 16px rgba(64, 158, 255, 0.35);
+  backdrop-filter: blur(8px);
+  animation: flowIndicatorIn 0.3s ease-out;
+}
+@keyframes flowIndicatorIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+.flow-icon { flex-shrink: 0; opacity: 0.9; }
+.flow-text { white-space: nowrap; }
+.flow-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  background: rgba(255,255,255,0.2);
+  border: none;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0;
+  transition: background 0.15s;
+  margin-right: 2px;
+}
+.flow-btn:hover { background: rgba(255,255,255,0.4); }
+.flow-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  background: rgba(255,255,255,0.25);
+  border: none;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0;
+  transition: background 0.15s;
+}
+.flow-close:hover { background: rgba(255,255,255,0.45); }
 
 /* ==================== 框选矩形 ==================== */
 .selection-box {

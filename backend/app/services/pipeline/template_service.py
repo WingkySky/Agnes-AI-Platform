@@ -110,6 +110,9 @@ async def create_template(
     if existing:
         raise HTTPException(status_code=400, detail=f"模板 key '{data.key}' 已存在")
 
+    # 自动计算预估积分（如果未设置）
+    await auto_fill_estimated_credits(db, data)
+
     tpl = PipelineTemplate(
         key=data.key,
         name=data.name,
@@ -162,6 +165,9 @@ async def update_template(
         raise HTTPException(status_code=403, detail="无权修改此模板")
 
     update_data = data.model_dump(exclude_unset=True)
+
+    # 自动计算预估积分（如果 steps_config 有内容且 estimated_credits 未设置）
+    await auto_fill_estimated_credits(db, data)
 
     # 公开已审核非内置模板 → draft 流程
     if tpl.is_public and tpl.is_approved and not tpl.is_builtin:
@@ -368,3 +374,84 @@ def validate_steps_config(steps_config: List[Dict[str, Any]]) -> None:
             if dep not in step_keys:
                 # 依赖的步骤可能在后面（DAG 顺序不一定是拓扑序），这里先不严格检查
                 pass
+
+
+# ---------- 自动计算模板预估积分 ----------
+def calculate_template_credits(
+    steps_config: List[Dict[str, Any]],
+) -> int:
+    """
+    根据 steps_config 自动计算模板预估积分（同步版本，使用默认值）。
+
+    遍历每个步骤，根据步骤类型（image_gen/video_gen/llm_generate/composite/audio_gen）
+    和对应参数（尺寸、秒数）计算积分消耗，求和得到 total。
+    无有效步骤时返回 0。
+    """
+    # 默认积分消耗（不需要查询数据库）
+    DEFAULT_COSTS = {
+        "llm_generate": 2,
+        "image_gen": 20,  # 默认生图消耗 20 积分
+        "video_gen": 150,  # 默认生视频消耗 150 积分（5秒 × 30积分/秒）
+        "audio_gen": 10,  # 默认生音频消耗 10 积分（10秒 × 1积分/秒）
+        "composite": 5,
+    }
+
+    total = 0
+    for step in steps_config:
+        step_type = (step.get("type") or step.get("step_type") or "").strip().lower()
+        config = step.get("config") or {}
+
+        if step_type == "image_gen":
+            # 根据尺寸调整积分
+            size = config.get("size") or "1024x1024"
+            if "1024" in size:
+                total += 20
+            elif "512" in size:
+                total += 10
+            else:
+                total += 20  # 默认
+
+        elif step_type == "video_gen":
+            # 根据时长调整积分
+            seconds = max(1, int(config.get("seconds") or 5))
+            total += seconds * 30  # 每秒 30 积分
+
+        elif step_type == "llm_generate":
+            total += DEFAULT_COSTS["llm_generate"]
+
+        elif step_type == "audio_gen":
+            duration = max(1, int(config.get("duration") or 10))
+            total += max(1, duration * 1)  # 每秒约 1 积分
+
+        elif step_type == "composite":
+            total += DEFAULT_COSTS["composite"]
+
+        else:
+            # 未知类型：跳过
+            pass
+
+    return max(0, total)
+
+
+async def auto_fill_estimated_credits(
+    db: AsyncSession,
+    data: Any,  # PipelineTemplateCreate or PipelineTemplateUpdate
+) -> None:
+    """
+    如果 data.steps_config 有内容且 data.estimated_credits 未设置，
+    则自动计算并填充 estimated_credits。
+    """
+    steps = None
+    if hasattr(data, "steps_config") and data.steps_config:
+        steps = data.steps_config
+    if not steps:
+        return
+    if hasattr(data, "estimated_credits") and data.estimated_credits not in (None, 0):
+        # 用户已显式设置积分，不覆盖
+        return
+    try:
+        credits = calculate_template_credits(steps)
+        if credits > 0:
+            data.estimated_credits = credits
+    except Exception as e:
+        logger.warning("[模板服务] 自动计算积分失败（不阻断保存）: %s", e)

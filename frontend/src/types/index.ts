@@ -813,14 +813,18 @@ export type AssetType = 'character' | 'prop' | 'scene' | 'brand'
 export interface PipelineInputConfig {
   key: string
   label: string
+  label_i18n?: string
   type: 'text' | 'number' | 'style_select' | 'boolean' | 'select' | 'textarea' | 'image_upload'
   required?: boolean
   default?: any
   placeholder?: string
+  placeholder_i18n?: string
   min?: number
   max?: number
   description?: string
-  options?: Array<{ label: string; value: any }>
+  options?: string[]
+  options_i18n_prefix?: string
+  maxlength?: number
 }
 
 /** 流水线模板 */
@@ -852,6 +856,31 @@ export interface PipelineTemplate {
   likes_count?: number
   created_at: string
   updated_at: string
+}
+
+/** 模板场景预设（向导创建模板用） */
+export interface TemplateScenario {
+  key: string
+  name: string
+  description: string
+  icon: string
+  color: string
+  category: string
+  i18n_key?: string
+  inputs_config: PipelineInputConfig[]
+  steps_config_template?: any[]
+  estimated_credits: number
+  estimated_time_minutes: number
+}
+
+/** 从场景预设创建模板请求 */
+export interface TemplateFromScenarioRequest {
+  scenario_key: string
+  inputs: Record<string, any>
+  name?: string
+  description?: string
+  is_public?: boolean
+  tags?: string[]
 }
 
 /** 流水线模板修订草稿（公开模板编辑后 pending revision） */

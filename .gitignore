@@ -31,6 +31,7 @@ backend/logs/
 #设计文档
 .trae/
 docs/
+.workbuddy/
 
 
 #参考项目

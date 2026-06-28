@@ -107,6 +107,29 @@ export function deleteTemplate(id: number): Promise<{ message: string; template_
   return client.delete(`/api/pipeline/templates/${id}`)
 }
 
+/**
+ * 获取模板场景预设列表
+ */
+export function getTemplateScenarios(): Promise<{ items: TemplateScenario[]; total: number }> {
+  return client.get('/api/pipeline/template-scenarios')
+}
+
+/**
+ * 获取可用的模型列表
+ * @param modelType 可选过滤条件：image/video/chat
+ */
+export function getAvailableModels(modelType?: string): Promise<{ items: any[]; total: number }> {
+  const params = modelType ? { model_type: modelType } : {}
+  return client.get('/api/pipeline/available-models', { params })
+}
+
+/**
+ * 从场景预设创建模板
+ */
+export function createTemplateFromScenario(data: TemplateFromScenarioRequest): Promise<PipelineTemplate> {
+  return client.post('/api/pipeline/templates/from-scenario', data)
+}
+
 /** 提交模板到公开市场审核 */
 export function submitTemplatePublic(id: number, reason?: string): Promise<{
   message: string

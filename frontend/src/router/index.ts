@@ -94,6 +94,12 @@ const routes: RouteRecordRaw[] = [
     meta: { titleKey: 'router.templateEdit', requiresAuth: true, permission: 'pipeline:run' }
   },
   {
+    path: '/workshop/wizard',
+    name: 'template-wizard',
+    component: () => import('@/views/TemplateWizardView.vue'),
+    meta: { titleKey: 'router.templateWizard', requiresAuth: true, permission: 'pipeline:run' }
+  },
+  {
     path: '/workshop/history',
     name: 'pipeline-history',
     component: () => import('@/views/PipelineHistoryView.vue'),

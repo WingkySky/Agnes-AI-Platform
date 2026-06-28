@@ -53,25 +53,13 @@
                 <el-checkbox :value="tpl.id">
                   <div class="tpl-info">
                     <span class="tpl-name">{{ tpl.name }}</span>
-                    <el-tag size="small" type="info">{{ tpl.category }}</el-tag>
-                    <span class="tpl-key">{{ tpl.key }}</span>
+                    <el-tag size="small" :type="categoryTagType(tpl.category)">{{ categoryLabel(tpl.category) }}</el-tag>
                   </div>
                 </el-checkbox>
               </div>
             </el-checkbox-group>
           </div>
         </div>
-        <template #footer>
-          <el-button @click="visible = false">{{ t('workshop.importExport.cancel') }}</el-button>
-          <el-button
-            type="primary"
-            :loading="exporting"
-            :disabled="selectedExportIds.length === 0"
-            @click="doExport"
-          >
-            {{ t('workshop.importExport.exportBtn') }}
-          </el-button>
-        </template>
       </el-tab-pane>
 
       <!-- ===== 导入 Tab ===== -->
@@ -131,7 +119,11 @@
             <el-table :data="previewRows" size="small" border max-height="320">
               <el-table-column prop="name" :label="t('workshop.importExport.colName')" min-width="140" />
               <el-table-column prop="key" :label="t('workshop.importExport.colKey')" min-width="160" />
-              <el-table-column prop="category" :label="t('workshop.importExport.colCategory')" width="100" />
+              <el-table-column prop="category" :label="t('workshop.importExport.colCategory')" width="100">
+                <template #default="{ row }">
+                  {{ categoryLabel(row.category) }}
+                </template>
+              </el-table-column>
               <el-table-column :label="t('workshop.importExport.colStatus')" width="120">
                 <template #default="{ row }">
                   <el-tag v-if="row.conflict" type="warning" size="small">
@@ -145,19 +137,31 @@
             </el-table>
           </div>
         </div>
-        <template #footer>
-          <el-button @click="visible = false">{{ t('workshop.importExport.cancel') }}</el-button>
-          <el-button
-            type="primary"
-            :loading="importing"
-            :disabled="!previewData || previewData.templates.length === 0"
-            @click="doImport"
-          >
-            {{ t('workshop.importExport.importBtn') }}
-          </el-button>
-        </template>
       </el-tab-pane>
     </el-tabs>
+
+    <!-- 统一 footer：根据当前 Tab 显示不同按钮 -->
+    <template #footer>
+      <el-button @click="visible = false">{{ t('workshop.importExport.cancel') }}</el-button>
+      <el-button
+        v-if="activeTab === 'export'"
+        type="primary"
+        :loading="exporting"
+        :disabled="selectedExportIds.length === 0"
+        @click="doExport"
+      >
+        {{ t('workshop.importExport.exportBtn') }}
+      </el-button>
+      <el-button
+        v-if="activeTab === 'import'"
+        type="primary"
+        :loading="importing"
+        :disabled="!previewData || previewData.templates.length === 0"
+        @click="doImport"
+      >
+        {{ t('workshop.importExport.importBtn') }}
+      </el-button>
+    </template>
   </el-dialog>
 </template>
 
@@ -257,8 +261,8 @@ async function loadExportableTemplates() {
     const res = await client.get('/api/pipeline/templates', {
       params: { page: 1, page_size: 100 },
     })
-    // 所有可见模板都可导出（内置 + 公开 + 自定义），导出是只读操作不做限制
-    const all: PipelineTemplate[] = res.data?.items || []
+    // res 已是响应体 { items: [...], total: N }，无需再 .data
+    const all: PipelineTemplate[] = res.items || []
     exportableTemplates.value = all
     // 应用外部预选
     if (props.presetTemplateIds && props.presetTemplateIds.length > 0) {
@@ -285,9 +289,9 @@ async function doExport() {
       include_script: includeScript.value,
       include_style: includeStyle.value,
     }
-    const res = await client.get('/api/pipeline/templates/export', { params })
-
-    const jsonStr = JSON.stringify(res.data, null, 2)
+    const res = await client.get('/api/pipeline/export/templates', { params })
+    // res 已是响应体（即导出的 JSON 对象），无需再 .data
+    const jsonStr = JSON.stringify(res, null, 2)
     const blob = new Blob([jsonStr], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
@@ -356,8 +360,9 @@ async function buildPreviewRows(data: any) {
     const res = await client.get('/api/pipeline/templates', {
       params: { page: 1, page_size: 100 },
     })
+    // res 已是响应体，直接用 res.items
     const existingKeys = new Set<string>(
-      (res.data?.items || []).map((x: any) => x.key),
+      (res.items || []).map((x: any) => x.key),
     )
     rows.forEach((r) => {
       r.conflict = existingKeys.has(r.key)
@@ -403,6 +408,25 @@ function onClosed() {
   conflictStrategy.value = 'rename'
   importVisibility.value = 'private'
   selectedExportIds.value = []
+}
+
+/** 类别翻译 */
+function categoryLabel(category: string): string {
+  const key = `workshop.importExport.category.${category}`
+  const translated = t(key)
+  return translated !== key ? translated : category
+}
+
+/** 类别 tag 颜色 */
+function categoryTagType(category: string): '' | 'success' | 'warning' | 'danger' | 'info' {
+  const map: Record<string, '' | 'success' | 'warning' | 'danger' | 'info'> = {
+    drama: '',
+    comic: 'success',
+    commercial: 'warning',
+    education: 'info',
+    anime: 'danger',
+  }
+  return map[category] || 'info'
 }
 </script>
 

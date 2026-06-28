@@ -102,6 +102,17 @@ PipelineTemplateOut = PipelineTemplateResponse
 # 用于公开已审核模板被编辑后生成的 pending revision 序列化
 # =====================================================
 
+class TemplateFromScenarioRequest(BaseModel):
+    """从场景预设创建模板请求"""
+    scenario_key: str = Field(..., description="场景预设 key")
+    inputs: Dict[str, Any] = Field(default_factory=dict, description="用户输入参数")
+    name: Optional[str] = None
+    description: Optional[str] = None
+    is_public: bool = Field(False, description="是否公开")
+    tags: Optional[List[str]] = None
+    custom_steps_config: Optional[List[Dict[str, Any]]] = Field(None, description="自定义步骤配置（如果提供，则覆盖场景预设的步骤配置）")
+
+
 class PipelineTemplateRevisionOut(BaseModel):
     """流水线模板修订草稿响应（编辑器拉取草稿 + 审核页面展示共用）"""
     id: int

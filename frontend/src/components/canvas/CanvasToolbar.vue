@@ -62,7 +62,7 @@
 import { ref, computed } from 'vue'
 import {
   Hand, MousePointer2, Undo2, Redo2, Type, Image, Video, Music2, Settings2, Upload,
-  FolderOpen, Palette, Trash2, Eraser, Keyboard, Film,
+  FolderOpen, Palette, Trash2, Eraser, Keyboard, Film, GitBranch,
 } from 'lucide-vue-next'
 import CanvasAppearancePanel from './CanvasAppearancePanel.vue'
 import { useI18n } from '@/i18n'
@@ -80,6 +80,8 @@ const props = defineProps({
   showImageInfo: { type: Boolean, default: false },
   // 当前激活的工具：hand（移动）/ select（选择框选）
   activeTool: { type: String, default: 'hand' },
+  // 流程模式是否启用
+  isFlowMode: { type: Boolean, default: false },
 })
 
 const emit = defineEmits([
@@ -96,6 +98,7 @@ const emit = defineEmits([
   'toggle-image-info',
   'show-shortcuts',
   'pipeline-launch',
+  'toggle-flow-mode',
 ])
 
 // 工具栏容器引用，用于计算 tooltip 水平位置
@@ -130,7 +133,11 @@ const buttonGroups = computed<any[][]>(() => [
   [
     { id: 'tool-pipeline', label: t('canvas.toolbar.toolPipeline'), icon: Film, emit: 'pipeline-launch' },
   ],
-  // 组4：我的素材/画布外观
+  // 组5：流程模式（识别执行顺序、步骤分组）
+  [
+    { id: 'tool-flow', label: t('canvas.toolbar.toolFlow'), icon: GitBranch, active: props.isFlowMode, emit: 'toggle-flow-mode' },
+  ],
+  // 组6：我的素材/画布外观
   [
     { id: 'tool-assets', label: t('canvas.toolbar.toolAssets'), icon: FolderOpen, emit: 'open-asset-library' },
     { id: 'tool-style', label: t('canvas.toolbar.toolStyle'), icon: Palette, active: props.showAppearancePanel, emit: 'toggle-appearance-panel' },

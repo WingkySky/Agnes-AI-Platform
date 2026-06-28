@@ -11,6 +11,7 @@ import { defineStore } from 'pinia'
 import { canvasThemes } from '@/lib/canvas-theme'
 import { loadCanvas, saveCanvas, switchCanvasUser, cancelSaveCanvas } from '@/lib/canvas-storage'
 import { useThemeStore } from './theme'
+import { analyzeFlow, analyzeExecutionOrder } from '@/lib/canvas-flow-analyzer'
 
 // ---------- 本地类型定义 ----------
 
@@ -40,8 +41,37 @@ interface CanvasConnection {
   source_panel_id: string
   target_panel_id: string
   type: string
+  /** 数据传递配置（可选） */
+  data_mapping?: {
+    source_field: string
+    target_field: string
+  }[]
   created_at: string
   [key: string]: unknown
+}
+
+/** 画布步骤（流程分组） */
+interface CanvasStep {
+  id: string
+  name: string
+  description?: string
+  color?: string
+  panel_ids: string[]
+  order: number
+  depends_on: string[]
+  status?: 'pending' | 'running' | 'success' | 'failed'
+  created_at: string
+  updated_at: string
+}
+
+/** 画布流程图 */
+interface CanvasFlow {
+  id: string
+  name: string
+  workspace_id: string
+  steps: CanvasStep[]
+  created_at: string
+  updated_at: string
 }
 
 /** 画布工作区 */
@@ -291,6 +321,11 @@ export const useCanvasStore = defineStore('canvas', {
 
     // ---------- 剪贴板 ----------
     clipboard: [],
+
+    // ---------- 流程模式 ----------
+    isFlowMode: false,
+    steps: [] as CanvasStep[],
+    flows: [] as CanvasFlow[],
 
     // ---------- 持久化标记 ----------
     _storageReady: false,
@@ -548,6 +583,38 @@ export const useCanvasStore = defineStore('canvas', {
         Object.assign(merged, output)
       }
       return merged
+    },
+
+    // ==================== 流程模式 ====================
+
+    /**
+     * 获取分析后的步骤列表（按执行顺序排序）
+     * - 自动分析节点连线，识别执行顺序
+     * - 返回 CanvasStep[] 数组
+     */
+    analyzedSteps(state): CanvasStep[] {
+      if (!state.isFlowMode || state.panels.length === 0) return []
+      
+      // 使用静态导入的函数
+      return analyzeFlow(state.panels, state.connections)
+    },
+
+    /**
+     * 获取执行顺序（拓扑排序）
+     * - 返回按执行顺序排列的节点 ID 列表
+     */
+    executionOrder(state): string[] {
+      if (state.panels.length === 0) return []
+      
+      // 使用静态导入的函数
+      return analyzeExecutionOrder(state.panels, state.connections)
+    },
+
+    /**
+     * 检查是否启用了流程模式且有步骤
+     */
+    hasFlowSteps(state): boolean {
+      return state.isFlowMode && state.steps.length > 0
     },
   },
 
@@ -1466,6 +1533,159 @@ export const useCanvasStore = defineStore('canvas', {
       // 重新 hydrate 新用户数据
       this._storageReady = false
       await this._hydrateFromStorage()
+    },
+
+    // ==================== 流程模式 ====================
+
+    /**
+     * 切换流程模式
+     */
+    toggleFlowMode(): void {
+      this.isFlowMode = !this.isFlowMode
+      if (this.isFlowMode) {
+        // 进入流程模式时，自动分析流程
+        this.analyzeCurrentFlow()
+      }
+      this._save()
+    },
+
+    /**
+     * 设置流程模式
+     */
+    setFlowMode(enabled: boolean): void {
+      if (this.isFlowMode !== enabled) {
+        this.isFlowMode = enabled
+        if (this.isFlowMode) {
+          this.analyzeCurrentFlow()
+        }
+        this._save()
+      }
+    },
+
+    /**
+     * 分析当前画布的流程，自动生成步骤分组
+     */
+    analyzeCurrentFlow(): void {
+      if (!this.isFlowMode) return
+
+      const steps = analyzeFlow(this.panels, this.connections)
+      
+      // 保留现有步骤的状态（如自定义名称、颜色等）
+      const existingStepMap = new Map(this.steps.map(s => [s.id, s]))
+      
+      this.steps = steps.map(newStep => {
+        const existing = existingStepMap.get(newStep.id)
+        if (existing) {
+          // 保留用户自定义的信息
+          return {
+            ...newStep,
+            name: existing.name || newStep.name,
+            description: existing.description || newStep.description,
+            color: existing.color || newStep.color,
+            status: existing.status || newStep.status,
+          }
+        }
+        return newStep
+      })
+
+      this._save()
+    },
+
+    /**
+     * 添加步骤
+     */
+    addStep(step: Partial<CanvasStep>): string {
+      const id = step.id || `step_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      const newStep: CanvasStep = {
+        id,
+        name: step.name || `步骤 ${this.steps.length + 1}`,
+        description: step.description,
+        color: step.color || '#409eff',
+        panel_ids: step.panel_ids || [],
+        order: step.order ?? this.steps.length,
+        depends_on: step.depends_on || [],
+        status: step.status,
+        created_at: step.created_at || new Date().toISOString(),
+        updated_at: step.updated_at || new Date().toISOString(),
+      }
+      
+      this.steps.push(newStep)
+      this._save()
+      return id
+    },
+
+    /**
+     * 更新步骤
+     */
+    updateStep(stepId: string, updates: Partial<CanvasStep>): void {
+      const index = this.steps.findIndex(s => s.id === stepId)
+      if (index === -1) return
+
+      const step = this.steps[index]
+      if (updates.name !== undefined) step.name = updates.name
+      if (updates.description !== undefined) step.description = updates.description
+      if (updates.color !== undefined) step.color = updates.color
+      if (updates.panel_ids !== undefined) step.panel_ids = updates.panel_ids
+      if (updates.order !== undefined) step.order = updates.order
+      if (updates.depends_on !== undefined) step.depends_on = updates.depends_on
+      if (updates.status !== undefined) step.status = updates.status
+      step.updated_at = new Date().toISOString()
+
+      this._save()
+    },
+
+    /**
+     * 删除步骤
+     */
+    removeStep(stepId: string): void {
+      const index = this.steps.findIndex(s => s.id === stepId)
+      if (index === -1) return
+
+      this.steps.splice(index, 1)
+      this._save()
+    },
+
+    /**
+     * 添加节点到步骤
+     */
+    addPanelToStep(stepId: string, panelId: string): void {
+      const step = this.steps.find(s => s.id === stepId)
+      if (!step) return
+
+      if (!step.panel_ids.includes(panelId)) {
+        step.panel_ids.push(panelId)
+        step.updated_at = new Date().toISOString()
+        this._save()
+      }
+    },
+
+    /**
+     * 从步骤移除节点
+     */
+    removePanelFromStep(stepId: string, panelId: string): void {
+      const step = this.steps.find(s => s.id === stepId)
+      if (!step) return
+
+      const index = step.panel_ids.indexOf(panelId)
+      if (index !== -1) {
+        step.panel_ids.splice(index, 1)
+        step.updated_at = new Date().toISOString()
+        this._save()
+      }
+    },
+
+    /**
+     * 从选中节点创建步骤
+     */
+    createStepFromSelection(): string | null {
+      if (this.selectedPanelIds.length === 0) return null
+
+      const stepId = this.addStep({
+        panel_ids: [...this.selectedPanelIds],
+        name: `步骤 ${this.steps.length + 1}`,
+      })
+
+      return stepId
     },
   },
 })

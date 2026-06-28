@@ -45,6 +45,7 @@ from app.core.security import get_current_user, get_current_user_optional, decod
 from app.models.user import User
 from app.models.pipeline import PipelineTemplate, StylePreset, ScriptTemplate
 from app.models.asset import Asset
+from app.models.model_definition import ModelDefinition
 from app.services.pipeline.sse_manager import pipeline_sse_manager
 from app.schemas.pipeline import (
     PipelineTemplateOut,
@@ -56,6 +57,7 @@ from app.schemas.pipeline import (
     PipelineStepOut,
     CreditEstimateOut,
     CreditEstimateRequest,
+    TemplateFromScenarioRequest,
     SubtitlesSaveRequest,
     SubtitlesSaveResponse,
     RecomposeRequest,
@@ -82,6 +84,8 @@ from app.services.pipeline import (
     estimate_credits,
     save_subtitles,
 )
+from app.services.pipeline import template_service
+from app.services.pipeline import template_scenarios
 from app.services.pipeline.run_service import recompose_video
 from app.services.watermark_service import (
     get_watermark_config,
@@ -462,7 +466,7 @@ _TEMPLATE_EXPORT_EXCLUDE_FIELDS = {
 }
 
 
-@router.get("/pipeline/templates/export", summary="导出流水线模板为 JSON")
+@router.get("/pipeline/export/templates", summary="导出流水线模板为 JSON")
 async def export_pipeline_templates(
     template_ids: Optional[str] = Query(
         None, description="要导出的模板 ID 列表（逗号分隔），不传则导出所有可见模板"
@@ -482,9 +486,13 @@ async def export_pipeline_templates(
     - include_style=true 时一并导出 inputs_config 中引用的 StylePreset
     - 导入时所有模板都会变成当前用户的自定义模板（is_builtin=False, is_public=False）
     """
-    # 构建查询：所有可见模板（内置或公开），指定 ID 时仅导出指定模板
+    # 构建查询：所有可见模板（内置 + 公开 + 当前用户自己的）
     query = select(PipelineTemplate).filter(
-        or_(PipelineTemplate.is_builtin == True, PipelineTemplate.is_public == True)  # noqa: E712
+        or_(
+            PipelineTemplate.is_builtin == True,
+            PipelineTemplate.is_public == True,
+            PipelineTemplate.author_id == _current_user.id,
+        )  # noqa: E712
     )
 
     # 按指定 ID 过滤
@@ -1661,3 +1669,111 @@ async def get_pipeline_output(filename: str):
         filename=filename,
         # 不强制 attachment，让浏览器内联播放视频
     )
+
+
+# =====================================================
+# 场景化模板 API
+# =====================================================
+
+@router.get("/pipeline/template-scenarios", summary="获取模板场景预设列表")
+async def get_template_scenarios():
+    """
+    获取场景化模板预设列表。
+
+    返回所有预设的场景（漫剧、广告、教育、二次元等），
+    每个场景包含：key、name、description、icon、color、inputs_config 模板。
+    """
+    return {
+        "items": template_scenarios.TEMPLATE_SCENARIOS,
+        "total": len(template_scenarios.TEMPLATE_SCENARIOS),
+    }
+
+
+@router.post("/pipeline/templates/from-scenario", summary="从场景预设创建模板")
+async def create_template_from_scenario(
+    req: TemplateFromScenarioRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    从场景预设创建模板。
+    
+    根据 scenario_key 加载预设，用 inputs 渲染 steps_config_template，
+    自动计算 estimated_credits，创建模板。
+    """
+    # 1. 加载场景预设
+    scenario = template_scenarios.get_scenario_by_key(req.scenario_key)
+    if not scenario:
+        raise HTTPException(status_code=404, detail=f"场景预设 '{req.scenario_key}' 不存在")
+
+    # 2. 渲染 steps_config
+    try:
+        # 如果用户提供了自定义步骤配置，则使用它
+        if req.custom_steps_config:
+            steps_config = req.custom_steps_config
+        else:
+            # 否则，使用场景预设渲染步骤配置
+            steps_config = template_scenarios.render_steps_config(
+                scenario=scenario,
+                inputs=req.inputs or {},
+            )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"渲染步骤配置失败: {e}")
+
+    # 3. 构造模板创建请求
+    template_name = req.name or scenario["name"]
+    template_description = req.description or scenario.get("description", "")
+    template_key = f"{req.scenario_key}_{current_user.id}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+
+    create_req = PipelineTemplateCreate(
+        key=template_key,
+        name=template_name,
+        description=template_description,
+        category=scenario.get("category", "drama"),
+        inputs_config=scenario.get("inputs_config", []),
+        steps_config=steps_config,
+        is_public=req.is_public,
+        tags=req.tags or scenario.get("tags", []),
+    )
+
+    # 4. 自动计算预估积分（create_template 内部会调用 auto_fill_estimated_credits）
+    tpl = await template_service.create_template(
+        db, create_req, author_id=current_user.id, is_builtin=False
+    )
+
+    # 5. 如果提供了缩略图 URL，更新
+    thumbnail_url = req.inputs.get("thumbnail_url") if req.inputs else None
+    if thumbnail_url:
+        tpl.thumbnail_url = thumbnail_url
+        await db.commit()
+        await db.refresh(tpl)
+
+    return PipelineTemplateOut.model_validate(tpl)
+
+
+@router.get("/pipeline/available-models", summary="获取可用的模型列表")
+async def get_available_models(
+    db: AsyncSession = Depends(get_async_db),
+    model_type: Optional[str] = None,
+):
+    """
+    获取可用的模型列表（从 model_definitions 表读取）。
+    
+    - model_type: 可选过滤条件，image/video/chat
+    """
+    query = select(ModelDefinition).where(
+        ModelDefinition.is_active == True
+    )
+    
+    if model_type:
+        query = query.where(ModelDefinition.type == model_type)
+    
+    query = query.order_by(ModelDefinition.sort_order.asc())
+    
+    result = await db.execute(query)
+    models = result.scalars().all()
+    
+    return {
+        "items": [m.to_dict() for m in models],
+        "total": len(models),
+    }
