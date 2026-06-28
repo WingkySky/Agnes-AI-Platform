@@ -42,7 +42,7 @@ DEFAULT_MENU_ITEMS = [
     {"key": "admin-users", "label_key": "nav.usersAdmin", "icon": "User", "path": "/admin/users", "position": "sidebar", "group_key": "admin", "sort_order": 2, "is_visible": True, "require_admin": True},
     {"key": "admin-roles", "label_key": "nav.roleManage", "icon": "UserFilled", "path": "/admin/roles", "position": "sidebar", "group_key": "admin", "sort_order": 3, "is_visible": True, "require_admin": True},
     {"key": "admin-credit-rules", "label_key": "nav.creditRules", "icon": "Coin", "path": "/admin/credit-rules", "position": "sidebar", "group_key": "admin", "sort_order": 4, "is_visible": True, "require_admin": True},
-    {"key": "admin-moderation", "label_key": "nav.moderation", "icon": "Histogram", "path": "/admin/moderation", "position": "sidebar", "group_key": "admin", "sort_order": 5, "is_visible": True, "require_admin": True},
+    {"key": "admin-review", "label_key": "nav.unifiedReview", "icon": "Checked", "path": "/admin/review", "position": "sidebar", "group_key": "admin", "sort_order": 5, "is_visible": True, "require_admin": True},
     {"key": "admin-sensitive-words", "label_key": "nav.sensitiveWords", "icon": "ChatDotRound", "path": "/admin/sensitive-words", "position": "sidebar", "group_key": "admin", "sort_order": 6, "is_visible": True, "require_admin": True},
     {"key": "admin-watermark", "label_key": "nav.watermarkConfig", "icon": "Picture", "path": "/admin/watermark", "position": "sidebar", "group_key": "admin", "sort_order": 7, "is_visible": True, "require_admin": True},
     {"key": "admin-email", "label_key": "nav.emailConfig", "icon": "Message", "path": "/admin/email", "position": "sidebar", "group_key": "admin", "sort_order": 8, "is_visible": True, "require_admin": True},

@@ -165,9 +165,17 @@
             <el-icon size="10"><Warning /></el-icon>
             {{ t('history.rejected') }}
           </div>
-          <!-- 快捷操作按钮组（非编辑模式下显示）：放大 / 下载 / 分享 / 删除，分别调用不同模块 -->
+          <!-- 快捷操作按钮组（非编辑模式下显示）：复制提示词 / 放大 / 下载 / 分享 / 删除，分别调用不同模块 -->
           <!-- 放在 card-preview 内，z-index 足够高以确保不被其他蒙层遮挡 -->
           <div v-if="!editMode" class="card-actions">
+            <!-- 复制提示词：调用剪贴板复制模块 -->
+            <div
+              v-if="item.prompt"
+              class="card-action-btn"
+              @click.stop="copyPrompt(item)"
+              :title="t('history.copyPrompt')">
+              <el-icon size="16"><CopyDocument /></el-icon>
+            </div>
             <!-- 放大：调用 ImageViewer 图片查看器模块 -->
             <div
               v-if="item.type === 'image'"
@@ -394,7 +402,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Loading, Document, Delete, VideoPlay, CircleCloseFilled, Edit, Close, Download, ZoomIn, Share, Warning } from '@element-plus/icons-vue'
+import { Refresh, Loading, Document, Delete, VideoPlay, CircleCloseFilled, Edit, Close, Download, ZoomIn, Share, Warning, CopyDocument } from '@element-plus/icons-vue'
 import ImageViewer from '@/components/ImageViewer.vue'
 import { getHistoryList, deleteHistoryRecord, batchDeleteHistory } from '@/api/history'
 import { updateShareStatus, batchUpdateShareStatus } from '@/api/plaza'
@@ -913,6 +921,14 @@ function copyLink(url: string) {
   }
   copyToClipboard(url)
     .then(() => ElMessage.success(t('history.linkCopied')))
+    .catch(() => ElMessage.error(t('history.copyLinkFailed')))
+}
+
+/** 卡片快捷复制提示词：复用通用剪贴板复制模块 */
+function copyPrompt(item: GenerationRecord) {
+  if (!item.prompt) return
+  copyToClipboard(item.prompt)
+    .then(() => ElMessage.success(t('history.promptCopied')))
     .catch(() => ElMessage.error(t('history.copyLinkFailed')))
 }
 

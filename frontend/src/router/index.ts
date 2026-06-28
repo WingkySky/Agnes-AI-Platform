@@ -143,10 +143,10 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
     children: [
       {
-        path: 'moderation',
-        name: 'admin-moderation',
-        component: () => import('@/views/ModerationView.vue'),
-        meta: { titleKey: 'nav.moderation', permission: 'plaza:moderate' }
+        path: 'review',
+        name: 'admin-review',
+        component: () => import('@/views/admin/UnifiedReview.vue'),
+        meta: { titleKey: 'nav.unifiedReview', requiresAdmin: true }
       },
       {
         path: 'sensitive-words',
@@ -201,12 +201,6 @@ const routes: RouteRecordRaw[] = [
         name: 'admin-presets',
         component: () => import('@/views/presets/PresetCenter.vue'),
         meta: { titleKey: 'nav.presetsAdmin', requiresAdmin: true }
-      },
-      {
-        path: 'presets/audit',
-        name: 'admin-presets-audit',
-        component: () => import('@/views/admin/PresetAudit.vue'),
-        meta: { titleKey: 'nav.presetAudit', requiresAdmin: true }
       },
     ]
   },

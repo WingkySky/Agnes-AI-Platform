@@ -11,6 +11,7 @@
 import client from './client'
 import type {
   PipelineTemplate,
+  PipelineTemplateRevision,
   PipelineRun,
   PipelineStep,
   StylePreset,
@@ -26,6 +27,7 @@ import type {
 // re-export 类型，方便使用方从 api 文件统一导入（向后兼容）
 export type {
   PipelineTemplate,
+  PipelineTemplateRevision,
   PipelineRun,
   PipelineStep,
   StylePreset,
@@ -70,6 +72,9 @@ export interface TemplateUpdateRequest {
   script_template_id?: number
   tags?: string[]
   is_public?: boolean
+  output_mapping?: Record<string, any>
+  estimated_credits?: number
+  estimated_time_minutes?: number
 }
 
 // =====================================================
@@ -100,6 +105,40 @@ export function updateTemplate(id: number, data: TemplateUpdateRequest): Promise
 
 export function deleteTemplate(id: number): Promise<{ message: string; template_id: number }> {
   return client.delete(`/api/pipeline/templates/${id}`)
+}
+
+/** 提交模板到公开市场审核 */
+export function submitTemplatePublic(id: number, reason?: string): Promise<{
+  message: string
+  template_id: number
+  is_public: boolean
+  is_approved: boolean
+  rejected?: boolean
+  hit_words?: string[]
+}> {
+  return client.post(`/api/pipeline/templates/${id}/submit-public`, { reason })
+}
+
+/** 取消模板公开 */
+export function cancelTemplatePublic(id: number): Promise<{
+  message: string
+  template_id: number
+  is_public: boolean
+}> {
+  return client.post(`/api/pipeline/templates/${id}/cancel-public`)
+}
+
+/** 获取模板的 pending 修订草稿（编辑器进入时拉取恢复未保存草稿） */
+export function getTemplateRevision(id: number): Promise<PipelineTemplateRevision> {
+  return client.get(`/api/pipeline/templates/${id}/revision`)
+}
+
+/** AI 生成模板缩略图（按 name+description+tags 调用 Agnes AI 生图） */
+export function generateTemplateThumbnail(id: number): Promise<{
+  thumbnail_url: string
+  template_id: number
+}> {
+  return client.post(`/api/pipeline/templates/${id}/thumbnail/ai-generate`)
 }
 
 /**

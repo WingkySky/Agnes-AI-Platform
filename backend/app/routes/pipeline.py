@@ -37,7 +37,7 @@ from typing import Optional, AsyncGenerator, List, Dict, Any
 
 from fastapi import APIRouter, HTTPException, Depends, Query, Request, BackgroundTasks
 from fastapi.responses import StreamingResponse, RedirectResponse
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_db
@@ -50,6 +50,7 @@ from app.schemas.pipeline import (
     PipelineTemplateOut,
     PipelineTemplateCreate,
     PipelineTemplateUpdate,
+    PipelineTemplateRevisionOut,
     PipelineRunCreate,
     PipelineRunOut,
     PipelineStepOut,
@@ -104,12 +105,18 @@ router = APIRouter()
 async def get_pipeline_templates(
     category: Optional[str] = None,
     search: Optional[str] = None,
+    scope: str = Query("market", description="列表范围：market 模板市场 / my 我的模板"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
-    _current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
-    """获取流水线模板列表（支持按分类筛选和搜索，返回内置模板和公开模板）"""
+    """
+    获取流水线模板列表。
+
+    - scope=market（默认）：模板市场，返回内置模板 + 审核通过的公开模板
+    - scope=my：我的模板，返回当前用户创建的所有模板（需登录）
+    """
     query = select(PipelineTemplate)
     filters = []
     if category:
@@ -121,7 +128,19 @@ async def get_pipeline_templates(
             PipelineTemplate.description.ilike(search_pattern),
             PipelineTemplate.key.ilike(search_pattern),
         ))
-    filters.append(or_(PipelineTemplate.is_builtin == True, PipelineTemplate.is_public == True))
+
+    if scope == "my":
+        # 我的模板：必须登录，只看自己创建的
+        if not current_user:
+            raise HTTPException(status_code=401, detail="请先登录")
+        filters.append(PipelineTemplate.author_id == current_user.id)
+        filters.append(PipelineTemplate.is_builtin == False)  # noqa: E712
+    else:
+        # 模板市场：内置 + 审核通过的公开模板
+        filters.append(or_(
+            PipelineTemplate.is_builtin == True,  # noqa: E712
+            and_(PipelineTemplate.is_public == True, PipelineTemplate.is_approved == True)  # noqa: E712
+        ))
     
     if filters:
         query = query.where(*filters)
@@ -181,11 +200,120 @@ async def update_pipeline_template(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    """编辑自己的流水线模板（内置模板不可编辑）"""
+    """
+    编辑流水线模板。
+
+    - admin 可编辑任意模板（含内置模板，直接生效）
+    - 作者可编辑自己的非内置模板
+    - 公开已审核非内置模板被编辑 → 走 draft 流程（生成 pending revision + AI 预筛）
+    - 其他情况直接改原模板字段
+    """
+    # 计算是否为 admin（与项目其他路由保持一致：role == 'admin' 或 is_admin == True）
+    is_admin = bool(getattr(current_user, "is_admin", False)) or current_user.role == "admin"
     tpl = await template_service.update_template(
-        db, template_id, req, user_id=current_user.id
+        db, template_id, req, user_id=current_user.id, is_admin=is_admin
     )
     return PipelineTemplateOut.model_validate(tpl)
+
+
+@router.get("/pipeline/templates/{template_id}/revision", summary="获取模板的修订草稿")
+async def get_template_revision(
+    template_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    获取公开模板的 pending revision（编辑器进入时拉取，恢复未保存草稿）。
+
+    - 仅作者或 admin 可访问
+    - 没有 pending revision 时返回 404
+    """
+    tpl = await template_service.get_template_by_id(db, template_id)
+    if not tpl:
+        raise HTTPException(status_code=404, detail="流水线模板不存在")
+
+    is_admin = bool(getattr(current_user, "is_admin", False)) or current_user.role == "admin"
+    if tpl.author_id != current_user.id and not is_admin:
+        raise HTTPException(status_code=403, detail="无权查看此模板的修订")
+
+    revision = await template_service.get_pending_revision(db, template_id)
+    if not revision:
+        raise HTTPException(status_code=404, detail="该模板暂无待审核的修订")
+    return PipelineTemplateRevisionOut.model_validate(revision)
+
+
+@router.post("/pipeline/templates/{template_id}/thumbnail/ai-generate", summary="AI 生成模板缩略图")
+async def generate_template_thumbnail_ai(
+    template_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    按模板 name + description + tags 调用 Agnes AI 生图接口生成缩略图。
+
+    - 仅作者或 admin 可调用
+    - 生成后写入 tpl.thumbnail_url，返回新 URL
+    - 复用现有 AgnesAIClient.create_image，不新写底层
+    """
+    tpl = await template_service.get_template_by_id(db, template_id)
+    if not tpl:
+        raise HTTPException(status_code=404, detail="流水线模板不存在")
+
+    is_admin = bool(getattr(current_user, "is_admin", False)) or current_user.role == "admin"
+    if tpl.author_id != current_user.id and not is_admin:
+        raise HTTPException(status_code=403, detail="无权生成此模板的缩略图")
+
+    # 后端拼装 prompt：竖版 4:3 风格化插画缩略图，避免文字
+    tags_text = "、".join(tpl.tags or [])
+    prompt = (
+        f"竖版 4:3 风格化插画缩略图，主题：{tpl.name or ''}，"
+        f"{tpl.description or ''}，标签：{tags_text}，"
+        f"适合作为创意工坊模板封面，避免文字"
+    )
+
+    from app.services.agnes_client import agnes_client
+    from app.services.model_registry import get_models_by_type
+
+    # 选取第一个可用图片模型
+    try:
+        image_models = await get_models_by_type("image")
+        model_id = image_models[0].id if image_models else ""
+    except Exception:
+        model_id = ""
+    if not model_id:
+        raise HTTPException(status_code=500, detail="无可用图片生成模型")
+
+    # 调用 Agnes 图像生成（竖版 4:3 → 768x1024）
+    try:
+        resp = await agnes_client.create_image(
+            prompt=prompt,
+            model=model_id,
+            size="768x1024",
+            response_format="url",
+        )
+    except Exception as e:
+        logger.warning("AI 生成模板缩略图失败: %s", e)
+        raise HTTPException(status_code=500, detail=f"AI 生图失败：{e}")
+
+    # 解析返回的图片 URL
+    image_url = None
+    try:
+        data_list = resp.get("data", []) if isinstance(resp, dict) else []
+        if isinstance(data_list, list) and data_list:
+            image_url = data_list[0].get("url")
+        if not image_url and isinstance(resp, dict) and resp.get("url"):
+            image_url = resp["url"]
+    except Exception as e:
+        logger.warning("解析 AI 生图响应失败: %s", e)
+
+    if not image_url:
+        raise HTTPException(status_code=500, detail="AI 生图未返回有效 URL")
+
+    # 写入模板 thumbnail_url
+    tpl.thumbnail_url = image_url
+    await db.commit()
+
+    return {"thumbnail_url": image_url, "template_id": template_id}
 
 
 @router.delete("/pipeline/templates/{template_id}", summary="删除流水线模板")
@@ -199,6 +327,113 @@ async def delete_pipeline_template(
         db, template_id, user_id=current_user.id
     )
     return {"message": "删除成功", "template_id": template_id}
+
+
+@router.post("/pipeline/templates/{template_id}/submit-public", summary="提交模板到公开市场审核")
+async def submit_template_public(
+    template_id: int,
+    payload: Dict[str, Any] = None,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    将模板提交到公开市场审核。
+
+    - 只能提交自己的非内置模板
+    - 已被驳回的模板不可再次提交（硬约束：被驳回内容不能再公开）
+    - 提交前进行 AI 预筛（敏感词检测），命中则直接驳回
+    - 提交后 is_public=True, is_approved=False, is_rejected=False
+    """
+    result = await db.execute(
+        select(PipelineTemplate).filter(PipelineTemplate.id == template_id)
+    )
+    tpl = result.scalar_one_or_none()
+    if not tpl:
+        raise HTTPException(status_code=404, detail="模板不存在")
+    if tpl.is_builtin:
+        raise HTTPException(status_code=400, detail="内置模板不可提交公开")
+    if tpl.author_id != current_user.id and not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="只能提交自己的模板")
+    if tpl.is_rejected:
+        raise HTTPException(status_code=403, detail="该模板已被驳回，不可再次提交公开")
+    if tpl.is_public and tpl.is_approved:
+        raise HTTPException(status_code=400, detail="模板已在公开市场中")
+
+    submit_reason = (payload or {}).get("reason") or ""
+
+    # ---------- AI 预筛：敏感词检测 ----------
+    # 检查模板名称、描述、标签中是否包含敏感词
+    check_text = " ".join([
+        tpl.name or "",
+        tpl.description or "",
+        " ".join(tpl.tags or []),
+        submit_reason,
+    ])
+    from app.services.moderation_service import check_sensitive_text
+    hit, hit_words = await check_sensitive_text(db, check_text)
+    if hit:
+        # 命中敏感词：直接驳回（AI 预筛不通过）
+        tpl.is_public = False
+        tpl.is_approved = False
+        tpl.is_rejected = True
+        tpl.reject_reason = f"AI 预筛命中敏感词：{', '.join(hit_words[:5])}"
+        tpl.submit_reason = submit_reason
+        await db.commit()
+        return {
+            "message": "提交未通过 AI 预筛",
+            "rejected": True,
+            "hit_words": hit_words,
+            "template_id": template_id,
+        }
+
+    # 提交审核
+    tpl.is_public = True
+    tpl.is_approved = False
+    tpl.is_rejected = False
+    tpl.submit_reason = submit_reason
+    tpl.reject_reason = None
+    await db.commit()
+
+    return {
+        "message": "已提交审核，等待管理员处理",
+        "template_id": template_id,
+        "is_public": True,
+        "is_approved": False,
+    }
+
+
+@router.post("/pipeline/templates/{template_id}/cancel-public", summary="取消模板公开")
+async def cancel_template_public(
+    template_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    取消模板的公开状态（从市场下架，仅自己可见）。
+
+    - 只能操作自己的模板
+    - 取消后 is_public=False, is_approved=False, is_rejected 保持不变
+    """
+    result = await db.execute(
+        select(PipelineTemplate).filter(PipelineTemplate.id == template_id)
+    )
+    tpl = result.scalar_one_or_none()
+    if not tpl:
+        raise HTTPException(status_code=404, detail="模板不存在")
+    if tpl.is_builtin:
+        raise HTTPException(status_code=400, detail="内置模板不可取消公开")
+    if tpl.author_id != current_user.id and not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="只能操作自己的模板")
+
+    tpl.is_public = False
+    tpl.is_approved = False
+    await db.commit()
+
+    return {
+        "message": "已取消公开",
+        "template_id": template_id,
+        "is_public": False,
+    }
 
 
 @router.post("/pipeline/templates/{template_id}/estimate-credits", summary="预估积分消耗")
@@ -325,7 +560,8 @@ async def import_pipeline_templates(
     请求体格式：
     {
       "data": { ... 导出文件内容 ... },
-      "conflict_strategy": "rename" | "skip" | "overwrite"  // 冲突处理策略
+      "conflict_strategy": "rename" | "skip" | "overwrite",  // 冲突处理策略
+      "import_mode": "private" | "public" | "builtin"         // 导入模式（仅管理员可选 public/builtin）
     }
 
     返回：{ imported, skipped, renamed, overwritten, items }
@@ -333,11 +569,35 @@ async def import_pipeline_templates(
     - rename：自动追加 " (导入)" 后缀（key 追加 _imported_N）
     - skip：跳过冲突项
     - overwrite：覆盖同 key 模板（仅限自己的非内置模板）
+    - import_mode:
+        - private（默认，所有用户可用）：导入为私有模板
+        - public（仅管理员）：导入后直接设为公开并审核通过
+        - builtin（仅管理员）：导入为内置模板（无作者）
     """
     data = payload.get("data") or {}
     conflict_strategy = payload.get("conflict_strategy", "rename")
+    import_mode = payload.get("import_mode", "private")
+
     if conflict_strategy not in ("rename", "skip", "overwrite"):
         raise HTTPException(status_code=400, detail="conflict_strategy 必须是 rename/skip/overwrite 之一")
+    if import_mode not in ("private", "public", "builtin"):
+        raise HTTPException(status_code=400, detail="import_mode 必须是 private/public/builtin 之一")
+
+    # 权限校验：public 和 builtin 模式仅管理员可用
+    is_admin = bool(getattr(current_user, "is_admin", False) or (current_user.role == "admin"))
+    if import_mode in ("public", "builtin") and not is_admin:
+        raise HTTPException(status_code=403, detail="仅管理员可使用 public/builtin 导入模式")
+
+    # 根据 import_mode 确定模板的初始状态
+    def _get_template_flags() -> Dict[str, Any]:
+        if import_mode == "builtin":
+            return {"is_builtin": True, "is_public": False, "is_approved": True, "author_id": None}
+        elif import_mode == "public":
+            return {"is_builtin": False, "is_public": True, "is_approved": True, "author_id": current_user.id}
+        else:  # private
+            return {"is_builtin": False, "is_public": False, "is_approved": False, "author_id": current_user.id}
+
+    flags = _get_template_flags()
 
     templates_in = data.get("templates") or []
     scripts_in = data.get("script_templates") or []
@@ -479,9 +739,10 @@ async def import_pipeline_templates(
                 estimated_credits=tpl_data.get("estimated_credits", 100),
                 estimated_time_minutes=tpl_data.get("estimated_time_minutes", 10),
                 tags=tpl_data.get("tags") or [],
-                is_builtin=False,
-                is_public=False,
-                author_id=current_user.id,
+                is_builtin=flags["is_builtin"],
+                is_public=flags["is_public"],
+                is_approved=flags["is_approved"],
+                author_id=flags["author_id"],
             )
 
         if existing_tpl is None:

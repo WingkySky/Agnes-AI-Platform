@@ -45,6 +45,11 @@ class PipelineTemplateUpdate(BaseModel):
     steps_config: Optional[List[Dict[str, Any]]] = None
     script_template_id: Optional[int] = None
     is_public: Optional[bool] = None
+    # 补全之前缺失的字段（修复 tags 无法写入的 bug）
+    output_mapping: Optional[Dict[str, Any]] = None
+    estimated_credits: Optional[int] = None
+    estimated_time_minutes: Optional[int] = None
+    tags: Optional[List[str]] = None
 
 
 class PipelineTemplateResponse(PipelineTemplateBase):
@@ -52,6 +57,10 @@ class PipelineTemplateResponse(PipelineTemplateBase):
     id: int
     is_builtin: bool = False
     is_public: bool = False
+    is_approved: bool = False
+    is_rejected: bool = False
+    submit_reason: Optional[str] = None
+    reject_reason: Optional[str] = None
     author_id: Optional[int] = None
     use_count: int = 0
     likes_count: int = 0
@@ -59,6 +68,8 @@ class PipelineTemplateResponse(PipelineTemplateBase):
     estimated_credits: int = Field(default=0, description="预估积分")
     estimated_time_minutes: int = Field(default=10, description="预估耗时（分钟）")
     output_mapping: Optional[Dict[str, Any]] = Field(default=None, description="输出映射配置")
+    # 是否存在未审核的修订草稿（编辑器进入时拉取草稿、卡片显示"修订中"徽章用）
+    has_pending_revision: bool = Field(default=False, description="是否存在未审核的修订草稿")
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -84,6 +95,41 @@ class PipelineTemplateResponse(PipelineTemplateBase):
 
 # 兼容别名
 PipelineTemplateOut = PipelineTemplateResponse
+
+
+# =====================================================
+# 流水线模板修订草稿（Revision）Schema
+# 用于公开已审核模板被编辑后生成的 pending revision 序列化
+# =====================================================
+
+class PipelineTemplateRevisionOut(BaseModel):
+    """流水线模板修订草稿响应（编辑器拉取草稿 + 审核页面展示共用）"""
+    id: int
+    template_id: int
+    # ----- 编辑后的字段快照 -----
+    name: str
+    description: Optional[str] = None
+    category: str
+    thumbnail_url: Optional[str] = None
+    inputs_config: List[Dict[str, Any]] = Field(default_factory=list)
+    steps_config: List[Dict[str, Any]] = Field(default_factory=list)
+    output_mapping: Optional[Dict[str, Any]] = None
+    script_template_id: Optional[int] = None
+    estimated_credits: int = 0
+    estimated_time_minutes: int = 10
+    tags: List[str] = Field(default_factory=list)
+    # ----- 审核字段 -----
+    is_approved: bool = False
+    is_rejected: bool = False
+    submit_reason: Optional[str] = None
+    reject_reason: Optional[str] = None
+    # ----- 编辑者与时间 -----
+    edited_by: Optional[int] = None
+    created_at: Optional[datetime] = None
+    reviewed_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
 
 
 class PipelineTemplateListResponse(BaseModel):

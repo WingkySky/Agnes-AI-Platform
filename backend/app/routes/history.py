@@ -890,6 +890,7 @@ async def get_video_thumbnail(
     提取视频首帧作为缩略图（JPEG 格式）。
     - 视频所有者可访问
     - 已公开且审核通过的作品，所有用户均可访问（用于广场展示）
+    - 管理员/审核员可访问任意状态的作品（用于审核页展示）
     使用文件缓存，同一视频只提取一次。
     """
     # 查询视频记录
@@ -903,10 +904,15 @@ async def get_video_thumbnail(
     if record.type != "video":
         raise HTTPException(status_code=400, detail="该记录不是视频类型")
 
-    # 权限校验：本人可看；已公开且审核通过的作品所有人可看
+    # 权限校验：本人可看；已公开且审核通过的作品所有人可看；管理员/审核员可看任意作品
     is_owner = current_user and record.user_id == current_user.id
     is_public_approved = record.is_public and record.moderation_status == "approved"
-    if not is_owner and not is_public_approved:
+    is_staff = current_user and (
+        current_user.role == "admin"
+        or getattr(current_user, "is_admin", False)
+        or current_user.role == "moderator"
+    )
+    if not is_owner and not is_public_approved and not is_staff:
         raise HTTPException(status_code=404, detail="未找到对应视频记录")
 
     if not record.result_url:
@@ -925,9 +931,13 @@ async def get_video_thumbnail(
         )
 
     # 下载视频片段并提取首帧
+    # 注意：5MB 对某些视频（如 Seedance 输出）不足以包含完整 moov atom，
+    # 这里与 preview 端点一致使用 10MB；若仍失败则回退到完整下载。
     tmp_video = os.path.join(tempfile.gettempdir(), f"agnes_vtmp_{record_id}.mp4")
     try:
-        download_ok = await _download_video_partial(record.result_url, tmp_video)
+        download_ok = await _download_video_partial(
+            record.result_url, tmp_video, max_bytes=10 * 1024 * 1024
+        )
         if not download_ok:
             raise HTTPException(status_code=500, detail="下载视频片段失败，无法提取缩略图")
 
@@ -935,6 +945,23 @@ async def get_video_thumbnail(
         if not extract_ok:
             # 首帧提取失败时，尝试第 0.5 秒
             extract_ok = await _extract_frame_with_ffmpeg(tmp_video, cache_path, time_offset="0.5")
+
+        # 10MB 片段仍失败（moov atom 在文件尾部等场景），回退到下载完整视频再提取
+        if not extract_ok:
+            logger.info(
+                "[缩略图] 10MB 片段提取失败，回退到完整下载: record_id=%d", record_id
+            )
+            download_ok = await _download_video_partial(
+                record.result_url, tmp_video, max_bytes=100 * 1024 * 1024
+            )
+            if download_ok:
+                extract_ok = await _extract_frame_with_ffmpeg(
+                    tmp_video, cache_path, time_offset="0"
+                )
+                if not extract_ok:
+                    extract_ok = await _extract_frame_with_ffmpeg(
+                        tmp_video, cache_path, time_offset="0.5"
+                    )
 
         if not extract_ok or not os.path.exists(cache_path):
             raise HTTPException(status_code=500, detail="提取视频首帧失败")
@@ -963,6 +990,7 @@ async def get_video_preview(
     生成视频前 3 秒的 GIF 预览，用于鼠标悬停时的动态效果。
     - 视频所有者可访问
     - 已公开且审核通过的作品，所有用户均可访问（用于广场展示）
+    - 管理员/审核员可访问任意状态的作品（用于审核页展示）
     使用文件缓存，同一视频只生成一次。
     """
     # 查询视频记录
@@ -976,10 +1004,15 @@ async def get_video_preview(
     if record.type != "video":
         raise HTTPException(status_code=400, detail="该记录不是视频类型")
 
-    # 权限校验：本人可看；已公开且审核通过的作品所有人可看
+    # 权限校验：本人可看；已公开且审核通过的作品所有人可看；管理员/审核员可看任意作品
     is_owner = current_user and record.user_id == current_user.id
     is_public_approved = record.is_public and record.moderation_status == "approved"
-    if not is_owner and not is_public_approved:
+    is_staff = current_user and (
+        current_user.role == "admin"
+        or getattr(current_user, "is_admin", False)
+        or current_user.role == "moderator"
+    )
+    if not is_owner and not is_public_approved and not is_staff:
         raise HTTPException(status_code=404, detail="未找到对应视频记录")
 
     if not record.result_url:
@@ -1072,6 +1105,8 @@ async def update_share_status(
         record.moderation_status = "pending"
         record.moderation_flags = None
         record.moderation_reason = "审核中：等待系统预审"
+        # AI 预审状态：进入 pending，等异步任务跑完更新
+        record.ai_moderation_status = "pending"
 
         # 敏感词快速筛查（作为 flags 记录下来，供管理员参考）
         try:
@@ -1152,6 +1187,8 @@ async def batch_update_share_status(
             record.moderation_status = "pending"
             record.moderation_flags = None
             record.moderation_reason = "审核中：等待系统预审"
+            # AI 预审状态：进入 pending，等异步任务跑完更新
+            record.ai_moderation_status = "pending"
             try:
                 from app.services.moderation_service import check_sensitive_text
                 hit, hit_words = await check_sensitive_text(db, record.prompt or "")
@@ -1203,10 +1240,10 @@ async def _async_ai_moderate(
 ):
     """
     后台异步任务：调用 AI 多模态模型审核图片/视频内容。
-    审核完成后更新记录的 moderation_status：
-    - 违规 → rejected
-    - 不违规 → pending（继续等待人工审核）
-    - 审核失败 → pending（保持待审核，由人工处理）
+    审核完成后更新记录的 moderation_status 与 ai_moderation_status：
+    - 违规 → moderation_status=rejected, ai_moderation_status=violated
+    - 不违规 → moderation_status=pending, ai_moderation_status=passed（等人工复审）
+    - 审核失败 → moderation_status=pending, ai_moderation_status=failed（人工兜底）
     """
     from app.core.database import async_session
     from app.services.moderation_service import moderate_generation_with_ai
@@ -1224,6 +1261,7 @@ async def _async_ai_moderate(
             if not result.get("success"):
                 # 审核失败，保持 pending，等人工审核
                 record.moderation_reason = "系统预审失败，等待人工审核"
+                record.ai_moderation_status = "failed"
                 await db.commit()
                 logger.info("[AI审核] 记录 %d 审核失败，保持待审核", record_id)
                 return
@@ -1234,6 +1272,7 @@ async def _async_ai_moderate(
                 reason = result.get("reason", "") or ""
                 confidence = result.get("confidence", 0)
                 record.moderation_status = "rejected"
+                record.ai_moderation_status = "violated"
                 # 把 AI 审核结果追加到 flags 里
                 existing_flags = record.moderation_flags or []
                 if isinstance(existing_flags, list):
@@ -1254,6 +1293,7 @@ async def _async_ai_moderate(
                 logger.info("[AI审核] 记录 %d 判定违规: %s", record_id, reason_text)
             else:
                 # AI 判定没问题 → 保持 pending，等人工复审
+                record.ai_moderation_status = "passed"
                 reason = "AI 预审通过，等待人工复审"
                 flags = record.moderation_flags or []
                 if not flags:
@@ -1264,4 +1304,16 @@ async def _async_ai_moderate(
                 logger.info("[AI审核] 记录 %d AI 预审通过，等待人工复审", record_id)
 
     except Exception as e:
+        # 异常时也标记为 failed，方便管理员识别
+        try:
+            async with async_session() as db:
+                stmt = select(Generation).filter(Generation.id == record_id)
+                res = await db.execute(stmt)
+                record = res.scalar_one_or_none()
+                if record:
+                    record.ai_moderation_status = "failed"
+                    record.moderation_reason = "AI 审核任务异常，等待人工审核"
+                    await db.commit()
+        except Exception:
+            pass
         logger.exception("[AI审核] 后台任务异常 id=%d: %s", record_id, e)

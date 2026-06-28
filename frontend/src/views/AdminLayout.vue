@@ -26,10 +26,10 @@
               <span class="menu-group-title">{{ t('admin.groupModeration') }}</span>
             </template>
             <el-menu-item
-              v-if="permissionStore.hasPermission('plaza:moderate')"
-              index="/admin/moderation">
-              <el-icon><View /></el-icon>
-              <span>{{ t('nav.moderation') }}</span>
+              v-if="showUnifiedReview"
+              index="/admin/review">
+              <el-icon><Checked /></el-icon>
+              <span>{{ t('nav.unifiedReview') }}</span>
             </el-menu-item>
             <el-menu-item
               v-if="permissionStore.hasPermission('moderation:config')"
@@ -97,12 +97,6 @@
               <el-icon><Menu /></el-icon>
               <span>{{ t('nav.menuAdmin') }}</span>
             </el-menu-item>
-            <el-menu-item
-              v-if="userStore.isAdmin"
-              index="/admin/presets/audit">
-              <el-icon><Checked /></el-icon>
-              <span>{{ t('nav.presetAudit') }}</span>
-            </el-menu-item>
           </el-menu-item-group>
         </template>
       </el-menu>
@@ -123,7 +117,7 @@
 import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  Setting, View, Warning, UserFilled, User,
+  Setting, Warning, UserFilled, User,
   Picture, Coin, Cpu, Message, Menu, Checked,
 } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
@@ -141,7 +135,14 @@ const activeMenu = computed(() => route.path)
 
 // 内容审核组是否显示
 const showModerationGroup = computed(() => {
-  return permissionStore.hasPermission('plaza:moderate') ||
+  return showUnifiedReview.value ||
+    permissionStore.hasPermission('moderation:config')
+})
+
+// 是否显示统一审核入口（管理员 / 审核员 / 拥有 plaza:moderate 权限者）
+const showUnifiedReview = computed(() => {
+  return userStore.isAdmin ||
+    permissionStore.hasPermission('plaza:moderate') ||
     permissionStore.hasPermission('moderation:config')
 })
 
@@ -157,7 +158,7 @@ const showConfigGroup = computed(() => {
 
 // keep-alive 缓存的管理页面
 const cachedViews = [
-  'ModerationView',
+  'UnifiedReview',
   'SensitiveWordsView',
   'RolesAdminView',
   'UsersAdminView',
@@ -186,8 +187,9 @@ onMounted(() => {
 })
 
 // 计算第一个可访问的管理页面
+// 优先进入统一审核页（替代旧版 ModerationView）
 const firstAccessiblePage = computed(() => {
-  if (permissionStore.hasPermission('plaza:moderate')) return '/admin/moderation'
+  if (showUnifiedReview.value) return '/admin/review'
   if (permissionStore.hasPermission('moderation:config')) return '/admin/sensitive-words'
   if (permissionStore.hasPermission('role:manage')) return '/admin/roles'
   if (userStore.isAdmin) return '/admin/users'

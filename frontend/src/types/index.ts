@@ -729,7 +729,9 @@ export interface UpdateProfileRequest {
 export interface UserAdminRow {
   id: number
   username: string
+  nickname?: string | null
   email?: string | null
+  avatar_url?: string | null
   credits: number
   role: string
   is_active: boolean
@@ -829,15 +831,51 @@ export interface PipelineTemplate {
   description: string
   category: string
   thumbnail: string
+  thumbnail_url?: string | null
   estimated_credits: number
   estimated_time: string
   estimated_time_minutes?: number
   is_builtin: boolean
+  is_public: boolean
+  is_approved: boolean
+  is_rejected: boolean
+  has_pending_revision?: boolean
+  submit_reason?: string
+  reject_reason?: string
+  author_id?: number
   inputs_config: PipelineInputConfig[]
   steps_config: any[]
   tags: string[]
+  output_mapping?: Record<string, any> | null
+  script_template_id?: number | null
+  use_count?: number
+  likes_count?: number
   created_at: string
   updated_at: string
+}
+
+/** 流水线模板修订草稿（公开模板编辑后 pending revision） */
+export interface PipelineTemplateRevision {
+  id: number
+  template_id: number
+  name: string
+  description?: string | null
+  category: string
+  thumbnail_url?: string | null
+  inputs_config: Record<string, any>[]
+  steps_config: Record<string, any>[]
+  output_mapping?: Record<string, any> | null
+  script_template_id?: number | null
+  estimated_credits: number
+  estimated_time_minutes: number
+  tags: string[]
+  is_approved: boolean
+  is_rejected: boolean
+  submit_reason?: string | null
+  reject_reason?: string | null
+  edited_by?: number | null
+  created_at?: string | null
+  reviewed_at?: string | null
 }
 
 /** 流水线运行实例 */
@@ -994,6 +1032,7 @@ export interface PipelineListParams {
   category?: string
   search?: string
   is_builtin?: boolean
+  scope?: 'market' | 'my'
 }
 
 /** 列表返回结果 */

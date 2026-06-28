@@ -513,6 +513,7 @@ async def list_users(
         is_admin = u.role == ROLE_ADMIN or u.is_admin
         items.append(UserAdminRow(
             id=u.id, username=u.username, nickname=u.nickname, email=u.email,
+            avatar_url=u.avatar_url,
             credits=u.credits, role=u.role, is_active=u.is_active, is_admin=is_admin,
             watermark_enabled=u.watermark_enabled,
             content_safety_strict=u.content_safety_strict,

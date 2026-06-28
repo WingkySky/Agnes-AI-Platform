@@ -1,10 +1,12 @@
 /* =====================================================
  * 管理员相关 API 封装
  * - 角色管理
- * - 内容审核
  * - 敏感词管理
  * - 水印配置
  * - 用户扩展配置
+ *
+ * 注：作品/预设/模板审核统一走 /api/admin/review/*，
+ *     审核页面前端直接使用 @/api/client，不再在此封装。
  * ===================================================== */
 
 import client from './client'
@@ -29,35 +31,6 @@ export interface PermissionItem {
   name: string
   description: string
   group: string
-}
-
-/** 审核作品 */
-export interface ModerationWork {
-  id: number
-  type: 'image' | 'video'
-  prompt: string
-  model: string
-  result_url: string
-  user_id: number
-  username?: string | null
-  nickname?: string | null
-  is_public: boolean
-  likes_count: number
-  views_count: number
-  moderation_status: 'pending' | 'approved' | 'rejected'
-  moderation_reason: string | null
-  moderation_flags: string[]
-  moderated_at: string | null
-  public_shared_at: string | null
-  created_at: string
-}
-
-/** 审核列表响应 */
-export interface ModerationListResponse {
-  items: ModerationWork[]
-  total: number
-  page: number
-  page_size: number
 }
 
 /** 敏感词项 */
@@ -125,42 +98,6 @@ export function deleteRole(name: string): Promise<{ success: boolean }> {
   return client.delete(`/api/admin/roles/${name}`) as any
 }
 
-// ---------- 内容审核 ----------
-
-/** 获取待审核作品列表 */
-export function getModerationWorks(params: {
-  status?: 'pending' | 'approved' | 'rejected' | 'all'
-  work_type?: 'image' | 'video'
-  keyword?: string
-  work_id?: number
-  user_id?: number
-  username?: string
-  page?: number
-  page_size?: number
-}): Promise<ModerationListResponse> {
-  return client.get('/api/admin/moderation/works', { params }) as any
-}
-
-/** 通过审核 */
-export function approveWork(id: number): Promise<{ success: boolean }> {
-  return client.post(`/api/admin/moderation/works/${id}/approve`) as any
-}
-
-/** 驳回审核 */
-export function rejectWork(id: number, reason?: string): Promise<{ success: boolean }> {
-  return client.post(`/api/admin/moderation/works/${id}/reject`, { reason }) as any
-}
-
-/** 批量通过 */
-export function batchApprove(ids: number[]): Promise<{ success: boolean; updated_count: number }> {
-  return client.post('/api/admin/moderation/works/batch-approve', { ids }) as any
-}
-
-/** 批量驳回 */
-export function batchReject(ids: number[], reason?: string): Promise<{ success: boolean; updated_count: number }> {
-  return client.post('/api/admin/moderation/works/batch-reject', { ids, reason }) as any
-}
-
 // ---------- 敏感词 ----------
 
 /** 获取敏感词列表 */
@@ -170,7 +107,7 @@ export function getSensitiveWords(params: {
   page?: number
   page_size?: number
 }): Promise<SensitiveWordListResponse> {
-  return client.get('/api/admin/moderation/sensitive-words', { params }) as any
+  return client.get('/api/admin/sensitive-words', { params }) as any
 }
 
 /** 创建敏感词 */
@@ -179,7 +116,7 @@ export function createSensitiveWord(
   category: string,
   description?: string
 ): Promise<SensitiveWordItem> {
-  return client.post('/api/admin/moderation/sensitive-words', { word, category, description }) as any
+  return client.post('/api/admin/sensitive-words', { word, category, description }) as any
 }
 
 /** 更新敏感词 */
@@ -187,12 +124,12 @@ export function updateSensitiveWord(
   id: number,
   data: Partial<Omit<SensitiveWordItem, 'id' | 'created_at' | 'updated_at'>>
 ): Promise<SensitiveWordItem> {
-  return client.put(`/api/admin/moderation/sensitive-words/${id}`, data) as any
+  return client.put(`/api/admin/sensitive-words/${id}`, data) as any
 }
 
 /** 删除敏感词 */
 export function deleteSensitiveWord(id: number): Promise<{ success: boolean }> {
-  return client.delete(`/api/admin/moderation/sensitive-words/${id}`) as any
+  return client.delete(`/api/admin/sensitive-words/${id}`) as any
 }
 
 /** 批量导入敏感词 */
@@ -206,7 +143,7 @@ export function batchImportSensitiveWords(data: {
   skipped_count: number
   total_count: number
 }> {
-  return client.post('/api/admin/moderation/sensitive-words/batch-import', data) as any
+  return client.post('/api/admin/sensitive-words/batch-import', data) as any
 }
 
 // ---------- 水印配置 ----------

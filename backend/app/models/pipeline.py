@@ -57,6 +57,7 @@ class PipelineTemplate(Base):
     - author_id: 作者用户 ID（内置模板为 NULL）
     - use_count: 使用次数统计
     - likes_count: 点赞数
+    - has_pending_revision: 是否有未审核的修订草稿（公开模板编辑时置 True）
     """
 
     __tablename__ = "pipeline_templates"
@@ -83,12 +84,20 @@ class PipelineTemplate(Base):
     author_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     use_count = Column(Integer, default=0, nullable=False)
     likes_count = Column(Integer, default=0, nullable=False)
+    # 是否存在未审核的修订草稿（公开模板编辑时置 True，审核通过/拒绝时置回 False）
+    has_pending_revision = Column(Boolean, default=False, nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # 关联
     script_template = relationship("ScriptTemplate", back_populates="pipeline_templates")
     runs = relationship("PipelineRun", back_populates="template", cascade="all, delete-orphan")
+    # 公开模板的修订草稿列表（CASCADE 删除由外键约束保证）
+    revisions = relationship(
+        "PipelineTemplateRevision",
+        back_populates="template",
+        cascade="all, delete-orphan",
+    )
 
 
 class ScriptTemplate(Base):

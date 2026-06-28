@@ -34,6 +34,12 @@ interface PipelineState {
   templatesTotal: number
   templatesLoaded: boolean
 
+  /* 我的模板 */
+  myTemplates: PipelineTemplate[]
+  myTemplatesLoading: boolean
+  myTemplatesTotal: number
+  myTemplatesLoaded: boolean
+
   /* 当前流水线运行 */
   currentRunId: number | null
   currentRun: PipelineRun | null
@@ -50,6 +56,11 @@ export const usePipelineStore = defineStore('pipeline', {
     templatesLoading: false,
     templatesTotal: 0,
     templatesLoaded: false,
+
+    myTemplates: [],
+    myTemplatesLoading: false,
+    myTemplatesTotal: 0,
+    myTemplatesLoaded: false,
 
     currentRunId: null,
     currentRun: null,
@@ -78,12 +89,12 @@ export const usePipelineStore = defineStore('pipeline', {
   },
 
   actions: {
-    /** 加载流水线模板列表 */
+    /** 加载流水线模板列表（市场） */
     async loadTemplates(params: { page?: number; page_size?: number; category?: string; search?: string } = {}) {
       if (this.templatesLoading) return
       this.templatesLoading = true
       try {
-        const result = await getPipelineTemplates({ page: 1, page_size: 50, ...params })
+        const result = await getPipelineTemplates({ page: 1, page_size: 50, scope: 'market', ...params })
         this.templates = result.items
         this.templatesTotal = result.total
         this.templatesLoaded = true
@@ -93,6 +104,29 @@ export const usePipelineStore = defineStore('pipeline', {
       } finally {
         this.templatesLoading = false
       }
+    },
+
+    /** 加载我的模板列表 */
+    async loadMyTemplates(params: { page?: number; page_size?: number; category?: string; search?: string } = {}) {
+      if (this.myTemplatesLoading) return
+      this.myTemplatesLoading = true
+      try {
+        const result = await getPipelineTemplates({ page: 1, page_size: 100, scope: 'my', ...params })
+        this.myTemplates = result.items
+        this.myTemplatesTotal = result.total
+        this.myTemplatesLoaded = true
+      } catch (e) {
+        console.error('加载我的模板失败:', e)
+        throw e
+      } finally {
+        this.myTemplatesLoading = false
+      }
+    },
+
+    /** 刷新我的模板（强制重新加载） */
+    async refreshMyTemplates() {
+      this.myTemplatesLoaded = false
+      return this.loadMyTemplates()
     },
 
     /**

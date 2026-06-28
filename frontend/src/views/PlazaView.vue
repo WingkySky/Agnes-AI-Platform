@@ -123,18 +123,28 @@
           <!-- 我的作品角标 -->
           <div v-if="work.is_mine" class="mine-badge">{{ t('plaza.myWork') }}</div>
 
-          <!-- 底部信息条：作者（左）+ 点赞（右） -->
+          <!-- 底部信息条：作者（左）+ 复制提示词 + 点赞（右） -->
           <div class="card-overlay">
             <span class="author">
               <el-avatar :size="24" :src="avatarFullUrl(work.author_avatar_url)" :icon="UserFilled" />
               <span class="author-name">{{ work.author_nickname || t('plaza.anonymous') }}</span>
             </span>
-            <div
-              class="like-btn"
-              :class="{ liked: work.is_liked }"
-              @click.stop="toggleLike(work)">
-              <el-icon><StarFilled v-if="work.is_liked" /><Star v-else /></el-icon>
-              <span class="like-count">{{ work.likes_count }}</span>
+            <div class="overlay-right">
+              <!-- 复制提示词：点击复制作品 prompt 到剪贴板 -->
+              <div
+                v-if="work.prompt"
+                class="copy-prompt-btn"
+                :title="t('plaza.copyPrompt')"
+                @click.stop="copyText(work.prompt, t('plaza.copied'))">
+                <el-icon><CopyDocument /></el-icon>
+              </div>
+              <div
+                class="like-btn"
+                :class="{ liked: work.is_liked }"
+                @click.stop="toggleLike(work)">
+                <el-icon><StarFilled v-if="work.is_liked" /><Star v-else /></el-icon>
+                <span class="like-count">{{ work.likes_count }}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -673,7 +683,7 @@ onMounted(() => {
   z-index: 2;
 }
 
-/* 底部信息条：作者 + 点赞（层级高于水印，确保可点击且不被遮挡） */
+/* 底部信息条：作者 + 复制提示词 + 点赞（层级高于水印，确保可点击且不被遮挡） */
 .card-overlay {
   position: absolute;
   left: 0;
@@ -687,6 +697,29 @@ onMounted(() => {
   background: linear-gradient(to top, rgba(10, 15, 30, 0.78), rgba(10, 15, 30, 0));
   color: #fff;
   z-index: 10;
+}
+/* 底部右侧操作组：复制提示词 + 点赞 */
+.overlay-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+/* 复制提示词按钮：圆形图标按钮，与点赞按钮风格一致 */
+.copy-prompt-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(4px);
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.copy-prompt-btn:hover {
+  background: rgba(255, 255, 255, 0.28);
 }
 
 /* 带水印图片组件外层容器：撑满缩略图区域，层级低于底部信息条 */

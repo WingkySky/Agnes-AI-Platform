@@ -117,6 +117,16 @@
               </el-radio-group>
             </div>
 
+            <!-- 导入可见性（仅管理员） -->
+            <div v-if="userStore.isAdmin" class="import-visibility">
+              <span class="strategy-label">{{ t('workshop.importExport.importVisibility') }}</span>
+              <el-radio-group v-model="importVisibility">
+                <el-radio value="private">{{ t('workshop.importExport.visibilityPrivate') }}</el-radio>
+                <el-radio value="public">{{ t('workshop.importExport.visibilityPublic') }}</el-radio>
+                <el-radio value="builtin">{{ t('workshop.importExport.visibilityBuiltin') }}</el-radio>
+              </el-radio-group>
+            </div>
+
             <!-- 模板预览表 -->
             <el-table :data="previewRows" size="small" border max-height="320">
               <el-table-column prop="name" :label="t('workshop.importExport.colName')" min-width="140" />
@@ -157,9 +167,11 @@ import { ElMessage } from 'element-plus'
 import { Upload } from '@element-plus/icons-vue'
 import client from '@/api/client'
 import { useI18n } from '@/i18n'
+import { useUserStore } from '@/stores/user'
 import type { PipelineTemplate } from '@/types'
 
 const { t } = useI18n()
+const userStore = useUserStore()
 
 const props = defineProps<{
   modelValue: boolean
@@ -214,6 +226,7 @@ const importFileName = ref('')
 const previewData = ref<any>(null)
 const previewRows = ref<any[]>([])
 const conflictStrategy = ref<'rename' | 'skip' | 'overwrite'>('rename')
+const importVisibility = ref<'private' | 'public' | 'builtin'>('private')
 
 // ===== 弹窗打开时初始化 =====
 watch(
@@ -362,6 +375,7 @@ async function doImport() {
     const res = await client.post('/api/pipeline/templates/import', {
       data: previewData.value,
       conflict_strategy: conflictStrategy.value,
+      import_mode: importVisibility.value,
     })
     const r = res.data || {}
     ElMessage.success(
@@ -387,6 +401,7 @@ function onClosed() {
   previewRows.value = []
   importFileName.value = ''
   conflictStrategy.value = 'rename'
+  importVisibility.value = 'private'
   selectedExportIds.value = []
 }
 </script>

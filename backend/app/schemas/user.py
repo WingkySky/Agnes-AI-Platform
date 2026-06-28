@@ -139,6 +139,7 @@ class UserAdminRow(BaseModel):
     username: str
     nickname: Optional[str] = None
     email: Optional[str] = None
+    avatar_url: Optional[str] = None
     credits: int
     role: str
     is_active: bool

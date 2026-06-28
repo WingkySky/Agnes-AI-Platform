@@ -18,13 +18,17 @@
     <el-card class="table-card" shadow="never">
       <el-table :data="users" style="width: 100%" stripe v-loading="loading">
         <el-table-column prop="id" label="ID" width="70" align="center" />
-        <el-table-column :label="t('users.colUsername')" min-width="140">
+        <el-table-column :label="t('users.colUsername')" min-width="180">
           <template #default="{ row }">
             <div class="user-cell">
-              <el-avatar :size="30" :icon="UserFilled" />
+              <el-avatar :size="32" :src="avatarFullUrl(row.avatar_url)" :icon="UserFilled" class="user-avatar" />
               <div class="user-cell-info">
-                <div class="user-cell-name">{{ row.username }}</div>
-                <div class="user-cell-email muted">{{ row.email || t('users.noEmail') }}</div>
+                <div class="user-cell-name">{{ row.nickname || row.username }}</div>
+                <div class="user-cell-sub muted">
+                  <span v-if="row.nickname">@{{ row.username }}</span>
+                  <span v-if="row.email">{{ row.nickname ? ' · ' : '' }}{{ row.email }}</span>
+                  <span v-if="!row.email && !row.nickname">{{ t('users.noEmail') }}</span>
+                </div>
               </div>
             </div>
           </template>
@@ -135,6 +139,22 @@ const loading = ref(false)
 /** 是否是当前登录用户自己（自己禁止改角色/禁用自己） */
 function isSelf(row: UserAdminRow) {
   return userStore.user?.id === row.id
+}
+
+/**
+ * 归一化头像 URL
+ * - 空值：返回空字符串（由 el-avatar 回退到 :icon 默认图标）
+ * - 以 http(s):// 开头：直接使用
+ * - 以 / 开头的相对路径（后端上传目录）：拼接 API 基础地址
+ */
+function avatarFullUrl(rawUrl: string | null | undefined): string {
+  if (!rawUrl) return ''
+  if (/^https?:\/\//i.test(rawUrl)) return rawUrl
+  if (rawUrl.startsWith('/')) {
+    const apiHost = (import.meta.env.VITE_API_BASE_URL as string) || ''
+    return `${apiHost}${rawUrl}`
+  }
+  return rawUrl
 }
 
 /** 格式化时间（返回空字符串或格式化后的时间字符串） */
@@ -323,6 +343,14 @@ onMounted(fetchUsers)
   gap: 10px;
 }
 
+/* 用户列表统一头像样式，确保在斑马纹背景下都清晰可见 */
+.user-avatar {
+  background: var(--agnes-bg-chip);
+  color: var(--agnes-text-muted);
+  flex-shrink: 0;
+  border: 1px solid var(--agnes-border-faint);
+}
+
 .user-cell-info {
   display: flex;
   flex-direction: column;
@@ -331,10 +359,12 @@ onMounted(fetchUsers)
 .user-cell-name {
   color: var(--agnes-text-primary);
   font-weight: 500;
+  line-height: 1.4;
 }
 
-.user-cell-email {
+.user-cell-sub {
   font-size: 12px;
+  line-height: 1.4;
 }
 
 .role-dropdown {

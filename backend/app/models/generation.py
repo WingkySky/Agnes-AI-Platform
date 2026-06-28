@@ -60,6 +60,8 @@ class Generation(Base):
     moderated_at = Column(DateTime, nullable=True)                               # 最后审核时间
     # 自动预审命中的敏感关键词（JSON 数组，便于管理员快速查看）
     moderation_flags = Column(JSON, nullable=True)
+    # AI 预审状态：NULL（未触发）/ pending（审核中）/ passed（通过，等人工复审）/ violated（违规，已自动屏蔽）/ failed（审核失败，等人工兜底）
+    ai_moderation_status = Column(String(20), nullable=True, index=True)
 
     # ===== 流水线相关字段 =====
     # 关联的流水线运行 ID（用于追溯生成来源）
@@ -93,5 +95,6 @@ class Generation(Base):
             "moderation_status": self.moderation_status,
             "moderation_reason": self.moderation_reason,
             "moderation_flags": self.moderation_flags,
+            "ai_moderation_status": self.ai_moderation_status,
             "preset_id": self.preset_id,
         }

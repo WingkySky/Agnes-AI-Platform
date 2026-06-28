@@ -52,7 +52,7 @@ from app.routes import proxy as proxy_route
 from app.routes import preferences as preferences_route
 from app.routes import plaza as plaza_route
 from app.routes import admin_roles as admin_roles_route
-from app.routes import admin_moderation as admin_moderation_route
+from app.routes import admin_sensitive_words as admin_sensitive_words_route
 from app.routes import admin_watermark as admin_watermark_route
 from app.routes import admin_system_config as admin_system_config_route
 from app.routes import menu as menu_route
@@ -60,7 +60,7 @@ from app.routes import pipeline as pipeline_route
 from app.routes import style_elements as style_elements_route
 from app.routes import camera_presets as camera_presets_route
 from app.routes import prompt_presets as prompt_presets_route
-from app.routes import admin_presets as admin_presets_route
+from app.routes import admin_review as admin_review_route
 from app.services.video_poller import poller_manager
 from app.services.image_poller import image_poller_manager
 from app.services.agnes_client import agnes_client
@@ -406,7 +406,7 @@ app.include_router(proxy_route.router, prefix="/api", tags=["图片代理"])
 app.include_router(preferences_route.router, prefix="/api", tags=["用户偏好设置"])
 app.include_router(plaza_route.router, prefix="/api", tags=["作品广场"])
 app.include_router(admin_roles_route.router, prefix="/api", tags=["管理员-角色权限"])
-app.include_router(admin_moderation_route.router, prefix="/api", tags=["管理员-内容审核"])
+app.include_router(admin_sensitive_words_route.router, prefix="/api", tags=["管理员-敏感词管理"])
 app.include_router(admin_watermark_route.router, prefix="/api", tags=["管理员-水印配置"])
 app.include_router(admin_system_config_route.router, prefix="/api", tags=["管理员-系统配置"])
 app.include_router(menu_route.router, prefix="/api", tags=["菜单配置"])
@@ -414,7 +414,7 @@ app.include_router(pipeline_route.router, prefix="/api", tags=["创意流水线"
 app.include_router(style_elements_route.router, prefix="/api", tags=["风格元素"])
 app.include_router(camera_presets_route.router, prefix="/api", tags=["摄像机预设"])
 app.include_router(prompt_presets_route.router, prefix="/api", tags=["提示词预设"])
-app.include_router(admin_presets_route.router, prefix="/api", tags=["管理员-预设审核"])
+app.include_router(admin_review_route.router, prefix="/api", tags=["管理员-统一审核"])
 
 
 # ---------- 健康检查 ----------
