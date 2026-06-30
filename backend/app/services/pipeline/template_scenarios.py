@@ -21,7 +21,9 @@ TEMPLATE_SCENARIOS = [
         # 用户输入参数定义（label/placeholder/options 均为英文 fallback，前端用 i18n_key 查找翻译）
         "inputs_config": [
             {"key": "topic", "label_i18n": "topic_label", "label": "Story Theme", "type": "text", "required": True, "default": "", "placeholder_i18n": "topic_ph", "placeholder": "e.g. Modern urban romance story"},
-            {"key": "style", "label_i18n": "style_label", "label": "Art Style", "type": "style_select", "required": True, "default": "realistic", "options": ["realistic", "anime", "ink", "cyberpunk"], "options_i18n_prefix": "style_opt_"},
+            {"key": "style", "label_i18n": "style_label", "label": "Art Style", "type": "select", "required": True, "default": "realistic",
+             "options": [{"label": "Realistic", "value": "realistic"}, {"label": "Anime", "value": "anime"}, {"label": "Ink Wash", "value": "ink"}, {"label": "Cyberpunk", "value": "cyberpunk"}],
+             "options_i18n_prefix": "style_opt_"},
             {"key": "episodes", "label_i18n": "episodes_label", "label": "Episodes", "type": "number", "required": False, "default": 1, "min": 1, "max": 10},
             {"key": "duration_per_episode", "label_i18n": "duration_label", "label": "Duration per Episode (sec)", "type": "number", "required": False, "default": 30, "min": 10, "max": 300},
         ],
@@ -104,7 +106,9 @@ TEMPLATE_SCENARIOS = [
         "inputs_config": [
             {"key": "product", "label_i18n": "product_label", "label": "Product Name", "type": "text", "required": True, "default": "", "placeholder_i18n": "product_ph", "placeholder": "e.g. New smartphone"},
             {"key": "selling_points", "label_i18n": "selling_points_label", "label": "Selling Points", "type": "text", "required": True, "default": "", "placeholder_i18n": "selling_points_ph", "placeholder": "e.g. Long battery, HD camera"},
-            {"key": "style", "label_i18n": "style_label", "label": "Ad Style", "type": "style_select", "required": True, "default": "modern", "options": ["modern", "vintage", "tech", "warm"], "options_i18n_prefix": "style_opt_"},
+            {"key": "style", "label_i18n": "style_label", "label": "Ad Style", "type": "select", "required": True, "default": "modern",
+             "options": [{"label": "Modern", "value": "modern"}, {"label": "Vintage", "value": "vintage"}, {"label": "Tech", "value": "tech"}, {"label": "Warm", "value": "warm"}],
+             "options_i18n_prefix": "style_opt_"},
             {"key": "duration", "label_i18n": "duration_label", "label": "Video Duration (sec)", "type": "number", "required": False, "default": 30, "min": 10, "max": 120},
         ],
         "steps_config_template": [
@@ -160,8 +164,12 @@ TEMPLATE_SCENARIOS = [
         "i18n_key": "education",
         "inputs_config": [
             {"key": "topic", "label_i18n": "topic_label", "label": "Teaching Topic", "type": "text", "required": True, "default": "", "placeholder_i18n": "topic_ph", "placeholder": "e.g. Python programming basics"},
-            {"key": "grade", "label_i18n": "grade_label", "label": "Target Grade", "type": "style_select", "required": False, "default": "high_school", "options": ["elementary", "middle", "high_school", "college", "vocational"], "options_i18n_prefix": "grade_opt_"},
-            {"key": "style", "label_i18n": "style_label", "label": "Courseware Style", "type": "style_select", "required": False, "default": "clean", "options": ["clean", "lively", "interactive"], "options_i18n_prefix": "course_style_opt_"},
+            {"key": "grade", "label_i18n": "grade_label", "label": "Target Grade", "type": "select", "required": False, "default": "high_school",
+             "options": [{"label": "Elementary School", "value": "elementary"}, {"label": "Middle School", "value": "middle"}, {"label": "High School", "value": "high_school"}, {"label": "College", "value": "college"}, {"label": "Vocational", "value": "vocational"}],
+             "options_i18n_prefix": "grade_opt_"},
+            {"key": "style", "label_i18n": "style_label", "label": "Courseware Style", "type": "select", "required": False, "default": "clean",
+             "options": [{"label": "Clean & Minimal", "value": "clean"}, {"label": "Lively & Colorful", "value": "lively"}, {"label": "Interactive", "value": "interactive"}],
+             "options_i18n_prefix": "course_style_opt_"},
             {"key": "duration", "label_i18n": "duration_label", "label": "Video Duration (min)", "type": "number", "required": False, "default": 5, "min": 1, "max": 30},
         ],
         "steps_config_template": [
@@ -229,7 +237,9 @@ TEMPLATE_SCENARIOS = [
         "i18n_key": "anime",
         "inputs_config": [
             {"key": "character", "label_i18n": "character_label", "label": "Character Description", "type": "text", "required": True, "default": "", "placeholder_i18n": "character_ph", "placeholder": "e.g. Silver-haired girl, blue eyes, futuristic uniform"},
-            {"key": "style", "label_i18n": "style_label", "label": "Art Style", "type": "style_select", "required": True, "default": "japanese", "options": ["japanese", "american", "chinese", "european"], "options_i18n_prefix": "art_style_opt_"},
+            {"key": "style", "label_i18n": "style_label", "label": "Art Style", "type": "select", "required": True, "default": "japanese",
+             "options": [{"label": "Japanese Anime", "value": "japanese"}, {"label": "American Comic", "value": "american"}, {"label": "Chinese Style", "value": "chinese"}, {"label": "European Art", "value": "european"}],
+             "options_i18n_prefix": "art_style_opt_"},
             {"key": "story", "label_i18n": "story_label", "label": "Story Background", "type": "text", "required": False, "default": "", "placeholder_i18n": "story_ph", "placeholder": "Optional: Character story background"},
             {"key": "num_images", "label_i18n": "num_images_label", "label": "Number of Images", "type": "number", "required": False, "default": 4, "min": 1, "max": 20},
         ],

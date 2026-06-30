@@ -20,13 +20,6 @@
         </template>
         <!-- 编辑模式下提供导出、分享操作 + 专家模式开关 -->
         <template #extra>
-          <!-- 专家模式开关 -->
-          <el-tooltip :content="t('templateEditor.expertModeTip')" placement="top">
-            <span class="expert-mode-wrap">
-              <span class="expert-mode-label">{{ t('templateEditor.expertMode') }}</span>
-              <el-switch v-model="expertMode" size="small" />
-            </span>
-          </el-tooltip>
           <template v-if="isEdit">
             <!-- 公开状态标签 -->
             <el-tag
@@ -87,395 +80,281 @@
           label-width="120px"
           class="editor-form">
 
-          <!-- ====== 专家模式：JSON textarea ====== -->
-          <template v-if="expertMode">
-            <el-form-item :label="t('templateEditor.inputsConfig')">
-              <el-input
-                v-model="inputsConfigText"
-                type="textarea"
-                :rows="10"
-                :placeholder="inputsConfigPlaceholder" />
-              <div class="form-hint">{{ t('templateEditor.inputsConfigHint') }}</div>
+          <!-- ===== 基础信息块 ===== -->
+          <div class="form-section">
+            <div class="section-title">{{ t('templateEditor.basicInfo') }}</div>
+            <!-- 模板名称 -->
+            <el-form-item :label="t('templateEditor.name')" prop="name">
+              <el-input v-model="form.name" :placeholder="t('templateEditor.namePlaceholder')" />
             </el-form-item>
-            <el-form-item :label="t('templateEditor.stepsConfig')">
+            <!-- 模板 Key -->
+            <el-form-item :label="t('templateEditor.key')" prop="key">
               <el-input
-                v-model="stepsConfigText"
-                type="textarea"
-                :rows="14"
-                :placeholder="stepsConfigPlaceholder" />
-              <div class="form-hint">{{ t('templateEditor.stepsConfigHint') }}</div>
+                v-model="form.key"
+                :placeholder="t('templateEditor.keyPlaceholder')"
+                :disabled="isEdit" />
+              <div class="form-hint">{{ t('templateEditor.keyHint') }}</div>
             </el-form-item>
-          </template>
+            <!-- 分类 -->
+            <el-form-item :label="t('templateEditor.category')" prop="category">
+              <el-select v-model="form.category" :placeholder="t('templateEditor.categoryPlaceholder')">
+                <el-option
+                  v-for="cat in categoryOptions"
+                  :key="cat.value"
+                  :label="cat.label"
+                  :value="cat.value" />
+              </el-select>
+            </el-form-item>
+            <!-- 描述 -->
+            <el-form-item :label="t('templateEditor.description')" prop="description">
+              <el-input
+                v-model="form.description"
+                type="textarea"
+                :rows="2"
+                :placeholder="t('templateEditor.descriptionPlaceholder')" />
+            </el-form-item>
+            <!-- Tags -->
+            <el-form-item :label="t('templateEditor.tags')">
+              <el-select
+                v-model="form.tags"
+                multiple
+                filterable
+                allow-create
+                :placeholder="t('templateEditor.tagsPlaceholder')" />
+            </el-form-item>
+            <!-- 公开/私有 -->
+            <el-form-item :label="t('templateEditor.visibility')">
+              <el-switch
+                v-model="form.is_public"
+                :active-text="t('templateEditor.public')"
+                :inactive-text="t('templateEditor.private')" />
+            </el-form-item>
+          </div>
 
-          <!-- ====== 结构化模式：分块表单 ====== -->
-          <template v-else>
-            <!-- ===== 基础信息块 ===== -->
-            <div class="form-section">
-              <div class="section-title">{{ t('templateEditor.basicInfo') }}</div>
-              <!-- 模板名称 -->
-              <el-form-item :label="t('templateEditor.name')" prop="name">
-                <el-input v-model="form.name" :placeholder="t('templateEditor.namePlaceholder')" />
-              </el-form-item>
-              <!-- 模板 Key -->
-              <el-form-item :label="t('templateEditor.key')" prop="key">
+          <!-- ===== 缩略图块 ===== -->
+          <div class="form-section">
+            <div class="section-title">{{ t('templateEditor.thumbnailUrl') }}</div>
+            <el-form-item :label="t('templateEditor.thumbnailUrl')">
+              <div class="thumb-input-row">
                 <el-input
-                  v-model="form.key"
-                  :placeholder="t('templateEditor.keyPlaceholder')"
-                  :disabled="isEdit" />
-                <div class="form-hint">{{ t('templateEditor.keyHint') }}</div>
-              </el-form-item>
-              <!-- 分类 -->
-              <el-form-item :label="t('templateEditor.category')" prop="category">
-                <el-select v-model="form.category" :placeholder="t('templateEditor.categoryPlaceholder')">
-                  <el-option
-                    v-for="cat in categoryOptions"
-                    :key="cat.value"
-                    :label="cat.label"
-                    :value="cat.value" />
-                </el-select>
-              </el-form-item>
-              <!-- 描述 -->
-              <el-form-item :label="t('templateEditor.description')" prop="description">
-                <el-input
-                  v-model="form.description"
-                  type="textarea"
-                  :rows="2"
-                  :placeholder="t('templateEditor.descriptionPlaceholder')" />
-              </el-form-item>
-              <!-- Tags -->
-              <el-form-item :label="t('templateEditor.tags')">
-                <el-select
-                  v-model="form.tags"
-                  multiple
-                  filterable
-                  allow-create
-                  :placeholder="t('templateEditor.tagsPlaceholder')" />
-              </el-form-item>
-              <!-- 公开/私有 -->
-              <el-form-item :label="t('templateEditor.visibility')">
-                <el-switch
-                  v-model="form.is_public"
-                  :active-text="t('templateEditor.public')"
-                  :inactive-text="t('templateEditor.private')" />
-              </el-form-item>
-            </div>
-
-            <!-- ===== 缩略图块 ===== -->
-            <div class="form-section">
-              <div class="section-title">{{ t('templateEditor.thumbnailUrl') }}</div>
-              <el-form-item :label="t('templateEditor.thumbnailUrl')">
-                <div class="thumb-input-row">
-                  <el-input
-                    v-model="form.thumbnail_url"
-                    :placeholder="t('templateEditor.thumbnailUrlPlaceholder')" />
-                  <el-button
-                    :loading="generatingThumb"
-                    type="primary"
-                    plain
-                    size="default"
-                    @click="handleAiGenerateThumb">
-                    <el-icon><MagicStick /></el-icon>
-                    {{ t('templateEditor.aiGenerateThumbnail') }}
-                  </el-button>
-                  <el-button
-                    type="primary"
-                    plain
-                    size="default"
-                    @click="historyPickerVisible = true">
-                    <el-icon><PictureFilled /></el-icon>
-                    {{ t('templateEditor.historyImage') }}
-                  </el-button>
-                </div>
-                <div v-if="form.thumbnail_url" class="thumbnail-preview">
-                  <img :src="form.thumbnail_url" alt="thumbnail" @error="onThumbError" />
-                </div>
-              </el-form-item>
-            </div>
-
-            <!-- ===== 输入参数块 ===== -->
-            <div class="form-section">
-              <div class="section-title">
-                {{ t('templateEditor.inputParams') }}
-                <el-button link type="primary" size="small" @click="addInputRow">
-                  <el-icon><Plus /></el-icon>
-                  {{ t('common.add') }}
-                </el-button>
-              </div>
-              <div v-if="form.inputs_config.length === 0" class="empty-block">
-                {{ t('templateEditor.inputsEmpty') }}
-              </div>
-              <div
-                v-for="(item, idx) in form.inputs_config"
-                :key="'in-' + idx"
-                class="input-row">
-                <el-input
-                  v-model="item.key"
-                  :placeholder="t('templateEditor.fieldKey')"
-                  class="col-key" />
-                <el-input
-                  v-model="item.label"
-                  :placeholder="t('templateEditor.fieldLabel')"
-                  class="col-label" />
-                <el-select
-                  v-model="item.type"
-                  :placeholder="t('templateEditor.fieldType')"
-                  class="col-type"
-                  @change="onInputTypeChange(item)">
-                  <el-option label="text" value="text" />
-                  <el-option label="number" value="number" />
-                  <el-option label="style_select" value="style_select" />
-                  <el-option label="boolean" value="boolean" />
-                </el-select>
-                <el-checkbox v-model="item.required" class="col-required">
-                  {{ t('templateEditor.fieldRequired') }}
-                </el-checkbox>
-                <el-input
-                  v-model="item.placeholder"
-                  :placeholder="t('templateEditor.fieldPlaceholder')"
-                  class="col-placeholder" />
-                <!-- default 控件按 type 联动 -->
-                <component
-                  :is="getDefaultControl(item.type)"
-                  v-model="item.default"
-                  :placeholder="t('templateEditor.fieldDefault')"
-                  :min="item.min"
-                  :max="item.max"
-                  class="col-default">
-                </component>
-                <!-- number 类型额外提供 min/max -->
-                <template v-if="item.type === 'number'">
-                  <el-input-number
-                    v-model="item.min"
-                    :placeholder="t('templateEditor.fieldMin')"
-                    class="col-min"
-                    controls-position="right" />
-                  <el-input-number
-                    v-model="item.max"
-                    :placeholder="t('templateEditor.fieldMax')"
-                    class="col-max"
-                    controls-position="right" />
-                </template>
+                  v-model="form.thumbnail_url"
+                  :placeholder="t('templateEditor.thumbnailUrlPlaceholder')" />
                 <el-button
-                  link
-                  type="danger"
-                  size="small"
-                  @click="removeInputRow(idx)">
-                  <el-icon><Delete /></el-icon>
+                  :loading="generatingThumb"
+                  type="primary"
+                  plain
+                  size="default"
+                  @click="handleAiGenerateThumb">
+                  <el-icon><MagicStick /></el-icon>
+                  {{ t('templateEditor.aiGenerateThumbnail') }}
+                </el-button>
+                <el-button
+                  type="primary"
+                  plain
+                  size="default"
+                  @click="historyPickerVisible = true">
+                  <el-icon><PictureFilled /></el-icon>
+                  {{ t('templateEditor.historyImage') }}
                 </el-button>
               </div>
-            </div>
+              <div v-if="form.thumbnail_url" class="thumbnail-preview">
+                <img :src="form.thumbnail_url" alt="thumbnail" @error="onThumbError" />
+              </div>
+            </el-form-item>
+          </div>
 
-            <!-- ===== 步骤配置块 ===== -->
-            <div class="form-section">
-              <div class="section-title">
-                {{ t('templateEditor.stepsConfig') }}
-                <el-button link type="primary" size="small" @click="addStep">
+          <!-- ===== 输入参数块（简化版：只显示 label + default + 删除）===== -->
+          <div class="form-section">
+            <div class="section-title">
+              {{ t('templateEditor.inputParams') }}
+              <el-dropdown trigger="click" @command="addInputFromPreset">
+                <el-button link type="primary" size="small">
                   <el-icon><Plus /></el-icon>
                   {{ t('common.add') }}
                 </el-button>
-              </div>
-              <div v-if="form.steps_config.length === 0" class="empty-block">
-                {{ t('templateEditor.stepsEmpty') }}
-              </div>
-              <el-collapse v-model="activeStepKeys" class="steps-collapse">
-                <el-collapse-item
-                  v-for="(step, idx) in form.steps_config"
-                  :key="'st-' + idx"
-                  :name="idx">
-                  <template #title>
-                    <div class="step-card-header">
-                      <span class="step-index">#{{ idx + 1 }}</span>
-                      <span class="step-key">{{ step.key || t('templateEditor.untitledStep') }}</span>
-                      <el-tag size="small" type="info" effect="plain">{{ step.type || '-' }}</el-tag>
-                      <div class="step-header-actions" @click.stop>
-                        <el-button
-                          link
-                          size="small"
-                          :disabled="idx === 0"
-                          @click="moveStep(idx, -1)">
-                          <el-icon><Top /></el-icon>
-                        </el-button>
-                        <el-button
-                          link
-                          size="small"
-                          :disabled="idx === form.steps_config.length - 1"
-                          @click="moveStep(idx, 1)">
-                          <el-icon><Bottom /></el-icon>
-                        </el-button>
-                        <el-button
-                          link
-                          type="danger"
-                          size="small"
-                          @click="removeStep(idx)">
-                          <el-icon><Delete /></el-icon>
-                        </el-button>
-                      </div>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="text">{{ t('templateEditor.inputTypeText') || '主题/文本' }}</el-dropdown-item>
+                    <el-dropdown-item command="number">{{ t('templateEditor.inputTypeNumber') || '数量' }}</el-dropdown-item>
+                    <el-dropdown-item command="style_select">{{ t('templateEditor.inputTypeStyle') || '风格' }}</el-dropdown-item>
+                    <el-dropdown-item command="boolean">{{ t('templateEditor.inputTypeBoolean') || '开关' }}</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
+            <div v-if="form.inputs_config.length === 0" class="empty-block">
+              {{ t('templateEditor.inputsEmpty') }}
+            </div>
+            <div
+              v-for="(item, idx) in form.inputs_config"
+              :key="'in-' + idx"
+              class="input-row-simple">
+              <span class="input-type-badge">{{ inputTypeBadge(item.type) }}</span>
+              <el-input
+                v-model="item.label"
+                :placeholder="t('templateEditor.fieldLabel')"
+                class="input-label" />
+              <component
+                :is="getDefaultControl(item.type)"
+                v-model="item.default"
+                :placeholder="t('templateEditor.fieldDefault')"
+                :min="item.min"
+                :max="item.max"
+                size="small"
+                class="input-default" />
+              <el-button
+                link
+                type="danger"
+                size="small"
+                @click="removeInputRow(idx)">
+                <el-icon><Delete /></el-icon>
+              </el-button>
+            </div>
+          </div>
+
+          <!-- ===== 步骤配置块（接入预设步骤库）===== -->
+          <div class="form-section">
+            <div class="section-title">{{ t('templateEditor.stepsConfig') }}</div>
+            <!-- 预设步骤库横向按钮组 -->
+            <div class="step-preset-bar">
+              <el-button
+                v-for="preset in WORKSHOP_STEP_PRESETS"
+                :key="preset.presetKey"
+                size="small"
+                :style="{ '--preset-color': preset.color }"
+                class="preset-btn"
+                @click="addStepFromPreset(preset.presetKey)">
+                <el-icon><component :is="getPresetIcon(preset.icon)" /></el-icon>
+                <span>{{ preset.name }}</span>
+                <el-icon class="preset-add"><Plus /></el-icon>
+              </el-button>
+            </div>
+            <div v-if="form.steps_config.length === 0" class="empty-block">
+              {{ t('templateEditor.stepsEmpty') }}
+            </div>
+            <el-collapse v-model="activeStepKeys" class="steps-collapse">
+              <el-collapse-item
+                v-for="(step, idx) in form.steps_config"
+                :key="'st-' + idx"
+                :name="idx">
+                <template #title>
+                  <div class="step-card-header">
+                    <span class="step-index">#{{ idx + 1 }}</span>
+                    <el-input
+                      v-model="step.name"
+                      :placeholder="t('templateEditor.stepNamePlaceholder')"
+                      size="small"
+                      class="step-name-input"
+                      @click.stop />
+                    <el-tag size="small" type="info" effect="plain">{{ step.type }}</el-tag>
+                    <div class="step-header-actions" @click.stop>
+                      <el-button
+                        link
+                        size="small"
+                        :disabled="idx === 0"
+                        @click="moveStep(idx, -1)">
+                        <el-icon><Top /></el-icon>
+                      </el-button>
+                      <el-button
+                        link
+                        size="small"
+                        :disabled="idx === form.steps_config.length - 1"
+                        @click="moveStep(idx, 1)">
+                        <el-icon><Bottom /></el-icon>
+                      </el-button>
+                      <el-button
+                        link
+                        type="danger"
+                        size="small"
+                        @click="removeStep(idx)">
+                        <el-icon><Delete /></el-icon>
+                      </el-button>
                     </div>
-                  </template>
-                  <div class="step-form">
-                    <el-form-item :label="t('templateEditor.fieldKey')">
-                      <el-input v-model="step.key" :placeholder="t('templateEditor.stepKeyPlaceholder')" />
-                    </el-form-item>
-                    <el-form-item :label="t('templateEditor.fieldLabel')">
-                      <el-input v-model="step.name" :placeholder="t('templateEditor.stepNamePlaceholder')" />
-                    </el-form-item>
-                    <el-form-item :label="t('templateEditor.fieldType')">
-                      <el-select v-model="step.type" :placeholder="t('templateEditor.fieldType')" @change="onStepTypeChange(step)">
-                        <el-option label="llm_generate" value="llm_generate" />
-                        <el-option label="image_batch" value="image_batch" />
-                        <el-option label="tts_generate" value="tts_generate" />
-                        <el-option label="video_batch" value="video_batch" />
-                        <el-option label="ffmpeg_composite" value="ffmpeg_composite" />
-                      </el-select>
-                    </el-form-item>
-                    <el-form-item :label="t('templateEditor.dependsOn')">
-                      <el-select
-                        v-model="step.depends_on"
-                        multiple
-                        :placeholder="t('templateEditor.dependsOnPlaceholder')">
-                        <el-option
-                          v-for="other in otherStepKeys(step)"
-                          :key="other.key"
-                          :label="other.key + (other.name ? ' / ' + other.name : '')"
-                          :value="other.key" />
-                      </el-select>
-                    </el-form-item>
-
-                    <!-- config 字段按 type 联动 -->
-                    <!-- llm_generate: use_script_template / model / temperature / json_output / prompt_template -->
-                    <template v-if="step.type === 'llm_generate'">
-                      <el-form-item label="use_script_template">
-                        <el-switch v-model="step.config.use_script_template" />
-                      </el-form-item>
-                      <el-form-item label="model">
-                        <el-input v-model="step.config.model" placeholder="e.g. agnes-chat-1.1" />
-                      </el-form-item>
-                      <el-form-item label="temperature">
-                        <el-input-number
-                          v-model="step.config.temperature"
-                          :min="0" :max="2" :step="0.1"
-                          controls-position="right" />
-                      </el-form-item>
-                      <el-form-item label="json_output">
-                        <el-switch v-model="step.config.json_output" />
-                      </el-form-item>
-                      <el-form-item label="prompt_template">
-                        <el-input
-                          v-model="step.config.prompt_template"
-                          type="textarea"
-                          :rows="4"
-                          placeholder="Jinja2 / f-string 模板" />
-                      </el-form-item>
-                    </template>
-
-                    <!-- image_batch: source / from_step / items_path / prompt_field / size -->
-                    <template v-else-if="step.type === 'image_batch'">
-                      <el-form-item label="source">
-                        <el-radio-group v-model="step.config.source">
-                          <el-radio value="from_step">from_step</el-radio>
-                          <el-radio value="items_path">items_path</el-radio>
-                        </el-radio-group>
-                      </el-form-item>
-                      <el-form-item v-if="step.config.source === 'from_step'" label="from_step">
-                        <el-select v-model="step.config.from_step" :placeholder="t('templateEditor.dependsOnPlaceholder')">
-                          <el-option
-                            v-for="other in otherStepKeys(step)"
-                            :key="other.key"
-                            :label="other.key"
-                            :value="other.key" />
-                        </el-select>
-                      </el-form-item>
-                      <el-form-item v-if="step.config.source === 'items_path'" label="items_path">
-                        <el-input v-model="step.config.items_path" placeholder="e.g. scenes" />
-                      </el-form-item>
-                      <el-form-item label="prompt_field">
-                        <el-input v-model="step.config.prompt_field" placeholder="e.g. prompt" />
-                      </el-form-item>
-                      <el-form-item label="max_concurrent">
-                        <el-input-number v-model="step.config.size" :min="1" :max="20" controls-position="right" />
-                      </el-form-item>
-                    </template>
-
-                    <!-- tts_generate: voice / speed -->
-                    <template v-else-if="step.type === 'tts_generate'">
-                      <el-form-item label="voice">
-                        <el-input v-model="step.config.voice" placeholder="e.g. female_gentle" />
-                      </el-form-item>
-                      <el-form-item label="speed">
-                        <el-input-number v-model="step.config.speed" :min="0.5" :max="2" :step="0.1" controls-position="right" />
-                      </el-form-item>
-                    </template>
-
-                    <!-- video_batch: source / from_step / items_path / size / max_concurrent -->
-                    <template v-else-if="step.type === 'video_batch'">
-                      <el-form-item label="source">
-                        <el-radio-group v-model="step.config.source">
-                          <el-radio value="from_step">from_step</el-radio>
-                          <el-radio value="items_path">items_path</el-radio>
-                        </el-radio-group>
-                      </el-form-item>
-                      <el-form-item v-if="step.config.source === 'from_step'" label="from_step">
-                        <el-select v-model="step.config.from_step" :placeholder="t('templateEditor.dependsOnPlaceholder')">
-                          <el-option
-                            v-for="other in otherStepKeys(step)"
-                            :key="other.key"
-                            :label="other.key"
-                            :value="other.key" />
-                        </el-select>
-                      </el-form-item>
-                      <el-form-item v-if="step.config.source === 'items_path'" label="items_path">
-                        <el-input v-model="step.config.items_path" placeholder="e.g. scenes" />
-                      </el-form-item>
-                      <el-form-item label="max_concurrent">
-                        <el-input-number v-model="step.config.max_concurrent" :min="1" :max="20" controls-position="right" />
-                      </el-form-item>
-                    </template>
-
-                    <!-- ffmpeg_composite: output_format / codec -->
-                    <template v-else-if="step.type === 'ffmpeg_composite'">
-                      <el-form-item label="output_format">
-                        <el-input v-model="step.config.output_format" placeholder="e.g. mp4" />
-                      </el-form-item>
-                      <el-form-item label="codec">
-                        <el-input v-model="step.config.codec" placeholder="e.g. libx264" />
-                      </el-form-item>
-                    </template>
                   </div>
-                </el-collapse-item>
-              </el-collapse>
-            </div>
+                </template>
+                <div class="step-form">
+                  <!-- 步骤 key（折叠在高级区） -->
+                  <el-form-item :label="t('templateEditor.fieldKey')">
+                    <el-input v-model="step.key" :placeholder="t('templateEditor.stepKeyPlaceholder')" />
+                  </el-form-item>
 
-            <!-- ===== 高级设置块 ===== -->
-            <div class="form-section">
-              <div class="section-title">{{ t('templateEditor.advancedSettings') }}</div>
-              <el-form-item :label="t('templateEditor.scriptTemplate')">
-                <el-select
-                  v-model="form.script_template_id"
-                  clearable
-                  :placeholder="t('templateEditor.scriptTemplatePlaceholder')">
-                  <el-option
-                    v-for="s in scriptTemplates"
-                    :key="s.id"
-                    :label="s.name"
-                    :value="s.id" />
-                </el-select>
-              </el-form-item>
-              <el-form-item :label="t('templateEditor.outputMapping')">
-                <el-input
-                  v-model="outputMappingText"
-                  type="textarea"
-                  :rows="4"
-                  :placeholder="t('templateEditor.outputMappingPlaceholder')" />
-                <div class="form-hint">{{ t('templateEditor.outputMappingHint') }}</div>
-              </el-form-item>
-              <el-form-item :label="t('templateEditor.estimatedCredits')">
-                <el-input-number v-model="form.estimated_credits" :min="0" controls-position="right" />
-              </el-form-item>
-              <el-form-item :label="t('templateEditor.estimatedTime')">
-                <el-input-number v-model="form.estimated_time_minutes" :min="1" controls-position="right" />
-              </el-form-item>
+                  <!-- 提示词模板（llm_generate 类型，用户最常改的） -->
+                  <el-form-item
+                    v-if="step.type === 'llm_generate'"
+                    :label="t('templateEditor.promptTemplate')">
+                    <el-input
+                      v-model="step.config.prompt"
+                      type="textarea"
+                      :rows="4"
+                      :placeholder="t('templateEditor.promptPlaceholder') || '提示词模板，用 双花括号 引用输入参数'" />
+                    <div class="form-hint">{{ t('templateEditor.promptHint') || '用 双花括号+变量名 等占位符引用输入参数' }}</div>
+                  </el-form-item>
+
+                  <!-- 高级参数折叠区 -->
+                  <el-divider content-position="left">
+                    <span class="advanced-toggle">{{ t('templateEditor.advancedSettings') }}</span>
+                  </el-divider>
+                  <!-- depends_on（依赖步骤） -->
+                  <el-form-item :label="t('templateEditor.dependsOn')">
+                    <el-select
+                      v-model="step.depends_on"
+                      multiple
+                      :placeholder="t('templateEditor.dependsOnPlaceholder')">
+                      <el-option
+                        v-for="other in otherStepKeys(step)"
+                        :key="other.key"
+                        :label="other.key + (other.name ? ' / ' + other.name : '')"
+                        :value="other.key" />
+                    </el-select>
+                  </el-form-item>
+                  <!-- 按预设的 advancedFields 动态渲染高级参数 -->
+                  <el-form-item
+                    v-for="field in getAdvancedFields(step)"
+                    :key="field.key"
+                    :label="field.label">
+                    <el-input
+                      v-if="field.type === 'text'"
+                      v-model="step.config[field.key]" />
+                    <el-input-number
+                      v-else-if="field.type === 'number'"
+                      v-model="step.config[field.key]"
+                      :min="field.min"
+                      :max="field.max"
+                      :step="field.step || 1"
+                      controls-position="right" />
+                    <el-select
+                      v-else-if="field.type === 'select'"
+                      v-model="step.config[field.key]">
+                      <el-option
+                        v-for="opt in field.options"
+                        :key="opt.value"
+                        :label="opt.label"
+                        :value="opt.value" />
+                    </el-select>
+                    <el-switch
+                      v-else-if="field.type === 'boolean'"
+                      v-model="step.config[field.key]" />
+                  </el-form-item>
+                </div>
+              </el-collapse-item>
+            </el-collapse>
+          </div>
+
+          <!-- 校验错误列表（保存前预校验失败时显示） -->
+          <div v-if="validationErrors.length > 0" class="form-section validation-errors-section">
+            <div class="section-title" style="color: var(--el-color-danger)">
+              {{ t('templateEditor.validationFailed') || '校验失败' }}（{{ validationErrors.length }} 处）
             </div>
-          </template>
+            <div
+              v-for="(err, idx) in validationErrors"
+              :key="idx"
+              class="validation-error-item">
+              <el-icon color="var(--el-color-danger)"><WarningFilled /></el-icon>
+              <span class="err-step">{{ err.step_key || '(全局)' }}</span>
+              <span class="err-field">[{{ err.field }}]</span>
+              <span class="err-reason">{{ err.reason }}</span>
+            </div>
+          </div>
 
           <!-- 操作按钮 -->
           <el-form-item>
@@ -581,12 +460,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, reactive, watch } from 'vue'
+import { ref, computed, onMounted, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Download, UploadFilled, RemoveFilled, MagicStick, PictureFilled,
-  Plus, Delete, Top, Bottom, ArrowDown,
+  Plus, Delete, Top, Bottom, ArrowDown, WarningFilled,
+  Document, UserFilled, Picture, VideoPlay, Microphone, ChatLineSquare, Connection,
 } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import {
@@ -599,11 +479,18 @@ import {
   generateTemplateThumbnail,
   getStylePresets,
   getScriptTemplates,
+  validateTemplate,
 } from '@/api/pipeline'
 import type { PipelineTemplate, PipelineTemplateRevision, StylePreset, ScriptTemplate } from '@/types'
 import type { FormInstance, FormRules } from 'element-plus'
 import TemplateImportExportDialog from '@/components/pipeline/TemplateImportExportDialog.vue'
 import HistoryImagePicker from '@/components/pipeline/HistoryImagePicker.vue'
+import {
+  WORKSHOP_STEP_PRESETS,
+  getStepPreset,
+  createStepFromPreset,
+  type WorkshopStepType,
+} from '@/config/workshop-step-presets'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -630,8 +517,8 @@ const presetExportIds = ref<number[]>([])
 // ---------- 历史选图 ----------
 const historyPickerVisible = ref(false)
 
-// ---------- 专家模式 ----------
-const expertMode = ref(false)
+// ---------- 保存前预校验错误列表 ----------
+const validationErrors = ref<{ step_key: string | null; field: string; reason: string }[]>([])
 
 // ---------- 关联资源（StylePreset / ScriptTemplate） ----------
 const stylePresets = ref<StylePreset[]>([])
@@ -644,17 +531,6 @@ const categoryOptions = [
   { value: 'education', label: t('workshop.category.education') },
   { value: 'entertainment', label: t('workshop.category.entertainment') },
 ]
-
-// 专家模式 JSON 文本（仅专家模式使用）
-const inputsConfigText = ref('[]')
-const stepsConfigText = ref('[]')
-
-// 旧 placeholder 文案保留作为专家模式参考
-const inputsConfigPlaceholder = 'JSON 数组，每个元素为 {key, label, type, required, placeholder, default, min, max}'
-const stepsConfigPlaceholder = 'JSON 数组，每个元素为 {key, name, type, config, depends_on}'
-
-// 输出映射 JSON 文本
-const outputMappingText = ref('{}')
 
 // 折叠面板默认展开项
 const activeStepKeys = ref<number[]>([0])
@@ -671,8 +547,6 @@ const form = reactive({
   inputs_config: [] as any[],
   steps_config: [] as any[],
   script_template_id: undefined as number | undefined,
-  estimated_credits: 0,
-  estimated_time_minutes: 10,
 })
 
 const rules: FormRules = {
@@ -686,6 +560,42 @@ const rules: FormRules = {
 
 function goBack() {
   router.push('/workshop')
+}
+
+// ---------- 预设步骤库相关 ----------
+
+/** Element Plus 图标名 → 组件 映射 */
+const PRESET_ICON_MAP: Record<string, any> = {
+  Document,
+  UserFilled,
+  Picture,
+  VideoPlay,
+  Microphone,
+  ChatLineSquare,
+  Connection,
+}
+
+function getPresetIcon(iconName: string) {
+  return PRESET_ICON_MAP[iconName] || Document
+}
+
+/** 从预设添加步骤 */
+function addStepFromPreset(presetKey: string) {
+  const idx = form.steps_config.length
+  const newStep = createStepFromPreset(presetKey, idx)
+  // 自动填充 depends_on：默认依赖上一个步骤
+  if (idx > 0 && form.steps_config[idx - 1]?.key) {
+    newStep.depends_on = [form.steps_config[idx - 1].key]
+  }
+  form.steps_config.push(newStep)
+  // 自动展开新添加的步骤
+  activeStepKeys.value = [idx]
+}
+
+/** 获取步骤的高级字段规格（从预设查） */
+function getAdvancedFields(step: any) {
+  const preset = WORKSHOP_STEP_PRESETS.find((p) => p.type === step.type)
+  return preset?.advancedFields || []
 }
 
 // ---------- 模板审核状态 ----------
@@ -802,15 +712,30 @@ function onPickHistoryImage(url: string) {
   form.thumbnail_url = url
 }
 
-// ---------- 输入参数（inputs_config）操作 ----------
-function addInputRow() {
+// ---------- 输入参数（inputs_config）简化操作 ----------
+
+/** 从预设类型添加输入（key/type/required 由预设自动填） */
+function addInputFromPreset(type: string) {
+  const presetMap: Record<string, { key: string; label: string; required: boolean }> = {
+    text: { key: 'theme', label: t('templateEditor.defaultInputLabel') || '主题', required: true },
+    number: { key: 'count', label: t('templateEditor.inputTypeNumber') || '数量', required: false },
+    style_select: { key: 'style', label: t('templateEditor.inputTypeStyle') || '风格', required: false },
+    boolean: { key: 'enable', label: t('templateEditor.inputTypeBoolean') || '开关', required: false },
+  }
+  const preset = presetMap[type] || presetMap.text
+  // key 去重：若已存在则追加 _N
+  let finalKey = preset.key
+  let n = 2
+  while (form.inputs_config.some((it) => it.key === finalKey)) {
+    finalKey = `${preset.key}_${n++}`
+  }
   form.inputs_config.push({
-    key: '',
-    label: '',
-    type: 'text',
-    required: false,
+    key: finalKey,
+    label: preset.label,
+    type,
+    required: preset.required,
     placeholder: '',
-    default: '',
+    default: type === 'number' ? 0 : type === 'boolean' ? false : '',
   })
 }
 
@@ -818,29 +743,15 @@ function removeInputRow(idx: number) {
   form.inputs_config.splice(idx, 1)
 }
 
-/** type 切换时重置 default/min/max 字段 */
-function onInputTypeChange(item: any) {
-  switch (item.type) {
-    case 'number':
-      item.default = typeof item.default === 'number' ? item.default : 0
-      if (item.min == null) item.min = 0
-      if (item.max == null) item.max = 100
-      break
-    case 'boolean':
-      item.default = !!item.default
-      delete item.min
-      delete item.max
-      break
-    case 'style_select':
-      item.default = item.default ?? ''
-      delete item.min
-      delete item.max
-      break
-    default:
-      item.default = item.default ?? ''
-      delete item.min
-      delete item.max
+/** 输入类型徽章文字 */
+function inputTypeBadge(type: string): string {
+  const map: Record<string, string> = {
+    text: '文本',
+    number: '数字',
+    style_select: '风格',
+    boolean: '开关',
   }
+  return map[type] || type
 }
 
 /** 根据 type 返回 default 控件组件名（用于 <component :is>） */
@@ -854,17 +765,6 @@ function getDefaultControl(type: string) {
 }
 
 // ---------- 步骤（steps_config）操作 ----------
-function addStep() {
-  form.steps_config.push({
-    key: '',
-    name: '',
-    type: 'llm_generate',
-    depends_on: [],
-    config: {},
-  })
-  activeStepKeys.value.push(form.steps_config.length - 1)
-}
-
 function removeStep(idx: number) {
   form.steps_config.splice(idx, 1)
   // 重新计算折叠面板展开项索引
@@ -881,60 +781,14 @@ function moveStep(idx: number, dir: number) {
   ;[arr[idx], arr[target]] = [arr[target], arr[idx]]
 }
 
-/** type 切换时初始化 config 默认值 */
-function onStepTypeChange(step: any) {
-  // 切换时重置 config
-  step.config = {}
-  switch (step.type) {
-    case 'llm_generate':
-      step.config = { use_script_template: false, model: '', temperature: 0.7, json_output: false, prompt_template: '' }
-      break
-    case 'image_batch':
-      step.config = { source: 'from_step', from_step: '', items_path: '', prompt_field: 'prompt', size: 4 }
-      break
-    case 'tts_generate':
-      step.config = { voice: '', speed: 1.0 }
-      break
-    case 'video_batch':
-      step.config = { source: 'from_step', from_step: '', items_path: '', max_concurrent: 2 }
-      break
-    case 'ffmpeg_composite':
-      step.config = { output_format: 'mp4', codec: 'libx264' }
-      break
-  }
-}
-
 /** 返回除当前 step 之外的其他 step（用于 depends_on 多选） */
 function otherStepKeys(currentStep: any) {
   return form.steps_config.filter((s) => s !== currentStep && !!s.key)
 }
 
-// ---------- 专家模式：结构化 <-> JSON 双向切换 ----------
-watch(expertMode, (newVal) => {
-  if (newVal) {
-    // 切换到专家模式：序列化结构化数据到 JSON textarea
-    inputsConfigText.value = JSON.stringify(form.inputs_config, null, 2)
-    stepsConfigText.value = JSON.stringify(form.steps_config, null, 2)
-  } else {
-    // 切回结构化模式：解析 JSON 回填表单；解析失败保留 textarea 模式
-    try {
-      const parsedInputs = JSON.parse(inputsConfigText.value)
-      const parsedSteps = JSON.parse(stepsConfigText.value)
-      if (!Array.isArray(parsedInputs) || !Array.isArray(parsedSteps)) {
-        throw new Error('not array')
-      }
-      form.inputs_config = parsedInputs
-      form.steps_config = parsedSteps
-    } catch (e: any) {
-      ElMessage.error(t('templateEditor.expertModeParseFailed'))
-      expertMode.value = true
-    }
-  }
-})
-
 // ---------- 右侧预览计算属性 ----------
-const previewInputs = computed(() => (expertMode.value ? [] : form.inputs_config))
-const previewSteps = computed(() => (expertMode.value ? [] : form.steps_config))
+const previewInputs = computed(() => form.inputs_config)
+const previewSteps = computed(() => form.steps_config)
 
 // ---------- 加载关联资源（StylePreset / ScriptTemplate） ----------
 async function loadRelatedResources() {
@@ -962,9 +816,6 @@ function fillFormFromTemplate(tpl: PipelineTemplate) {
   form.inputs_config = (tpl.inputs_config || []).map((it: any) => ({ ...it }))
   form.steps_config = (tpl.steps_config || []).map((it: any) => ({ ...it, config: { ...(it.config || {}) } }))
   form.script_template_id = tpl.script_template_id ?? undefined
-  form.estimated_credits = tpl.estimated_credits ?? 0
-  form.estimated_time_minutes = tpl.estimated_time_minutes ?? 10
-  outputMappingText.value = tpl.output_mapping ? JSON.stringify(tpl.output_mapping, null, 2) : '{}'
 }
 
 function fillFormFromRevision(rev: PipelineTemplateRevision) {
@@ -976,9 +827,6 @@ function fillFormFromRevision(rev: PipelineTemplateRevision) {
   form.inputs_config = (rev.inputs_config || []).map((it: any) => ({ ...it }))
   form.steps_config = (rev.steps_config || []).map((it: any) => ({ ...it, config: { ...(it.config || {}) } }))
   form.script_template_id = rev.script_template_id ?? undefined
-  form.estimated_credits = rev.estimated_credits ?? 0
-  form.estimated_time_minutes = rev.estimated_time_minutes ?? 10
-  outputMappingText.value = rev.output_mapping ? JSON.stringify(rev.output_mapping, null, 2) : '{}'
   // 注意：revision 不含 is_public / key 字段，保留从原模板加载的值
 }
 
@@ -1040,7 +888,7 @@ onMounted(async () => {
 })
 
 // ---------- 保存逻辑 ----------
-/** 基础校验：name/key 必填、inputs_config key 唯一、steps_config key 唯一、depends_on 引用存在 */
+/** 基础校验：name/key 必填、inputs_config key 唯一、steps_config key 唯一 */
 function validateBeforeSave(): string | null {
   if (!form.name.trim()) return t('templateEditor.nameRequired')
   if (!form.key.trim()) return t('templateEditor.keyRequired')
@@ -1062,47 +910,67 @@ function validateBeforeSave(): string | null {
     stepKeys.add(step.key)
   }
 
-  // depends_on 引用的 step key 必须存在
-  for (const step of form.steps_config) {
-    const deps = step.depends_on || []
-    for (const dep of deps) {
-      if (!stepKeys.has(dep)) {
-        return t('templateEditor.dependsOnNotFound', { dep, step: step.key })
+  return null
+}
+
+/**
+ * 自动填充 from_step 等引用字段（spec 5.1.5）
+ * 按步骤顺序找最近的、位置在当前步骤之前的、对应类型的上游 step.key
+ */
+function autoFillFromStepReferences() {
+  const steps = form.steps_config
+  const STEP_UPSTREAM_MAP: Record<string, string[]> = {
+    image_batch: ['llm_generate'],
+    video_batch: ['image_batch'],
+    tts_generate: ['llm_generate'],
+    ffmpeg_composite: ['video_batch'],
+  }
+
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i]
+    const stepType = step.type
+    const config = step.config || {}
+    const upstreamTypes = STEP_UPSTREAM_MAP[stepType] || []
+
+    // 普通 from_step
+    if ('from_step' in config && upstreamTypes.length > 0) {
+      let fromKey: string | null = null
+      for (let j = i - 1; j >= 0; j--) {
+        if (upstreamTypes.includes(steps[j].type)) {
+          fromKey = steps[j].key
+          break
+        }
+      }
+      if (fromKey) {
+        config.from_step = fromKey
+        if (!step.depends_on.includes(fromKey)) {
+          step.depends_on.push(fromKey)
+        }
+      }
+    }
+
+    // ffmpeg_composite 的 audio_from_step：找最近的 tts_generate
+    if (stepType === 'ffmpeg_composite' && 'audio_from_step' in config) {
+      let audioKey: string | null = null
+      for (let j = i - 1; j >= 0; j--) {
+        if (steps[j].type === 'tts_generate') {
+          audioKey = steps[j].key
+          break
+        }
+      }
+      if (audioKey) {
+        config.audio_from_step = audioKey
+        if (!step.depends_on.includes(audioKey)) {
+          step.depends_on.push(audioKey)
+        }
       }
     }
   }
-
-  // output_mapping JSON 解析校验
-  if (outputMappingText.value.trim()) {
-    try {
-      JSON.parse(outputMappingText.value)
-    } catch {
-      return t('templateEditor.outputMappingInvalid')
-    }
-  }
-
-  return null
 }
 
 async function handleSave() {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
-
-  // 专家模式下需要先把 JSON 解析回结构化数据
-  if (expertMode.value) {
-    try {
-      const parsedInputs = JSON.parse(inputsConfigText.value)
-      const parsedSteps = JSON.parse(stepsConfigText.value)
-      if (!Array.isArray(parsedInputs) || !Array.isArray(parsedSteps)) {
-        throw new Error('not array')
-      }
-      form.inputs_config = parsedInputs
-      form.steps_config = parsedSteps
-    } catch {
-      ElMessage.error(t('templateEditor.expertModeParseFailed'))
-      return
-    }
-  }
 
   // 基础校验
   const errMsg = validateBeforeSave()
@@ -1111,14 +979,30 @@ async function handleSave() {
     return
   }
 
-  // 组装更新 payload
-  let outputMapping: Record<string, any> | undefined
-  if (outputMappingText.value.trim()) {
-    try {
-      outputMapping = JSON.parse(outputMappingText.value)
-    } catch {
-      // 校验阶段已拦截，这里不会触发
+  // 自动填充 from_step 等引用字段（spec 5.1.5）
+  autoFillFromStepReferences()
+
+  // 保存前预校验（spec 5.1.6）：调后端 validate 接口
+  validationErrors.value = []
+  const templatePayload: Record<string, any> = {
+    key: form.key,
+    name: form.name,
+    category: form.category,
+    inputs_config: form.inputs_config,
+    steps_config: form.steps_config,
+  }
+  try {
+    const validateRes = await validateTemplate(templatePayload)
+    if (!validateRes.is_valid) {
+      validationErrors.value = validateRes.errors
+      ElMessage.warning(
+        `${t('templateEditor.validationFailed') || '校验失败'}：${validateRes.errors.length} 处错误`,
+      )
+      return
     }
+  } catch (e: any) {
+    // validate 接口失败不阻断保存（降级为只做前端基础校验）
+    console.warn('[templateEditor] validate API failed, skip pre-validation:', e)
   }
 
   saving.value = true
@@ -1134,9 +1018,6 @@ async function handleSave() {
         tags: form.tags.length > 0 ? form.tags : undefined,
         is_public: form.is_public,
         script_template_id: form.script_template_id,
-        output_mapping: outputMapping,
-        estimated_credits: form.estimated_credits,
-        estimated_time_minutes: form.estimated_time_minutes,
       })
       ElMessage.success(t('templateEditor.updateSuccess'))
     } else {
@@ -1435,6 +1316,109 @@ async function handleSave() {
     text-align: center;
     color: var(--el-text-color-placeholder);
     font-size: 13px;
+  }
+
+  /* ===== 新增样式（spec 5.1 编辑器简化）===== */
+
+  /* 预设步骤库横向按钮组 */
+  .step-preset-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+    padding: 10px;
+    background: var(--el-fill-color-light);
+    border-radius: 8px;
+  }
+
+  .preset-btn {
+    --preset-color: var(--el-color-primary);
+    border-color: var(--preset-color) !important;
+    color: var(--preset-color) !important;
+  }
+  .preset-btn:hover {
+    background: var(--preset-color) !important;
+    color: #fff !important;
+  }
+  .preset-btn .el-icon {
+    margin-right: 4px;
+  }
+  .preset-add {
+    margin-left: 4px;
+    font-size: 12px;
+  }
+
+  /* 简化的输入参数行 */
+  .input-row-simple {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+    padding: 8px 10px;
+    background: var(--el-fill-color-light);
+    border-radius: 6px;
+  }
+  .input-type-badge {
+    flex-shrink: 0;
+    padding: 2px 8px;
+    background: var(--el-color-primary-light-9);
+    color: var(--el-color-primary);
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .input-label {
+    width: 140px;
+    flex-shrink: 0;
+  }
+  .input-default {
+    flex: 1;
+  }
+
+  /* 步骤名输入框（卡片头内） */
+  .step-name-input {
+    flex: 1;
+    width: auto;
+  }
+  .step-name-input :deep(.el-input__wrapper) {
+    background: transparent;
+    box-shadow: none;
+  }
+
+  /* 高级参数分隔线 */
+  .advanced-toggle {
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+  }
+
+  /* 校验错误列表 */
+  .validation-errors-section {
+    border-color: var(--el-color-danger-light-5);
+    background: var(--el-color-danger-light-9);
+  }
+  .validation-error-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    margin-bottom: 4px;
+    background: var(--el-bg-color);
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--el-color-danger);
+  }
+  .err-step {
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+  .err-field {
+    color: var(--el-text-color-secondary);
+    flex-shrink: 0;
+    font-family: monospace;
+  }
+  .err-reason {
+    flex: 1;
+    color: var(--el-text-color-regular);
   }
 }
 </style>

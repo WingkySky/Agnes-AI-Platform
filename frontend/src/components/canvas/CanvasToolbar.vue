@@ -63,6 +63,7 @@ import { ref, computed } from 'vue'
 import {
   Hand, MousePointer2, Undo2, Redo2, Type, Image, Video, Music2, Settings2, Upload,
   FolderOpen, Palette, Trash2, Eraser, Keyboard, Film, GitBranch,
+  Mic, FileText, Puzzle,
 } from 'lucide-vue-next'
 import CanvasAppearancePanel from './CanvasAppearancePanel.vue'
 import { useI18n } from '@/i18n'
@@ -120,13 +121,17 @@ const buttonGroups = computed<any[][]>(() => [
     { id: 'tool-undo', label: t('canvas.toolbar.toolUndo'), icon: Undo2, disabled: !props.canUndo, emit: 'undo' },
     { id: 'tool-redo', label: t('canvas.toolbar.toolRedo'), icon: Redo2, disabled: !props.canRedo, emit: 'redo' },
   ],
-  // 组3：新增节点（文本/图片/视频/音频/生成配置/上传素材）
+  // 组3：新增节点（文本/图片/视频/音频/生成配置/配音/字幕/合成/上传素材）
   [
     { id: 'tool-text', label: t('canvas.toolbar.toolText'), icon: Type, emit: 'add-node', payload: 'text' },
     { id: 'tool-image', label: t('canvas.toolbar.toolImage'), icon: Image, emit: 'add-node', payload: 'image' },
     { id: 'tool-video', label: t('canvas.toolbar.toolVideo'), icon: Video, emit: 'add-node', payload: 'video' },
     { id: 'tool-audio', label: t('canvas.toolbar.toolAudio'), icon: Music2, emit: 'add-node', payload: 'audio' },
     { id: 'tool-config', label: t('canvas.toolbar.toolConfig'), icon: Settings2, emit: 'add-node', payload: 'config' },
+    // 新增 3 种节点类型（spec 5.4.3）：配音/字幕/合成
+    { id: 'tool-tts', label: t('canvas.toolbar.toolTts') || '配音', icon: Mic, emit: 'add-node', payload: 'tts' },
+    { id: 'tool-subtitle', label: t('canvas.toolbar.toolSubtitle') || '字幕', icon: FileText, emit: 'add-node', payload: 'subtitle' },
+    { id: 'tool-compose', label: t('canvas.toolbar.toolCompose') || '成片合成', icon: Puzzle, emit: 'add-node', payload: 'compose' },
     { id: 'tool-upload', label: t('canvas.toolbar.toolUpload'), icon: Upload, emit: 'upload-asset' },
   ],
   // 组4：漫剧生成（从画布节点生成视频）

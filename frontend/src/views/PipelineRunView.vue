@@ -51,23 +51,23 @@
             <!-- 文本/主题输入 -->
             <div v-if="field.type === 'text'" class="form-item">
               <label class="form-label">
-                {{ field.label }}
+                {{ inputLabelI18n(field) }}
                 <span v-if="field.required" class="required">*</span>
               </label>
               <el-input
                 v-model="inputs[field.key]"
                 type="textarea"
                 :rows="4"
-                :placeholder="field.placeholder || t('pipelineRun.promptPlaceholder')"
+                :placeholder="inputPlaceholderI18n(field)"
                 maxlength="2000"
                 show-word-limit />
-              <div v-if="field.description" class="field-desc">{{ field.description }}</div>
+              <div v-if="field.description" class="field-desc">{{ inputDescI18n(field) }}</div>
             </div>
 
             <!-- 数字输入 -->
             <div v-else-if="field.type === 'number'" class="form-item">
               <label class="form-label">
-                {{ field.label }}
+                {{ inputLabelI18n(field) }}
                 <span v-if="field.required" class="required">*</span>
                 <span v-if="field.min !== undefined || field.max !== undefined" class="hint">
                   （{{ field.min || 1 }}-{{ field.max || 100 }}）
@@ -78,13 +78,13 @@
                 :min="field.min || 1"
                 :max="field.max || 100"
                 :step="1" />
-              <div v-if="field.description" class="field-desc">{{ field.description }}</div>
+              <div v-if="field.description" class="field-desc">{{ inputDescI18n(field) }}</div>
             </div>
 
             <!-- 风格预设选择：支持套装预设 / 分层组合两种模式 -->
             <div v-else-if="field.type === 'style_select'" class="form-item">
               <label class="form-label">
-                {{ field.label }}
+                {{ inputLabelI18n(field) }}
                 <span v-if="field.required" class="required">*</span>
               </label>
               <!-- 模式切换 -->
@@ -114,34 +114,34 @@
                   v-model="showElementEditor"
                   @created="onElementCreated" />
               </div>
-              <div v-if="field.description" class="field-desc">{{ field.description }}</div>
+              <div v-if="field.description" class="field-desc">{{ inputDescI18n(field) }}</div>
             </div>
 
             <!-- 布尔开关 -->
             <div v-else-if="field.type === 'boolean'" class="form-item form-item-switch">
-              <label class="form-label">{{ field.label }}</label>
+              <label class="form-label">{{ inputLabelI18n(field) }}</label>
               <el-switch v-model="inputs[field.key]" />
-              <div v-if="field.description" class="field-desc">{{ field.description }}</div>
+              <div v-if="field.description" class="field-desc">{{ inputDescI18n(field) }}</div>
             </div>
 
             <!-- 普通下拉选择 -->
             <div v-else-if="field.type === 'select'" class="form-item">
               <label class="form-label">
-                {{ field.label }}
+                {{ inputLabelI18n(field) }}
                 <span v-if="field.required" class="required">*</span>
               </label>
               <el-select
                 v-model="inputs[field.key]"
-                :placeholder="field.placeholder || ''"
+                :placeholder="inputPlaceholderI18n(field)"
                 class="full-width"
                 clearable>
                 <el-option
                   v-for="opt in field.options"
-                  :key="opt.value"
-                  :label="opt.label"
-                  :value="opt.value" />
+                  :key="typeof opt === 'string' ? opt : opt.value"
+                  :label="selectOptionLabel(field, opt)"
+                  :value="typeof opt === 'string' ? opt : opt.value" />
               </el-select>
-              <div v-if="field.description" class="field-desc">{{ field.description }}</div>
+              <div v-if="field.description" class="field-desc">{{ inputDescI18n(field) }}</div>
             </div>
 
             <el-divider v-if="idx < template.inputs_config.length - 1" />
@@ -205,7 +205,7 @@
               <el-icon :size="48"><MagicStick /></el-icon>
             </div>
           </div>
-          <p class="template-desc">{{ template.description }}</p>
+          <p class="template-desc">{{ templateDescI18n() }}</p>
           <div v-if="template.tags && template.tags.length > 0" class="template-tags">
             <el-tag
               v-for="tag in template.tags"
@@ -240,7 +240,7 @@
               class="step-item">
               <div class="step-index">{{ idx + 1 }}</div>
               <div class="step-info">
-                <div class="step-name">{{ step.name || step.key }}</div>
+                <div class="step-name">{{ stepNameI18n(step) }}</div>
                 <div class="step-type">{{ getStepTypeLabel(step.type) }}</div>
               </div>
             </div>
@@ -463,13 +463,75 @@ async function startPipeline() {
 }
 
 function getStepTypeLabel(type: string): string {
-  const map: Record<string, string> = {
-    'llm_generate': 'LLM 剧本生成',
-    'image_batch': '图片批量生成',
-    'video_batch': '视频批量生成',
-    'style_apply': '风格应用',
+  const key = `pipelineRun.stepType.${type}`
+  const translated = t(key)
+  return translated !== key ? translated : type
+}
+
+// ---------- i18n 辅助函数：翻译模板数据中的英文文本 ----------
+
+const i18nBase = 'workshop.templateWizard.scenarios'
+
+/** 翻译输入字段标签 */
+function inputLabelI18n(field: PipelineInputConfig): string {
+  if (field.label_i18n) {
+    const key = `${i18nBase}.${field.label_i18n}`
+    const translated = t(key)
+    return translated !== key ? translated : field.label
   }
-  return map[type] || type
+  return field.label
+}
+
+/** 翻译输入字段 placeholder */
+function inputPlaceholderI18n(field: PipelineInputConfig): string {
+  if (field.placeholder_i18n) {
+    const key = `${i18nBase}.${field.placeholder_i18n}`
+    const translated = t(key)
+    return translated !== key ? translated : (field.placeholder || '')
+  }
+  return field.placeholder || t('pipelineRun.promptPlaceholder')
+}
+
+/** 翻译输入字段描述 */
+function inputDescI18n(field: PipelineInputConfig): string {
+  if (!field.description) return ''
+  // 尝试从 i18n 查找（如果后端有 description_i18n 字段）
+  ;(field as any).description_i18n
+  // 当前后端暂无 description_i18n，直接返回原文（后续可扩展）
+  return field.description
+}
+
+/** 翻译下拉选项标签 */
+function selectOptionLabel(field: PipelineInputConfig, opt: any): string {
+  const val = typeof opt === 'string' ? opt : opt.value
+  const prefix = (field as any).options_i18n_prefix || ''
+  if (prefix) {
+    const key = `${i18nBase}.${prefix}${val}`
+    const translated = t(key)
+    if (translated !== key) return translated
+  }
+  // fallback: 使用 options 数组中的 label 或 value 本身
+  return typeof opt === 'string' ? opt : (opt.label || opt.value)
+}
+
+/** 翻译步骤名称 */
+function stepNameI18n(step: any): string {
+  if (step.name_i18n) {
+    const key = `${i18nBase}.${step.name_i18n}`
+    const translated = t(key)
+    return translated !== key ? translated : (step.name || step.key)
+  }
+  return step.name || step.key
+}
+
+/** 翻译模板描述 */
+function templateDescI18n(): string {
+  if (!template.value?.description) return ''
+  // 尝试按场景 category 匹配翻译
+  const cat = template.value.category
+  const descKey = `workshop.templateWizard.scenarios.${cat}.desc`
+  const translated = t(descKey)
+  return translated !== descKey ? translated : template.value.description
 }
 
 // ---------- 生命周期 ----------

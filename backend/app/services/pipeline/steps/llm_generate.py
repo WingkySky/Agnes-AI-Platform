@@ -44,9 +44,13 @@ class LlmGenerateExecutor(BaseStepExecutor):
             if not self.context.script_template:
                 raise ValueError("配置了使用剧本模板但未加载剧本模板")
         else:
-            # 直接使用 prompt_template
-            if not config.get("prompt_template"):
+            # 直接使用 prompt_template（兼容旧字段名 prompt）
+            prompt_template = config.get("prompt_template") or config.get("prompt") or ""
+            if not prompt_template:
                 raise ValueError("缺少 prompt_template 配置")
+            # 统一字段名，避免 _build_prompts 重复处理
+            if not config.get("prompt_template"):
+                config["prompt_template"] = prompt_template
 
     async def execute(self) -> Dict[str, Any]:
         """执行 LLM 生成"""
@@ -106,8 +110,8 @@ class LlmGenerateExecutor(BaseStepExecutor):
                 template_text, variables
             )
         else:
-            # 直接使用配置中的模板
-            prompt_template = config.get("prompt_template", "")
+            # 直接使用配置中的模板（兼容旧字段名 prompt）
+            prompt_template = config.get("prompt_template") or config.get("prompt") or ""
             variables = self._get_template_variables()
             user_prompt = script_template_service.render_prompt_template(
                 prompt_template, variables

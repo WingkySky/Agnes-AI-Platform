@@ -79,17 +79,34 @@ let ready = false
 let initPromise: Promise<void> | null = null
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 
-/** 等待 localforage 就绪；幂等 */
+/** 等待 localforage 就绪；幂等；超时时降级为不可用 */
+const READY_TIMEOUT_MS = 3000
+
 function ensureReady(): Promise<void> {
   if (initPromise) return initPromise
-  initPromise = canvasStore
-    .ready()
-    .then(() => {
-      ready = true
-    })
-    .catch(() => {
-      ready = false
-    }) as Promise<void>
+  initPromise = new Promise<void>((resolve) => {
+    // 正常 ready 路径
+    canvasStore
+      .ready()
+      .then(() => {
+        ready = true
+      })
+      .catch(() => {
+        ready = false
+      })
+      .finally(() => {
+        resolve()
+      })
+
+    // 超时保护：3 秒后强制继续，避免 IndexedDB 不可用时整个页面白屏
+    setTimeout(() => {
+      if (!ready) {
+        ready = false
+        // 强制 resolve initPromise，避免外部 await 永远挂起
+        resolve()
+      }
+    }, READY_TIMEOUT_MS)
+  })
   return initPromise
 }
 

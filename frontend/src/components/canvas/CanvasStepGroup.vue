@@ -20,7 +20,7 @@
     <div class="step-header" :style="headerStyle">
       <span class="step-order">{{ step.order + 1 }}</span>
       <span class="step-name">{{ step.name }}</span>
-      <span class="step-count">{{ step.panel_ids.length }} 个节点</span>
+      <span class="step-count">{{ t('canvas.stepGroup.nodesCount', { n: step.panel_ids.length }) }}</span>
       <span class="step-status">
         <el-icon v-if="effectiveStatus === 'pending'" :size="14"><Clock /></el-icon>
         <el-icon v-else-if="effectiveStatus === 'running'" :size="14"><Loader2 /></el-icon>

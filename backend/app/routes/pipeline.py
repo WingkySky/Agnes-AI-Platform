@@ -83,6 +83,9 @@ from app.services.pipeline import (
     export_run_to_canvas,
     estimate_credits,
     save_subtitles,
+    get_sample_template,
+    validate_template,
+    infer_output_mapping,
 )
 from app.services.pipeline import template_service
 from app.services.pipeline import template_scenarios
@@ -556,6 +559,42 @@ async def export_pipeline_templates(
     }
 
 
+@router.get("/pipeline/templates/sample", summary="下载示例模板 JSON")
+async def get_pipeline_template_sample():
+    """
+    返回一份最小可用的示例模板 JSON（标准漫剧 4 步流程）。
+
+    用途：用户在导入对话框点"下载示例模板"时调用，下载后照着改即可。
+    无需鉴权（公开接口，方便未登录用户也能获取格式参考）。
+    返回的 JSON 结构与 /pipeline/export/templates 一致，可直接作为
+    /pipeline/templates/import 的 payload.data 字段导入。
+    """
+    return get_sample_template()
+
+
+@router.post("/pipeline/templates/validate", summary="无副作用校验模板结构")
+async def validate_pipeline_template(
+    payload: Dict[str, Any],
+    _current_user: User = Depends(get_current_user),
+):
+    """
+    无副作用校验模板结构（不落库、不启动运行）。
+
+    请求体：完整模板 JSON（与 create/update 接口的 body 结构一致，不含 id）。
+
+    校验项:
+      - steps_config 每个 step.type 必须命中后端注册表
+        (llm_generate / image_batch / video_batch / tts_generate / ffmpeg_composite)
+      - step.key 必须非空且在同模板内唯一
+      - depends_on 引用的 key 必须存在于同模板内
+      - from_step / audio_from_step / subtitle_from_step 同样校验存在性
+
+    返回: { is_valid: bool, errors: [{step_key, field, reason}] }
+    """
+    is_valid, errors = validate_template(payload or {})
+    return {"is_valid": is_valid, "errors": errors}
+
+
 @router.post("/pipeline/templates/import", summary="批量导入流水线模板")
 async def import_pipeline_templates(
     payload: Dict[str, Any],
@@ -618,6 +657,7 @@ async def import_pipeline_templates(
     skipped: List[str] = []
     renamed: List[str] = []
     overwritten: List[str] = []
+    errors: List[Dict[str, Any]] = []  # 校验失败的模板明细
 
     # 第一步：导入剧本模板（建立 key→new_id 映射，供模板引用时重映射）
     script_key_to_id: Dict[str, int] = {}
@@ -707,6 +747,27 @@ async def import_pipeline_templates(
         tpl_name = tpl_data.get("name", "未命名")
         if not tpl_key:
             skipped.append(f"模板 {tpl_name}（缺 key）")
+            continue
+
+        # 校验模板结构（step.type/depends_on/from_step 等）
+        # 校验失败的模板不写入数据库，记入 errors 列表
+        is_valid, validation_errors = validate_template(tpl_data)
+        if not is_valid:
+            errors.append(
+                {
+                    "template_key": tpl_key,
+                    "template_name": tpl_name,
+                    "reasons": [
+                        f"[{e.get('field')}] {e.get('reason')}"
+                        for e in validation_errors
+                    ],
+                }
+            )
+            logger.warning(
+                "导入模板 %s 校验失败，跳过: %s",
+                tpl_key,
+                validation_errors,
+            )
             continue
 
         # 查询同 key 是否已存在
@@ -828,6 +889,7 @@ async def import_pipeline_templates(
         "skipped_items": skipped,
         "renamed_items": renamed,
         "overwritten_items": overwritten,
+        "errors": errors,
     }
 
 
@@ -835,6 +897,11 @@ async def import_pipeline_templates(
 
 def _serialize_template(tpl: PipelineTemplate) -> Dict[str, Any]:
     """将 PipelineTemplate 序列化为可导出的字典（剔除运行时字段）"""
+    # output_mapping 为 null 时按 steps_config 自动推断（spec 5.3 / Task 4）
+    output_mapping = tpl.output_mapping
+    if not output_mapping and tpl.steps_config:
+        output_mapping = infer_output_mapping(tpl.steps_config)
+
     data: Dict[str, Any] = {
         "key": tpl.key,
         "name": tpl.name,
@@ -843,7 +910,7 @@ def _serialize_template(tpl: PipelineTemplate) -> Dict[str, Any]:
         "thumbnail_url": tpl.thumbnail_url,
         "inputs_config": tpl.inputs_config,
         "steps_config": tpl.steps_config,
-        "output_mapping": tpl.output_mapping,
+        "output_mapping": output_mapping,
         "script_template_id": tpl.script_template_id,
         "estimated_credits": tpl.estimated_credits,
         "estimated_time_minutes": tpl.estimated_time_minutes,

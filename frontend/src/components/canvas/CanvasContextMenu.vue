@@ -24,7 +24,7 @@
         @click="handleDuplicate"
       >
         <Plus :size="16" />
-        <span>复制</span>
+        <span>{{ t('canvas.contextMenu.duplicate') }}</span>
       </button>
       <button
         type="button"
@@ -33,7 +33,7 @@
         @click="handleDelete"
       >
         <Trash2 :size="16" />
-        <span>删除</span>
+        <span>{{ t('canvas.contextMenu.delete') }}</span>
       </button>
     </template>
 
@@ -46,7 +46,7 @@
         @click="handleDelete"
       >
         <Trash2 :size="16" />
-        <span>删除</span>
+        <span>{{ t('canvas.contextMenu.delete') }}</span>
       </button>
     </template>
   </div>
@@ -65,6 +65,9 @@
 
 import { onMounted, onUnmounted, computed } from 'vue'
 import { Plus, Trash2 } from 'lucide-vue-next'
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
 
 /* ---------- Props 定义 ---------- */
 const props = defineProps({

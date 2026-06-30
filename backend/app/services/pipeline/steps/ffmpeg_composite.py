@@ -83,8 +83,8 @@ class FFmpegCompositeExecutor(BaseStepExecutor):
         return cls._drawtext_available
 
     async def validate(self) -> None:
-        """验证输入：必须指定 from_step，且 ffmpeg/ffprobe 可用"""
         config = self.config.get("config", {})
+        """验证输入：必须指定 from_step，且 ffmpeg/ffprobe 可用"""
         from_step = config.get("from_step")
         if not from_step:
             raise ValueError("ffmpeg_composite 必须指定 from_step（上游 video_batch 步骤）")
@@ -103,8 +103,8 @@ class FFmpegCompositeExecutor(BaseStepExecutor):
             raise ValueError(f"ffmpeg 不可用: {e}")
 
     async def execute(self) -> Dict[str, Any]:
-        """执行视频合成"""
         config = self.config.get("config", {})
+        """执行视频合成"""
         from_step = config.get("from_step")
         audio_step = config.get("audio_from_step")  # 可选：tts_generate 步骤 key
         bgm_url = config.get("bgm_url")  # 可选：BGM 音乐 URL

@@ -83,9 +83,9 @@
         <!-- 流程模式指示条 -->
         <div v-if="store.isFlowMode" class="flow-mode-indicator">
           <svg class="flow-icon" viewBox="0 0 16 16" width="14" height="14"><path fill="currentColor" d="M8 1a2 2 0 110 4 2 2 0 010-4zM5 7a2 2 0 100 4 2 2 0 000-4zm6 0a2 2 0 100 4 2 2 0 000-4zM3 13h10M6 9l2-2m2 2l-2-2"/></svg>
-          <span class="flow-text">流程模式 · {{ store.analyzedSteps.length }} 个步骤</span>
+          <span class="flow-text">{{ t('canvas.flowModeIndicator', { n: store.analyzedSteps.length }) }}</span>
           <button class="flow-btn" @click.stop="store.analyzeCurrentFlow()" :title="t('canvas.reanalyze')">↻</button>
-          <button class="flow-close" @click.stop="store.toggleFlowMode()" title="关闭流程模式">×</button>
+          <button class="flow-close" @click.stop="store.toggleFlowMode()" :title="t('canvas.flowModeClose')">×</button>
         </div>
 
         <!-- 流程模式：步骤分组可视化 -->
@@ -472,11 +472,24 @@ const NODE_DEFAULT_SIZES = {
   video: { width: 420, height: 236 },
   audio: { width: 340, height: 120 },
   config: { width: 360, height: 380 },
+  // 新增 3 种节点类型（spec 5.4.1）
+  tts: { width: 340, height: 180 },
+  subtitle: { width: 340, height: 180 },
+  compose: { width: 360, height: 240 },
 }
 
 // ---------- 节点类型名称（国际化） ----------
 function getNodeName(type: string): string {
-  return t(`canvas.nodeNames.${type}`)
+  // 新增 3 种节点类型兜底中文名（i18n 未覆盖时使用）
+  const fallbackNames: Record<string, string> = {
+    tts: '配音',
+    subtitle: '字幕',
+    compose: '成片合成',
+  }
+  const i18nKey = `canvas.nodeNames.${type}`
+  const translated = t(i18nKey)
+  // i18n 未命中时返回 key 本身，用兜底名替代
+  return translated === i18nKey ? (fallbackNames[type] || type) : translated
 }
 
 // ==================== 画布标题栏 ====================
@@ -876,6 +889,11 @@ function handleConnectingUp(event: PointerEvent) {
     } else {
       // 普通单连接
       store.endConnecting(targetId, 'target')
+      // 连线类型校验失败提示（spec 5.4.2）
+      if (store.lastConnectionError) {
+        ElMessage.warning(store.lastConnectionError)
+        store.lastConnectionError = null
+      }
     }
   } else {
     store.cancelConnecting()
@@ -2555,6 +2573,31 @@ function createNodeAtCenter(type: string) {
   const cx = (window.innerWidth / 2 - store.viewport.x) / store.viewport.zoom
   const cy = (window.innerHeight / 2 - store.viewport.y) / store.viewport.zoom
   store.pushSnapshot()
+  // 新增 3 种节点类型使用预设默认 content（spec 5.4.4）
+  // 其他类型保持空 content，由用户后续填充
+  let initialContent: Record<string, unknown> = {}
+  if (type === 'tts') {
+    initialContent = {
+      voice: 'default',
+      speed: 1.0,
+      provider: 'agnes-tts',
+      from_node: null,
+    }
+  } else if (type === 'subtitle') {
+    initialContent = {
+      model: 'agnes-2.0-flash',
+      temperature: 0.5,
+      from_node: null,
+      prompt: '根据上游剧本内容生成 SRT 格式字幕，每条字幕不超过 20 字',
+    }
+  } else if (type === 'compose') {
+    initialContent = {
+      from_node: null,
+      with_subtitle: true,
+      audio_from_node: null,
+      subtitle_from_node: null,
+    }
+  }
   const id = store.addPanel({
     type,
     name: getNodeName(type),
@@ -2562,7 +2605,7 @@ function createNodeAtCenter(type: string) {
     y: cy - size.height / 2,
     width: size.width,
     height: size.height,
-    content: {},
+    content: initialContent,
   })
   store.selectPanel(id, { append: false })
   return id

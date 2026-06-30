@@ -24,8 +24,8 @@
     <!-- 标题栏 -->
     <div class="asset-header">
       <div class="asset-title-wrap">
-        <span class="asset-title">素材库</span>
-        <span class="asset-subtitle">{{ activeTab === 'history' ? '生成历史' : '本地素材' }}</span>
+        <span class="asset-title">{{ t('canvas.assetLibrary.title') }}</span>
+        <span class="asset-subtitle">{{ activeTab === 'history' ? t('canvas.assetLibrary.historyTab') : t('canvas.assetLibrary.localTab') }}</span>
       </div>
       <button class="asset-close" @click="$emit('close')">
         <X :size="18" />
@@ -39,14 +39,14 @@
         @click="switchTab('history')"
       >
         <History :size="14" />
-        <span>生成历史</span>
+        <span>{{ t('canvas.assetLibrary.historyTab') }}</span>
       </button>
       <button
         :class="['asset-tab', { active: activeTab === 'local' }]"
         @click="switchTab('local')"
       >
         <FolderOpen :size="14" />
-        <span>我的素材</span>
+        <span>{{ t('canvas.assetLibrary.localTab') }}</span>
       </button>
     </div>
 
@@ -69,7 +69,7 @@
         @click="triggerUpload"
       >
         <Upload :size="14" />
-        <span>上传</span>
+        <span>{{ t('canvas.assetLibrary.upload') }}</span>
       </button>
     </div>
 
@@ -78,7 +78,7 @@
       <!-- 加载中（首次） -->
       <div v-if="loading && displayItems.length === 0" class="asset-loading">
         <Loader2 :size="24" class="spin-icon" />
-        <span>加载中...</span>
+        <span>{{ t('canvas.assetLibrary.loading') }}</span>
       </div>
 
       <!-- 空状态 -->
@@ -86,7 +86,7 @@
         <Inbox :size="40" />
         <span>{{ emptyText }}</span>
         <span v-if="activeTab === 'local'" class="asset-empty-hint">
-          点击上方"上传"按钮，或在画布节点上点击"存素材"按钮
+          {{ t('canvas.assetLibrary.emptyHint') }}
         </span>
       </div>
 
@@ -137,7 +137,7 @@
           </span>
           <!-- 来源标签 -->
           <span class="card-source-badge" :class="item.source">
-            {{ item.source === 'history' ? '历史' : '本地' }}
+            {{ item.source === 'history' ? t('canvas.assetLibrary.source.history') : t('canvas.assetLibrary.source.local') }}
           </span>
           <!-- 类型标签 -->
           <span class="card-type-badge">{{ typeLabel(item.type) }}</span>
@@ -148,7 +148,7 @@
         <button
           v-if="item.source === 'local'"
           class="card-delete"
-          title="删除"
+          :title="t('canvas.assetLibrary.delete')"
           @click.stop="$emit('delete-asset', item.id)"
         >
           <Trash2 :size="14" />
@@ -167,7 +167,7 @@
       </button>
       <span class="pager-info">
         {{ historyTotal > 0 ? `${historyPage} / ${totalPages}` : '0 / 0' }}
-        <span class="pager-total">（共 {{ historyTotal }} 条）</span>
+        <span class="pager-total">{{ t('canvas.assetLibrary.pagerTotal', { n: historyTotal }) }}</span>
       </span>
       <button
         class="pager-btn"
@@ -218,7 +218,7 @@
         />
         <div v-else class="preview-loading">
           <Loader2 :size="20" class="spin-icon" />
-          <span>加载预览...</span>
+          <span>{{ t('canvas.assetLibrary.previewLoading') }}</span>
         </div>
       </template>
       <div v-if="previewItem.name" class="preview-name">{{ previewItem.name }}</div>
@@ -238,10 +238,13 @@
  * - 悬浮预览通过 Teleport + position:fixed，避免被面板裁剪
  * ===================================================== */
 import { ref, computed, reactive, onMounted, onBeforeUnmount } from 'vue'
+import { useI18n } from '@/i18n'
 import { X, Trash2, Music2, Inbox, Loader2, History, FolderOpen, Upload, Play, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import { useAssetStore } from '@/stores/canvasAsset'
 import { getHistoryList } from '@/api/history'
 import client from '@/api/client'
+
+const { t } = useI18n()
 
 const props = defineProps({
   theme: { type: Object, required: true },
@@ -255,11 +258,11 @@ const assetStore = useAssetStore()
 const activeTab = ref('history') // 'history' | 'local'
 
 // ---------- 类型筛选 ----------
-const filters = [
-  { value: 'all', label: '全部' },
-  { value: 'image', label: '图片' },
-  { value: 'video', label: '视频' },
-]
+const filters = computed(() => [
+  { value: 'all', label: t('canvas.assetLibrary.filters.all') },
+  { value: 'image', label: t('canvas.assetLibrary.filters.image') },
+  { value: 'video', label: t('canvas.assetLibrary.filters.video') },
+])
 const currentFilter = ref('all')
 
 // ---------- 历史记录数据（分页） ----------
@@ -322,11 +325,11 @@ const displayItems = computed(() => {
 // ---------- 空状态文案 ----------
 const emptyText = computed(() => {
   if (activeTab.value === 'history') {
-    if (currentFilter.value === 'image') return '暂无图片生成历史'
-    if (currentFilter.value === 'video') return '暂无视频生成历史'
-    return '暂无生成历史'
+    if (currentFilter.value === 'image') return t('canvas.assetLibrary.empty.noImageHistory')
+    if (currentFilter.value === 'video') return t('canvas.assetLibrary.empty.noVideoHistory')
+    return t('canvas.assetLibrary.empty.noHistory')
   }
-  return '暂无本地素材'
+  return t('canvas.assetLibrary.empty.noLocalAssets')
 })
 
 // ---------- 面板样式 ----------
@@ -343,7 +346,11 @@ function truncate(str: string, len: number) {
 }
 
 function typeLabel(type: string) {
-  const labels: Record<string, string> = { image: '图片', video: '视频', audio: '音频' }
+  const labels: Record<string, string> = {
+    image: t('canvas.assetLibrary.typeLabel.image'),
+    video: t('canvas.assetLibrary.typeLabel.video'),
+    audio: t('canvas.assetLibrary.typeLabel.audio'),
+  }
   return labels[type] || type
 }
 

@@ -113,6 +113,13 @@ async def create_template(
     # 自动计算预估积分（如果未设置）
     await auto_fill_estimated_credits(db, data)
 
+    # 自动推断 output_mapping（如果未设置）— spec 5.3 / Task 4
+    # 取最后一个 ffmpeg_composite / video_batch 步骤的输出作为最终产物
+    output_mapping = None
+    if data.steps_config:
+        from app.services.pipeline.template_validate import infer_output_mapping
+        output_mapping = infer_output_mapping(data.steps_config)
+
     tpl = PipelineTemplate(
         key=data.key,
         name=data.name,
@@ -121,6 +128,7 @@ async def create_template(
         thumbnail_url=data.thumbnail_url,
         inputs_config=data.inputs_config,
         steps_config=data.steps_config,
+        output_mapping=output_mapping,
         script_template_id=data.script_template_id,
         is_builtin=is_builtin,
         is_public=data.is_public if not is_builtin else True,
@@ -192,6 +200,11 @@ async def update_template(
     for field, value in update_data.items():
         if hasattr(tpl, field) and value is not None:
             setattr(tpl, field, value)
+
+    # 若 steps_config 被更新但 output_mapping 未显式传入，自动推断（spec 5.3 / Task 4）
+    if "steps_config" in update_data and "output_mapping" not in update_data:
+        from app.services.pipeline.template_validate import infer_output_mapping
+        tpl.output_mapping = infer_output_mapping(tpl.steps_config or [])
 
     await db.commit()
     await db.refresh(tpl)
@@ -383,16 +396,25 @@ def calculate_template_credits(
     """
     根据 steps_config 自动计算模板预估积分（同步版本，使用默认值）。
 
-    遍历每个步骤，根据步骤类型（image_gen/video_gen/llm_generate/composite/audio_gen）
-    和对应参数（尺寸、秒数）计算积分消耗，求和得到 total。
-    无有效步骤时返回 0。
+    遍历每个步骤，根据后端权威 step_type（llm_generate/image_batch/
+    video_batch/tts_generate/ffmpeg_composite）和对应参数（尺寸、秒数）
+    计算积分消耗，求和得到 total。无有效步骤时返回 0。
+
+    注意：历史代码曾用 image_gen/video_gen/audio_gen/composite 等错误名，
+    导致对真实 step_type 全部失效。此处已对齐 backend/app/services/pipeline/steps/
+    注册表的权威命名，并保留对旧名的兜底兼容（项目未上线，兼容仅为防回归）。
     """
-    # 默认积分消耗（不需要查询数据库）
+    # 默认积分消耗（与后端注册表 step_type 对齐）
     DEFAULT_COSTS = {
         "llm_generate": 2,
-        "image_gen": 20,  # 默认生图消耗 20 积分
-        "video_gen": 150,  # 默认生视频消耗 150 积分（5秒 × 30积分/秒）
-        "audio_gen": 10,  # 默认生音频消耗 10 积分（10秒 × 1积分/秒）
+        "image_batch": 20,        # 默认生图消耗 20 积分
+        "video_batch": 150,       # 默认生视频消耗 150 积分（5秒 × 30积分/秒）
+        "tts_generate": 10,       # 默认 TTS 消耗 10 积分（约 10 秒音频）
+        "ffmpeg_composite": 5,
+        # 旧名兜底（仅防回归，新代码不应再产出这些 type）
+        "image_gen": 20,
+        "video_gen": 150,
+        "audio_gen": 10,
         "composite": 5,
     }
 
@@ -401,7 +423,7 @@ def calculate_template_credits(
         step_type = (step.get("type") or step.get("step_type") or "").strip().lower()
         config = step.get("config") or {}
 
-        if step_type == "image_gen":
+        if step_type in ("image_batch", "image_gen"):
             # 根据尺寸调整积分
             size = config.get("size") or "1024x1024"
             if "1024" in size:
@@ -410,8 +432,12 @@ def calculate_template_credits(
                 total += 10
             else:
                 total += 20  # 默认
+            # batch_size 影响积分（多张图）
+            batch_size = max(1, int(config.get("batch_size") or 1))
+            if batch_size > 1:
+                total += 20 * (batch_size - 1)
 
-        elif step_type == "video_gen":
+        elif step_type in ("video_batch", "video_gen"):
             # 根据时长调整积分
             seconds = max(1, int(config.get("seconds") or 5))
             total += seconds * 30  # 每秒 30 积分
@@ -419,12 +445,12 @@ def calculate_template_credits(
         elif step_type == "llm_generate":
             total += DEFAULT_COSTS["llm_generate"]
 
-        elif step_type == "audio_gen":
+        elif step_type in ("tts_generate", "audio_gen"):
             duration = max(1, int(config.get("duration") or 10))
             total += max(1, duration * 1)  # 每秒约 1 积分
 
-        elif step_type == "composite":
-            total += DEFAULT_COSTS["composite"]
+        elif step_type in ("ffmpeg_composite", "composite"):
+            total += DEFAULT_COSTS["ffmpeg_composite"]
 
         else:
             # 未知类型：跳过

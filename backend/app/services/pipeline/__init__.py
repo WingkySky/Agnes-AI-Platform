@@ -19,6 +19,11 @@ from app.services.pipeline.template_service import (
     delete_template,
     validate_steps_config,
 )
+from app.services.pipeline.template_validate import (
+    get_sample_template,
+    validate_template,
+    infer_output_mapping,
+)
 from app.services.pipeline.run_service import (
     get_run_by_id,
     get_run_steps,
@@ -55,6 +60,9 @@ __all__ = [
     "update_template",
     "delete_template",
     "validate_steps_config",
+    "get_sample_template",
+    "validate_template",
+    "infer_output_mapping",
     "get_run_by_id",
     "get_run_steps",
     "list_runs",

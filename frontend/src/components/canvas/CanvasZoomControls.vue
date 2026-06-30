@@ -15,8 +15,8 @@
       <button
         class="dock-btn"
         :style="minimapVisible ? activeStyle : { color: theme.toolbar.item }"
-        :title="minimapVisible ? '关闭小地图' : '打开小地图'"
-        :aria-label="minimapVisible ? '关闭小地图' : '打开小地图'"
+        :title="minimapVisible ? t('canvas.zoom.minimapClose') : t('canvas.zoom.minimapOpen')"
+        :aria-label="minimapVisible ? t('canvas.zoom.minimapClose') : t('canvas.zoom.minimapOpen')"
         @click="$emit('toggle-minimap')"
       >
         <Compass class="icon" />
@@ -26,8 +26,8 @@
       <button
         class="dock-btn"
         :style="{ color: theme.toolbar.item }"
-        title="重置视图"
-        aria-label="重置视图"
+        :title="t('canvas.zoom.reset')"
+        :aria-label="t('canvas.zoom.reset')"
         @click="$emit('reset-view')"
       >
         <Focus class="icon" />
@@ -42,8 +42,8 @@
         :value="zoomPercent"
         class="zoom-slider"
         :style="{ accentColor: theme.node.activeStroke }"
-        title="放大/缩小画布"
-        aria-label="放大/缩小画布"
+        :title="t('canvas.zoom.zoomInOut')"
+        :aria-label="t('canvas.zoom.zoomInOut')"
         @input="onSliderInput"
       />
 

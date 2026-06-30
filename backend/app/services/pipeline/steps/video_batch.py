@@ -43,6 +43,7 @@ class VideoBatchExecutor(BaseStepExecutor):
         elif source == "parsed_result":
             if not config.get("from_step"):
                 raise ValueError("source=parsed_result 时必须指定 from_step")
+            # items_path 由后端自动推断，不需要在前端/模板中指定
         elif source == "input_list":
             pass
         else:
@@ -228,15 +229,17 @@ class VideoBatchExecutor(BaseStepExecutor):
         return tasks
 
     def _build_tasks_from_parsed_result(self, config: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """从解析结果中构建视频任务"""
+        """从解析结果中构建视频任务
+        
+        自动推断 items_path（同 image_batch 策略）
+        """
         from_step_key = config.get("from_step", "")
-        items_path = config.get("items_path", "scenes")
+        items_path = config.get("items_path", "")  # 允许前端显式指定（向后兼容）
 
         step_output = self.context.steps_output.get(from_step_key, {})
         parsed_result = step_output.get("parsed_result")
 
         # 防御性检查：上游 LLM 步骤的 parsed_result 为 None 时抛出明确错误
-        # 避免静默返回空列表导致步骤被标记为 success（实际没有任何产出）
         if parsed_result is None:
             raw_response = step_output.get("raw_response", "")
             raise ValueError(
@@ -245,7 +248,8 @@ class VideoBatchExecutor(BaseStepExecutor):
                 f"可能是 LLM 输出 JSON 解析失败。"
             )
 
-        items = self._get_by_path(parsed_result, items_path, default=[])
+        # 自动推断 items_path
+        items = self._auto_detect_items(parsed_result, items_path, config, from_step_key)
         if not isinstance(items, list):
             items = [items]
 
@@ -275,6 +279,95 @@ class VideoBatchExecutor(BaseStepExecutor):
             tasks.append(task)
 
         return tasks
+
+    def _auto_detect_items(
+        self,
+        parsed_result: Any,
+        explicit_items_path: str,
+        config: Dict[str, Any],
+        from_step_key: str,
+    ) -> Any:
+        """自动推断 items_path 并从 parsed_result 中提取数组。
+        
+        推断策略（按优先级）：
+        1. explicit_items_path 非空 → 直接用（向后兼容模板中显式指定的情况）
+        2. parsed_result 本身是数组 → 直接用（最常见情况）
+        3. parsed_result 是对象 → 找数组字段：
+           a. 只有一个数组字段 → 自动用
+           b. 多个数组字段 → 尝试用 prompt_field / output_field 关键字匹配字段名
+           c. 仍无法判断 → 报引导性错误，提示用户在模板中指定 items_path
+        """
+        # 1. 显式指定（向后兼容）
+        if explicit_items_path:
+            items = self._get_by_path(parsed_result, explicit_items_path, default=[])
+            logger.info(f"[视频批量] 使用显式 items_path='{explicit_items_path}': step_key={self.step_key}")
+            return items
+
+        # 2. parsed_result 本身是数组（画布直接输出数组的最常见情况）
+        if isinstance(parsed_result, list):
+            logger.info(f"[视频批量] 自动推断：parsed_result 本身是数组，共 {len(parsed_result)} 项: step_key={self.step_key}")
+            return parsed_result
+
+        # 3. parsed_result 是对象 → 找数组字段
+        if isinstance(parsed_result, dict):
+            array_fields = [
+                (k, v) for k, v in parsed_result.items()
+                if isinstance(v, list)
+            ]
+
+            if len(array_fields) == 0:
+                logger.warning(
+                    f"[视频批量] parsed_result 中没有数组字段，将整个对象作为单项处理: "
+                    f"step_key={self.step_key}, keys={list(parsed_result.keys())}"
+                )
+                return [parsed_result]
+
+            if len(array_fields) == 1:
+                field_name, items = array_fields[0]
+                logger.info(
+                    f"[视频批量] 自动推断 items_path='{field_name}': "
+                    f"step_key={self.step_key}, 共 {len(items)} 项"
+                )
+                return items
+
+            # 多个数组字段 → 尝试用 prompt_field / output_field 智能匹配
+            prompt_field = config.get("prompt_field", "")
+            output_field = config.get("output_field", "")
+            candidate_fields = [prompt_field, output_field]
+
+            for field_name, items in array_fields:
+                for candidate in candidate_fields:
+                    if candidate and (candidate in field_name or field_name in candidate):
+                        logger.info(
+                            f"[视频批量] 通过字段名匹配自动推断 items_path='{field_name}': "
+                            f"step_key={self.step_key}, 匹配关键字='{candidate}'"
+                        )
+                        return items
+
+                if items and isinstance(items[0], dict):
+                    item_keys = list(items[0].keys())
+                    for candidate in candidate_fields:
+                        if candidate and candidate in item_keys:
+                            logger.info(
+                                f"[视频批量] 通过元素 key 匹配自动推断 items_path='{field_name}': "
+                                f"step_key={self.step_key}, 匹配关键字='{candidate}'"
+                            )
+                            return items
+
+            field_info = ", ".join([
+                f"'{k}'({len(v)}项)" for k, v in array_fields
+            ])
+            raise ValueError(
+                f"上游步骤 '{from_step_key}' 的 parsed_result 包含多个数组字段（{field_info}），"
+                f"无法自动推断要迭代哪个数组。\n"
+                f"请在模板步骤配置中显式指定 items_path（例如：items_path='{array_fields[0][0]}'）。"
+            )
+
+        logger.warning(
+            f"[视频批量] parsed_result 类型无法迭代: type={type(parsed_result).__name__}, "
+            f"step_key={self.step_key}"
+        )
+        return [parsed_result]
 
     def _build_tasks_from_input(self, config: Dict[str, Any]) -> List[Dict[str, Any]]:
         """从 inputs 中构建视频任务"""

@@ -13,6 +13,35 @@ import { loadCanvas, saveCanvas, switchCanvasUser, cancelSaveCanvas } from '@/li
 import { useThemeStore } from './theme'
 import { analyzeFlow, analyzeExecutionOrder } from '@/lib/canvas-flow-analyzer'
 
+// ---------- 连线类型校验（spec 5.4.2） ----------
+
+/**
+ * 新增节点类型（tts/subtitle/compose）只接受特定类型的入边。
+ * 返回 null 表示校验通过，返回字符串表示错误信息。
+ *
+ * 规则：
+ *   - tts      只接受 text 入边
+ *   - subtitle 只接受 text 入边（产出 SRT 文本，不做视频 ASR）
+ *   - compose  必须有且仅有一个 video 入边；可选 tts 和 subtitle 入边各最多一个
+ *   - text/image/video/audio/config 保持现有行为（不限制）
+ */
+function validateConnectionTypes(sourceType: string, targetType: string): string | null {
+  const ALLOWED_INPUTS: Record<string, string[]> = {
+    tts: ['text'],
+    subtitle: ['text'],
+    compose: ['video', 'tts', 'subtitle'],
+  }
+  const allowed = ALLOWED_INPUTS[targetType]
+  if (!allowed) return null // 非新增类型不校验
+
+  if (!allowed.includes(sourceType)) {
+    const targetLabel = { tts: '配音', subtitle: '字幕', compose: '成片合成' }[targetType] || targetType
+    const sourceLabel = { text: '文本', image: '图片', video: '视频', audio: '音频', config: '配置', tts: '配音', subtitle: '字幕', compose: '合成' }[sourceType] || sourceType
+    return `${targetLabel}节点不接受 ${sourceLabel} 类型输入`
+  }
+  return null
+}
+
 // ---------- 本地类型定义 ----------
 
 /** 画布面板（节点） */
@@ -234,6 +263,9 @@ interface CanvasState {
   // ---------- 连线拖拽（临时连线状态）----------
   connecting: ConnectingState | null
 
+  // 连线类型校验失败时的错误信息（供调用方读取显示提示）
+  lastConnectionError: string | null
+
   // ---------- 搜索与筛选 ----------
   searchQuery: string
   searchMatchedIds: string[]
@@ -304,6 +336,9 @@ export const useCanvasStore = defineStore('canvas', {
 
     // ---------- 连线拖拽（临时连线状态）----------
     connecting: null,
+
+    // 连线类型校验错误信息
+    lastConnectionError: null,
 
     // ---------- 搜索与筛选 ----------
     searchQuery: '',
@@ -1053,6 +1088,22 @@ export const useCanvasStore = defineStore('canvas', {
     /** 添加连线 */
     addConnection({ source_panel_id, target_panel_id, type = 'manual', ...rest }: { source_panel_id: string; target_panel_id: string; type?: string; [key: string]: unknown }): CanvasConnection | null {
       if (!source_panel_id || !target_panel_id) return null
+
+      // 连线类型校验（spec 5.4.2）
+      // 新增的 tts/subtitle/compose 节点只接受特定类型的入边
+      const sourcePanel = this.panels.find((p) => p.id === source_panel_id)
+      const targetPanel = this.panels.find((p) => p.id === target_panel_id)
+      if (sourcePanel && targetPanel) {
+        const sourceType = sourcePanel.type || 'text'
+        const targetType = targetPanel.type || 'text'
+        const validationError = validateConnectionTypes(sourceType, targetType)
+        if (validationError) {
+          // 校验失败：返回 null，调用方可读取 lastConnectionError 显示提示
+          this.lastConnectionError = validationError
+          return null
+        }
+      }
+
       const conn: CanvasConnection = {
         id: uid(),
         workspace_id: this.activeWorkspaceId,
@@ -1117,11 +1168,17 @@ export const useCanvasStore = defineStore('canvas', {
         (c) => c.source_panel_id === realSource && c.target_panel_id === realTarget,
       )
       if (exists) return
-      this.addConnection({
+      const conn = this.addConnection({
         source_panel_id: realSource,
         target_panel_id: realTarget,
         type: 'flow',
       })
+      // 连线类型校验失败时，endConnecting 不抛错（addConnection 已设 lastConnectionError）
+      // 调用方（CanvasView）应在调 endConnecting 后检查 store.lastConnectionError 显示提示
+      if (!conn && this.lastConnectionError) {
+        // 错误信息保留在 state 里供调用方读取，这里不清理
+        return
+      }
     },
 
     /** 取消当前拖拽连线 */

@@ -10,7 +10,7 @@
       <div class="mask-edit-dialog" :style="dialogStyle">
         <!-- 标题栏 -->
         <div class="mask-header">
-          <span class="mask-title">蒙版编辑</span>
+          <span class="mask-title">{{ t('canvas.maskEditDialog.title') }}</span>
           <button class="mask-close" @click="$emit('cancel')">
             <X :size="18" />
           </button>
@@ -28,28 +28,27 @@
         <!-- 工具栏 -->
         <div class="mask-tools">
           <label class="mask-tool-label">
-            画笔大小
+            {{ t('canvas.maskEditDialog.brushSize') }}
             <input type="range" v-model.number="brushSize" min="5" max="80" step="5" />
             <span>{{ brushSize }}px</span>
           </label>
           <button class="mask-tool-btn" @click="clearMask">
-            <Eraser :size="16" /> 清除
-          </button>
+            <Eraser :size="16" /> {{ t('canvas.maskEditDialog.clear') }}</button>
         </div>
 
         <!-- 提示词输入 -->
         <div class="mask-prompt-area">
           <textarea v-model="prompt"
-            placeholder="输入要编辑的内容描述，如：将背景改为星空"
+            :placeholder="t('canvas.maskEditDialog.promptPlaceholder')"
             rows="2" />
         </div>
 
         <!-- 操作按钮 -->
         <div class="mask-actions">
-          <button class="mask-btn-cancel" @click="$emit('cancel')">取消</button>
+          <button class="mask-btn-cancel" @click="$emit('cancel')">{{ t('canvas.maskEditDialog.cancel') }}</button>
           <button class="mask-btn-confirm" :disabled="!hasMask || !prompt.trim()"
             @click="confirm">
-            开始编辑
+              {{ t('canvas.maskEditDialog.confirm') }}
           </button>
         </div>
       </div>
@@ -59,9 +58,12 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick } from 'vue'
+import { useI18n } from '@/i18n'
 import { X, Eraser } from 'lucide-vue-next'
 import { ElMessage } from 'element-plus'
 import { loadImage, toBase64IfNeeded } from '@/lib/canvas-image-ops'
+
+const { t } = useI18n()
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -121,7 +123,7 @@ async function initCanvas() {
     }).catch(() => { /* 失败时 confirm 时会再转一次 */ })
   } catch (err) {
     console.error('[MaskEditDialog] 图片加载失败:', err)
-    ElMessage.error(`蒙版编辑：图片加载失败`)
+    ElMessage.error(t('canvas.maskEditDialog.loadFailed'))
     return
   }
 

@@ -99,6 +99,28 @@ export function createTemplate(data: TemplateCreateRequest): Promise<PipelineTem
   return client.post('/api/pipeline/templates', data)
 }
 
+/** 下载示例模板 JSON（无需鉴权） */
+export function getSampleTemplate(): Promise<{
+  version: string
+  exported_at: string
+  templates: Record<string, any>[]
+  script_templates: Record<string, any>[]
+  style_presets: Record<string, any>[]
+}> {
+  return client.get('/api/pipeline/templates/sample')
+}
+
+/**
+ * 无副作用校验模板结构（不落库、不启动运行）
+ * @returns { is_valid: boolean, errors: [{step_key, field, reason}] }
+ */
+export function validateTemplate(data: Record<string, any>): Promise<{
+  is_valid: boolean
+  errors: { step_key: string | null; field: string; reason: string }[]
+}> {
+  return client.post('/api/pipeline/templates/validate', data)
+}
+
 export function updateTemplate(id: number, data: TemplateUpdateRequest): Promise<PipelineTemplate> {
   return client.put(`/api/pipeline/templates/${id}`, data)
 }

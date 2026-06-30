@@ -81,6 +81,29 @@
             />
           </div>
 
+          <!-- 下载示例模板按钮（spec 5.2.1） -->
+          <div class="import-sample-area">
+            <el-button text type="primary" :loading="downloadingSample" @click="downloadSample">
+              <el-icon><Download /></el-icon>
+              {{ t('workshop.importExport.downloadSample') || '下载示例模板' }}
+            </el-button>
+            <span class="sample-hint">{{ t('workshop.importExport.sampleHint') || '不知道格式？下载示例文件照着改' }}</span>
+          </div>
+
+          <!-- 校验错误列表（来自后端 errors 字段，spec 5.2.3） -->
+          <div v-if="importErrors.length > 0" class="import-errors">
+            <div class="errors-header">
+              <el-icon color="var(--el-color-danger)"><WarningFilled /></el-icon>
+              <span>{{ t('workshop.importExport.errorsTitle', { n: importErrors.length }) || `${importErrors.length} 个模板校验失败` }}</span>
+            </div>
+            <div v-for="(err, idx) in importErrors" :key="idx" class="error-item">
+              <div class="error-template">{{ err.template_name || err.template_key }}</div>
+              <ul class="error-reasons">
+                <li v-for="(reason, rIdx) in err.reasons" :key="rIdx">{{ reason }}</li>
+              </ul>
+            </div>
+          </div>
+
           <!-- 预览区域 -->
           <div v-if="previewData" class="import-preview">
             <div class="preview-summary">
@@ -168,10 +191,11 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Upload } from '@element-plus/icons-vue'
+import { Upload, Download, WarningFilled } from '@element-plus/icons-vue'
 import client from '@/api/client'
 import { useI18n } from '@/i18n'
 import { useUserStore } from '@/stores/user'
+import { getSampleTemplate } from '@/api/pipeline'
 import type { PipelineTemplate } from '@/types'
 
 const { t } = useI18n()
@@ -230,6 +254,10 @@ const importFileName = ref('')
 const previewData = ref<any>(null)
 const previewRows = ref<any[]>([])
 const conflictStrategy = ref<'rename' | 'skip' | 'overwrite'>('rename')
+// 下载示例模板 loading
+const downloadingSample = ref(false)
+// 后端返回的校验错误列表（spec 5.2.3）
+const importErrors = ref<{ template_key: string; template_name: string; reasons: string[] }[]>([])
 const importVisibility = ref<'private' | 'public' | 'builtin'>('private')
 
 // ===== 弹窗打开时初始化 =====
@@ -383,20 +411,62 @@ async function doImport() {
       import_mode: importVisibility.value,
     })
     const r = res.data || {}
-    ElMessage.success(
-      t('workshop.importExport.importSuccess', {
-        imported: r.imported || 0,
-        renamed: r.renamed || 0,
-        overwritten: r.overwritten || 0,
-        skipped: r.skipped || 0,
-      }),
-    )
-    emit('imported')
-    visible.value = false
+    // 读取后端校验错误（spec 5.2.3）
+    importErrors.value = r.errors || []
+
+    // 有校验失败时改用 warning 提示
+    if (importErrors.value.length > 0) {
+      ElMessage.warning(
+        t('workshop.importExport.importPartialWarning', {
+          imported: r.imported || 0,
+          failed: importErrors.value.length,
+        }) || `成功导入 ${r.imported || 0} 个，${importErrors.value.length} 个校验失败`,
+      )
+    } else {
+      ElMessage.success(
+        t('workshop.importExport.importSuccess', {
+          imported: r.imported || 0,
+          renamed: r.renamed || 0,
+          overwritten: r.overwritten || 0,
+          skipped: r.skipped || 0,
+        }),
+      )
+    }
+
+    // 全部成功才关闭弹窗；有错误则保持打开让用户看错误明细
+    if (importErrors.value.length === 0) {
+      emit('imported')
+      visible.value = false
+    }
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || t('workshop.importExport.importFailed'))
   } finally {
     importing.value = false
+  }
+}
+
+/**
+ * 下载示例模板（spec 5.2.1）
+ */
+async function downloadSample() {
+  downloadingSample.value = true
+  try {
+    const sample = await getSampleTemplate()
+    const jsonStr = JSON.stringify(sample, null, 2)
+    const blob = new Blob([jsonStr], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'agnes-template-example.json'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+    ElMessage.success(t('workshop.importExport.sampleDownloaded') || '示例模板已下载')
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || t('workshop.importExport.sampleDownloadFailed') || '下载失败')
+  } finally {
+    downloadingSample.value = false
   }
 }
 
@@ -408,6 +478,7 @@ function onClosed() {
   conflictStrategy.value = 'rename'
   importVisibility.value = 'private'
   selectedExportIds.value = []
+  importErrors.value = []
 }
 
 /** 类别翻译 */
@@ -526,5 +597,65 @@ function categoryTagType(category: string): '' | 'success' | 'warning' | 'danger
 .strategy-label {
   font-size: 13px;
   color: var(--el-text-color-regular);
+}
+
+/* 下载示例模板区 */
+.import-sample-area {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.sample-hint {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+/* 校验错误列表 */
+.import-errors {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--el-color-danger-light-9);
+  border: 1px solid var(--el-color-danger-light-5);
+  border-radius: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.errors-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--el-color-danger);
+}
+
+.error-item {
+  padding: 6px 8px;
+  background: var(--el-bg-color);
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.error-template {
+  font-weight: 500;
+  color: var(--el-text-color-primary);
+  margin-bottom: 4px;
+}
+
+.error-reasons {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--el-text-color-regular);
+}
+
+.error-reasons li {
+  line-height: 1.5;
+  font-family: monospace;
+  font-size: 11px;
 }
 </style>

@@ -296,6 +296,67 @@
           </button>
         </div>
 
+        <!-- 配音节点（spec 5.4.1）：音色/语速/来源 -->
+        <div v-else-if="panel.type === 'tts'" class="tts-content">
+          <div class="tts-row">
+            <span class="tts-label">{{ t('canvas.node.voice') || '音色' }}</span>
+            <select
+              class="tts-select"
+              :value="(panel.content as any).voice || 'default'"
+              @change="updatePanelContent('voice', ($event.target as HTMLSelectElement)?.value)"
+              @mousedown.stop
+            >
+              <option value="default">{{ t('canvas.node.voiceDefault') || '默认' }}</option>
+              <option value="female">{{ t('canvas.node.voiceFemale') || '女声' }}</option>
+              <option value="male">{{ t('canvas.node.voiceMale') || '男声' }}</option>
+            </select>
+          </div>
+          <div class="tts-row">
+            <span class="tts-label">{{ t('canvas.node.speed') || '语速' }}</span>
+            <el-slider
+              :model-value="(panel.content as any).speed ?? 1.0"
+              :min="0.5" :max="2.0" :step="0.1"
+              @update:model-value="updatePanelContent('speed', $event)"
+              @mousedown.stop
+              style="flex: 1"
+            />
+          </div>
+          <div class="tts-hint">
+            {{ t('canvas.node.ttsHint') || '连接文本节点作为配音来源' }}
+          </div>
+        </div>
+
+        <!-- 字幕节点（spec 5.4.1）：从上游文本生成 SRT -->
+        <div v-else-if="panel.type === 'subtitle'" class="subtitle-content">
+          <div class="subtitle-hint">
+            {{ t('canvas.node.subtitleHint') || '连接文本节点，自动生成 SRT 字幕' }}
+          </div>
+          <textarea
+            class="subtitle-prompt"
+            :value="(panel.content as any).prompt || ''"
+            :placeholder="t('canvas.node.subtitlePromptPlaceholder') || '字幕生成提示词（可选）'"
+            @input="updatePanelContent('prompt', ($event.target as HTMLTextAreaElement)?.value)"
+            @mousedown.stop
+            rows="3"
+          />
+        </div>
+
+        <!-- 成片合成节点（spec 5.4.1）：拼接视频 + 字幕 + 配音 -->
+        <div v-else-if="panel.type === 'compose'" class="compose-content">
+          <div class="compose-row">
+            <el-switch
+              :model-value="(panel.content as any).with_subtitle ?? true"
+              @update:model-value="updatePanelContent('with_subtitle', $event)"
+              @mousedown.stop
+              size="small"
+            />
+            <span class="compose-label">{{ t('canvas.node.burnSubtitle') || '烧录字幕' }}</span>
+          </div>
+          <div class="compose-hint">
+            {{ t('canvas.node.composeHint') || '连接视频节点（必须）+ 可选配音/字幕节点' }}
+          </div>
+        </div>
+
         <!-- 未知节点类型 -->
         <div
           v-else
@@ -1045,6 +1106,17 @@ function updateConfigContent(key: string, value: any) {
   store.updatePanel(props.panel.id, { content: updates })
 }
 
+/**
+ * 更新节点 content 的单个字段（用于 tts/subtitle/compose 新节点类型）
+ * 与 updateConfigContent 类似但不处理模式切换逻辑
+ */
+function updatePanelContent(key: string, value: any) {
+  const currentContent = (props.panel.content || {}) as Record<string, any>
+  store.updatePanel(props.panel.id, {
+    content: { ...currentContent, [key]: value },
+  })
+}
+
 /** 帧率变化：如果当前时长超过新帧率的最大限制，自动调整为最大可用时长 */
 function onFrameRateChange(newFps: number) {
   const updates: Record<string, any> = { frame_rate: newFps }
@@ -1734,5 +1806,114 @@ onUnmounted(() => {
   white-space: nowrap;
   color: var(--agnes-text-tertiary);
   font-size: 11px;
+}
+
+/* ===== 新增节点类型样式（spec 5.4）===== */
+
+/* 配音节点 */
+.tts-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  height: 100%;
+  overflow-y: auto;
+}
+
+.tts-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tts-label {
+  font-size: 12px;
+  color: var(--agnes-text-secondary);
+  flex-shrink: 0;
+  width: 36px;
+}
+
+.tts-select {
+  flex: 1;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--agnes-border);
+  border-radius: 6px;
+  background: var(--agnes-bg);
+  color: var(--agnes-text);
+  font-size: 12px;
+  outline: none;
+}
+
+.tts-hint {
+  margin-top: auto;
+  padding: 6px 8px;
+  background: var(--agnes-bg-soft);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--agnes-text-tertiary);
+  line-height: 1.4;
+}
+
+/* 字幕节点 */
+.subtitle-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  height: 100%;
+}
+
+.subtitle-hint {
+  padding: 6px 8px;
+  background: var(--agnes-bg-soft);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--agnes-text-tertiary);
+  line-height: 1.4;
+}
+
+.subtitle-prompt {
+  flex: 1;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--agnes-border);
+  border-radius: 6px;
+  background: var(--agnes-bg);
+  color: var(--agnes-text);
+  font-size: 12px;
+  resize: none;
+  outline: none;
+  font-family: inherit;
+}
+
+/* 成片合成节点 */
+.compose-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  height: 100%;
+}
+
+.compose-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.compose-label {
+  font-size: 13px;
+  color: var(--agnes-text);
+}
+
+.compose-hint {
+  margin-top: auto;
+  padding: 6px 8px;
+  background: var(--agnes-bg-soft);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--agnes-text-tertiary);
+  line-height: 1.4;
 }
 </style>

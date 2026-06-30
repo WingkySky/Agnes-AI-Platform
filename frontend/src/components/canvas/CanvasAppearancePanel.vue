@@ -8,39 +8,39 @@
 <template>
   <div class="canvas-appearance-panel" :style="panelStyle">
     <!-- 面板标题 -->
-    <div class="panel-title">画布外观</div>
+    <div class="panel-title">{{ t('canvas.appearance.title') }}</div>
 
     <!-- 主题模式：浅色/深色 -->
-    <div class="section-label">主题模式</div>
+    <div class="section-label">{{ t('canvas.appearance.themeMode') }}</div>
     <div class="mode-group theme-mode-group" :style="{ background: theme.toolbar.itemHover }">
       <button
         type="button"
         class="mode-btn"
         :class="{ active: themeMode === 'light' }"
         :style="themeMode === 'light' ? lightActiveStyle : { color: theme.toolbar.item }"
-        aria-label="切换到浅色主题"
-        title="切换到浅色主题"
+        :aria-label="t('canvas.appearance.themeLightHint')"
+        :title="t('canvas.appearance.themeLightHint')"
         @click="$emit('set-theme', 'light')"
       >
         <Sun :size="16" />
-        <span>浅色</span>
+        <span>{{ t('canvas.appearance.light') }}</span>
       </button>
       <button
         type="button"
         class="mode-btn"
         :class="{ active: themeMode === 'dark' }"
         :style="themeMode === 'dark' ? darkActiveStyle : { color: theme.toolbar.item }"
-        aria-label="切换到深色主题"
-        title="切换到深色主题"
+        :aria-label="t('canvas.appearance.themeDarkHint')"
+        :title="t('canvas.appearance.themeDarkHint')"
         @click="$emit('set-theme', 'dark')"
       >
         <Moon :size="16" />
-        <span>深色</span>
+        <span>{{ t('canvas.appearance.dark') }}</span>
       </button>
     </div>
 
     <!-- 网格样式：点/线/空白 -->
-    <div class="section-label mt-3">网格样式</div>
+    <div class="section-label mt-3">{{ t('canvas.appearance.gridStyle') }}</div>
     <div class="mode-group bg-mode-group" :style="{ background: theme.toolbar.itemHover }">
       <button
         type="button"
@@ -50,7 +50,7 @@
         @click="$emit('set-background', 'dots')"
       >
         <CircleDot :size="16" />
-        <span>点</span>
+        <span>{{ t('canvas.appearance.dots') }}</span>
       </button>
       <button
         type="button"
@@ -60,7 +60,7 @@
         @click="$emit('set-background', 'lines')"
       >
         <Grid2x2 :size="16" />
-        <span>线</span>
+        <span>{{ t('canvas.appearance.lines') }}</span>
       </button>
       <button
         type="button"
@@ -70,7 +70,7 @@
         @click="$emit('set-background', 'blank')"
       >
         <Square :size="16" />
-        <span>空白</span>
+        <span>{{ t('canvas.appearance.blank') }}</span>
       </button>
     </div>
 
@@ -78,7 +78,7 @@
     <div class="image-info-row">
       <span class="image-info-label">
         <Info :size="14" />
-        图片信息
+        {{ t('canvas.appearance.imageInfo') }}
       </span>
       <el-switch
         :model-value="showImageInfo"
@@ -91,8 +91,11 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from '@/i18n'
 import { Sun, Moon, CircleDot, Grid2x2, Square, Info } from 'lucide-vue-next'
 import { ElSwitch } from 'element-plus'
+
+const { t } = useI18n()
 
 const props = defineProps({
   theme: { type: Object, required: true },
