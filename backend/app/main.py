@@ -61,6 +61,8 @@ from app.routes import style_elements as style_elements_route
 from app.routes import camera_presets as camera_presets_route
 from app.routes import prompt_presets as prompt_presets_route
 from app.routes import admin_review as admin_review_route
+from app.routes import asset as asset_route
+from app.routes import scenes as scenes_route
 from app.services.video_poller import poller_manager
 from app.services.image_poller import image_poller_manager
 from app.services.agnes_client import agnes_client
@@ -415,6 +417,8 @@ app.include_router(style_elements_route.router, prefix="/api", tags=["风格元�
 app.include_router(camera_presets_route.router, prefix="/api", tags=["摄像机预设"])
 app.include_router(prompt_presets_route.router, prefix="/api", tags=["提示词预设"])
 app.include_router(admin_review_route.router, prefix="/api", tags=["管理员-统一审核"])
+app.include_router(asset_route.router, prefix="/api", tags=["管理员-资源转存"])
+app.include_router(scenes_route.router, prefix="/api", tags=["3D 场景（导演台）"])
 
 
 # ---------- 健康检查 ----------

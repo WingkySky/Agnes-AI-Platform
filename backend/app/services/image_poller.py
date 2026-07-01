@@ -21,9 +21,13 @@ import uuid
 from datetime import datetime
 from typing import Dict, Optional, List
 
+from sqlalchemy import select
+
 from app.services.agnes_client import agnes_client
 from app.services.provider_registry import provider_registry
+from app.services import asset_storage
 from app.models.generation import Generation
+from app.models.model_definition import ModelDefinition
 from app.core.database import new_async_session
 from app.services.credits_service import confirm_credits, refund_credits
 
@@ -284,7 +288,7 @@ class ImagePollerManager:
                         if k not in ("base64_image", "image_url", "base64_images", "image_urls", "mask", "is_public")
                     },
                     mode=task.params.get("mode"),
-                    result_url=result_url,
+                    result_url=result_url,  # 先用原始 URL，转存成功后再更新
                     status=task.status,
                     credits_consumed=task.credits_consumed,
                     task_id=task.task_id,
@@ -296,7 +300,67 @@ class ImagePollerManager:
                     preset_id=task.preset_id,
                 )
                 session.add(record)
-                await session.commit()
+                await session.commit()  # 先提交拿到 record.id
+
+                # ===== 资源转存：把上游 URL 转存到对象存储（仅对 HTTP/HTTPS URL，跳过 data URI） =====
+                if task.result_url and task.result_url.startswith(("http://", "https://")):
+                    try:
+                        model_id = task.params.get("model", "")
+                        # 查询模型的 asset_storage_mode（默认 auto）
+                        asset_storage_mode = "auto"
+                        try:
+                            stmt = select(ModelDefinition.asset_storage_mode).where(
+                                ModelDefinition.model_id == model_id
+                            )
+                            mode_result = await session.execute(stmt)
+                            mode_row = mode_result.first()
+                            if mode_row:
+                                asset_storage_mode = mode_row[0]
+                        except Exception as mode_err:
+                            logger.warning(
+                                "[图片任务器] 查询 asset_storage_mode 失败，用默认 auto: task_id=%s error=%s",
+                                task.task_id, mode_err,
+                            )
+
+                        # 查询 provider_type（用于 auto 模式判断是否需要转存）
+                        provider_type = ""
+                        try:
+                            provider_type = await provider_registry.get_provider_type(model_id)
+                        except Exception as pt_err:
+                            logger.warning(
+                                "[图片任务器] 查询 provider_type 失败: task_id=%s error=%s",
+                                task.task_id, pt_err,
+                            )
+
+                        logger.info(
+                            "[图片任务器] 资源转存开始: task_id=%s model_id=%s mode=%s provider_type=%s",
+                            task.task_id, model_id, asset_storage_mode, provider_type,
+                        )
+                        # 执行转存（失败不抛异常，返回 pending 状态）
+                        new_result_url, original_url, migrate_status = await asset_storage.migrate_if_needed(
+                            upstream_url=task.result_url,
+                            record_id=record.id,
+                            type="image",
+                            created_at=record.created_at,
+                            model_id=model_id,
+                            asset_storage_mode=asset_storage_mode,
+                            provider_type=provider_type,
+                        )
+                        # 用转存结果更新记录
+                        record.result_url = new_result_url
+                        record.original_url = original_url
+                        record.migrate_status = migrate_status
+                        await session.commit()
+                        logger.info(
+                            "[图片任务器] 资源转存完成: task_id=%s migrate_status=%s",
+                            task.task_id, migrate_status,
+                        )
+                    except Exception as migrate_err:
+                        # 转存失败不影响主流程：记录已写入，result_url 保持原始 URL，migrate_status 保持 NULL
+                        logger.error(
+                            "[图片任务器] 资源转存异常: task_id=%s error=%s",
+                            task.task_id, migrate_err, exc_info=True,
+                        )
             logger.info("[图片任务器] 记录已异步写入数据库: task_id=%s moderation=%s", task.task_id, moderation_status)
         except Exception as e:
             logger.error("[图片任务器] 数据库写入失败: %s", e)

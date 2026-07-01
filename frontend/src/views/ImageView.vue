@@ -98,6 +98,47 @@
               <PresetQuickPanel @select="onPresetSelect" />
             </el-popover>
 
+            <!-- 3D 场景快捷面板：从导演台选择场景，追加镜头语言到 prompt -->
+            <el-popover
+              placement="bottom-start"
+              :width="340"
+              trigger="click"
+              :teleported="true"
+              v-model:visible="scenePopoverVisible"
+            >
+              <template #reference>
+                <el-button
+                  :icon="Aim"
+                  size="small"
+                  plain
+                  style="margin-top: 6px; margin-left: 8px"
+                >
+                  {{ t('scene3d.useSceneBtn') }}
+                </el-button>
+              </template>
+              <div class="scene-quick-panel">
+                <h5 class="panel-title">{{ t('scene3d.quickPanelTitle') }}</h5>
+                <div v-loading="sceneLoading" class="scene-list">
+                  <button
+                    v-for="scene in sceneList"
+                    :key="scene.id"
+                    type="button"
+                    class="scene-item"
+                    :disabled="sceneApplying"
+                    @click="onSceneSelect(scene)"
+                  >
+                    <div class="scene-item-info">
+                      <span class="scene-item-name">{{ scene.name }}</span>
+                      <span v-if="scene.is_public" class="scene-item-tag">{{ t('scene3d.publicTag') }}</span>
+                    </div>
+                  </button>
+                  <p v-if="!sceneLoading && sceneList.length === 0" class="panel-empty">
+                    {{ t('scene3d.quickPanelEmpty') }}
+                  </p>
+                </div>
+              </div>
+            </el-popover>
+
             <!-- 紧凑参数选择：尺寸 + 模型，一行标签搞定 -->
             <el-form-item :label="t('params.size')">
               <ParamSelector mode="image" v-model:size="size" v-model:model="model" />
@@ -276,7 +317,7 @@
 import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  MagicStick, Download, Link, PictureFilled, Edit, Loading, CircleCloseFilled, VideoPlay, Share, InfoFilled, Folder
+  MagicStick, Download, Link, PictureFilled, Edit, Loading, CircleCloseFilled, VideoPlay, Share, InfoFilled, Folder, Aim
 } from '@element-plus/icons-vue'
 import PromptTemplates from '@/components/PromptTemplates.vue'
 import PresetQuickPanel from '@/components/presets/PresetQuickPanel.vue'
@@ -292,7 +333,9 @@ import { useI18n } from '@/i18n'
 import { useCreditEstimate } from '@/composables/useCreditEstimate'
 import { useDownload } from '@/composables/useDownload'
 import { matchImageSize, getImageSizeLabel, getModelParams } from '@/config/model-params'
+import { getScenes, previewScenePrompt } from '@/api/scenes'
 import type { FileInfo } from '@/types'
+import type { Scene3D, SceneData } from '@/types/scene'
 
 const { t } = useI18n()
 const userStore = useUserStore()
@@ -470,6 +513,51 @@ function onPresetSelect(preset: any) {
     ElMessage.success(t('presets.applied'))
   }
 }
+
+// ---------- 3D 场景快捷应用：从导演台选择场景，将镜头语言追加到 prompt ----------
+const scenePopoverVisible = ref(false)
+const sceneList = ref<Scene3D[]>([])
+const sceneLoading = ref(false)
+const sceneApplying = ref(false)
+
+/** 弹出面板打开时加载场景列表（当前用户的 + 公开的） */
+async function loadScenes() {
+  sceneLoading.value = true
+  try {
+    const res = await getScenes({ page: 1, page_size: 20 })
+    sceneList.value = res.items || []
+  } catch {
+    sceneList.value = []
+  } finally {
+    sceneLoading.value = false
+  }
+}
+
+/** 选中场景后调用预览接口拿到 prompt_suffix，追加到提示词末尾 */
+async function onSceneSelect(scene: Scene3D) {
+  if (sceneApplying.value) return
+  sceneApplying.value = true
+  try {
+    const res = await previewScenePrompt(scene.scene_data as SceneData)
+    const suffix = (res.prompt_suffix || '').trim()
+    if (suffix) {
+      // prompt_suffix 已含句号边界，直接以空格拼接
+      const base = prompt.value.trim()
+      prompt.value = base ? `${base} ${suffix}` : suffix
+      ElMessage.success(t('scene3d.appliedToImage'))
+    }
+    scenePopoverVisible.value = false
+  } catch {
+    ElMessage.error(t('scene3d.applyFailed'))
+  } finally {
+    sceneApplying.value = false
+  }
+}
+
+// 面板打开时自动加载场景列表
+watch(scenePopoverVisible, (v) => {
+  if (v) loadScenes()
+})
 
 function handleImageChange(fileList: FileInfo[]) {
   // fileList 为数组（可能为 null 表示清空）
@@ -927,4 +1015,53 @@ function copyImageUrl() {
 }
 .tip-title { font-weight: 600; color: var(--agnes-text-primary); margin-bottom: 8px; }
 .tips-card ul { margin: 0; padding-left: 20px; line-height: 1.8; }
+
+/* 3D 场景快捷面板 */
+.scene-quick-panel { padding: 4px 0; min-width: 260px; }
+.scene-quick-panel .panel-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--agnes-text-tertiary);
+  margin: 0 0 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.scene-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 280px;
+  overflow: auto;
+}
+.scene-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s;
+}
+.scene-item:hover:not(:disabled) { background: var(--agnes-bg-hover); }
+.scene-item:disabled { cursor: not-allowed; opacity: 0.6; }
+.scene-item-info { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.scene-item-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--agnes-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.scene-item-tag { font-size: 11px; color: var(--agnes-text-tertiary); }
+.scene-quick-panel .panel-empty {
+  font-size: 12px;
+  color: var(--agnes-text-tertiary);
+  text-align: center;
+  padding: 16px 0;
+  margin: 0;
+}
 </style>

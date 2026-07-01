@@ -69,6 +69,13 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/WorkshopView.vue'),
     meta: { titleKey: 'router.workshop', requiresAuth: true, permission: 'pipeline:run' }
   },
+  // ---------- 3D 场景导演台：用 3D 空间布局生成可控的镜头语言 prompt ----------
+  {
+    path: '/scene-editor',
+    name: 'scene-editor',
+    component: () => import('@/views/SceneEditorView.vue'),
+    meta: { titleKey: 'router.sceneEditor', requiresAuth: true }
+  },
   {
     path: '/workshop/run/:templateId',
     name: 'pipeline-run',

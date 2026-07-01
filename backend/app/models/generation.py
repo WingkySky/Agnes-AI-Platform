@@ -28,6 +28,8 @@ class Generation(Base):
     - public_shared_at: 首次设为公开的时间（用于广场「最新」排序）
     - likes_count: 点赞数（反范式缓存，用于高性能排序）
     - views_count: 浏览次数（打开详情即 +1）
+    - original_url: 上游 Provider 返回的原始 URL（转存场景保留以便审计追溯）
+    - migrate_status: 转存状态（done/pending/NULL）
     """
 
     __tablename__ = "generations"
@@ -74,6 +76,12 @@ class Generation(Base):
     # 不加外键，因为预设可能来自 prompt_presets 或 camera_presets 多表
     preset_id = Column(Integer, nullable=True, index=True)
 
+    # ===== 资源转存字段 =====
+    # 上游 Provider 返回的原始 URL，转存场景下保留以便审计追溯；未转存记录（如 Agnes）为 NULL
+    original_url = Column(Text, nullable=True)
+    # 转存状态：done（已转存）/ pending（待重试，可由管理员接口反复触发）/ NULL（未启用转存）
+    migrate_status = Column(String(20), nullable=True, index=True)
+
     def to_dict(self):
         """便捷转换为字典（用于 JSON 序列化）"""
         return {
@@ -97,4 +105,14 @@ class Generation(Base):
             "moderation_flags": self.moderation_flags,
             "ai_moderation_status": self.ai_moderation_status,
             "preset_id": self.preset_id,
+            "original_url": self.original_url,
+            "migrate_status": self.migrate_status,
         }
+
+
+# ===== 数据库 schema 升级说明 =====
+# 由于项目使用 SQLAlchemy create_all 自动建表，SQLite 不会自动给已存在的表加新列。
+# 升级时需手动执行以下 SQL（PostgreSQL/MySQL 同理）：
+#   ALTER TABLE generations ADD COLUMN original_url TEXT;
+#   ALTER TABLE generations ADD COLUMN migrate_status VARCHAR(20);
+#   CREATE INDEX ix_generations_migrate_status ON generations(migrate_status);

@@ -263,7 +263,7 @@
           />
           <div v-else class="detail-video-wrap">
             <video
-              v-if="detailItem.result_url"
+              v-if="detailItem.result_url && !detailVideoFailed"
               ref="detailVideoEl"
               :src="getVideoStreamUrl(detailItem)"
               :poster="detailPoster"
@@ -276,6 +276,11 @@
               @error="onDetailVideoError"
               @abort="onDetailVideoAbort"
             ></video>
+            <!-- 视频加载失败占位：上游 Provider URL 过期（如 Seedance 404），优雅降级避免破图 -->
+            <div v-else-if="detailVideoFailed" class="video-failed-placeholder">
+              <el-icon :size="64"><VideoCamera /></el-icon>
+              <span>{{ t('common.resourceExpired') }}</span>
+            </div>
             <div v-else class="detail-video-empty">
               <el-icon :size="36" :color="'var(--agnes-error)'"><CircleCloseFilled /></el-icon>
               <div>{{ t('history.videoUrlEmpty') }}</div>
@@ -283,10 +288,6 @@
             <div v-if="detailVideoLoading" class="detail-video-status">
               <el-icon :size="24" class="spinner"><LoadingIcon /></el-icon>
               <span>{{ t('history.videoLoading') }}</span>
-            </div>
-            <div v-if="detailVideoFailed" class="detail-video-status error">
-              <el-icon :size="24"><CircleCloseFilled /></el-icon>
-              <span>{{ t('history.videoCannotPlay') }}</span>
             </div>
           </div>
         </div>
@@ -402,7 +403,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Loading, Document, Delete, VideoPlay, CircleCloseFilled, Edit, Close, Download, ZoomIn, Share, Warning, CopyDocument } from '@element-plus/icons-vue'
+import { Refresh, Loading, Document, Delete, VideoPlay, CircleCloseFilled, VideoCamera, Edit, Close, Download, ZoomIn, Share, Warning, CopyDocument } from '@element-plus/icons-vue'
 import ImageViewer from '@/components/ImageViewer.vue'
 import { getHistoryList, deleteHistoryRecord, batchDeleteHistory } from '@/api/history'
 import { updateShareStatus, batchUpdateShareStatus } from '@/api/plaza'
@@ -1583,6 +1584,23 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 .detail-video-empty div { margin-top: 10px; }
+
+/* 视频加载失败占位：居中展示图标 + 文案，避免破图 */
+.video-failed-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: var(--agnes-bg-base);
+  color: var(--agnes-text-muted);
+  border-radius: 10px;
+}
+.video-failed-placeholder span {
+  font-size: 14px;
+}
 
 .detail-video-status {
   position: absolute;

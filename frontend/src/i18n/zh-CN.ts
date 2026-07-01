@@ -53,6 +53,7 @@ const zhCN = {
     required: '不能为空',
     expand: '展开',
     collapse: '收起',
+    resourceExpired: '资源已失效',
   },
 
   // ------ 水印相关 ------
@@ -780,6 +781,7 @@ const zhCN = {
     cameraPresets: '摄像机预设',
     presets: '预设中心',
     presetAudit: '预设审核',
+    sceneEditor: '3D 导演台',
   },
 
   // ------ 广场 ------
@@ -3065,6 +3067,12 @@ const zhCN = {
     formModelType: '类型（留空自动推断）',
     formModelProviderName: '供应商名称（留空自动推断）',
     formCapabilities: '能力标签',
+    // 资源存储方式
+    formAssetStorageMode: '资源存储方式',
+    assetStorageModeAuto: '跟随默认',
+    assetStorageModeKeep: '保留原始 URL',
+    assetStorageModeMigrate: '转存到对象存储',
+    assetStorageModeTip: '跟随默认：Agnes 模型保留原 URL，其他模型转存到对象存储；保留原始 URL：不转存；转存到对象存储：强制转存（需在后端配置对象存储）',
     // 同步结果
     syncResultTitle: '同步结果',
     syncSuccess: '同步成功：新增 {added} 个，更新 {updated} 个，停用 {deactivated} 个，API 返回 {total} 个',
@@ -3344,6 +3352,45 @@ const zhCN = {
     presetMode: '预设模式',
     manualMode: '手动模式',
     selectPreset: '选择摄像机预设...',
+  },
+
+  // ------ 3D 场景导演台 ------
+  scene3d: {
+    title: '3D 场景导演台',
+    desc: '在 3D 空间中摆放相机、主体与灯光，自动生成可控的镜头语言描述，让生图构图、机位变得可复现。',
+    targetCamera: '相机',
+    targetSubject: '主体',
+    targetLight: '灯光',
+    resetView: '重置视角',
+    namePlaceholder: '场景名称',
+    descPlaceholder: '场景描述（可选）',
+    isPublic: '公开',
+    create: '创建',
+    newScene: '新建',
+    promptPreview: '镜头语言预览',
+    noPrompt: '拖动 3D 元素后将自动生成镜头语言',
+    details: '各维度明细',
+    detailDistance: '相机距离',
+    detailAngle: '视角',
+    detailFocal: '焦段',
+    detailFov: '视野',
+    detailComposition: '构图',
+    detailLight: '光位',
+    sceneList: '场景列表',
+    publicTag: '公开',
+    sharedTag: '共享',
+    nameRequired: '请输入场景名称',
+    saveSuccess: '场景已保存',
+    createSuccess: '场景已创建',
+    deleteConfirm: '确定删除该场景吗？此操作不可撤销。',
+    deleteSuccess: '场景已删除',
+    useInImage: '应用到图片生成',
+    appliedToImage: '已应用到图片生成',
+    // 图片生成入口的快捷面板文案
+    useSceneBtn: '3D 场景',
+    quickPanelTitle: '选择场景追加镜头语言',
+    quickPanelEmpty: '暂无场景，请先在导演台创建',
+    applyFailed: '应用场景失败',
   },
 }
 

@@ -256,6 +256,15 @@
         <el-form-item v-if="editingModel" :label="t('settings.formIsActive')">
           <el-switch v-model="modelForm.is_active" />
         </el-form-item>
+        <!-- 资源存储方式：决定生成结果（图片/视频）的转存策略 -->
+        <el-form-item :label="t('settings.formAssetStorageMode')">
+          <el-radio-group v-model="modelForm.asset_storage_mode">
+            <el-radio value="auto">{{ t('settings.assetStorageModeAuto') }}</el-radio>
+            <el-radio value="keep">{{ t('settings.assetStorageModeKeep') }}</el-radio>
+            <el-radio value="migrate">{{ t('settings.assetStorageModeMigrate') }}</el-radio>
+          </el-radio-group>
+          <div class="form-item-hint">{{ t('settings.assetStorageModeTip') }}</div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="modelDialogVisible = false">{{ t('common.cancel') }}</el-button>
@@ -340,6 +349,8 @@ const modelForm = reactive({
   provider_name: '',
   capabilities: [] as string[],
   is_active: true,
+  // 资源存储策略：auto(按 provider_type 自动判断) / keep(保留原始 URL) / migrate(强制转存对象存储)
+  asset_storage_mode: 'auto',
 })
 const modelRules: FormRules = {
   provider_id: [{ required: true, message: t('settings.formModelProvider'), trigger: 'change' }],
@@ -529,6 +540,8 @@ function openModelDialog(model?: ModelDefinition) {
       provider_name: model.provider_name,
       capabilities: [...(model.capabilities || [])],
       is_active: model.is_active,
+      // 回填资源存储策略，旧数据缺字段时回退到默认 auto
+      asset_storage_mode: model.asset_storage_mode || 'auto',
     })
   } else {
     Object.assign(modelForm, {
@@ -539,6 +552,7 @@ function openModelDialog(model?: ModelDefinition) {
       provider_name: '',
       capabilities: [],
       is_active: true,
+      asset_storage_mode: 'auto',
     })
   }
   modelDialogVisible.value = true
@@ -557,6 +571,7 @@ async function submitModel() {
           provider_name: modelForm.provider_name,
           capabilities: modelForm.capabilities,
           is_active: modelForm.is_active,
+          asset_storage_mode: modelForm.asset_storage_mode,
         })
         ElMessage.success(t('settings.modelUpdated'))
       } else {
@@ -567,6 +582,7 @@ async function submitModel() {
           model_type: modelForm.model_type,
           provider_name: modelForm.provider_name,
           capabilities: modelForm.capabilities,
+          asset_storage_mode: modelForm.asset_storage_mode,
         })
         ElMessage.success(t('settings.modelCreated'))
       }

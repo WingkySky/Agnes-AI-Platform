@@ -154,6 +154,7 @@ async def add_custom_model(req: CustomModelCreateRequest):
         provider_name=req.provider_name.strip(),
         capabilities=req.capabilities,
         sort_order=req.sort_order,
+        asset_storage_mode=req.asset_storage_mode,
     )
     return ModelDefinitionResponse(
         id=defn.id,
@@ -166,6 +167,7 @@ async def add_custom_model(req: CustomModelCreateRequest):
         is_active=defn.is_active,
         is_custom=defn.is_custom,
         sort_order=defn.sort_order,
+        asset_storage_mode=defn.asset_storage_mode or "auto",
     )
 
 
@@ -180,6 +182,7 @@ async def update_model(model_id: str, req: ModelUpdateRequest):
         capabilities=req.capabilities,
         is_active=req.is_active,
         sort_order=req.sort_order,
+        asset_storage_mode=req.asset_storage_mode,
     )
     if defn is None:
         raise HTTPException(status_code=404, detail=f"模型 {model_id} 不存在")
@@ -195,6 +198,7 @@ async def update_model(model_id: str, req: ModelUpdateRequest):
         is_active=defn.is_active,
         is_custom=defn.is_custom,
         sort_order=defn.sort_order,
+        asset_storage_mode=defn.asset_storage_mode or "auto",
     )
 
 

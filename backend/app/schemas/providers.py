@@ -78,6 +78,7 @@ class CustomModelCreateRequest(BaseModel):
     provider_name: str = Field(default="", description="供应商名称（留空自动推断）")
     capabilities: Optional[List[str]] = Field(default=None, description="能力标签列表")
     sort_order: int = Field(default=0, description="排序权重")
+    asset_storage_mode: str = Field(default="auto", description="资源存储策略: auto/keep/migrate")
 
 
 class ModelUpdateRequest(BaseModel):
@@ -88,6 +89,7 @@ class ModelUpdateRequest(BaseModel):
     capabilities: Optional[List[str]] = Field(default=None, description="能力标签列表")
     is_active: Optional[bool] = Field(default=None, description="是否激活")
     sort_order: Optional[int] = Field(default=None, description="排序权重")
+    asset_storage_mode: Optional[str] = Field(default=None, description="资源存储策略: auto/keep/migrate")
 
 
 class ModelDefinitionResponse(BaseModel):
@@ -102,6 +104,7 @@ class ModelDefinitionResponse(BaseModel):
     is_active: bool
     is_custom: bool
     sort_order: int
+    asset_storage_mode: str = Field(default="auto", description="资源存储策略: auto/keep/migrate")
 
     class Config:
         from_attributes = True

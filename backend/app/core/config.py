@@ -129,6 +129,54 @@ class Settings(BaseSettings):
         description="邮箱验证码重发间隔（秒），默认 60 秒",
     )
 
+    # ---------- 对象存储配置（用于资源转存，S3 兼容协议） ----------
+    # 支持任何 S3 兼容服务商：Cloudflare R2 / AWS S3 / MinIO / 阿里云 OSS（S3 兼容模式）
+    # 未配置时跳过转存，所有 URL 走原始上游
+    storage_backend_type: str = Field(
+        default="s3",
+        description="对象存储后端类型：s3（兼容 R2/MinIO/OSS）/ 未来扩展 local 等",
+    )
+    storage_endpoint: str = Field(
+        default="",
+        description="S3 兼容 endpoint，如 https://<account_id>.r2.cloudflarestorage.com",
+    )
+    storage_access_key_id: str = Field(
+        default="",
+        description="对象存储 Access Key ID",
+    )
+    storage_secret_access_key: str = Field(
+        default="",
+        description="对象存储 Secret Access Key",
+    )
+    storage_bucket: str = Field(
+        default="",
+        description="对象存储桶名",
+    )
+    storage_region: str = Field(
+        default="auto",
+        description="region，R2 用 auto，AWS S3 用具体 region 如 us-east-1",
+    )
+    storage_public_url_base: str = Field(
+        default="",
+        description="公共访问基址，如 https://pub-xxx.r2.dev 或绑定的自定义域名",
+    )
+    storage_video_upload_timeout_sec: int = Field(
+        default=120,
+        description="视频上传超时（秒）",
+    )
+    storage_image_upload_timeout_sec: int = Field(
+        default=30,
+        description="图片上传超时（秒）",
+    )
+    storage_migrate_retry_max: int = Field(
+        default=2,
+        description="转存失败重试次数",
+    )
+    storage_migrate_retry_interval_sec: int = Field(
+        default=5,
+        description="转存重试间隔（秒）",
+    )
+
     # ---------- 日志配置 ----------
     log_level: str = Field(
         default="INFO",

@@ -109,6 +109,16 @@ def _import_all_executors():
     except ImportError as e:
         logger.debug(f"步骤执行器未加载（可能尚未实现）: tts_generate - {e}")
 
+    try:
+        from app.services.pipeline.steps import color_grade  # noqa: F401
+    except ImportError as e:
+        logger.debug(f"步骤执行器未加载（可能尚未实现）: color_grade - {e}")
+
+    try:
+        from app.services.pipeline.steps import video_edit  # noqa: F401
+    except ImportError as e:
+        logger.debug(f"步骤执行器未加载（可能尚未实现）: video_edit - {e}")
+
 
 # 调用一次以触发注册（但在模块未实现时不会报错）
 _import_all_executors()

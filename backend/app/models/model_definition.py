@@ -26,6 +26,7 @@ class ModelDefinition(Base):
     - is_active: 是否启用
     - is_custom: 是否用户手动新增（true 时刷新模型列表不被覆盖）
     - sort_order: 排序权重
+    - asset_storage_mode: 资源存储策略（auto/keep/migrate）
     - created_at / updated_at: 时间戳
     """
 
@@ -41,6 +42,7 @@ class ModelDefinition(Base):
     is_active = Column(Boolean, default=True, nullable=False, comment="是否启用")
     is_custom = Column(Boolean, default=False, nullable=False, comment="是否用户自定义")
     sort_order = Column(Integer, default=0, nullable=False, comment="排序权重")
+    asset_storage_mode = Column(String(20), default="auto", nullable=False, comment="资源存储策略: auto(按provider_type自动判断) / keep(保留原URL) / migrate(强制转存对象存储)")
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -58,6 +60,13 @@ class ModelDefinition(Base):
             "is_active": self.is_active,
             "is_custom": self.is_custom,
             "sort_order": self.sort_order,
+            "asset_storage_mode": self.asset_storage_mode,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+# ===== 数据库 schema 升级说明 =====
+# 由于项目使用 SQLAlchemy create_all 自动建表，SQLite 不会自动给已存在的表加新列。
+# 升级时需手动执行以下 SQL：
+#   ALTER TABLE model_definitions ADD COLUMN asset_storage_mode VARCHAR(20) NOT NULL DEFAULT 'auto';

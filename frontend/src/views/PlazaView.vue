@@ -183,12 +183,18 @@
             fit="contain" />
           <!-- 视频：result_url 为公开 CDN，<video> 可直接播放（代理流需鉴权无法携带 JWT） -->
           <video
-            v-else
+            v-else-if="!videoLoadFailed"
             :src="detail.result_url ?? ''"
             :poster="detail.type === 'video' && !thumbFailed[detail.id] ? `/api/history/video/${detail.id}/thumbnail` : ''"
             controls
             playsinline
-            preload="metadata" />
+            preload="metadata"
+            @error="handleVideoError" />
+          <!-- 视频加载失败占位：上游 Provider URL 过期（如 Seedance 404），优雅降级避免破图 -->
+          <div v-else class="video-failed-placeholder">
+            <el-icon :size="64"><VideoCamera /></el-icon>
+            <span>{{ t('common.resourceExpired') }}</span>
+          </div>
         </div>
 
         <!-- 右：详情信息 -->
@@ -264,10 +270,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  Loading, Picture, VideoPlay, User, UserFilled, Star, StarFilled,
+  Loading, Picture, VideoPlay, VideoCamera, User, UserFilled, Star, StarFilled,
   CopyDocument, View, ArrowDown, Clock,
 } from '@element-plus/icons-vue'
 import {
@@ -311,6 +317,18 @@ const hasMore = computed(() => list.value.length < total.value)
 // ---------- 详情状态 ----------
 const detailVisible = ref(false)
 const detail = ref<PlazaWork | null>(null)
+// 视频加载失败标记：上游 Provider URL 过期（如 Seedance 404）时优雅降级
+const videoLoadFailed = ref(false)
+
+/** <video> 加载失败时切换为占位文案，避免破图 */
+function handleVideoError() {
+  videoLoadFailed.value = true
+}
+
+// 切换详情时重置失败标记，避免新视频沿用旧占位
+watch(detail, () => {
+  videoLoadFailed.value = false
+})
 
 // ---------- 加载列表 ----------
 /** 拉取一页数据；append=true 时追加到已有列表（加载更多） */
@@ -804,6 +822,20 @@ onMounted(() => {
   max-height: 70vh;
   object-fit: contain;
   display: block;
+}
+/* 视频加载失败占位：居中展示图标 + 文案，避免破图 */
+.video-failed-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  color: var(--agnes-text-muted);
+}
+.video-failed-placeholder span {
+  font-size: 14px;
 }
 .detail-info {
   flex: 1 1 45%;

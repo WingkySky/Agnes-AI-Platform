@@ -18,47 +18,56 @@
     @contextmenu.prevent="handleContextMenu"
     @dragstart.prevent
   >
-    <!-- 原图（普通 img，无跨域问题） -->
-    <img
-      :src="src"
-      :alt="alt"
-      :loading="loading"
-      :class="imgClass"
-      :style="mergedImgStyle"
-      :draggable="false"
-      @load="$emit('load', $event)"
-      @error="$emit('error', $event)"
-    />
-    <!-- 文字水印 -->
-    <div
-      v-if="shouldShow && wmConfig?.type === 'text' && wmConfig.text"
-      class="wm-text"
-      :style="textStyle"
-    >
-      {{ wmConfig.text }}
+    <!-- 原图 + 水印层（加载失败时整体隐藏） -->
+    <template v-if="!loadFailed">
+      <!-- 原图（普通 img，无跨域问题） -->
+      <img
+        :src="src"
+        :alt="alt"
+        :loading="loading"
+        :class="imgClass"
+        :style="mergedImgStyle"
+        :draggable="false"
+        @load="$emit('load', $event)"
+        @error="handleError"
+      />
+      <!-- 文字水印 -->
+      <div
+        v-if="shouldShow && wmConfig?.type === 'text' && wmConfig.text"
+        class="wm-text"
+        :style="textStyle"
+      >
+        {{ wmConfig.text }}
+      </div>
+      <!-- 图片水印 -->
+      <img
+        v-else-if="shouldShow && wmConfig?.type === 'image' && wmConfig.image_url"
+        class="wm-image"
+        :src="wmConfig.image_url"
+        :style="imageStyle"
+        alt="watermark"
+        draggable="false"
+      />
+      <!-- 透明拦截层：水印开启时覆盖在最上层，阻止右键直接保存原图 -->
+      <div
+        v-if="shouldShow"
+        class="wm-intercept-layer"
+        :title="interceptTitle"
+      />
+    </template>
+    <!-- 加载失败占位：上游 URL 过期等导致图片加载失败时优雅降级 -->
+    <div v-else class="image-failed-placeholder">
+      <el-icon :size="48"><Picture /></el-icon>
+      <span>{{ t('common.resourceExpired') }}</span>
     </div>
-    <!-- 图片水印 -->
-    <img
-      v-else-if="shouldShow && wmConfig?.type === 'image' && wmConfig.image_url"
-      class="wm-image"
-      :src="wmConfig.image_url"
-      :style="imageStyle"
-      alt="watermark"
-      draggable="false"
-    />
-    <!-- 透明拦截层：水印开启时覆盖在最上层，阻止右键直接保存原图 -->
-    <div
-      v-if="shouldShow"
-      class="wm-intercept-layer"
-      :title="interceptTitle"
-    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { CSSProperties } from 'vue'
 import { ElMessage } from 'element-plus'
+import { Picture } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { useModelsStore } from '@/stores/models'
 import { useUserStore } from '@/stores/user'
@@ -90,6 +99,26 @@ const emit = defineEmits<{
   (e: 'load', event: Event): void
   (e: 'error', event: Event): void
 }>()
+
+/** 图片是否加载失败（用于切换占位显示） */
+const loadFailed = ref(false)
+
+/**
+ * 图片加载失败处理：切换为占位显示，并向上抛出 error 事件
+ * 注意：onerror 只触发一次占位切换，不做重试
+ */
+function handleError(event: Event) {
+  loadFailed.value = true
+  emit('error', event)
+}
+
+// src 变化时重置失败状态，便于列表中复用组件时重新尝试加载
+watch(
+  () => props.src,
+  () => {
+    loadFailed.value = false
+  },
+)
 
 const modelsStore = useModelsStore()
 const userStore = useUserStore()
@@ -248,5 +277,24 @@ const mergedImgStyle = computed<CSSProperties>(() => {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
+}
+
+/* 加载失败占位：上游 URL 过期等导致图片加载失败时显示 */
+.image-failed-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  min-height: 200px;
+  background: var(--el-fill-color-light, #f5f7fa);
+  color: var(--el-text-color-secondary, #909399);
+  border-radius: 4px;
+}
+
+.image-failed-placeholder span {
+  font-size: 13px;
 }
 </style>

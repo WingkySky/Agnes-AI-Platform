@@ -111,6 +111,12 @@ class FFmpegCompositeExecutor(BaseStepExecutor):
         with_subtitle = config.get("with_subtitle", True)
         with_bgm = config.get("with_bgm", False)
         bgm_volume = config.get("bgm_volume", 0.3)  # BGM 音量（0~1）
+        # 可选：调色预设（subtle/neutral_punch/warm_cinematic/none 或自定义滤镜链）
+        # 来自 video-use 项目，应用到每个分镜片段
+        grade_preset = config.get("grade_preset", "")
+        # 可选：30ms 音频淡入淡出（默认 True，避免切点爆音）
+        # 来自 video-use render.py Rule 3
+        with_audio_fade = config.get("with_audio_fade", True)
 
         # 1. 获取上游视频列表（按 index 排序）
         step_output = self.context.steps_output.get(from_step, {})
@@ -151,7 +157,9 @@ class FFmpegCompositeExecutor(BaseStepExecutor):
             subtitle_text = subtitles[idx] if idx < len(subtitles) else ""
             audio_path = audios[idx].get("audio_path") if idx < len(audios) else None
             composed = await self._compose_single(
-                vpath, idx, subtitle_text, audio_path
+                vpath, idx, subtitle_text, audio_path,
+                grade_preset=grade_preset,
+                with_audio_fade=with_audio_fade,
             )
             composed_paths.append(composed)
             # 获取合成后片段的实际时长（关键：用实际时长而非配置时长，确保 SRT 与视频对齐）
@@ -334,38 +342,66 @@ class FFmpegCompositeExecutor(BaseStepExecutor):
         index: int,
         subtitle_text: str,
         audio_path: Optional[str],
+        grade_preset: str = "",
+        with_audio_fade: bool = True,
     ) -> str:
         """
-        对单个视频烧录字幕 + 混入配音（如果有）
+        对单个视频烧录字幕 + 混入配音 + 可选调色 + 可选音频淡入淡出
 
         - 如果有字幕且需要烧录，用 drawtext 滤镜
         - 如果有配音音频，替换原音轨
+        - 如果配置了 grade_preset，叠加调色滤镜链（来自 video-use 预设）
+        - 如果 with_audio_fade=True，叠加 30ms 音频淡入淡出（来自 video-use render.py Rule 3）
         - 如果都没有，直接返回原视频路径（跳过重编码）
         """
         has_subtitle = bool(subtitle_text.strip())
         has_audio = bool(audio_path)
+        has_grade = bool(grade_preset and grade_preset != "none")
 
-        # 没有字幕也没有配音，跳过重编码
-        if not has_subtitle and not has_audio:
+        # 解析调色滤镜链
+        grade_filter = ""
+        if has_grade:
+            # 复用 color_grade 步骤的预设解析逻辑
+            from app.services.pipeline.steps.color_grade import resolve_grade_filter
+            grade_filter = resolve_grade_filter(grade_preset)
+            if not grade_filter:
+                has_grade = False
+
+        # 没有字幕、配音、调色，且不需要音频淡入淡出，跳过重编码
+        if not has_subtitle and not has_audio and not has_grade and not with_audio_fade:
             return video_path
 
         # 检测 drawtext 滤镜可用性（只检测一次，结果缓存）
         if has_subtitle and not await self._check_drawtext_available():
             # drawtext 不可用：跳过字幕烧录，保留外挂 SRT
-            if not has_audio:
+            if not has_audio and not has_grade and not with_audio_fade:
                 return video_path
-            has_subtitle = False  # 降至仅配音模式
+            has_subtitle = False  # 降至其他模式
 
         out_path = video_path.replace(".mp4", f"_composed_{index:03d}.mp4")
 
-        # 构建视频滤镜（drawtext 烧录字幕，支持样式配置）
+        # 构建视频滤镜（drawtext 烧录字幕 + 调色滤镜链）
         vf_filters: List[str] = []
+        if has_grade:
+            vf_filters.append(grade_filter)
         if has_subtitle:
             # 从 step config 读取字幕样式（recompose 时会注入更新后的样式）
             style = self._resolve_subtitle_style(self.config.get("config", {}))
             vf_filters.append(self._build_drawtext_filter(style, subtitle_text))
 
         vf_arg = ",".join(vf_filters) if vf_filters else None
+
+        # 构建音频滤镜（30ms 淡入淡出，仅在保留原音轨时生效）
+        # 注：配音替换场景下，音频来自独立文件，淡入淡出应用到混音后的最终音轨
+        af_arg: Optional[str] = None
+        if with_audio_fade:
+            seg_duration = await self._get_video_duration(video_path)
+            if seg_duration > 0.06:
+                fade_out_start = max(0.0, seg_duration - 0.03)
+                af_arg = (
+                    f"afade=t=in:st=0:d=0.03,"
+                    f"afade=t=out:st={fade_out_start:.3f}:d=0.03"
+                )
 
         # 构建 ffmpeg 命令
         cmd: List[str] = ["ffmpeg", "-y", "-i", video_path]
@@ -374,12 +410,15 @@ class FFmpegCompositeExecutor(BaseStepExecutor):
 
         if vf_arg:
             cmd.extend(["-vf", vf_arg])
+        if af_arg:
+            cmd.extend(["-af", af_arg])
 
         if has_audio:
             # 用配音替换原音轨：视频来自输入0，音频来自输入1
+            # 注意：-af 滤镜会应用到输入1的音频
             cmd.extend(["-map", "0:v:0", "-map", "1:a:0", "-c:v", "libx264", "-c:a", "aac"])
         else:
-            # 保留原音轨，只烧录字幕
+            # 保留原音轨，只烧录字幕/调色/音频淡入淡出
             cmd.extend(["-c:v", "libx264", "-c:a", "aac"])
 
         cmd.extend(["-preset", "fast", "-pix_fmt", "yuv420p", "-movflags", "+faststart", out_path])

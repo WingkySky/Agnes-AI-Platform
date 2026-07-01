@@ -597,6 +597,8 @@ export interface ModelDefinition {
   is_active: boolean
   is_custom: boolean
   sort_order: number
+  /** 资源存储策略：auto(按 provider_type 自动判断) / keep(保留原始 URL) / migrate(强制转存对象存储) */
+  asset_storage_mode: string
 }
 
 /** 模型定义列表响应 — 对齐 ModelListResponse */
@@ -614,6 +616,8 @@ export interface CustomModelCreateRequest {
   provider_name?: string
   capabilities?: string[] | null
   sort_order?: number
+  /** 资源存储策略：auto / keep / migrate，默认 auto */
+  asset_storage_mode?: string
 }
 
 /** 更新模型定义请求 — 对齐 ModelUpdateRequest */
@@ -624,6 +628,8 @@ export interface ModelUpdateRequest {
   capabilities?: string[] | null
   is_active?: boolean
   sort_order?: number
+  /** 资源存储策略：auto / keep / migrate */
+  asset_storage_mode?: string
 }
 
 /** 模型同步结果 — 对齐 SyncModelsResponse */

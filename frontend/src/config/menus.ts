@@ -74,6 +74,15 @@ export const BUILT_IN_MENUS: BuiltInMenuItem[] = [
     is_group: false,
   },
   {
+    key: 'scene-editor',
+    label_zh: '3D 导演台',
+    label_en: '3D Scene Director',
+    icon: 'Aim',
+    path: '/scene-editor',
+    require_admin: false,
+    is_group: false,
+  },
+  {
     key: 'assets',
     label_zh: '资产库',
     label_en: 'Asset Library',
@@ -337,6 +346,7 @@ export const DEFAULT_MENU_CONFIG: MenuItemConfig[] = [
   { key: 'videos', show_in_top: true, show_in_sidebar: true, top_group_key: 'create', sidebar_group_key: 'create', top_sort_order: 3, sidebar_sort_order: 3 },
   { key: 'canvas', show_in_top: true, show_in_sidebar: true, top_group_key: 'create', sidebar_group_key: 'create', top_sort_order: 4, sidebar_sort_order: 4 },
   { key: 'workshop', show_in_top: true, show_in_sidebar: true, top_group_key: 'create', sidebar_group_key: 'create', top_sort_order: 5, sidebar_sort_order: 5 },
+  { key: 'scene-editor', show_in_top: true, show_in_sidebar: true, top_group_key: 'create', sidebar_group_key: 'create', top_sort_order: 6, sidebar_sort_order: 6 },
   { key: 'assets', show_in_top: false, show_in_sidebar: true, top_group_key: null, sidebar_group_key: 'personal', top_sort_order: 99, sidebar_sort_order: 5 },
   { key: 'presets', show_in_top: false, show_in_sidebar: true, top_group_key: null, sidebar_group_key: 'create', top_sort_order: 99, sidebar_sort_order: 6 },
 

@@ -512,6 +512,23 @@ class ProviderRegistry:
             )
             return result2.scalars().first()
 
+    async def get_provider_type(self, model_id: str) -> str:
+        """
+        根据模型 ID 查询所属 Provider 的 provider_type（单次 JOIN 查询）。
+        用于资源转存策略判断（agnes 保持原样，其他转存）。
+        不过滤 is_active，因为转存场景需要查询历史记录的 provider_type。
+        返回空字符串表示未找到。
+        """
+        async with new_async_session() as session:
+            stmt = (
+                select(ApiProvider.provider_type)
+                .join(ModelDefinition, ModelDefinition.provider_id == ApiProvider.id)
+                .where(ModelDefinition.model_id == model_id)
+            )
+            result = await session.execute(stmt)
+            row = result.first()
+            return row[0] if row else ""
+
     # ---------- Provider 同步模型（调用 /models API） ----------
 
     async def sync_provider_models(self, provider_id: int) -> Dict[str, Any]:
@@ -823,6 +840,7 @@ class ProviderRegistry:
         provider_name: str = "",
         capabilities: Optional[List[str]] = None,
         sort_order: int = 0,
+        asset_storage_mode: str = "auto",
     ) -> ModelDefinition:
         """
         添加用户自定义模型。
@@ -850,6 +868,7 @@ class ProviderRegistry:
                 is_active=True,
                 is_custom=True,
                 sort_order=sort_order,
+                asset_storage_mode=asset_storage_mode,
             )
             session.add(defn)
             await session.commit()
@@ -871,6 +890,7 @@ class ProviderRegistry:
         capabilities: Optional[List[str]] = None,
         is_active: Optional[bool] = None,
         sort_order: Optional[int] = None,
+        asset_storage_mode: Optional[str] = None,
     ) -> Optional[ModelDefinition]:
         """更新模型定义"""
         async with new_async_session() as session:
@@ -893,6 +913,8 @@ class ProviderRegistry:
                 defn.is_active = is_active
             if sort_order is not None:
                 defn.sort_order = sort_order
+            if asset_storage_mode is not None:
+                defn.asset_storage_mode = asset_storage_mode
 
             await session.commit()
             await session.refresh(defn)
@@ -939,6 +961,7 @@ class ProviderRegistry:
                 "is_active": d.is_active,
                 "is_custom": d.is_custom,
                 "sort_order": d.sort_order,
+                "asset_storage_mode": d.asset_storage_mode or "auto",
             }
             for d in definitions
         ]

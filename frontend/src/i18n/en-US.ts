@@ -51,6 +51,7 @@ const enUS = {
     required: 'is required',
     expand: 'Expand',
     collapse: 'Collapse',
+    resourceExpired: 'Resource Expired',
   },
 
   // ------ Watermark ------
@@ -778,6 +779,7 @@ const enUS = {
     cameraPresets: 'Camera Presets',
     presets: 'Preset Center',
     presetAudit: 'Preset Audit',
+    sceneEditor: '3D Scene Director',
   },
 
   // ------ Plaza ------
@@ -2925,6 +2927,12 @@ const enUS = {
     formModelType: 'Type (auto-inferred if empty)',
     formModelProviderName: 'Provider name (auto-inferred if empty)',
     formCapabilities: 'Capabilities',
+    // Asset storage mode
+    formAssetStorageMode: 'Asset Storage Mode',
+    assetStorageModeAuto: 'Follow Default',
+    assetStorageModeKeep: 'Keep Original URL',
+    assetStorageModeMigrate: 'Migrate to Object Storage',
+    assetStorageModeTip: 'Follow Default: Agnes models keep original URL, others migrate to object storage; Keep Original URL: no migration; Migrate to Object Storage: force migration (requires backend object storage configuration)',
     syncResultTitle: 'Sync Result',
     syncSuccess: 'Sync complete: added {added}, updated {updated}, deactivated {deactivated}, API returned {total}',
     confirmDeleteProvider: 'Delete provider "{name}"? This will cascade delete all its model definitions and cannot be undone.',
@@ -3290,6 +3298,45 @@ const enUS = {
     presetMode: 'Preset',
     manualMode: 'Manual',
     selectPreset: 'Select a camera preset...',
+  },
+
+  // ------ 3D Scene Director ------
+  scene3d: {
+    title: '3D Scene Director',
+    desc: 'Place camera, subject and lights in 3D space to auto-generate controllable cinematic prompts, making image composition and camera angles reproducible.',
+    targetCamera: 'Camera',
+    targetSubject: 'Subject',
+    targetLight: 'Light',
+    resetView: 'Reset View',
+    namePlaceholder: 'Scene name',
+    descPlaceholder: 'Scene description (optional)',
+    isPublic: 'Public',
+    create: 'Create',
+    newScene: 'New',
+    promptPreview: 'Cinematic Prompt Preview',
+    noPrompt: 'Drag 3D elements to auto-generate cinematic language',
+    details: 'Details',
+    detailDistance: 'Distance',
+    detailAngle: 'Angle',
+    detailFocal: 'Focal',
+    detailFov: 'FOV',
+    detailComposition: 'Composition',
+    detailLight: 'Light',
+    sceneList: 'Scene List',
+    publicTag: 'Public',
+    sharedTag: 'Shared',
+    nameRequired: 'Please enter a scene name',
+    saveSuccess: 'Scene saved',
+    createSuccess: 'Scene created',
+    deleteConfirm: 'Delete this scene? This action cannot be undone.',
+    deleteSuccess: 'Scene deleted',
+    useInImage: 'Apply to image generation',
+    appliedToImage: 'Applied to image generation',
+    // Quick panel text in image generation view
+    useSceneBtn: '3D Scene',
+    quickPanelTitle: 'Select scene to append cinematic prompt',
+    quickPanelEmpty: 'No scenes yet, create one in Director first',
+    applyFailed: 'Failed to apply scene',
   },
 }
 

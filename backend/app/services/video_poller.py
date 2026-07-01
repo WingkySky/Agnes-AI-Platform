@@ -19,9 +19,13 @@ import time
 from datetime import datetime
 from typing import Dict, Optional, List
 
+from sqlalchemy import select
+
 from app.services.agnes_client import agnes_client
 from app.services.provider_registry import provider_registry
+from app.services import asset_storage
 from app.models.generation import Generation
+from app.models.model_definition import ModelDefinition
 from app.core.database import new_async_session
 from app.services.credits_service import confirm_credits, refund_credits
 
@@ -339,7 +343,7 @@ class VideoPollerManager:
                     model=task.params.get("model", ""),
                     params=task.params,
                     mode=task.params.get("mode"),
-                    result_url=task.video_url,
+                    result_url=task.video_url,  # 先用原始 URL，转存成功后再更新
                     status=task.status,
                     credits_consumed=task.credits_consumed,
                     task_id=task.task_id or task.video_id,
@@ -351,7 +355,63 @@ class VideoPollerManager:
                     preset_id=task.preset_id,
                 )
                 session.add(record)
-                await session.commit()
+                await session.commit()  # 先提交拿到 record.id
+
+                # ===== 资源转存：把上游视频 URL 转存到对象存储（视频文件较大，注意超时） =====
+                # 仅对 HTTP/HTTPS URL 做转存；转存失败不影响主流程（记录已写入）
+                if task.video_url and task.video_url.startswith(("http://", "https://")):
+                    try:
+                        model_id = task.params.get("model", "")
+
+                        # 查询模型的 asset_storage_mode（决定是否转存）
+                        asset_storage_mode = "auto"  # 默认值
+                        try:
+                            stmt = select(ModelDefinition.asset_storage_mode).where(
+                                ModelDefinition.model_id == model_id
+                            )
+                            mode_result = await session.execute(stmt)
+                            mode_row = mode_result.first()
+                            if mode_row:
+                                asset_storage_mode = mode_row[0]
+                        except Exception as e:
+                            logger.warning("[视频轮询器] 查询 asset_storage_mode 失败，用默认 auto: %s", e)
+
+                        # 查询 provider_type（auto 模式下用于判断是否需要转存）
+                        provider_type = ""
+                        try:
+                            provider_type = await provider_registry.get_provider_type(model_id)
+                        except Exception as e:
+                            logger.warning("[视频轮询器] 查询 provider_type 失败: %s", e)
+
+                        # 执行转存（视频超时由 storage_video_upload_timeout_sec 控制，默认 120s）
+                        logger.info(
+                            "[视频轮询器] 资源转存开始: task_id=%s model=%s mode=%s provider_type=%s",
+                            task.task_id, model_id, asset_storage_mode, provider_type,
+                        )
+                        new_result_url, original_url, migrate_status = await asset_storage.migrate_if_needed(
+                            upstream_url=task.video_url,
+                            record_id=record.id,
+                            type="video",
+                            created_at=record.created_at,
+                            model_id=model_id,
+                            asset_storage_mode=asset_storage_mode,
+                            provider_type=provider_type,
+                        )
+                        # 更新记录字段
+                        record.result_url = new_result_url
+                        record.original_url = original_url
+                        record.migrate_status = migrate_status
+                        await session.commit()
+                        logger.info(
+                            "[视频轮询器] 资源转存完成: task_id=%s migrate_status=%s",
+                            task.task_id, migrate_status,
+                        )
+                    except Exception as migrate_err:
+                        # 转存失败不影响主流程，记录已写入，migrate_status 保持 NULL
+                        logger.error(
+                            "[视频轮询器] 资源转存异常: task_id=%s error=%s",
+                            task.task_id, migrate_err, exc_info=True,
+                        )
             logger.info("[视频轮询器] 记录已异步写入数据库: status=%s moderation=%s", task.status, moderation_status)
         except Exception as e:
             logger.error("[视频轮询器] 数据库写入失败: %s", e)
