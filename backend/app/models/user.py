@@ -67,6 +67,10 @@ class User(Base):
     watermark_enabled = Column(Boolean, default=False, nullable=False)  # 是否为该用户生成内容添加水印
     content_safety_strict = Column(Boolean, default=False, nullable=False)  # 是否启用严格内容安全（敏感词拦截）
 
+    # ===== 密码安全 =====
+    # 是否需要在下次登录后强制修改密码（默认管理员账号、首位注册管理员、被管理员重置密码后置为 True）
+    must_change_password = Column(Boolean, default=False, nullable=False)
+
     # 时间字段
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     last_login_at = Column(DateTime, nullable=True)
@@ -104,6 +108,7 @@ class User(Base):
             "is_admin": self.effective_is_admin,
             "watermark_enabled": self.watermark_enabled,
             "content_safety_strict": self.content_safety_strict,
+            "must_change_password": self.must_change_password or False,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "last_login_at": self.last_login_at.isoformat() if self.last_login_at else None,
         }

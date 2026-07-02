@@ -30,9 +30,14 @@ logger = logging.getLogger("agnes_platform")
 # =====================================================
 
 def _derive_key(raw_key: str) -> bytes:
+    """
+    从任意长度的 raw_key 派生 Fernet 兼容的 32 字节密钥（urlsafe base64 编码）。
+    配置层已强制要求 ENCRYPTION_KEY 非空（见 config.py 的 _validate_encryption_key），
+    此处不再做默认密钥兜底，避免使用弱密钥导致 Provider API Key 被泄露。
+    """
     if not raw_key:
-        raw_key = "agnes-platform-default-encryption-key"
-        logger.warning("[security] ENCRYPTION_KEY 未配置，使用默认密钥（生产环境请务必配置）")
+        # 防御性兜底：正常情况下不会走到这里（config 校验会先抛错）
+        raise ValueError("ENCRYPTION_KEY 未配置，无法派生加密密钥")
     digest = hashlib.sha256(raw_key.encode("utf-8")).digest()
     return base64.urlsafe_b64encode(digest)
 

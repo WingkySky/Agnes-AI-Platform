@@ -17,6 +17,7 @@
 # =====================================================
 
 import logging
+import time
 from typing import Optional
 
 from fastapi import HTTPException
@@ -31,14 +32,37 @@ from app.models.credit_transaction import CreditTransaction
 logger = logging.getLogger("agnes_platform")
 
 
-# ---------- 缓存：进程内的积分规则快照，避免每次都查询 ----------
-# 每次 consume_credits 前都会读取；这里提供一个轻量函数
+# ---------- 进程内积分规则缓存 ----------
+# 缓存结构：{rule_key: (value, updated_at)}，TTL 60 秒
+# 积分规则在管理界面修改频率低，但每次扣费都查询开销大，因此做进程内缓存
+_credit_rules_cache: dict[str, tuple[int, float]] = {}
+_CREDIT_RULES_CACHE_TTL = 60.0  # 秒
+
+
+def invalidate_credit_rules_cache() -> None:
+    """清除全部积分规则缓存（在管理员修改/重置规则后调用）"""
+    _credit_rules_cache.clear()
+
+
+# ---------- 读取单条积分规则（带 TTL 缓存）----------
 async def _get_rule_value(db: AsyncSession, rule_key: str, default: int) -> int:
-    """从 credit_rules 表读取指定 key 的 value；不存在则写入并返回默认值。"""
+    """从 credit_rules 表读取指定 key 的 value；不存在则返回默认值。"""
+    # 先查缓存
+    cached = _credit_rules_cache.get(rule_key)
+    if cached:
+        value, updated_at = cached
+        if time.time() - updated_at < _CREDIT_RULES_CACHE_TTL:
+            return value
+        # 过期：清除该 key
+        _credit_rules_cache.pop(rule_key, None)
+
     result = await db.execute(select(CreditRule.value).filter(CreditRule.rule_key == rule_key))
     value = result.scalar_one_or_none()
     if value is None:
+        # 不存在数据库记录：缓存默认值，避免连续空查
+        _credit_rules_cache[rule_key] = (default, time.time())
         return default
+    _credit_rules_cache[rule_key] = (value, time.time())
     return value
 
 

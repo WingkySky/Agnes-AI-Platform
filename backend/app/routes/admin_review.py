@@ -95,24 +95,24 @@ async def list_review_items(
                 db, status, keyword, item_id, user_id, username, work_type, ai_status
             )
             all_items.extend(work_items)
-        except Exception as e:
-            logger.warning("查询作品审核列表失败: %s", e)
+        except Exception:
+            logger.exception("查询作品审核列表失败")
 
     # 2. 预设审核
     if review_type in ("all", "preset"):
         try:
             preset_items = await _query_preset_reviews(db, status, keyword, item_id, user_id)
             all_items.extend(preset_items)
-        except Exception as e:
-            logger.warning("查询预设审核列表失败: %s", e)
+        except Exception:
+            logger.exception("查询预设审核列表失败")
 
     # 3. 模板审核
     if review_type in ("all", "template"):
         try:
             template_items = await _query_template_reviews(db, status, keyword, item_id, user_id)
             all_items.extend(template_items)
-        except Exception as e:
-            logger.warning("查询模板审核列表失败: %s", e)
+        except Exception:
+            logger.exception("查询模板审核列表失败")
 
     # 4. 模板修订草稿审核（template_revision）
     if review_type in ("all", "template_revision"):
@@ -121,8 +121,8 @@ async def list_review_items(
                 db, status, keyword, item_id, user_id
             )
             all_items.extend(revision_items)
-        except Exception as e:
-            logger.warning("查询模板修订审核列表失败: %s", e)
+        except Exception:
+            logger.exception("查询模板修订审核列表失败")
 
     # 按创建时间倒序
     all_items.sort(key=lambda x: x.get("created_at") or "", reverse=True)
@@ -164,7 +164,7 @@ async def get_review_stats(
         )
         work_pending = result.scalar_one()
     except Exception:
-        pass
+        logger.exception("统计作品待审核数失败")
 
     # 预设待审核数
     preset_pending = 0
@@ -179,7 +179,7 @@ async def get_review_stats(
         )
         preset_pending = result.scalar_one()
     except Exception:
-        pass
+        logger.exception("统计预设待审核数失败")
 
     # 模板待审核数
     template_pending = 0
@@ -195,7 +195,7 @@ async def get_review_stats(
         )
         template_pending = result.scalar_one()
     except Exception:
-        pass
+        logger.exception("统计模板待审核数失败")
 
     # 模板修订草稿待审核数（template_revision）
     template_revision_pending = 0
@@ -210,7 +210,7 @@ async def get_review_stats(
         )
         template_revision_pending = result.scalar_one()
     except Exception:
-        pass
+        logger.exception("统计模板修订草稿待审核数失败")
 
     # ===== AI 预审结果分布（仅作品）=====
     # ai_passed_pending：AI 预审通过、等待人工复审的项
@@ -257,7 +257,7 @@ async def get_review_stats(
         )
         ai_pending = result.scalar_one()
     except Exception:
-        pass
+        logger.exception("统计 AI 预审结果分布失败")
 
     return {
         "work_pending": work_pending,

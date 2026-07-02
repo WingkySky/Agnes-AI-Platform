@@ -9,6 +9,7 @@ import base64
 import logging
 import os
 import tempfile
+import time
 from typing import List, Tuple, Optional, Dict, Any
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +18,19 @@ from sqlalchemy.future import select
 from app.models.sensitive_word import SensitiveWord, DEFAULT_SENSITIVE_WORDS
 
 logger = logging.getLogger("agnes_platform")
+
+
+# ---------- 敏感词进程内缓存 ----------
+# 缓存结构：(words_list, updated_at)，TTL 60 秒
+# 敏感词表更新不频繁，但每次审核都全表加载开销大，因此做进程内缓存
+_sensitive_words_cache: tuple[List[str], float] | None = None
+_SENSITIVE_WORDS_CACHE_TTL = 60.0  # 秒
+
+
+def invalidate_sensitive_words_cache() -> None:
+    """清除敏感词缓存（在敏感词增删改后调用）"""
+    global _sensitive_words_cache
+    _sensitive_words_cache = None
 
 
 # ---------- 初始化默认敏感词 ----------
@@ -32,6 +46,8 @@ async def ensure_default_sensitive_words(db: AsyncSession) -> None:
                 is_active=1,
             ))
     await db.commit()
+    # 初始化后清除缓存（防止之前残留的缓存影响后续审核）
+    invalidate_sensitive_words_cache()
 
 
 # ---------- 敏感词检测 ----------
@@ -46,19 +62,34 @@ async def check_sensitive_text(
     if not text:
         return False, []
 
-    # 读取所有启用的敏感词
-    result = await db.execute(
-        select(SensitiveWord).filter(SensitiveWord.is_active == 1)
-    )
-    words = result.scalars().all()
-    if not words:
+    # 先查进程内缓存（60 秒 TTL）
+    global _sensitive_words_cache
+    words_lower: List[str] = []
+    if _sensitive_words_cache is not None:
+        cached_words, updated_at = _sensitive_words_cache
+        if time.time() - updated_at < _SENSITIVE_WORDS_CACHE_TTL:
+            words_lower = cached_words
+        else:
+            _sensitive_words_cache = None
+
+    # 缓存未命中：读取所有启用的敏感词
+    if not words_lower:
+        result = await db.execute(
+            select(SensitiveWord).filter(SensitiveWord.is_active == 1)
+        )
+        rows = result.scalars().all()
+        if not rows:
+            # 仍然缓存空结果，避免连续空查打 DB
+            _sensitive_words_cache = ([], time.time())
+            return False, []
+        words_lower = [w.word.lower() for w in rows]
+        _sensitive_words_cache = (words_lower, time.time())
+
+    if not words_lower:
         return False, []
 
     text_lower = text.lower()
-    hit_words = []
-    for w in words:
-        if w.word.lower() in text_lower:
-            hit_words.append(w.word)
+    hit_words = [w for w in words_lower if w in text_lower]
 
     return (len(hit_words) > 0), hit_words
 

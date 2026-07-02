@@ -36,11 +36,15 @@ async def get_config_by_category(db: AsyncSession, category: str) -> dict[str, s
 
 async def get_config_value(db: AsyncSession, key: str, default: str = "") -> str:
     """获取单个配置值"""
-    # 先查缓存
+    # 先查缓存：检查 TTL 是否在 60 秒内
     import time
     cached = _config_cache.get(key)
     if cached:
-        return cached[0]
+        value, updated_at = cached
+        if time.time() - updated_at < 60:
+            return value
+        # 缓存过期，清除后继续查库
+        _config_cache.pop(key, None)
 
     result = await db.execute(
         select(SystemConfig).where(SystemConfig.config_key == key)

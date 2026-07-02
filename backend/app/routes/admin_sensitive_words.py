@@ -23,6 +23,7 @@ from app.core.database import get_async_db
 from app.core.security import require_permission
 from app.models.user import User
 from app.models.sensitive_word import SensitiveWord, SENSITIVE_CATEGORIES
+from app.services.moderation_service import invalidate_sensitive_words_cache
 
 logger = logging.getLogger("agnes_platform")
 router = APIRouter(prefix="/admin/sensitive-words", tags=["管理员-敏感词管理"])
@@ -93,6 +94,9 @@ async def create_sensitive_word(
     await db.commit()
     await db.refresh(sw)
 
+    # 清除敏感词缓存
+    invalidate_sensitive_words_cache()
+
     logger.info("[敏感词管理] %s 新增敏感词: %s", moderator.username, word)
     return sw.to_dict()
 
@@ -142,6 +146,9 @@ async def update_sensitive_word(
     await db.commit()
     await db.refresh(sw)
 
+    # 清除敏感词缓存
+    invalidate_sensitive_words_cache()
+
     logger.info("[敏感词管理] %s 修改敏感词 id=%d", moderator.username, word_id)
     return sw.to_dict()
 
@@ -160,6 +167,9 @@ async def delete_sensitive_word(
 
     await db.delete(sw)
     await db.commit()
+
+    # 清除敏感词缓存
+    invalidate_sensitive_words_cache()
 
     logger.info("[敏感词管理] %s 删除敏感词: %s", moderator.username, sw.word)
     return {"success": True, "message": "已删除"}
@@ -219,6 +229,8 @@ async def batch_import_sensitive_words(
             db.add(sw)
         await db.commit()
         inserted_count = len(new_words)
+        # 清除敏感词缓存
+        invalidate_sensitive_words_cache()
 
     logger.info(
         "[敏感词管理] %s 批量导入敏感词：新增 %d，跳过 %d",

@@ -144,6 +144,8 @@ async def create_default_admin(db: AsyncSession):
         role=ROLE_ADMIN,
         is_admin=True,
         is_active=True,
+        # 默认管理员使用弱密码 admin123，首次登录后必须修改
+        must_change_password=True,
     )
 
     db.add(admin)

@@ -73,8 +73,8 @@ class Settings(BaseSettings):
 
     # ---------- JWT 与用户认证 ----------
     jwt_secret: str = Field(
-        default="change-me-please-this-is-not-secure",
-        description="JWT 签名密钥（生产环境请务必修改为随机字符串）",
+        default="",
+        description="JWT 签名密钥（必须配置为随机字符串，启动时会校验）",
     )
     jwt_access_token_expire_minutes: int = Field(
         default=60 * 24 * 7,
@@ -212,6 +212,60 @@ class Settings(BaseSettings):
         """
         if isinstance(v, str):
             return [item.strip() for item in v.split(",") if item.strip()]
+        return v
+
+    @field_validator("jwt_secret", mode="after")
+    @classmethod
+    def _validate_jwt_secret(cls, v: str) -> str:
+        """
+        启动时校验 JWT_SECRET：
+        - 必须显式配置（不能为空）
+        - 不能使用旧的不安全默认值
+        - 长度至少 32 字节（防止弱密钥被暴力破解）
+        """
+        insecure_defaults = {
+            "change-me-please-this-is-not-secure",
+            "change-me",
+            "secret",
+            "jwt-secret",
+        }
+        if not v:
+            raise ValueError(
+                "JWT_SECRET 未配置：请在 backend/.env 中设置 JWT_SECRET=<随机字符串>（至少 32 字节）。"
+                "可执行 `python -c \"import secrets; print(secrets.token_urlsafe(48))\"` 生成。"
+            )
+        if v in insecure_defaults:
+            raise ValueError(
+                "JWT_SECRET 仍使用不安全默认值，请在 backend/.env 中修改为随机字符串。"
+            )
+        if len(v) < 32:
+            raise ValueError(
+                f"JWT_SECRET 长度不足（当前 {len(v)} 字节，至少需要 32 字节）。"
+                "可执行 `python -c \"import secrets; print(secrets.token_urlsafe(48))\"` 生成。"
+            )
+        return v
+
+    @field_validator("encryption_key", mode="after")
+    @classmethod
+    def _validate_encryption_key(cls, v: str) -> str:
+        """
+        启动时校验 ENCRYPTION_KEY：
+        - 必须显式配置（不能为空，避免使用默认密钥导致 Provider API Key 被泄露）
+        - 不能使用已知的默认占位值
+        """
+        insecure_defaults = {
+            "agnes-platform-default-encryption-key",
+        }
+        if not v:
+            raise ValueError(
+                "ENCRYPTION_KEY 未配置：请在 backend/.env 中设置 ENCRYPTION_KEY=<随机字符串>。"
+                "该密钥用于加密数据库中存储的 Provider API Key，未配置将导致无法安全保存 API Key。"
+                "可执行 `python -c \"import secrets; print(secrets.token_urlsafe(32))\"` 生成。"
+            )
+        if v in insecure_defaults:
+            raise ValueError(
+                "ENCRYPTION_KEY 仍使用不安全默认值，请在 backend/.env 中修改为随机字符串。"
+            )
         return v
 
     @property

@@ -19,6 +19,7 @@ from app.core.security import get_current_admin_user
 from app.models.credit_rule import CreditRule, DEFAULT_CREDIT_RULES
 from app.models.user import User
 from app.schemas.user import CreditRuleResponse, CreditRuleUpdateRequest
+from app.services.credits_service import invalidate_credit_rules_cache
 
 logger = logging.getLogger("agnes_platform")
 router = APIRouter(prefix="/admin", tags=["管理员-积分规则"])
@@ -125,6 +126,9 @@ async def update_credit_rule(
     await db.commit()
     await db.refresh(row)
 
+    # 清除积分规则缓存
+    invalidate_credit_rules_cache()
+
     logger.info("[管理员操作] %s 修改积分规则 %s = %d", admin.username, rule_key, row.value)
     return CreditRuleResponse(
         id=row.id, rule_key=row.rule_key, name=row.name,
@@ -155,6 +159,8 @@ async def reset_credit_rules(
             row.description = default["description"] or ""
             row.updated_at = now
     await db.commit()
+    # 清除积分规则缓存
+    invalidate_credit_rules_cache()
 
     logger.info("[管理员操作] %s 恢复默认积分规则", admin.username)
     return await list_credit_rules(db, admin)
