@@ -15,6 +15,7 @@ export interface SubjectData {
   y: number
   z: number
   label: string
+  rotation: Vec3
 }
 
 /** 相机参数 */
@@ -24,20 +25,39 @@ export interface CameraData {
   fov: number
 }
 
-/** 灯光参数（MVP 仅方向光） */
+/** 灯光参数（支持方向光/环境光，方向光带 direction 控制照射方向） */
 export interface LightData {
   type: 'directional' | 'ambient'
   x: number
   y: number
   z: number
   intensity: number
+  direction: Vec3
 }
 
-/** 3D 场景布局数据 */
+/** 道具占位（布景元素） */
+export interface PropData {
+  type: 'box' | 'plane' | 'sphere' | 'cylinder'
+  x: number
+  y: number
+  z: number
+  label: string
+  rotation: Vec3
+}
+
+/** 环境布景描述 */
+export interface EnvironmentData {
+  type: 'studio' | 'indoor' | 'outdoor' | 'night' | 'custom'
+  label: string
+}
+
+/** 3D 场景布局数据（支持多主体/多灯光/道具布景） */
 export interface SceneData {
-  subject: SubjectData
+  subjects: SubjectData[]
   camera: CameraData
   lights: LightData[]
+  props: PropData[]
+  environment: EnvironmentData
 }
 
 /** 3D 场景记录 */

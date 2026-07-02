@@ -5,8 +5,9 @@
  * 每个预设自带合理默认 config 和默认提示词模板，
  * 高级参数折叠在"展开高级"区里。
  *
- * 7 个预设的 type 必须命中后端权威 step_type 清单
- * (llm_generate / image_batch / video_batch / tts_generate / ffmpeg_composite)
+ * 9 个预设的 type 必须命中后端权威 step_type 清单
+ * (llm_generate / image_batch / video_batch / tts_generate /
+ *  ffmpeg_composite / color_grade / video_edit)
  * 后端注册表见 backend/app/services/pipeline/steps/__init__.py
  * ===================================================== */
 
@@ -17,6 +18,8 @@ export type WorkshopStepType =
   | 'video_batch'
   | 'tts_generate'
   | 'ffmpeg_composite'
+  | 'color_grade'
+  | 'video_edit'
 
 /** 高级折叠区字段规格（驱动 StepCard 动态渲染表单） */
 export interface AdvancedFieldSpec {
@@ -327,6 +330,55 @@ export const WORKSHOP_STEP_PRESETS: WorkshopStepPreset[] = [
         default: true,
       },
     ],
+  },
+  {
+    presetKey: 'color_grade',
+    name: '调色',
+    type: 'color_grade',
+    icon: 'MagicStick',
+    color: '#A855F7',
+    defaultName: '调色',
+    defaultConfig: {
+      from_step: null, // 前端按流程顺序自动填充为最近的 video_batch / ffmpeg_composite step.key
+      preset: 'neutral_punch',
+      with_audio_fade: true,
+    },
+    defaultPromptTemplate: '',
+    advancedFields: [
+      {
+        key: 'preset',
+        label: '调色预设',
+        type: 'select',
+        default: 'neutral_punch',
+        options: [
+          { label: '不调色', value: 'none' },
+          { label: '轻微清理', value: 'subtle' },
+          { label: '中性增艳（推荐）', value: 'neutral_punch' },
+          { label: '暖色电影感', value: 'warm_cinematic' },
+          { label: '自动', value: 'auto' },
+        ],
+      },
+      {
+        key: 'with_audio_fade',
+        label: '音频淡入淡出',
+        type: 'boolean',
+        default: true,
+      },
+    ],
+  },
+  {
+    presetKey: 'video_edit',
+    name: '视频剪辑',
+    type: 'video_edit',
+    icon: 'Scissor',
+    color: '#EC4899',
+    defaultName: '视频剪辑',
+    defaultConfig: {
+      from_step: null, // 前端按流程顺序自动填充为最近的 video_batch / ffmpeg_composite / color_grade step.key
+      operations: [], // 剪辑操作列表，由专门编辑器填写：[{type: 'trim'|'cut', start, end}, ...]
+    },
+    defaultPromptTemplate: '',
+    advancedFields: [], // operations 由专门的剪辑操作编辑器渲染，不走通用 advancedFields 表单
   },
 ]
 

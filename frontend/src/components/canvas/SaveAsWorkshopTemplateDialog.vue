@@ -172,6 +172,10 @@ const STEP_UPSTREAM_MAP: Record<WorkshopStepType, WorkshopStepType[]> = {
   video_batch: ['image_batch'],
   tts_generate: ['llm_generate'],
   ffmpeg_composite: ['video_batch'],
+  // 调色：上游可以是视频生成或成片合成
+  color_grade: ['video_batch', 'ffmpeg_composite'],
+  // 视频剪辑：上游可以是视频生成、成片合成或调色
+  video_edit: ['video_batch', 'ffmpeg_composite', 'color_grade'],
 }
 
 // 字幕步骤(llm_generate 但 presetKey='subtitle') 的上游是 text/llm_generate

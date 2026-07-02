@@ -61,6 +61,8 @@ from app.schemas.pipeline import (
     SubtitlesSaveRequest,
     SubtitlesSaveResponse,
     RecomposeRequest,
+    PostProcessRequest,
+    PostProcessResponse,
 )
 from app.schemas.assets import (
     StylePresetOut,
@@ -90,6 +92,7 @@ from app.services.pipeline import (
 from app.services.pipeline import template_service
 from app.services.pipeline import template_scenarios
 from app.services.pipeline.run_service import recompose_video
+from app.services.pipeline import post_process_video
 from app.services.watermark_service import (
     get_watermark_config,
     should_apply_watermark,
@@ -1201,6 +1204,65 @@ async def recompose_run_video(
         subtitle_style=style_dict,
     )
     return {"message": "重新烧录完成", "data": result}
+
+
+# =====================================================
+# 历史视频后期处理 API
+# 对 Generation 表中已存在的视频做二次后期处理（调色 / 剪辑），
+# 无需重跑整个流水线。复用 ColorGradeExecutor / VideoEditExecutor。
+# =====================================================
+
+@router.post(
+    "/pipeline/generations/{generation_id}/post-process",
+    summary="对历史视频做后期处理（调色/剪辑）",
+    response_model=PostProcessResponse,
+)
+async def post_process_generation_video(
+    generation_id: int,
+    payload: PostProcessRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    对单个历史视频执行后期处理（调色 / 剪辑），无需重跑整个流水线。
+
+    - **color_grade 调色**: 应用 4 个预设（subtle/neutral_punch/warm_cinematic/none）
+      或自定义 ffmpeg 滤镜链，可选叠加 30ms 音频淡入淡出
+    - **video_edit 剪辑**: 基于 trim/cut 操作裁剪或删除指定片段，
+      多段保留区间自动拼接，每个切点叠加 30ms 音频淡入淡出
+
+    处理结果作为新的 Generation 记录入库，关联到源视频（params.source_generation_id）。
+    新记录默认不公开，需用户手动分享。
+
+    鉴权要求：当前用户必须是源视频的归属用户。
+    """
+    # 构造执行器配置
+    config: Dict[str, Any] = {}
+    if payload.operation == "color_grade":
+        config = {
+            "preset": payload.preset or "neutral_punch",
+            "with_audio_fade": payload.with_audio_fade if payload.with_audio_fade is not None else True,
+        }
+    elif payload.operation == "video_edit":
+        if not payload.operations:
+            raise HTTPException(status_code=400, detail="video_edit 操作必须提供 operations 列表")
+        config = {
+            "operations": [op.model_dump() for op in payload.operations],
+        }
+
+    try:
+        result = await post_process_video(
+            db=db,
+            generation_id=generation_id,
+            operation=payload.operation,
+            config=config,
+            user_id=current_user.id,
+        )
+        return PostProcessResponse(**result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/pipeline/runs/{run_id}/download", summary="下载流水线最终视频")

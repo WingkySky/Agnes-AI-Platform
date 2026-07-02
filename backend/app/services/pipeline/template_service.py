@@ -397,8 +397,8 @@ def calculate_template_credits(
     根据 steps_config 自动计算模板预估积分（同步版本，使用默认值）。
 
     遍历每个步骤，根据后端权威 step_type（llm_generate/image_batch/
-    video_batch/tts_generate/ffmpeg_composite）和对应参数（尺寸、秒数）
-    计算积分消耗，求和得到 total。无有效步骤时返回 0。
+    video_batch/tts_generate/ffmpeg_composite/color_grade/video_edit）
+    和对应参数（尺寸、秒数）计算积分消耗，求和得到 total。无有效步骤时返回 0。
 
     注意：历史代码曾用 image_gen/video_gen/audio_gen/composite 等错误名，
     导致对真实 step_type 全部失效。此处已对齐 backend/app/services/pipeline/steps/
@@ -411,6 +411,8 @@ def calculate_template_credits(
         "video_batch": 150,       # 默认生视频消耗 150 积分（5秒 × 30积分/秒）
         "tts_generate": 10,       # 默认 TTS 消耗 10 积分（约 10 秒音频）
         "ffmpeg_composite": 5,
+        "color_grade": 3,         # 调色：本地 ffmpeg 处理，象征性 3 积分
+        "video_edit": 5,          # 剪辑：本地 ffmpeg 处理 + 拼接，象征性 5 积分
         # 旧名兜底（仅防回归，新代码不应再产出这些 type）
         "image_gen": 20,
         "video_gen": 150,
@@ -451,6 +453,17 @@ def calculate_template_credits(
 
         elif step_type in ("ffmpeg_composite", "composite"):
             total += DEFAULT_COSTS["ffmpeg_composite"]
+
+        elif step_type == "color_grade":
+            # 调色：本地 ffmpeg 处理，按视频数量计费（每段 3 积分）
+            # 上游视频数量未知，按默认 1 段估算
+            total += DEFAULT_COSTS["color_grade"]
+
+        elif step_type == "video_edit":
+            # 剪辑：本地 ffmpeg 处理 + 拼接，按操作数量计费
+            operations = config.get("operations") or []
+            op_count = max(1, len(operations)) if operations else 1
+            total += DEFAULT_COSTS["video_edit"] * op_count
 
         else:
             # 未知类型：跳过

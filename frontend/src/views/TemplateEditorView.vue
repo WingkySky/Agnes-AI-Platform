@@ -924,6 +924,10 @@ function autoFillFromStepReferences() {
     video_batch: ['image_batch'],
     tts_generate: ['llm_generate'],
     ffmpeg_composite: ['video_batch'],
+    // 调色：上游可以是视频生成或成片合成
+    color_grade: ['video_batch', 'ffmpeg_composite'],
+    // 视频剪辑：上游可以是视频生成、成片合成或调色
+    video_edit: ['video_batch', 'ffmpeg_composite', 'color_grade'],
   }
 
   for (let i = 0; i < steps.length; i++) {

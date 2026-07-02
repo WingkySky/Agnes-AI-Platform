@@ -351,6 +351,53 @@ class RecomposeRequest(BaseModel):
 
 
 # =====================================================
+# 历史视频后期处理 Schema
+# =====================================================
+
+class VideoEditOperation(BaseModel):
+    """剪辑操作条目"""
+    type: str = Field(..., pattern="^(trim|cut)$", description="操作类型：trim 保留区间 / cut 删除区间")
+    start: float = Field(..., ge=0, description="起始时间（秒）")
+    end: float = Field(..., ge=0, description="结束时间（秒）")
+
+
+class PostProcessRequest(BaseModel):
+    """
+    历史视频后期处理请求
+
+    对 Generation 表中已存在的视频做二次后期处理（调色 / 剪辑），
+    无需重跑整个流水线。处理结果作为新的 Generation 记录入库。
+    """
+    operation: str = Field(
+        ...,
+        pattern="^(color_grade|video_edit)$",
+        description="操作类型：color_grade 调色 / video_edit 剪辑",
+    )
+    # 调色配置（operation=color_grade 时使用）
+    preset: Optional[str] = Field(
+        "neutral_punch",
+        description="调色预设：subtle/neutral_punch/warm_cinematic/none/auto 或自定义 ffmpeg 滤镜链",
+    )
+    with_audio_fade: Optional[bool] = Field(
+        True, description="是否叠加 30ms 音频淡入淡出（避免切点爆音）",
+    )
+    # 剪辑配置（operation=video_edit 时使用）
+    operations: Optional[List[VideoEditOperation]] = Field(
+        None, description="剪辑操作列表（trim 保留区间 / cut 删除区间）",
+    )
+
+
+class PostProcessResponse(BaseModel):
+    """历史视频后期处理响应"""
+    success: bool = Field(description="是否处理成功")
+    source_generation_id: int = Field(description="源视频 Generation ID")
+    new_generation_id: int = Field(description="新生成的视频 Generation ID")
+    result_url: str = Field(description="处理结果视频 URL")
+    operation: str = Field(description="实际执行的操作类型")
+    credits_consumed: int = Field(description="本次处理消耗的积分")
+
+
+# =====================================================
 # 画布导出 Schema
 # =====================================================
 

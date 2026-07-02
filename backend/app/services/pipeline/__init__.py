@@ -46,6 +46,7 @@ from app.services.pipeline.integration import (
     estimate_pipeline_total_credits,
     auto_moderate_pipeline_outputs,
 )
+from app.services.pipeline.post_process_service import post_process_video
 
 __all__ = [
     "PipelineEngine",
@@ -81,4 +82,5 @@ __all__ = [
     "save_batch_generations",
     "estimate_pipeline_total_credits",
     "auto_moderate_pipeline_outputs",
+    "post_process_video",
 ]

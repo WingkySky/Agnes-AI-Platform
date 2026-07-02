@@ -58,6 +58,26 @@
 
       <!-- 右侧：场景列表 + prompt 预览 -->
       <el-col :xs="24" :lg="8">
+        <!-- 环境布景设置 -->
+        <el-card shadow="never" class="env-card">
+          <template #header>
+            <span>{{ t('scene3d.environmentTitle') }}</span>
+          </template>
+          <el-select
+            :model-value="sceneData.environment?.type || 'studio'"
+            size="small"
+            style="width: 100%"
+            @change="onEnvironmentChange"
+          >
+            <el-option
+              v-for="opt in environmentOptions"
+              :key="opt.value"
+              :label="opt.label"
+              :value="opt.value"
+            />
+          </el-select>
+        </el-card>
+
         <!-- prompt 预览 -->
         <el-card shadow="never" class="preview-card">
           <template #header>
@@ -145,13 +165,36 @@ const userStore = useUserStore()
 // ---------- 默认场景数据 ----------
 function defaultSceneData(): SceneData {
   return {
-    subject: { x: 0, y: 0, z: 0, label: '主体' },
+    subjects: [{ x: 0, y: 0, z: 0, label: t('scene3d.subjectDefaultLabel'), rotation: { x: 0, y: 0, z: 0 } }],
     camera: {
       position: { x: 0, y: 1.6, z: 5 },
       lookAt: { x: 0, y: 0, z: 0 },
       fov: 50,
     },
-    lights: [{ type: 'directional', x: 5, y: 8, z: 5, intensity: 1.0 }],
+    lights: [{ type: 'directional', x: 5, y: 8, z: 5, intensity: 1.0, direction: { x: -0.47, y: -0.75, z: -0.47 } }],
+    props: [],
+    environment: { type: 'studio', label: t('scene3d.envStudio') },
+  }
+}
+
+// ---------- 环境类型选项 ----------
+const environmentOptions = computed(() => [
+  { value: 'studio', label: t('scene3d.envStudio') },
+  { value: 'indoor', label: t('scene3d.envIndoor') },
+  { value: 'outdoor', label: t('scene3d.envOutdoor') },
+  { value: 'night', label: t('scene3d.envNight') },
+  { value: 'custom', label: t('scene3d.envCustom') },
+])
+
+/** 环境类型切换时同步到 sceneData */
+function onEnvironmentChange(envType: string) {
+  const opt = environmentOptions.value.find(o => o.value === envType)
+  sceneData.value = {
+    ...sceneData.value,
+    environment: {
+      type: envType as 'studio' | 'indoor' | 'outdoor' | 'night' | 'custom',
+      label: opt?.label || '',
+    },
   }
 }
 
@@ -288,7 +331,12 @@ function detailLabel(key: string): string {
     focal: t('scene3d.detailFocal'),
     fov_desc: t('scene3d.detailFov'),
     composition: t('scene3d.detailComposition'),
+    camera_facing: t('scene3d.detailCameraFacing'),
+    subjects: t('scene3d.detailSubjects'),
+    orientation: t('scene3d.detailOrientation'),
     light: t('scene3d.detailLight'),
+    props: t('scene3d.detailProps'),
+    environment: t('scene3d.detailEnvironment'),
   }
   return map[key] || key
 }
@@ -311,7 +359,7 @@ onMounted(() => {
 
 .page-desc {
   margin: 0 0 16px;
-  color: var(--el-text-color-secondary, #909399);
+  color: var(--agnes-text-secondary);
   font-size: 13px;
 }
 
@@ -351,29 +399,30 @@ onMounted(() => {
 }
 
 .preview-card,
-.list-card {
+.list-card,
+.env-card {
   margin-bottom: 16px;
 }
 
 .prompt-suffix {
   padding: 12px;
-  background: var(--el-fill-color-light, #f5f7fa);
+  background: var(--agnes-bg-inset);
   border-radius: 6px;
   font-size: 14px;
   line-height: 1.6;
-  color: var(--el-text-color-primary, #303133);
+  color: var(--agnes-text-primary);
   word-break: break-all;
 }
 
 .details-list {
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px dashed var(--el-border-color, #dcdfe6);
+  border-top: 1px dashed var(--agnes-border);
 }
 
 .details-title {
   font-size: 13px;
-  color: var(--el-text-color-secondary, #909399);
+  color: var(--agnes-text-secondary);
   margin-bottom: 8px;
 }
 
@@ -385,11 +434,11 @@ onMounted(() => {
 }
 
 .detail-key {
-  color: var(--el-text-color-secondary, #909399);
+  color: var(--agnes-text-secondary);
 }
 
 .detail-val {
-  color: var(--el-text-color-primary, #303133);
+  color: var(--agnes-text-primary);
 }
 
 .list-header {
@@ -411,16 +460,16 @@ onMounted(() => {
 }
 
 .scene-item:hover {
-  background: var(--el-fill-color-light, #f5f7fa);
+  background: var(--agnes-bg-hover);
 }
 
 .scene-item.active {
-  background: var(--el-color-primary-light-9, #ecf5ff);
+  background: var(--agnes-nav-hover-bg);
 }
 
 .scene-item-name {
   font-size: 14px;
-  color: var(--el-text-color-primary, #303133);
+  color: var(--agnes-text-primary);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -428,7 +477,7 @@ onMounted(() => {
 
 .scene-item-desc {
   font-size: 12px;
-  color: var(--el-text-color-secondary, #909399);
+  color: var(--agnes-text-secondary);
   margin-top: 2px;
 }
 </style>

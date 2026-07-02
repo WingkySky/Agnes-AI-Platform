@@ -191,6 +191,22 @@
               :title="t('history.download')">
               <el-icon size="16"><Download /></el-icon>
             </div>
+            <!-- 后期处理-调色：仅视频项显示，打开 PostProcessDialog -->
+            <div
+              v-if="item.type === 'video'"
+              class="card-action-btn"
+              @click.stop="openPostProcess(item, 'color_grade')"
+              :title="t('history.postProcess.colorGrade')">
+              <el-icon size="16"><MagicStick /></el-icon>
+            </div>
+            <!-- 后期处理-剪辑：仅视频项显示，打开 PostProcessDialog -->
+            <div
+              v-if="item.type === 'video'"
+              class="card-action-btn"
+              @click.stop="openPostProcess(item, 'video_edit')"
+              :title="t('history.postProcess.videoEdit')">
+              <el-icon size="16"><Scissor /></el-icon>
+            </div>
             <!-- 分享状态切换：点击切换公开/私有（公开时高亮；被屏蔽时禁用） -->
             <div
               class="card-action-btn card-action-share"
@@ -396,6 +412,14 @@
       :url="viewerUrl"
       :download-url="viewerDownloadUrl"
     />
+
+    <!-- 后期处理弹窗（调色/剪辑）：对单个历史视频做二次后期处理 -->
+    <PostProcessDialog
+      v-model:visible="postProcessVisible"
+      :generation-id="postProcessGenId"
+      :video-url="postProcessVideoUrl"
+      @success="handlePostProcessSuccess"
+    />
   </div>
 </template>
 
@@ -403,7 +427,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Loading, Document, Delete, VideoPlay, CircleCloseFilled, VideoCamera, Edit, Close, Download, ZoomIn, Share, Warning, CopyDocument } from '@element-plus/icons-vue'
+import { Refresh, Loading, Document, Delete, VideoPlay, CircleCloseFilled, VideoCamera, Edit, Close, Download, ZoomIn, Share, Warning, CopyDocument, MagicStick, Scissor } from '@element-plus/icons-vue'
 import ImageViewer from '@/components/ImageViewer.vue'
 import { getHistoryList, deleteHistoryRecord, batchDeleteHistory } from '@/api/history'
 import { updateShareStatus, batchUpdateShareStatus } from '@/api/plaza'
@@ -414,6 +438,7 @@ import { useI18n } from '@/i18n'
 import { formatPixels, getTierBySize, IMAGE_TIER_CONFIG } from '@/config/model-params'
 import type { GenerationRecord } from '@/types'
 import ImageWithWatermark from '@/components/ImageWithWatermark.vue'
+import PostProcessDialog from '@/components/PostProcessDialog.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -461,6 +486,10 @@ const detailVideoEl = ref<HTMLVideoElement | null>(null)
 const detailPoster = ref('')
 const detailVideoLoading = ref(false)
 const detailVideoFailed = ref(false)
+// 后期处理弹窗状态（调色/剪辑）
+const postProcessVisible = ref(false)
+const postProcessGenId = ref<number | null>(null)
+const postProcessVideoUrl = ref('')
 // 图片实际尺寸（通过 <img> @load 读取 naturalWidth/naturalHeight）
 const detailImageNatural = ref<{ w: number; h: number } | null>(null)
 // 视频实际尺寸（通过 <video> loadedmetadata 读取 videoWidth/videoHeight）
@@ -956,6 +985,31 @@ async function quickDelete(item: GenerationRecord) {
   // 复用详情弹窗中的 confirmDelete 逻辑，先设置当前项再弹出确认
   detailItem.value = item
   confirmDelete()
+}
+
+/**
+ * 打开后期处理弹窗（调色/剪辑）
+ * 由视频卡片上的 MagicStick/Scissor 按钮触发
+ */
+function openPostProcess(item: GenerationRecord, _operation: 'color_grade' | 'video_edit') {
+  if (!item?.id || item.type !== 'video') return
+  postProcessGenId.value = item.id
+  // result_url 可能是相对路径（/api/...），PostProcessDialog 内部用 HTML5 video 加载时长
+  // 需要 baseURL 拼接才能正确加载
+  const baseURL = import.meta.env.VITE_API_BASE_URL || ''
+  postProcessVideoUrl.value = item.result_url?.startsWith('http')
+    ? item.result_url
+    : `${baseURL}${item.result_url}`
+  postProcessVisible.value = true
+}
+
+/**
+ * 后期处理成功回调：刷新历史列表，提示用户新记录已生成
+ */
+function handlePostProcessSuccess(result: { result_url: string; new_generation_id: number; operation: string }) {
+  // 刷新列表，让新记录显示出来
+  loadList()
+  ElMessage.success(t('history.postProcess.processDone', { id: result.new_generation_id }))
 }
 
 async function downloadDetail() {

@@ -31,19 +31,44 @@ class CameraData(BaseModel):
 
 
 class LightData(BaseModel):
-    """灯光参数（MVP 仅方向光）"""
+    """灯光参数（支持方向光/环境光，方向光带 direction 控制照射方向）"""
     type: str = Field(default="directional", description="灯光类型：directional/ambient")
     x: float = 5.0
     y: float = 8.0
     z: float = 5.0
     intensity: float = Field(default=1.0, ge=0, le=5)
+    direction: Vec3 = Field(
+        default_factory=lambda: Vec3(x=0, y=-1, z=0),
+        description="灯光照射方向（归一化向量），directional 类型有效",
+    )
+
+
+class PropData(BaseModel):
+    """道具占位（布景元素：立方体/平面/球体等，用于提示生成画面中的道具）"""
+    type: str = Field(default="box", description="道具几何类型：box/plane/sphere/cylinder")
+    x: float = 0.0
+    y: float = 0.0
+    z: float = 0.0
+    label: str = Field(default="道具", description="道具标签，如 '桌子'、'树'")
+    rotation: Vec3 = Field(
+        default_factory=lambda: Vec3(x=0, y=0, z=0),
+        description="道具旋转（欧拉角，度）",
+    )
+
+
+class EnvironmentData(BaseModel):
+    """环境布景描述（室内/室外/特定场景类型）"""
+    type: str = Field(default="studio", description="环境类型：studio/indoor/outdoor/night/custom")
+    label: str = Field(default="工作室", description="环境显示名，如 '室内'、'夜景街头'")
 
 
 class SceneData(BaseModel):
-    """3D 场景布局数据"""
-    subject: SubjectData = Field(default_factory=SubjectData)
+    """3D 场景布局数据（支持多主体/多灯光/道具布景）"""
+    subjects: List[SubjectData] = Field(default_factory=list, description="主体列表")
     camera: CameraData = Field(default_factory=CameraData)
-    lights: List[LightData] = Field(default_factory=list)
+    lights: List[LightData] = Field(default_factory=list, description="灯光列表")
+    props: List[PropData] = Field(default_factory=list, description="道具占位列表")
+    environment: EnvironmentData = Field(default_factory=EnvironmentData, description="环境布景")
 
 
 # ---------- 请求模型 ----------

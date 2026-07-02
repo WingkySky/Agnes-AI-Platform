@@ -4,17 +4,25 @@
 # 生成图片/视频时，把 3D 布局翻译成精确的镜头语言描述，
 # 注入到现有 prompt 拼接流程，让构图、机位、视角变得可控。
 #
-# scene_data JSON 结构（MVP 极简版）：
+# scene_data JSON 结构（支持多主体/多灯光/道具布景）：
 #   {
-#     "subject":  {"x":0, "y":0, "z":0, "label":"主体"},
+#     "subjects": [
+#       {"x":0, "y":0, "z":0, "label":"角色A"},
+#       {"x":2, "y":0, "z":0, "label":"角色B"}
+#     ],
 #     "camera": {
 #       "position": {"x":0, "y":1.6, "z":5},
 #       "lookAt":   {"x":0, "y":0, "z":0},
 #       "fov": 50
 #     },
 #     "lights": [
-#       {"type":"directional", "x":5, "y":8, "z":5, "intensity":1.0}
-#     ]
+#       {"type":"directional", "x":5, "y":8, "z":5, "intensity":1.0},
+#       {"type":"directional", "x":-5, "y":3, "z":-3, "intensity":0.4}
+#     ],
+#     "props": [
+#       {"type":"box", "x":1, "y":0, "z":-2, "label":"桌子"}
+#     ],
+#     "environment": {"type":"studio", "label":"工作室"}
 #   }
 # =====================================================
 
