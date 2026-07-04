@@ -274,8 +274,9 @@ async function launch() {
   creating.value = true
   step.value = 3
   try {
+    // ProjectLaunchDialog 中的 4 种场景对应 wizard_chains.WIZARD_CHAINS 预设链路，
+    // 不依赖数据库 PipelineTemplate，因此使用 category 模式创建项目。
     const project = await projectStore.createWizardProject({
-      template_id: selectedTemplate.value.id,
       category: selectedCategory.value,
       title: projectTitle.value.trim(),
       description: projectDescription.value.trim() || undefined,
