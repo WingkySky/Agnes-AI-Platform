@@ -195,14 +195,15 @@ function statusLabel(status: ProjectStatus): string {
   return map[status] || status
 }
 
-function statusTagType(status: ProjectStatus): '' | 'success' | 'info' | 'warning' | 'danger' {
+function statusTagType(status: ProjectStatus): 'primary' | 'success' | 'info' | 'warning' | 'danger' {
   switch (status) {
     case 'completed': return 'success'
     case 'creating': return 'warning'
     case 'merging': return 'warning'
     case 'archived': return 'info'
     case 'draft': return 'info'
-    default: return ''
+    case 'in_progress': return 'primary'
+    default: return 'info'
   }
 }
 

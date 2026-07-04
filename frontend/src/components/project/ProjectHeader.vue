@@ -94,12 +94,13 @@ const statusLabel = computed(() => {
   return map[props.project?.status as ProjectStatus] || '未知'
 })
 
-const statusTagType = computed<'' | 'success' | 'info' | 'warning' | 'danger'>(() => {
+const statusTagType = computed<'primary' | 'success' | 'info' | 'warning' | 'danger'>(() => {
   switch (props.project?.status) {
     case 'completed': return 'success'
     case 'creating': case 'merging': return 'warning'
     case 'archived': case 'draft': return 'info'
-    default: return ''
+    case 'in_progress': return 'primary'
+    default: return 'info'
   }
 })
 
