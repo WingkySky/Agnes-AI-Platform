@@ -135,7 +135,11 @@ import { ElMessage } from 'element-plus'
 import { Film, Loading } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 
-const props = defineProps<{ modelValue: boolean }>()
+const props = defineProps<{
+  modelValue: boolean
+  /** 初始预选模板类别（从 WorkshopView 跳转时传入） */
+  initialCategory?: string
+}>()
 const emit = defineEmits<{
   (e: 'update:modelValue', val: boolean)
   (e: 'created', projectId: number)
@@ -231,7 +235,14 @@ const templates = [
 ]
 
 watch(visible, (v) => {
-  if (v) resetState()
+  if (v) {
+    resetState()
+    // 如果有初始类别，自动选中对应模板
+    if (props.initialCategory) {
+      const tpl = templates.find(t => t.key === props.initialCategory)
+      if (tpl) selectTemplate(tpl)
+    }
+  }
 })
 
 function resetState() {

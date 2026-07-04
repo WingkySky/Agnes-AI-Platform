@@ -299,6 +299,10 @@ const zhCN = {
     image: '图片',
     video: '视频',
     typeLabel: '类型',
+    // 自动重试中状态（n 为当前重试次数，最大 3 次）
+    retrying: '重试中 ({n}/3)',
+    // 重试中辅助提示（展示最后一条错误信息）
+    retryingHint: '上次错误：{error}',
   },
 
   // ------ 历史记录 ------
@@ -803,11 +807,10 @@ const zhCN = {
     credits: '积分明细',
     canvas: '无限画布',
     workshop: '创意工坊',
-    pipelineRun: '流水线运行',
-    pipelineResult: '流水线结果',
+    projects: '我的项目',
+    projectDetail: '项目详情',
     templateCreate: '创建模板',
     templateEdit: '编辑模板',
-    pipelineHistory: '创作历史',
     assets: '资产库',
     settings: '配置管理',
     profile: '个人中心',
@@ -1088,6 +1091,7 @@ const zhCN = {
           step_storyboard: '分镜生成',
           step_image: '生成分镜图片',
           step_video: '生成视频',
+          step_transition: '转场合成',
           step_composite: '合成输出',
         },
         ad: {
@@ -1106,6 +1110,7 @@ const zhCN = {
           step_copywrite: '文案生成',
           step_image: '生成产品配图',
           step_video: '生成广告视频',
+          step_transition: '转场合成',
         },
         education: {
           name: '教育课件',
@@ -1258,6 +1263,7 @@ const zhCN = {
     retry: '重试',
     retried: '已重新启动',
     retryFailed: '重试失败',
+    retryingInProgress: '该步骤正在重试中',
     retryStep: '重试此步骤',
     rerunStep: '重新执行',
     rerunStepTitle: '重新执行步骤',
@@ -1276,6 +1282,9 @@ const zhCN = {
     editInputs: '编辑参数',
     inputsSaved: '参数已保存',
     exportToCanvas: '导出到画布',
+    // Task 28: 自动执行剩余开关
+    autoConfirm: '自动执行剩余',
+    autoConfirmTip: '开启后跳过需确认步骤的自动暂停，按 DAG 顺序连续执行剩余步骤',
     exportSuccess: '已导出 {count} 个素材到画布',
     noExportData: '无可导出数据',
     duration: '时长 {seconds} 秒',
@@ -1322,6 +1331,9 @@ const zhCN = {
       skipped: '已跳过',
       waiting_review: '待审核',
       processing: '处理中',
+      // Task 21 新增的步骤状态
+      awaiting_confirmation: '待确认',
+      stale: '已失效',
     },
     // SSE 连接状态徽章
     connectionStatus: {
@@ -1358,6 +1370,54 @@ const zhCN = {
     promptRewritten: '提示词已改写',
     originalPrompt: '原始提示词',
     rewrittenPrompt: '改写后提示词',
+    // 元素卡片（ItemCard 组件：展示单个生成元素）
+    itemCard: {
+      untitled: '未命名',
+      success: '已完成',
+      failed: '失败',
+      running: '生成中',
+      pending: '等待中',
+      retryItem: '重试此张',
+      regenerate: '修改 Prompt 重生',
+      upload: '上传替换',
+      delete: '删除',
+      seed: '种子',
+      errorUnknown: '生成失败',
+    },
+  },
+
+  // ------ 步骤产物面板（StepPanel 组件：右栏步骤产物展示 + 操作区） ------
+  stepPanel: {
+    untitled: '未命名步骤',
+    confirm: '确认',
+    reject: '驳回',
+    pause: '暂停',
+    resume: '继续',
+    // 下游 stale 横条
+    staleTip: '下游 {n} 个步骤已失效，请应用变更或忽略',
+    applyStale: '应用变更',
+    ignoreStale: '忽略',
+    // 部分元素失败提示条
+    partialFailTip: '当前步骤 {label} 元素存在失败，可单独重试',
+    retryAllFailed: '重试全部失败',
+    // 产物展示区
+    emptyOutput: '该步骤暂无产物',
+    addItem: '新增元素',
+    textOutput: '文本输出',
+    // human_gate 决策
+    gateDecision: '决策',
+    gateComment: '备注',
+    gateCommentPlaceholder: '请输入备注（可选）',
+    gateOptionApprove: '通过',
+    gateOptionReject: '驳回',
+    gateDecisionRequired: '请先选择决策',
+    // 底部确认区
+    confirmHint: '确认后下游步骤将继续执行',
+    confirmAndContinue: '确认并继续',
+    // 文本操作
+    copy: '复制',
+    copySuccess: '已复制到剪贴板',
+    copyFailed: '复制失败',
   },
 
   // ------ 模板编辑器 ------
@@ -1480,6 +1540,39 @@ const zhCN = {
     empty: '暂无时间轴数据（请先完成最终合成）',
   },
 
+  // ------ 流水线步骤相关（转场配置等） ------
+  pipeline: {
+    // 转场配置（TransitionEditor / TimelinePreview 转场入口）
+    transition: {
+      dialogTitle: '转场设置 · 第 {n} 个片段间',
+      typeLabel: '转场类型',
+      typePlaceholder: '选择转场类型',
+      durationLabel: '转场时长',
+      ms: '毫秒',
+      remove: '移除转场',
+      hardCutHint: '当前为硬切（无转场），点击配置转场效果',
+      entryTip: '第 {n} 个片段间转场',
+      currentLabel: '当前转场',
+      // 14 种 xfade 转场类型中文名
+      types: {
+        fade: '淡入淡出',
+        wipeleft: '左擦除',
+        wiperight: '右擦除',
+        wipeup: '上擦除',
+        wipedown: '下擦除',
+        slideleft: '左滑入',
+        slideright: '右滑入',
+        slideup: '上滑入',
+        slidedown: '下滑入',
+        circleopen: '圆形展开',
+        circleclose: '圆形闭合',
+        dissolve: '溶解',
+        pixelize: '像素化',
+        radialsmooth: '径向平滑',
+      },
+    },
+  },
+
   // ------ 字幕编辑器（SubtitleEditor） ------
   subtitleEditor: {
     title: '字幕编辑',
@@ -1518,6 +1611,41 @@ const zhCN = {
     recomposeTip: '重新烧录会耗时约 1-2 分钟，请勿离开页面',
     recomposeSuccess: '重新烧录完成，视频已更新',
     recomposeFailed: '重新烧录失败',
+  },
+
+  // ------ 元素编辑弹窗（ItemEditDialog） ------
+  itemEditDialog: {
+    title: '元素编辑',
+    textTab: '文本',
+    imageTab: '图片',
+    promptTab: '提示词',
+    // 文本模式
+    settingTextLabel: '设定文本',
+    settingTextPlaceholder: '请输入设定文本',
+    descriptionLabel: '描述',
+    descriptionPlaceholder: '请输入描述',
+    // 提示词模式
+    promptLabel: '提示词',
+    promptPlaceholder: '请输入提示词，用于重生时覆盖原 prompt',
+    // 图片模式
+    uploadImage: '上传图片',
+    uploadHint: '点击或拖拽图片到此处上传',
+    uploadDesc: '支持 jpg/png/webp 格式，单张不超过 {n}MB',
+    imageTooLarge: '图片大小不能超过 {n}MB',
+    imageInvalid: '仅支持 jpg/png/webp 格式',
+    imagePreview: '图片预览',
+    noImage: '请先选择图片',
+    // 分镜条目字段
+    sceneIndex: '序号',
+    sceneDescription: '场景描述',
+    sceneDescriptionPlaceholder: '请输入场景描述',
+    sceneCharacters: '角色',
+    sceneCharactersPlaceholder: '多个角色用逗号分隔',
+    sceneDialogue: '台词',
+    sceneDialoguePlaceholder: '请输入台词',
+    sceneShot: '镜头',
+    sceneShotPlaceholder: '请输入镜头描述',
+    invalidForm: '请检查表单内容',
   },
 
   // ------ 资产库 ------
@@ -3228,6 +3356,9 @@ const zhCN = {
       autoCopyPromptHint: '图片/视频生成完成后自动将提示词复制到剪贴板',
       defaultImageCount: '默认生成数量',
       defaultImageCountHint: '新建图片生成任务时的默认张数',
+      // 任务失败自动重试开关
+      autoRetry: '任务失败自动重试',
+      autoRetryHint: '图片/视频任务失败时自动重试（3s→9s→27s，最多 3 次），仅对网络错误、超时、服务端错误、限流生效；内容审核拒绝、参数错误、鉴权失败不重试',
     },
     // 界面偏好
     ui: {

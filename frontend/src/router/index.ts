@@ -1,10 +1,10 @@
 /* =====================================================
  * Vue Router 路由配置
- * 页面：登录、图片生成 / 视频生成 / 聊天 / 画布 / 历史 / 设置
+ * 页面：登录、图片生成 / 视频生成 / 聊天 / 画布 / 历史 / 项目 / 设置
  * 管理员页：用户与角色管理 / 积分规则配置
  * - requiresAuth 路由：未登录时自动跳转到登录页
  * - requiresAdmin 路由：非管理员访问时 403 并跳转首页
- * - 所有业务页（chat/images/videos/history/canvas/settings）均需登录
+ * - 所有业务页（chat/images/videos/history/canvas/projects/settings）均需登录
  * ===================================================== */
 
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
@@ -63,6 +63,19 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/CanvasView.vue'),
     meta: { titleKey: 'router.canvas', requiresAuth: true }
   },
+  // ---------- 项目制创作（替代旧 PipelineRun 流程） ----------
+  {
+    path: '/projects',
+    name: 'projects',
+    component: () => import('@/views/projects/ProjectListView.vue'),
+    meta: { titleKey: 'router.projects', requiresAuth: true }
+  },
+  {
+    path: '/projects/:id',
+    name: 'project-detail',
+    component: () => import('@/views/projects/ProjectDetailView.vue'),
+    meta: { titleKey: 'router.projectDetail', requiresAuth: true }
+  },
   {
     path: '/workshop',
     name: 'workshop',
@@ -76,18 +89,7 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/SceneEditorView.vue'),
     meta: { titleKey: 'router.sceneEditor', requiresAuth: true }
   },
-  {
-    path: '/workshop/run/:templateId',
-    name: 'pipeline-run',
-    component: () => import('@/views/PipelineRunView.vue'),
-    meta: { titleKey: 'router.pipelineRun', requiresAuth: true, permission: 'pipeline:run' }
-  },
-  {
-    path: '/workshop/result/:runId',
-    name: 'pipeline-result',
-    component: () => import('@/views/PipelineResultView.vue'),
-    meta: { titleKey: 'router.pipelineResult', requiresAuth: true, permission: 'pipeline:run' }
-  },
+  // ---------- 模板编辑（保留，模板语义已改为"项目创建向导模板" L1） ----------
   {
     path: '/workshop/template/create',
     name: 'template-create',
@@ -105,12 +107,6 @@ const routes: RouteRecordRaw[] = [
     name: 'template-wizard',
     component: () => import('@/views/TemplateWizardView.vue'),
     meta: { titleKey: 'router.templateWizard', requiresAuth: true, permission: 'pipeline:run' }
-  },
-  {
-    path: '/workshop/history',
-    name: 'pipeline-history',
-    component: () => import('@/views/PipelineHistoryView.vue'),
-    meta: { titleKey: 'router.pipelineHistory', requiresAuth: true, permission: 'pipeline:run' }
   },
   {
     path: '/assets',

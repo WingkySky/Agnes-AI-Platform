@@ -297,6 +297,10 @@ const enUS = {
     image: 'Image',
     video: 'Video',
     typeLabel: 'Type',
+    // Auto-retry in progress (n is current attempt, max 3)
+    retrying: 'Retrying ({n}/3)',
+    // Retry hint showing the last error message
+    retryingHint: 'Last error: {error}',
   },
 
   // ------ History ------
@@ -801,11 +805,10 @@ const enUS = {
     credits: 'Credit Transactions',
     canvas: 'Infinite Canvas',
     workshop: 'Workshop',
-    pipelineRun: 'Pipeline Run',
-    pipelineResult: 'Pipeline Result',
+    projects: 'My Projects',
+    projectDetail: 'Project Detail',
     templateCreate: 'Create Template',
     templateEdit: 'Edit Template',
-    pipelineHistory: 'Creation History',
     assets: 'Asset Library',
     settings: 'Settings',
     profile: 'Profile',
@@ -1086,6 +1089,7 @@ const enUS = {
           step_storyboard: 'Storyboard Generation',
           step_image: 'Generate Storyboard Images',
           step_video: 'Generate Video',
+          step_transition: 'Transition Compose',
           step_composite: 'Composite Output',
         },
         ad: {
@@ -1104,6 +1108,7 @@ const enUS = {
           step_copywrite: 'Copywriting Generation',
           step_image: 'Generate Product Images',
           step_video: 'Generate Ad Video',
+          step_transition: 'Transition Compose',
         },
         education: {
           name: 'Educational Courseware',
@@ -1243,6 +1248,7 @@ const enUS = {
     retry: 'Retry',
     retried: 'Restarted',
     retryFailed: 'Failed to retry',
+    retryingInProgress: 'This step is retrying',
     retryStep: 'Retry this step',
     rerunStep: 'Re-run',
     rerunStepTitle: 'Re-run Step',
@@ -1255,6 +1261,9 @@ const enUS = {
     editInputs: 'Edit Inputs',
     inputsSaved: 'Inputs saved',
     exportToCanvas: 'Export to Canvas',
+    // Task 28: auto-confirm switch
+    autoConfirm: 'Auto Run Remaining',
+    autoConfirmTip: 'When enabled, skips auto-pause on confirmation-required steps and runs remaining steps sequentially per DAG.',
     exportSuccess: 'Exported {count} assets to canvas',
     noExportData: 'No data to export',
     createdAt: 'Created',
@@ -1296,6 +1305,9 @@ const enUS = {
       skipped: 'Skipped',
       waiting_review: 'Awaiting review',
       processing: 'Processing',
+      // Task 21 new step statuses
+      awaiting_confirmation: 'Awaiting confirmation',
+      stale: 'Stale',
     },
     // SSE connection status badge
     connectionStatus: {
@@ -1336,6 +1348,54 @@ const enUS = {
     promptRewritten: 'Prompt rewritten',
     originalPrompt: 'Original prompt',
     rewrittenPrompt: 'Rewritten prompt',
+    // Element card (ItemCard component: single generated element display)
+    itemCard: {
+      untitled: 'Untitled',
+      success: 'Done',
+      failed: 'Failed',
+      running: 'Generating',
+      pending: 'Pending',
+      retryItem: 'Retry This',
+      regenerate: 'Edit Prompt & Regenerate',
+      upload: 'Upload Replace',
+      delete: 'Delete',
+      seed: 'Seed',
+      errorUnknown: 'Generation failed',
+    },
+  },
+
+  // ------ Step Panel (right column: step output display + actions) ------
+  stepPanel: {
+    untitled: 'Untitled Step',
+    confirm: 'Confirm',
+    reject: 'Reject',
+    pause: 'Pause',
+    resume: 'Resume',
+    // Downstream stale bar
+    staleTip: '{n} downstream step(s) are stale. Apply changes or ignore.',
+    applyStale: 'Apply Changes',
+    ignoreStale: 'Ignore',
+    // Partial failure bar
+    partialFailTip: 'Current step {label} has failed items. You can retry them individually.',
+    retryAllFailed: 'Retry All Failed',
+    // Output area
+    emptyOutput: 'No output for this step yet',
+    addItem: 'Add Item',
+    textOutput: 'Text Output',
+    // human_gate decision
+    gateDecision: 'Decision',
+    gateComment: 'Comment',
+    gateCommentPlaceholder: 'Enter a comment (optional)',
+    gateOptionApprove: 'Approve',
+    gateOptionReject: 'Reject',
+    gateDecisionRequired: 'Please select a decision first',
+    // Footer confirm area
+    confirmHint: 'Downstream steps will continue after confirmation',
+    confirmAndContinue: 'Confirm & Continue',
+    // Text actions
+    copy: 'Copy',
+    copySuccess: 'Copied to clipboard',
+    copyFailed: 'Copy failed',
   },
 
   // ------ Final Video Player ------
@@ -1357,6 +1417,39 @@ const enUS = {
     durationLabel: 'Duration {s}',
     seekHint: 'Click to seek',
     empty: 'No timeline data (please complete final composition first)',
+  },
+
+  // ------ Pipeline step related (transition config, etc.) ------
+  pipeline: {
+    // Transition config (TransitionEditor / TimelinePreview transition entries)
+    transition: {
+      dialogTitle: 'Transition Settings · Between Scene {n}',
+      typeLabel: 'Transition Type',
+      typePlaceholder: 'Select transition type',
+      durationLabel: 'Duration',
+      ms: 'ms',
+      remove: 'Remove Transition',
+      hardCutHint: 'Currently hard cut (no transition). Click to configure.',
+      entryTip: 'Transition between scene {n} and {n+1}',
+      currentLabel: 'Current',
+      // 14 xfade transition types
+      types: {
+        fade: 'Fade',
+        wipeleft: 'Wipe Left',
+        wiperight: 'Wipe Right',
+        wipeup: 'Wipe Up',
+        wipedown: 'Wipe Down',
+        slideleft: 'Slide Left',
+        slideright: 'Slide Right',
+        slideup: 'Slide Up',
+        slidedown: 'Slide Down',
+        circleopen: 'Circle Open',
+        circleclose: 'Circle Close',
+        dissolve: 'Dissolve',
+        pixelize: 'Pixelize',
+        radialsmooth: 'Radial Smooth',
+      },
+    },
   },
 
   // ------ Subtitle Editor ------
@@ -1397,6 +1490,41 @@ const enUS = {
     recomposeTip: 'Recompose takes about 1-2 minutes, please do not leave the page',
     recomposeSuccess: 'Recompose completed, video updated',
     recomposeFailed: 'Recompose failed',
+  },
+
+  // ------ Item Edit Dialog ------
+  itemEditDialog: {
+    title: 'Item Edit',
+    textTab: 'Text',
+    imageTab: 'Image',
+    promptTab: 'Prompt',
+    // Text mode
+    settingTextLabel: 'Setting Text',
+    settingTextPlaceholder: 'Enter setting text',
+    descriptionLabel: 'Description',
+    descriptionPlaceholder: 'Enter description',
+    // Prompt mode
+    promptLabel: 'Prompt',
+    promptPlaceholder: 'Enter prompt to override during regeneration',
+    // Image mode
+    uploadImage: 'Upload Image',
+    uploadHint: 'Click or drag an image here to upload',
+    uploadDesc: 'Supports jpg/png/webp, up to {n}MB',
+    imageTooLarge: 'Image size must not exceed {n}MB',
+    imageInvalid: 'Only jpg/png/webp formats are supported',
+    imagePreview: 'Preview',
+    noImage: 'Please select an image first',
+    // Storyboard item fields
+    sceneIndex: 'Index',
+    sceneDescription: 'Scene Description',
+    sceneDescriptionPlaceholder: 'Enter scene description',
+    sceneCharacters: 'Characters',
+    sceneCharactersPlaceholder: 'Separate multiple characters with commas',
+    sceneDialogue: 'Dialogue',
+    sceneDialoguePlaceholder: 'Enter dialogue',
+    sceneShot: 'Shot',
+    sceneShotPlaceholder: 'Enter shot description',
+    invalidForm: 'Please check the form',
   },
 
   // ------ Asset Library ------
@@ -3084,6 +3212,9 @@ const enUS = {
       autoCopyPromptHint: 'Automatically copy the prompt to clipboard when generation completes',
       defaultImageCount: 'Default Image Count',
       defaultImageCountHint: 'Default number of images for new generation tasks',
+      // Task failure auto-retry toggle
+      autoRetry: 'Auto-retry on Task Failure',
+      autoRetryHint: 'Automatically retry failed image/video tasks (3s→9s→27s, up to 3 attempts). Only applies to network errors, timeouts, server errors, and rate limits; moderation rejection, parameter errors, and auth failures are not retried.',
     },
     // UI preferences
     ui: {

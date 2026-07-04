@@ -102,13 +102,13 @@
     </div>
 
     <!-- 创建项目对话框 -->
-    <ProjectLaunchDialog v-model="launchDialogVisible" @created="onProjectCreated" />
+    <ProjectLaunchDialog v-model="launchDialogVisible" :initial-category="initialCategory" @created="onProjectCreated" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import {
   Plus, Search, Refresh, Film, Clock, Picture, FolderOpened, MoreFilled,
@@ -118,9 +118,11 @@ import ProjectLaunchDialog from '@/components/project/ProjectLaunchDialog.vue'
 import type { Project, ProjectStatus } from '@/types/project'
 
 const router = useRouter()
+const route = useRoute()
 const projectStore = useProjectStore()
 
 const launchDialogVisible = ref(false)
+const initialCategory = ref<string>('')
 const searchKeyword = ref('')
 const statusFilter = ref<ProjectStatus | ''>('')
 const currentPage = ref(1)
@@ -129,6 +131,12 @@ let searchTimer: number | null = null
 
 onMounted(() => {
   fetchList()
+  // 从 WorkshopView 跳转过来时带 category 参数，自动打开创建对话框
+  const cat = route.query.category
+  if (cat && typeof cat === 'string') {
+    initialCategory.value = cat
+    launchDialogVisible.value = true
+  }
 })
 
 async function fetchList() {

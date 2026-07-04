@@ -2,9 +2,9 @@
      创意工坊视图 WorkshopView
      - 模板市场 + 我的模板（Tab 切换）
      - 支持搜索和筛选
-     - 点击模板进入配置运行页面
+     - 点击模板跳转到 /projects 进入项目创建向导（L1：模板已改为向导模板）
      - 我的模板支持提交审核/取消公开/编辑/删除
-     - 展示我的运行历史记录（运行中/已完成）
+     - 注意：旧的 PipelineRun 流程已废弃，运行历史已移除（K1）
      ===================================================== -->
 
 <template>
@@ -70,10 +70,6 @@
           {{ activeTab === 'market' ? t('workshop.templateMarket') : t('workshop.myTemplates') }}
         </h3>
         <div class="section-actions">
-          <el-button type="primary" link size="small" @click="goToHistory">
-            <el-icon><PictureFilled /></el-icon>
-            {{ t('workshop.creationHistory') }}
-          </el-button>
           <!-- 快速创建按钮：打开场景化向导 -->
           <el-button
             v-if="isLoggedIn"
@@ -165,7 +161,7 @@
                 type="primary"
                 link
                 size="small"
-                @click.stop="goToRun(tpl)">
+                @click.stop="goToProjectsWithTemplate(tpl)">
                 {{ t('workshop.useTemplate') }}
               </el-button>
               <!-- 市场模板：改进模板按钮（仅登录用户可见） -->
@@ -184,7 +180,7 @@
                   type="primary"
                   link
                   size="small"
-                  @click.stop="goToRun(tpl)">
+                  @click.stop="goToProjectsWithTemplate(tpl)">
                   {{ t('workshop.useTemplate') }}
                 </el-button>
                 <el-dropdown
@@ -251,62 +247,6 @@
       </div>
     </div>
 
-    <!-- 我的流水线历史 -->
-    <div v-loading="runHistoryLoading" class="history-section">
-      <div class="section-header">
-        <h3 class="section-title">{{ t('workshop.myRuns') }}</h3>
-        <el-button type="primary" link @click="loadRunHistory">
-          <el-icon><Refresh /></el-icon>
-          {{ t('workshop.refresh') }}
-        </el-button>
-      </div>
-
-      <!-- 空状态 -->
-      <div v-if="!runHistoryLoading && runHistory.length === 0" class="empty-state small">
-        <el-icon :size="36"><Clock /></el-icon>
-        <p class="empty-text">{{ t('workshop.noRuns') }}</p>
-      </div>
-
-      <!-- 历史列表 -->
-      <div v-else class="run-list">
-        <div
-          v-for="run in runHistory"
-          :key="run.id"
-          class="run-item"
-          @click="goToResult(run)">
-          <div class="run-status">
-            <el-tag :type="getStatusType(run.status)" size="small">
-              {{ t(`common.status.${run.status}`) }}
-            </el-tag>
-          </div>
-          <div class="run-info">
-            <div class="run-name">{{ run.name || run.template_name }}</div>
-            <div class="run-meta">
-              <span>{{ run.template_name }}</span>
-              <span>·</span>
-              <span>{{ formatTime(run.created_at) }}</span>
-            </div>
-          </div>
-          <div class="run-progress">
-            <el-progress
-              :percentage="run.progress || 0"
-              :stroke-width="6"
-              :show-text="false" />
-          </div>
-          <div class="run-action">
-            <el-button
-              type="danger"
-              link
-              size="small"
-              @click.stop="deleteRunConfirm(run)">
-              <el-icon><Delete /></el-icon>
-            </el-button>
-            <el-icon class="go-icon"><ArrowRight /></el-icon>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <!-- 模板导入/导出对话框 -->
     <TemplateImportExportDialog
       v-model="ioDialogVisible"
@@ -318,17 +258,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from '@/i18n'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Search, MagicStick, Coin, Clock, Refresh, ArrowRight, Delete, Plus, PictureFilled,
+  Search, MagicStick, Coin, Clock, Refresh, Delete, Plus,
   Upload, Download, MoreFilled, Edit, UploadFilled, RemoveFilled,
 } from '@element-plus/icons-vue'
 import { usePipelineStore } from '@/stores/pipeline'
 import { useUserStore } from '@/stores/user'
-import type { PipelineTemplate, PipelineRun } from '@/api/pipeline'
+import type { PipelineTemplate } from '@/api/pipeline'
 import { submitTemplatePublic, cancelTemplatePublic, deleteTemplate } from '@/api/pipeline'
 import TemplateImportExportDialog from '@/components/pipeline/TemplateImportExportDialog.vue'
 
@@ -379,7 +319,7 @@ function onSearch() {
 }
 
 function onCardClick(tpl: PipelineTemplate) {
-  goToRun(tpl)
+  goToProjectsWithTemplate(tpl)
 }
 
 function refreshMyTemplates() {
@@ -388,8 +328,6 @@ function refreshMyTemplates() {
 
 // ---------- 计算属性 ----------
 const templatesLoading = computed(() => pipelineStore.templatesLoading)
-const runHistoryLoading = computed(() => pipelineStore.runHistoryLoading)
-const runHistory = computed(() => pipelineStore.runHistory)
 
 const currentLoading = computed(() => {
   return activeTab.value === 'market' ? templatesLoading.value : pipelineStore.myTemplatesLoading
@@ -535,20 +473,12 @@ async function loadTemplates() {
   }
 }
 
-async function loadRunHistory() {
-  try {
-    await pipelineStore.loadRunHistory()
-  } catch (e: any) {
-    ElMessage.error(e?.message || t('workshop.loadRunsFailed'))
-  }
-}
-
-function goToRun(tpl: PipelineTemplate) {
-  router.push(`/workshop/run/${tpl.id}`)
-}
-
-function goToResult(run: PipelineRun) {
-  router.push(`/workshop/result/${run.id}`)
+/**
+ * 跳转到项目列表页，并带上 template_id 参数
+ * ProjectListView 接收后自动打开创建对话框
+ */
+function goToProjectsWithTemplate(tpl: PipelineTemplate) {
+  router.push({ path: '/projects', query: { template_id: tpl.id, category: tpl.category } })
 }
 
 function goToCreateTemplate() {
@@ -563,54 +493,12 @@ function goToImprove(tpl: PipelineTemplate) {
   router.push(`/workshop/template/${tpl.id}/edit`)
 }
 
-function goToHistory() {
-  router.push('/workshop/history')
-}
-
-async function deleteRunConfirm(run: PipelineRun) {
-  try {
-    await ElMessageBox.confirm(
-      t('workshop.deleteRunConfirm', { name: run.name || run.template_name }),
-      t('workshop.deleteRun'),
-      { confirmButtonText: t('common.delete'), cancelButtonText: t('common.cancel'), type: 'warning' }
-    )
-    await pipelineStore.deleteRun(run.id)
-    ElMessage.success(t('workshop.deleteSuccess'))
-  } catch (e: any) {
-    if (e !== 'cancel') {
-      ElMessage.error(e?.message || t('workshop.deleteFailed'))
-    }
-  }
-}
-
-function getStatusType(status: string): 'success' | 'warning' | 'danger' | 'info' | 'primary' {
-  switch (status) {
-    case 'success': return 'success'
-    case 'running': return 'primary'
-    case 'pending': return 'warning'
-    case 'failed': return 'danger'
-    default: return 'info'
-  }
-}
-
-function formatTime(timeStr: string): string {
-  if (!timeStr) return ''
-  const date = new Date(timeStr)
-  const now = new Date()
-  const diff = now.getTime() - date.getTime()
-  if (diff < 60000) return t('workshop.justNow')
-  if (diff < 3600000) return t('workshop.minutesAgo', { n: Math.floor(diff / 60000) })
-  if (diff < 86400000) return t('workshop.hoursAgo', { n: Math.floor(diff / 3600000) })
-  return t('workshop.daysAgo', { n: Math.floor(diff / 86400000) })
-}
-
 // ---------- 生命周期 ----------
 onMounted(() => {
   // 模板列表只在未加载时拉取，避免重复请求
   if (!pipelineStore.templatesLoaded) {
     loadTemplates()
   }
-  loadRunHistory()
 })
 </script>
 
@@ -850,72 +738,6 @@ onMounted(() => {
   margin-bottom: 12px;
 }
 
-.history-section {
-  margin-top: 32px;
-}
-
-.run-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.run-item {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 16px 20px;
-  background: var(--agnes-bg-card);
-  border: 1px solid var(--agnes-border);
-  border-radius: 10px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.run-item:hover {
-  border-color: var(--agnes-primary-border);
-  background: var(--agnes-primary-light-9, rgba(64, 158, 255, 0.1));
-}
-
-.run-status {
-  flex-shrink: 0;
-}
-
-.run-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.run-name {
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--agnes-text-primary);
-  margin-bottom: 4px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.run-meta {
-  font-size: 12px;
-  color: var(--agnes-text-secondary);
-  display: flex;
-  gap: 8px;
-}
-
-.run-progress {
-  width: 120px;
-  flex-shrink: 0;
-}
-
-.run-action {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--agnes-text-placeholder);
-  flex-shrink: 0;
-}
-
 .empty-state {
   display: flex;
   flex-direction: column;
@@ -923,10 +745,6 @@ onMounted(() => {
   justify-content: center;
   padding: 60px 20px;
   color: var(--agnes-text-placeholder);
-}
-
-.empty-state.small {
-  padding: 40px 20px;
 }
 
 .empty-text {
