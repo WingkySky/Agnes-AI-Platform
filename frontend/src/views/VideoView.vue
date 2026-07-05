@@ -619,7 +619,7 @@ async function startGenerate() {
     ElMessage.success(t('generate.videoSubmitted'))
   } catch (e) {
     console.error('[VideoView] 提交任务失败：', e)
-    ElMessage.error(t('generate.createTaskFailed') + ((e as Error).message || ''))
+    ElMessage.error(t('generate.createTaskFailed') + (e instanceof Error ? e.message : ''))
   }
 }
 

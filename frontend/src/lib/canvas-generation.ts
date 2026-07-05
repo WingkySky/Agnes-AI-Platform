@@ -23,6 +23,7 @@ import { useModelsStore } from '@/stores/models'
 import { usePreferencesStore } from '@/stores/preferences'
 import { parseSize } from '@/config/model-params'
 import type { ImageGenerationRequest, VideoGenerationRequest } from '@/types'
+import { getErrorMessage } from '@/lib/type-helpers'
 
 // ---------- 类型定义 ----------
 
@@ -710,7 +711,7 @@ export async function executeMergeGeneration(configId: string, store: CanvasStor
       prefsStore.notifyComplete('image', { prompt: ctx.prompt, modelId: config.model })
     } catch (err) {
       // 失败：更新节点为 error 状态
-      const errMsg = (err as Error).message || '生成失败'
+      const errMsg = getErrorMessage(err) || '生成失败'
       store.updatePanel(newNodeId, {
         content: { status: 'error', errorDetails: errMsg },
       })
@@ -979,7 +980,7 @@ export async function executeMergeVideoGeneration(configId: string, store: Canva
       prefsStore.notifyComplete('video', { prompt: ctx.prompt, modelId: config.model })
     } catch (err) {
       // 失败：更新节点为 error 状态
-      const errMsg = (err as Error).message || '视频生成失败'
+      const errMsg = getErrorMessage(err) || '视频生成失败'
       store.updatePanel(newNodeId, {
         content: { status: 'error', errorDetails: errMsg },
       })

@@ -78,7 +78,7 @@ interface Props {
   src: string
   alt?: string
   loading?: 'lazy' | 'eager'
-  imgClass?: string | string[] | Record<string, boolean>
+  imgClass?: string | string[] | Record<string, boolean> | (string | Record<string, boolean>)[]
   imgStyle?: CSSProperties
   fit?: 'contain' | 'cover' | 'fill'
   /** 自定义宽度，不传则自适应 */

@@ -739,7 +739,7 @@ async function loadList(page?: number) {
     if (filters.ai_status) params.ai_status = filters.ai_status
     if (filters.item_id != null) params.item_id = filters.item_id
 
-    const res = await client.get('/api/admin/review/list', { params })
+    const res: any = await client.get('/api/admin/review/list', { params })
     list.value = res.items
     total.value = res.total
     selectedIds.value = []
@@ -766,7 +766,7 @@ async function silentRefresh() {
     if (filters.ai_status) params.ai_status = filters.ai_status
     if (filters.item_id != null) params.item_id = filters.item_id
 
-    const res = await client.get('/api/admin/review/list', { params })
+    const res: any = await client.get('/api/admin/review/list', { params })
     list.value = res.items
     total.value = res.total
     lastUpdated.value = new Date().toISOString()
@@ -966,7 +966,7 @@ async function fetchAllPendingItems(): Promise<ReviewItem[]> {
     if (filters.ai_status) params.ai_status = filters.ai_status
     if (filters.item_id != null) params.item_id = filters.item_id
 
-    const res = await client.get('/api/admin/review/list', { params })
+    const res: any = await client.get('/api/admin/review/list', { params })
     const items: ReviewItem[] = res.items || []
     all.push(...items)
     if (items.length < size) break

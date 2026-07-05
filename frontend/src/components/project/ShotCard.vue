@@ -1,9 +1,9 @@
 <!-- =====================================================
      分镜卡片 ShotCard
-     - 展示：序号 / 标题 / 镜头信息 / 帧图 / 视频
-     - 操作：生成帧图 / 上传帧图 / 生成视频 / 上传视频 / 编辑 / 删除 / 多选
+     - 展示：序号 / 标题 / 镜头信息 / 帧图 / 视频 / 配音
+     - 操作：生成帧图 / 上传帧图 / 生成视频 / 上传视频 / 生成配音 / 上传配音 / 编辑 / 删除 / 多选
      - 绑定角色/道具（标签形式展示，可解绑）
-     - 帧图/视频版本切换器（内联 el-dropdown）
+     - 帧图/视频/音频版本切换器（内联 el-dropdown）
      ===================================================== -->
 
 <template>
@@ -165,6 +165,86 @@
       </template>
     </div>
 
+    <!-- 音频预览（配音） -->
+    <div class="audio-preview">
+      <template v-if="activeAudio?.file_url">
+        <div class="audio-row">
+          <el-icon class="audio-icon"><Microphone /></el-icon>
+          <audio
+            :src="activeAudio.file_url"
+            controls
+            preload="metadata"
+            class="audio-player"
+          />
+          <!-- 音频版本切换器 -->
+          <div
+            v-if="shot.audios && shot.audios.length > 1"
+            class="audio-version-switcher"
+            @click.stop
+          >
+            <el-dropdown trigger="click" @command="onSetActiveAudio">
+              <el-button link size="small" type="primary">
+                v{{ activeAudio?.version || '-' }}
+                <el-icon><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item
+                    v-for="aud in shot.audios"
+                    :key="aud.id"
+                    :command="aud.id"
+                    :disabled="aud.is_active"
+                  >
+                    v{{ aud.version }}
+                    <el-tag v-if="aud.is_active" type="success" size="small">采用</el-tag>
+                    <el-tag v-if="aud.is_manual" type="warning" size="small">手动</el-tag>
+                    <el-tag v-if="aud.voice_name" type="info" size="small">{{ aud.voice_name }}</el-tag>
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </div>
+          <el-button
+            v-if="projectStore.isEditable"
+            link
+            size="small"
+            type="danger"
+            :icon="Delete"
+            @click.stop="onDeleteAudio(activeAudio.id)"
+          >删除</el-button>
+        </div>
+      </template>
+      <template v-else>
+        <div class="audio-placeholder">
+          <el-icon :size="20"><Microphone /></el-icon>
+          <span v-if="localGeneratingAudio" class="generating-text">
+            <el-icon class="loading-icon"><Loading /></el-icon>
+            配音生成中...
+          </span>
+          <span v-else>暂无配音</span>
+          <el-button
+            v-if="projectStore.isEditable && !localGeneratingAudio"
+            type="primary"
+            size="small"
+            :icon="Microphone"
+            :loading="localGeneratingAudio"
+            :disabled="!shot.dialogue"
+            @click.stop="onGenerateAudio"
+          >生成配音</el-button>
+          <div class="upload-wrapper" @click.stop>
+            <el-upload
+              v-if="projectStore.isEditable && !localGeneratingAudio"
+              :show-file-list="false"
+              :before-upload="onUploadAudio"
+              accept="audio/*"
+            >
+              <el-button size="small" :icon="Upload" :loading="uploadingAudio">上传</el-button>
+            </el-upload>
+          </div>
+        </div>
+      </template>
+    </div>
+
     <!-- 对话台词 -->
     <div v-if="shot.dialogue" class="shot-section">
       <div class="section-label">台词</div>
@@ -241,7 +321,7 @@
 import { computed, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Picture, Loading, MagicStick, Upload, Edit, Delete, Refresh, VideoPlay, ArrowDown,
+  Picture, Loading, MagicStick, Upload, Edit, Delete, Refresh, VideoPlay, ArrowDown, Microphone,
 } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import type { ProjectShot } from '@/types/project'
@@ -269,10 +349,13 @@ const localGeneratingFrame = ref(false)
 const localGeneratingVideo = ref(false)
 const uploadingFrame = ref(false)
 const uploadingVideo = ref(false)
+const localGeneratingAudio = ref(false)
+const uploadingAudio = ref(false)
 
 // ---------- 计算 ----------
 const activeFrameImage = computed(() => props.shot.active_frame_image)
 const activeVideo = computed(() => props.shot.active_video)
+const activeAudio = computed(() => props.shot.active_audio)
 
 const shotTypeLabel = computed(() => {
   const map: Record<string, string> = {
@@ -400,6 +483,73 @@ async function onSetActiveVideo(videoId: number) {
     emit('refresh')
   } catch (e: any) {
     ElMessage.error(e?.message || '切换失败')
+  }
+}
+
+// ---------- 音频操作 ----------
+async function onGenerateAudio() {
+  if (!props.shot.dialogue) {
+    ElMessage.warning('该分镜没有台词，无法生成配音')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `将基于台词生成分镜 ${props.shot.sequence_no} 的配音，是否继续？`,
+      '生成配音',
+      { type: 'info', confirmButtonText: '开始', cancelButtonText: '取消' },
+    )
+  } catch (_) { return }
+
+  localGeneratingAudio.value = true
+  try {
+    // 不指定 voice_id，由后端按角色绑定/默认音色选取
+    await projectStore.generateTTS(props.shot.id, {})
+    ElMessage.success('配音已生成')
+    emit('refresh')
+  } catch (e: any) {
+    ElMessage.error(e?.message || '生成失败')
+  } finally {
+    localGeneratingAudio.value = false
+  }
+}
+
+async function onUploadAudio(file: File): Promise<boolean> {
+  uploadingAudio.value = true
+  try {
+    await projectStore.uploadAudio(props.shot.id, file)
+    ElMessage.success('音频已上传')
+    emit('refresh')
+  } catch (e: any) {
+    ElMessage.error(e?.message || '上传失败')
+  } finally {
+    uploadingAudio.value = false
+  }
+  return false
+}
+
+async function onSetActiveAudio(audioId: number) {
+  try {
+    await projectStore.setActiveAudio(props.shot.id, audioId)
+    ElMessage.success('已切换音频版本')
+    emit('refresh')
+  } catch (e: any) {
+    ElMessage.error(e?.message || '切换失败')
+  }
+}
+
+async function onDeleteAudio(audioId: number) {
+  try {
+    await ElMessageBox.confirm('确定删除该音频版本？此操作不可撤销。', '删除确认', {
+      type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消',
+    })
+  } catch (_) { return }
+
+  try {
+    await projectStore.deleteAudio(props.shot.id, audioId)
+    ElMessage.success('音频已删除')
+    emit('refresh')
+  } catch (e: any) {
+    ElMessage.error(e?.message || '删除失败')
   }
 }
 
@@ -585,6 +735,41 @@ async function onDelete() {
 .generating-text {
   display: inline-flex; align-items: center; gap: 4px;
   color: var(--el-color-primary);
+}
+
+/* ---------- 音频预览 ---------- */
+.audio-preview {
+  background: var(--el-fill-color);
+  border-radius: 6px;
+  padding: 8px 10px;
+  position: relative;
+}
+.audio-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.audio-icon {
+  color: var(--el-color-success);
+  flex-shrink: 0;
+}
+.audio-player {
+  flex: 1;
+  height: 32px;
+  min-width: 0;
+}
+.audio-version-switcher {
+  flex-shrink: 0;
+}
+.audio-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
 }
 
 .shot-section {

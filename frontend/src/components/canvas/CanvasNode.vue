@@ -830,7 +830,7 @@ const configCameraParams = ref<Record<string, any>>({
 function onQuickPanelSelect(preset: PromptPreset) {
   // 填充提示词文本
   if (preset.prompt_text) {
-    configText.value = preset.prompt_text
+    configPrompt.value = preset.prompt_text
   }
   // 填充摄像机参数
   if (preset.camera_params && typeof preset.camera_params === 'object') {

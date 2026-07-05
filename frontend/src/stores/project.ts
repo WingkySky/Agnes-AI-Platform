@@ -55,6 +55,32 @@ import {
   mergeProject as apiMergeProject,
   getMergeStatus as apiGetMergeStatus,
   getEntityApi,
+  // Phase 2
+  listAudios as apiListAudios,
+  generateTTS as apiGenerateTTS,
+  batchGenerateTTS as apiBatchGenerateTTS,
+  uploadAudio as apiUploadAudio,
+  setActiveAudio as apiSetActiveAudio,
+  deleteAudio as apiDeleteAudio,
+  listBuiltinVoices as apiListBuiltinVoices,
+  listCharacterVoices as apiListCharacterVoices,
+  assignCharacterVoice as apiAssignCharacterVoice,
+  generateSubtitles as apiGenerateSubtitles,
+  generateSubtitlesWithWhisper as apiGenerateSubtitlesWithWhisper,
+  listSubtitleClips as apiListSubtitleClips,
+  getSubtitleStyle as apiGetSubtitleStyle,
+  updateSubtitleStyle as apiUpdateSubtitleStyle,
+  checkWhisperAvailable as apiCheckWhisperAvailable,
+  initTimeline as apiInitTimeline,
+  listTimelineClips as apiListTimelineClips,
+  createTimelineClip as apiCreateTimelineClip,
+  updateTimelineClip as apiUpdateTimelineClip,
+  deleteTimelineClip as apiDeleteTimelineClip,
+  getTimelineData as apiGetTimelineData,
+  saveTimelineData as apiSaveTimelineData,
+  listBgms as apiListBgms,
+  listBgmMoods as apiListBgmMoods,
+  mergeProjectAdvanced as apiMergeProjectAdvanced,
 } from '@/api/projects'
 import type {
   Project,
@@ -97,6 +123,26 @@ import type {
   WizardResumeRequest,
   EntityType,
   ProjectActiveView,
+  // Phase 2
+  ProjectShotAudio,
+  GenerateTTSRequest,
+  BatchGenerateTTSRequest,
+  VoiceOption,
+  CharacterVoice,
+  AssignCharacterVoiceRequest,
+  SubtitleStyle,
+  GenerateSubtitleRequest,
+  GenerateSubtitleAdvancedRequest,
+  SubtitleGenerateResult,
+  TimelineClip,
+  TimelineClipCreateRequest,
+  TimelineClipUpdateRequest,
+  TimelineDataResponse,
+  TimelineDataUpdateRequest,
+  TimelineTrackType,
+  BGMItem,
+  BGMMood,
+  MergeAdvancedRequest,
 } from '@/types/project'
 
 interface ProjectState {
@@ -125,6 +171,18 @@ interface ProjectState {
   /* 合成状态 */
   mergeStatus: MergeStatusResponse | null
   mergeLoading: boolean
+  /** 合成进度 SSE 事件（由 ProjectDetailView 同步自 useProjectSSE） */
+  mergeProgress: Record<string, any> | null
+
+  /* Phase 2 — 配音 / 音色 / 字幕 / 时间线 / BGM */
+  builtinVoices: VoiceOption[]
+  characterVoices: CharacterVoice[]
+  timelineData: TimelineDataResponse | null
+  timelineLoading: boolean
+  subtitleStyle: SubtitleStyle | null
+  whisperAvailable: boolean
+  bgmList: BGMItem[]
+  bgmMoods: string[]
 }
 
 export const useProjectStore = defineStore('project', {
@@ -149,6 +207,17 @@ export const useProjectStore = defineStore('project', {
 
     mergeStatus: null,
     mergeLoading: false,
+    mergeProgress: null,
+
+    // Phase 2
+    builtinVoices: [],
+    characterVoices: [],
+    timelineData: null,
+    timelineLoading: false,
+    subtitleStyle: null,
+    whisperAvailable: false,
+    bgmList: [],
+    bgmMoods: [],
   }),
 
   getters: {
@@ -213,6 +282,8 @@ export const useProjectStore = defineStore('project', {
       this.props = []
       this.shots = []
       this.mergeStatus = null
+      this.mergeLoading = false
+      this.mergeProgress = null
     },
 
     // ================ 项目 CRUD ================
@@ -711,6 +782,190 @@ export const useProjectStore = defineStore('project', {
     async fetchMergeStatus() {
       if (!this.currentProjectId) return
       this.mergeStatus = await apiGetMergeStatus(this.currentProjectId)
+    },
+
+    // ================ Phase 2: 配音（TTS） ================
+    async listAudios(shotId: number) {
+      if (!this.currentProjectId) return []
+      return await apiListAudios(this.currentProjectId, shotId)
+    },
+
+    async generateTTS(shotId: number, data: GenerateTTSRequest) {
+      if (!this.currentProjectId) throw new Error('未选择项目')
+      const audio = await apiGenerateTTS(this.currentProjectId, shotId, data)
+      await this.refreshShot(shotId)
+      return audio
+    },
+
+    async batchGenerateTTS(data: BatchGenerateTTSRequest) {
+      if (!this.currentProjectId) throw new Error('未选择项目')
+      const result = await apiBatchGenerateTTS(this.currentProjectId, data)
+      // 刷新涉及的分镜（让 UI 显示新的音频版本）
+      for (const shotId of data.shot_ids) {
+        await this.refreshShot(shotId)
+      }
+      return result
+    },
+
+    async uploadAudio(shotId: number, file: File) {
+      if (!this.currentProjectId) throw new Error('未选择项目')
+      const audio = await apiUploadAudio(this.currentProjectId, shotId, file)
+      await this.refreshShot(shotId)
+      return audio
+    },
+
+    async setActiveAudio(shotId: number, versionId: number) {
+      if (!this.currentProjectId) throw new Error('未选择项目')
+      const audio = await apiSetActiveAudio(this.currentProjectId, shotId, versionId)
+      await this.refreshShot(shotId)
+      return audio
+    },
+
+    async deleteAudio(shotId: number, versionId: number) {
+      if (!this.currentProjectId) throw new Error('未选择项目')
+      await apiDeleteAudio(this.currentProjectId, shotId, versionId)
+      await this.refreshShot(shotId)
+    },
+
+    // ================ Phase 2: 音色 ================
+    async fetchBuiltinVoices() {
+      if (!this.currentProjectId) return
+      this.builtinVoices = await apiListBuiltinVoices(this.currentProjectId)
+    },
+
+    async fetchCharacterVoices() {
+      if (!this.currentProjectId) return
+      this.characterVoices = await apiListCharacterVoices(this.currentProjectId)
+    },
+
+    async assignCharacterVoice(
+      characterId: number,
+      data: AssignCharacterVoiceRequest,
+    ) {
+      if (!this.currentProjectId) throw new Error('未选择项目')
+      const assignment = await apiAssignCharacterVoice(
+        this.currentProjectId, characterId, data,
+      )
+      await this.fetchCharacterVoices()
+      return assignment
+    },
+
+    // ================ Phase 2: 字幕 ================
+    async generateSubtitles(data: GenerateSubtitleRequest = {}) {
+      if (!this.currentProjectId) throw new Error('未选择项目')
+      return await apiGenerateSubtitles(this.currentProjectId, data)
+    },
+
+    async generateSubtitlesWithWhisper(data: GenerateSubtitleAdvancedRequest = {}) {
+      if (!this.currentProjectId) throw new Error('未选择项目')
+      return await apiGenerateSubtitlesWithWhisper(this.currentProjectId, data)
+    },
+
+    async fetchSubtitleClips() {
+      if (!this.currentProjectId) return []
+      return await apiListSubtitleClips(this.currentProjectId)
+    },
+
+    async fetchSubtitleStyle() {
+      if (!this.currentProjectId) return
+      this.subtitleStyle = await apiGetSubtitleStyle(this.currentProjectId)
+    },
+
+    async updateSubtitleStyle(data: SubtitleStyle) {
+      if (!this.currentProjectId) throw new Error('未选择项目')
+      this.subtitleStyle = await apiUpdateSubtitleStyle(this.currentProjectId, data)
+      return this.subtitleStyle
+    },
+
+    async fetchWhisperAvailable() {
+      if (!this.currentProjectId) return
+      const result = await apiCheckWhisperAvailable(this.currentProjectId)
+      this.whisperAvailable = result.available
+    },
+
+    // ================ Phase 2: 时间线 ================
+    async initTimeline() {
+      if (!this.currentProjectId) throw new Error('未选择项目')
+      this.timelineLoading = true
+      try {
+        this.timelineData = await apiInitTimeline(this.currentProjectId)
+        // 初始化后同步字幕样式
+        if (this.timelineData.subtitle_style) {
+          this.subtitleStyle = this.timelineData.subtitle_style as SubtitleStyle
+        }
+      } finally {
+        this.timelineLoading = false
+      }
+    },
+
+    async fetchTimelineData() {
+      if (!this.currentProjectId) return
+      this.timelineLoading = true
+      try {
+        this.timelineData = await apiGetTimelineData(this.currentProjectId)
+        if (this.timelineData.subtitle_style) {
+          this.subtitleStyle = this.timelineData.subtitle_style as SubtitleStyle
+        }
+      } finally {
+        this.timelineLoading = false
+      }
+    },
+
+    async fetchTimelineClips(trackType?: TimelineTrackType) {
+      if (!this.currentProjectId) return []
+      return await apiListTimelineClips(this.currentProjectId, trackType)
+    },
+
+    async createTimelineClip(data: TimelineClipCreateRequest) {
+      if (!this.currentProjectId) throw new Error('未选择项目')
+      const clip = await apiCreateTimelineClip(this.currentProjectId, data)
+      await this.fetchTimelineData()
+      return clip
+    },
+
+    async updateTimelineClip(clipId: number, data: TimelineClipUpdateRequest) {
+      if (!this.currentProjectId) throw new Error('未选择项目')
+      const clip = await apiUpdateTimelineClip(this.currentProjectId, clipId, data)
+      await this.fetchTimelineData()
+      return clip
+    },
+
+    async deleteTimelineClip(clipId: number) {
+      if (!this.currentProjectId) throw new Error('未选择项目')
+      await apiDeleteTimelineClip(this.currentProjectId, clipId)
+      await this.fetchTimelineData()
+    },
+
+    async saveTimelineData(data: TimelineDataUpdateRequest) {
+      if (!this.currentProjectId) throw new Error('未选择项目')
+      this.timelineData = await apiSaveTimelineData(this.currentProjectId, data)
+      if (this.timelineData.subtitle_style) {
+        this.subtitleStyle = this.timelineData.subtitle_style as SubtitleStyle
+      }
+      return this.timelineData
+    },
+
+    // ================ Phase 2: BGM 库 ================
+    async fetchBgms(mood?: BGMMood) {
+      if (!this.currentProjectId) return
+      this.bgmList = await apiListBgms(this.currentProjectId, mood)
+    },
+
+    async fetchBgmMoods() {
+      if (!this.currentProjectId) return
+      const result = await apiListBgmMoods(this.currentProjectId)
+      this.bgmMoods = result.moods
+    },
+
+    // ================ Phase 2: 高级合成 ================
+    async mergeProjectAdvanced(data: MergeAdvancedRequest = {}) {
+      if (!this.currentProjectId) throw new Error('未选择项目')
+      this.mergeLoading = true
+      try {
+        await apiMergeProjectAdvanced(this.currentProjectId, data)
+      } finally {
+        this.mergeLoading = false
+      }
     },
   },
 })

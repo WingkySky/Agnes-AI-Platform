@@ -71,6 +71,7 @@ async function getAssetStore(): Promise<LocalForageInstance> {
   if (assetStoreInstance) return assetStoreInstance
   try {
     const localforage = await import('localforage')
+    /** createInstance 返回类型是 LocalForage 超集，此处向上转型为接口子集，安全等价 */
     assetStoreInstance = localforage.default.createInstance({
       name: 'agnes-platform',
       storeName: 'assets',

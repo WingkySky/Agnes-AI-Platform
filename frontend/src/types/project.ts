@@ -287,6 +287,7 @@ export interface ProjectShot {
   image_prompt?: string | null
   active_frame_image_id?: number | null
   active_video_id?: number | null
+  active_audio_id?: number | null
   created_at: string
   updated_at: string
   // 关联
@@ -294,8 +295,10 @@ export interface ProjectShot {
   props?: ProjectProp[]
   frame_images?: ProjectFrameImage[]
   videos?: ProjectVideo[]
+  audios?: ProjectShotAudio[]
   active_frame_image?: ProjectFrameImage | null
   active_video?: ProjectVideo | null
+  active_audio?: ProjectShotAudio | null
 }
 
 export interface ShotCreateRequest {
@@ -479,6 +482,15 @@ export type ProjectEventType =
   | 'project_status_changed'
   | 'merge_progress'
   | 'merge_completed'
+  // Phase 2 — TTS / 字幕 / 时间线 / 音频激活
+  | 'tts_progress'
+  | 'tts_completed'
+  | 'subtitle_progress'
+  | 'subtitle_completed'
+  | 'audio_activated'
+  | 'timeline_clip_created'
+  | 'timeline_clip_updated'
+  | 'timeline_clip_deleted'
   | 'unauthorized'
 
 export interface ProjectSSEPayload {
@@ -486,4 +498,187 @@ export interface ProjectSSEPayload {
   project_id: number
   data?: Record<string, any>
   timestamp?: string
+}
+
+// =====================================================
+// Phase 2 — 配音 / 音色 / 字幕 / 时间线 / BGM
+// =====================================================
+
+// ---------- 配音（多版本） ----------
+
+export interface ProjectShotAudio {
+  id: number
+  shot_id: number
+  version: number
+  is_active: boolean
+  is_manual: boolean
+  file_url?: string | null
+  text?: string | null
+  voice_id?: string | null
+  voice_name?: string | null
+  character_id?: number | null
+  provider?: string | null
+  model?: string | null
+  duration_ms?: number | null
+  file_size?: number | null
+  created_by: string
+  created_at?: string | null
+}
+
+export interface GenerateTTSRequest {
+  voice_id?: string
+  character_id?: number
+  text?: string
+  model?: string
+  provider?: string
+}
+
+export interface BatchGenerateTTSRequest {
+  shot_ids: number[]
+  voice_id?: string
+}
+
+// ---------- 音色 ----------
+
+export interface VoiceOption {
+  voice_id: string
+  name: string
+  gender: 'male' | 'female' | 'neutral'
+  suitable_for?: string
+}
+
+export interface CharacterVoice {
+  id: number
+  project_id: number
+  character_id: number
+  voice_id: string
+  voice_name?: string | null
+  assigned_at?: string | null
+}
+
+export interface AssignCharacterVoiceRequest {
+  voice_id: string
+  voice_name?: string
+}
+
+// ---------- 字幕 ----------
+
+export interface SubtitleStyle {
+  font_family: string
+  font_size: number
+  font_color: string
+  outline_color: string
+  outline_width: number
+  position: 'bottom' | 'top' | 'center'
+  margin_vertical: number
+}
+
+export interface GenerateSubtitleRequest {
+  shot_ids?: number[]
+  style?: Record<string, any>
+}
+
+export interface GenerateSubtitleAdvancedRequest {
+  shot_ids?: number[]
+  mode?: 'llm' | 'whisper'
+  whisper_model_size?: string
+}
+
+export interface SubtitleGenerateResult {
+  clips: Array<{
+    shot_id: number
+    start_time: number
+    duration: number
+    text: string
+  }>
+  count: number
+  mode: 'llm' | 'whisper'
+  whisper_available?: boolean
+}
+
+// ---------- 时间线 ----------
+
+export type TimelineTrackType = 'video' | 'audio' | 'subtitle'
+
+export type TransitionType = 'none' | 'fade' | 'slide' | 'wipe' | 'dissolve'
+
+export interface TimelineClip {
+  id: number
+  project_id: number
+  track_type: TimelineTrackType
+  track_index: number
+  source_type?: string | null
+  source_id?: number | null
+  shot_id?: number | null
+  start_time: number
+  duration: number
+  trim_start: number
+  trim_end?: number | null
+  transition_type: TransitionType
+  transition_duration: number
+  subtitle_text?: string | null
+  sort_order: number
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export interface TimelineClipCreateRequest {
+  track_type: TimelineTrackType
+  track_index?: number
+  source_type?: string
+  source_id?: number
+  shot_id?: number
+  start_time: number
+  duration: number
+  trim_start?: number
+  trim_end?: number
+  transition_type?: TransitionType
+  transition_duration?: number
+  subtitle_text?: string
+  sort_order?: number
+}
+
+export interface TimelineClipUpdateRequest {
+  start_time?: number
+  duration?: number
+  trim_start?: number
+  trim_end?: number
+  transition_type?: TransitionType
+  transition_duration?: number
+  subtitle_text?: string
+  track_index?: number
+  sort_order?: number
+}
+
+export interface TimelineDataResponse {
+  clips: TimelineClip[]
+  subtitle_style?: Record<string, any>
+  total_duration: number
+}
+
+export interface TimelineDataUpdateRequest {
+  subtitle_style?: Record<string, any>
+  draft?: Record<string, any>
+}
+
+// ---------- BGM 库 ----------
+
+export type BGMMood = 'calm' | 'corporate' | 'dramatic' | 'uplifting' | 'sad'
+
+export interface BGMItem {
+  id: string
+  name: string
+  mood: BGMMood
+  duration: number
+  available: boolean
+}
+
+// ---------- 高级合成 ----------
+
+export interface MergeAdvancedRequest {
+  with_audio?: boolean
+  with_subtitle?: boolean
+  with_bgm?: boolean
+  bgm_id?: string
+  use_timeline?: boolean
 }

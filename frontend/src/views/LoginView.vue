@@ -259,7 +259,7 @@ async function handleSendEmailCode() {
 async function handleForgotNextStep() {
   if (!forgotPasswordRef.value) return
   // 只校验 email 和 code
-  const valid = await forgotPasswordRef.value.validateFields(['email', 'code']).catch(() => false)
+  const valid = await forgotPasswordRef.value.validateField(['email', 'code']).catch(() => false)
   if (!valid) return
 
   // 这里不直接验证验证码，而是进入下一步，等重置时一起验证

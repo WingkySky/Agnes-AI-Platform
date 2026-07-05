@@ -42,8 +42,10 @@ export interface GetMenuConfigsResponse {
 // ---------- API 函数 ----------
 
 /** 获取当前菜单配置 */
-export function getMenuConfigs() {
-  return client.get<GetMenuConfigsResponse>('/api/menu-configs')
+export async function getMenuConfigs(): Promise<GetMenuConfigsResponse> {
+  // 响应拦截器已解包 response.data，因此 client.get 实际返回的是响应体数据
+  const data: unknown = await client.get<GetMenuConfigsResponse>('/api/menu-configs')
+  return data as GetMenuConfigsResponse
 }
 
 /** 保存菜单配置 */

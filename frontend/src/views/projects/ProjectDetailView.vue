@@ -226,14 +226,28 @@ watch(
   },
 )
 
-// 合成完成事件 → 刷新详情
+// 合成进度事件 → 同步 store.mergeLoading + store.mergeProgress + 完成时刷新详情
 watch(
   () => sse.mergeProgress.value,
   (evt) => {
-    if (evt && evt.status === 'completed') {
+    if (!evt) return
+    // 同步到 store，供 TimelineTab 等子组件读取
+    projectStore.mergeProgress = evt
+    // 合成进行中：保持 mergeLoading=true（覆盖 API 立即返回时的 false）
+    if (evt.status === 'started' || evt.status === 'downloading' || evt.status === 'compositing') {
+      projectStore.mergeLoading = true
+    }
+    // 合成完成：刷新详情，获取 final_video_url
+    if (evt.status === 'completed') {
+      projectStore.mergeLoading = false
       if (projectIdRef.value) {
         projectStore.fetchProject(projectIdRef.value).catch(() => {/* 忽略 */})
       }
+    }
+    // 合成失败：释放 loading，提示错误
+    if (evt.status === 'failed') {
+      projectStore.mergeLoading = false
+      ElMessage.error(evt.error || '合成失败，请重试')
     }
   },
 )

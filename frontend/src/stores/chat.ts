@@ -150,7 +150,7 @@ export const useChatStore = defineStore('chat', {
     /** 加载会话列表 */
     async loadSessions(): Promise<void> {
       try {
-        const data = await getChatSessions({ page: 1, page_size: 50 }) as { items?: ChatSession[]; total?: number }
+        const data: { items?: ChatSession[]; total?: number } = await getChatSessions({ page: 1, page_size: 50 })
         this.sessions = data.items || []
         this.sessionsTotal = data.total || 0
       } catch (e: unknown) {
@@ -240,7 +240,7 @@ export const useChatStore = defineStore('chat', {
     /** 使用 AI 自动总结会话主题（生成新标题） */
     async autoSummarizeSession(sessionId: number): Promise<ChatSession> {
       try {
-        const updated = await summarizeChatSession(sessionId) as ChatSession
+        const updated: ChatSession = await summarizeChatSession(sessionId)
         // 更新本地 sessions 列表
         const session = this.sessions.find(s => s.id === sessionId)
         if (session) {
@@ -574,7 +574,7 @@ export const useChatStore = defineStore('chat', {
 
       const poll = async (): Promise<void> => {
         try {
-          const data = await getMediaStatus(taskId) as MediaStatusResponse
+          const data: MediaStatusResponse = await getMediaStatus(taskId)
           // 轮询成功，重置失败计数
           this.mediaPollFailCounts[taskId] = 0
           this.mediaStatusMap[taskId] = data

@@ -141,8 +141,8 @@ const props = defineProps<{
   initialCategory?: string
 }>()
 const emit = defineEmits<{
-  (e: 'update:modelValue', val: boolean)
-  (e: 'created', projectId: number)
+  (e: 'update:modelValue', val: boolean): void
+  (e: 'created', projectId: number): void
 }>()
 
 const projectStore = useProjectStore()

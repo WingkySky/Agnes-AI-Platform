@@ -1,6 +1,6 @@
 <!-- =====================================================
      项目管理视图 ProjectManagerView
-     - Tab 容器：剧本 / 角色 / 场景 / 道具 / 分镜
+     - Tab 容器：剧本 / 角色 / 场景 / 道具 / 分镜 / 时间线
      - 每个 Tab 内部由对应 Tab 组件实现
      - 顶部展示批量操作工具栏（透传给子 Tab）
      ===================================================== -->
@@ -57,24 +57,34 @@
         </template>
         <ShotsTab />
       </el-tab-pane>
+
+      <el-tab-pane name="timeline">
+        <template #label>
+          <span class="tab-label">
+            <el-icon><VideoCamera /></el-icon> 时间线
+          </span>
+        </template>
+        <TimelineTab />
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { Document, User, Picture, Box, Film } from '@element-plus/icons-vue'
+import { Document, User, Picture, Box, Film, VideoCamera } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import ScriptTab from './ScriptTab.vue'
 import CharactersTab from './CharactersTab.vue'
 import ScenesTab from './ScenesTab.vue'
 import PropsTab from './PropsTab.vue'
 import ShotsTab from './ShotsTab.vue'
+import TimelineTab from './timeline/TimelineTab.vue'
 
 const projectStore = useProjectStore()
 
 // 默认展示剧本 Tab
-const activeTab = ref<'script' | 'character' | 'scene' | 'prop' | 'shot'>('script')
+const activeTab = ref<'script' | 'character' | 'scene' | 'prop' | 'shot' | 'timeline'>('script')
 
 // 各实体数量
 const scriptCount = computed(() => projectStore.scripts.length)

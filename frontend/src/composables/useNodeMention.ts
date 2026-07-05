@@ -50,7 +50,7 @@ function getCaretCoordinates(textarea: HTMLTextAreaElement, position: number): {
   ] as const
 
   for (const p of props) {
-    (div.style as any)[p] = (style as any)[p]
+    (div.style as CSSStyleDeclaration)[p] = (style as any)[p]
   }
 
   div.style.position = 'absolute'
@@ -114,7 +114,8 @@ export function useNodeMention(textareaRef: { value: HTMLTextAreaElement | null 
 
     return inputs
       .map(({ panel, index }) => {
-        const typeLabel = TYPE_LABELS[panel.type] || '节点'
+        const panelType = panel.type ?? ''
+        const typeLabel = TYPE_LABELS[panelType] || '节点'
         const label = `${typeLabel}${index}`
         let name = ''
         let preview = ''

@@ -1140,6 +1140,26 @@ class AgnesAIClient:
             "raw": data,
         }
 
+    # ---------- TTS 配音生成（Phase 2） ----------
+    async def create_tts_task(
+        self,
+        text: str,
+        voice_id: str,
+        model: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        调用 Agnes TTS API 生成音频
+
+        返回: {"url": str, "duration_ms": int, "file_size": int}
+
+        TODO: Agnes AI 是否提供 TTS 端点待确认。
+              若不支持，通过 provider_registry 路由到第三方 TTS provider
+              （阿里云 / 字节火山 / Edge TTS 等）。
+        """
+        raise NotImplementedError(
+            "Agnes TTS API 尚未实现，请通过 provider_registry 路由到第三方 TTS"
+        )
+
 
 # 全局单例客户端实例
 agnes_client = AgnesAIClient()

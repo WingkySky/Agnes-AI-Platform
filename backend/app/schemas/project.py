@@ -343,6 +343,7 @@ class ShotResponse(BaseModel):
     scene_id: Optional[int] = None
     active_frame_image_id: Optional[int] = None
     active_video_id: Optional[int] = None
+    active_audio_id: Optional[int] = None  # Phase 2
     status: str
     sort_order: int = 0
     created_at: Optional[datetime] = None
@@ -352,8 +353,10 @@ class ShotResponse(BaseModel):
     props: Optional[List["PropResponse"]] = None
     frame_images: Optional[List["FrameImageResponse"]] = None
     videos: Optional[List["VideoResponse"]] = None
+    audios: Optional[List["ProjectShotAudioResponse"]] = None  # Phase 2
     active_frame_image: Optional["FrameImageResponse"] = None
     active_video: Optional["VideoResponse"] = None
+    active_audio: Optional["ProjectShotAudioResponse"] = None  # Phase 2
 
 
 class ReorderRequest(BaseModel):
@@ -484,9 +487,196 @@ class MergeStatusResponse(BaseModel):
 
 
 # =====================================================
-# 解决前向引用：CharacterResponse/SceneResponse/PropResponse
-# 在定义时引用了尚未定义的 EntityAssetResponse
+# Phase 2 Schema — 配音 / 音色映射 / 字幕 / 时间线
+# =====================================================
+
+# ---------- 配音 ----------
+
+class ProjectShotAudioResponse(BaseModel):
+    """分镜配音响应（多版本）"""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    shot_id: int
+    version: int
+    is_active: bool
+    is_manual: bool
+    file_url: Optional[str] = None
+    text: Optional[str] = None
+    voice_id: Optional[str] = None
+    voice_name: Optional[str] = None
+    character_id: Optional[int] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    duration_ms: Optional[int] = None
+    file_size: Optional[int] = None
+    created_by: str = "ai"
+    created_at: Optional[datetime] = None
+
+
+class GenerateTTSRequest(BaseModel):
+    """TTS 配音生成请求"""
+    voice_id: Optional[str] = Field(None, description="音色 ID，不传则自动分配（同角色同声音）")
+    character_id: Optional[int] = Field(None, description="关联角色 ID（用于音色固定）")
+    text: Optional[str] = Field(None, description="TTS 文本，不传则用 shot.dialogue")
+    model: Optional[str] = None
+    provider: Optional[str] = None
+
+
+class BatchGenerateTTSRequest(BaseModel):
+    """批量 TTS 生成"""
+    shot_ids: List[int] = Field(..., description="分镜 ID 数组")
+    voice_id: Optional[str] = None
+
+
+class SetActiveAudioRequest(BaseModel):
+    """设为采用版音频"""
+    version_id: int
+
+
+# ---------- 音色映射 ----------
+
+class CharacterVoiceResponse(BaseModel):
+    """角色-音色映射响应"""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    project_id: int
+    character_id: int
+    voice_id: str
+    voice_name: Optional[str] = None
+    assigned_at: Optional[datetime] = None
+
+
+class AssignCharacterVoiceRequest(BaseModel):
+    """为角色分配音色"""
+    voice_id: str
+    voice_name: Optional[str] = None
+
+
+class VoiceOption(BaseModel):
+    """内置音色选项"""
+    voice_id: str
+    name: str
+    gender: str = Field(..., description="male/female/neutral")
+    suitable_for: str = Field("", description="适用角色描述")
+
+
+# ---------- 字幕 ----------
+
+class GenerateSubtitleRequest(BaseModel):
+    """从分镜对白生成字幕"""
+    shot_ids: Optional[List[int]] = Field(None, description="不传则全部有对白的分镜")
+    style: Optional[Dict[str, Any]] = None
+
+
+class SubtitleStyle(BaseModel):
+    """字幕样式"""
+    font_family: str = "Microsoft YaHei"
+    font_size: int = 48
+    font_color: str = "#FFFFFF"
+    outline_color: str = "#000000"
+    outline_width: int = 2
+    position: str = "bottom"  # bottom/top/center
+    margin_vertical: int = 60
+
+
+class SubtitleClip(BaseModel):
+    """单条字幕"""
+    start_time: float
+    end_time: float
+    text: str
+
+
+# ---------- 时间线 ----------
+
+class TimelineClipResponse(BaseModel):
+    """时间线片段响应"""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    project_id: int
+    track_type: str  # video/audio/subtitle
+    track_index: int
+    source_type: Optional[str] = None
+    source_id: Optional[int] = None
+    shot_id: Optional[int] = None
+    start_time: float
+    duration: float
+    trim_start: float = 0
+    trim_end: Optional[float] = None
+    transition_type: str = "none"
+    transition_duration: float = 0
+    subtitle_text: Optional[str] = None
+    sort_order: int = 0
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class TimelineClipCreate(BaseModel):
+    """创建时间线片段"""
+    track_type: str
+    track_index: int = 0
+    source_type: Optional[str] = None
+    source_id: Optional[int] = None
+    shot_id: Optional[int] = None
+    start_time: float
+    duration: float
+    trim_start: float = 0
+    trim_end: Optional[float] = None
+    transition_type: str = "none"
+    transition_duration: float = 0
+    subtitle_text: Optional[str] = None
+    sort_order: int = 0
+
+
+class TimelineClipUpdate(BaseModel):
+    """更新时间线片段"""
+    start_time: Optional[float] = None
+    duration: Optional[float] = None
+    trim_start: Optional[float] = None
+    trim_end: Optional[float] = None
+    transition_type: Optional[str] = None
+    transition_duration: Optional[float] = None
+    subtitle_text: Optional[str] = None
+    track_index: Optional[int] = None
+    sort_order: Optional[int] = None
+
+
+class TimelineDataUpdate(BaseModel):
+    """时间线草稿数据更新（含字幕样式）"""
+    subtitle_style: Optional[Dict[str, Any]] = None
+    draft: Optional[Dict[str, Any]] = None
+
+
+class TimelineDataResponse(BaseModel):
+    """时间线数据响应"""
+    clips: List[TimelineClipResponse]
+    subtitle_style: Optional[Dict[str, Any]] = None
+    total_duration: float = 0
+
+
+class MergeAdvancedRequest(BaseModel):
+    """高级合成请求（Phase 2）"""
+    with_audio: bool = True
+    with_subtitle: bool = True
+    with_bgm: bool = False
+    bgm_id: Optional[str] = None
+    use_timeline: bool = True
+
+
+class GenerateSubtitleAdvancedRequest(BaseModel):
+    """高级字幕生成请求（支持 whisper 模式）"""
+    shot_ids: Optional[List[int]] = Field(None, description="不传则全部有对白的分镜")
+    mode: str = Field("llm", description="字幕模式: llm（默认）/ whisper（forced alignment）")
+    whisper_model_size: str = Field("small", description="whisper 模型大小: tiny/base/small/medium/large-v3")
+
+
+# =====================================================
+# 解决前向引用：CharacterResponse/SceneResponse/PropResponse/ShotResponse
+# 在定义时引用了尚未定义的 EntityAssetResponse / ProjectShotAudioResponse
 # =====================================================
 CharacterResponse.model_rebuild()
 SceneResponse.model_rebuild()
 PropResponse.model_rebuild()
+ShotResponse.model_rebuild()

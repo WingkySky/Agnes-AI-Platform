@@ -344,6 +344,11 @@ export const IMAGE_TIER_CONFIG: Record<ImageTier, {
     color: '#9c27b0',
     desc: '约 8MP · 耗时 ~150s',
   },
+  custom: {
+    label: '自定义',
+    color: '#e6a23c',
+    desc: '自定义参数',
+  },
 }
 
 /** 清晰度等级列表（按清晰度从低到高排序） */

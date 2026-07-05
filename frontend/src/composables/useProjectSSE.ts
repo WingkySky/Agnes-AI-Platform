@@ -51,6 +51,12 @@ export interface ProjectSSEState {
   projectError: Ref<string | null>
   /** 项目详情快照（轮询兜底时拉取） */
   projectSnapshot: Ref<any>
+  /** Phase 2 — TTS 配音进度事件 */
+  ttsProgress: Ref<Record<string, any> | null>
+  /** Phase 2 — 字幕生成进度事件 */
+  subtitleProgress: Ref<Record<string, any> | null>
+  /** Phase 2 — 时间线片段变更事件 */
+  timelineClipEvent: Ref<Record<string, any> | null>
   /** 主动关闭连接 */
   close: () => void
   /** 主动重连 */
@@ -76,6 +82,10 @@ export function useProjectSSE(projectId: Ref<number | string | null>): ProjectSS
   const mergeProgress = ref<Record<string, any> | null>(null)
   const projectError = ref<string | null>(null)
   const projectSnapshot = ref<any>(null)
+  // Phase 2 — TTS / 字幕 / 时间线 事件
+  const ttsProgress = ref<Record<string, any> | null>(null)
+  const subtitleProgress = ref<Record<string, any> | null>(null)
+  const timelineClipEvent = ref<Record<string, any> | null>(null)
 
   // ================ 复用全局 store ================
   const userStore = useUserStore()
@@ -282,6 +292,31 @@ export function useProjectSSE(projectId: Ref<number | string | null>): ProjectSS
           pollStatus()
           break
         }
+
+        // Phase 2 — TTS 配音进度
+        case 'tts_progress':
+        case 'tts_completed':
+        case 'audio_activated': {
+          ttsProgress.value = payload
+          // TTS 完成 / 音频激活后视为实体更新，触发 UI 刷新
+          lastEntityUpdate.value = payload
+          break
+        }
+
+        // Phase 2 — 字幕生成进度
+        case 'subtitle_progress':
+        case 'subtitle_completed': {
+          subtitleProgress.value = payload
+          break
+        }
+
+        // Phase 2 — 时间线片段变更
+        case 'timeline_clip_created':
+        case 'timeline_clip_updated':
+        case 'timeline_clip_deleted': {
+          timelineClipEvent.value = payload
+          break
+        }
       }
     } catch (e) {
       console.error('[ProjectSSE] 事件处理失败:', e)
@@ -318,6 +353,15 @@ export function useProjectSSE(projectId: Ref<number | string | null>): ProjectSS
         'project_status_changed',
         'merge_progress',
         'merge_completed',
+        // Phase 2
+        'tts_progress',
+        'tts_completed',
+        'subtitle_progress',
+        'subtitle_completed',
+        'audio_activated',
+        'timeline_clip_created',
+        'timeline_clip_updated',
+        'timeline_clip_deleted',
         'unauthorized',
       ]
 
@@ -410,6 +454,10 @@ export function useProjectSSE(projectId: Ref<number | string | null>): ProjectSS
     mergeProgress,
     projectError,
     projectSnapshot,
+    // Phase 2
+    ttsProgress,
+    subtitleProgress,
+    timelineClipEvent,
     close: () => { manualClosed.value = true; closeConnection(); stopPolling() },
     reconnect: () => {
       manualClosed.value = false

@@ -51,6 +51,26 @@ import type {
   WizardCreateRequest,
   WizardResumeRequest,
   EntityType,
+  // Phase 2
+  ProjectShotAudio,
+  GenerateTTSRequest,
+  BatchGenerateTTSRequest,
+  VoiceOption,
+  CharacterVoice,
+  AssignCharacterVoiceRequest,
+  SubtitleStyle,
+  GenerateSubtitleRequest,
+  GenerateSubtitleAdvancedRequest,
+  SubtitleGenerateResult,
+  TimelineClip,
+  TimelineClipCreateRequest,
+  TimelineClipUpdateRequest,
+  TimelineDataResponse,
+  TimelineDataUpdateRequest,
+  TimelineTrackType,
+  BGMItem,
+  BGMMood,
+  MergeAdvancedRequest,
 } from '@/types/project'
 
 // =====================================================
@@ -93,7 +113,7 @@ export function updateActiveView(id: number, data: ActiveViewUpdateRequest): Pro
  * 构造项目 SSE 订阅 URL（带 token query，兼容 EventSource）
  */
 export function buildProjectSSEUrl(projectId: number, token: string | null): string {
-  const baseUrl: string = (import.meta as any).env?.VITE_API_BASE_URL || ''
+  const baseUrl: string = import.meta.env?.VITE_API_BASE_URL || ''
   const path = `/api/projects/${projectId}/events`
   const url = `${baseUrl}${path}`
   if (token) {
@@ -389,4 +409,183 @@ export function getEntityApi(entityType: EntityType): EntityEndpoints {
     case 'prop':
       return propsApi
   }
+}
+
+// =====================================================
+// Phase 2 API — 配音 / 音色 / 字幕 / 时间线 / BGM / 高级合成
+// =====================================================
+
+// ---------- 配音（多版本） ----------
+
+export function listAudios(projectId: number, shotId: number): Promise<ProjectShotAudio[]> {
+  return client.get(`/api/projects/${projectId}/shots/${shotId}/audios`)
+}
+
+export function generateTTS(
+  projectId: number,
+  shotId: number,
+  data: GenerateTTSRequest,
+): Promise<ProjectShotAudio> {
+  return client.post(`/api/projects/${projectId}/shots/${shotId}/audios/generate`, data)
+}
+
+export function batchGenerateTTS(
+  projectId: number,
+  data: BatchGenerateTTSRequest,
+): Promise<{ audio_ids: number[]; success_count: number }> {
+  return client.post(`/api/projects/${projectId}/shots/audios/batch-generate`, data)
+}
+
+export function uploadAudio(projectId: number, shotId: number, file: File): Promise<ProjectShotAudio> {
+  const form = new FormData()
+  form.append('file', file)
+  return client.post(
+    `/api/projects/${projectId}/shots/${shotId}/audios/upload`,
+    form,
+    { headers: { 'Content-Type': 'multipart/form-data' } },
+  )
+}
+
+export function setActiveAudio(
+  projectId: number,
+  shotId: number,
+  versionId: number,
+): Promise<ProjectShotAudio> {
+  return client.post(
+    `/api/projects/${projectId}/shots/${shotId}/audios/${versionId}/set-active`,
+    {},
+  )
+}
+
+export function deleteAudio(
+  projectId: number,
+  shotId: number,
+  versionId: number,
+): Promise<{ success: boolean }> {
+  return client.delete(`/api/projects/${projectId}/shots/${shotId}/audios/${versionId}`)
+}
+
+// ---------- 音色 ----------
+
+export function listBuiltinVoices(projectId: number): Promise<VoiceOption[]> {
+  return client.get(`/api/projects/${projectId}/voices/builtin`)
+}
+
+export function listCharacterVoices(projectId: number): Promise<CharacterVoice[]> {
+  return client.get(`/api/projects/${projectId}/character-voices`)
+}
+
+export function assignCharacterVoice(
+  projectId: number,
+  characterId: number,
+  data: AssignCharacterVoiceRequest,
+): Promise<CharacterVoice> {
+  return client.post(
+    `/api/projects/${projectId}/character-voices/${characterId}`,
+    data,
+  )
+}
+
+// ---------- 字幕 ----------
+
+export function generateSubtitles(
+  projectId: number,
+  data: GenerateSubtitleRequest = {},
+): Promise<SubtitleGenerateResult> {
+  return client.post(`/api/projects/${projectId}/subtitles/generate`, data)
+}
+
+export function generateSubtitlesWithWhisper(
+  projectId: number,
+  data: GenerateSubtitleAdvancedRequest = {},
+): Promise<SubtitleGenerateResult> {
+  return client.post(`/api/projects/${projectId}/subtitles/generate-whisper`, data)
+}
+
+export function listSubtitleClips(projectId: number): Promise<TimelineClip[]> {
+  return client.get(`/api/projects/${projectId}/subtitles/clips`)
+}
+
+export function getSubtitleStyle(projectId: number): Promise<SubtitleStyle> {
+  return client.get(`/api/projects/${projectId}/subtitles/style`)
+}
+
+export function updateSubtitleStyle(
+  projectId: number,
+  data: SubtitleStyle,
+): Promise<SubtitleStyle> {
+  return client.patch(`/api/projects/${projectId}/subtitles/style`, data)
+}
+
+export function checkWhisperAvailable(
+  projectId: number,
+): Promise<{ available: boolean }> {
+  return client.get(`/api/projects/${projectId}/subtitles/whisper-available`)
+}
+
+// ---------- 时间线 ----------
+
+export function initTimeline(projectId: number): Promise<TimelineDataResponse> {
+  return client.post(`/api/projects/${projectId}/timeline/init`, {})
+}
+
+export function listTimelineClips(
+  projectId: number,
+  trackType?: TimelineTrackType,
+): Promise<TimelineClip[]> {
+  const params = trackType ? { track_type: trackType } : {}
+  return client.get(`/api/projects/${projectId}/timeline/clips`, { params })
+}
+
+export function createTimelineClip(
+  projectId: number,
+  data: TimelineClipCreateRequest,
+): Promise<TimelineClip> {
+  return client.post(`/api/projects/${projectId}/timeline/clips`, data)
+}
+
+export function updateTimelineClip(
+  projectId: number,
+  clipId: number,
+  data: TimelineClipUpdateRequest,
+): Promise<TimelineClip> {
+  return client.patch(`/api/projects/${projectId}/timeline/clips/${clipId}`, data)
+}
+
+export function deleteTimelineClip(
+  projectId: number,
+  clipId: number,
+): Promise<{ success: boolean }> {
+  return client.delete(`/api/projects/${projectId}/timeline/clips/${clipId}`)
+}
+
+export function getTimelineData(projectId: number): Promise<TimelineDataResponse> {
+  return client.get(`/api/projects/${projectId}/timeline/data`)
+}
+
+export function saveTimelineData(
+  projectId: number,
+  data: TimelineDataUpdateRequest,
+): Promise<TimelineDataResponse> {
+  return client.patch(`/api/projects/${projectId}/timeline/data`, data)
+}
+
+// ---------- BGM 库 ----------
+
+export function listBgms(projectId: number, mood?: BGMMood): Promise<BGMItem[]> {
+  const params = mood ? { mood } : {}
+  return client.get(`/api/projects/${projectId}/bgms`, { params })
+}
+
+export function listBgmMoods(projectId: number): Promise<{ moods: string[] }> {
+  return client.get(`/api/projects/${projectId}/bgms/moods`)
+}
+
+// ---------- 高级合成 ----------
+
+export function mergeProjectAdvanced(
+  projectId: number,
+  data: MergeAdvancedRequest = {},
+): Promise<{ status: string }> {
+  return client.post(`/api/projects/${projectId}/merge/advanced`, data)
 }

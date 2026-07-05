@@ -14,7 +14,12 @@
 #   9. 视频:                /projects/{id}/shots/{sid}/videos[/{vid}][/generate][/upload]
 #  10. 资产桥接:            /projects/{id}/entities/{etype}/{eid}/import-asset, /promote-asset
 #  11. 画布:                /projects/{id}/canvas[/init]
-#  12. 合成:                /projects/{id}/merge
+#  12. 合成:                /projects/{id}/merge[/status][/advanced]
+#  13. 配音（Phase 2）:     /projects/{id}/shots/{sid}/audios[/{vid}][/generate][/batch][/upload][/set-active]
+#  14. 音色（Phase 2）:     /projects/{id}/voices/builtin, /projects/{id}/character-voices[/{cid}]
+#  15. 字幕（Phase 2）:     /projects/{id}/subtitles[/generate][/generate-whisper][/clips][/style]
+#  16. 时间线（Phase 2）:   /projects/{id}/timeline[/init][/clips[/{cid}]][/data]
+#  17. BGM 库（Phase 2）:   /projects/{id}/bgms[/moods]
 # =====================================================
 
 import asyncio
@@ -69,7 +74,15 @@ from app.schemas.project import (
     # 画布
     CanvasDataUpdate, CanvasLayoutResponse,
     # 合成
-    MergeRequest, MergeStatusResponse,
+    MergeRequest, MergeStatusResponse, MergeAdvancedRequest,
+    # Phase 2 — 配音 / 音色 / 字幕 / 时间线
+    ProjectShotAudioResponse,
+    GenerateTTSRequest, BatchGenerateTTSRequest, SetActiveAudioRequest,
+    CharacterVoiceResponse, AssignCharacterVoiceRequest, VoiceOption,
+    GenerateSubtitleRequest, GenerateSubtitleAdvancedRequest,
+    SubtitleStyle, SubtitleClip,
+    TimelineClipResponse, TimelineClipCreate, TimelineClipUpdate,
+    TimelineDataUpdate, TimelineDataResponse,
 )
 from app.services.project import project_sse_manager
 from app.services.project.project_service import (
@@ -126,6 +139,28 @@ from app.services.project.canvas_bridge import (
 )
 from app.services.project.merge_service import (
     merge_project, get_merge_status,
+)
+from app.services.project.audio_service import (
+    list_builtin_voices as list_builtin_voice_options,
+    generate_audio, batch_generate_audios, upload_audio,
+    set_active_audio, list_audios, delete_audio,
+    assign_character_voice, list_character_voices,
+)
+from app.services.project.subtitle_service import (
+    generate_subtitles, generate_subtitles_with_whisper,
+    is_whisper_available, get_subtitle_clips,
+)
+from app.services.project.timeline_service import (
+    init_timeline, list_clips as list_timeline_clips,
+    create_clip as create_timeline_clip,
+    update_clip as update_timeline_clip,
+    delete_clip as delete_timeline_clip,
+    get_timeline_data, save_timeline_data,
+    get_subtitle_style, update_subtitle_style,
+)
+from app.services.project.bgm_library import (
+    list_bgms as list_bgm_library,
+    list_moods as list_bgm_moods,
 )
 
 logger = logging.getLogger("agnes_platform.project.routes")
@@ -1392,17 +1427,52 @@ async def save_canvas_api(
 # 11. 合成
 # =====================================================
 
-@router.post("/{project_id}/merge", response_model=MergeStatusResponse, summary="触发合成")
+@router.post("/{project_id}/merge", response_model=MergeStatusResponse, summary="触发合成（简单拼接）")
 async def merge_project_api(
     project_id: int,
     data: MergeRequest,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    """简单合成：按分镜顺序 concat 拼接视频（无音频/字幕/转场）"""
     project = await _get_project_or_404(db, project_id)
     _check_project_owner(project, current_user)
     try:
-        await merge_project(db, project_id, current_user.id)
+        await merge_project(db, project_id, current_user.id, use_timeline=False)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return MergeStatusResponse(status="started")
+
+
+@router.post(
+    "/{project_id}/merge/advanced",
+    response_model=MergeStatusResponse,
+    summary="触发高级合成（多轨 + 转场 + 音频 + 字幕 + BGM）",
+)
+async def merge_project_advanced_api(
+    project_id: int,
+    data: MergeAdvancedRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    高级合成（Phase 2）:
+    - 视频轨: xfade 转场（fade/slide/wipe/dissolve）
+    - 音频轨: TTS 拼接（30ms 淡入淡出）+ BGM amix 混音
+    - 字幕轨: ASS 烧录
+    - BGM: 内置库选择（with_bgm=True 时需指定 bgm_id）
+    """
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    try:
+        await merge_project(
+            db, project_id, current_user.id,
+            with_audio=data.with_audio,
+            with_subtitle=data.with_subtitle,
+            with_bgm=data.with_bgm,
+            bgm_id=data.bgm_id,
+            use_timeline=data.use_timeline,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return MergeStatusResponse(status="started")
@@ -1483,3 +1553,524 @@ async def get_final_video_api(
             "Cache-Control": "no-cache",
         },
     )
+
+
+# =====================================================
+# 13. 配音（Phase 2）— TTS 生成 / 多版本管理
+# -------------------------------------------------
+# 路由:
+#   POST   /projects/{id}/shots/{sid}/audios/generate         生成 TTS（异步）
+#   POST   /projects/{id}/shots/audios/batch-generate         批量 TTS
+#   POST   /projects/{id}/shots/{sid}/audios/upload           上传音频
+#   GET    /projects/{id}/shots/{sid}/audios                  列出音频版本
+#   POST   /projects/{id}/shots/{sid}/audios/{vid}/set-active 设为采用版
+#   DELETE /projects/{id}/shots/{sid}/audios/{vid}            删除音频版本
+# =====================================================
+
+@router.post(
+    "/{project_id}/shots/{shot_id}/audios/generate",
+    response_model=ProjectShotAudioResponse,
+    summary="生成 TTS 配音（异步）",
+)
+async def generate_audio_api(
+    project_id: int,
+    shot_id: int,
+    data: GenerateTTSRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """生成分镜 TTS 配音（同角色同声音自动分配音色）"""
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    try:
+        return await generate_audio(
+            db, shot_id, current_user.id,
+            voice_id=data.voice_id,
+            character_id=data.character_id,
+            text=data.text,
+            model=data.model,
+            provider=data.provider,
+        )
+    except (ValueError, RuntimeError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post(
+    "/{project_id}/shots/audios/batch-generate",
+    summary="批量生成 TTS 配音",
+)
+async def batch_generate_audios_api(
+    project_id: int,
+    data: BatchGenerateTTSRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """批量 TTS 生成（并行），返回成功生成的 audio_id 列表"""
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    audio_ids = await batch_generate_audios(
+        db, data.shot_ids, current_user.id, voice_id=data.voice_id,
+    )
+    return {"audio_ids": audio_ids, "success_count": len(audio_ids)}
+
+
+@router.post(
+    "/{project_id}/shots/{shot_id}/audios/upload",
+    response_model=ProjectShotAudioResponse,
+    summary="上传音频（替代 TTS）",
+)
+async def upload_audio_api(
+    project_id: int,
+    shot_id: int,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """用户上传音频替代 TTS（is_manual=True）"""
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    from app.services.upload_service import save_upload_file
+    file_url = await save_upload_file(file, folder=f"projects/{project_id}/shots/{shot_id}/audios")
+    audio = await upload_audio(db, shot_id, current_user.id, file_url)
+    if not audio:
+        raise HTTPException(status_code=404, detail="分镜不存在")
+    return audio
+
+
+@router.get(
+    "/{project_id}/shots/{shot_id}/audios",
+    response_model=List[ProjectShotAudioResponse],
+    summary="列出音频版本",
+)
+async def list_audios_api(
+    project_id: int,
+    shot_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    return await list_audios(db, shot_id)
+
+
+@router.post(
+    "/{project_id}/shots/{shot_id}/audios/{version_id}/set-active",
+    response_model=ProjectShotAudioResponse,
+    summary="设为采用版音频",
+)
+async def set_active_audio_api(
+    project_id: int,
+    shot_id: int,
+    version_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    try:
+        return await set_active_audio(db, shot_id, version_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete(
+    "/{project_id}/shots/{shot_id}/audios/{version_id}",
+    summary="删除音频版本",
+)
+async def delete_audio_api(
+    project_id: int,
+    shot_id: int,
+    version_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    ok = await delete_audio(db, shot_id, version_id)
+    if not ok:
+        raise HTTPException(
+            status_code=400,
+            detail="无法删除（采用版不允许删除或版本不存在）",
+        )
+    return {"success": ok}
+
+
+# =====================================================
+# 14. 音色（Phase 2）— 内置音色库 + 角色音色映射
+# -------------------------------------------------
+# 路由:
+#   GET    /projects/{id}/voices/builtin                内置音色清单
+#   GET    /projects/{id}/character-voices              角色音色映射列表
+#   POST   /projects/{id}/character-voices/{cid}        为角色分配音色
+# =====================================================
+
+@router.get(
+    "/{project_id}/voices/builtin",
+    response_model=List[VoiceOption],
+    summary="内置音色清单",
+)
+async def list_builtin_voices_api(
+    project_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """返回内置音色清单（供前端音色选择器）"""
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    voices = list_builtin_voice_options()
+    return [
+        VoiceOption(
+            voice_id=v.get("voice_id", ""),
+            name=v.get("name", ""),
+            gender=v.get("gender", "neutral"),
+            suitable_for=v.get("suitable_for", ""),
+        )
+        for v in voices
+    ]
+
+
+@router.get(
+    "/{project_id}/character-voices",
+    response_model=List[CharacterVoiceResponse],
+    summary="角色音色映射列表",
+)
+async def list_character_voices_api(
+    project_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    return await list_character_voices(db, project_id)
+
+
+@router.post(
+    "/{project_id}/character-voices/{character_id}",
+    response_model=CharacterVoiceResponse,
+    summary="为角色分配音色",
+)
+async def assign_character_voice_api(
+    project_id: int,
+    character_id: int,
+    data: AssignCharacterVoiceRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """为角色分配音色（同角色同声音，upsert）"""
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    return await assign_character_voice(
+        db, project_id, character_id,
+        voice_id=data.voice_id, voice_name=data.voice_name,
+    )
+
+
+# =====================================================
+# 15. 字幕（Phase 2）— LLM 拆分 / Whisper 对齐 / 样式
+# -------------------------------------------------
+# 路由:
+#   POST   /projects/{id}/subtitles/generate             生成字幕（LLM 模式）
+#   POST   /projects/{id}/subtitles/generate-whisper     生成字幕（whisper 模式，未安装回退 LLM）
+#   GET    /projects/{id}/subtitles/clips                字幕片段列表
+#   GET    /projects/{id}/subtitles/style                字幕样式
+#   PATCH  /projects/{id}/subtitles/style                更新字幕样式
+#   GET    /projects/{id}/subtitles/whisper-available    检查 whisper 是否可用
+# =====================================================
+
+@router.post(
+    "/{project_id}/subtitles/generate",
+    summary="生成字幕（LLM 拆分模式）",
+)
+async def generate_subtitles_api(
+    project_id: int,
+    data: GenerateSubtitleRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """LLM 模式：分镜对白拆分为短字幕，按权重分配时长"""
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    clips = await generate_subtitles(
+        db, project_id,
+        shot_ids=data.shot_ids, mode="llm",
+    )
+    return {"clips": clips, "count": len(clips), "mode": "llm"}
+
+
+@router.post(
+    "/{project_id}/subtitles/generate-whisper",
+    summary="生成字幕（whisper forced alignment 模式）",
+)
+async def generate_subtitles_whisper_api(
+    project_id: int,
+    data: GenerateSubtitleAdvancedRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    whisper 模式：基于 TTS 音频做 forced alignment，时间戳精确到毫秒。
+
+    未安装 faster-whisper 时自动回退 LLM 模式。
+    """
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    clips = await generate_subtitles_with_whisper(
+        db, project_id,
+        shot_ids=data.shot_ids,
+        whisper_model_size=data.whisper_model_size,
+    )
+    return {
+        "clips": clips,
+        "count": len(clips),
+        "mode": "whisper" if is_whisper_available() else "llm",
+        "whisper_available": is_whisper_available(),
+    }
+
+
+@router.get(
+    "/{project_id}/subtitles/clips",
+    response_model=List[TimelineClipResponse],
+    summary="字幕片段列表",
+)
+async def list_subtitle_clips_api(
+    project_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    clips = await get_subtitle_clips(db, project_id)
+    return [TimelineClipResponse.model_validate(c) for c in clips]
+
+
+@router.get(
+    "/{project_id}/subtitles/style",
+    response_model=SubtitleStyle,
+    summary="获取字幕样式",
+)
+async def get_subtitle_style_api(
+    project_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    style = await get_subtitle_style(db, project_id)
+    return SubtitleStyle(**style)
+
+
+@router.patch(
+    "/{project_id}/subtitles/style",
+    response_model=SubtitleStyle,
+    summary="更新字幕样式",
+)
+async def update_subtitle_style_api(
+    project_id: int,
+    data: SubtitleStyle,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    await update_subtitle_style(db, project_id, data.model_dump())
+    return data
+
+
+@router.get(
+    "/{project_id}/subtitles/whisper-available",
+    summary="检查 whisper 是否可用",
+)
+async def check_whisper_available_api(
+    project_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """前端用于决定是否展示 whisper 模式选项"""
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    return {"available": is_whisper_available()}
+
+
+# =====================================================
+# 16. 时间线（Phase 2）— 多轨编辑
+# -------------------------------------------------
+# 路由:
+#   POST   /projects/{id}/timeline/init              初始化时间线（从分镜自动生成）
+#   GET    /projects/{id}/timeline/clips             列出所有片段（可按轨道过滤）
+#   POST   /projects/{id}/timeline/clips             创建片段
+#   PATCH  /projects/{id}/timeline/clips/{cid}       更新片段
+#   DELETE /projects/{id}/timeline/clips/{cid}       删除片段
+#   GET    /projects/{id}/timeline/data              获取完整时间线数据
+#   PATCH  /projects/{id}/timeline/data              保存时间线草稿（字幕样式等）
+# =====================================================
+
+@router.post(
+    "/{project_id}/timeline/init",
+    response_model=TimelineDataResponse,
+    summary="初始化时间线（从分镜自动生成）",
+)
+async def init_timeline_api(
+    project_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """从分镜数据自动初始化时间线（视频轨 + 音频轨）"""
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    try:
+        await init_timeline(db, project_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    data = await get_timeline_data(db, project_id)
+    return TimelineDataResponse(**data)
+
+
+@router.get(
+    "/{project_id}/timeline/clips",
+    response_model=List[TimelineClipResponse],
+    summary="列出时间线片段",
+)
+async def list_timeline_clips_api(
+    project_id: int,
+    track_type: Optional[str] = Query(None, description="按轨道过滤: video/audio/subtitle"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    clips = await list_timeline_clips(db, project_id, track_type=track_type)
+    return [TimelineClipResponse.model_validate(c) for c in clips]
+
+
+@router.post(
+    "/{project_id}/timeline/clips",
+    response_model=TimelineClipResponse,
+    summary="创建时间线片段",
+)
+async def create_timeline_clip_api(
+    project_id: int,
+    data: TimelineClipCreate,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    clip = await create_timeline_clip(db, project_id, data.model_dump(exclude_none=True))
+    return clip
+
+
+@router.patch(
+    "/{project_id}/timeline/clips/{clip_id}",
+    response_model=TimelineClipResponse,
+    summary="更新时间线片段",
+)
+async def update_timeline_clip_api(
+    project_id: int,
+    clip_id: int,
+    data: TimelineClipUpdate,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    clip = await update_timeline_clip(
+        db, project_id, clip_id, data.model_dump(exclude_none=True)
+    )
+    if not clip:
+        raise HTTPException(status_code=404, detail="时间线片段不存在")
+    return clip
+
+
+@router.delete(
+    "/{project_id}/timeline/clips/{clip_id}",
+    summary="删除时间线片段",
+)
+async def delete_timeline_clip_api(
+    project_id: int,
+    clip_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    ok = await delete_timeline_clip(db, project_id, clip_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="时间线片段不存在")
+    return {"success": ok}
+
+
+@router.get(
+    "/{project_id}/timeline/data",
+    response_model=TimelineDataResponse,
+    summary="获取完整时间线数据",
+)
+async def get_timeline_data_api(
+    project_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    data = await get_timeline_data(db, project_id)
+    return TimelineDataResponse(**data)
+
+
+@router.patch(
+    "/{project_id}/timeline/data",
+    response_model=TimelineDataResponse,
+    summary="保存时间线草稿数据",
+)
+async def save_timeline_data_api(
+    project_id: int,
+    data: TimelineDataUpdate,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """保存时间线草稿（字幕样式、轨道折叠状态等）"""
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    await save_timeline_data(
+        db, project_id,
+        subtitle_style=data.subtitle_style,
+        draft=data.draft,
+    )
+    refreshed = await get_timeline_data(db, project_id)
+    return TimelineDataResponse(**refreshed)
+
+
+# =====================================================
+# 17. BGM 库（Phase 2）— 内置背景音乐
+# -------------------------------------------------
+# 路由:
+#   GET  /projects/{id}/bgms        BGM 列表（可按情绪过滤）
+#   GET  /projects/{id}/bgms/moods  情绪分类列表
+# =====================================================
+
+@router.get(
+    "/{project_id}/bgms",
+    summary="BGM 内置库列表",
+)
+async def list_bgms_api(
+    project_id: int,
+    mood: Optional[str] = Query(None, description="按情绪过滤: calm/corporate/dramatic/uplifting/sad"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """BGM 内置库列表（available 字段标识文件是否就绪）"""
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    return list_bgm_library(mood=mood)
+
+
+@router.get(
+    "/{project_id}/bgms/moods",
+    summary="BGM 情绪分类列表",
+)
+async def list_bgm_moods_api(
+    project_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    return {"moods": list_bgm_moods()}

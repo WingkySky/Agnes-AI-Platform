@@ -191,15 +191,15 @@ const form = reactive<Partial<WatermarkConfig>>({
 })
 
 const positionOptions = [
-  { value: 'top-left', label: computed(() => t('admin.watermark.positions.topLeft')) },
-  { value: 'top-center', label: computed(() => t('admin.watermark.positions.topCenter')) },
-  { value: 'top-right', label: computed(() => t('admin.watermark.positions.topRight')) },
-  { value: 'center-left', label: computed(() => t('admin.watermark.positions.centerLeft')) },
-  { value: 'center', label: computed(() => t('admin.watermark.positions.center')) },
-  { value: 'center-right', label: computed(() => t('admin.watermark.positions.centerRight')) },
-  { value: 'bottom-left', label: computed(() => t('admin.watermark.positions.bottomLeft')) },
-  { value: 'bottom-center', label: computed(() => t('admin.watermark.positions.bottomCenter')) },
-  { value: 'bottom-right', label: computed(() => t('admin.watermark.positions.bottomRight')) }
+  { value: 'top-left' as const, label: t('admin.watermark.positions.topLeft') },
+  { value: 'top-center' as const, label: t('admin.watermark.positions.topCenter') },
+  { value: 'top-right' as const, label: t('admin.watermark.positions.topRight') },
+  { value: 'center-left' as const, label: t('admin.watermark.positions.centerLeft') },
+  { value: 'center' as const, label: t('admin.watermark.positions.center') },
+  { value: 'center-right' as const, label: t('admin.watermark.positions.centerRight') },
+  { value: 'bottom-left' as const, label: t('admin.watermark.positions.bottomLeft') },
+  { value: 'bottom-center' as const, label: t('admin.watermark.positions.bottomCenter') },
+  { value: 'bottom-right' as const, label: t('admin.watermark.positions.bottomRight') },
 ]
 
 /** 根据位置计算样式 */

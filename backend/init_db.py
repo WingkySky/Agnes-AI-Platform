@@ -92,6 +92,10 @@ _safe_import("app.models.project", [
     "ProjectShotProp",
     "ProjectShotFrameImage",
     "ProjectShotVideo",
+    # Phase 2: 配音 / 音色映射 / 时间线片段
+    "ProjectShotAudio",
+    "ProjectCharacterVoice",
+    "ProjectTimelineClip",
 ])
 
 logging.basicConfig(

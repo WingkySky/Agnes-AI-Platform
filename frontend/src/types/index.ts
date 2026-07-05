@@ -361,6 +361,7 @@ export interface SendMessageRequest {
   content: string
   attachments?: MessageAttachment[] | null
   camera_params?: Record<string, any> | null
+  preset_ref?: number | null
 }
 
 /** 媒体回调请求 — 对齐 MediaCallbackRequest */

@@ -59,7 +59,7 @@ export function useCreditEstimate(paramsGetter: EstimateParamsGetter) {
       if (myId !== reqId) return
       console.warn('[useCreditEstimate] 请求失败:', e)
       cost.value = null
-      error.value = (e as Error)?.message || 'estimate failed'
+      error.value = e instanceof Error ? e.message : 'estimate failed'
     } finally {
       if (myId === reqId) loading.value = false
     }

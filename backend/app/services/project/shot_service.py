@@ -18,6 +18,7 @@ from app.models.project import (
     ProjectShotProp,
     ProjectShotFrameImage,
     ProjectShotVideo,
+    ProjectShotAudio,
     ProjectCharacter,
     ProjectScene,
     ProjectProp,
@@ -39,8 +40,8 @@ async def _attach_shot_relations(db: AsyncSession, shot: ProjectShot) -> None:
     """
     给单个 shot 注入关联数据到 __dict__（避免 SQLAlchemy async lazy load 报错）：
     - characters / props（关联实体）
-    - frame_images / videos（多版本列表）
-    - active_frame_image / active_video（采用版）
+    - frame_images / videos / audios（多版本列表）
+    - active_frame_image / active_video / active_audio（采用版）
     """
     # 角色
     chars_result = await db.execute(
@@ -81,6 +82,15 @@ async def _attach_shot_relations(db: AsyncSession, shot: ProjectShot) -> None:
     videos = videos_result.scalars().all()
     shot.__dict__["videos"] = videos
 
+    # 音频版本列表（Phase 2）
+    audios_result = await db.execute(
+        select(ProjectShotAudio)
+        .where(ProjectShotAudio.shot_id == shot.id)
+        .order_by(ProjectShotAudio.version.desc())
+    )
+    audios = audios_result.scalars().all()
+    shot.__dict__["audios"] = audios
+
     # 采用帧图
     active_frame = None
     if shot.active_frame_image_id:
@@ -97,6 +107,14 @@ async def _attach_shot_relations(db: AsyncSession, shot: ProjectShot) -> None:
     if not active_vid and videos:
         active_vid = next((v for v in videos if v.is_active), None)
     shot.__dict__["active_video"] = active_vid
+
+    # 采用音频（Phase 2）
+    active_audio = None
+    if shot.active_audio_id:
+        active_audio = next((a for a in audios if a.id == shot.active_audio_id), None)
+    if not active_audio and audios:
+        active_audio = next((a for a in audios if a.is_active), None)
+    shot.__dict__["active_audio"] = active_audio
 
 
 async def _attach_shot_relations_batch(db: AsyncSession, shots: List[ProjectShot]) -> None:
@@ -158,14 +176,28 @@ async def _attach_shot_relations_batch(db: AsyncSession, shots: List[ProjectShot
     for v in video_rows:
         video_map.setdefault(v.shot_id, []).append(v)
 
+    # 音频（Phase 2）
+    audio_rows = (
+        await db.execute(
+            select(ProjectShotAudio)
+            .where(ProjectShotAudio.shot_id.in_(shot_ids))
+            .order_by(ProjectShotAudio.shot_id, ProjectShotAudio.version.desc())
+        )
+    ).scalars().all()
+    audio_map: dict = {}
+    for a in audio_rows:
+        audio_map.setdefault(a.shot_id, []).append(a)
+
     for shot in shots:
         sid = shot.id
         frames = frame_map.get(sid, [])
         videos = video_map.get(sid, [])
+        audios = audio_map.get(sid, [])
         shot.__dict__["characters"] = char_map.get(sid, [])
         shot.__dict__["props"] = prop_map.get(sid, [])
         shot.__dict__["frame_images"] = frames
         shot.__dict__["videos"] = videos
+        shot.__dict__["audios"] = audios
 
         active_frame = None
         if shot.active_frame_image_id:
@@ -180,6 +212,14 @@ async def _attach_shot_relations_batch(db: AsyncSession, shots: List[ProjectShot
         if not active_vid and videos:
             active_vid = next((v for v in videos if v.is_active), None)
         shot.__dict__["active_video"] = active_vid
+
+        # 采用音频（Phase 2）
+        active_audio = None
+        if shot.active_audio_id:
+            active_audio = next((a for a in audios if a.id == shot.active_audio_id), None)
+        if not active_audio and audios:
+            active_audio = next((a for a in audios if a.is_active), None)
+        shot.__dict__["active_audio"] = active_audio
 
 
 # =====================================================

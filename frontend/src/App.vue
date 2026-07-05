@@ -264,7 +264,8 @@ const iconMap: Record<string, any> = {
 function getIcon(iconName: string | null | undefined) {
   if (!iconName) return null
   // 优先使用本地映射，找不到则从全部图标中取
-  return iconMap[iconName] || (ElementPlusIconsVue as any)[iconName] || null
+  const key = iconName as keyof typeof ElementPlusIconsVue
+  return iconMap[iconName] || ElementPlusIconsVue[key] || null
 }
 
 // 应用启动时加载模型配置和菜单

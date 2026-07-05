@@ -10,10 +10,10 @@ import { usePermissionStore } from '@/stores/permission'
 /**
  * 更新元素显示状态
  */
-function updateEl(el: HTMLElement, binding: DirectiveBinding<string>) {
+function updateEl(el: HTMLElement, binding: DirectiveBinding) {
   const permStore = usePermissionStore()
   const perm = binding.value
-  if (!perm) return
+  if (typeof perm !== 'string' || !perm) return
 
   const hasPerm = permStore.hasPermission(perm)
   if (hasPerm) {
@@ -24,11 +24,11 @@ function updateEl(el: HTMLElement, binding: DirectiveBinding<string>) {
 }
 
 const permissionDirective: Directive = {
-  mounted(el: HTMLElement, binding) {
-    updateEl(el, binding as DirectiveBinding<string>)
+  mounted(el: HTMLElement, binding: DirectiveBinding) {
+    updateEl(el, binding)
   },
-  updated(el: HTMLElement, binding) {
-    updateEl(el, binding as DirectiveBinding<string>)
+  updated(el: HTMLElement, binding: DirectiveBinding) {
+    updateEl(el, binding)
   },
 }
 

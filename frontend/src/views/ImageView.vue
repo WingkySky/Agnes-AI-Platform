@@ -640,7 +640,7 @@ async function handleGenerate() {
       : t('generate.imageSubmitted'))
   } catch (e) {
     console.error('[ImageView] 提交任务失败：', e)
-    ElMessage.error(t('generate.createTaskFailed') + ((e as Error).message || ''))
+    ElMessage.error(t('generate.createTaskFailed') + (e instanceof Error ? e.message : ''))
   }
 }
 

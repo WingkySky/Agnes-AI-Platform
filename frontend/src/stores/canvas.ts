@@ -45,7 +45,7 @@ function validateConnectionTypes(sourceType: string, targetType: string): string
 // ---------- 本地类型定义 ----------
 
 /** 画布面板（节点） */
-interface CanvasPanel {
+export interface CanvasPanel {
   id: string
   workspace_id?: string | null
   type?: string
@@ -64,7 +64,7 @@ interface CanvasPanel {
 }
 
 /** 画布连线 */
-interface CanvasConnection {
+export interface CanvasConnection {
   id: string
   workspace_id?: string | null
   source_panel_id: string
@@ -80,7 +80,7 @@ interface CanvasConnection {
 }
 
 /** 画布步骤（流程分组） */
-interface CanvasStep {
+export interface CanvasStep {
   id: string
   name: string
   description?: string
@@ -198,17 +198,34 @@ function restoreFromSnapshot(state: CanvasState, snap: HistorySnapshot): void {
  * 深合并（仅合并普通对象；数组与基本类型用右侧值覆盖）
  * - 供 updatePanel 的 content 深度合并使用
  */
+
+/** 类型谓词：判断值是否为普通对象（非数组、非null） */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** 类型谓词：背景模式值 */
+function isBackgroundMode(value: unknown): value is 'dots' | 'lines' | 'blank' {
+  return typeof value === 'string' && (['dots', 'lines', 'blank'] as readonly string[]).includes(value)
+}
+
 function deepMerge(target: Record<string, unknown> | null | undefined, source: Record<string, unknown> | null | undefined): Record<string, unknown> {
   if (!source || typeof source !== 'object') return target ?? source ?? {}
-  if (Array.isArray(source)) return source as unknown as Record<string, unknown>
+  if (Array.isArray(source)) {
+    const arrResult: Record<string, unknown> = {}
+    for (let i = 0; i < source.length; i++) {
+      arrResult[String(i)] = source[i]
+    }
+    return arrResult
+  }
   if (!target || typeof target !== 'object' || Array.isArray(target)) {
     return JSON.parse(JSON.stringify(source))
   }
-  const out = JSON.parse(JSON.stringify(target)) as Record<string, unknown>
+  const out: Record<string, unknown> = JSON.parse(JSON.stringify(target))
   for (const key of Object.keys(source)) {
     const sv = source[key]
-    if (sv && typeof sv === 'object' && !Array.isArray(sv)) {
-      out[key] = deepMerge(out[key] as Record<string, unknown>, sv as Record<string, unknown>)
+    if (isPlainObject(sv)) {
+      out[key] = deepMerge(isPlainObject(out[key]) ? out[key] : {}, sv)
     } else {
       out[key] = sv
     }
@@ -282,6 +299,11 @@ interface CanvasState {
 
   // ---------- 剪贴板 ----------
   clipboard: CanvasPanel[]
+
+  // ---------- 流程模式 ----------
+  isFlowMode: boolean
+  steps: CanvasStep[]
+  flows: CanvasFlow[]
 
   // ---------- 持久化标记 ----------
   _storageReady: boolean
@@ -359,8 +381,8 @@ export const useCanvasStore = defineStore('canvas', {
 
     // ---------- 流程模式 ----------
     isFlowMode: false,
-    steps: [] as CanvasStep[],
-    flows: [] as CanvasFlow[],
+    steps: new Array<CanvasStep>(),
+    flows: new Array<CanvasFlow>(),
 
     // ---------- 持久化标记 ----------
     _storageReady: false,
@@ -542,7 +564,7 @@ export const useCanvasStore = defineStore('canvas', {
           }
           return { panel, output }
         })
-        .filter(Boolean) as { panel: CanvasPanel; output: Record<string, unknown> }[]
+        .filter((x): x is NonNullable<typeof x> => x != null)
     },
 
     /**
@@ -601,7 +623,7 @@ export const useCanvasStore = defineStore('canvas', {
         .map((c) => c.source_panel_id)
         .filter(Boolean)
 
-      const merged = JSON.parse(JSON.stringify(panel.content ?? {})) as Record<string, unknown>
+      const merged: Record<string, unknown> = JSON.parse(JSON.stringify(panel.content ?? {}))
       for (const pid of upstreamIds) {
         const up = state.panels.find((p) => p.id === pid)
         if (!up) continue
@@ -785,14 +807,14 @@ export const useCanvasStore = defineStore('canvas', {
 
       // 重新生成 panel id 和 connection id
       const idMap = new Map<string, string>()
-      const newPanels = JSON.parse(JSON.stringify(ws.panels)) as CanvasPanel[]
+      const newPanels: CanvasPanel[] = JSON.parse(JSON.stringify(ws.panels))
       newPanels.forEach(p => {
         const oldId = p.id
         const newId = uid()
         idMap.set(oldId, newId)
         p.id = newId
       })
-      const newConnections = JSON.parse(JSON.stringify(ws.connections)) as CanvasConnection[]
+      const newConnections: CanvasConnection[] = JSON.parse(JSON.stringify(ws.connections))
       newConnections.forEach(c => {
         c.id = uid()
         c.source_panel_id = idMap.get(c.source_panel_id) || c.source_panel_id
@@ -809,8 +831,10 @@ export const useCanvasStore = defineStore('canvas', {
               return newNodeId ? `@[node:${newNodeId}]` : match
             })
           }
-          if (panel.content.composerContent) panel.content.composerContent = updateRef(panel.content.composerContent as string)
-          if (panel.content.prompt) panel.content.prompt = updateRef(panel.content.prompt as string)
+          const cc = panel.content.composerContent
+          if (typeof cc === 'string') panel.content.composerContent = updateRef(cc)
+          const pp = panel.content.prompt
+          if (typeof pp === 'string') panel.content.prompt = updateRef(pp)
         }
       })
 
@@ -921,19 +945,31 @@ export const useCanvasStore = defineStore('canvas', {
     // ==================== 节点操作 ====================
 
     /** 添加面板（自动生成 id / workspace_id / zIndex / 时间戳） */
-    addPanel(panel: Partial<CanvasPanel> & { x: number; y: number; width: number; height: number }): string {
+    addPanel(input: Partial<CanvasPanel> & { x: number; y: number; width: number; height: number }): string {
       if (!this.activeWorkspaceId) {
         this.createWorkspace('画布 1')
       }
-      panel.id = uid()
-      panel.workspace_id = this.activeWorkspaceId!
-      panel.zIndex = this.panels.length + 1
-      panel.created_at = new Date().toISOString()
-      panel.updated_at = new Date().toISOString()
-      if (!panel.content || typeof panel.content !== 'object') {
-        panel.content = {}
+      const panel: CanvasPanel = {
+        id: uid(),
+        workspace_id: this.activeWorkspaceId!,
+        zIndex: this.panels.length + 1,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        content: {},
+        x: input.x,
+        y: input.y,
+        width: input.width,
+        height: input.height,
+        type: input.type,
+        name: input.name,
+        meta: input.meta,
+        is_locked: input.is_locked,
+        is_hidden: input.is_hidden,
       }
-      this.panels.push(panel as CanvasPanel)
+      if (input.content && typeof input.content === 'object') {
+        panel.content = input.content
+      }
+      this.panels.push(panel)
       this._save()
       return panel.id
     },
@@ -946,7 +982,7 @@ export const useCanvasStore = defineStore('canvas', {
       if (changes.content && typeof changes.content === 'object') {
         mergedChanges = {
           ...changes,
-          content: deepMerge(panel.content ?? {}, changes.content as Record<string, unknown>),
+          content: deepMerge(panel.content ?? {}, changes.content),
         }
       }
       Object.assign(panel, mergedChanges, { updated_at: new Date().toISOString() })
@@ -1491,15 +1527,16 @@ export const useCanvasStore = defineStore('canvas', {
         const message = e instanceof Error ? e.message : String(e)
         throw new Error('JSON 解析失败: ' + message)
       }
-      const ws = data?.workspace as { panels?: CanvasPanel[]; connections?: CanvasConnection[]; viewport?: Viewport } | undefined
-      if (!ws || !Array.isArray(ws.panels) || !Array.isArray(ws.connections)) {
-        throw new Error('JSON 结构不合法（缺少 workspace.panels 或 workspace.connections）')
+      const ws = data.workspace
+      if (!ws || typeof ws !== 'object' || Array.isArray(ws) || !('panels' in ws) || !('connections' in ws)) {
+        throw new Error('JSON 结构不合法（缺少 workspace 或 workspace.panels / workspace.connections）')
       }
-      if (ws.viewport && typeof ws.viewport === 'object') {
-        this.viewport = { ...this.viewport, ...ws.viewport }
+      const wsObj = ws as Record<string, unknown>
+      if (wsObj.viewport && typeof wsObj.viewport === 'object') {
+        this.viewport = { ...this.viewport, ...(wsObj.viewport as Viewport) }
       }
-      this.panels = JSON.parse(JSON.stringify(ws.panels))
-      this.connections = JSON.parse(JSON.stringify(ws.connections))
+      this.panels = JSON.parse(JSON.stringify(wsObj.panels))
+      this.connections = JSON.parse(JSON.stringify(wsObj.connections))
       this.selectedPanelIds = []
       this.selectedPanelId = null
       this._save()
@@ -1515,23 +1552,27 @@ export const useCanvasStore = defineStore('canvas', {
     async _hydrateFromStorage(): Promise<void> {
       if (this._storageReady) return
       try {
-        const data = await loadCanvas() as Record<string, unknown> | null
-        if (data && typeof data === 'object') {
-          if (Array.isArray(data.workspaces)) this.workspaces = data.workspaces as CanvasWorkspace[]
-          if ('activeWorkspaceId' in data) this.activeWorkspaceId = data.activeWorkspaceId as string | null
+        const rawData: Record<string, unknown> | null = await loadCanvas()
+        if (rawData && typeof rawData === 'object') {
+          if (Array.isArray(rawData.workspaces)) this.workspaces = rawData.workspaces as CanvasWorkspace[]
+          if ('activeWorkspaceId' in rawData) {
+            const id = rawData.activeWorkspaceId
+            this.activeWorkspaceId = typeof id === 'string' || typeof id === 'number' ? String(id) : null
+          }
           // themeMode 不从 localforage 恢复：全局主题 store（localStorage）是唯一真相源，
           // 由 App.vue 的 watch(immediate) 同步过来，避免 localforage 旧值覆盖全局主题
-          if (['dots', 'lines', 'blank'].includes(data.backgroundMode as string)) {
-            this.backgroundMode = data.backgroundMode as 'dots' | 'lines' | 'blank'
+          const bgMode = rawData.backgroundMode
+          if (isBackgroundMode(bgMode)) {
+            this.backgroundMode = bgMode
           }
-          if (typeof data.showImageInfo === 'boolean') {
-            this.showImageInfo = data.showImageInfo
+          if (typeof rawData.showImageInfo === 'boolean') {
+            this.showImageInfo = rawData.showImageInfo
           }
-          if (data.viewport && typeof data.viewport === 'object') {
-            this.viewport = { ...this.viewport, ...(data.viewport as Viewport) }
+          if (rawData.viewport && typeof rawData.viewport === 'object') {
+            this.viewport = { ...this.viewport, ...(rawData.viewport as Viewport) }
           }
-          if (Array.isArray(data.panels)) this.panels = data.panels as CanvasPanel[]
-          if (Array.isArray(data.connections)) this.connections = data.connections as CanvasConnection[]
+          if (Array.isArray(rawData.panels)) this.panels = rawData.panels as CanvasPanel[]
+          if (Array.isArray(rawData.connections)) this.connections = rawData.connections as CanvasConnection[]
           // 加载完成后同步一次：确保 workspaces 中当前工作区数据与顶层一致
           // 避免旧版本数据中 workspaces 与顶层不同步，导致切换工作区时丢失数据
           this._syncCurrentWorkspace()

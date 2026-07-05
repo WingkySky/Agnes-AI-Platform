@@ -442,6 +442,7 @@ import {
 } from '@/lib/canvas-templates'
 // 画布生成：上游节点查找（用于配置节点 prompt 为空时检查上游文本）
 import { getUpstreamNodes } from '@/lib/canvas-generation'
+import { getErrorMessage } from '@/lib/type-helpers'
 
 const { t } = useI18n()
 const { downloadViaProxy, downloadWatermarkedImage } = useDownload()
@@ -1105,8 +1106,8 @@ async function generateImageFromPrompt(sourcePanel: typeof store.panels[number],
     ElMessage.warning(t('canvas.messages.generateTimeout'))
   } catch (err) {
     console.error('[canvas] generate image error:', err)
-    store.updatePanel(newPanelId!, { content: { status: 'error', errorDetails: (err as Error).message } })
-    ElMessage.error(`${t('canvas.messages.generateFailed')}: ${(err as Error).message}`)
+    store.updatePanel(newPanelId!, { content: { status: 'error', errorDetails: getErrorMessage(err) } })
+    ElMessage.error(`${t('canvas.messages.generateFailed')}: ${getErrorMessage(err)}`)
   }
 }
 
@@ -1215,8 +1216,8 @@ async function generateImageFromSource(
     ElMessage.warning(t('canvas.messages.generateTimeout'))
   } catch (err) {
     console.error('[canvas] quick generate image error:', err)
-    store.updatePanel(newPanelId, { content: { status: 'error', errorDetails: (err as Error).message } })
-    ElMessage.error(`${t('canvas.messages.generateFailed')}: ${(err as Error).message}`)
+    store.updatePanel(newPanelId, { content: { status: 'error', errorDetails: getErrorMessage(err) } })
+    ElMessage.error(`${t('canvas.messages.generateFailed')}: ${getErrorMessage(err)}`)
   }
 }
 
@@ -1320,8 +1321,8 @@ async function generateVideoFromSource(
     ElMessage.warning(t('canvas.messages.generateTimeout'))
   } catch (err) {
     console.error('[canvas] quick generate video error:', err)
-    store.updatePanel(newPanelId, { content: { status: 'error', errorDetails: (err as Error).message } })
-    ElMessage.error(`${t('canvas.messages.generateFailed')}: ${(err as Error).message}`)
+    store.updatePanel(newPanelId, { content: { status: 'error', errorDetails: getErrorMessage(err) } })
+    ElMessage.error(`${t('canvas.messages.generateFailed')}: ${getErrorMessage(err)}`)
   }
 }
 
@@ -1373,7 +1374,7 @@ async function retryGeneration(panel: typeof store.panels[number]) {
         },
       })
     } catch (err) {
-      ElMessage.error(`${t('canvas.messages.retryFailed')}: ${(err as Error).message}`)
+      ElMessage.error(`${t('canvas.messages.retryFailed')}: ${getErrorMessage(err)}`)
     }
   } else {
     // 没有上游 config 节点，用节点自身的 prompt 重新生成（直接更新当前节点）
@@ -1459,7 +1460,7 @@ async function handleConfigGenerate(panel: typeof store.panels[number]) {
     }
   } catch (err) {
     console.error('[canvas] config generate error:', err)
-    ElMessage.error(`${t('canvas.messages.generateFailed')}: ${(err as Error).message}`)
+    ElMessage.error(`${t('canvas.messages.generateFailed')}: ${getErrorMessage(err)}`)
   }
 }
 
@@ -1527,7 +1528,7 @@ async function handleSaveAsTemplate() {
     saveTemplateVisible.value = false
   } catch (err) {
     console.error('[canvas] save as template failed:', err)
-    ElMessage.error(`${t('canvas.templates.saveFailed')}: ${(err as Error).message}`)
+    ElMessage.error(`${t('canvas.templates.saveFailed')}: ${getErrorMessage(err)}`)
   } finally {
     saveTemplateLoading.value = false
   }
@@ -1551,7 +1552,7 @@ function handleUseTemplate(template: CanvasTemplate) {
     ElMessage.success(t('canvas.messages.templateApplied'))
   } catch (err) {
     console.error('[canvas] apply template failed:', err)
-    ElMessage.error(`${t('canvas.messages.templateApplyFailed')}: ${(err as Error).message}`)
+    ElMessage.error(`${t('canvas.messages.templateApplyFailed')}: ${getErrorMessage(err)}`)
   }
 }
 
@@ -1647,7 +1648,7 @@ async function handleHoverSaveAsset() {
     })
     ElMessage.success(t('canvas.messages.savedToAssets'))
   } catch (err) {
-    ElMessage.error(`${t('canvas.messages.saveFailed')}: ${(err as Error).message || err}`)
+    ElMessage.error(`${t('canvas.messages.saveFailed')}: ${getErrorMessage(err) || err}`)
   }
 }
 
@@ -1933,11 +1934,11 @@ async function handleHoverDescribe() {
     // 反推失败时把文字节点标记为错误状态并写入错误信息
     store.updatePanel(textNodeId, {
       content: {
-        content: `${t('canvas.messages.describeFailed')}: ${(err as Error).message || err}`,
+        content: `${t('canvas.messages.describeFailed')}: ${getErrorMessage(err) || err}`,
         status: 'error',
       },
     })
-    ElMessage.error(`${t('canvas.messages.describeFailed')}: ${(err as Error).message || err}`)
+    ElMessage.error(`${t('canvas.messages.describeFailed')}: ${getErrorMessage(err) || err}`)
   }
 }
 
@@ -2065,8 +2066,8 @@ async function handleMaskConfirm(
     taskQueue.updateCanvasTask(taskId, { status: 'failed' })
   } catch (err) {
     console.error('[canvas] mask edit error:', err)
-    store.updatePanel(panelId!, { content: { status: 'error', errorDetails: (err as Error).message } })
-    ElMessage.error(`${t('canvas.messages.maskEditFailed')}: ${(err as Error).message}`)
+    store.updatePanel(panelId!, { content: { status: 'error', errorDetails: getErrorMessage(err) } })
+    ElMessage.error(`${t('canvas.messages.maskEditFailed')}: ${getErrorMessage(err)}`)
   }
 }
 
@@ -2104,7 +2105,7 @@ async function handleCropConfirm(rect: { x: number; y: number; w: number; h: num
     store.pushSnapshot()
     ElMessage.success(t('canvas.messages.cropDone'))
   } catch (err) {
-    ElMessage.error(`${t('canvas.messages.cropFailed')}: ${(err as Error).message || err}`)
+    ElMessage.error(`${t('canvas.messages.cropFailed')}: ${getErrorMessage(err) || err}`)
   }
 }
 
@@ -2157,7 +2158,7 @@ async function handleSplitConfirm({ rows, cols }: { rows: number; cols: number }
     store.pushSnapshot()
     ElMessage.success(t('canvas.messages.splitDone'))
   } catch (err) {
-    ElMessage.error(`${t('canvas.messages.splitFailed')}: ${(err as Error).message || err}`)
+    ElMessage.error(`${t('canvas.messages.splitFailed')}: ${getErrorMessage(err) || err}`)
   }
 }
 
@@ -2187,7 +2188,7 @@ async function handleUpscaleConfirm({ targetLongEdge, algorithm }: { targetLongE
     store.pushSnapshot()
     ElMessage.success(t('canvas.messages.upscaleDone'))
   } catch (err) {
-    ElMessage.error(`${t('canvas.messages.upscaleFailed')}: ${(err as Error).message || err}`)
+    ElMessage.error(`${t('canvas.messages.upscaleFailed')}: ${getErrorMessage(err) || err}`)
   }
 }
 
@@ -2302,8 +2303,8 @@ async function handleAngleConfirm({ prompt }: { prompt: string }) {
     taskQueue.updateCanvasTask(taskId, { status: 'failed' })
   } catch (err) {
     console.error('[canvas] angle error:', err)
-    store.updatePanel(newId, { content: { status: 'error', errorDetails: (err as Error).message } })
-    ElMessage.error(`${t('canvas.messages.angleFailed')}: ${(err as Error).message}`)
+    store.updatePanel(newId, { content: { status: 'error', errorDetails: getErrorMessage(err) } })
+    ElMessage.error(`${t('canvas.messages.angleFailed')}: ${getErrorMessage(err)}`)
   }
 }
 
@@ -2434,7 +2435,7 @@ async function handleDeleteAsset(id: string) {
     await assetStore.removeAsset(id)
     ElMessage.success(t('canvas.messages.assetDeleted'))
   } catch (err) {
-    ElMessage.error(`${t('canvas.messages.assetDeleteFailed')}: ${(err as Error).message || err}`)
+    ElMessage.error(`${t('canvas.messages.assetDeleteFailed')}: ${getErrorMessage(err) || err}`)
   }
 }
 
@@ -2462,7 +2463,7 @@ async function handleUploadAssetFiles(files: FileList | File[]) {
     }
     ElMessage.success(`${t('canvas.messages.nodeCreated')}: ${count}`)
   } catch (err) {
-    ElMessage.error(`${t('canvas.messages.uploadFailed')}: ${(err as Error).message || err}`)
+    ElMessage.error(`${t('canvas.messages.uploadFailed')}: ${getErrorMessage(err) || err}`)
   }
 }
 
@@ -2600,7 +2601,7 @@ function handleFileSelect(event: Event) {
         store.importJSON((e.target as FileReader)?.result as string)
         ElMessage.success(t('canvas.messages.jsonLoadedToNode'))
       } catch (err) {
-        ElMessage.error(`${t('canvas.messages.jsonExported')}: ${(err as Error).message}`)
+        ElMessage.error(`${t('canvas.messages.jsonExported')}: ${getErrorMessage(err)}`)
       }
     }
     reader.readAsText(file)

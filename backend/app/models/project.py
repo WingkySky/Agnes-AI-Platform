@@ -146,6 +146,7 @@ class ProjectCharacter(Base):
     project = relationship("Project", back_populates="characters")
     asset = relationship("Asset", foreign_keys=[asset_id])
     shots = relationship("ProjectShotCharacter", back_populates="character", cascade="all, delete-orphan")
+    voice_assignments = relationship("ProjectCharacterVoice", back_populates="character", cascade="all, delete-orphan")  # Phase 2
 
 
 class ProjectScene(Base):
@@ -331,6 +332,7 @@ class ProjectShot(Base):
     scene = relationship("ProjectScene", back_populates="shots")
     frame_images = relationship("ProjectShotFrameImage", back_populates="shot", cascade="all, delete-orphan")
     videos = relationship("ProjectShotVideo", back_populates="shot", cascade="all, delete-orphan")
+    audios = relationship("ProjectShotAudio", back_populates="shot", cascade="all, delete-orphan")  # Phase 2
     shot_characters = relationship("ProjectShotCharacter", back_populates="shot", cascade="all, delete-orphan")
     shot_props = relationship("ProjectShotProp", back_populates="shot", cascade="all, delete-orphan")
 
@@ -449,3 +451,125 @@ class ProjectShotVideo(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     shot = relationship("ProjectShot", back_populates="videos")
+
+
+# =====================================================
+# Phase 2 模型 — 配音 / 音色映射 / 时间线片段
+# =====================================================
+
+class ProjectShotAudio(Base):
+    """
+    分镜配音多版本表（TTS 生成或用户上传）— Phase 2
+
+    字段说明:
+    - shot_id: 所属分镜
+    - version: 版本号
+    - is_active: 是否为当前采用版
+    - is_manual: 是否为用户手动上传
+    - file_url: 音频文件 URL
+    - text: TTS 输入文本（即对白）
+    - voice_id: 音色 ID
+    - voice_name: 音色名称（冗余存储，便于展示）
+    - character_id: 关联角色（同角色同声音策略）
+    - provider: TTS provider（agnes/aliyun/volcengine 等）
+    - model: TTS 模型名
+    - duration_ms: 时长（毫秒）
+    - file_size: 文件大小（字节）
+    - created_by: 创建方式（ai/manual）
+    """
+    __tablename__ = "project_shot_audios"
+    __table_args__ = (
+        UniqueConstraint("shot_id", "version", name="uq_psa_shot_version"),
+        Index("idx_psa_shot", "shot_id"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    shot_id = Column(Integer, ForeignKey("project_shots.id", ondelete="CASCADE"), nullable=False)
+    version = Column(Integer, default=1, nullable=False)
+    is_active = Column(Boolean, default=False, nullable=False)
+    is_manual = Column(Boolean, default=False, nullable=False)
+    file_url = Column(String(500), nullable=True)
+    text = Column(Text, nullable=True)  # TTS 输入文本（即对白）
+    voice_id = Column(String(100), nullable=True)  # 音色 ID
+    voice_name = Column(String(200), nullable=True)  # 音色名称（冗余存储，便于展示）
+    character_id = Column(Integer, ForeignKey("project_characters.id"), nullable=True)  # 关联角色（同角色同声音）
+    provider = Column(String(50), nullable=True)  # TTS provider（agnes/aliyun/volcengine 等）
+    model = Column(String(100), nullable=True)  # TTS 模型名
+    duration_ms = Column(Integer, nullable=True)
+    file_size = Column(BigInteger, nullable=True)
+    created_by = Column(String(20), default="ai", nullable=False)  # ai/manual
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    shot = relationship("ProjectShot", back_populates="audios")
+    character = relationship("ProjectCharacter")
+
+
+class ProjectCharacterVoice(Base):
+    """
+    角色-音色映射表（同角色同声音）— Phase 2
+
+    字段说明:
+    - project_id: 所属项目
+    - character_id: 关联角色
+    - voice_id: 音色 ID
+    - voice_name: 音色名称（冗余存储）
+    - assigned_at: 分配时间
+    """
+    __tablename__ = "project_character_voices"
+    __table_args__ = (
+        UniqueConstraint("project_id", "character_id", name="uq_pcv_project_character"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    character_id = Column(Integer, ForeignKey("project_characters.id", ondelete="CASCADE"), nullable=False)
+    voice_id = Column(String(100), nullable=False)
+    voice_name = Column(String(200), nullable=True)
+    assigned_at = Column(DateTime, default=datetime.utcnow)
+
+    character = relationship("ProjectCharacter", back_populates="voice_assignments")
+
+
+class ProjectTimelineClip(Base):
+    """
+    时间线片段表（多轨：video/audio/subtitle）— Phase 2
+
+    字段说明:
+    - project_id: 所属项目
+    - track_type: 轨道类型（video/audio/subtitle）
+    - track_index: 轨道序号（0=主轨, 1=次轨）
+    - source_type: 来源类型（shot_video/shot_audio/bgm/subtitle）
+    - source_id: 来源 ID（多态引用 project_shot_videos/audios.id）
+    - shot_id: 关联分镜（便于溯源）
+    - start_time: 起始时间（秒）
+    - duration: 时长（秒）
+    - trim_start: 裁剪起始（秒）
+    - trim_end: 裁剪结束（秒）
+    - transition_type: 转场类型（fade/slide/wipe/dissolve/none）
+    - transition_duration: 转场时长（秒）
+    - subtitle_text: 字幕片段的文本
+    - sort_order: 排序序号
+    """
+    __tablename__ = "project_timeline_clips"
+    __table_args__ = (
+        Index("idx_ptc_project", "project_id"),
+        Index("idx_ptc_track", "project_id", "track_type", "track_index"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    track_type = Column(String(20), nullable=False)  # video/audio/subtitle
+    track_index = Column(Integer, default=0, nullable=False)  # 轨道序号
+    source_type = Column(String(20), nullable=True)  # shot_video/shot_audio/bgm/subtitle
+    source_id = Column(Integer, nullable=True)  # 多态引用 project_shot_videos/audios.id
+    shot_id = Column(Integer, ForeignKey("project_shots.id"), nullable=True)
+    start_time = Column(Float, nullable=False)  # 起始时间（秒）
+    duration = Column(Float, nullable=False)  # 时长（秒）
+    trim_start = Column(Float, default=0, nullable=False)  # 裁剪起始
+    trim_end = Column(Float, nullable=True)  # 裁剪结束
+    transition_type = Column(String(50), default="none", nullable=False)  # fade/slide/wipe/dissolve/none
+    transition_duration = Column(Float, default=0, nullable=False)
+    subtitle_text = Column(Text, nullable=True)  # 字幕片段的文本
+    sort_order = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -113,10 +113,10 @@
           </div>
 
           <!-- 分页 -->
-          <div class="pagination-wrap" v-if="total > filters.limit">
+          <div class="pagination-wrap" v-if="total > (filters.limit ?? 24)">
             <el-pagination
               v-model:current-page="currentPage"
-              :page-size="filters.limit"
+              :page-size="filters.limit ?? 24"
               :total="total"
               layout="total, prev, pager, next"
               @current-change="onPageChange"
@@ -501,7 +501,7 @@ const detailWorksPageSize = 12
 async function fetchData() {
   const typeVal = currentType.value || undefined
   const categoryVal = sidebarFilters.value.categories.length > 0
-    ? sidebarFilters.value.categories
+    ? sidebarFilters.value.categories.join(',')
     : undefined
 
   // 社区库模式：只展示已审核公开预设，绕过 store 直调 API
@@ -537,7 +537,7 @@ async function fetchData() {
       type: typeVal as PresetType | undefined,
       category: categoryVal,
       search: searchText.value || undefined,
-      tags: sidebarFilters.value.tags.length > 0 ? sidebarFilters.value.tags : undefined,
+      tags: sidebarFilters.value.tags.length > 0 ? sidebarFilters.value.tags.join(',') : undefined,
       sort: sortMode.value as any,
       limit: 24,
       offset: (currentPage.value - 1) * 24,
