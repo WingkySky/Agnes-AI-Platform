@@ -266,7 +266,7 @@ import {
   Search, MagicStick, Coin, Clock, Refresh, Delete, Plus,
   Upload, Download, MoreFilled, Edit, UploadFilled, RemoveFilled,
 } from '@element-plus/icons-vue'
-import { usePipelineStore } from '@/stores/pipeline'
+import { useTemplateStore } from '@/stores/template'
 import { useUserStore } from '@/stores/user'
 import type { PipelineTemplate } from '@/api/pipeline'
 import { submitTemplatePublic, cancelTemplatePublic, deleteTemplate } from '@/api/pipeline'
@@ -274,7 +274,7 @@ import TemplateImportExportDialog from '@/components/pipeline/TemplateImportExpo
 
 const { t } = useI18n()
 const router = useRouter()
-const pipelineStore = usePipelineStore()
+const pipelineStore = useTemplateStore()
 const userStore = useUserStore()
 
 // ---------- 状态 ----------

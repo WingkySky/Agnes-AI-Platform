@@ -246,21 +246,6 @@ async def lifespan(app: FastAPI):
         await ensure_default_configs(db)
     logger.info("✓ 系统配置已初始化")
 
-    # 服务重启自检：根据实际产物修正僵尸流水线状态
-    # - 扫描所有 running/pending 状态的 run
-    # - 对未完成步骤做产物自检：有产物 → 标 success（避免重复生成）；无产物 → 标 failed（让用户可重试）
-    # - 不处理 paused（用户主动暂停的语义需保留）
-    from app.services.pipeline.run_service import recover_zombie_runs
-    async with async_session() as db:
-        result = await recover_zombie_runs(db)
-    if result["runs_checked"] > 0:
-        logger.info(
-            "✓ 僵尸流水线自检完成：共 %d 条，恢复 success %d 条，标记 failed %d 条",
-            result["runs_checked"],
-            result["recovered_to_success"],
-            result["marked_failed"],
-        )
-
     logger.info("🚀 Agnes AI Platform（全异步架构）后端服务已启动")
 
     yield  # 应用在此期间运行

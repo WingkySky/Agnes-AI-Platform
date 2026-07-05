@@ -1,5 +1,7 @@
 # =====================================================
-# 创意流水线路由
+# 流水线模板 / 风格 / 剧本模板 / 资产库 路由
+#
+# 项目制创作（Project）已迁移到 /api/projects/*，本文件仅保留模板市场相关 API
 #
 # API 列表:
 #   /api/pipeline/templates            - 获取模板列表
@@ -9,88 +11,39 @@
 #   /api/pipeline/templates/{id}/estimate-credits - 预估积分
 #   /api/pipeline/templates/export      - 导出模板为 JSON (GET)
 #   /api/pipeline/templates/import      - 批量导入模板 (POST)
-#   /api/pipeline/runs                 - 创建/运行流水线
-#   /api/pipeline/runs                 - 获取运行列表 (GET)
-#   /api/pipeline/runs/{id}            - 获取运行详情 (GET) / 删除 (DELETE)
-#   /api/pipeline/runs/{id}/steps      - 获取步骤列表
-#   /api/pipeline/runs/{id}/retry      - 重试失败的流水线
-#   /api/pipeline/runs/{id}/cancel     - 取消流水线
-#   /api/pipeline/runs/{id}/pause      - 暂停流水线 (POST)
-#   /api/pipeline/runs/{id}/inputs     - 编辑流水线输入参数 (PUT)
-#   /api/pipeline/runs/{id}/export-to-canvas - 导出到画布 (POST)
-#   /api/pipeline/runs/{id}/steps/{key}/retry - 重试单步骤
-#   Task 11-17 新增端点：
-#   /api/pipeline/runs/{run_id}/steps/{step_key}/confirm - 确认/驳回步骤 (POST)
-#   /api/pipeline/runs/{run_id}/steps/{step_key}/retry-item - 元素级重试 (POST)
-#   /api/pipeline/runs/{run_id}/steps/{step_key}/output - 编辑步骤产物 (PATCH)
-#   /api/pipeline/runs/{run_id}/steps/{step_key}/items/{item_id}/upload - 上传图片替换 item (POST)
-#   /api/pipeline/runs/{run_id}/apply-stale - 应用下游失效 (POST)
-#   /api/pipeline/runs/{run_id}/ignore-stale - 忽略下游失效 (POST)
-#   /api/pipeline/runs/{run_id}/lock - 获取/释放编辑锁 (POST/DELETE)
-#   /api/pipeline/runs/{run_id}/steps/{step_key}/revisions - 版本历史 (GET)
-#   /api/pipeline/runs/{run_id}/steps/{step_key}/revisions/{revision} - 回滚版本 (POST)
-#   /api/pipeline/runs/{run_id}/auto-confirm - 切换自动确认 (POST)
-#   /api/pipeline/runs/{run_id}/steps/{step_key}/retry-preserve - 步骤级重试保留成功元素 (POST)
-#   /api/pipeline/outputs              - 获取流水线产物列表 (GET)
-#   /api/pipeline/outputs/{filename}   - 合成产物静态文件（最终视频等）
 #   /api/pipeline/styles               - 风格预设列表
 #   /api/pipeline/styles/{id}          - 风格预设详情
 #   /api/pipeline/script-templates     - 剧本模板列表
 #   /api/pipeline/script-templates/{id} - 剧本模板详情
 #   /api/pipeline/assets               - 资产库列表
 #   /api/pipeline/assets/{id}          - 资产详情
-#   /api/pipeline/outputs/{filename}  - 合成产物静态文件（最终视频等）
+#   /api/pipeline/template-scenarios   - 模板场景预设列表
+#   /api/pipeline/templates/from-scenario - 从场景预设创建模板
+#   /api/pipeline/available-models     - 获取可用的模型列表
 # =====================================================
 
 import logging
-import asyncio
 from datetime import datetime
-from typing import Optional, AsyncGenerator, List, Dict, Any
+from typing import Optional, List, Dict, Any
 
-from fastapi import APIRouter, HTTPException, Depends, Query, Request, BackgroundTasks
-from fastapi.responses import StreamingResponse, RedirectResponse
+from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy import select, func, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_db
-from app.core.security import get_current_user, get_current_user_optional, decode_access_token
+from app.core.security import get_current_user, get_current_user_optional
 from app.models.user import User
 from app.models.pipeline import PipelineTemplate, StylePreset, ScriptTemplate
 from app.models.asset import Asset
 from app.models.model_definition import ModelDefinition
-from app.services.pipeline.sse_manager import pipeline_sse_manager
 from app.schemas.pipeline import (
     PipelineTemplateOut,
     PipelineTemplateCreate,
     PipelineTemplateUpdate,
     PipelineTemplateRevisionOut,
-    PipelineRunCreate,
-    PipelineRunOut,
-    PipelineStepOut,
     CreditEstimateOut,
     CreditEstimateRequest,
     TemplateFromScenarioRequest,
-    SubtitlesSaveRequest,
-    SubtitlesSaveResponse,
-    RecomposeRequest,
-    PostProcessRequest,
-    PostProcessResponse,
-    # Task 11-17 Schema
-    StepConfirmRequest,
-    StepConfirmResponse,
-    ItemRetryRequest,
-    ItemRetryResponse,
-    StepOutputEditRequest,
-    StepOutputEditResponse,
-    ItemUploadResponse,
-    StaleApplyResponse,
-    StaleIgnoreResponse,
-    EditLockResponse,
-    StepRevisionItem,
-    StepRevisionRollbackResponse,
-    AutoConfirmRequest,
-    AutoConfirmResponse,
-    StepRetryPreserveResponse,
 )
 from app.schemas.assets import (
     StylePresetOut,
@@ -101,47 +54,10 @@ from app.schemas.assets import (
 from app.services.pipeline import (
     list_templates,
     get_template_by_id,
-    create_and_start_run,
-    get_run_by_id,
-    get_run_steps,
-    list_runs,
-    retry_run,
-    cancel_run,
-    delete_run,
-    pause_run,
-    update_run_inputs,
-    export_run_to_canvas,
-    estimate_credits,
-    save_subtitles,
-    get_sample_template,
-    validate_template,
-    infer_output_mapping,
+    validate_steps_config,
 )
 from app.services.pipeline import template_service
 from app.services.pipeline import template_scenarios
-from app.services.pipeline.run_service import recompose_video
-# Task 11-17 服务层函数直接导入（避免改动 __init__.py）
-from app.services.pipeline.run_service import (
-    confirm_step,
-    retry_step_item,
-    edit_step_output,
-    upload_step_item,
-    apply_stale,
-    ignore_stale,
-    acquire_edit_lock,
-    release_edit_lock,
-    list_step_revisions,
-    rollback_step_revision,
-    set_auto_confirm,
-    retry_step_preserve_success,
-)
-from app.services.pipeline import post_process_video
-from app.services.watermark_service import (
-    get_watermark_config,
-    should_apply_watermark,
-    apply_video_watermark,
-)
-from app.services.pipeline import template_service
 from app.services import style_service
 from app.services import script_template_service
 from app.services import asset_library
@@ -194,20 +110,20 @@ async def get_pipeline_templates(
             PipelineTemplate.is_builtin == True,  # noqa: E712
             and_(PipelineTemplate.is_public == True, PipelineTemplate.is_approved == True)  # noqa: E712
         ))
-    
+
     if filters:
         query = query.where(*filters)
-    
+
     count_query = select(func.count()).select_from(query.subquery())
     total_result = await db.execute(count_query)
     total = total_result.scalar_one()
-    
+
     query = query.order_by(
         PipelineTemplate.is_builtin.desc(),
         PipelineTemplate.use_count.desc(),
         PipelineTemplate.id.asc(),
     ).offset((page - 1) * page_size).limit(page_size)
-    
+
     result = await db.execute(query)
     items = list(result.scalars().all())
 
@@ -258,7 +174,7 @@ async def update_pipeline_template(
 
     - admin 可编辑任意模板（含内置模板，直接生效）
     - 作者可编辑自己的非内置模板
-    - 公开已审核非内置模板被编辑 → 走 draft 流程（生成 pending revision + AI 预筛）
+    - 公开已审核非内置模板被编辑 → 走 draft 流程（生成 pending revision + 敏感词预筛）
     - 其他情况直接改原模板字段
     """
     # 计算是否为 admin（与项目其他路由保持一致：role == 'admin' 或 is_admin == True）
@@ -394,7 +310,7 @@ async def submit_template_public(
 
     - 只能提交自己的非内置模板
     - 已被驳回的模板不可再次提交（硬约束：被驳回内容不能再公开）
-    - 提交前进行 AI 预筛（敏感词检测），命中则直接驳回
+    - 提交前进行敏感词预筛，命中则直接驳回
     - 提交后 is_public=True, is_approved=False, is_rejected=False
     """
     result = await db.execute(
@@ -414,8 +330,7 @@ async def submit_template_public(
 
     submit_reason = (payload or {}).get("reason") or ""
 
-    # ---------- AI 预筛：敏感词检测 ----------
-    # 检查模板名称、描述、标签中是否包含敏感词
+    # ---------- 敏感词预筛 ----------
     check_text = " ".join([
         tpl.name or "",
         tpl.description or "",
@@ -425,7 +340,7 @@ async def submit_template_public(
     from app.services.moderation_service import check_sensitive_text
     hit, hit_words = await check_sensitive_text(db, check_text)
     if hit:
-        # 命中敏感词：直接驳回（AI 预筛不通过）
+        # 命中敏感词：直接驳回
         tpl.is_public = False
         tpl.is_approved = False
         tpl.is_rejected = True
@@ -497,8 +412,12 @@ async def estimate_pipeline_credits(
     _current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """预估流水线运行需要消耗的积分（粗略估算）"""
-    result = await estimate_credits(db, template_id, req.inputs or {})
-    return CreditEstimateOut(**result)
+    # wizard_chain 模式下积分预估简化为模板 estimated_credits 字段
+    tpl = await get_template_by_id(db, template_id)
+    if not tpl:
+        raise HTTPException(status_code=404, detail="流水线模板不存在")
+    estimated = tpl.estimated_credits or 0
+    return CreditEstimateOut(total_credits=estimated, steps=[])
 
 
 # =====================================================
@@ -608,14 +527,14 @@ async def export_pipeline_templates(
 @router.get("/pipeline/templates/sample", summary="下载示例模板 JSON")
 async def get_pipeline_template_sample():
     """
-    返回一份最小可用的示例模板 JSON（标准漫剧 4 步流程）。
+    返回一份最小可用的示例模板 JSON（标准漫剧流程）。
 
     用途：用户在导入对话框点"下载示例模板"时调用，下载后照着改即可。
     无需鉴权（公开接口，方便未登录用户也能获取格式参考）。
     返回的 JSON 结构与 /pipeline/export/templates 一致，可直接作为
     /pipeline/templates/import 的 payload.data 字段导入。
     """
-    return get_sample_template()
+    return template_service.get_sample_template()
 
 
 @router.post("/pipeline/templates/validate", summary="无副作用校验模板结构")
@@ -629,15 +548,14 @@ async def validate_pipeline_template(
     请求体：完整模板 JSON（与 create/update 接口的 body 结构一致，不含 id）。
 
     校验项:
-      - steps_config 每个 step.type 必须命中后端注册表
-        (llm_generate / image_batch / video_batch / tts_generate / ffmpeg_composite)
+      - steps_config 每个 step.type 必须命中后端支持的类型清单
       - step.key 必须非空且在同模板内唯一
       - depends_on 引用的 key 必须存在于同模板内
       - from_step / audio_from_step / subtitle_from_step 同样校验存在性
 
     返回: { is_valid: bool, errors: [{step_key, field, reason}] }
     """
-    is_valid, errors = validate_template(payload or {})
+    is_valid, errors = template_service.validate_template(payload or {})
     return {"is_valid": is_valid, "errors": errors}
 
 
@@ -795,9 +713,8 @@ async def import_pipeline_templates(
             skipped.append(f"模板 {tpl_name}（缺 key）")
             continue
 
-        # 校验模板结构（step.type/depends_on/from_step 等）
-        # 校验失败的模板不写入数据库，记入 errors 列表
-        is_valid, validation_errors = validate_template(tpl_data)
+        # 校验模板结构
+        is_valid, validation_errors = template_service.validate_template(tpl_data)
         if not is_valid:
             errors.append(
                 {
@@ -825,9 +742,6 @@ async def import_pipeline_templates(
         # 重映射剧本模板 ID
         script_template_id = None
         if tpl_data.get("script_template_id"):
-            # 通过导出数据中的临时 id 标记反查 key（导出时已存原 id，导入侧需要重建）
-            # 简化处理：剧本模板已按 key 唯一，这里直接清空让用户手动关联
-            # 若要精确映射，需要导出时附带 key——这里检查导出数据是否携带 script_template_key
             st_key = tpl_data.get("script_template_key")
             if st_key and st_key in script_key_to_id:
                 script_template_id = script_key_to_id[st_key]
@@ -943,11 +857,7 @@ async def import_pipeline_templates(
 
 def _serialize_template(tpl: PipelineTemplate) -> Dict[str, Any]:
     """将 PipelineTemplate 序列化为可导出的字典（剔除运行时字段）"""
-    # output_mapping 为 null 时按 steps_config 自动推断（spec 5.3 / Task 4）
-    output_mapping = tpl.output_mapping
-    if not output_mapping and tpl.steps_config:
-        output_mapping = infer_output_mapping(tpl.steps_config)
-
+    # wizard_chain 模式下 output_mapping 不再推断，直接保留原值
     data: Dict[str, Any] = {
         "key": tpl.key,
         "name": tpl.name,
@@ -956,7 +866,7 @@ def _serialize_template(tpl: PipelineTemplate) -> Dict[str, Any]:
         "thumbnail_url": tpl.thumbnail_url,
         "inputs_config": tpl.inputs_config,
         "steps_config": tpl.steps_config,
-        "output_mapping": output_mapping,
+        "output_mapping": tpl.output_mapping,
         "script_template_id": tpl.script_template_id,
         "estimated_credits": tpl.estimated_credits,
         "estimated_time_minutes": tpl.estimated_time_minutes,
@@ -1021,783 +931,9 @@ def _remap_style_ids_in_inputs(
     if not styles_in or not style_key_to_id:
         return inputs_config
 
-    # 构建 原 id → 新 id 的映射（基于导出数据中 StylePreset 的 key）
-    # 注意：导出数据中 StylePreset 不含 id（已剔除），所以无法直接通过 id 反查
     # 简化处理：style_select 的 default 在导入时保持原值，由用户手动校正
     # （因为 style_select 的 options 通常存储在 inputs_config 内，且 id 会变）
     return inputs_config
-
-
-# =====================================================
-# 流水线运行 API
-# =====================================================
-
-@router.post("/pipeline/runs", summary="创建并启动流水线")
-async def create_pipeline_run(
-    req: PipelineRunCreate,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    创建并启动一个流水线实例。
-
-    - 必须登录
-    - 会在后台异步执行，立即返回 run_id
-    - 可通过 SSE 或轮询获取进度
-    """
-    # 将摄像机参数并入 inputs，供引擎步骤执行时读取
-    inputs = dict(req.inputs or {})
-    if req.camera_params and isinstance(req.camera_params, dict):
-        inputs["camera_params"] = req.camera_params
-
-    run = await create_and_start_run(
-        db=db,
-        template_id=req.template_id,
-        inputs=inputs,
-        user_id=current_user.id,
-        name=req.name,
-    )
-
-    return PipelineRunOut.model_validate(run)
-
-
-@router.get("/pipeline/runs", summary="获取流水线运行列表")
-async def get_pipeline_runs(
-    status: Optional[str] = None,
-    template_id: Optional[int] = None,
-    search: Optional[str] = None,
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-):
-    """获取当前用户的流水线运行记录"""
-    items, total = await list_runs(
-        db,
-        user_id=current_user.id,
-        status=status,
-        template_id=template_id,
-        search=search,
-        page=page,
-        page_size=page_size,
-    )
-
-    return {
-        "items": [PipelineRunOut.model_validate(item) for item in items],
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-    }
-
-
-@router.get("/pipeline/runs/{run_id}", summary="获取流水线运行详情")
-async def get_pipeline_run_detail(
-    run_id: int,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-):
-    """获取单个流水线运行的详细信息"""
-    run = await get_run_by_id(db, run_id)
-    if not run:
-        raise HTTPException(status_code=404, detail="流水线不存在")
-
-    # 权限检查
-    if run.user_id != current_user.id:
-        # 管理员可以看所有，这里简化处理
-        if not getattr(current_user, "is_admin", False):
-            raise HTTPException(status_code=403, detail="无权查看此流水线")
-
-    return PipelineRunOut.model_validate(run)
-
-
-@router.get("/pipeline/runs/{run_id}/steps", summary="获取流水线步骤列表")
-async def get_pipeline_run_steps(
-    run_id: int,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-):
-    """获取流水线的所有步骤执行情况"""
-    # 权限检查
-    run = await get_run_by_id(db, run_id)
-    if not run:
-        raise HTTPException(status_code=404, detail="流水线不存在")
-
-    if run.user_id != current_user.id and not getattr(current_user, "is_admin", False):
-        raise HTTPException(status_code=403, detail="无权查看此流水线")
-
-    steps = await get_run_steps(db, run_id)
-    return [PipelineStepOut.model_validate(step) for step in steps]
-
-
-@router.post("/pipeline/runs/{run_id}/retry", summary="重试失败的流水线")
-async def retry_pipeline_run(
-    run_id: int,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    重试失败的流水线。
-    只会重试失败的步骤及其后续步骤，已成功的步骤跳过。
-    """
-    run = await retry_run(db, run_id, user_id=current_user.id)
-    return PipelineRunOut.model_validate(run)
-
-
-@router.post("/pipeline/runs/{run_id}/steps/{step_key}/retry", summary="重试失败的步骤")
-async def retry_pipeline_step(
-    run_id: int,
-    step_key: str,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    重试流水线中失败的单个步骤。
-    只会重试指定的步骤，不影响其他步骤。
-    """
-    from app.services.pipeline.engine import retry_pipeline_step as engine_retry_step
-    await engine_retry_step(run_id, step_key, user_id=current_user.id)
-    return {"message": "步骤重试指令已发送", "step_key": step_key}
-
-
-@router.post("/pipeline/runs/{run_id}/cancel", summary="取消流水线")
-async def cancel_pipeline_run(
-    run_id: int,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-):
-    """取消正在运行的流水线"""
-    await cancel_run(db, run_id, user_id=current_user.id)
-    return {"message": "取消指令已发送"}
-
-
-@router.delete("/pipeline/runs/{run_id}", summary="删除流水线运行记录")
-async def delete_pipeline_run(
-    run_id: int,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    软删除流水线运行记录。
-
-    设置 is_deleted=True，保留数据库记录用于统计。
-    不会自动清理 pipeline_outputs 产物文件。
-    """
-    run = await delete_run(db, run_id, user_id=current_user.id)
-    return {"message": "删除成功", "run_id": run.id}
-
-
-@router.post("/pipeline/runs/{run_id}/subtitles", summary="保存编辑后的字幕")
-async def save_pipeline_subtitles(
-    run_id: int,
-    req: SubtitlesSaveRequest,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    保存用户编辑后的字幕，后端会重新生成 SRT 文件并更新 ffmpeg_composite 步骤的 output_data。
-
-    - 必须登录，且只能修改自己的流水线字幕
-    - 字幕条目会按 start 升序重新编号 index
-    - 时间格式：秒（浮点数，如 5.2 表示 5.2 秒）
-    - 写入的 SRT 文件可通过 /api/pipeline/outputs/subtitles_{run_id}.srt 访问
-    """
-    result = await save_subtitles(
-        db=db,
-        run_id=run_id,
-        user_id=current_user.id,
-        subtitles=[entry.model_dump() for entry in req.subtitles],
-    )
-    return SubtitlesSaveResponse(**result)
-
-
-@router.post("/pipeline/runs/{run_id}/recompose", summary="重新烧录字幕到视频")
-async def recompose_run_video(
-    run_id: int,
-    payload: RecomposeRequest,
-    background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    用新字幕/样式重新烧录视频。
-
-    - 同步执行（耗时约 30s-2min，前端应显示进度）
-    - 复用 ffmpeg_composite 的内部方法
-    - 覆盖 final_{run_id}.mp4、subtitles_{run_id}.srt/.vtt
-    - 返回新产物 URL（带 ?v=timestamp 防缓存）
-
-    鉴权和 db.commit 由 recompose_video service 内部完成，路由层不重复。
-    """
-    # subtitle_style Pydantic 模型转 dict，过滤 None 字段
-    style_dict = None
-    if payload.subtitle_style:
-        style_dict = {
-            k: v for k, v in payload.subtitle_style.model_dump().items()
-            if v is not None
-        }
-        if not style_dict:
-            style_dict = None
-
-    # background_tasks 参数保留（当前同步执行，预留后续异步化）
-    result = await recompose_video(
-        db=db,
-        run_id=run_id,
-        user_id=current_user.id,
-        subtitles=payload.subtitles,
-        subtitle_style=style_dict,
-    )
-    return {"message": "重新烧录完成", "data": result}
-
-
-# =====================================================
-# 历史视频后期处理 API
-# 对 Generation 表中已存在的视频做二次后期处理（调色 / 剪辑），
-# 无需重跑整个流水线。复用 ColorGradeExecutor / VideoEditExecutor。
-# =====================================================
-
-@router.post(
-    "/pipeline/generations/{generation_id}/post-process",
-    summary="对历史视频做后期处理（调色/剪辑）",
-    response_model=PostProcessResponse,
-)
-async def post_process_generation_video(
-    generation_id: int,
-    payload: PostProcessRequest,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    对单个历史视频执行后期处理（调色 / 剪辑），无需重跑整个流水线。
-
-    - **color_grade 调色**: 应用 4 个预设（subtle/neutral_punch/warm_cinematic/none）
-      或自定义 ffmpeg 滤镜链，可选叠加 30ms 音频淡入淡出
-    - **video_edit 剪辑**: 基于 trim/cut 操作裁剪或删除指定片段，
-      多段保留区间自动拼接，每个切点叠加 30ms 音频淡入淡出
-
-    处理结果作为新的 Generation 记录入库，关联到源视频（params.source_generation_id）。
-    新记录默认不公开，需用户手动分享。
-
-    鉴权要求：当前用户必须是源视频的归属用户。
-    """
-    # 构造执行器配置
-    config: Dict[str, Any] = {}
-    if payload.operation == "color_grade":
-        config = {
-            "preset": payload.preset or "neutral_punch",
-            "with_audio_fade": payload.with_audio_fade if payload.with_audio_fade is not None else True,
-        }
-    elif payload.operation == "video_edit":
-        if not payload.operations:
-            raise HTTPException(status_code=400, detail="video_edit 操作必须提供 operations 列表")
-        config = {
-            "operations": [op.model_dump() for op in payload.operations],
-        }
-
-    try:
-        result = await post_process_video(
-            db=db,
-            generation_id=generation_id,
-            operation=payload.operation,
-            config=config,
-            user_id=current_user.id,
-        )
-        return PostProcessResponse(**result)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/pipeline/runs/{run_id}/download", summary="下载流水线最终视频")
-async def download_run_video(
-    run_id: int,
-    watermark: int = 0,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    下载流水线最终视频。
-
-    - watermark=0（默认）：302 重定向到静态文件（无水印）
-    - watermark=1：按用户水印配置实时加水印，返回 FileResponse（attachment）
-
-    水印处理策略：
-    1. 校验 run 归属当前用户
-    2. 定位 ffmpeg_composite 步骤，取 final_video_path
-    3. watermark=0 直接 302 重定向到静态文件
-    4. watermark=1 时调 should_apply_watermark 判断是否需要加水印
-    5. 不需要时仍重定向
-    6. 需要时调 apply_video_watermark，结果缓存到 data/pipeline_outputs/final_{run_id}_wm_{hash}.mp4
-    7. 用 FileResponse 返回，filename=pipeline_{run_id}.mp4
-    """
-    import os
-    import hashlib
-    from app.services.pipeline.steps.ffmpeg_composite import _OUTPUT_BASE
-    from app.models.user import User as UserModel
-    from sqlalchemy.future import select
-
-    # 校验 run 归属
-    run = await get_run_by_id(db, run_id)
-    if not run:
-        raise HTTPException(status_code=404, detail="流水线不存在")
-    if run.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="无权下载此流水线视频")
-
-    # 找到 ffmpeg_composite 步骤，取 final_video_path
-    steps = await get_run_steps(db, run_id)
-    composite_steps = [
-        s for s in steps
-        if s.step_type == "ffmpeg_composite" and s.status == "success"
-    ]
-    if not composite_steps:
-        raise HTTPException(status_code=400, detail="未找到已完成的合成步骤")
-    composite_step = sorted(composite_steps, key=lambda s: s.sort_order, reverse=True)[0]
-    output_data = composite_step.output_data or {}
-
-    # 优先用 output_data.final_video_path，否则从 URL 反推
-    final_path = output_data.get("final_video_path", "")
-    if not final_path:
-        final_url = output_data.get("final_video_url", "")
-        if final_url:
-            fname = final_url.rsplit("/", 1)[-1].split("?")[0]
-            final_path = os.path.join(_OUTPUT_BASE, fname)
-
-    if not final_path or not os.path.exists(final_path):
-        raise HTTPException(status_code=404, detail="最终视频文件不存在")
-
-    # 不加水印：直接重定向到静态文件路由
-    if watermark != 1:
-        final_url = output_data.get("final_video_url", "")
-        if not final_url:
-            fname = os.path.basename(final_path)
-            final_url = f"/api/pipeline/outputs/{fname}"
-        return RedirectResponse(url=final_url, status_code=302)
-
-    # 加水印：判断是否需要
-    wm_config = await get_watermark_config(db)
-    # 重新查 user（获取 watermark_enabled 字段）
-    user_result = await db.execute(select(UserModel).filter(UserModel.id == run.user_id))
-    user_obj = user_result.scalar_one_or_none()
-
-    if not should_apply_watermark(wm_config, user_obj):
-        # 不需要水印，重定向到静态文件
-        final_url = output_data.get("final_video_url", "")
-        if not final_url:
-            fname = os.path.basename(final_path)
-            final_url = f"/api/pipeline/outputs/{fname}"
-        return RedirectResponse(url=final_url, status_code=302)
-
-    # 需要加水印：缓存文件名 = final_{run_id}_wm_{config_hash}.mp4
-    config_str = (
-        f"{wm_config.id}|{wm_config.text}|{wm_config.type}|"
-        f"{wm_config.position}|{wm_config.font_size}|"
-        f"{wm_config.opacity}|{wm_config.margin}"
-    )
-    config_hash = hashlib.md5(config_str.encode()).hexdigest()[:8]
-    wm_filename = f"final_{run_id}_wm_{config_hash}.mp4"
-    wm_path = os.path.join(_OUTPUT_BASE, wm_filename)
-
-    # 缓存未命中：实时加水印
-    if not (os.path.exists(wm_path) and os.path.getsize(wm_path) > 0):
-        wm_path = await apply_video_watermark(
-            video_path=final_path,
-            config=wm_config,
-            output_path=wm_path,
-        )
-        if wm_path == final_path:
-            # 水印失败，回退到原文件
-            wm_path = final_path
-
-    download_name = f"pipeline_{run_id}.mp4"
-    return FileResponse(
-        path=wm_path,
-        media_type="video/mp4",
-        filename=download_name,
-    )
-
-
-@router.post("/pipeline/runs/{run_id}/pause", summary="暂停流水线")
-async def pause_pipeline_run(
-    run_id: int,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    请求暂停正在运行的流水线。
-
-    设置 pause_requested=True，引擎在下一步执行前检测到并：
-    - 将 run 状态设为 paused
-    - 保存当前步骤进度
-    - 退出执行循环
-
-    暂停后用户可以编辑 inputs，然后调用 /runs/{run_id}/retry 继续执行。
-    """
-    run = await pause_run(db, run_id, user_id=current_user.id)
-    return {"message": "暂停指令已发送", "run_id": run.id, "status": run.status}
-
-
-@router.put("/pipeline/runs/{run_id}/inputs", summary="编辑流水线输入参数")
-async def update_pipeline_run_inputs(
-    run_id: int,
-    inputs: Dict[str, Any],
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    在 paused 状态下编辑流水线输入参数。
-
-    接收 JSON 对象，合并到 PipelineRun.inputs 中（保留原有未修改字段）。
-    仅 paused/pending/failed/cancelled 状态允许编辑。
-    """
-    run = await update_run_inputs(db, run_id, inputs=inputs, user_id=current_user.id)
-    return {"message": "输入参数已更新", "run_id": run.id, "inputs": run.inputs}
-
-
-@router.post("/pipeline/runs/{run_id}/export-to-canvas", summary="导出流水线结果到画布")
-async def export_pipeline_run_to_canvas(
-    run_id: int,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    将成功完成的流水线结果导出为画布素材。
-
-    收集最终视频和所有分镜图片 URL，写入 PipelineRun.canvas_export_data。
-    返回 {video, scenes} 格式的节点数据。
-    """
-    data = await export_run_to_canvas(db, run_id, user_id=current_user.id)
-    return {"message": "导出成功", "run_id": run_id, "data": data}
-
-
-# =====================================================
-# Task 11-17: 步骤确认 / 元素级重试 / 产物编辑 /
-# 下游失效 / 编辑锁 / 版本历史 / 自动确认 / 步骤级重试增强
-# =====================================================
-
-# ---------- Task 11: 确认 / 驳回 ----------
-
-@router.post(
-    "/pipeline/runs/{run_id}/steps/{step_key}/confirm",
-    summary="确认或驳回处于等待确认状态的步骤",
-)
-async def confirm_pipeline_step(
-    run_id: int,
-    step_key: str,
-    req: StepConfirmRequest,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    确认或驳回处于 pending 确认状态的步骤。
-
-    - action=confirm：置 confirmed，清暂停标志，后台恢复执行
-    - action=reject：置 rejected + failed，跳过下游，run 转 failed
-    - 若提供 edited_output，会先覆盖 step.output_data 并标记下游 stale
-    """
-    result = await confirm_step(
-        db=db,
-        run_id=run_id,
-        step_key=step_key,
-        action=req.action,
-        comment=req.comment,
-        edited_output=req.edited_output,
-        user_id=current_user.id,
-    )
-    return StepConfirmResponse(**result)
-
-
-# ---------- Task 12: 元素级重试 ----------
-
-@router.post(
-    "/pipeline/runs/{run_id}/steps/{step_key}/retry-item",
-    summary="重试步骤中的单个元素",
-)
-async def retry_pipeline_step_item(
-    run_id: int,
-    step_key: str,
-    item_id: str,
-    req: ItemRetryRequest,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    重试步骤中的单个元素（如单张图片/视频）。
-
-    - 从 output_data.items 找到 item_id 对应元素
-    - 构建 SingleItemContext，调 executor.execute_single()
-    - 步骤已 confirmed 时响应 requires_reconfirmation=true
-    """
-    result = await retry_step_item(
-        db=db,
-        run_id=run_id,
-        step_key=step_key,
-        item_id=item_id,
-        prompt_override=req.prompt_override,
-        seed=req.seed,
-        user_id=current_user.id,
-    )
-    return ItemRetryResponse(**result)
-
-
-# ---------- Task 13: 产物编辑 ----------
-
-@router.patch(
-    "/pipeline/runs/{run_id}/steps/{step_key}/output",
-    summary="编辑步骤产物（替换/删除/新增 items）",
-)
-async def edit_pipeline_step_output(
-    run_id: int,
-    step_key: str,
-    req: StepOutputEditRequest,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    编辑步骤产物（items 整体替换 / 删除指定 item_id / 追加新 items）。
-
-    - 编辑前保存版本到 PipelineStepOutputRevision
-    - 应用变更后调 mark_downstream_stale 标记下游
-    - 引擎 running 状态返回 409
-    """
-    result = await edit_step_output(
-        db=db,
-        run_id=run_id,
-        step_key=step_key,
-        items=req.items,
-        remove_item_ids=req.remove_item_ids,
-        add_items=req.add_items,
-        user_id=current_user.id,
-    )
-    return StepOutputEditResponse(**result)
-
-
-@router.post(
-    "/pipeline/runs/{run_id}/steps/{step_key}/items/{item_id}/upload",
-    summary="上传图片替换步骤中某个 item 的图片",
-)
-async def upload_pipeline_step_item(
-    run_id: int,
-    step_key: str,
-    item_id: str,
-    request: Request,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    上传图片替换步骤中某个 item 的图片。
-
-    - 支持格式：jpg/png/webp，最大 10MB
-    - 自动压缩（>2MB 用 quality=80，否则 quality=95）
-    - 保存修订前快照，更新 item.image_url
-    - 标记下游 stale
-    """
-    content_type = request.headers.get("content-type", "")
-
-    # 支持 multipart/form-data 和 raw body 两种上传方式
-    if content_type.startswith("multipart/form-data"):
-        form = await request.form()
-        file = form.get("file")
-        if not file:
-            raise HTTPException(status_code=400, detail="未提供文件，请用 file 字段上传")
-        file_content = await file.read()
-        ct = file.content_type or "image/jpeg"
-        filename = file.filename or "uploaded.jpg"
-    else:
-        # raw body 上传
-        file_content = await request.body()
-        ct = content_type or "image/jpeg"
-        filename = f"{item_id}.jpg"
-
-    if not file_content:
-        raise HTTPException(status_code=400, detail="上传内容为空")
-
-    result = await upload_step_item(
-        db=db,
-        run_id=run_id,
-        step_key=step_key,
-        item_id=item_id,
-        file_content=file_content,
-        content_type=ct,
-        filename=filename,
-        user_id=current_user.id,
-    )
-    return ItemUploadResponse(**result)
-
-
-# ---------- Task 14: 下游失效应用 / 忽略 ----------
-
-@router.post(
-    "/pipeline/runs/{run_id}/apply-stale",
-    summary="应用下游失效（按 DAG 逆序重置 stale 步骤及下游）",
-)
-async def apply_pipeline_stale(
-    run_id: int,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    应用下游失效：按 DAG 逆序重置 stale 步骤及其下游
-    （status=pending, output_data=null, stale=False），
-    清 pause_requested，调 engine.resume()。
-    """
-    result = await apply_stale(db=db, run_id=run_id, user_id=current_user.id)
-    return StaleApplyResponse(**result)
-
-
-@router.post(
-    "/pipeline/runs/{run_id}/ignore-stale",
-    summary="忽略下游失效（清除所有步骤的 stale 标记）",
-)
-async def ignore_pipeline_stale(
-    run_id: int,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    忽略下游失效：清除所有步骤的 stale 和 stale_reason。
-    适用于用户确认当前产物仍然有效、不需要重新执行的场景。
-    """
-    result = await ignore_stale(db=db, run_id=run_id, user_id=current_user.id)
-    return StaleIgnoreResponse(**result)
-
-
-# ---------- Task 15: 编辑锁 ----------
-
-@router.post(
-    "/pipeline/runs/{run_id}/lock",
-    summary="获取 run 级编辑锁（5 分钟超时）",
-)
-async def acquire_pipeline_edit_lock(
-    run_id: int,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    获取 run 级编辑锁（5 分钟超时，惰性检查）。
-
-    - 若锁已被其他用户持有且未过期 → 返回 409
-    - 若锁已过期或为当前用户持有 → 重新获取
-    """
-    result = await acquire_edit_lock(
-        db=db, run_id=run_id, user_id=current_user.id
-    )
-    return EditLockResponse(**result)
-
-
-@router.delete(
-    "/pipeline/runs/{run_id}/lock",
-    summary="释放 run 级编辑锁",
-)
-async def release_pipeline_edit_lock(
-    run_id: int,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    释放 run 级编辑锁。
-
-    - 仅锁持有者本人可释放
-    - 锁已过期时任何人可释放
-    """
-    result = await release_edit_lock(
-        db=db, run_id=run_id, user_id=current_user.id
-    )
-    return EditLockResponse(**result)
-
-
-# ---------- Task 15: 版本历史 ----------
-
-@router.get(
-    "/pipeline/runs/{run_id}/steps/{step_key}/revisions",
-    summary="查询步骤产物的版本历史",
-    response_model=List[StepRevisionItem],
-)
-async def list_pipeline_step_revisions(
-    run_id: int,
-    step_key: str,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-):
-    """查询步骤产物的版本历史（按 revision 降序）。"""
-    return await list_step_revisions(
-        db=db, run_id=run_id, step_key=step_key, user_id=current_user.id
-    )
-
-
-@router.post(
-    "/pipeline/runs/{run_id}/steps/{step_key}/revisions/{revision}",
-    summary="回滚步骤产物到指定版本",
-)
-async def rollback_pipeline_step_revision(
-    run_id: int,
-    step_key: str,
-    revision: int,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    回滚步骤产物到指定版本。
-
-    - 用指定版本覆盖当前 output_data
-    - 保存回滚前版本（便于反向回滚）
-    - 标记下游 stale
-    """
-    result = await rollback_step_revision(
-        db=db,
-        run_id=run_id,
-        step_key=step_key,
-        revision=revision,
-        user_id=current_user.id,
-    )
-    return StepRevisionRollbackResponse(**result)
-
-
-# ---------- Task 16: 自动确认切换 ----------
-
-@router.post(
-    "/pipeline/runs/{run_id}/auto-confirm",
-    summary="切换 run.auto_confirm 标志",
-)
-async def toggle_pipeline_auto_confirm(
-    run_id: int,
-    req: AutoConfirmRequest,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    切换 run.auto_confirm 标志。
-
-    开启后，后续需要确认的步骤会自动置 confirmed 跳过暂停。
-    """
-    result = await set_auto_confirm(
-        db=db, run_id=run_id, enabled=req.enabled, user_id=current_user.id
-    )
-    return AutoConfirmResponse(**result)
-
-
-# ---------- Task 17: 步骤级重试保留已成功元素 ----------
-
-@router.post(
-    "/pipeline/runs/{run_id}/steps/{step_key}/retry-preserve",
-    summary="步骤级重试（保留已成功元素，仅重跑失败元素）",
-)
-async def retry_pipeline_step_preserve(
-    run_id: int,
-    step_key: str,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    步骤级重试，保留 output_data.items 中 status=success 的元素。
-
-    - 把 success 元素写入 output_data.preserved_items
-    - 执行器执行时跳过对应 item_id，只重跑失败元素
-    - 只对重跑的失败元素计费
-    """
-    result = await retry_step_preserve_success(
-        db=db, run_id=run_id, step_key=step_key, user_id=current_user.id
-    )
-    return StepRetryPreserveResponse(**result)
 
 
 # =====================================================
@@ -1826,20 +962,20 @@ async def get_style_presets(
             StylePreset.key.ilike(search_pattern),
         ))
     filters.append(or_(StylePreset.is_builtin == True, StylePreset.is_public == True))
-    
+
     if filters:
         query = query.where(*filters)
-    
+
     count_query = select(func.count()).select_from(query.subquery())
     total_result = await db.execute(count_query)
     total = total_result.scalar_one()
-    
+
     query = query.order_by(
         StylePreset.is_builtin.desc(),
         StylePreset.use_count.desc(),
         StylePreset.id.asc(),
     ).offset((page - 1) * page_size).limit(page_size)
-    
+
     result = await db.execute(query)
     items = list(result.scalars().all())
 
@@ -1891,19 +1027,19 @@ async def get_script_templates(
             ScriptTemplate.key.ilike(search_pattern),
         ))
     filters.append(or_(ScriptTemplate.is_builtin == True, ScriptTemplate.is_public == True))
-    
+
     if filters:
         query = query.where(*filters)
-    
+
     count_query = select(func.count()).select_from(query.subquery())
     total_result = await db.execute(count_query)
     total = total_result.scalar_one()
-    
+
     query = query.order_by(
         ScriptTemplate.is_builtin.desc(),
         ScriptTemplate.id.asc(),
     ).offset((page - 1) * page_size).limit(page_size)
-    
+
     result = await db.execute(query)
     items = list(result.scalars().all())
 
@@ -1956,19 +1092,19 @@ async def get_assets(
             Asset.visual_description.ilike(search_pattern),
         ))
     filters.append(Asset.is_public == True)
-    
+
     if filters:
         query = query.where(*filters)
-    
+
     count_query = select(func.count()).select_from(query.subquery())
     total_result = await db.execute(count_query)
     total = total_result.scalar_one()
-    
+
     query = query.order_by(
         Asset.use_count.desc(),
         Asset.id.desc(),
     ).offset((page - 1) * page_size).limit(page_size)
-    
+
     result = await db.execute(query)
     items = list(result.scalars().all())
 
@@ -2008,173 +1144,6 @@ async def save_asset_from_generation(
 
 
 # =====================================================
-# SSE 进度推送 API
-# =====================================================
-
-@router.get("/pipeline/runs/{run_id}/events", summary="SSE 流水线进度推送")
-async def pipeline_sse_events(
-    run_id: int,
-    request: Request,
-    token: Optional[str] = Query(None, description="JWT token（用于 EventSource 无法设置 header 的场景）"),
-    db: AsyncSession = Depends(get_async_db),
-):
-    """
-    Server-Sent Events 实时推送流水线进度。
-
-    支持两种认证方式:
-    - Authorization: Bearer <token>（header）
-    - ?token=<token>（query 参数，供原生 EventSource 使用）
-
-    事件类型:
-    - state_snapshot: 连接建立时的当前状态快照
-    - step_started: 步骤开始执行
-    - step_progress: 步骤执行中进度（可选）
-    - step_completed: 步骤完成
-    - step_failed: 步骤失败
-    - pipeline_completed: 流水线完成（成功或失败）
-    """
-    # 认证：优先 header，其次 query 参数（EventSource 场景）
-    auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
-    if auth_header:
-        from app.core.security import _extract_token_from_header
-        resolved_token = _extract_token_from_header(auth_header)
-    else:
-        resolved_token = token
-
-    if not resolved_token:
-        raise HTTPException(status_code=401, detail="未登录或 token 无效")
-
-    user_id = decode_access_token(resolved_token)
-    if user_id is None:
-        raise HTTPException(status_code=401, detail="token 已过期或无效，请重新登录")
-
-    result = await db.execute(select(User).filter(User.id == user_id))
-    current_user = result.scalar_one_or_none()
-    if current_user is None or not current_user.is_active:
-        raise HTTPException(status_code=401, detail="用户不存在或已停用")
-
-    # 权限检查
-    run = await get_run_by_id(db, run_id)
-    if not run:
-        raise HTTPException(status_code=404, detail="流水线不存在")
-
-    if run.user_id != current_user.id and not getattr(current_user, "is_admin", False):
-        raise HTTPException(status_code=403, detail="无权查看此流水线")
-
-    # 订阅
-    queue = await pipeline_sse_manager.subscribe(run_id)
-
-    async def event_generator() -> AsyncGenerator[str, None]:
-        try:
-            while True:
-                try:
-                    # 带超时地等待事件，超时就发一个心跳
-                    event = await asyncio.wait_for(queue.get(), timeout=30.0)
-                    yield event
-                except asyncio.TimeoutError:
-                    # 心跳包，保持连接活跃
-                    yield ": heartbeat\n\n"
-        except asyncio.CancelledError:
-            # 客户端断开
-            pass
-        finally:
-            await pipeline_sse_manager.unsubscribe(run_id, queue)
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # 禁用 Nginx 缓冲
-        },
-    )
-
-
-# =====================================================
-# 合成产物静态文件服务
-# ffmpeg_composite 步骤产出的最终视频保存在本地 data/pipeline_outputs/
-# 通过此路由对外提供访问，支持 Range 请求（视频拖动播放）
-# =====================================================
-
-import os
-from fastapi.responses import FileResponse
-
-# 最终视频输出目录（与 ffmpeg_composite 执行器中的 _OUTPUT_BASE 保持一致）
-# routes/pipeline.py 位于 backend/app/routes/，3 次 dirname 到 backend/，再 join data/pipeline_outputs
-_PIPELINE_OUTPUT_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-    "data", "pipeline_outputs",
-)
-
-
-@router.get("/pipeline/outputs", summary="获取流水线产物列表")
-async def list_pipeline_outputs():
-    """
-    列出 pipeline_outputs 目录下的所有合成产物文件。
-
-    返回每个文件的名称、大小（字节）、最后修改时间。
-    """
-    import os
-    items = []
-    if os.path.isdir(_PIPELINE_OUTPUT_DIR):
-        for fname in sorted(os.listdir(_PIPELINE_OUTPUT_DIR)):
-            fpath = os.path.join(_PIPELINE_OUTPUT_DIR, fname)
-            if os.path.isfile(fpath):
-                stat = os.stat(fpath)
-                items.append({
-                    "filename": fname,
-                    "size": stat.st_size,
-                    "modified_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                    "url": f"/api/pipeline/outputs/{fname}",
-                })
-
-    return {"items": items, "total": len(items)}
-
-
-@router.get("/pipeline/outputs/{filename}", summary="获取流水线合成产物文件")
-async def get_pipeline_output(filename: str):
-    """
-    提供流水线合成产物（最终视频、BGM 缓存等）的静态文件访问。
-
-    - 支持 video/mp4、audio/mp3 等格式
-    - FileResponse 自动支持 Range 请求，前端视频播放器可拖动进度条
-    - 路径校验：禁止目录穿越（../ 等）
-    """
-    # 安全校验：只允许文件名，禁止路径分隔符
-    if not filename or "/" in filename or "\\" in filename or ".." in filename:
-        raise HTTPException(status_code=400, detail="非法文件名")
-
-    # 限制允许的扩展名（白名单）
-    allowed_exts = {".mp4", ".mp3", ".wav", ".m4a", ".srt", ".vtt"}
-    ext = os.path.splitext(filename)[1].lower()
-    if ext not in allowed_exts:
-        raise HTTPException(status_code=400, detail=f"不支持的文件类型: {ext}")
-
-    file_path = os.path.join(_PIPELINE_OUTPUT_DIR, filename)
-    if not os.path.exists(file_path) or not os.path.isfile(file_path):
-        raise HTTPException(status_code=404, detail="文件不存在")
-
-    # 根据扩展名设置 MIME 类型
-    mime_map = {
-        ".mp4": "video/mp4",
-        ".mp3": "audio/mpeg",
-        ".wav": "audio/wav",
-        ".m4a": "audio/mp4",
-        ".srt": "application/x-subrip",  # SRT 字幕文件
-        ".vtt": "text/vtt",  # WebVTT 字幕文件（浏览器 <track> 标签原生支持）
-    }
-    media_type = mime_map.get(ext, "application/octet-stream")
-
-    return FileResponse(
-        file_path,
-        media_type=media_type,
-        filename=filename,
-        # 不强制 attachment，让浏览器内联播放视频
-    )
-
-
-# =====================================================
 # 场景化模板 API
 # =====================================================
 
@@ -2200,7 +1169,7 @@ async def create_template_from_scenario(
 ):
     """
     从场景预设创建模板。
-    
+
     根据 scenario_key 加载预设，用 inputs 渲染 steps_config_template，
     自动计算 estimated_credits，创建模板。
     """
@@ -2209,29 +1178,11 @@ async def create_template_from_scenario(
     if not scenario:
         raise HTTPException(status_code=404, detail=f"场景预设 '{req.scenario_key}' 不存在")
 
-    # 2. 渲染 steps_config
+    # 2. 渲染 steps_config（wizard_chain 模式下直接拷贝预设链路）
     try:
-        # 如果用户提供了自定义步骤配置，则使用它
         if req.custom_steps_config:
             steps_config = req.custom_steps_config
-            # 兜底：从场景预设回填前端可能遗漏的字段（例如 requires_confirmation）
-            # 前端 map 步骤时若漏传 requires_confirmation，引擎读取后恒为 False，
-            # 会导致需要确认的步骤直接放行，整个流程一路跑完不暂停
-            preset_steps = scenario.get("steps_config_template", [])
-            preset_by_key = {s.get("key"): s for s in preset_steps if isinstance(s, dict)}
-            for step in steps_config:
-                if not isinstance(step, dict):
-                    continue
-                key = step.get("key")
-                preset = preset_by_key.get(key)
-                if not preset:
-                    continue
-                # 仅回填缺失的字段，不覆盖用户显式设置的值
-                for field_name in ("requires_confirmation",):
-                    if field_name not in step and field_name in preset:
-                        step[field_name] = preset[field_name]
         else:
-            # 否则，使用场景预设渲染步骤配置
             steps_config = template_scenarios.render_steps_config(
                 scenario=scenario,
                 inputs=req.inputs or {},
@@ -2277,21 +1228,21 @@ async def get_available_models(
 ):
     """
     获取可用的模型列表（从 model_definitions 表读取）。
-    
+
     - model_type: 可选过滤条件，image/video/chat
     """
     query = select(ModelDefinition).where(
         ModelDefinition.is_active == True
     )
-    
+
     if model_type:
         query = query.where(ModelDefinition.type == model_type)
-    
+
     query = query.order_by(ModelDefinition.sort_order.asc())
-    
+
     result = await db.execute(query)
     models = result.scalars().all()
-    
+
     return {
         "items": [m.to_dict() for m in models],
         "total": len(models),

@@ -113,12 +113,8 @@ async def create_template(
     # 自动计算预估积分（如果未设置）
     await auto_fill_estimated_credits(db, data)
 
-    # 自动推断 output_mapping（如果未设置）— spec 5.3 / Task 4
-    # 取最后一个 ffmpeg_composite / video_batch 步骤的输出作为最终产物
+    # wizard_chain 模式下 output_mapping 由项目制合成流程处理，模板层不再推断
     output_mapping = None
-    if data.steps_config:
-        from app.services.pipeline.template_validate import infer_output_mapping
-        output_mapping = infer_output_mapping(data.steps_config)
 
     tpl = PipelineTemplate(
         key=data.key,
@@ -186,12 +182,19 @@ async def update_template(
             revision.submit_reason = update_data["submit_reason"]
         tpl.has_pending_revision = True
         await db.flush()
-        # 触发 AI 预筛（命中敏感词时标记 revision.is_rejected=True 并写入 reject_reason）
+        # 触发敏感词预筛（命中则标记 revision.is_rejected=True 并写入 reject_reason）
+        # 直接复用 app.services.moderation_service.check_sensitive_text
         try:
-            from app.services.pipeline.moderation_service import prescreen_template_revision
-            await prescreen_template_revision(db, revision)
+            from app.services.moderation_service import check_sensitive_text
+            text_to_check = " ".join(filter(None, [
+                revision.name, revision.description, revision.submit_reason,
+            ] or []))
+            hit, hit_words = await check_sensitive_text(db, text_to_check)
+            if hit:
+                revision.is_rejected = True
+                revision.reject_reason = f"命中敏感词: {', '.join(hit_words[:5])}"
         except Exception as e:
-            logger.warning("revision AI 预筛失败（不阻断保存）: %s", e)
+            logger.warning("revision 敏感词预筛失败（不阻断保存）: %s", e)
         await db.commit()
         await db.refresh(tpl)
         return tpl
@@ -201,10 +204,9 @@ async def update_template(
         if hasattr(tpl, field) and value is not None:
             setattr(tpl, field, value)
 
-    # 若 steps_config 被更新但 output_mapping 未显式传入，自动推断（spec 5.3 / Task 4）
+    # wizard_chain 模式下 output_mapping 由项目制合成流程处理，模板层不再推断
     if "steps_config" in update_data and "output_mapping" not in update_data:
-        from app.services.pipeline.template_validate import infer_output_mapping
-        tpl.output_mapping = infer_output_mapping(tpl.steps_config or [])
+        tpl.output_mapping = None
 
     await db.commit()
     await db.refresh(tpl)
@@ -499,3 +501,224 @@ async def auto_fill_estimated_credits(
             data.estimated_credits = credits
     except Exception as e:
         logger.warning("[模板服务] 自动计算积分失败（不阻断保存）: %s", e)
+
+
+# =====================================================
+# 模板校验 & 示例文件（迁移自 template_validate.py）
+# =====================================================
+
+# wizard_chain 模式下支持的 step type 清单
+_WIZARD_STEP_TYPES = {
+    "llm_generate",
+    "image_batch",
+    "video_batch",
+    "tts_generate",
+    "ffmpeg_composite",
+    "color_grade",
+    "video_edit",
+    "transition_compose",
+    "script_generation",
+    "entity_extraction",
+    "storyboard_split",
+    "frame_prompt_extract",
+}
+
+# 导出文件格式版本
+TEMPLATE_EXPORT_VERSION = "1.0"
+
+
+def get_sample_template() -> Dict[str, Any]:
+    """
+    返回一份最小可用的示例模板 JSON。
+
+    结构与 /api/pipeline/export/templates 的导出格式完全一致，
+    用户可直接保存为 .json 然后通过 /api/pipeline/templates/import 导入。
+    """
+    from datetime import datetime
+    return {
+        "version": TEMPLATE_EXPORT_VERSION,
+        "exported_at": datetime.utcnow().isoformat() + "Z",
+        "templates": [
+            {
+                "key": "example_standard_drama",
+                "name": "示例 · 标准漫剧",
+                "description": "剧本 → 分镜 → 视频 → 合成（最小可用示例，可直接导入）",
+                "category": "drama",
+                "tags": ["示例", "漫剧"],
+                "inputs_config": [
+                    {
+                        "key": "theme",
+                        "label": "主题",
+                        "type": "text",
+                        "required": True,
+                        "default": "",
+                    }
+                ],
+                "steps_config": [
+                    {
+                        "key": "script_generation",
+                        "name": "剧本生成",
+                        "type": "llm_generate",
+                        "depends_on": [],
+                        "config": {
+                            "prompt_template": "根据主题 {{theme}} 生成 8 个分镜剧本，输出 JSON 数组",
+                            "model": "agnes-2.0-flash",
+                            "temperature": 0.8,
+                        },
+                    },
+                    {
+                        "key": "frame_prompt_extract",
+                        "name": "帧 prompt 提取",
+                        "type": "llm_generate",
+                        "depends_on": ["script_generation"],
+                        "config": {
+                            "prompt_template": "为每个分镜提取帧级绘画 prompt",
+                            "model": "agnes-2.0-flash",
+                            "temperature": 0.5,
+                        },
+                    },
+                ],
+                "output_mapping": None,
+                "is_public": False,
+            }
+        ],
+        "script_templates": [],
+        "style_presets": [],
+    }
+
+
+def validate_template(template_data: Dict[str, Any]) -> tuple:
+    """
+    无副作用校验模板结构（不落库、不启动运行）。
+
+    检查项:
+      - steps_config 每个 step.type 必须命中支持的类型清单
+      - step.key 必须非空且在同模板内唯一
+      - depends_on 引用的 key 必须存在于同模板内
+      - from_step / audio_from_step / subtitle_from_step 同样校验存在性
+
+    Args:
+        template_data: 完整模板 dict
+
+    Returns:
+        (is_valid, errors)  errors 形如 [{step_key, field, reason}]
+    """
+    errors: List[Dict[str, Any]] = []
+
+    steps = template_data.get("steps_config") or []
+    if not isinstance(steps, list) or not steps:
+        return False, [
+            {
+                "step_key": None,
+                "field": "steps_config",
+                "reason": "steps_config 不能为空",
+            }
+        ]
+
+    # 第一遍：收集 key 集合，校验 type / key 唯一性
+    seen_keys: set = set()
+    duplicate_keys: set = set()
+    for step in steps:
+        if not isinstance(step, dict):
+            errors.append(
+                {"step_key": None, "field": "step", "reason": "step 必须是对象"}
+            )
+            continue
+
+        key = step.get("key")
+        if not key:
+            errors.append(
+                {"step_key": None, "field": "key", "reason": "步骤缺少 key"}
+            )
+            continue
+
+        if key in seen_keys:
+            duplicate_keys.add(key)
+        seen_keys.add(key)
+
+        step_type = step.get("type")
+        if not step_type:
+            errors.append(
+                {
+                    "step_key": key,
+                    "field": "type",
+                    "reason": f"步骤 {key} 缺少 type 字段",
+                }
+            )
+        elif step_type not in _WIZARD_STEP_TYPES:
+            errors.append(
+                {
+                    "step_key": key,
+                    "field": "type",
+                    "reason": (
+                        f"未知步骤类型 '{step_type}'，支持的类型: "
+                        f"{', '.join(sorted(_WIZARD_STEP_TYPES))}"
+                    ),
+                }
+            )
+
+    # 重复 key 错误（去重后只报一次）
+    for k in duplicate_keys:
+        errors.append(
+            {
+                "step_key": k,
+                "field": "key",
+                "reason": f"步骤 key 重复: {k}",
+            }
+        )
+
+    # 第二遍：校验 depends_on 和 from_step 引用（依赖 key 存在性）
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        key = step.get("key") or "<unknown>"
+        config = step.get("config") or {}
+
+        # depends_on
+        depends_on = step.get("depends_on") or []
+        if isinstance(depends_on, list):
+            for dep in depends_on:
+                if dep not in seen_keys:
+                    errors.append(
+                        {
+                            "step_key": key,
+                            "field": "depends_on",
+                            "reason": f"depends_on 引用了不存在的步骤 key: {dep}",
+                        }
+                    )
+
+        # from_step
+        from_step = config.get("from_step")
+        if from_step and from_step not in seen_keys:
+            errors.append(
+                {
+                    "step_key": key,
+                    "field": "from_step",
+                    "reason": f"from_step 引用了不存在的步骤 key: {from_step}",
+                }
+            )
+
+        # audio_from_step
+        audio_from = config.get("audio_from_step")
+        if audio_from and audio_from not in seen_keys:
+            errors.append(
+                {
+                    "step_key": key,
+                    "field": "audio_from_step",
+                    "reason": f"audio_from_step 引用了不存在的步骤 key: {audio_from}",
+                }
+            )
+
+        # subtitle_from_step
+        subtitle_from = config.get("subtitle_from_step")
+        if subtitle_from and subtitle_from not in seen_keys:
+            errors.append(
+                {
+                    "step_key": key,
+                    "field": "subtitle_from_step",
+                    "reason": f"subtitle_from_step 引用了不存在的步骤 key: {subtitle_from}",
+                }
+            )
+
+    return (len(errors) == 0), errors
+

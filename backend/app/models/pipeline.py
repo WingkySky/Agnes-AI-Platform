@@ -1,6 +1,6 @@
 # =====================================================
-# Pipeline 模型 — 创意流水线相关数据模型
-# 包含流水线模板、执行实例、步骤记录等核心表
+# Pipeline 模型 — 流水线模板、剧本模板、风格预设等数据模型
+# 项目制创作（Project）已迁移到 app.models.project，本文件仅保留模板相关表
 # =====================================================
 
 from datetime import datetime
@@ -8,23 +8,6 @@ from sqlalchemy import Column, Integer, String, Text, DateTime, JSON, Boolean, F
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
-
-
-# =====================================================
-# 流水线运行状态常量（与 engine.py 保持一致）
-# =====================================================
-STATUS_PENDING = "pending"
-STATUS_RUNNING = "running"
-STATUS_SUCCESS = "success"
-STATUS_FAILED = "failed"
-STATUS_CANCELLED = "cancelled"
-
-# 步骤状态常量
-STEP_STATUS_PENDING = "pending"
-STEP_STATUS_RUNNING = "running"
-STEP_STATUS_SUCCESS = "success"
-STEP_STATUS_FAILED = "failed"
-STEP_STATUS_SKIPPED = "skipped"
 
 
 class PipelineTemplate(Base):
@@ -91,7 +74,6 @@ class PipelineTemplate(Base):
 
     # 关联
     script_template = relationship("ScriptTemplate", back_populates="pipeline_templates")
-    runs = relationship("PipelineRun", back_populates="template", cascade="all, delete-orphan")
     # 公开模板的修订草稿列表（CASCADE 删除由外键约束保证）
     revisions = relationship(
         "PipelineTemplateRevision",
@@ -205,145 +187,3 @@ class StylePreset(Base):
 
     # 关联
     assets = relationship("Asset", back_populates="style")
-
-
-class PipelineRun(Base):
-    """
-    流水线执行实例
-
-    一次具体的流水线执行，有状态，可断点续跑。
-
-    字段说明:
-    - id: 主键
-    - template_id: 使用的模板 ID
-    - user_id: 所属用户
-    - name: 本次运行的名称（用户可自定义）
-    - inputs: 用户输入的参数值（JSON）
-    - status: 整体状态
-    - current_step_key: 当前执行到的步骤 key
-    - started_at: 开始时间
-    - finished_at: 结束时间
-    - total_credits: 累计消耗积分
-    - output_summary: 输出摘要（最终成片 URL 等）
-    - error_message: 整体错误信息
-    - canvas_export_data: 导出到画布的数据（Phase 3）
-    - pause_requested: 是否请求暂停
-    - pause_reason: 暂停原因：user_manual/awaiting_confirmation/null
-    - auto_confirm: 是否自动确认（开启后跳过 requires_confirmation 的自动暂停）
-    - edit_lock_user_id: 编辑锁持有者用户 ID（运行级互斥锁，5 分钟超时）
-    - edit_lock_expires_at: 编辑锁过期时间（惰性检查，超时自动释放）
-    """
-
-    __tablename__ = "pipeline_runs"
-
-    id = Column(Integer, primary_key=True, index=True)
-    template_id = Column(Integer, ForeignKey("pipeline_templates.id"), nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
-    name = Column(String(200), nullable=True)
-    inputs = Column(JSON, nullable=False)
-    status = Column(String(30), default="pending", nullable=False, index=True)
-    current_step_key = Column(String(100), nullable=True)
-    started_at = Column(DateTime, nullable=True)
-    finished_at = Column(DateTime, nullable=True)
-    total_credits = Column(Integer, default=0, nullable=False)
-    output_summary = Column(JSON, default=dict, nullable=False)
-    error_message = Column(Text, nullable=True)
-    canvas_export_data = Column(JSON, nullable=True)
-    pause_requested = Column(Boolean, default=False, nullable=False)
-    # 暂停原因：user_manual/awaiting_confirmation/null
-    pause_reason = Column(String(30), nullable=True)
-    # 是否自动确认（开启后跳过 requires_confirmation 的自动暂停）
-    auto_confirm = Column(Boolean, default=False, nullable=False)
-    # 编辑锁持有者用户 ID（运行级互斥锁，5 分钟超时，惰性检查）
-    edit_lock_user_id = Column(Integer, nullable=True)
-    # 编辑锁过期时间（超过此时间视为锁已释放）
-    edit_lock_expires_at = Column(DateTime, nullable=True)
-    is_deleted = Column(Boolean, default=False, nullable=False, index=True)
-    deleted_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    # 关联
-    template = relationship("PipelineTemplate", back_populates="runs")
-    steps = relationship("PipelineStep", back_populates="run", cascade="all, delete-orphan",
-                         order_by="PipelineStep.sort_order")
-
-    __table_args__ = (
-        Index("idx_pipeline_runs_user_status", "user_id", "status"),
-    )
-
-
-class PipelineStep(Base):
-    """
-    流水线步骤执行记录
-
-    流水线中的一个执行步骤，记录输入、输出、状态、耗时等。
-
-    字段说明:
-    - id: 主键
-    - run_id: 所属流水线实例 ID
-    - step_key: 步骤定义的 key（如 'script_generation'）
-    - name: 步骤显示名称
-    - step_type: 步骤类型
-    - status: 状态
-    - input_data: 步骤输入数据（JSON）
-    - output_data: 步骤输出数据（JSON）
-    - error_message: 错误信息
-    - started_at: 开始时间
-    - finished_at: 结束时间
-    - credits_consumed: 本步消耗积分
-    - retry_count: 重试次数
-    - max_retries: 最大重试次数
-    - timeout_sec: 超时时间（秒）
-    - depends_on: 依赖的步骤 key 数组（JSON）
-    - requires_confirmation: 是否需要用户确认后才继续下游
-    - confirmation_status: 确认状态：pending/confirmed/rejected/null（不需要确认时）
-    - confirmation_comment: 用户确认/驳回时填写的备注
-    - stale: 产物是否已失效（上游被编辑/替换后标记）
-    - stale_reason: 失效原因
-    - sort_order: 排序序号
-    """
-
-    __tablename__ = "pipeline_steps"
-
-    id = Column(Integer, primary_key=True, index=True)
-    run_id = Column(Integer, ForeignKey("pipeline_runs.id", ondelete="CASCADE"), nullable=False, index=True)
-    step_key = Column(String(100), nullable=False)
-    name = Column(String(200), nullable=False)
-    step_type = Column(String(50), nullable=False)
-    status = Column(String(30), default="pending", nullable=False, index=True)
-    input_data = Column(JSON, default=dict, nullable=False)
-    output_data = Column(JSON, default=dict, nullable=False)
-    error_message = Column(Text, nullable=True)
-    started_at = Column(DateTime, nullable=True)
-    finished_at = Column(DateTime, nullable=True)
-    credits_consumed = Column(Integer, default=0, nullable=False)
-    retry_count = Column(Integer, default=0, nullable=False)
-    max_retries = Column(Integer, default=1, nullable=False)
-    timeout_sec = Column(Integer, default=300, nullable=False)
-    depends_on = Column(JSON, default=list, nullable=False)
-    # 是否需要用户确认后才继续下游
-    requires_confirmation = Column(Boolean, default=False, nullable=False)
-    # 确认状态：pending/confirmed/rejected/null（不需要确认时）
-    confirmation_status = Column(String(20), nullable=True)
-    # 用户确认/驳回时填写的备注
-    confirmation_comment = Column(Text, nullable=True)
-    # 产物是否已失效（上游被编辑/替换后标记）
-    stale = Column(Boolean, default=False, nullable=False)
-    # 失效原因
-    stale_reason = Column(String(500), nullable=True)
-    sort_order = Column(Integer, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    # 关联
-    run = relationship("PipelineRun", back_populates="steps")
-
-    __table_args__ = (
-        Index("idx_pipeline_steps_run_status", "run_id", "status"),
-    )
-
-    # 联合唯一约束：同一个 run 内 step_key 唯一
-    __mapper_args__ = {
-        "confirm_deleted_rows": False,
-    }

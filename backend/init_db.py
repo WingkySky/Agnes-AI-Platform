@@ -74,13 +74,26 @@ _safe_import("app.models.plaza_like", ["PlazaLike"])
 _safe_import("app.models.system_config", ["SystemConfig"])
 _safe_import("app.models.pipeline", [
     "PipelineTemplate",
-    "PipelineRun",
-    "PipelineStep",
     "StylePreset",
     "ScriptTemplate",
 ])
+_safe_import("app.models.pipeline_template_revision", ["PipelineTemplateRevision"])
 _safe_import("app.models.style_element", ["StyleElement"])
 _safe_import("app.models.asset", ["Asset"])
+# 项目制创作相关表（Project 体系）
+_safe_import("app.models.project", [
+    "Project",
+    "ProjectScript",
+    "ProjectCharacter",
+    "ProjectScene",
+    "ProjectProp",
+    "ProjectEntityAsset",
+    "ProjectShot",
+    "ProjectShotCharacter",
+    "ProjectShotProp",
+    "ProjectShotFrameImage",
+    "ProjectShotVideo",
+])
 
 logging.basicConfig(
     level=logging.INFO,
