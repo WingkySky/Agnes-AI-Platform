@@ -240,7 +240,7 @@ export const useChatStore = defineStore('chat', {
     /** 使用 AI 自动总结会话主题（生成新标题） */
     async autoSummarizeSession(sessionId: number): Promise<ChatSession> {
       try {
-        const updated: ChatSession = await summarizeChatSession(sessionId)
+        const updated = await summarizeChatSession(sessionId) as unknown as ChatSession
         // 更新本地 sessions 列表
         const session = this.sessions.find(s => s.id === sessionId)
         if (session) {

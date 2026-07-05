@@ -80,7 +80,7 @@ import { Search, FolderOpened, Plus } from '@element-plus/icons-vue'
 import { useAssetStore } from '@/stores/asset'
 import AssetCard from '@/components/pipeline/AssetCard.vue'
 import AssetDetailModal from '@/components/pipeline/AssetDetailModal.vue'
-import type { Asset, AssetType } from '@/types'
+import type { Asset, AssetType, PipelineListParams } from '@/types'
 
 const { t } = useI18n()
 const assetStore = useAssetStore()

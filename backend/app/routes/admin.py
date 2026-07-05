@@ -20,6 +20,7 @@ from app.models.credit_rule import CreditRule, DEFAULT_CREDIT_RULES
 from app.models.user import User
 from app.schemas.user import CreditRuleResponse, CreditRuleUpdateRequest
 from app.services.credits_service import invalidate_credit_rules_cache
+from app.services.project.project_service import rebuild_all_project_covers
 
 logger = logging.getLogger("agnes_platform")
 router = APIRouter(prefix="/admin", tags=["管理员-积分规则"])
@@ -164,3 +165,18 @@ async def reset_credit_rules(
 
     logger.info("[管理员操作] %s 恢复默认积分规则", admin.username)
     return await list_credit_rules(db, admin)
+
+
+# =====================================================
+# 项目封面批量回填（管理员专用）
+# =====================================================
+
+@router.post("/projects/rebuild-all-covers", summary="[管理员] 批量回填项目封面")
+async def rebuild_all_covers_api(
+    db: AsyncSession = Depends(get_async_db),
+    admin: User = Depends(get_current_admin_user),
+):
+    """为所有缺少封面的项目自动回填封面（扫描所有帧图）"""
+    result = await rebuild_all_project_covers(db)
+    logger.info("[管理员操作] %s 执行批量封面回填: %s", admin.username, result)
+    return result

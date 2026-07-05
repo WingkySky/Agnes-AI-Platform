@@ -105,6 +105,16 @@ export function updateActiveView(id: number, data: ActiveViewUpdateRequest): Pro
   return client.patch(`/api/projects/${id}/active-view`, data)
 }
 
+/** 自动从分镜帧图中选取封面 */
+export function rebuildProjectCover(id: number): Promise<Project> {
+  return client.post(`/api/projects/${id}/rebuild-cover`)
+}
+
+/** 指定帧图设为封面 */
+export function setProjectCover(id: number, frameImageId: number): Promise<Project> {
+  return client.post(`/api/projects/${id}/set-cover`, { frame_image_id: frameImageId })
+}
+
 // =====================================================
 // 项目 SSE 订阅 URL
 // =====================================================

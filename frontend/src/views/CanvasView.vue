@@ -981,9 +981,6 @@ const quickGenerateState = reactive({
   mode: 'text2image' as 'text2image' | 'text2video' | 'image2image' | 'image2video',
 })
 
-// 弹窗确认生成
-async function handleQuickGenerateConfirm(payload: { mode: string; prompt?: string; model?: string; size?: string; aspect_ratio?: string; seconds?: number }) {
-
 // 打开快捷生成弹窗（由文本/图片节点的生图/生视频按钮触发）
 function handleQuickGenerate({ panel, mode }: { panel: typeof store.panels[number]; mode: string }) {
   // 校验源内容非空

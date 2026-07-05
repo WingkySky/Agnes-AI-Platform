@@ -13,6 +13,7 @@ from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.project import (
+    Project,
     ProjectShot,
     ProjectShotFrameImage,
     ProjectShotCharacter,
@@ -72,6 +73,20 @@ async def _get_character_ref_urls(
         if asset and asset.file_url:
             urls.append(asset.file_url)
     return urls
+
+
+async def _ensure_project_cover(
+    db: AsyncSession, project_id: int, thumbnail_url: Optional[str]
+) -> None:
+    """若项目尚无封面，则用给定的 thumbnail_url 回填 cover_url（原子条件更新，避免并发覆盖）"""
+    if not thumbnail_url:
+        return
+    await db.execute(
+        update(Project)
+        .where(Project.id == project_id)
+        .where((Project.cover_url.is_(None)) | (Project.cover_url == ""))
+        .values(cover_url=thumbnail_url)
+    )
 
 
 # =====================================================
@@ -209,6 +224,7 @@ async def claim_frame_image(
     await db.flush()
 
     shot.active_frame_image_id = frame_image.id
+    await _ensure_project_cover(db, shot.project_id, frame_image.thumbnail_url)
     await db.commit()
     await db.refresh(frame_image)
 
@@ -296,6 +312,7 @@ async def upload_frame_image(
     await db.flush()
 
     shot.active_frame_image_id = frame_image.id
+    await _ensure_project_cover(db, shot.project_id, thumbnail_url or file_url)
     await db.commit()
     await db.refresh(frame_image)
 
@@ -335,6 +352,8 @@ async def set_active_frame_image(
     else:
         project_id = None
 
+    if project_id:
+        await _ensure_project_cover(db, project_id, fi.thumbnail_url or fi.file_url)
     await db.commit()
     await db.refresh(fi)
 

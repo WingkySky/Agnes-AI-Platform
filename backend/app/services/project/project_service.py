@@ -17,6 +17,8 @@ from sqlalchemy.orm import selectinload
 
 from app.models.project import (
     Project,
+    ProjectShot,
+    ProjectShotFrameImage,
     PROJECT_STATUS_DRAFT,
     PROJECT_STATUS_IN_PROGRESS,
     PROJECT_STATUS_ARCHIVED,
@@ -159,3 +161,91 @@ async def update_status(
     await db.commit()
     await db.refresh(project)
     return project
+
+
+# =====================================================
+# 封面管理
+# =====================================================
+
+async def rebuild_project_cover(db: AsyncSession, project_id: int) -> Optional[Project]:
+    """从分镜帧图中自动选取封面（按分镜顺序取第一个有激活帧图的分镜）"""
+    project = await get_project(db, project_id)
+    if not project:
+        return None
+
+    result = await db.execute(
+        select(ProjectShotFrameImage)
+        .join(ProjectShot, ProjectShot.id == ProjectShotFrameImage.shot_id)
+        .where(
+            ProjectShot.project_id == project_id,
+            ProjectShotFrameImage.is_active.is_(True),
+            ProjectShotFrameImage.thumbnail_url.isnot(None),
+            ProjectShotFrameImage.thumbnail_url != "",
+        )
+        .order_by(ProjectShot.sort_order, ProjectShot.sequence_no, ProjectShotFrameImage.version.desc())
+        .limit(1)
+    )
+    frame = result.scalar_one_or_none()
+    if frame and frame.thumbnail_url:
+        project.cover_url = frame.thumbnail_url
+        await db.commit()
+        await db.refresh(project)
+    return project
+
+
+async def set_project_cover_from_frame(
+    db: AsyncSession, project_id: int, frame_image_id: int
+) -> Optional[Project]:
+    """将指定帧图设为项目封面（校验帧图属于该项目）"""
+    project = await get_project(db, project_id)
+    if not project:
+        return None
+
+    result = await db.execute(
+        select(ProjectShotFrameImage)
+        .join(ProjectShot, ProjectShot.id == ProjectShotFrameImage.shot_id)
+        .where(
+            ProjectShotFrameImage.id == frame_image_id,
+            ProjectShot.project_id == project_id,
+        )
+    )
+    frame = result.scalar_one_or_none()
+    if not frame:
+        return None  # 帧图不存在或不属于该项目
+
+    project.cover_url = frame.thumbnail_url or frame.file_url
+    await db.commit()
+    await db.refresh(project)
+    return project
+
+
+async def rebuild_all_project_covers(db: AsyncSession) -> dict:
+    """批量为所有缺少封面的项目回填封面（供一次性修复使用）"""
+    result = await db.execute(
+        select(Project).where((Project.cover_url.is_(None)) | (Project.cover_url == ""))
+    )
+    projects = result.scalars().all()
+    updated = 0
+    skipped = 0
+    for project in projects:
+        frame_result = await db.execute(
+            select(ProjectShotFrameImage)
+            .join(ProjectShot, ProjectShot.id == ProjectShotFrameImage.shot_id)
+            .where(
+                ProjectShot.project_id == project.id,
+                ProjectShotFrameImage.is_active.is_(True),
+                ProjectShotFrameImage.thumbnail_url.isnot(None),
+                ProjectShotFrameImage.thumbnail_url != "",
+            )
+            .order_by(ProjectShot.sort_order, ProjectShot.sequence_no, ProjectShotFrameImage.version.desc())
+            .limit(1)
+        )
+        frame = frame_result.scalar_one_or_none()
+        if frame and frame.thumbnail_url:
+            project.cover_url = frame.thumbnail_url
+            updated += 1
+        else:
+            skipped += 1
+    await db.commit()
+    return {"total": len(projects), "updated": updated, "skipped": skipped}
+

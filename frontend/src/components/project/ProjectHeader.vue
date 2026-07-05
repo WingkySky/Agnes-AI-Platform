@@ -9,6 +9,16 @@
   <div class="project-header">
     <div class="header-left">
       <el-button link :icon="ArrowLeft" @click="$router.push('/projects')">返回</el-button>
+
+      <!-- 封面预览 + 选择器 -->
+      <div class="cover-selector" @click="showCoverPicker = true">
+        <img v-if="project?.cover_url" :src="project.cover_url" alt="封面" class="cover-thumb" />
+        <div v-else class="cover-placeholder">
+          <el-icon :size="20"><Picture /></el-icon>
+          <span class="cover-hint">点击选择封面</span>
+        </div>
+      </div>
+
       <div class="header-title-block">
         <div class="title-row">
           <span class="title">{{ project?.title || '加载中...' }}</span>
@@ -31,6 +41,11 @@
           {{ sseConnected ? '实时' : '轮询' }}
         </el-tag>
       </el-tooltip>
+
+      <!-- 自动设置封面 -->
+      <el-button size="small" :icon="Picture" @click="onRebuildCover" :disabled="!!project?.cover_url">
+        自动设置封面
+      </el-button>
 
       <!-- 视图切换 -->
       <el-radio-group
@@ -95,11 +110,43 @@
         style="width: 100%; max-height: 70vh; background: #000"
       />
     </el-dialog>
+
+    <!-- 封面选择弹窗 -->
+    <el-dialog
+      v-model="showCoverPicker"
+      title="选择项目封面"
+      width="720px"
+    >
+      <div v-if="coverCandidates.length === 0" style="color: var(--el-text-color-secondary); padding: 20px 0; text-align: center;">
+        暂无可用的帧图。请先为分镜生成帧图后再设置封面。
+      </div>
+      <div v-else class="cover-picker-grid">
+        <div
+          v-for="item in coverCandidates"
+          :key="item.frame_image.id"
+          class="cover-picker-item"
+          :class="{ active: project?.cover_url === item.frame_image.thumbnail_url || project?.cover_url === item.frame_image.file_url }"
+          @click="onSelectCover(item)"
+        >
+          <img :src="(item.frame_image.thumbnail_url || item.frame_image.file_url) || undefined" :alt="`分镜${item.shot.sequence_no}`" />
+          <div class="cover-picker-label">
+            <span>第 {{ item.shot.sequence_no }} 镜</span>
+            <span v-if="item.shot.title">{{ item.shot.title }}</span>
+            <el-tag v-if="item.frame_image.is_active" size="small" type="success">当前激活</el-tag>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="showCoverPicker = false">取消</el-button>
+        <el-button type="danger" plain @click="onClearCover">清除封面</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import {
   ArrowLeft, Calendar, FullScreen, Monitor, Picture, Connection,
@@ -118,6 +165,77 @@ const props = defineProps<{
 
 const projectStore = useProjectStore()
 const userStore = useUserStore()
+const router = useRouter()
+
+// ================ 封面选择器 ================
+const showCoverPicker = ref(false)
+
+interface CoverCandidate {
+  shot: {
+    id: number
+    sequence_no: number
+    title?: string | null
+  }
+  frame_image: {
+    id: number
+    thumbnail_url?: string | null
+    file_url?: string | null
+    is_active: boolean
+  }
+}
+
+const coverCandidates = computed<CoverCandidate[]>(() => {
+  if (!props.project?.shots) return []
+  const candidates: CoverCandidate[] = []
+  for (const shot of props.project.shots) {
+    if (shot.frame_images && shot.frame_images.length > 0) {
+      for (const fi of shot.frame_images) {
+        if (fi.thumbnail_url || fi.file_url) {
+          candidates.push({ shot, frame_image: fi })
+        }
+      }
+    }
+  }
+  return candidates
+})
+
+async function onRebuildCover() {
+  if (!props.project) return
+  try {
+    await projectStore.rebuildCover(props.project.id)
+    ElMessage.success('封面已自动选取')
+  } catch (e: any) {
+    ElMessage.error(e?.message || '自动设置封面失败')
+  }
+}
+
+async function onSelectCover(item: CoverCandidate) {
+  if (!props.project) return
+  try {
+    await projectStore.setCoverFromFrame(props.project.id, item.frame_image.id)
+    showCoverPicker.value = false
+  } catch (e: any) {
+    ElMessage.error(e?.message || '设置封面失败')
+  }
+}
+
+async function onClearCover() {
+  if (!props.project) return
+  try {
+    await ElMessageBox.confirm('确定要清除当前封面吗？', '清除封面', {
+      type: 'warning',
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+    })
+    await projectStore.updateProject(props.project.id, { cover_url: '' })
+    showCoverPicker.value = false
+    ElMessage.success('封面已清除')
+  } catch (e: any) {
+    if (e !== 'cancel') {
+      // 用户取消
+    }
+  }
+}
 
 // ================ 合成进度计算属性 ================
 const isMerging = computed(() => props.project?.status === 'merging')
@@ -250,4 +368,39 @@ function formatDate(s?: string | null): string {
 }
 .meta-row span { display: inline-flex; align-items: center; gap: 4px; }
 .header-right { display: flex; align-items: center; gap: 12px; }
+
+/* 封面选择器 */
+.cover-selector {
+  width: 48px; height: 48px; border-radius: 6px; overflow: hidden;
+  border: 1px solid var(--el-border-color-light); cursor: pointer;
+  flex-shrink: 0; transition: border-color 0.2s;
+}
+.cover-selector:hover { border-color: var(--el-color-primary); }
+.cover-thumb { width: 100%; height: 100%; object-fit: cover; }
+.cover-placeholder {
+  width: 100%; height: 100%; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  color: var(--el-text-color-secondary); font-size: 8px; gap: 2px;
+  background: var(--el-fill-color-light);
+}
+.cover-hint { line-height: 1; }
+
+.cover-picker-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px; max-height: 50vh; overflow-y: auto; padding: 4px;
+}
+.cover-picker-item {
+  border: 2px solid var(--el-border-color-light); border-radius: 6px;
+  overflow: hidden; cursor: pointer; transition: all 0.15s;
+}
+.cover-picker-item:hover { border-color: var(--el-color-primary); }
+.cover-picker-item.active { border-color: var(--el-color-primary); box-shadow: 0 0 0 1px var(--el-color-primary); }
+.cover-picker-item img {
+  width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block;
+}
+.cover-picker-label {
+  padding: 4px 8px; display: flex; gap: 6px; align-items: center;
+  font-size: 12px; color: var(--el-text-color-regular); flex-wrap: wrap;
+}
+.cover-picker-label span:first-child { color: var(--el-text-color-secondary); }
 </style>

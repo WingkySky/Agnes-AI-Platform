@@ -88,6 +88,7 @@ from app.services.project import project_sse_manager
 from app.services.project.project_service import (
     create_project, create_draft_for_wizard, get_project, list_projects,
     update_project, delete_project, archive_project, update_active_view, update_status,
+    rebuild_project_cover, set_project_cover_from_frame,
 )
 from app.services.project.wizard import run_wizard
 from app.services.project.script_service import (
@@ -270,6 +271,81 @@ async def update_active_view_api(
     project = await _get_project_or_404(db, project_id)
     _check_project_owner(project, current_user)
     return await update_active_view(db, project_id, data.view)
+
+
+@router.post("/{project_id}/rebuild-cover", response_model=ProjectResponse, summary="自动选取封面")
+async def rebuild_cover_api(
+    project_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """从分镜帧图中自动选取封面（按分镜顺序取第一个激活帧图）"""
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    updated = await rebuild_project_cover(db, project_id)
+    if not updated:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    return updated
+
+
+@router.post("/{project_id}/set-cover", response_model=ProjectResponse, summary="指定帧图设置封面")
+async def set_cover_api(
+    project_id: int,
+    data: dict,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """将指定帧图设为项目封面"""
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    frame_image_id = data.get("frame_image_id")
+    if not frame_image_id:
+        raise HTTPException(status_code=400, detail="缺少 frame_image_id 参数")
+    updated = await set_project_cover_from_frame(db, project_id, int(frame_image_id))
+    if not updated:
+        raise HTTPException(status_code=400, detail="帧图不存在或不属于该项目")
+    return updated
+
+
+@router.post("/rebuild-missing-covers", summary="批量回填当前用户无封面的项目")
+async def rebuild_missing_covers_api(
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """为当前用户所有缺少封面但已有激活帧图的项目自动补全封面"""
+    from sqlalchemy import select as sa_select, and_
+    from app.models.project import Project, ProjectShot, ProjectShotFrameImage
+
+    result = await db.execute(
+        sa_select(Project).where(
+            Project.user_id == current_user.id,
+            (Project.cover_url.is_(None)) | (Project.cover_url == ""),
+        )
+    )
+    projects = result.scalars().all()
+    updated = 0
+    skipped = 0
+    for project in projects:
+        frame_result = await db.execute(
+            sa_select(ProjectShotFrameImage)
+            .join(ProjectShot, ProjectShot.id == ProjectShotFrameImage.shot_id)
+            .where(
+                ProjectShot.project_id == project.id,
+                ProjectShotFrameImage.is_active.is_(True),
+                ProjectShotFrameImage.thumbnail_url.isnot(None),
+                ProjectShotFrameImage.thumbnail_url != "",
+            )
+            .order_by(ProjectShot.sort_order, ProjectShot.sequence_no, ProjectShotFrameImage.version.desc())
+            .limit(1)
+        )
+        frame = frame_result.scalar_one_or_none()
+        if frame and frame.thumbnail_url:
+            project.cover_url = frame.thumbnail_url
+            updated += 1
+        else:
+            skipped += 1
+    await db.commit()
+    return {"total": len(projects), "updated": updated, "skipped": skipped}
 
 
 # =====================================================

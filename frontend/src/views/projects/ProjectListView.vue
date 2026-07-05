@@ -80,6 +80,7 @@
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item command="open">打开</el-dropdown-item>
+                  <el-dropdown-item command="rebuild-cover" :disabled="project.cover_url !== null">自动设置封面</el-dropdown-item>
                   <el-dropdown-item command="archive" :disabled="project.status === 'archived'">归档</el-dropdown-item>
                   <el-dropdown-item command="delete" divided>删除</el-dropdown-item>
                 </el-dropdown-menu>
@@ -167,6 +168,9 @@ function onProjectCreated(projectId: number) {
 async function onCardAction(cmd: string, project: Project) {
   if (cmd === 'open') {
     openProject(project.id)
+  } else if (cmd === 'rebuild-cover') {
+    await projectStore.rebuildCover(project.id)
+    await fetchList()
   } else if (cmd === 'archive') {
     await projectStore.archiveProject(project.id)
     await fetchList()

@@ -18,6 +18,8 @@ import {
   deleteProject as apiDeleteProject,
   archiveProject as apiArchiveProject,
   updateActiveView as apiUpdateActiveView,
+  rebuildProjectCover as apiRebuildProjectCover,
+  setProjectCover as apiSetProjectCover,
   createWizardProject as apiCreateWizardProject,
   resumeWizard as apiResumeWizard,
   listScripts as apiListScripts,
@@ -329,6 +331,30 @@ export const useProjectStore = defineStore('project', {
       return project
     },
 
+    // ================ 封面管理 ================
+    async rebuildCover(id: number) {
+      const project = await apiRebuildProjectCover(id)
+      if (this.currentProjectId === id) {
+        this.currentProject = { ...this.currentProject, ...project }
+      }
+      // 同步更新列表中的项目
+      const idx = this.projects.findIndex(p => p.id === id)
+      if (idx >= 0) this.projects[idx] = { ...this.projects[idx], ...project }
+      ElMessage.success('封面已自动选取')
+      return project
+    },
+
+    async setCoverFromFrame(id: number, frameImageId: number) {
+      const project = await apiSetProjectCover(id, frameImageId)
+      if (this.currentProjectId === id) {
+        this.currentProject = { ...this.currentProject, ...project }
+      }
+      const idx = this.projects.findIndex(p => p.id === id)
+      if (idx >= 0) this.projects[idx] = { ...this.projects[idx], ...project }
+      ElMessage.success('封面已设置')
+      return project
+    },
+
     // ================ 向导 ================
     async createWizardProject(data: WizardCreateRequest) {
       const project = await apiCreateWizardProject(data)
@@ -344,7 +370,7 @@ export const useProjectStore = defineStore('project', {
     /** SSE 推送 project_status_changed 事件时本地同步状态 */
     updateStatusFromEvent(newStatus: string) {
       if (this.currentProject) {
-        this.currentProject = { ...this.currentProject, status: newStatus }
+        this.currentProject = { ...this.currentProject, status: newStatus as ProjectStatus }
       }
     },
 
@@ -614,8 +640,8 @@ export const useProjectStore = defineStore('project', {
     // ================ 帧图 ================
     async generateFrameImage(shotId: number, data: GenerateFrameImageRequest) {
       if (!this.currentProjectId) throw new Error('未选择项目')
-      const resp = await apiGenerateFrameImage(this.currentProjectId, shotId, data)
-      const taskId = resp?.task_id
+      const resp = await apiGenerateFrameImage(this.currentProjectId, shotId, data) as unknown as Record<string, unknown>
+      const taskId = resp?.task_id as string | undefined
       if (!taskId) throw new Error('生成任务提交失败：未返回 task_id')
 
       const { useTaskQueueStore } = await import('@/stores/taskQueue')
@@ -699,8 +725,8 @@ export const useProjectStore = defineStore('project', {
       const { useTaskQueueStore } = await import('@/stores/taskQueue')
       const taskQueue = useTaskQueueStore()
       try {
-        const resp = await apiGenerateVideo(projectId, shotId, data)
-        const backendTaskId = resp?.task_id
+        const resp = await apiGenerateVideo(projectId, shotId, data) as unknown as Record<string, unknown>
+        const backendTaskId = resp?.task_id as string | undefined
         if (!backendTaskId) {
           throw new Error('生成任务提交失败：未返回 task_id')
         }
