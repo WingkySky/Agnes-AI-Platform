@@ -40,9 +40,10 @@ async def merge_project(
     """
     触发项目合成（异步执行）
 
-    1. 校验项目状态
-    2. 切换到 merging
-    3. 后台启动 execute_merge
+    1. 校验项目状态：只阻止 merging 中重复触发，允许 in_progress / completed 重新合成
+    2. 清空旧 final_video_url（避免用户看到上次的失败结果）
+    3. 切换到 merging
+    4. 后台启动 execute_merge
     """
     project = (
         await db.execute(select(Project).where(Project.id == project_id))
@@ -53,13 +54,18 @@ async def merge_project(
     if project.status == PROJECT_STATUS_MERGING:
         raise ValueError("项目正在合成中，请稍候")
 
+    # 重新合成时清空旧的成片 URL（避免用户点"播放成片"看到上次的失败结果）
+    if project.final_video_url:
+        project.final_video_url = None
+        await db.commit()
+
     # 切换到 merging 状态
     project = await update_status(db, project_id, PROJECT_STATUS_MERGING)
 
     await project_sse_manager.push(
         project_id,
         "merge_progress",
-        {"status": "started", "progress": 0},
+        {"status": "started", "progress": 0, "message": "合成任务已启动"},
     )
 
     # 后台执行合成（独立 session）

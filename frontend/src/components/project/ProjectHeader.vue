@@ -65,6 +65,18 @@
       >
         播放成片
       </el-button>
+
+      <!-- 合成进度指示器：merging 状态或最近一次进度事件 -->
+      <el-tooltip
+        v-if="isMerging || mergeProgressError"
+        :content="mergeProgressError || mergeProgressText"
+        placement="bottom"
+      >
+        <el-tag :type="mergeProgressError ? 'danger' : 'warning'" size="small" effect="plain">
+          <el-icon v-if="isMerging" class="loading-icon"><Loading /></el-icon>
+          {{ mergeProgressError ? '合成失败' : `合成中 ${mergeProgressPercent}%` }}
+        </el-tag>
+      </el-tooltip>
     </div>
 
     <!-- 成片播放弹窗 -->
@@ -87,11 +99,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { ElMessageBox } from 'element-plus'
+import { computed, ref, watch } from 'vue'
+import { ElMessageBox, ElMessage } from 'element-plus'
 import {
   ArrowLeft, Calendar, FullScreen, Monitor, Picture, Connection,
-  Grid, Histogram, VideoPlay,
+  Grid, Histogram, VideoPlay, Loading,
 } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import { useUserStore } from '@/stores/user'
@@ -100,10 +112,43 @@ import type { Project, ProjectActiveView, ProjectStatus } from '@/types/project'
 const props = defineProps<{
   project: Project | null
   sseConnected: boolean
+  /** 合成进度 SSE 事件（来自 useProjectSSE.mergeProgress） */
+  mergeProgress?: Record<string, any> | null
 }>()
 
 const projectStore = useProjectStore()
 const userStore = useUserStore()
+
+// ================ 合成进度计算属性 ================
+const isMerging = computed(() => props.project?.status === 'merging')
+
+const mergeProgressPercent = computed(() => {
+  const p = props.mergeProgress
+  if (!p) return 0
+  return Number(p.progress ?? 0)
+})
+
+const mergeProgressText = computed(() => {
+  const p = props.mergeProgress
+  if (!p) return '合成中...'
+  // 按 status 给出可读文案
+  const stage = p.status || ''
+  const stageTextMap: Record<string, string> = {
+    started: '合成任务已启动',
+    downloading: `下载分镜视频中 (${p.progress ?? 0}%)`,
+    compositing: `ffmpeg 拼接中 (${p.progress ?? 0}%)`,
+    completed: '合成完成',
+    failed: '合成失败',
+  }
+  if (stage === 'failed') return p.error || '合成失败'
+  return stageTextMap[stage] || p.message || `合成中 (${p.progress ?? 0}%)`
+})
+
+const mergeProgressError = computed(() => {
+  const p = props.mergeProgress
+  if (!p) return ''
+  return p.status === 'failed' ? (p.error || '合成失败，请重试') : ''
+})
 
 // 成片播放弹窗
 const finalVideoDialogVisible = ref(false)
@@ -160,8 +205,27 @@ async function onMerge() {
       { type: 'info', confirmButtonText: '开始合成', cancelButtonText: '取消' },
     )
     await projectStore.mergeProject()
-  } catch (_) { /* 取消 */ }
+    ElMessage.success('合成任务已启动，进度显示在右上角')
+  } catch (e: any) {
+    // API 调用失败（非用户取消）→ 弹错误提示
+    if (e !== 'cancel' && e?.message !== 'cancel') {
+      ElMessage.error(e?.message || '合成启动失败')
+    }
+  }
 }
+
+// 监听合成进度 SSE 事件：失败时弹错误提示，成功时刷新详情
+watch(
+  () => props.mergeProgress,
+  (evt) => {
+    if (!evt) return
+    if (evt.status === 'failed') {
+      ElMessage.error(`合成失败：${evt.error || '未知错误'}`)
+    } else if (evt.status === 'completed' && props.project) {
+      ElMessage.success('合成完成，可点击"播放成片"预览')
+    }
+  },
+)
 
 function formatDate(s?: string | null): string {
   if (!s) return ''

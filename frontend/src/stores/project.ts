@@ -699,7 +699,10 @@ export const useProjectStore = defineStore('project', {
       this.mergeLoading = true
       try {
         await apiMergeProject(this.currentProjectId)
-        ElMessage.success('合成任务已启动')
+        // 不在此处弹 success 提示，由 ProjectHeader 统一处理（避免重复弹）
+      } catch (e: any) {
+        // 透传错误给调用方，由 UI 层决定如何提示
+        throw e
       } finally {
         this.mergeLoading = false
       }

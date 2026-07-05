@@ -25,7 +25,11 @@
 
     <template v-else-if="project">
       <!-- 顶部工具栏 -->
-      <ProjectHeader :project="project" :sse-connected="sse.connected.value" />
+      <ProjectHeader
+        :project="project"
+        :sse-connected="sse.connected.value"
+        :merge-progress="sse.mergeProgress.value"
+      />
 
       <!-- 向导进度面板：status=creating 时展示 -->
       <div v-if="project.status === 'creating'" class="wizard-panel">
