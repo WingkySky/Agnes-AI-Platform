@@ -45,7 +45,6 @@ from app.models.project import (
     ProjectShotVideo,
     PROJECT_STATUS_CREATING,
 )
-from app.models.pipeline import PipelineTemplate
 from app.schemas.project import (
     # 项目
     ProjectCreate, ProjectUpdate, ProjectResponse, ProjectListResponse,
@@ -251,9 +250,7 @@ async def create_via_wizard_api(
     """
     通过模板向导创建项目（4 步 LLM 链）
 
-    支持两种模式：
-    1. template_id 模式：从数据库 PipelineTemplate 加载 steps_config
-    2. category 模式：从 wizard_chains.WIZARD_CHAINS 预设链路查找（drama/ad/education/anime）
+    使用 category 模式：从 wizard_chains.WIZARD_CHAINS 预设链路查找（drama/ad/education/anime）
 
     1. 创建草稿项目（status=creating）
     2. 后台异步执行 wizard 链
@@ -261,41 +258,20 @@ async def create_via_wizard_api(
     """
     from app.services.project.wizard_chains import get_wizard_chain, is_wizard_chain
 
-    wizard_chain: list = []
-    template_id: Optional[int] = None
     category: Optional[str] = data.category
 
-    if data.template_id:
-        # template_id 模式：从数据库加载模板
-        template = (
-            await db.execute(
-                select(PipelineTemplate).where(PipelineTemplate.id == data.template_id)
-            )
-        ).scalar_one_or_none()
-        if not template:
-            raise HTTPException(status_code=404, detail="模板不存在")
-        template_id = template.id
-        # 模板分类回填到 category（用于向导链路选择）
-        if not category:
-            category = getattr(template, "category", None) or "drama"
-        # 取 wizard_chain（兼容旧的 steps_config 字段）
-        wizard_chain = template.steps_config or []
-        # 如果 steps_config 不是 wizard_chain 格式，则按 category 查找预设链路
-        if not is_wizard_chain(wizard_chain):
-            wizard_chain = get_wizard_chain(category or "drama")
-    elif category:
-        # category 模式：从预设 WIZARD_CHAINS 查找
-        wizard_chain = get_wizard_chain(category)
-    else:
+    if not category:
         raise HTTPException(
             status_code=400,
-            detail="必须提供 template_id 或 category 之一",
+            detail="必须提供 category 参数",
         )
+
+    # 从预设 WIZARD_CHAINS 查找
+    wizard_chain = get_wizard_chain(category)
 
     # 把 category 写入 wizard_inputs，便于 resume 时找回链路
     merged_inputs = dict(data.inputs or {})
-    if category:
-        merged_inputs.setdefault("_category", category)
+    merged_inputs.setdefault("_category", category)
 
     # 创建草稿项目
     project = await create_draft_for_wizard(
@@ -304,7 +280,6 @@ async def create_via_wizard_api(
         ProjectCreate(
             title=data.title,
             description=data.description,
-            template_id=template_id,
             aspect_ratio=data.aspect_ratio,
             resolution=data.resolution,
             wizard_inputs=merged_inputs,
@@ -354,33 +329,18 @@ async def resume_wizard_api(
     if project.status != PROJECT_STATUS_CREATING:
         raise HTTPException(status_code=400, detail="项目不在向导中，无需恢复")
 
-    from app.services.project.wizard_chains import get_wizard_chain, is_wizard_chain
+    from app.services.project.wizard_chains import get_wizard_chain
 
-    wizard_chain: list = []
     inputs = dict(project.wizard_inputs or {})
     category = inputs.get("_category")
 
-    # 优先从 template_id 取 wizard_chain
-    if project.template_id:
-        template = (
-            await db.execute(
-                select(PipelineTemplate).where(PipelineTemplate.id == project.template_id)
-            )
-        ).scalar_one_or_none()
-        if template:
-            wizard_chain = template.steps_config or []
-            if not is_wizard_chain(wizard_chain):
-                wizard_chain = get_wizard_chain(category or getattr(template, "category", None) or "drama")
-
-    # 无 template_id 或模板已删：用 category 从预设链路查找
-    if not wizard_chain and category:
-        wizard_chain = get_wizard_chain(category)
-
-    if not wizard_chain:
+    if not category:
         raise HTTPException(
             status_code=400,
-            detail="无法找回 wizard_chain（既无 template_id 也无 category）",
+            detail="无法找回 wizard_chain（缺少 category）",
         )
+
+    wizard_chain = get_wizard_chain(category)
 
     asyncio.create_task(
         _run_wizard_async(project.id, wizard_chain, inputs)

@@ -63,7 +63,7 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/CanvasView.vue'),
     meta: { titleKey: 'router.canvas', requiresAuth: true }
   },
-  // ---------- 项目制创作（替代旧 PipelineRun 流程） ----------
+  // ---------- 项目制创作 ----------
   {
     path: '/projects',
     name: 'projects',
@@ -76,37 +76,12 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/projects/ProjectDetailView.vue'),
     meta: { titleKey: 'router.projectDetail', requiresAuth: true }
   },
-  {
-    path: '/workshop',
-    name: 'workshop',
-    component: () => import('@/views/WorkshopView.vue'),
-    meta: { titleKey: 'router.workshop', requiresAuth: true, permission: 'pipeline:run' }
-  },
   // ---------- 3D 场景导演台：用 3D 空间布局生成可控的镜头语言 prompt ----------
   {
     path: '/scene-editor',
     name: 'scene-editor',
     component: () => import('@/views/SceneEditorView.vue'),
     meta: { titleKey: 'router.sceneEditor', requiresAuth: true }
-  },
-  // ---------- 模板编辑（保留，模板语义已改为"项目创建向导模板" L1） ----------
-  {
-    path: '/workshop/template/create',
-    name: 'template-create',
-    component: () => import('@/views/TemplateEditorView.vue'),
-    meta: { titleKey: 'router.templateCreate', requiresAuth: true, permission: 'pipeline:run' }
-  },
-  {
-    path: '/workshop/template/:id/edit',
-    name: 'template-edit',
-    component: () => import('@/views/TemplateEditorView.vue'),
-    meta: { titleKey: 'router.templateEdit', requiresAuth: true, permission: 'pipeline:run' }
-  },
-  {
-    path: '/workshop/wizard',
-    name: 'template-wizard',
-    component: () => import('@/views/TemplateWizardView.vue'),
-    meta: { titleKey: 'router.templateWizard', requiresAuth: true, permission: 'pipeline:run' }
   },
   {
     path: '/assets',

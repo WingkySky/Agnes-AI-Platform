@@ -16,7 +16,6 @@ class ProjectCreate(BaseModel):
     """创建项目请求（空白创建）"""
     title: str = Field(..., min_length=1, max_length=200, description="项目标题")
     description: Optional[str] = Field(None, description="项目描述")
-    template_id: Optional[int] = Field(None, description="创建向导使用的模板 ID")
     aspect_ratio: Optional[str] = Field("16:9", description="宽高比")
     resolution: Optional[str] = Field("1280x720", description="分辨率")
     wizard_inputs: Optional[Dict[str, Any]] = Field(default_factory=dict, description="向导参数")
@@ -39,7 +38,6 @@ class ProjectResponse(BaseModel):
     id: int
     title: str
     description: Optional[str] = None
-    template_id: Optional[int] = None
     user_id: int
     status: str
     cover_url: Optional[str] = None
@@ -77,13 +75,9 @@ class ActiveViewUpdate(BaseModel):
 class WizardCreateRequest(BaseModel):
     """通过模板向导创建项目
 
-    支持两种模式：
-    1. template_id 模式：从数据库 PipelineTemplate 加载 steps_config
-    2. category 模式：从 wizard_chains.WIZARD_CHAINS 预设链路查找（drama/ad/education/anime）
-    两者至少传一个；同时传时以 template_id 为准。
+    使用 category 模式：从 wizard_chains.WIZARD_CHAINS 预设链路查找（drama/ad/education/anime）
     """
-    template_id: Optional[int] = Field(None, description="模板 ID（与 category 二选一）")
-    category: Optional[str] = Field(None, description="场景分类（drama/ad/education/anime，与 template_id 二选一）")
+    category: Optional[str] = Field(None, description="场景分类（drama/ad/education/anime）")
     title: str = Field(..., min_length=1, max_length=200, description="项目标题")
     description: Optional[str] = Field(None, description="项目描述")
     inputs: Dict[str, Any] = Field(..., description="用户输入参数")

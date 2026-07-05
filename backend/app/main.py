@@ -169,28 +169,6 @@ _auto_migrate_missing_columns()
 
 
 # =====================================================
-# 内置模板审核状态初始化
-# =====================================================
-# 新增 is_approved 字段后，所有内置模板默认为 False，但内置模板本就是系统提供的，
-# 应该直接标记为已审核通过。
-def _init_builtin_template_approved():
-    """将所有内置流水线模板的 is_approved 设为 True（系统内置无需审核）。"""
-    from sqlalchemy import text
-    try:
-        with engine.connect() as conn:
-            result = conn.execute(
-                text("UPDATE pipeline_templates SET is_approved = 1 WHERE is_builtin = 1 AND is_approved = 0")
-            )
-            conn.commit()
-            if result.rowcount > 0:
-                logger.info("✓ 已将 %d 个内置流水线模板标记为已审核通过", result.rowcount)
-    except Exception as e:
-        logger.warning("⚠️ 初始化内置模板审核状态失败: %s", e)
-
-_init_builtin_template_approved()
-
-
-# =====================================================
 # Lifespan 上下文管理器（替代 deprecated startup/shutdown）
 # =====================================================
 @asynccontextmanager

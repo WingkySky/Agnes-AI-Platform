@@ -31,7 +31,6 @@ export interface Project {
   id: number
   title: string
   description?: string | null
-  template_id?: number | null
   user_id: number
   status: ProjectStatus
   cover_url?: string | null
@@ -58,7 +57,6 @@ export interface Project {
 export interface ProjectCreateRequest {
   title: string
   description?: string
-  template_id?: number
   aspect_ratio?: string
   resolution?: string
   wizard_inputs?: Record<string, any>
@@ -442,7 +440,6 @@ export interface MergeStatusResponse {
 // =====================================================
 
 export interface WizardCreateRequest {
-  template_id?: number
   category?: string
   title: string
   description?: string

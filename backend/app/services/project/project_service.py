@@ -33,7 +33,6 @@ async def create_project(db: AsyncSession, user_id: int, data: ProjectCreate) ->
     project = Project(
         title=data.title,
         description=data.description,
-        template_id=data.template_id,
         user_id=user_id,
         status=PROJECT_STATUS_IN_PROGRESS,
         aspect_ratio=data.aspect_ratio or "16:9",
@@ -53,7 +52,6 @@ async def create_draft_for_wizard(
     project = Project(
         title=data.title,
         description=data.description,
-        template_id=data.template_id,
         user_id=user_id,
         status="creating",
         aspect_ratio=data.aspect_ratio or "16:9",

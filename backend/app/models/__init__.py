@@ -21,7 +21,6 @@ from app.models.pipeline import (
     ScriptTemplate,
     StylePreset,
 )
-from app.models.pipeline_template_revision import PipelineTemplateRevision
 from app.models.style_element import StyleElement
 from app.models.asset import Asset
 from app.models.camera_preset import CameraPreset

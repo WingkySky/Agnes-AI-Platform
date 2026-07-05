@@ -16,7 +16,7 @@ from sqlalchemy.future import select
 
 from app.models.camera_preset import CameraPreset
 from app.models.prompt_preset import PromptPreset, PresetIndex
-from app.models.pipeline import StylePreset, ScriptTemplate, PipelineTemplate
+from app.models.pipeline import StylePreset, ScriptTemplate
 
 
 async def aggregate_presets(
@@ -55,8 +55,6 @@ async def aggregate_presets(
         return await _aggregate_from_style(db, user_id, category, tags, search, sort, page_size, offset)
     elif preset_type == "script":
         return await _aggregate_from_script(db, user_id, category, tags, search, sort, page_size, offset)
-    elif preset_type == "pipeline":
-        return await _aggregate_from_pipeline(db, user_id, category, tags, search, sort, page_size, offset)
     elif preset_type is not None:
         return await _aggregate_from_prompt(db, user_id, preset_type, category, tags, search, sort, page_size, offset)
     else:
@@ -255,31 +253,6 @@ async def _aggregate_from_script(
     return items, total
 
 
-async def _aggregate_from_pipeline(
-    db: AsyncSession, user_id, category, tags, search, sort, limit, offset
-) -> tuple[list[dict], int]:
-    """从 pipeline_templates 表查询，虚拟映射 type="pipeline" """
-    conditions = _build_simple_visibility_conditions(PipelineTemplate, user_id)
-    if category:
-        conditions.append(PipelineTemplate.category == category)
-    if search:
-        s = f"%{search}%"
-        conditions.append(or_(PipelineTemplate.name.like(s), PipelineTemplate.description.like(s)))
-
-    where = and_(*conditions)
-    order_by = PipelineTemplate.use_count.desc() if sort in ("hot", "usage") else PipelineTemplate.updated_at.desc()
-
-    base_query = select(PipelineTemplate).filter(where)
-    count_result = await db.execute(base_query)
-    total = len(count_result.scalars().all())
-
-    result = await db.execute(base_query.order_by(order_by).offset(offset).limit(limit))
-    presets = result.scalars().all()
-
-    items = [_pipeline_to_unified(p) for p in presets]
-    return items, total
-
-
 # ---------- 可见性过滤 ----------
 
 def _build_visibility_conditions(model, user_id: Optional[int]) -> list:
@@ -464,34 +437,5 @@ def _script_to_unified(st: ScriptTemplate) -> dict:
             "scenes_max": st.scenes_max,
             "default_scene_duration": st.default_scene_duration,
             "output_schema": st.output_schema,
-        },
-    }
-
-
-def _pipeline_to_unified(pt: PipelineTemplate) -> dict:
-    """PipelineTemplate → 统一 dict"""
-    return {
-        "id": pt.id,
-        "user_id": pt.author_id,
-        "name": pt.name,
-        "description": pt.description,
-        "type": "pipeline",
-        "category": pt.category,
-        "tags": pt.tags or [],
-        "is_public": pt.is_public,
-        "is_approved": pt.is_public,
-        "usage_count": pt.use_count,
-        "created_at": pt.created_at.isoformat() if pt.created_at else None,
-        "updated_at": pt.updated_at.isoformat() if pt.updated_at else None,
-        "prompt_text": pt.description or "",
-        "camera_params": None,
-        "style_params": None,
-        "script_text": None,
-        "pipeline_config": {
-            "key": pt.key,
-            "inputs_config": pt.inputs_config,
-            "steps_config": pt.steps_config,
-            "estimated_credits": pt.estimated_credits,
-            "estimated_time_minutes": pt.estimated_time_minutes,
         },
     }

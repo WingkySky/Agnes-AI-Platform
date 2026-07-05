@@ -74,12 +74,6 @@ class PipelineTemplate(Base):
 
     # 关联
     script_template = relationship("ScriptTemplate", back_populates="pipeline_templates")
-    # 公开模板的修订草稿列表（CASCADE 删除由外键约束保证）
-    revisions = relationship(
-        "PipelineTemplateRevision",
-        back_populates="template",
-        cascade="all, delete-orphan",
-    )
 
 
 class ScriptTemplate(Base):

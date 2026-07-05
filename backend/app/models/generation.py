@@ -65,12 +65,6 @@ class Generation(Base):
     # AI 预审状态：NULL（未触发）/ pending（审核中）/ passed（通过，等人工复审）/ violated（违规，已自动屏蔽）/ failed（审核失败，等人工兜底）
     ai_moderation_status = Column(String(20), nullable=True, index=True)
 
-    # ===== 流水线相关字段 =====
-    # 关联的流水线运行 ID（用于追溯生成来源）
-    pipeline_run_id = Column(Integer, nullable=True, index=True)
-    # 关联的流水线步骤 key（标识是哪个步骤生成的）
-    pipeline_step_key = Column(String(100), nullable=True, index=True)
-
     # ===== 预设来源字段 =====
     # 生成时使用的预设 ID（来自 PresetQuickPanel 选择或 Chat preset_ref 透传）
     # 不加外键，因为预设可能来自 prompt_presets 或 camera_presets 多表

@@ -33,7 +33,6 @@ class Project(Base):
     - id: 主键
     - title: 项目标题
     - description: 项目描述
-    - template_id: 创建向导使用的模板 ID（空白创建为 NULL）
     - user_id: 所属用户
     - status: 项目状态机（draft/creating/in_progress/merging/completed/archived）
     - cover_url: 封面图 URL
@@ -51,7 +50,6 @@ class Project(Base):
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
-    template_id = Column(Integer, ForeignKey("pipeline_templates.id"), nullable=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     status = Column(String(30), default=PROJECT_STATUS_DRAFT, nullable=False, index=True)
     cover_url = Column(String(500), nullable=True)

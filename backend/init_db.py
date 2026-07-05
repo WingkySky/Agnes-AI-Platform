@@ -77,7 +77,6 @@ _safe_import("app.models.pipeline", [
     "StylePreset",
     "ScriptTemplate",
 ])
-_safe_import("app.models.pipeline_template_revision", ["PipelineTemplateRevision"])
 _safe_import("app.models.style_element", ["StyleElement"])
 _safe_import("app.models.asset", ["Asset"])
 # 项目制创作相关表（Project 体系）

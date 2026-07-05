@@ -168,12 +168,8 @@
         @set-background="(mode) => store.setBackgroundMode(mode)"
         @toggle-image-info="(val) => handleToggleImageInfo(val)"
         @show-shortcuts="handleShowShortcuts"
-        @pipeline-launch="handlePipelineLaunch"
         @toggle-flow-mode="handleToggleFlowMode"
       />
-
-      <!-- 漫剧生成对话框 -->
-      <PipelineLaunchDialog v-model="showPipelineLaunchDialog" />
 
       <!-- ============ 左下角缩放控件 ============ -->
       <CanvasZoomControls
@@ -314,21 +310,12 @@
         @save="handleStepEditSave"
       />
 
-      <!-- 保存为创意工坊模板弹窗 -->
-      <SaveAsWorkshopTemplateDialog
-        v-if="saveAsWorkshopTemplateVisible"
-        :visible="saveAsWorkshopTemplateVisible"
-        @close="saveAsWorkshopTemplateVisible = false"
-        @saved="handleWorkshopTemplateSaved"
-      />
-
       <!-- ============ 画布管理弹窗（批量操作、模板库） ============ -->
       <CanvasManagerPopover
         v-model="managerVisible"
         @new-canvas="newCanvas"
         @import-json="importJson"
         @save-as-template="openSaveTemplateDialog"
-        @save-as-workshop-template="handleSaveAsWorkshopTemplate"
         @use-template="handleUseTemplate"
       />
 
@@ -427,7 +414,6 @@ import InfiniteCanvas from '@/components/canvas/InfiniteCanvas.vue'
 import CanvasConnectionsLayer from '@/components/canvas/CanvasConnectionsLayer.vue'
 import CanvasNode from '@/components/canvas/CanvasNode.vue'
 import CanvasToolbar from '@/components/canvas/CanvasToolbar.vue'
-import PipelineLaunchDialog from '@/components/pipeline/PipelineLaunchDialog.vue'
 import CanvasZoomControls from '@/components/canvas/CanvasZoomControls.vue'
 import CanvasMinimap from '@/components/canvas/CanvasMinimap.vue'
 import CanvasNodeHoverToolbar from '@/components/canvas/CanvasNodeHoverToolbar.vue'
@@ -442,8 +428,6 @@ import CanvasImageAngleDialog from '@/components/canvas/CanvasImageAngleDialog.v
 // 流程步骤分组组件
 import CanvasStepGroup from '@/components/canvas/CanvasStepGroup.vue'
 import StepEditDialog from '@/components/canvas/StepEditDialog.vue'
-// 保存为创意工坊模板弹窗
-import SaveAsWorkshopTemplateDialog from '@/components/canvas/SaveAsWorkshopTemplateDialog.vue'
 // 带水印的图片组件（预览大图时显示水印）
 import ImageWithWatermark from '@/components/ImageWithWatermark.vue'
 // 画布模板库组件
@@ -1512,8 +1496,6 @@ const saveTemplateForm = reactive({
   name: '',
   description: '',
 })
-// 保存为创意工坊模板对话框状态
-const saveAsWorkshopTemplateVisible = ref(false)
 
 /** 打开"保存为模板"对话框，预填当前画布名称 */
 function openSaveTemplateDialog() {
@@ -1524,21 +1506,6 @@ function openSaveTemplateDialog() {
   saveTemplateForm.name = store.activeWorkspace?.name || ''
   saveTemplateForm.description = ''
   saveTemplateVisible.value = true
-}
-
-/** 打开"保存为创意工坊模板"对话框 */
-function handleSaveAsWorkshopTemplate() {
-  if (store.panels.length === 0) {
-    ElMessage.warning(t('canvas.templates.emptyCanvas'))
-    return
-  }
-  saveAsWorkshopTemplateVisible.value = true
-}
-
-/** 创意工坊模板保存成功 */
-function handleWorkshopTemplateSaved(template: any) {
-  saveAsWorkshopTemplateVisible.value = false
-  ElMessage.success(t('workshop.templateCreated'))
 }
 
 /** 把当前画布保存为用户自定义模板 */
@@ -2384,8 +2351,6 @@ async function downloadPreviewImage() {
 // ==================== 底部工具栏事件 ====================
 
 const showAppearancePanel = ref(false)
-// 漫剧生成对话框
-const showPipelineLaunchDialog = ref(false)
 // 素材库面板显示开关
 const showAssetLibrary = ref(false)
 
@@ -2541,11 +2506,6 @@ const canvasSize = computed(() => ({
 // 打开快捷键帮助弹窗（由底部工具栏的快捷键按钮触发）
 function handleShowShortcuts() {
   zoomControlsRef.value?.openShortcuts()
-}
-
-/** 打开漫剧生成对话框 */
-function handlePipelineLaunch() {
-  showPipelineLaunchDialog.value = true
 }
 
 /** 切换流程模式 */

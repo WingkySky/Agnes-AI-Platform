@@ -1,7 +1,7 @@
 # =====================================================
 # 统一审核管理路由（管理员/审核员）
 #
-# 聚合所有类型的审核任务：作品、预设、模板
+# 聚合所有类型的审核任务：作品、预设
 # 走一套统一的列表 + 通过 + 驳回逻辑
 #
 # API 列表:
@@ -26,8 +26,6 @@ from app.core.security import get_current_user
 from app.models.user import User
 from app.models.generation import Generation
 from app.models.prompt_preset import PresetIndex
-from app.models.pipeline import PipelineTemplate
-from app.models.pipeline_template_revision import PipelineTemplateRevision
 
 # =====================================================
 # 作品审核：仅展示公开到广场的作品，与旧 ModerationView 行为保持一致
@@ -38,8 +36,8 @@ logger = logging.getLogger("agnes_platform")
 router = APIRouter(prefix="/admin/review", tags=["管理员-统一审核"])
 
 
-# 审核类型枚举（template_revision: 公开模板的修订草稿审核）
-REVIEW_TYPES = ("work", "preset", "template", "template_revision")
+# 审核类型枚举（流水线模板审核已下线，仅保留作品 / 预设两类）
+REVIEW_TYPES = ("work", "preset")
 REVIEW_STATUSES = ("pending", "approved", "rejected", "all")
 # AI 预审状态枚举
 AI_MODERATION_STATUSES = ("pending", "passed", "violated", "failed", "none", "all")
@@ -106,24 +104,6 @@ async def list_review_items(
         except Exception:
             logger.exception("查询预设审核列表失败")
 
-    # 3. 模板审核
-    if review_type in ("all", "template"):
-        try:
-            template_items = await _query_template_reviews(db, status, keyword, item_id, user_id)
-            all_items.extend(template_items)
-        except Exception:
-            logger.exception("查询模板审核列表失败")
-
-    # 4. 模板修订草稿审核（template_revision）
-    if review_type in ("all", "template_revision"):
-        try:
-            revision_items = await _query_template_revision_reviews(
-                db, status, keyword, item_id, user_id
-            )
-            all_items.extend(revision_items)
-        except Exception:
-            logger.exception("查询模板修订审核列表失败")
-
     # 按创建时间倒序
     all_items.sort(key=lambda x: x.get("created_at") or "", reverse=True)
 
@@ -181,36 +161,8 @@ async def get_review_stats(
     except Exception:
         logger.exception("统计预设待审核数失败")
 
-    # 模板待审核数
-    template_pending = 0
-    try:
-        result = await db.execute(
-            select(func.count()).select_from(PipelineTemplate).filter(
-                and_(
-                    PipelineTemplate.is_public == True,  # noqa: E712
-                    PipelineTemplate.is_approved == False,  # noqa: E712
-                    PipelineTemplate.is_builtin == False,  # noqa: E712
-                )
-            )
-        )
-        template_pending = result.scalar_one()
-    except Exception:
-        logger.exception("统计模板待审核数失败")
-
-    # 模板修订草稿待审核数（template_revision）
-    template_revision_pending = 0
-    try:
-        result = await db.execute(
-            select(func.count()).select_from(PipelineTemplateRevision).filter(
-                and_(
-                    PipelineTemplateRevision.is_approved == False,  # noqa: E712
-                    PipelineTemplateRevision.is_rejected == False,  # noqa: E712
-                )
-            )
-        )
-        template_revision_pending = result.scalar_one()
-    except Exception:
-        logger.exception("统计模板修订草稿待审核数失败")
+    # 模板待审核数（模板审核已下线，恒为 0）
+    # 保留字段是为了兼容前端 UnifiedReview.vue 的 stats 显示
 
     # ===== AI 预审结果分布（仅作品）=====
     # ai_passed_pending：AI 预审通过、等待人工复审的项
@@ -262,9 +214,10 @@ async def get_review_stats(
     return {
         "work_pending": work_pending,
         "preset_pending": preset_pending,
-        "template_pending": template_pending,
-        "template_revision_pending": template_revision_pending,
-        "total_pending": work_pending + preset_pending + template_pending + template_revision_pending,
+        # 模板审核已下线，保留字段恒为 0（兼容前端 stats 显示）
+        "template_pending": 0,
+        "template_revision_pending": 0,
+        "total_pending": work_pending + preset_pending,
         # AI 预审结果分布
         "ai_passed_pending": ai_passed_pending,
         "ai_violated": ai_violated,
@@ -334,38 +287,6 @@ async def approve_item(
             )
         return {"message": "审核通过", "review_type": review_type, "item_id": item_id}
 
-    elif review_type == "template":
-        # 模板审核通过
-        result = await db.execute(select(PipelineTemplate).filter(PipelineTemplate.id == item_id))
-        tpl = result.scalar_one_or_none()
-        if not tpl:
-            raise HTTPException(status_code=404, detail="模板不存在")
-        tpl.is_approved = True
-        tpl.is_rejected = False
-        tpl.reject_reason = None
-        await db.commit()
-        return {"message": "审核通过", "review_type": review_type, "item_id": item_id}
-
-    elif review_type == "template_revision":
-        # 模板修订草稿审核通过 → 用 revision 字段覆盖原模板
-        from app.services.pipeline.template_service import apply_revision_to_template
-        result = await db.execute(
-            select(PipelineTemplateRevision).filter(PipelineTemplateRevision.id == item_id)
-        )
-        revision = result.scalar_one_or_none()
-        if not revision:
-            raise HTTPException(status_code=404, detail="模板修订草稿不存在")
-        if revision.is_approved:
-            raise HTTPException(status_code=400, detail="该修订草稿已审核通过")
-        if revision.is_rejected:
-            raise HTTPException(status_code=400, detail="该修订草稿已被驳回，不可直接通过")
-        await apply_revision_to_template(db, revision)
-        logger.info(
-            "[统一审核] %s 通过模板修订 id=%d template_id=%d",
-            current_user.username, item_id, revision.template_id,
-        )
-        return {"message": "审核通过", "review_type": review_type, "item_id": item_id}
-
 
 # =====================================================
 # 驳回
@@ -432,49 +353,6 @@ async def reject_item(
                 db, entry.preset_id,
                 is_public=False, is_approved=False, is_rejected=True,
             )
-        return {"message": "已驳回", "review_type": review_type, "item_id": item_id}
-
-    elif review_type == "template":
-        # 模板驳回
-        result = await db.execute(select(PipelineTemplate).filter(PipelineTemplate.id == item_id))
-        tpl = result.scalar_one_or_none()
-        if not tpl:
-            raise HTTPException(status_code=404, detail="模板不存在")
-        tpl.is_public = False
-        tpl.is_approved = False
-        tpl.is_rejected = True
-        tpl.reject_reason = reason or None
-        await db.commit()
-        return {"message": "已驳回", "review_type": review_type, "item_id": item_id}
-
-    elif review_type == "template_revision":
-        # 模板修订草稿驳回 → 仅标记 revision，原模板业务字段与可见性不变
-        from datetime import datetime
-        result = await db.execute(
-            select(PipelineTemplateRevision).filter(PipelineTemplateRevision.id == item_id)
-        )
-        revision = result.scalar_one_or_none()
-        if not revision:
-            raise HTTPException(status_code=404, detail="模板修订草稿不存在")
-        if revision.is_approved:
-            raise HTTPException(status_code=400, detail="该修订草稿已审核通过，不可驳回")
-        revision.is_rejected = True
-        revision.reject_reason = reason or None
-        revision.reviewed_at = datetime.utcnow()
-        # 原模板业务字段与可见性（is_public/is_approved）不变；
-        # 但 has_pending_revision 置回 False，使卡片"修订中"徽章消失。
-        # 作者再次编辑时会重新走 draft 流程并置 True。
-        tpl_result = await db.execute(
-            select(PipelineTemplate).filter(PipelineTemplate.id == revision.template_id)
-        )
-        tpl_obj = tpl_result.scalar_one_or_none()
-        if tpl_obj:
-            tpl_obj.has_pending_revision = False
-        await db.commit()
-        logger.info(
-            "[统一审核] %s 驳回模板修订 id=%d reason=%s",
-            current_user.username, item_id, reason,
-        )
         return {"message": "已驳回", "review_type": review_type, "item_id": item_id}
 
 
@@ -752,196 +630,3 @@ async def _query_preset_reviews(
     ]
 
 
-async def _query_template_reviews(
-    db: AsyncSession,
-    status: str,
-    keyword: Optional[str],
-    item_id: Optional[int],
-    user_id: Optional[int],
-) -> List[Dict[str, Any]]:
-    """查询模板审核列表"""
-    query = select(PipelineTemplate).filter(PipelineTemplate.is_builtin == False)  # noqa: E712
-
-    # 模板状态映射
-    if status == "pending":
-        query = query.filter(
-            and_(
-                PipelineTemplate.is_public == True,  # noqa: E712
-                PipelineTemplate.is_approved == False,  # noqa: E712
-            )
-        )
-    elif status == "approved":
-        query = query.filter(
-            and_(
-                PipelineTemplate.is_public == True,  # noqa: E712
-                PipelineTemplate.is_approved == True,  # noqa: E712
-            )
-        )
-    elif status == "rejected":
-        query = query.filter(PipelineTemplate.is_rejected == True)  # noqa: E712
-    # all: 不额外限制（但排除内置）
-
-    if item_id:
-        query = query.filter(PipelineTemplate.id == item_id)
-    if user_id:
-        query = query.filter(PipelineTemplate.author_id == user_id)
-    if keyword:
-        pattern = f"%{keyword}%"
-        query = query.filter(
-            or_(
-                PipelineTemplate.name.ilike(pattern),
-                PipelineTemplate.description.ilike(pattern),
-                PipelineTemplate.key.ilike(pattern),
-            )
-        )
-
-    query = query.order_by(PipelineTemplate.created_at.desc()).limit(200)
-    result = await db.execute(query)
-    templates = result.scalars().all()
-
-    # 批量查询作者信息
-    user_ids_set = {t.author_id for t in templates if t.author_id is not None}
-    authors_map: dict = {}
-    if user_ids_set:
-        user_stmt = select(User).filter(User.id.in_(list(user_ids_set)))
-        user_result = await db.execute(user_stmt)
-        for u in user_result.scalars().all():
-            authors_map[u.id] = u
-
-    def _tpl_status(tpl) -> str:
-        if tpl.is_rejected:
-            return "rejected"
-        if tpl.is_public and tpl.is_approved:
-            return "approved"
-        if tpl.is_public and not tpl.is_approved:
-            return "pending"
-        return "private"
-
-    return [
-        {
-            "id": f"template-{tpl.id}",
-            "review_type": "template",
-            "item_id": tpl.id,
-            "name": tpl.name,
-            "description": tpl.description,
-            "user_id": tpl.author_id,
-            "username": authors_map[tpl.author_id].username if tpl.author_id and authors_map.get(tpl.author_id) else None,
-            "nickname": getattr(authors_map.get(tpl.author_id), "nickname", None) if tpl.author_id and authors_map.get(tpl.author_id) else None,
-            "category": tpl.category,
-            "key": tpl.key,
-            "status": _tpl_status(tpl),
-            "submit_reason": tpl.submit_reason,
-            "reject_reason": tpl.reject_reason,
-            "thumbnail_url": tpl.thumbnail_url,
-            "cover_url": tpl.thumbnail_url,
-            "estimated_credits": tpl.estimated_credits,
-            "estimated_time_minutes": tpl.estimated_time_minutes,
-            "tags": tpl.tags,
-            "created_at": tpl.created_at.isoformat() if tpl.created_at else None,
-        }
-        for tpl in templates
-    ]
-
-
-async def _query_template_revision_reviews(
-    db: AsyncSession,
-    status: str,
-    keyword: Optional[str],
-    item_id: Optional[int],
-    user_id: Optional[int],
-) -> List[Dict[str, Any]]:
-    """
-    查询模板修订草稿审核列表（template_revision 类型）。
-
-    status 映射：
-      - pending: is_approved=False 且 is_rejected=False
-      - approved: is_approved=True
-      - rejected: is_rejected=True
-      - all: 全部
-    """
-    query = select(PipelineTemplateRevision)
-
-    if status == "pending":
-        query = query.filter(
-            and_(
-                PipelineTemplateRevision.is_approved == False,  # noqa: E712
-                PipelineTemplateRevision.is_rejected == False,  # noqa: E712
-            )
-        )
-    elif status == "approved":
-        query = query.filter(PipelineTemplateRevision.is_approved == True)  # noqa: E712
-    elif status == "rejected":
-        query = query.filter(PipelineTemplateRevision.is_rejected == True)  # noqa: E712
-    # all: 不额外限制
-
-    if item_id:
-        query = query.filter(PipelineTemplateRevision.id == item_id)
-    if user_id:
-        query = query.filter(PipelineTemplateRevision.edited_by == user_id)
-    if keyword:
-        pattern = f"%{keyword}%"
-        query = query.filter(
-            or_(
-                PipelineTemplateRevision.name.ilike(pattern),
-                PipelineTemplateRevision.description.ilike(pattern),
-            )
-        )
-
-    query = query.order_by(PipelineTemplateRevision.created_at.desc()).limit(200)
-    result = await db.execute(query)
-    revisions = result.scalars().all()
-
-    # 批量查询关联的原模板（用于展示模板名/key/作者）
-    tpl_ids_set = {r.template_id for r in revisions if r.template_id is not None}
-    templates_map: dict = {}
-    if tpl_ids_set:
-        tpl_stmt = select(PipelineTemplate).filter(PipelineTemplate.id.in_(list(tpl_ids_set)))
-        tpl_result = await db.execute(tpl_stmt)
-        for t in tpl_result.scalars().all():
-            templates_map[t.id] = t
-
-    # 批量查询编辑者信息
-    user_ids_set = {r.edited_by for r in revisions if r.edited_by is not None}
-    authors_map: dict = {}
-    if user_ids_set:
-        user_stmt = select(User).filter(User.id.in_(list(user_ids_set)))
-        user_result = await db.execute(user_stmt)
-        for u in user_result.scalars().all():
-            authors_map[u.id] = u
-
-    def _revision_status(rev) -> str:
-        if rev.is_approved:
-            return "approved"
-        if rev.is_rejected:
-            return "rejected"
-        return "pending"
-
-    return [
-        {
-            "id": f"template_revision-{rev.id}",
-            "review_type": "template_revision",
-            "item_id": rev.id,
-            "template_id": rev.template_id,
-            "name": rev.name,
-            "description": rev.description,
-            "category": rev.category,
-            "thumbnail_url": rev.thumbnail_url,
-            "cover_url": rev.thumbnail_url,
-            "tags": rev.tags or [],
-            "estimated_credits": rev.estimated_credits,
-            "estimated_time_minutes": rev.estimated_time_minutes,
-            "submit_reason": rev.submit_reason,
-            "reject_reason": rev.reject_reason,
-            "user_id": rev.edited_by,
-            "username": authors_map[rev.edited_by].username if rev.edited_by and authors_map.get(rev.edited_by) else None,
-            "nickname": getattr(authors_map.get(rev.edited_by), "nickname", None) if rev.edited_by and authors_map.get(rev.edited_by) else None,
-            "status": _revision_status(rev),
-            "created_at": rev.created_at.isoformat() if rev.created_at else None,
-            "reviewed_at": rev.reviewed_at.isoformat() if rev.reviewed_at else None,
-            # 关联的原模板信息（用于审核页面展示对比）
-            "template_name": templates_map[rev.template_id].name if rev.template_id and templates_map.get(rev.template_id) else None,
-            "template_key": templates_map[rev.template_id].key if rev.template_id and templates_map.get(rev.template_id) else None,
-            "template_thumbnail_url": templates_map[rev.template_id].thumbnail_url if rev.template_id and templates_map.get(rev.template_id) else None,
-        }
-        for rev in revisions
-    ]

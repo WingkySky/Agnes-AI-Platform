@@ -1,6 +1,6 @@
 <!-- =====================================================
      统一审核管理页 - UnifiedReview
-     - 聚合：作品审核、预设审核、模板审核（替代旧 ModerationView + PresetAudit）
+     - 聚合：作品审核、预设审核（替代旧 ModerationView + PresetAudit）
      - Tab 切换类型 + 状态筛选 + 作品子类型筛选（image/video）
      - 关键词 / 内容 ID / 创作者用户名 / AI 预审结果 多维搜索
      - 列表（含缩略图、AI 预审结果 Tag、命中敏感词、点赞浏览、作者信息）
@@ -38,53 +38,40 @@
 
     <!-- 统计卡片 -->
     <el-row :gutter="16" class="stats-row">
-      <el-col :span="3">
+      <el-col :span="4">
         <el-card class="stat-card" shadow="hover" @click="switchType('all')">
           <div class="stat-num">{{ stats.total_pending || 0 }}</div>
           <div class="stat-label">{{ t('admin.review.stats.total') }}</div>
         </el-card>
       </el-col>
-      <el-col :span="3">
+      <el-col :span="4">
         <el-card class="stat-card stat-work" shadow="hover" @click="switchType('work')">
           <div class="stat-num">{{ stats.work_pending || 0 }}</div>
           <div class="stat-label">{{ t('admin.review.types.work') }}</div>
         </el-card>
       </el-col>
-      <el-col :span="3">
+      <el-col :span="4">
         <el-card class="stat-card stat-preset" shadow="hover" @click="switchType('preset')">
           <div class="stat-num">{{ stats.preset_pending || 0 }}</div>
           <div class="stat-label">{{ t('admin.review.types.preset') }}</div>
         </el-card>
       </el-col>
-      <el-col :span="3">
-        <el-card class="stat-card stat-template" shadow="hover" @click="switchType('template')">
-          <div class="stat-num">{{ stats.template_pending || 0 }}</div>
-          <div class="stat-label">{{ t('admin.review.types.template') }}</div>
-        </el-card>
-      </el-col>
-      <!-- 模板修订待审核数 -->
-      <el-col :span="3">
-        <el-card class="stat-card stat-template-revision" shadow="hover" @click="switchType('template_revision')">
-          <div class="stat-num">{{ stats.template_revision_pending || 0 }}</div>
-          <div class="stat-label">{{ t('admin.review.types.templateRevision') }}</div>
-        </el-card>
-      </el-col>
       <!-- AI 预审通过，待人工复审 -->
-      <el-col :span="3">
+      <el-col :span="4">
         <el-card class="stat-card stat-ai-passed" shadow="hover" @click="quickFilterAi('passed')">
           <div class="stat-num">{{ stats.ai_passed_pending || 0 }}</div>
           <div class="stat-label">{{ t('admin.review.stats.aiPassedPending') }}</div>
         </el-card>
       </el-col>
       <!-- AI 判违规 -->
-      <el-col :span="3">
+      <el-col :span="4">
         <el-card class="stat-card stat-ai-violated" shadow="hover" @click="quickFilterAi('violated')">
           <div class="stat-num">{{ stats.ai_violated || 0 }}</div>
           <div class="stat-label">{{ t('admin.review.stats.aiViolated') }}</div>
         </el-card>
       </el-col>
       <!-- 右侧留白占位（保持 24 栅格对齐） -->
-      <el-col :span="3" class="stat-spacer" />
+      <el-col :span="4" class="stat-spacer" />
     </el-row>
 
     <!-- 筛选区 -->
@@ -94,9 +81,6 @@
         <el-tab-pane :label="t('admin.review.types.all')" name="all" />
         <el-tab-pane :label="t('admin.review.types.work')" name="work" />
         <el-tab-pane :label="t('admin.review.types.preset')" name="preset" />
-        <el-tab-pane :label="t('admin.review.types.template')" name="template" />
-        <!-- 模板修订：公开已审核模板被编辑后产生的 revision 草稿 -->
-        <el-tab-pane :label="t('admin.review.types.templateRevision')" name="template_revision" />
       </el-tabs>
 
       <!-- 待审核状态下显示一键操作快捷条 -->
@@ -266,7 +250,7 @@
         </el-table-column>
         <!-- 预览（作品类型显示缩略图） -->
         <el-table-column
-          v-if="filters.review_type === 'all' || filters.review_type === 'work' || filters.review_type === 'template_revision'"
+          v-if="filters.review_type === 'all' || filters.review_type === 'work'"
           :label="t('admin.review.colPreview')"
           width="90"
           align="center">
@@ -288,15 +272,8 @@
               </div>
             </div>
             <el-image
-              v-else-if="(row.review_type === 'template' || row.review_type === 'preset') && row.thumbnail_url"
+              v-else-if="row.review_type === 'preset' && row.thumbnail_url"
               :src="row.thumbnail_url"
-              fit="cover"
-              style="width: 56px; height: 56px; border-radius: 6px; cursor: pointer"
-              @click="handleView(row)" />
-            <!-- 模板修订：显示原模板缩略图 -->
-            <el-image
-              v-else-if="row.review_type === 'template_revision' && (row.template_thumbnail_url || row.thumbnail_url)"
-              :src="row.template_thumbnail_url || row.thumbnail_url"
               fit="cover"
               style="width: 56px; height: 56px; border-radius: 6px; cursor: pointer"
               @click="handleView(row)" />
@@ -313,26 +290,7 @@
               :show-after="300">
               <span class="prompt-text">{{ truncatePrompt(row.prompt) }}</span>
             </el-tooltip>
-            <!-- 模板修订：显示原模板名 + 修订描述 tooltip -->
-            <el-tooltip
-              v-else-if="row.review_type === 'template_revision'"
-              :content="row.description || t('admin.review.noDescription')"
-              placement="top"
-              :show-after="300">
-              <span class="prompt-text">{{ row.template_name || row.name || '-' }}</span>
-            </el-tooltip>
             <span v-else>{{ row.name || '-' }}</span>
-          </template>
-        </el-table-column>
-        <!-- 模板修订：提交说明列（仅 template_revision 类型显示） -->
-        <el-table-column
-          v-if="filters.review_type === 'template_revision'"
-          :label="t('admin.review.colSubmitReason')"
-          min-width="180"
-          show-overflow-tooltip>
-          <template #default="{ row }">
-            <span v-if="row.submit_reason" class="prompt-text">{{ row.submit_reason }}</span>
-            <span v-else class="muted">-</span>
           </template>
         </el-table-column>
         <!-- 分类 -->
@@ -508,16 +466,6 @@
             style="max-height: 300px"
             preview-teleported />
         </div>
-        <!-- 模板修订：原模板缩略图（优先 template_thumbnail_url） -->
-        <div
-          v-else-if="currentItem.review_type === 'template_revision' && (currentItem.template_thumbnail_url || currentItem.thumbnail_url)"
-          class="detail-thumb">
-          <el-image
-            :src="currentItem.template_thumbnail_url || currentItem.thumbnail_url"
-            fit="contain"
-            style="max-height: 300px"
-            preview-teleported />
-        </div>
 
         <el-descriptions :column="2" border style="margin-top: 16px">
           <el-descriptions-item :label="t('admin.review.colItemId')">
@@ -563,9 +511,6 @@
           <el-descriptions-item v-else-if="currentItem.description" :label="t('admin.review.colDescription')" :span="2">
             <div class="desc-text">{{ currentItem.description }}</div>
           </el-descriptions-item>
-          <el-descriptions-item v-if="currentItem.submit_reason" :label="t('admin.review.colSubmitReason')" :span="2">
-            <div class="desc-text">{{ currentItem.submit_reason }}</div>
-          </el-descriptions-item>
           <el-descriptions-item
             v-if="currentItem.review_type === 'work' && currentItem.moderation_flags && currentItem.moderation_flags.length > 0"
             :label="t('admin.review.colHitWords')"
@@ -583,50 +528,6 @@
             </div>
           </el-descriptions-item>
         </el-descriptions>
-
-        <!-- 模板修订专属字段：展示修订后的新值 -->
-        <template v-if="currentItem.review_type === 'template_revision'">
-          <div class="revision-section-title">{{ t('admin.review.templateRevisionFields.title') }}</div>
-          <el-descriptions :column="2" border>
-            <el-descriptions-item :label="t('admin.review.templateRevisionFields.templateId')">
-              {{ currentItem.template_id ?? '-' }}
-            </el-descriptions-item>
-            <el-descriptions-item :label="t('admin.review.templateRevisionFields.templateKey')">
-              {{ currentItem.template_key || '-' }}
-            </el-descriptions-item>
-            <el-descriptions-item :label="t('admin.review.templateRevisionFields.templateName')" :span="2">
-              {{ currentItem.template_name || currentItem.name || '-' }}
-            </el-descriptions-item>
-            <el-descriptions-item :label="t('admin.review.templateRevisionFields.newName')">
-              {{ currentItem.name || '-' }}
-            </el-descriptions-item>
-            <el-descriptions-item :label="t('admin.review.templateRevisionFields.newCategory')">
-              {{ currentItem.category || '-' }}
-            </el-descriptions-item>
-            <el-descriptions-item v-if="currentItem.tags && currentItem.tags.length > 0" :label="t('admin.review.templateRevisionFields.newTags')" :span="2">
-              <el-tag
-                v-for="tag in currentItem.tags"
-                :key="tag"
-                size="small"
-                effect="plain"
-                style="margin-right: 4px; margin-bottom: 4px">
-                {{ tag }}
-              </el-tag>
-            </el-descriptions-item>
-            <el-descriptions-item :label="t('admin.review.templateRevisionFields.inputsCount')">
-              {{ Array.isArray(currentItem.inputs_config) ? currentItem.inputs_config.length : 0 }}
-            </el-descriptions-item>
-            <el-descriptions-item :label="t('admin.review.templateRevisionFields.stepsCount')">
-              {{ Array.isArray(currentItem.steps_config) ? currentItem.steps_config.length : 0 }}
-            </el-descriptions-item>
-            <el-descriptions-item v-if="currentItem.estimated_credits != null" :label="t('admin.review.templateRevisionFields.estimatedCredits')">
-              {{ currentItem.estimated_credits }}
-            </el-descriptions-item>
-            <el-descriptions-item v-if="currentItem.estimated_time_minutes != null" :label="t('admin.review.templateRevisionFields.estimatedTime')">
-              {{ currentItem.estimated_time_minutes }}
-            </el-descriptions-item>
-          </el-descriptions>
-        </template>
       </template>
       <template #footer>
         <el-button @click="detailVisible = false">{{ t('common.close') }}</el-button>
@@ -681,7 +582,7 @@ const { t } = useI18n()
 
 interface ReviewItem {
   id: string | number
-  review_type: 'work' | 'preset' | 'template' | 'template_revision'
+  review_type: 'work' | 'preset'
   item_id: number
   name?: string
   description?: string
@@ -700,7 +601,6 @@ interface ReviewItem {
   result_url?: string
   work_type?: 'image' | 'video'
   model?: string
-  submit_reason?: string
   reject_reason?: string
   moderation_reason?: string | null
   moderation_flags?: string[]
@@ -710,14 +610,6 @@ interface ReviewItem {
   views_count?: number
   is_public?: boolean
   tags?: string[]
-  estimated_credits?: number
-  estimated_time_minutes?: number
-  // template_revision 专属字段
-  template_id?: number
-  template_name?: string
-  template_key?: string
-  template_thumbnail_url?: string
-  reviewed_at?: string | null
   // AI 预审状态：null / pending / passed / violated / failed
   ai_moderation_status?: 'pending' | 'passed' | 'violated' | 'failed' | null
   [key: string]: any
@@ -733,8 +625,6 @@ const total = ref(0)
 const stats = reactive<Record<string, number>>({
   work_pending: 0,
   preset_pending: 0,
-  template_pending: 0,
-  template_revision_pending: 0,
   total_pending: 0,
   ai_passed_pending: 0,
   ai_violated: 0,
@@ -910,9 +800,6 @@ function getTypeTagType(type: string): 'primary' | 'success' | 'warning' | 'info
   const map: Record<string, any> = {
     work: 'primary',
     preset: 'warning',
-    template: 'success',
-    // 模板修订：使用 info 与 template 区分
-    template_revision: 'info',
   }
   return map[type] || 'info'
 }
@@ -1221,8 +1108,6 @@ onBeforeUnmount(() => {
 }
 .stat-work .stat-num { color: var(--el-color-primary); }
 .stat-preset .stat-num { color: var(--el-color-warning); }
-.stat-template .stat-num { color: var(--el-color-success); }
-.stat-template-revision .stat-num { color: var(--el-color-info); }
 .stat-ai-passed .stat-num { color: var(--el-color-success); }
 .stat-ai-violated .stat-num { color: var(--el-color-danger); }
 
@@ -1230,17 +1115,6 @@ onBeforeUnmount(() => {
 .stat-spacer {
   min-height: 0;
   visibility: hidden;
-}
-
-/* 模板修订专属字段区块标题 */
-.revision-section-title {
-  margin-top: 20px;
-  margin-bottom: 12px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-  padding-left: 8px;
-  border-left: 3px solid var(--el-color-info);
 }
 
 /* AI 审核结果高亮卡片 */

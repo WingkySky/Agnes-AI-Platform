@@ -222,9 +222,6 @@
         <el-button type="primary" @click="emit('save-as-template'); visible = false">
           {{ t('canvas.manager.saveAsTemplate') }}
         </el-button>
-        <el-button type="success" @click="emit('save-as-workshop-template'); visible = false">
-          {{ t('workshop.saveAsWorkshopTemplate') }}
-        </el-button>
       </div>
     </div>
   </el-dialog>
@@ -267,7 +264,6 @@ const emit = defineEmits<{
   (e: 'new-canvas'): void
   (e: 'import-json'): void
   (e: 'save-as-template'): void
-  (e: 'save-as-workshop-template'): void
   (e: 'use-template', tpl: CanvasTemplate): void
 }>()
 

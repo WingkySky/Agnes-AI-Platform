@@ -499,7 +499,7 @@ export interface QueueTask {
   pollIntervalMs: number
   rawResponse: unknown
   backendTaskId: string | null
-  source?: 'chat' | 'canvas' | 'pipeline' | 'project' | null
+  source?: 'chat' | 'canvas' | 'project' | null
   /** 画布来源任务的节点 ID，用于任务完成后回填结果 */
   panelId?: string | null
   /** 项目来源任务的上下文（用于任务完成后认领结果到项目实体） */
@@ -809,179 +809,8 @@ export interface CreditRuleUpdateRequest {
 // 注意：字段命名保持 snake_case，与后端 API 返回一致
 // =====================================================
 
-/** 流水线步骤类型（与后端 steps/*.py 的 step_type 一致） */
-export type PipelineStepType =
-  | 'llm_generate'
-  | 'image_batch'
-  | 'video_batch'
-  | 'ffmpeg_composite'
-  | 'tts_generate'
-  | 'human_review'
-
-/** 流水线运行状态 */
-export type PipelineRunStatus =
-  | 'pending' | 'running' | 'success' | 'failed' | 'cancelled' | 'waiting_review'
-
-/** 步骤状态 */
-export type PipelineStepStatus =
-  | 'pending' | 'running' | 'success' | 'failed' | 'skipped' | 'waiting_review'
-
 /** 资产类型（与后端 VALID_ASSET_TYPES 一致） */
 export type AssetType = 'character' | 'prop' | 'scene' | 'brand'
-
-/** 流水线输入配置项 */
-export interface PipelineInputConfig {
-  key: string
-  label: string
-  label_i18n?: string
-  type: 'text' | 'number' | 'style_select' | 'boolean' | 'select' | 'textarea' | 'image_upload'
-  required?: boolean
-  default?: any
-  placeholder?: string
-  placeholder_i18n?: string
-  min?: number
-  max?: number
-  description?: string
-  options?: string[]
-  options_i18n_prefix?: string
-  maxlength?: number
-}
-
-/** 流水线模板 */
-export interface PipelineTemplate {
-  id: number
-  key: string
-  name: string
-  description: string
-  category: string
-  thumbnail: string
-  thumbnail_url?: string | null
-  estimated_credits: number
-  estimated_time: string
-  estimated_time_minutes?: number
-  is_builtin: boolean
-  is_public: boolean
-  is_approved: boolean
-  is_rejected: boolean
-  has_pending_revision?: boolean
-  submit_reason?: string
-  reject_reason?: string
-  author_id?: number
-  inputs_config: PipelineInputConfig[]
-  steps_config: any[]
-  tags: string[]
-  output_mapping?: Record<string, any> | null
-  script_template_id?: number | null
-  use_count?: number
-  likes_count?: number
-  created_at: string
-  updated_at: string
-}
-
-/** 模板场景预设（向导创建模板用） */
-export interface TemplateScenario {
-  key: string
-  name: string
-  description: string
-  icon: string
-  color: string
-  category: string
-  i18n_key?: string
-  inputs_config: PipelineInputConfig[]
-  steps_config_template?: any[]
-  estimated_credits: number
-  estimated_time_minutes: number
-}
-
-/** 从场景预设创建模板请求 */
-export interface TemplateFromScenarioRequest {
-  scenario_key: string
-  inputs: Record<string, any>
-  name?: string
-  description?: string
-  is_public?: boolean
-  tags?: string[]
-}
-
-/** 流水线模板修订草稿（公开模板编辑后 pending revision） */
-export interface PipelineTemplateRevision {
-  id: number
-  template_id: number
-  name: string
-  description?: string | null
-  category: string
-  thumbnail_url?: string | null
-  inputs_config: Record<string, any>[]
-  steps_config: Record<string, any>[]
-  output_mapping?: Record<string, any> | null
-  script_template_id?: number | null
-  estimated_credits: number
-  estimated_time_minutes: number
-  tags: string[]
-  is_approved: boolean
-  is_rejected: boolean
-  submit_reason?: string | null
-  reject_reason?: string | null
-  edited_by?: number | null
-  created_at?: string | null
-  reviewed_at?: string | null
-}
-
-/** 流水线运行实例 */
-export interface PipelineRun {
-  id: number
-  template_id: number
-  template_name?: string
-  name: string
-  status: PipelineRunStatus | string
-  total_credits: number
-  inputs: Record<string, any>
-  current_step: string | null
-  current_step_key?: string
-  progress: number
-  error_message: string | null
-  output_summary?: Record<string, any>
-  started_at: string | null
-  finished_at: string | null
-  created_at: string
-  updated_at: string
-}
-
-/** 步骤执行记录 */
-export interface PipelineStep {
-  id: number
-  run_id: number
-  step_key: string
-  name: string
-  step_type: PipelineStepType | string
-  status: PipelineStepStatus | string
-  depends_on: string[]
-  sort_order: number
-  output_data: Record<string, any>
-  input_data?: Record<string, any>
-  error_message: string | null
-  retry_count: number
-  max_retries: number
-  timeout_sec?: number
-  credits_consumed: number
-  started_at: string | null
-  finished_at: string | null
-  created_at: string
-  // ===== 以下字段由 SSE 实时推送，API 返回的 step 不含这些字段 =====
-  /** 步骤内整体百分比（0~1 或 0~100，取决于后端实现；前端做兼容处理） */
-  progress?: number
-  /** 步骤内逐元素进度详情（current/total/phase/phase_text 等） */
-  progress_detail?: {
-    current?: number
-    total?: number
-    percent?: number
-    phase?: string
-    phase_text?: string
-    message?: string
-  }
-  /** 步骤输出摘要文案（运行中显示阶段描述，完成时显示统计摘要） */
-  output_summary?: string
-}
 
 /** 风格预设 */
 export interface StylePreset {
@@ -1044,25 +873,6 @@ export interface Asset {
   updated_at: string
 }
 
-/** 积分预估结果 */
-export interface CreditEstimateResult {
-  estimated_total: number
-  breakdown: Array<{
-    step_key: string
-    step_name: string
-    step_type: string
-    estimated_credits: number
-  }>
-  note: string
-}
-
-/** 创建运行请求 */
-export interface CreateRunRequest {
-  template_id: number
-  inputs: Record<string, any>
-  name?: string
-}
-
 /** 从生成结果保存到资产库 */
 export interface SaveAssetFromGenerationRequest {
   generation_id: number
@@ -1090,29 +900,4 @@ export interface ListResult<T> {
   total: number
   page: number
   page_size: number
-}
-
-/** SSE 事件类型 */
-export type PipelineSSEEventType =
-  | 'state_snapshot' | 'pipeline_started' | 'step_started'
-  | 'step_progress' | 'step_completed' | 'step_failed'
-  | 'step_skipped' | 'pipeline_completed' | 'pipeline_failed'
-
-/** pipeline 任务注册参数（taskQueue 用） */
-export interface RegisterPipelineTaskParams {
-  runId: number
-  templateName: string
-}
-
-/** pipeline 任务更新参数（taskQueue 用） */
-export interface UpdatePipelineTaskParams {
-  status?: PipelineRunStatus | string
-  progress?: number
-  currentStep?: string
-  totalSteps?: number
-  completedSteps?: number
-  // 元素级进度（步骤内逐个产物计数，如"3/8 视频已生成"）
-  itemCurrent?: number
-  itemTotal?: number
-  phaseText?: string
 }

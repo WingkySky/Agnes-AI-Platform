@@ -62,7 +62,7 @@
 import { ref, computed } from 'vue'
 import {
   Hand, MousePointer2, Undo2, Redo2, Type, Image, Video, Music2, Settings2, Upload,
-  FolderOpen, Palette, Trash2, Eraser, Keyboard, Film, GitBranch,
+  FolderOpen, Palette, Trash2, Eraser, Keyboard, GitBranch,
   Mic, FileText, Puzzle,
 } from 'lucide-vue-next'
 import CanvasAppearancePanel from './CanvasAppearancePanel.vue'
@@ -98,7 +98,6 @@ const emit = defineEmits([
   'set-background',
   'toggle-image-info',
   'show-shortcuts',
-  'pipeline-launch',
   'toggle-flow-mode',
 ])
 
@@ -134,11 +133,7 @@ const buttonGroups = computed<any[][]>(() => [
     { id: 'tool-compose', label: t('canvas.toolbar.toolCompose') || '成片合成', icon: Puzzle, emit: 'add-node', payload: 'compose' },
     { id: 'tool-upload', label: t('canvas.toolbar.toolUpload'), icon: Upload, emit: 'upload-asset' },
   ],
-  // 组4：漫剧生成（从画布节点生成视频）
-  [
-    { id: 'tool-pipeline', label: t('canvas.toolbar.toolPipeline'), icon: Film, emit: 'pipeline-launch' },
-  ],
-  // 组5：流程模式（识别执行顺序、步骤分组）
+  // 组4：流程模式（识别执行顺序、步骤分组）
   [
     { id: 'tool-flow', label: t('canvas.toolbar.toolFlow'), icon: GitBranch, active: props.isFlowMode, emit: 'toggle-flow-mode' },
   ],
