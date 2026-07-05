@@ -163,7 +163,7 @@
     <el-popover
       v-model:visible="modelPopoverVisible"
       placement="bottom-start"
-      :width="240"
+      :width="260"
       trigger="click"
     >
       <template #reference>
@@ -173,16 +173,30 @@
           <el-icon class="param-tag__arrow"><ArrowDown /></el-icon>
         </span>
       </template>
-      <div class="param-model-list">
-        <div
-          v-for="m in modelList"
-          :key="m.id"
-          class="param-model-item"
-          :class="{ 'param-model-item--active': currentModel === m.id }"
-          @click="currentModel = m.id; modelPopoverVisible = false"
-        >
-          <span class="param-model-item__name">{{ m.name }}</span>
-          <span v-if="m.provider" class="param-model-item__provider">{{ m.provider }}</span>
+      <div class="param-model-popover">
+        <!-- Provider 标签页切换 -->
+        <div v-if="modelGroups.length > 1" class="param-model-tabs">
+          <button
+            v-for="group in modelGroups"
+            :key="group.provider"
+            type="button"
+            class="param-model-tab"
+            :class="{ 'param-model-tab--active': selectedProvider === group.provider }"
+            @click="selectedProvider = group.provider"
+          >{{ group.provider }}</button>
+        </div>
+        <!-- 当前 Provider 的模型列表 -->
+        <div class="param-model-list">
+          <div
+            v-for="m in filteredModels"
+            :key="m.id"
+            class="param-model-item"
+            :class="{ 'param-model-item--active': currentModel === m.id }"
+            @click="currentModel = m.id; modelPopoverVisible = false"
+          >
+            <span class="param-model-item__name">{{ m.name }}</span>
+            <span v-if="m.capabilities.length" class="param-model-item__badge">{{ m.capabilities[0] }}</span>
+          </div>
         </div>
       </div>
     </el-popover>
@@ -250,6 +264,9 @@ const resolutionPopoverVisible = ref(false)
 const durationPopoverVisible = ref(false)
 const fpsPopoverVisible = ref(false)
 const modelPopoverVisible = ref(false)
+
+// 当前选中的 Provider（用于 tabs 切换）
+const selectedProvider = ref('')
 
 // 尺寸模式：image 用 "image"，video 用 "video"
 const sizeMode = computed(() => props.mode === 'video' ? 'video' : 'image')
@@ -381,6 +398,29 @@ const currentResolutionLabel = computed(() => {
 const modelList = computed(() => props.modelList || (
   props.mode === 'video' ? modelsStore.videoModels : modelsStore.imageModels
 ))
+
+// 按 Provider 分组的模型列表
+const modelGroups = computed(() => {
+  const groups: { provider: string; models: ModelInfo[] }[] = []
+  const providerMap = new Map<string, ModelInfo[]>()
+  for (const m of modelList.value) {
+    const p = m.provider || '其他'
+    if (!providerMap.has(p)) providerMap.set(p, [])
+    providerMap.get(p)!.push(m)
+  }
+  providerMap.forEach((models, provider) => {
+    groups.push({ provider, models })
+  })
+  return groups
+})
+
+// 根据选中的 Provider 过滤模型列表
+const filteredModels = computed(() => {
+  if (!selectedProvider.value) {
+    return modelList.value
+  }
+  return modelList.value.filter(m => m.provider === selectedProvider.value)
+})
 
 // 切换 FPS 时若当前时长超过新 FPS 的上限，自动降到允许的最大值
 watch(() => currentFrameRate.value, (fps) => {
@@ -614,12 +654,52 @@ const popoverWidth = computed(() => props.mode === 'video' ? 320 : 400)
   color: #fff;
 }
 
+/* 模型选择弹窗容器 */
+.param-model-popover {
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+}
+
+/* Provider 标签页切换 */
+.param-model-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px 4px 8px;
+  border-bottom: 1px solid var(--agnes-border);
+  margin-bottom: 4px;
+}
+
+.param-model-tab {
+  padding: 4px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--agnes-text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  transition: all 0.15s ease;
+}
+
+.param-model-tab:hover {
+  background: var(--agnes-bg-hover);
+  color: var(--agnes-text-primary);
+}
+
+.param-model-tab--active {
+  background: var(--agnes-info-bg);
+  color: #fff;
+  font-weight: 500;
+}
+
 /* 模型列表 */
 .param-model-list {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 4px;
+  max-height: 240px;
+  overflow-y: auto;
 }
 
 .param-model-item {
@@ -648,9 +728,12 @@ const popoverWidth = computed(() => props.mode === 'video' ? 320 : 400)
   font-weight: 500;
 }
 
-.param-model-item__provider {
-  font-size: 11px;
-  opacity: 0.5;
+.param-model-item__badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(107, 156, 255, 0.2);
+  color: var(--agnes-primary-soft);
   margin-left: 8px;
 }
 

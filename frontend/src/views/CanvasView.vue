@@ -455,7 +455,7 @@ import ImageWithWatermark from '@/components/ImageWithWatermark.vue'
 // 画布模板库组件
 import CanvasManagerPopover from '@/components/canvas/CanvasManagerPopover.vue'
 // 画布积分预估与校验（生图/生视频/局部编辑前预检积分）
-import type { CanvasStep, CanvasPanel, CanvasConnection, CanvasStore as CanvasStoreState } from '@/stores/canvas'
+import type { CanvasStep, CanvasPanel, CanvasConnection } from '@/stores/canvas'
 import { checkCreditsBeforeGenerate, showCostConsumedMessage } from '@/lib/canvas-credits'
 import {
   type CanvasTemplate,

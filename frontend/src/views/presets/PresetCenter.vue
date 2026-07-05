@@ -440,7 +440,7 @@ import PresetCard from '@/components/presets/PresetCard.vue'
 import PresetFilterSidebar from '@/components/presets/PresetFilterSidebar.vue'
 import PresetEditorDialog from '@/components/presets/PresetEditorDialog.vue'
 import ImportExport from '@/components/presets/ImportExport.vue'
-import type { PromptPreset, PresetCreate, PresetUpdate, PresetType } from '@/types/preset'
+import type { PromptPreset, PresetCreate, PresetUpdate, PresetType, PresetSort } from '@/types/preset'
 import { updatePreset } from '@/api/presets'
 import client from '@/api/client'
 
@@ -455,7 +455,7 @@ const filters = computed(() => store.filters)
 
 const currentType = ref<string>('')
 const searchText = ref('')
-const sortMode = ref('new')
+const sortMode = ref<PresetSort>('new')
 const currentPage = ref(1)
 const isCommunity = ref(false)
 

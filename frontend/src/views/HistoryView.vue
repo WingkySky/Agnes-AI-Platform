@@ -1169,6 +1169,10 @@ function handleUserSwitch() {
   loadList()
 }
 
+// 用户登录/退出事件处理器（稳定引用，用于 addEventListener/removeEventListener）
+const handleLogin = (_e: Event) => handleUserSwitch()
+const handleLogout = (_e: Event) => handleUserSwitch()
+
 onMounted(() => {
   // 读取 URL 查询参数 task_id（从积分明细跳转过来时携带）
   const qTaskId = route.query.task_id
@@ -1177,18 +1181,16 @@ onMounted(() => {
   }
   loadList()
   if (typeof window !== 'undefined') {
-    const handleLogin = (e: Event) => handleUserSwitch()
-    const handleLogout = (e: Event) => handleUserSwitch()
-    window.addEventListener('agnes:user-login', handleLogin as EventListener)
-    window.addEventListener('agnes:user-logout', handleLogout as EventListener)
+    window.addEventListener('agnes:user-login', handleLogin)
+    window.addEventListener('agnes:user-logout', handleLogout)
   }
 })
 
 onBeforeUnmount(() => {
   clearVideoBlobUrls()
   if (typeof window !== 'undefined') {
-    window.removeEventListener('agnes:user-login', handleLogin as EventListener)
-    window.removeEventListener('agnes:user-logout', handleLogout as EventListener)
+    window.removeEventListener('agnes:user-login', handleLogin)
+    window.removeEventListener('agnes:user-logout', handleLogout)
   }
 })
 </script>

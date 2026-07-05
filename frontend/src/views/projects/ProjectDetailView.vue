@@ -99,6 +99,7 @@ import { useProjectSSE } from '@/composables/useProjectSSE'
 import ProjectHeader from '@/components/project/ProjectHeader.vue'
 import ProjectManagerView from '@/components/project/ProjectManagerView.vue'
 import ProjectCanvasView from '@/components/project/ProjectCanvasView.vue'
+import type { EntityType } from '@/types/project'
 
 const route = useRoute()
 const projectStore = useProjectStore()

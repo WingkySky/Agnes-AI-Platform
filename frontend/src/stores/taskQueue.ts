@@ -30,6 +30,8 @@ import type {
   RegisterCanvasTaskParams,
   ImageTaskStatusResponse,
   VideoStatusResponse,
+  ImageGenerationRequest,
+  VideoGenerationRequest,
 } from '@/types'
 
 // ---------- 常量 ----------
@@ -327,9 +329,13 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         task.status = 'pending'
         this._notifyTaskUpdate(taskId)
         const resp = await createImageTask(params as unknown as ImageGenerationRequest)
+        const respRecord = resp as unknown as Record<string, unknown>
         task.backendTaskId =
-          (resp as unknown as Record<string, unknown>).task_id || (resp as unknown as Record<string, unknown>).id || (resp as unknown as Record<string, unknown>).image_task_id || taskId
-        task.rawResponse = resp as unknown as Record<string, unknown>
+          (respRecord.task_id as string | undefined) ||
+          (respRecord.id as string | undefined) ||
+          (respRecord.image_task_id as string | undefined) ||
+          taskId
+        task.rawResponse = respRecord
         task.status = 'processing'
         this._notifyTaskUpdate(taskId)
         this._startPolling(taskId)
@@ -402,9 +408,13 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         task.status = 'pending'
         this._notifyTaskUpdate(taskId)
         const resp = await createVideoTask(params as unknown as VideoGenerationRequest)
+        const respRecord = resp as unknown as Record<string, unknown>
         task.backendTaskId =
-          (resp as unknown as Record<string, unknown>).task_id || (resp as unknown as Record<string, unknown>).video_id || (resp as unknown as Record<string, unknown>).id || taskId
-        task.rawResponse = resp as unknown as Record<string, unknown>
+          (respRecord.task_id as string | undefined) ||
+          (respRecord.video_id as string | undefined) ||
+          (respRecord.id as string | undefined) ||
+          taskId
+        task.rawResponse = respRecord
         task.status = 'processing'
         this._notifyTaskUpdate(taskId)
         this._startPolling(taskId)

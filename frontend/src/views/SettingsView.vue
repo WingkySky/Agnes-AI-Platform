@@ -105,8 +105,20 @@
         </div>
       </div>
 
+      <!-- Provider 分组切换 Tabs -->
+      <div v-if="modelProviderGroups.length > 0" class="model-provider-tabs">
+        <el-tabs v-model="selectedModelProvider" type="card" @tab-click="handleModelProviderChange">
+          <el-tab-pane
+            v-for="group in modelProviderGroups"
+            :key="group.provider"
+            :label="`${group.provider} (${group.count})`"
+            :name="group.provider">
+          </el-tab-pane>
+        </el-tabs>
+      </div>
+
       <el-table
-        :data="providersStore.modelDefinitions"
+        :data="filteredModelDefinitions"
         v-loading="providersStore.loading"
         stripe
         class="settings-table">
@@ -275,7 +287,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Plus, Edit, Delete, Refresh, Setting } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
@@ -290,6 +302,35 @@ const modelsStore = useModelsStore()
 // ---------- 同步状态 ----------
 const syncingProviderId = ref<number | null>(null)
 const submitting = ref(false)
+
+// ---------- 模型按 Provider 分组 ----------
+const selectedModelProvider = ref('')
+
+// 按 provider_name 分组的模型列表
+const modelProviderGroups = computed(() => {
+  const groups: { provider: string; count: number }[] = []
+  const providerMap = new Map<string, number>()
+  for (const m of providersStore.modelDefinitions) {
+    const p = m.provider_name || '其他'
+    providerMap.set(p, (providerMap.get(p) || 0) + 1)
+  }
+  providerMap.forEach((count, provider) => {
+    groups.push({ provider, count })
+  })
+  return groups
+})
+
+// 根据选中的 Provider 过滤模型
+const filteredModelDefinitions = computed(() => {
+  if (!selectedModelProvider.value) {
+    return providersStore.modelDefinitions
+  }
+  return providersStore.modelDefinitions.filter(m => m.provider_name === selectedModelProvider.value)
+})
+
+function handleModelProviderChange(tab: { name: string }) {
+  selectedModelProvider.value = tab.name
+}
 
 // ---------- Provider Type 选项（对齐 agn-sdk 已注册的 adapter） ----------
 // 仅展示常见的视频/图像/对话类 Provider，其他可通过 allow-create 自由输入
@@ -688,6 +729,40 @@ async function handleDeleteModel(model: ModelDefinition) {
 .cap-tag {
   margin-right: 4px;
   margin-bottom: 4px;
+}
+
+/* 模型 Provider 分组 Tabs */
+.model-provider-tabs {
+  margin-bottom: 16px;
+}
+
+:deep(.model-provider-tabs .el-tabs--card) {
+  --el-tabs-card-border-color: var(--agnes-border);
+}
+
+:deep(.model-provider-tabs .el-tabs__header) {
+  margin: 0;
+}
+
+:deep(.model-provider-tabs .el-tabs__nav-wrap::after) {
+  background: transparent;
+}
+
+:deep(.model-provider-tabs .el-tabs__item) {
+  border-radius: 8px 8px 0 0;
+  margin-right: 4px;
+  color: var(--agnes-text-secondary);
+  font-size: 13px;
+}
+
+:deep(.model-provider-tabs .el-tabs__item.is-active) {
+  background: var(--agnes-bg-hover);
+  color: var(--agnes-text-primary);
+  border-color: var(--agnes-border);
+}
+
+:deep(.model-provider-tabs .el-tabs__item:hover) {
+  color: var(--agnes-text-primary);
 }
 
 /* 深色主题表格覆盖 */
