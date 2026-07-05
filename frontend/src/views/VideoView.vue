@@ -310,7 +310,7 @@ import { useUserStore } from '@/stores/user'
 import { useI18n } from '@/i18n'
 import { useCreditEstimate } from '@/composables/useCreditEstimate'
 import { useDownload } from '@/composables/useDownload'
-import { matchVideoAspectRatio, getVideoAspectRatioLabel } from '@/config/model-params'
+import { matchVideoAspectRatio, getVideoAspectRatioLabel, autoMatchImageSize } from '@/config/model-params'
 import type { FileInfo } from '@/types'
 
 const { t } = useI18n()
@@ -522,14 +522,15 @@ function handleKeyframesToggle(enabled: boolean) {
 
 /** 根据上传图片的实际尺寸自动匹配最接近的视频宽高比 */
 function autoMatchAspectRatio(file: FileInfo) {
-  const img = new Image()
-  img.onload = () => {
-    const matched = matchVideoAspectRatio(img.naturalWidth, img.naturalHeight)
-    if (matched && matched !== aspectRatio.value) {
-      aspectRatio.value = matched
+  autoMatchImageSize(
+    file,
+    (width, height) => matchVideoAspectRatio(width, height),
+    (matched) => {
+      if (matched && matched !== aspectRatio.value) {
+        aspectRatio.value = matched
+      }
     }
-  }
-  img.src = file.previewUrl || file.url || ''
+  )
 }
 
 // ---------- 开始生成 ----------

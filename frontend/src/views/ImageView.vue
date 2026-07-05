@@ -332,7 +332,7 @@ import { usePreferencesStore } from '@/stores/preferences'
 import { useI18n } from '@/i18n'
 import { useCreditEstimate } from '@/composables/useCreditEstimate'
 import { useDownload } from '@/composables/useDownload'
-import { matchImageSize, getImageSizeLabel, getModelParams } from '@/config/model-params'
+import { matchImageSize, getImageSizeLabel, getModelParams, autoMatchImageSize } from '@/config/model-params'
 import { getScenes, previewScenePrompt } from '@/api/scenes'
 import type { FileInfo } from '@/types'
 import type { Scene3D, SceneData } from '@/types/scene'
@@ -573,14 +573,15 @@ function handleImageClear() {
 
 /** 根据上传图片的实际尺寸自动匹配最接近的预设分辨率 */
 function autoMatchSize(file: FileInfo) {
-  const img = new Image()
-  img.onload = () => {
-    const matched = matchImageSize(img.naturalWidth, img.naturalHeight)
-    if (matched && matched !== size.value) {
-      size.value = matched
+  autoMatchImageSize(
+    file,
+    (width, height) => matchImageSize(width, height),
+    (matched) => {
+      if (matched && matched !== size.value) {
+        size.value = matched
+      }
     }
-  }
-  img.src = file.previewUrl || file.url || ''
+  )
 }
 
 // ---------- 提交任务 ----------

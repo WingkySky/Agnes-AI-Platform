@@ -10,6 +10,8 @@
  *   - 图生图时可通过 matchImageSize() 自适应输入图片分辨率
  * ===================================================== */
 
+import type { FileInfo } from '@/types'
+
 // =====================================================
 // 类型定义
 // =====================================================
@@ -508,3 +510,54 @@ IMAGE_TIER_ORDER.push('custom')
 
 /** 自定义分辨率标记 */
 export const CUSTOM_VIDEO_RESOLUTION_VALUE = -1
+
+/**
+ * 通用图片尺寸自动匹配工具
+ * 根据上传图片的实际尺寸自动匹配最接近的预设参数
+ *
+ * @param file - FileInfo 对象
+ * @param matchFn - 匹配函数，接收宽高返回匹配结果
+ * @param onMatch - 匹配成功回调，接收匹配结果
+ * @param timeout - 超时时间（毫秒），默认 5000ms
+ */
+export function autoMatchImageSize(
+  file: FileInfo,
+  matchFn: (width: number, height: number) => string,
+  onMatch: (matched: string) => void,
+  timeout: number = 5000,
+): void {
+  const img = new Image()
+  let loaded = false
+  let timer: number | null = null
+
+  const cleanup = () => {
+    if (timer !== null) {
+      clearTimeout(timer)
+      timer = null
+    }
+    loaded = true
+  }
+
+  timer = window.setTimeout(() => {
+    if (!loaded) {
+      console.warn('autoMatchImageSize: 图片加载超时')
+      cleanup()
+    }
+  }, timeout)
+
+  img.onload = () => {
+    if (loaded) return
+    const matched = matchFn(img.naturalWidth, img.naturalHeight)
+    if (matched) {
+      onMatch(matched)
+    }
+    cleanup()
+  }
+
+  img.onerror = () => {
+    console.warn('autoMatchImageSize: 图片加载失败', file.previewUrl || file.url)
+    cleanup()
+  }
+
+  img.src = file.previewUrl || file.url || ''
+}
