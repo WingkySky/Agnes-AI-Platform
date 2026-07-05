@@ -237,7 +237,7 @@ function confirm() {
     mask: maskBase64,
     // 提供预下载好的 base64 原图，供调用方直接上传 image2image API，
     // 避免再次从远端下载；若失败则回调方还可以回退到原 imageUrl
-    base64_image: loadedImageBase64.value || (imageEl && (imageEl as any).src) || '',
+    base64_image: loadedImageBase64.value || (imageEl && (imageEl as HTMLImageElement)?.src) || '',
     prompt: prompt.value.trim(),
   })
 }

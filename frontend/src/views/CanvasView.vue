@@ -391,7 +391,29 @@
   </div>
 </template>
 
-<script setup lang="ts">
+/** 图片任务状态响应（扩展字段，覆盖层可能在 status 外返回 image_url/error/data） */
+interface ImageTaskPollStatus {
+  status: string
+  task_id?: string
+  progress?: number
+  result_url?: string | null
+  url?: string | null
+  message?: string | null
+  image_url?: string | null
+  data?: { url?: string }[]
+  error?: string
+}
+
+/** 视频任务状态响应（扩展字段） */
+interface VideoTaskPollStatus {
+  status: string
+  progress?: number
+  message?: string
+  video_url?: string
+  error?: string
+}
+
+// ========== 任务状态响应（扩展字段） ==========<script setup lang="ts">
 /* =====================================================
  * CanvasView 无限画布主视图
  * - 整合 9 个子组件：InfiniteCanvas / CanvasConnectionsLayer /
@@ -433,8 +455,8 @@ import ImageWithWatermark from '@/components/ImageWithWatermark.vue'
 // 画布模板库组件
 import CanvasManagerPopover from '@/components/canvas/CanvasManagerPopover.vue'
 // 画布积分预估与校验（生图/生视频/局部编辑前预检积分）
+import type { CanvasStep, CanvasPanel, CanvasConnection, CanvasStore as CanvasStoreState } from '@/stores/canvas'
 import { checkCreditsBeforeGenerate, showCostConsumedMessage } from '@/lib/canvas-credits'
-// 画布模板管理（保存/加载/创建画布）
 import {
   type CanvasTemplate,
   saveAsTemplate,
@@ -544,7 +566,7 @@ const selectedStepId = ref<string | null>(null)
 // 步骤编辑弹窗状态
 const stepEditState = reactive({
   visible: false,
-  step: null as any | null,
+  step: null as typeof store.steps[number] | null,
 })
 
 // 流程模式：步骤操作
@@ -955,12 +977,15 @@ async function handleNodeGenerateImage(panel: typeof store.panels[number]) {
 // 弹窗状态：visible + 源节点 + 模式（text2image/text2video/image2image/image2video）
 const quickGenerateState = reactive({
   visible: false,
-  sourcePanel: null as any,
+  sourcePanel: null as typeof store.panels[number] | null,
   mode: 'text2image' as 'text2image' | 'text2video' | 'image2image' | 'image2video',
 })
 
+// 弹窗确认生成
+async function handleQuickGenerateConfirm(payload: { mode: string; prompt?: string; model?: string; size?: string; aspect_ratio?: string; seconds?: number }) {
+
 // 打开快捷生成弹窗（由文本/图片节点的生图/生视频按钮触发）
-function handleQuickGenerate({ panel, mode }: { panel: any; mode: string }) {
+function handleQuickGenerate({ panel, mode }: { panel: typeof store.panels[number]; mode: string }) {
   // 校验源内容非空
   if (panel.type === 'text') {
     const text = (panel.content?.content || '').trim()
@@ -976,7 +1001,7 @@ function handleQuickGenerate({ panel, mode }: { panel: any; mode: string }) {
     }
   }
   quickGenerateState.sourcePanel = panel
-  quickGenerateState.mode = mode as any
+  quickGenerateState.mode = mode as 'text2image' | 'text2video' | 'image2image' | 'image2video';
   quickGenerateState.visible = true
 }
 
@@ -1077,7 +1102,7 @@ async function generateImageFromPrompt(sourcePanel: typeof store.panels[number],
       const isFailed = ['failed', 'error'].includes(status.status)
 
       if (isSuccess) {
-        const imageUrl = status.result_url || (status as any).image_url || status.url || (status as any).data?.[0]?.url
+        const imageUrl = (status as ImageTaskPollStatus).result_url || (status as ImageTaskPollStatus).image_url || status.url || (status as ImageTaskPollStatus).data?.[0]?.url
         store.updatePanel(newPanelId!, { content: { content: imageUrl, status: 'success' } })
         store.pushSnapshot()
         taskQueue.updateCanvasTask(taskId, { status: 'success', resultUrl: imageUrl, progress: 100 })
@@ -1090,7 +1115,7 @@ async function generateImageFromPrompt(sourcePanel: typeof store.panels[number],
         return
       }
       if (isFailed) {
-        const errMsg = status.message || (status as any).error || t('canvas.messages.generateFailed')
+        const errMsg = (status as ImageTaskPollStatus).message || (status as ImageTaskPollStatus).error || t('canvas.messages.generateFailed')
         store.updatePanel(newPanelId!, { content: { status: 'error', errorDetails: errMsg } })
         taskQueue.updateCanvasTask(taskId, { status: 'failed' })
         ElMessage.error(`${t('canvas.messages.imageGenerationFailed')}: ${errMsg}`)
@@ -1189,7 +1214,7 @@ async function generateImageFromSource(
       const isFailed = ['failed', 'error'].includes(status.status)
 
       if (isSuccess) {
-        const imageUrl = status.result_url || (status as any).image_url || status.url || (status as any).data?.[0]?.url
+        const imageUrl = (status as ImageTaskPollStatus).result_url || (status as ImageTaskPollStatus).image_url || status.url || (status as ImageTaskPollStatus).data?.[0]?.url
         store.updatePanel(newPanelId, { content: { content: imageUrl, status: 'success' } })
         store.pushSnapshot()
         taskQueue.updateCanvasTask(taskId, { status: 'success', resultUrl: imageUrl, progress: 100 })
@@ -1201,7 +1226,7 @@ async function generateImageFromSource(
         return
       }
       if (isFailed) {
-        const errMsg = status.message || (status as any).error || t('canvas.messages.generateFailed')
+        const errMsg = (status as ImageTaskPollStatus).message || (status as ImageTaskPollStatus).error || t('canvas.messages.generateFailed')
         store.updatePanel(newPanelId, { content: { status: 'error', errorDetails: errMsg } })
         taskQueue.updateCanvasTask(taskId, { status: 'failed' })
         ElMessage.error(`${t('canvas.messages.imageGenerationFailed')}: ${errMsg}`)
@@ -1306,7 +1331,7 @@ async function generateVideoFromSource(
         return
       }
       if (isFailed) {
-        const errMsg = status.message || (status as any).error || t('canvas.messages.generateFailed')
+        const errMsg = (status as ImageTaskPollStatus).message || (status as ImageTaskPollStatus).error || t('canvas.messages.generateFailed')
         store.updatePanel(newPanelId, { content: { status: 'error', errorDetails: errMsg } })
         taskQueue.updateCanvasTask(taskId, { status: 'failed' })
         ElMessage.error(`${t('canvas.messages.videoGenerationFailed')}: ${errMsg}`)
@@ -1358,7 +1383,7 @@ async function retryGeneration(panel: typeof store.panels[number]) {
       store.updatePanel(panel.id, { content: { status: 'loading', errorDetails: null } })
       ElMessage.info(t('canvas.messages.regenerate'))
       // 异步执行，不阻塞
-      fn(configNode.id, store as any, {
+      fn(configNode.id, store as CanvasGenerationStore, {
         onProgress: (stage, data) => {
           if (stage === 'done') {
             // 成功提示附带消耗积分数量
@@ -1406,7 +1431,7 @@ async function handleConfigGenerate(panel: typeof store.panels[number]) {
   const prompt = (panel.content?.prompt || panel.content?.composerContent || '') as string
   if (!prompt.trim()) {
     // prompt 为空时，检查上游是否有文本节点（buildSimpleContext 会自动拼接上游文本）
-    const upstreamNodes = getUpstreamNodes(panel.id, store.panels as any, store.connections)
+    const upstreamNodes = getUpstreamNodes(panel.id, store.panels, store.connections)
     const hasUpstreamText = upstreamNodes.some(
       (p) => p.type === 'text' && ((p.content?.content as string) || '').trim(),
     )
@@ -1436,7 +1461,7 @@ async function handleConfigGenerate(panel: typeof store.panels[number]) {
     const fn = isVideo ? executeMergeVideoGeneration : executeMergeGeneration
 
     // 异步执行：立刻创建 loading 结果节点，后台轮询
-    const newNodeId = await fn(panel.id, store as any, {
+    const newNodeId = await fn(panel.id, store as CanvasGenerationStore, {
       onProgress: (stage, data) => {
         if (stage === 'done') {
           // 成功提示附带消耗积分数量
@@ -1856,7 +1881,7 @@ async function handleHoverDescribe() {
 
     // 创建临时会话
     const session = await createChatSession({ title: '图片反推' })
-    const sessionId = (session as any).id || (session as any).session_id
+    const sessionId = (session as { id?: number; session_id?: number }).id || (session as { id?: number; session_id?: number }).session_id
 
     // 反推指令：让 AI 描述图片并输出适合 AI 绘画的英文提示词
     // 措辞要点：明确这是"看图描述"任务，不是"生成图片"任务，避免 AI 误触发生图工具
@@ -2016,8 +2041,8 @@ async function handleMaskConfirm(
       size: '1024x1024',
       response_format: 'url',
       base64_images: [base64Image],
-      mask: mask,
-    } as any)
+      mask,
+    } as ImageGenerationRequest)
 
     const taskId = resp.task_id
 
@@ -2038,7 +2063,7 @@ async function handleMaskConfirm(
       const isFailed = ['failed', 'error'].includes(status.status)
 
       if (isSuccess) {
-        const resultUrl = status.result_url || (status as any).image_url || status.url || (status as any).data?.[0]?.url
+        const resultUrl = (status as ImageTaskPollStatus).result_url || (status as ImageTaskPollStatus).image_url || status.url || (status as ImageTaskPollStatus).data?.[0]?.url
         store.updatePanel(panelId!, { content: { content: resultUrl, status: 'success' } })
         store.pushSnapshot()
         taskQueue.updateCanvasTask(taskId, { status: 'success', resultUrl, progress: 100 })
@@ -2051,7 +2076,7 @@ async function handleMaskConfirm(
         return
       }
       if (isFailed) {
-        const errMsg = status.message || (status as any).error || t('canvas.messages.maskEditFailed')
+        const errMsg = (status as ImageTaskPollStatus).message || (status as ImageTaskPollStatus).error || t('canvas.messages.maskEditFailed')
         store.updatePanel(panelId!, { content: { status: 'error', errorDetails: errMsg } })
         taskQueue.updateCanvasTask(taskId, { status: 'failed' })
         ElMessage.error(`${t('canvas.messages.maskEditFailed')}: ${errMsg}`)
@@ -2258,7 +2283,7 @@ async function handleAngleConfirm({ prompt }: { prompt: string }) {
       // 用数组形式传参，与当前后端 schema 对齐；旧字段也保留一份兜底
       base64_images: [base64Image],
       base64_image: base64Image,
-    } as any)
+    } as ImageGenerationRequest)
 
     const taskId = resp.task_id
     taskQueue.registerCanvasTask({
@@ -2277,7 +2302,7 @@ async function handleAngleConfirm({ prompt }: { prompt: string }) {
       const isFailed = ['failed', 'error'].includes(status.status)
 
       if (isSuccess) {
-        const resultUrl = status.result_url || (status as any).image_url || status.url || (status as any).data?.[0]?.url
+        const resultUrl = (status as ImageTaskPollStatus).result_url || (status as ImageTaskPollStatus).image_url || status.url || (status as ImageTaskPollStatus).data?.[0]?.url
         store.updatePanel(newId, { content: { content: resultUrl, status: 'success' } })
         store.pushSnapshot()
         taskQueue.updateCanvasTask(taskId, { status: 'success', resultUrl, progress: 100 })
@@ -2289,7 +2314,7 @@ async function handleAngleConfirm({ prompt }: { prompt: string }) {
         return
       }
       if (isFailed) {
-        const errMsg = status.message || (status as any).error || t('canvas.messages.angleFailed')
+        const errMsg = (status as ImageTaskPollStatus).message || (status as ImageTaskPollStatus).error || t('canvas.messages.angleFailed')
         store.updatePanel(newId, { content: { status: 'error', errorDetails: errMsg } })
         taskQueue.updateCanvasTask(taskId, { status: 'failed' })
         ElMessage.error(`${t('canvas.messages.angleFailed')}: ${errMsg}`)
@@ -2763,8 +2788,8 @@ onMounted(async () => {
   window.addEventListener('keyup', handleKeyUp)
   window.addEventListener('click', handleGlobalClick)
   // 监听用户登录/退出，切换画布数据空间
-  window.addEventListener('agnes:user-login', handleUserSwitch as unknown as EventListener)
-  window.addEventListener('agnes:user-logout', handleUserLogout as unknown as EventListener)
+  window.addEventListener('agnes:user-login', handleUserSwitch as EventListener)
+  window.addEventListener('agnes:user-logout', handleUserLogout as EventListener)
 })
 
 onBeforeUnmount(() => {
@@ -2776,8 +2801,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointerup', handleSelectionUp)
   window.removeEventListener('pointermove', handleConnectingMove)
   window.removeEventListener('pointerup', handleConnectingUp)
-  window.removeEventListener('agnes:user-login', handleUserSwitch as unknown as EventListener)
-  window.removeEventListener('agnes:user-logout', handleUserLogout as unknown as EventListener)
+  window.removeEventListener('agnes:user-login', handleUserSwitch as EventListener)
+  window.removeEventListener('agnes:user-logout', handleUserLogout as EventListener)
   // 清理 hover 定时器
   cancelHoverHide()
 })

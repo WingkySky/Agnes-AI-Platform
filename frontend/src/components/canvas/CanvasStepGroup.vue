@@ -116,7 +116,7 @@ const headerStyle = computed(() => {
 const effectiveStatus = computed(() => {
   const panelStatuses = props.panels
     .filter(p => props.step.panel_ids.includes(p.id))
-    .map(p => (p.content as any)?.status || 'idle')
+    .map(p => (p.content as Record<string, unknown>)?.status || 'idle')
 
   if (panelStatuses.some(s => s === 'loading')) return 'running'
   if (panelStatuses.some(s => s === 'error')) return 'failed'

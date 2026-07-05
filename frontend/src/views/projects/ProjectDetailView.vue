@@ -216,7 +216,7 @@ watch(
     if (!evt) return
     const entityType = evt.entity_type as string | undefined
     if (entityType && ['character', 'scene', 'prop'].includes(entityType)) {
-      projectStore.fetchEntities(entityType as any).catch(() => {/* 忽略 */})
+      projectStore.fetchEntities(entityType as EntityType).catch(() => {/* 忽略 */})
     } else if (evt.shot_id || evt.entity_type === 'shot') {
       // 分镜相关更新：刷新对应分镜
       const shotId = evt.shot_id as number | undefined
@@ -240,6 +240,7 @@ watch(
     // 合成完成：刷新详情，获取 final_video_url
     if (evt.status === 'completed') {
       projectStore.mergeLoading = false
+      projectStore._stopMergePolling()
       if (projectIdRef.value) {
         projectStore.fetchProject(projectIdRef.value).catch(() => {/* 忽略 */})
       }
@@ -247,6 +248,7 @@ watch(
     // 合成失败：释放 loading，提示错误
     if (evt.status === 'failed') {
       projectStore.mergeLoading = false
+      projectStore._stopMergePolling()
       ElMessage.error(evt.error || '合成失败，请重试')
     }
   },

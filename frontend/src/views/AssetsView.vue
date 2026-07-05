@@ -117,10 +117,11 @@ const filteredAssets = computed(() => {
 async function reloadAssets() {
   try {
     await assetStore.loadAssets({
-      asset_type: assetStore.filter.type || undefined,
-    } as any)
-  } catch (e: any) {
-    ElMessage.error(e?.message || t('assets.loadFailed'))
+      category: assetStore.filter.type || undefined,
+    } as PipelineListParams | undefined)
+  } catch (e: unknown) {
+    const err = e as { message?: string }
+    ElMessage.error(err.message || t('assets.loadFailed'))
   }
 }
 

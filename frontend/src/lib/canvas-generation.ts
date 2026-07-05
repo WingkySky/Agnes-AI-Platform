@@ -22,6 +22,7 @@ import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useModelsStore } from '@/stores/models'
 import { usePreferencesStore } from '@/stores/preferences'
 import { parseSize } from '@/config/model-params'
+import type { CanvasPanel, CanvasConnection } from '@/stores/canvas'
 import type { ImageGenerationRequest, VideoGenerationRequest } from '@/types'
 import { getErrorMessage } from '@/lib/type-helpers'
 
@@ -63,29 +64,18 @@ interface GenerationContext {
   inputSummary: InputSummary
 }
 
-/** 面板类型（简化） */
-interface Panel {
-  id: string
-  type: string
-  name?: string
-  x?: number
-  y?: number
-  width?: number
-  height?: number
-  content?: Record<string, any>
+/** 面板类型（对齐 CanvasPanel） */
+interface GenerationPanel extends Omit<CanvasPanel, 'content'> {
+  content: Record<string, any>
 }
 
-/** 连线类型 */
-interface Connection {
-  source_panel_id: string
-  target_panel_id: string
-  [key: string]: any
-}
+/** 连线类型（对齐 CanvasConnection） */
+type GenerationConnection = CanvasConnection
 
-/** Canvas Store 接口（简化） */
-interface CanvasStore {
-  panels: Panel[]
-  connections: Connection[]
+/** Canvas Store 接口（抽象） */
+interface CanvasGenerationStore {
+  panels: GenerationPanel[]
+  connections: GenerationConnection[]
   addPanel: (panel: Record<string, any>) => string | undefined
   addConnection: (conn: Record<string, any>) => void
   updatePanel: (id: string, updates: Record<string, any>) => void
@@ -96,7 +86,7 @@ interface CanvasStore {
 interface GenerationConfig {
   model?: string
   size?: string
-  response_format?: string
+  response_format?: 'url' | 'b64_json'
   seconds?: number
   aspect_ratio?: string
   resolution?: number
@@ -133,9 +123,9 @@ function resourceLabel(type: string, index: number): string {
  * - image / text / video / audio 类型都是资源节点
  * - config / frame / quick-generate 不是资源节点
  */
-export function isResourceNode(panel: Panel | null | undefined): boolean {
+export function isResourceNode(panel: GenerationPanel | null | undefined): boolean {
   if (!panel) return false
-  return ['image', 'text', 'video', 'audio'].includes(panel.type)
+  return ['image', 'text', 'video', 'audio'].includes(panel.type || '')
 }
 
 /**
@@ -144,13 +134,13 @@ export function isResourceNode(panel: Panel | null | undefined): boolean {
  * - 按连接创建时间排序（保证序号与节点显示的1、2、3标记一致）
  * - 过滤掉非资源节点和重复连接
  */
-export function getUpstreamNodes(nodeId: string, panels: Panel[], connections: Connection[]): Panel[] {
+export function getUpstreamNodes(nodeId: string, panels: GenerationPanel[], connections: GenerationConnection[]): GenerationPanel[] {
   // 先按连接创建时间排序
   const incomingConns = connections
     .filter((c) => c.target_panel_id === nodeId)
     .sort((a, b) => {
-      const timeA = a.created_at ? new Date(a.created_at).getTime() : 0
-      const timeB = b.created_at ? new Date(b.created_at).getTime() : 0
+      const timeA = a.created_at ? new Date(a.created_at as string).getTime() : 0
+      const timeB = b.created_at ? new Date(b.created_at as string).getTime() : 0
       return timeA - timeB
     })
 
@@ -158,27 +148,30 @@ export function getUpstreamNodes(nodeId: string, panels: Panel[], connections: C
   const seen = new Set<string>()
   const upstreamIds: string[] = []
   for (const conn of incomingConns) {
-    if (conn.source_panel_id && !seen.has(conn.source_panel_id)) {
-      seen.add(conn.source_panel_id)
-      upstreamIds.push(conn.source_panel_id)
+    if (conn.source_panel_id) {
+      const id = conn.source_panel_id as string
+      if (!seen.has(id)) {
+        seen.add(id)
+        upstreamIds.push(id)
+      }
     }
   }
 
   const panelMap = new Map(panels.map((p) => [p.id, p]))
   return upstreamIds
     .map((id) => panelMap.get(id))
-    .filter((p): p is Panel => !!p && isResourceNode(p))
+    .filter((p): p is GenerationPanel => !!p && isResourceNode(p))
 }
 
 /**
  * 获取上游资源节点及其统一序号（与节点上显示的1、2、3标记一致）
  * - 返回 Array<{ panel, index, typeLabel }>，index 从 1 开始，按连接顺序
  */
-export function getUpstreamNodesWithIndex(nodeId: string, panels: Panel[], connections: Connection[]): Array<{ panel: Panel; index: number; label: string }> {
+export function getUpstreamNodesWithIndex(nodeId: string, panels: GenerationPanel[], connections: GenerationConnection[]): Array<{ panel: GenerationPanel; index: number; label: string }> {
   const upstreamPanels = getUpstreamNodes(nodeId, panels, connections)
   return upstreamPanels.map((panel, idx) => {
     const labels: Record<string, string> = { image: '图片', text: '文本', video: '视频', audio: '音频' }
-    const typeName = labels[panel.type] || '资源'
+    const typeName = labels[panel.type || 'image'] || '资源'
     return {
       panel,
       index: idx + 1,
@@ -193,32 +186,32 @@ export function getUpstreamNodesWithIndex(nodeId: string, panels: Panel[], conne
  * - text: 返回 { type: 'text', nodeId, text, title }
  * - video: 返回 { type: 'video', nodeId, videoUrl, title }
  */
-function extractResourceContent(panel: Panel): ResourceContent | null {
+function extractResourceContent(panel: GenerationPanel): ResourceContent | null {
   if (!panel) return null
   const c = panel.content || {}
-  const title = panel.name || panel.type
+  const title = (panel.name || panel.type || 'Untitled') as string
 
   switch (panel.type) {
     case 'image':
       return {
         type: 'image',
         nodeId: panel.id,
+        title: (panel.name || panel.type || 'Untitled') as string,
         imageUrl: c.content || c.imageUrl || c.image || c.url || '',
-        title,
       }
     case 'text':
       return {
         type: 'text',
         nodeId: panel.id,
+        title: (panel.name || panel.type || 'Untitled') as string,
         text: c.content || c.text || '',
-        title,
       }
     case 'video':
       return {
         type: 'video',
         nodeId: panel.id,
+        title: (panel.name || panel.type || 'Untitled') as string,
         videoUrl: c.content || c.videoUrl || c.url || '',
-        title,
       }
     default:
       return null
@@ -230,10 +223,10 @@ function extractResourceContent(panel: Panel): ResourceContent | null {
  * - 供 CanvasConfigComposer 组件使用
  * - 返回 { nodeId, type, title, text, imageUrl }
  */
-export function extractResourceContentForComposer(panel: Panel): ResourceContentForComposer | null {
+export function extractResourceContentForComposer(panel: GenerationPanel): ResourceContentForComposer | null {
   if (!panel) return null
   const c = panel.content || {}
-  const title = panel.name || panel.type
+  const title = (panel.name || panel.type || 'Untitled') as string
   switch (panel.type) {
     case 'image':
       return {
@@ -276,7 +269,7 @@ export function extractResourceContentForComposer(panel: Panel): ResourceContent
  *   · 所有上游图片作为 referenceImages
  * - 注意：prompt字段也会走引用解析（不一定非要composerContent）
  */
-export function buildGenerationContext(configNode: Panel, panels: Panel[], connections: Connection[]): GenerationContext | null {
+export function buildGenerationContext(configNode: GenerationPanel, panels: GenerationPanel[], connections: GenerationConnection[]): GenerationContext | null {
   if (!configNode) return null
 
   // 收集上游资源（带统一序号）
@@ -488,22 +481,18 @@ export async function createGenerationTask(ctx: GenerationContext, config: Gener
   const { prompt, referenceImages } = ctx
   const { base64Images, imageUrls } = await classifyImages(referenceImages || [])
 
-  const params: Record<string, any> = {
+  const hasReferenceImages = referenceImages && referenceImages.length > 0
+  const params: ImageGenerationRequest = {
     prompt,
     model: config.model || useModelsStore().defaultImageModel,
     size: config.size || '1024x1024',
     response_format: config.response_format || 'url',
-    mode: referenceImages && referenceImages.length > 0 ? 'image2image' : 'text2image',
+    mode: hasReferenceImages ? 'image2image' : 'text2image',
+    base64_images: base64Images.length > 0 ? base64Images : null,
+    image_urls: imageUrls.length > 0 ? imageUrls : null,
   }
 
-  if (base64Images.length > 0) {
-    params.base64_images = base64Images
-  }
-  if (imageUrls.length > 0) {
-    params.image_urls = imageUrls
-  }
-
-  const resp = await createImageTask(params as ImageGenerationRequest)
+  const resp = await createImageTask(params)
   if (!resp || !resp.task_id) {
     throw new Error('创建生成任务失败：未返回 task_id')
   }
@@ -580,7 +569,7 @@ export async function pollImageTask(
  * 计算新结果节点的位置（Config 节点右侧，自动排列）
  * - 返回 { x, y, width, height }
  */
-function calcResultNodePosition(configNode: Panel, isVideo: boolean, index: number) {
+function calcResultNodePosition(configNode: GenerationPanel, isVideo: boolean, index: number) {
   const cols = 4
   const nodeWidth = isVideo ? 320 : 200
   const nodeHeight = isVideo ? 200 : 200
@@ -599,7 +588,7 @@ function calcResultNodePosition(configNode: Panel, isVideo: boolean, index: numb
  * 在 Config 节点右侧创建一个 loading 状态的结果节点并连线
  * - 返回新节点 ID
  */
-export function createLoadingResultNode(store: CanvasStore, configNode: Panel, isVideo: boolean, index: number = 0): string {
+export function createLoadingResultNode(store: CanvasGenerationStore, configNode: GenerationPanel, isVideo: boolean, index: number = 0): string {
   const pos = calcResultNodePosition(configNode, isVideo, index)
   const prompt = configNode.content?.prompt || ''
 
@@ -643,7 +632,7 @@ export function createLoadingResultNode(store: CanvasStore, configNode: Panel, i
  *
  * @returns 新创建的结果节点 ID（loading 状态）
  */
-export async function executeMergeGeneration(configId: string, store: CanvasStore, options: GenerationOptions = {}): Promise<string> {
+export async function executeMergeGeneration(configId: string, store: CanvasGenerationStore, options: GenerationOptions = {}): Promise<string> {
   const { onProgress } = options
   const queueStore = useTaskQueueStore()
 
@@ -774,10 +763,10 @@ export async function createVideoGenerationTask(ctx: GenerationContext, config: 
     mode = 'text2video'  // 无图 → 文生视频
   }
 
-  const params: Record<string, any> = {
+  const params: VideoGenerationRequest = {
     prompt,
     model: config.model || useModelsStore().defaultVideoModel,
-    mode,
+    mode: mode as 'text2video' | 'image2video' | 'keyframes',
   }
 
   // 视频帧率
@@ -823,7 +812,7 @@ export async function createVideoGenerationTask(ctx: GenerationContext, config: 
     params.image_mime_types = allImages.map(() => 'image/png')
   }
 
-  const resp = await createVideoTask(params as VideoGenerationRequest)
+  const resp = await createVideoTask(params)
   if (!resp || !resp.task_id) {
     throw new Error('创建视频任务失败：未返回 task_id')
   }
@@ -903,7 +892,7 @@ export async function pollVideoTask(
  *
  * @returns 新创建的结果节点 ID（loading 状态）
  */
-export async function executeMergeVideoGeneration(configId: string, store: CanvasStore, options: GenerationOptions = {}): Promise<string> {
+export async function executeMergeVideoGeneration(configId: string, store: CanvasGenerationStore, options: GenerationOptions = {}): Promise<string> {
   const { onProgress } = options
   const queueStore = useTaskQueueStore()
 

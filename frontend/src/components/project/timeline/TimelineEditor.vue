@@ -62,6 +62,7 @@
           :pixels-per-second="pixelsPerSecond"
           :total-duration="totalDuration"
           :selected-clip-id="selectedClipId"
+          :active-clip-id="activeClipIdForTrack(trackType)"
           :editable="editable"
           @deselect="$emit('deselect')"
           @select-clip="$emit('select-clip', $event)"
@@ -92,6 +93,14 @@ const props = defineProps<{
   totalDuration: number
   selectedClipId?: number | null
   editable?: boolean
+  /** 受控播放头时间（秒），由父组件传入；不传则使用内部状态 */
+  playheadTime?: number
+  /** 当前播放中的视频片段 ID（高亮显示） */
+  activeVideoClipId?: number | null
+  /** 当前播放中的音频片段 ID */
+  activeAudioClipId?: number | null
+  /** 当前播放中的字幕片段 ID */
+  activeSubtitleClipId?: number | null
 }>()
 
 const emit = defineEmits<{
@@ -150,14 +159,27 @@ function formatTime(seconds: number): string {
 }
 
 // ---------- 播放头 ----------
-const playheadTime = ref(0)
+// 受控模式：优先使用 props.playheadTime（父组件驱动，如预览调度）
+// 非受控模式：props.playheadTime 未传时使用内部状态
+const internalPlayheadTime = ref(0)
+const playheadTime = computed({
+  get: () => {
+    return props.playheadTime !== undefined ? props.playheadTime : internalPlayheadTime.value
+  },
+  set: (val: number) => {
+    if (props.playheadTime === undefined) {
+      internalPlayheadTime.value = val
+    }
+    // 受控模式下 set 不直接修改（由父组件通过 props 更新），但仍 emit seek 事件
+  },
+})
 const playheadPosition = computed(() => playheadTime.value * pixelsPerSecond.value)
 
 function onRulerClick(e: MouseEvent) {
   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
   const x = e.clientX - rect.left + (scrollEl.value?.scrollLeft ?? 0)
   const t = Math.max(0, x / pixelsPerSecond.value)
-  playheadTime.value = t
+  internalPlayheadTime.value = t
   emit('seek', t)
 }
 
@@ -168,7 +190,7 @@ function onPlayheadDrag(e: MouseEvent) {
     if (!rect) return
     const x = ev.clientX - rect.left + (scrollEl.value?.scrollLeft ?? 0)
     const t = Math.max(0, x / pixelsPerSecond.value)
-    playheadTime.value = t
+    internalPlayheadTime.value = t
     emit('seek', t)
   }
   const onUp = () => {
@@ -180,14 +202,14 @@ function onPlayheadDrag(e: MouseEvent) {
 }
 
 function seekTo(t: number) {
-  playheadTime.value = t
+  internalPlayheadTime.value = t
   emit('seek', t)
 }
 
-// 外部 seek 事件同步
+// 外部 seek 事件同步（仅非受控模式生效）
 watch(() => props.totalDuration, () => {
-  if (playheadTime.value > props.totalDuration) {
-    playheadTime.value = props.totalDuration
+  if (internalPlayheadTime.value > props.totalDuration) {
+    internalPlayheadTime.value = props.totalDuration
   }
 })
 
@@ -196,6 +218,14 @@ const allClips = computed(() => props.clips)
 
 function clipsForTrack(type: TimelineTrackType): TimelineClip[] {
   return props.clips.filter((c) => c.track_type === type)
+}
+
+// 根据轨道类型返回当前播放中的片段 ID（用于高亮）
+function activeClipIdForTrack(type: TimelineTrackType): number | null {
+  if (type === 'video') return props.activeVideoClipId ?? null
+  if (type === 'audio') return props.activeAudioClipId ?? null
+  if (type === 'subtitle') return props.activeSubtitleClipId ?? null
+  return null
 }
 
 // ---------- 拖拽 / 裁剪代理 ----------

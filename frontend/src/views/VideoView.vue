@@ -449,7 +449,7 @@ const videoUrl = computed(() => {
   if (status === 'success') {
     // 直接使用 Agnes CDN 的原始 URL，
     // 不走后端代理，因为 <video src> 无法携带 JWT
-    return activeTask.value.resultUrl || (activeTask.value as any).url || ''
+    return activeTask.value.resultUrl || activeTask.value.url || ''
   }
   return ''
 })
@@ -457,7 +457,7 @@ const videoUrl = computed(() => {
 // 原始直链 URL（下载、复制链接）
 const rawVideoUrl = computed(() => {
   if (!activeTask.value) return ''
-  return activeTask.value.resultUrl || (activeTask.value as any).url || ''
+  return activeTask.value.resultUrl || activeTask.value.url || ''
 })
 
 // 状态标签（使用 i18n 显示本地化名称）

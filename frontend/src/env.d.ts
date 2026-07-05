@@ -26,3 +26,12 @@ declare module 'axios' {
     silent?: boolean
   }
 }
+
+/* File System Access API — showDirectoryPicker 扩展 */
+declare global {
+  interface Window {
+    showDirectoryPicker?(options?: {
+      mode?: 'read' | 'readwrite'
+    }): Promise<FileSystemDirectoryHandle>
+  }
+}

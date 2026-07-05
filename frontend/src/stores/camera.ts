@@ -67,10 +67,11 @@ export const useCameraStore = defineStore('camera', () => {
     if (presetId === null) {
       // 清空参数但保留 enabled 状态
       const wasEnabled = cameraParams.enabled
-      const keys = Object.keys(cameraParams) as (keyof CameraParams)[]
+      const params = cameraParams as Partial<CameraParams>
+      const keys = Object.keys(params) as (keyof CameraParams)[]
       for (const k of keys) {
         if (k === 'enabled') continue
-        ;(cameraParams as any)[k] = undefined
+        params[k] = undefined
       }
       return
     }
@@ -105,9 +106,10 @@ export const useCameraStore = defineStore('camera', () => {
   /** 清除所有摄像机状态 */
   function clearAll() {
     enabled.value = false
-    const keys = Object.keys(cameraParams) as (keyof CameraParams)[]
+    const params = cameraParams as Partial<CameraParams>
+    const keys = Object.keys(params) as (keyof CameraParams)[]
     for (const k of keys) {
-      ;(cameraParams as any)[k] = k === 'enabled' ? false : undefined
+      ;(params as Record<string, any>)[k] = k === 'enabled' ? false : undefined
     }
     presets.value = []
     presetsLoaded.value = false

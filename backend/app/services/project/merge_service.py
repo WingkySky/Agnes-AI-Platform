@@ -21,6 +21,7 @@ import asyncio
 import logging
 import os
 import tempfile
+from datetime import datetime, timedelta
 from typing import Optional, List
 
 from sqlalchemy import select
@@ -39,6 +40,147 @@ from app.services.project.project_service import update_status
 
 logger = logging.getLogger("agnes_platform.project.merge")
 
+# 缓存 ffmpeg subtitles 滤镜可用性（避免每次合成重复检测）
+_subtitles_filter_cache: Optional[bool] = None
+
+
+async def _check_subtitles_filter_available() -> bool:
+    """
+    检测当前 ffmpeg 是否支持 subtitles 滤镜（需要编译 libass）。
+
+    结果缓存，避免每次合成重复执行 ffmpeg -filters。
+    """
+    global _subtitles_filter_cache
+    if _subtitles_filter_cache is not None:
+        return _subtitles_filter_cache
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-filters",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+        output = stdout.decode("utf-8", errors="ignore")
+        # 匹配滤镜列表中的 subtitles 条目（如 "  T. subtitles  V->V  ..."）
+        _subtitles_filter_cache = " subtitles " in output or "subtitles " in output
+    except Exception as e:
+        logger.warning("检测 ffmpeg subtitles 滤镜失败，默认不可用: %s", e)
+        _subtitles_filter_cache = False
+    if not _subtitles_filter_cache:
+        logger.warning(
+            "[合成] 当前 ffmpeg 未编译 libass，subtitles 滤镜不可用，"
+            "将尝试 drawtext 直烧（无 libass 依赖）。"
+        )
+    return _subtitles_filter_cache
+
+
+# drawtext 滤镜可用性缓存
+_drawtext_filter_cache: Optional[bool] = None
+
+
+async def _check_drawtext_filter_available() -> bool:
+    """
+    检测当前 ffmpeg 是否支持 drawtext 滤镜（ffmpeg 内置，通常可用，无需 libass）。
+
+    作为 subtitles 滤镜不可用时的兜底硬烧方案。
+    """
+    global _drawtext_filter_cache
+    if _drawtext_filter_cache is not None:
+        return _drawtext_filter_cache
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-filters",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+        output = stdout.decode("utf-8", errors="ignore")
+        _drawtext_filter_cache = " drawtext " in output or "drawtext " in output
+    except Exception as e:
+        logger.warning("检测 ffmpeg drawtext 滤镜失败，默认不可用: %s", e)
+        _drawtext_filter_cache = False
+    if not _drawtext_filter_cache:
+        logger.warning(
+            "[合成] 当前 ffmpeg 不支持 drawtext 滤镜，"
+            "字幕只能以软字幕形式嵌入（mov_text）。"
+        )
+    return _drawtext_filter_cache
+
+
+def _build_drawtext_subtitles_filter(
+    clips: List[dict],
+    style: dict,
+    video_width: int = 1920,
+    video_height: int = 1080,
+) -> str:
+    """
+    根据字幕片段列表 + SubtitleStyle 构造 drawtext 滤镜链。
+
+    每条字幕对应一个 drawtext 滤镜，通过 enable='between(t,start,end)' 控制显示时段。
+    多个 drawtext 用逗号串联成单个 -vf 滤镜链。
+
+    参数:
+    - clips: 字幕片段列表 [{start_time, duration, text}, ...]
+    - style: SubtitleStyle dict（font_family / font_size / font_color / outline_color / outline_width / position / margin_vertical）
+    - video_width / video_height: 目标视频分辨率（用于位置计算）
+
+    返回:
+    - drawtext 滤镜字符串，如 "drawtext=...:enable='between(t,0,2.5)',drawtext=...:enable='between(t,2.5,4.3)'"
+    """
+    from app.services.watermark_service import _find_video_font, _escape_drawtext_text
+
+    fontfile = _find_video_font()
+    font_opt = f":fontfile='{fontfile}'" if fontfile else ""
+
+    font_size = int(style.get("font_size") or 48)
+    font_color_hex = (style.get("font_color") or "#FFFFFF").lstrip("#")
+    outline_color_hex = (style.get("outline_color") or "#000000").lstrip("#")
+    outline_width = int(style.get("outline_width") or 2)
+    margin_v = int(style.get("margin_vertical") or 60)
+    position = (style.get("position") or "bottom").lower()
+
+    # fontcolor 用 0xRRGGBB 格式
+    try:
+        fr, fg, fb = int(font_color_hex[0:2], 16), int(font_color_hex[2:4], 16), int(font_color_hex[4:6], 16)
+        fontcolor = f"0x{fr:02X}{fg:02X}{fb:02X}"
+    except Exception:
+        fontcolor = "0xFFFFFF"
+    try:
+        br, bg, bb = int(outline_color_hex[0:2], 16), int(outline_color_hex[2:4], 16), int(outline_color_hex[4:6], 16)
+        bordercolor = f"0x{br:02X}{bg:02X}{bb:02X}"
+    except Exception:
+        bordercolor = "0x000000"
+
+    # 位置表达式（drawtext 用 w/h/text_w/text_h 表示视频/文字尺寸）
+    if position == "top":
+        pos = f"x=(w-text_w)/2:y={margin_v}"
+    elif position == "center":
+        pos = f"x=(w-text_w)/2:y=(h-text_h)/2"
+    else:  # bottom（默认）
+        pos = f"x=(w-text_w)/2:y=h-text_h-{margin_v}"
+
+    filters: List[str] = []
+    for clip in clips:
+        text = (clip.get("text") or "").strip()
+        if not text:
+            continue
+        start = float(clip.get("start_time") or 0.0)
+        dur = float(clip.get("duration") or 0.0)
+        end = start + dur
+
+        escaped = _escape_drawtext_text(text)
+        # 每条字幕一个 drawtext 滤镜，用 enable 控制时段
+        f = (
+            f"drawtext=text='{escaped}'{font_opt}"
+            f":fontcolor={fontcolor}:fontsize={font_size}"
+            f":borderw={outline_width}:bordercolor={bordercolor}"
+            f":{pos}"
+            f":enable='between(t,{start:.3f},{end:.3f})'"
+        )
+        filters.append(f)
+
+    return ",".join(filters)
+
 
 async def merge_project(
     db: AsyncSession, project_id: int, user_id: int,
@@ -56,7 +198,8 @@ async def merge_project(
     - bgm_id: 指定 BGM ID（从内置库选），未指定则按项目氛围自动选
     - use_timeline: True=按时间线高级合成，False=按分镜顺序简单拼接
 
-    1. 校验项目状态：只阻止 merging 中重复触发，允许 in_progress / completed 重新合成
+    1. 校验项目状态：阻止 merging 中重复触发，但允许超时（5分钟）自动恢复
+       允许 in_progress / completed 重新合成
     2. 清空旧 final_video_url（避免用户看到上次的失败结果）
     3. 切换到 merging
     4. 后台启动 execute_merge / execute_merge_advanced
@@ -67,8 +210,18 @@ async def merge_project(
     if not project:
         raise ValueError(f"项目 {project_id} 不存在")
 
+    # 合成中重复触发：检查是否超时（5 分钟），超时视为上次合成卡死，自动恢复
     if project.status == PROJECT_STATUS_MERGING:
-        raise ValueError("项目正在合成中，请稍候")
+        if project.updated_at:
+            age = datetime.utcnow() - project.updated_at
+            if age < timedelta(minutes=5):
+                raise ValueError("项目正在合成中，请稍候")
+            logger.warning(
+                "项目 %s 卡在 merging 状态已 %s 秒，视为上次合成失败，自动恢复以允许重新合成",
+                project_id, int(age.total_seconds()),
+            )
+        else:
+            raise ValueError("项目正在合成中，请稍候")
 
     # 重新合成时清空旧的成片 URL（避免用户点"播放成片"看到上次的失败结果）
     if project.final_video_url:
@@ -102,9 +255,11 @@ async def _execute_merge_wrapper(
 ) -> None:
     """execute_merge / execute_merge_advanced 的包装器，使用独立 session"""
     from app.core.database import new_async_session
+    from app.models.project import PROJECT_STATUS_IN_PROGRESS
 
     db = new_async_session()
     try:
+        logger.info("[合成] 开始执行 project_id=%s use_timeline=%s", project_id, use_timeline)
         if use_timeline:
             await execute_merge_advanced(
                 db, project_id, user_id,
@@ -113,10 +268,15 @@ async def _execute_merge_wrapper(
             )
         else:
             await execute_merge(db, project_id, user_id)
+        logger.info("[合成] 执行完成 project_id=%s", project_id)
     except Exception as e:
-        logger.error(f"项目合成失败 project_id={project_id}: {e}")
-        # 失败回滚状态
-        await update_status(db, project_id, PROJECT_STATUS_COMPLETED)
+        logger.error("[合成] 项目合成失败 project_id=%s: %s", project_id, e, exc_info=True)
+        # 失败回滚状态：回滚到 in_progress（合成失败后项目可继续编辑/重试）
+        # 不用 completed，避免误以为合成成功
+        try:
+            await update_status(db, project_id, PROJECT_STATUS_IN_PROGRESS)
+        except Exception as rollback_err:
+            logger.error("[合成] 状态回滚失败 project_id=%s: %s", project_id, rollback_err)
         await project_sse_manager.push(
             project_id,
             "merge_progress",
@@ -336,7 +496,7 @@ async def execute_merge_advanced(
     - bgm_id: 指定 BGM ID，未指定则不混入 BGM（避免误选）
     """
     from app.services.project.timeline_service import list_clips, get_subtitle_style
-    from app.services.project.subtitle_service import build_ass
+    from app.services.project.subtitle_service import build_ass, build_srt
 
     project = (
         await db.execute(select(Project).where(Project.id == project_id))
@@ -351,6 +511,11 @@ async def execute_merge_advanced(
 
     if not video_clips:
         raise ValueError("时间线无视频片段，请先初始化时间线或生成视频")
+
+    logger.info(
+        "[合成] project_id=%s 时间线片段: video=%d audio=%d subtitle=%d",
+        project_id, len(video_clips), len(audio_clips), len(subtitle_clips),
+    )
 
     await project_sse_manager.push(project_id, "merge_progress", {
         "status": "downloading", "progress": 5,
@@ -411,10 +576,16 @@ async def execute_merge_advanced(
             "status": "compositing", "progress": 30,
         })
 
+        logger.info(
+            "[合成] project_id=%s 下载完成: video=%d audio=%d",
+            project_id, len(video_paths), len(audio_paths),
+        )
+
         if not video_paths:
             raise ValueError("时间线视频片段无可用源文件")
 
         # 3. 拼接视频（含 xfade 转场）
+        logger.info("[合成] project_id=%s 开始拼接视频（xfade 转场）", project_id)
         composite_video_path = os.path.join(tmp_dir, "composite_video.mp4")
         await _concat_videos_with_xfade(
             clips=[c for c in video_clips if c.track_index == 0 and c.source_id],
@@ -422,6 +593,7 @@ async def execute_merge_advanced(
             output_path=composite_video_path,
             aspect_ratio=project.aspect_ratio or "16:9",
         )
+        logger.info("[合成] project_id=%s 视频拼接完成: %s", project_id, composite_video_path)
 
         await project_sse_manager.push(project_id, "merge_progress", {
             "status": "compositing", "progress": 55,
@@ -430,6 +602,10 @@ async def execute_merge_advanced(
         # 4. 混合音频（TTS 拼接 + 淡入淡出 + BGM amix）
         composite_audio_path: Optional[str] = None
         if audio_paths or (with_bgm and bgm_id):
+            logger.info(
+                "[合成] project_id=%s 开始混合音频（TTS=%d BGM=%s）",
+                project_id, len(audio_paths), bgm_id,
+            )
             composite_audio_path = os.path.join(tmp_dir, "composite_audio.aac")
             await _mix_audio_tracks(
                 audio_paths=audio_paths,
@@ -438,15 +614,21 @@ async def execute_merge_advanced(
                 bgm_id=bgm_id,
                 total_duration=_estimate_total_duration(video_clips),
             )
+            logger.info("[合成] project_id=%s 音频混合完成: %s", project_id, composite_audio_path)
 
         await project_sse_manager.push(project_id, "merge_progress", {
             "status": "compositing", "progress": 75,
         })
 
-        # 5. 生成 ASS 字幕文件
+        # 5. 生成字幕文件
+        # 检测 ffmpeg 能力，按优先级选择字幕模式:
+        #   1. subtitles 滤镜可用（libass）→ ASS 硬烧（样式丰富）
+        #   2. drawtext 滤镜可用（ffmpeg 内置）→ drawtext 直烧（无需 libass）
+        #   3. 两者都不可用 → SRT 软字幕（mov_text 嵌入容器）
         subtitle_path: Optional[str] = None
+        subtitle_mode: Optional[str] = None  # "hard" | "drawtext" | "soft" | None
+        subtitle_drawtext_filter: Optional[str] = None  # drawtext 模式专用
         if subtitle_clips:
-            subtitle_path = os.path.join(tmp_dir, "subtitles.ass")
             subtitle_style = await get_subtitle_style(db, project_id)
             clips_data = [
                 {
@@ -456,11 +638,41 @@ async def execute_merge_advanced(
                 }
                 for c in subtitle_clips
             ]
-            ass_content = build_ass(clips_data, subtitle_style)
-            with open(subtitle_path, "w", encoding="utf-8") as f:
-                f.write(ass_content)
+            can_hardburn = await _check_subtitles_filter_available()
+            if can_hardburn:
+                # 模式 1: ASS 硬烧（libass 可用时优先，样式最丰富）
+                subtitle_path = os.path.join(tmp_dir, "subtitles.ass")
+                ass_content = build_ass(clips_data, subtitle_style)
+                with open(subtitle_path, "w", encoding="utf-8") as f:
+                    f.write(ass_content)
+                subtitle_mode = "hard"
+                logger.info("[合成] project_id=%s 字幕模式: 硬烧(ASS) %d 条", project_id, len(clips_data))
+            else:
+                # libass 不可用，尝试 drawtext 直烧
+                can_drawtext = await _check_drawtext_filter_available()
+                if can_drawtext:
+                    # 模式 2: drawtext 直烧（ffmpeg 内置滤镜，无 libass 依赖）
+                    # drawtext 滤镜直接构造在 -vf 链中，不需要外部字幕文件
+                    # 获取视频分辨率用于位置计算（从已拼接的 composite_video 读取）
+                    vid_w, vid_h = await _probe_video_resolution(composite_video_path)
+                    subtitle_drawtext_filter = _build_drawtext_subtitles_filter(
+                        clips_data, subtitle_style, vid_w, vid_h,
+                    )
+                    subtitle_mode = "drawtext"
+                    logger.info(
+                        "[合成] project_id=%s 字幕模式: drawtext 直烧 %d 条 (resolution=%dx%d)",
+                        project_id, len(clips_data), vid_w, vid_h,
+                    )
+                else:
+                    # 模式 3: SRT 软字幕兜底（mov_text 嵌入容器，播放器可选显示）
+                    subtitle_path = os.path.join(tmp_dir, "subtitles.srt")
+                    srt_content = build_srt(clips_data)
+                    with open(subtitle_path, "w", encoding="utf-8") as f:
+                        f.write(srt_content)
+                    subtitle_mode = "soft"
+                    logger.info("[合成] project_id=%s 字幕模式: 软字幕(SRT) %d 条", project_id, len(clips_data))
 
-        # 6. 最终合成：视频 + 音频 + 字幕烧录
+        # 6. 最终合成：视频 + 音频 + 字幕（硬烧或软字幕嵌入）
         outputs_dir = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
             "outputs", "projects", str(project_id),
@@ -468,12 +680,20 @@ async def execute_merge_advanced(
         os.makedirs(outputs_dir, exist_ok=True)
         output_path = os.path.join(outputs_dir, "final.mp4")
 
+        logger.info(
+            "[合成] project_id=%s 开始 ffmpeg 最终合成: video=%s audio=%s subtitle_mode=%s → %s",
+            project_id, composite_video_path, composite_audio_path,
+            subtitle_mode, output_path,
+        )
         await _ffmpeg_final_composite(
             video_path=composite_video_path,
             audio_path=composite_audio_path,
             subtitle_path=subtitle_path,
+            subtitle_mode=subtitle_mode,
             output_path=output_path,
+            drawtext_filter=subtitle_drawtext_filter,
         )
+        logger.info("[合成] project_id=%s ffmpeg 最终合成完成: %s", project_id, output_path)
 
         # 7. 更新项目
         import time as _time
@@ -490,6 +710,11 @@ async def execute_merge_advanced(
         project.status = PROJECT_STATUS_COMPLETED
         await db.commit()
         await db.refresh(project)
+
+        logger.info(
+            "[合成] project_id=%s 合成成功: final_url=%s total_duration=%.2f",
+            project_id, final_url, total_duration,
+        )
 
         await project_sse_manager.push(project_id, "merge_completed", {
             "status": "completed", "progress": 100,
@@ -511,7 +736,7 @@ def _estimate_total_duration(video_clips: List) -> float:
 
 
 async def _run_ffmpeg(cmd: List[str], timeout: int = 900, error_label: str = "ffmpeg") -> None:
-    """运行 ffmpeg 子进程，失败抛出可读错误"""
+    """运行 ffmpeg 子进程，失败抛出可读错误（含完整 stderr）"""
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
@@ -519,8 +744,12 @@ async def _run_ffmpeg(cmd: List[str], timeout: int = 900, error_label: str = "ff
     )
     stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     if proc.returncode != 0:
-        err_msg = stderr.decode("utf-8", errors="ignore")[:500]
-        raise RuntimeError(f"{error_label} 失败: {err_msg}")
+        # 完整 stderr 输出到日志，便于排查 ffmpeg 错误
+        full_err = stderr.decode("utf-8", errors="ignore")
+        logger.error("[%s] ffmpeg 命令: %s", error_label, " ".join(cmd))
+        logger.error("[%s] ffmpeg 完整 stderr:\n%s", error_label, full_err)
+        # 抛出时保留尾部 2000 字符（通常包含真正错误原因）
+        raise RuntimeError(f"{error_label} 失败: {full_err[-2000:]}")
 
 
 def _parse_resolution(aspect_ratio: str) -> tuple:
@@ -666,6 +895,36 @@ async def _probe_durations(video_paths: List[str]) -> List[float]:
     return durations
 
 
+async def _probe_video_resolution(video_path: str) -> tuple:
+    """
+    用 ffprobe 获取视频分辨率，返回 (width, height)。
+
+    失败时返回默认值 (1920, 1080)，用于 drawtext 位置计算的兜底。
+    """
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=width,height",
+        "-of", "csv=s=x:p=0",
+        video_path,
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+        out = stdout.decode("utf-8", errors="ignore").strip()
+        # 输出格式如 "1920x1080"
+        if "x" in out:
+            w_str, h_str = out.split("x", 1)
+            return int(w_str), int(h_str)
+    except Exception as e:
+        logger.warning("ffprobe 读取视频分辨率失败: %s", e)
+    return 1920, 1080
+
+
 async def _mix_audio_tracks(
     audio_paths: List[str],
     output_path: str,
@@ -779,26 +1038,48 @@ async def _ffmpeg_final_composite(
     audio_path: Optional[str],
     subtitle_path: Optional[str],
     output_path: str,
+    subtitle_mode: Optional[str] = None,
+    drawtext_filter: Optional[str] = None,
 ) -> None:
-    """最终合成：视频 + 音频 + 字幕烧录"""
+    """
+    最终合成：视频 + 音频 + 字幕
+
+    - subtitle_mode="hard": 字幕硬烧到画面（subtitles 滤镜 + ASS，需要 libass）
+    - subtitle_mode="drawtext": 字幕直烧到画面（drawtext 滤镜，ffmpeg 内置无需 libass）
+    - subtitle_mode="soft": 字幕作为软字幕嵌入（mov_text，播放器可选显示）
+    - subtitle_mode=None: 无字幕
+    """
     cmd: List[str] = ["ffmpeg", "-y", "-i", video_path]
 
     if audio_path:
         cmd.extend(["-i", audio_path])
 
-    # 视频滤镜（字幕烧录）
+    # 软字幕：作为独立输入流
+    if subtitle_mode == "soft" and subtitle_path:
+        cmd.extend(["-i", subtitle_path])
+
+    # 视频滤镜（hard / drawtext 模式使用 -vf）
     vf_filters: List[str] = []
-    if subtitle_path:
-        # subtitles 滤镜路径需转义冒号（Windows 路径问题，Linux 也要转义）
+    if subtitle_mode == "hard" and subtitle_path:
+        # 注意：ffmpeg 8.0 的 subtitles 滤镜不再支持 subtitles='path' 单引号包裹整个路径的写法
+        # 改用 subtitles=filename=path 显式参数语法，路径中的冒号需转义
         escaped_path = subtitle_path.replace(":", "\\:")
-        vf_filters.append(f"subtitles='{escaped_path}'")
+        vf_filters.append(f"subtitles=filename={escaped_path}")
+    elif subtitle_mode == "drawtext" and drawtext_filter:
+        # drawtext 模式：直接传入已构造好的 drawtext 滤镜链
+        vf_filters.append(drawtext_filter)
 
     if vf_filters:
         cmd.extend(["-vf", ",".join(vf_filters)])
 
     # 映射流
-    if audio_path:
+    # 输入索引：0=video, 1=audio(可选), 2=subtitle(可选,仅soft模式)
+    if audio_path and subtitle_mode == "soft" and subtitle_path:
+        cmd.extend(["-map", "0:v", "-map", "1:a", "-map", "2:s"])
+    elif audio_path:
         cmd.extend(["-map", "0:v", "-map", "1:a"])
+    elif subtitle_mode == "soft" and subtitle_path:
+        cmd.extend(["-map", "0:v", "-map", "1:s"])
     else:
         cmd.extend(["-map", "0:v"])
 
@@ -810,6 +1091,9 @@ async def _ffmpeg_final_composite(
     ])
     if audio_path:
         cmd.extend(["-c:a", "aac", "-b:a", "128k"])
+    # 软字幕编码为 mov_text（mp4 容器标准字幕格式）
+    if subtitle_mode == "soft" and subtitle_path:
+        cmd.extend(["-c:s", "mov_text"])
 
     cmd.append(output_path)
 

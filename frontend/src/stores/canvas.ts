@@ -1552,9 +1552,10 @@ export const useCanvasStore = defineStore('canvas', {
     async _hydrateFromStorage(): Promise<void> {
       if (this._storageReady) return
       try {
-        const rawData: Record<string, unknown> | null = await loadCanvas()
+        const rawData = await loadCanvas()
         if (rawData && typeof rawData === 'object') {
-          if (Array.isArray(rawData.workspaces)) this.workspaces = rawData.workspaces as CanvasWorkspace[]
+          const data = rawData as unknown as Record<string, unknown>
+          if (Array.isArray(data.workspaces)) this.workspaces = data.workspaces as CanvasWorkspace[]
           if ('activeWorkspaceId' in rawData) {
             const id = rawData.activeWorkspaceId
             this.activeWorkspaceId = typeof id === 'string' || typeof id === 'number' ? String(id) : null

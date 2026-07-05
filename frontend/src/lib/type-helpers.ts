@@ -1,8 +1,4 @@
-import { parseJSON } from '@/lib/type-helpers'
 /**
- * 类型安全辅助函数
- * 替代项目中不安全 as 类型断言
- */
 
 /** 安全地从 unknown 错误中提取消息字符串 */
 export function getErrorMessage(err: unknown): string {
@@ -12,7 +8,7 @@ export function getErrorMessage(err: unknown): string {
 
 /** 安全 JSON 解析，返回类型化结果 */
 export function parseJSON<T = unknown>(json: string): T {
-  return parseJSON<T>(json)
+  return JSON.parse(json) as T
 }
 
 /** 类型守卫：过滤 null / undefined */

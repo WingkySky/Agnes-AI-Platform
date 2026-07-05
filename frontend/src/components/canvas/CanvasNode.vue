@@ -302,7 +302,7 @@
             <span class="tts-label">{{ t('canvas.node.voice') || '音色' }}</span>
             <select
               class="tts-select"
-              :value="(panel.content as any).voice || 'default'"
+              :value="(panel.content as Record<string, unknown>).voice || 'default'"
               @change="updatePanelContent('voice', ($event.target as HTMLSelectElement)?.value)"
               @mousedown.stop
             >
@@ -314,7 +314,7 @@
           <div class="tts-row">
             <span class="tts-label">{{ t('canvas.node.speed') || '语速' }}</span>
             <el-slider
-              :model-value="(panel.content as any).speed ?? 1.0"
+              :model-value="(panel.content as Record<string, unknown>).speed ?? 1.0"
               :min="0.5" :max="2.0" :step="0.1"
               @update:model-value="updatePanelContent('speed', $event)"
               @mousedown.stop
@@ -333,7 +333,7 @@
           </div>
           <textarea
             class="subtitle-prompt"
-            :value="(panel.content as any).prompt || ''"
+            :value="(panel.content as Record<string, unknown>).prompt || ''"
             :placeholder="t('canvas.node.subtitlePromptPlaceholder') || '字幕生成提示词（可选）'"
             @input="updatePanelContent('prompt', ($event.target as HTMLTextAreaElement)?.value)"
             @mousedown.stop
@@ -345,7 +345,7 @@
         <div v-else-if="panel.type === 'compose'" class="compose-content">
           <div class="compose-row">
             <el-switch
-              :model-value="(panel.content as any).with_subtitle ?? true"
+              :model-value="(panel.content as Record<string, unknown>).with_subtitle ?? true"
               @update:model-value="updatePanelContent('with_subtitle', $event)"
               @mousedown.stop
               size="small"

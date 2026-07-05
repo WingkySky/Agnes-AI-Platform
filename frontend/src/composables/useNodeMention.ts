@@ -50,7 +50,7 @@ function getCaretCoordinates(textarea: HTMLTextAreaElement, position: number): {
   ] as const
 
   for (const p of props) {
-    (div.style as CSSStyleDeclaration)[p] = (style as any)[p]
+    ;(div.style as Record<string, string>)[p] = style[p]
   }
 
   div.style.position = 'absolute'

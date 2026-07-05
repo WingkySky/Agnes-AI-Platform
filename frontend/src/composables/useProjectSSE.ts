@@ -366,7 +366,7 @@ export function useProjectSSE(projectId: Ref<number | string | null>): ProjectSS
       ]
 
       eventTypes.forEach(type => {
-        eventSource?.addEventListener(type, handleEvent as any)
+        eventSource?.addEventListener(type, ((event: MessageEvent) => handleEvent(event)) as EventListener)
       })
 
       eventSource.onopen = () => {

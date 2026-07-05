@@ -26,6 +26,25 @@
       @merge-advanced="onMergeAdvanced"
     />
 
+    <!-- 预览区：视频画面 + 字幕 overlay + 控件 -->
+    <TimelinePreview
+      v-if="hasTimeline"
+      :clips="draftClips"
+      :subtitle-style="projectStore.subtitleStyle"
+      :total-duration="totalDuration"
+      :is-playing="preview.isPlaying.value"
+      :current-time="preview.currentTime.value"
+      :active-video-clip-id="preview.activeVideoClipId.value"
+      :active-audio-clip-id="preview.activeAudioClipId.value"
+      :active-subtitle-clip-id="preview.activeSubtitleClipId.value"
+      :active-subtitle-text="preview.activeSubtitleText.value"
+      :subtitle-style-css="preview.subtitleStyleCss.value"
+      @register-video="onRegisterVideo"
+      @register-audio="onRegisterAudio"
+      @toggle-play-pause="preview.togglePlayPause"
+      @restart="onRestart"
+    />
+
     <!-- 主体区：编辑器 + 属性面板 -->
     <div class="timeline-main">
       <div class="editor-wrap">
@@ -48,12 +67,16 @@
           :total-duration="totalDuration"
           :selected-clip-id="selectedClipId"
           :editable="projectStore.isEditable"
+          :playhead-time="preview.currentTime.value"
+          :active-video-clip-id="preview.activeVideoClipId.value"
+          :active-audio-clip-id="preview.activeAudioClipId.value"
+          :active-subtitle-clip-id="preview.activeSubtitleClipId.value"
           @select-clip="onSelectClip"
           @deselect="selectedClipId = null"
           @clip-drag="onClipDrag"
           @clip-trim="onClipTrim"
           @clip-updated="onClipUpdated"
-          @play="onPlay"
+          @play="preview.togglePlayPause"
           @seek="onSeek"
         />
       </div>
@@ -84,6 +107,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
+import { useTimelinePreview } from '@/composables/useTimelinePreview'
 import type {
   TimelineClip,
   TransitionType,
@@ -91,6 +115,7 @@ import type {
 } from '@/types/project'
 import TimelineToolbar from './TimelineToolbar.vue'
 import TimelineEditor from './TimelineEditor.vue'
+import TimelinePreview from './TimelinePreview.vue'
 import ClipPropertyPanel from './ClipPropertyPanel.vue'
 import SubtitleStyleDialog from './SubtitleStyleDialog.vue'
 import BgmPickerDialog from './BgmPickerDialog.vue'
@@ -130,6 +155,26 @@ watch(
   },
   { immediate: true },
 )
+
+// ---------- 预览调度 ----------
+const preview = useTimelinePreview({
+  clips: computed(() => draftClips.value),
+  subtitleStyle: computed(() => projectStore.subtitleStyle),
+  totalDuration,
+})
+
+// ---------- 预览元素注册转发 ----------
+function onRegisterVideo(clipId: number, el: HTMLVideoElement | null) {
+  preview.registerVideoEl(clipId, el)
+}
+
+function onRegisterAudio(clipId: number, el: HTMLAudioElement | null) {
+  preview.registerAudioEl(clipId, el)
+}
+
+function onRestart() {
+  preview.stop()
+}
 
 // ---------- 初始化 ----------
 onMounted(async () => {
@@ -299,11 +344,13 @@ async function onDeleteClip(clipId: number) {
 }
 
 function onPlay() {
-  ElMessage.info('播放预览需要后端合成支持')
+  // 预览播放/暂停由 composable 处理（通过模板 @play="preview.togglePlayPause" 绑定）
+  // 此函数保留为空，仅用于兼容旧 emit 调用
 }
 
-function onSeek(_t: number) {
-  // 当前仅本地维护播放头位置，不与后端交互
+function onSeek(t: number) {
+  // 拖拽播放头/点击标尺时跳转预览到指定时间
+  preview.seek(t)
 }
 </script>
 

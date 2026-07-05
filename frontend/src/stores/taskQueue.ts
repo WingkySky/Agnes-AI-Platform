@@ -326,10 +326,10 @@ export const useTaskQueueStore = defineStore('taskQueue', {
       try {
         task.status = 'pending'
         this._notifyTaskUpdate(taskId)
-        const resp = await createImageTask(params as any)
+        const resp = await createImageTask(params as unknown as ImageGenerationRequest)
         task.backendTaskId =
-          (resp as any).task_id || (resp as any).id || (resp as any).image_task_id || taskId
-        task.rawResponse = resp
+          (resp as unknown as Record<string, unknown>).task_id || (resp as unknown as Record<string, unknown>).id || (resp as unknown as Record<string, unknown>).image_task_id || taskId
+        task.rawResponse = resp as unknown as Record<string, unknown>
         task.status = 'processing'
         this._notifyTaskUpdate(taskId)
         this._startPolling(taskId)
@@ -401,10 +401,10 @@ export const useTaskQueueStore = defineStore('taskQueue', {
       try {
         task.status = 'pending'
         this._notifyTaskUpdate(taskId)
-        const resp = await createVideoTask(params as any)
+        const resp = await createVideoTask(params as unknown as VideoGenerationRequest)
         task.backendTaskId =
-          (resp as any).task_id || (resp as any).video_id || (resp as any).id || taskId
-        task.rawResponse = resp
+          (resp as unknown as Record<string, unknown>).task_id || (resp as unknown as Record<string, unknown>).video_id || (resp as unknown as Record<string, unknown>).id || taskId
+        task.rawResponse = resp as unknown as Record<string, unknown>
         task.status = 'processing'
         this._notifyTaskUpdate(taskId)
         this._startPolling(taskId)
@@ -491,7 +491,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         if (isSuccess) {
           task.status = 'success'
           // 提取结果 URL —— 兼容多种字段名
-          const d = data as any
+          const d = data as unknown as Record<string, unknown>
           const dData = d.data as Record<string, unknown> | undefined
           const url =
             (d.video_url as string) ||
@@ -534,7 +534,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
           this._saveToStorage()
         } else if (isFailed) {
           // 后端返回失败状态，提取错误信息
-          const failMsg = (data as any).message as string || (data as any).error as string || 'Generation failed'
+          const failMsg = (data as unknown as Record<string, unknown>).message as string || (data as unknown as Record<string, unknown>).error as string || 'Generation failed'
           this._stopPolling(taskId)
           // 【自动重试】后端失败也尝试重试（如 5xx / 网络抖动导致后端任务失败）
           if (this._scheduleRetry(taskId, { message: failMsg })) {

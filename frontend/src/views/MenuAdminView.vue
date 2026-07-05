@@ -314,6 +314,7 @@ import {
   UserFilled, MoreFilled,
 } from '@element-plus/icons-vue'
 import * as ElementPlusIcons from '@element-plus/icons-vue'
+import type { Component } from 'vue'
 import { useMenuStore } from '@/stores/menu'
 import {
   resolveMenus,
@@ -363,17 +364,20 @@ const configMap = reactive<Record<string, MenuItemConfig>>({})
 
 const currentLang = computed(() => locale.value.startsWith('zh') ? 'zh' : 'en')
 
-function getIcon(iconName: string | null | undefined) {
+// 图标组件映射（正确类型，无需 as any）
+const iconMap: Record<string, Component> = ElementPlusIcons as Record<string, Component>
+
+function getIcon(iconName: string | null | undefined): Component | null {
   if (!iconName) return null
-  return (ElementPlusIcons as any)[iconName] || null
+  return iconMap[iconName] || null
 }
 
 /** 获取分组显示名称（考虑自定义名称） */
 function getGroupDisplayName(group: EditableGroupConfig | AdminMenuGroup): string {
   if (currentLang.value === 'zh') {
-    return (group as any).custom_label_zh || group.label_zh
+    return group.custom_label_zh || group.label_zh
   }
-  return (group as any).custom_label_en || group.label_en
+  return group.custom_label_en || group.label_en
 }
 
 /** 计算表格最大高度 */

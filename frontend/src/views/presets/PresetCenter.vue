@@ -538,7 +538,7 @@ async function fetchData() {
       category: categoryVal,
       search: searchText.value || undefined,
       tags: sidebarFilters.value.tags.length > 0 ? sidebarFilters.value.tags.join(',') : undefined,
-      sort: sortMode.value as any,
+      sort: sortMode.value,
       limit: 24,
       offset: (currentPage.value - 1) * 24,
     })
@@ -606,7 +606,7 @@ async function handleDeletePreset(preset: PromptPreset) {
 // ================ 切换公开/私有 ================
 async function handleTogglePublic(preset: PromptPreset) {
   try {
-    await updatePreset(preset.id, { is_public: true } as any)
+    await updatePreset(preset.id, { is_public: true })
     ElMessage.success(t('presets.center.setPublicSuccess'))
     await fetchData()
   } catch (e: any) {

@@ -9,7 +9,7 @@
 <template>
   <div
     class="timeline-clip"
-    :class="[`track-${clip.track_type}`, { selected: selected }]"
+    :class="[`track-${clip.track_type}`, { selected: selected, 'playing-clip': isPlayingClip }]"
     :style="clipStyle"
     @mousedown="onDragStart"
     @click.stop="$emit('select', clip.id)"
@@ -69,6 +69,8 @@ const props = defineProps<{
   pixelsPerSecond: number
   selected?: boolean
   editable?: boolean
+  /** 是否为当前播放中的片段（高亮显示） */
+  isPlayingClip?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -189,6 +191,18 @@ function onTrimStart(side: 'left' | 'right') {
 .timeline-clip.selected {
   border-color: var(--el-color-primary);
   box-shadow: 0 0 0 2px var(--el-color-primary-light-7);
+}
+
+/* 播放中片段高亮（脉冲动画提示当前播放位置） */
+.timeline-clip.playing-clip {
+  border-color: var(--el-color-success);
+  box-shadow: 0 0 0 2px var(--el-color-success-light-7), 0 0 12px var(--el-color-success-light-5);
+  animation: clip-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes clip-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px var(--el-color-success-light-7), 0 0 8px var(--el-color-success-light-5); }
+  50% { box-shadow: 0 0 0 2px var(--el-color-success-light-5), 0 0 16px var(--el-color-success-light-3); }
 }
 
 /* 三种轨道类型背景色 */

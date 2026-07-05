@@ -284,6 +284,7 @@ export const useProjectStore = defineStore('project', {
       this.mergeStatus = null
       this.mergeLoading = false
       this.mergeProgress = null
+      this._stopMergePolling()
     },
 
     // ================ 项目 CRUD ================
@@ -343,7 +344,7 @@ export const useProjectStore = defineStore('project', {
     /** SSE 推送 project_status_changed 事件时本地同步状态 */
     updateStatusFromEvent(newStatus: string) {
       if (this.currentProject) {
-        this.currentProject = { ...this.currentProject, status: newStatus as any }
+        this.currentProject = { ...this.currentProject, status: newStatus }
       }
     },
 
@@ -448,7 +449,7 @@ export const useProjectStore = defineStore('project', {
       if (!this.currentProjectId) throw new Error('未选择项目')
       const api = getEntityApi(entityType)
       // 调用 generate-image 端点 → 后端提交到 image_poller，返回 { task_id, status: 'pending' }
-      const resp = await api.generateImage(this.currentProjectId, id, data) as any
+      const resp = await api.generateImage(this.currentProjectId, id, data)
       const taskId = resp?.task_id
       if (!taskId) throw new Error('生成任务提交失败：未返回 task_id')
 
@@ -613,7 +614,7 @@ export const useProjectStore = defineStore('project', {
     // ================ 帧图 ================
     async generateFrameImage(shotId: number, data: GenerateFrameImageRequest) {
       if (!this.currentProjectId) throw new Error('未选择项目')
-      const resp = await apiGenerateFrameImage(this.currentProjectId, shotId, data) as any
+      const resp = await apiGenerateFrameImage(this.currentProjectId, shotId, data)
       const taskId = resp?.task_id
       if (!taskId) throw new Error('生成任务提交失败：未返回 task_id')
 
@@ -698,7 +699,7 @@ export const useProjectStore = defineStore('project', {
       const { useTaskQueueStore } = await import('@/stores/taskQueue')
       const taskQueue = useTaskQueueStore()
       try {
-        const resp = await apiGenerateVideo(projectId, shotId, data) as any
+        const resp = await apiGenerateVideo(projectId, shotId, data)
         const backendTaskId = resp?.task_id
         if (!backendTaskId) {
           throw new Error('生成任务提交失败：未返回 task_id')
@@ -961,10 +962,73 @@ export const useProjectStore = defineStore('project', {
     async mergeProjectAdvanced(data: MergeAdvancedRequest = {}) {
       if (!this.currentProjectId) throw new Error('未选择项目')
       this.mergeLoading = true
+      // 注意：合成是异步任务，API 立即返回 status="started"
+      // mergeLoading 由 ProjectDetailView 的 SSE watch 维护：
+      //   - 收到 merge_progress(status=started/downloading/compositing) → 保持 true
+      //   - 收到 merge_progress(status=completed) → false + 刷新详情
+      //   - 收到 merge_progress(status=failed) → false + 错误提示
+      // 轮询兜底：SSE 事件可能丢失，启动轮询作为兜底
       try {
         await apiMergeProjectAdvanced(this.currentProjectId, data)
-      } finally {
+        this._startMergePolling(this.currentProjectId)
+      } catch (e) {
+        // API 调用本身失败（网络/路由错误/400校验失败），释放 loading 并清理过时进度
         this.mergeLoading = false
+        this.mergeProgress = null
+        throw e
+      }
+    },
+
+    // 合成轮询兜底：SSE 事件丢失时通过轮询项目状态恢复
+    // 每 5 秒轮询一次，最多 5 分钟（60 次），超时自动释放并提示
+    _mergePollingTimer: null as ReturnType<typeof setInterval> | null,
+    _mergePollingCount: 0,
+    _startMergePolling(projectId: number) {
+      this._stopMergePolling()
+      this._mergePollingCount = 0
+      this._mergePollingTimer = setInterval(async () => {
+        if (!this.mergeLoading) {
+          this._stopMergePolling()
+          return
+        }
+        this._mergePollingCount++
+        // 超时 5 分钟（60 次 × 5s = 300s）
+        if (this._mergePollingCount > 60) {
+          this._stopMergePolling()
+          this.mergeLoading = false
+          this.mergeProgress = null
+          console.warn('[merge-polling] 合成超时（5 分钟无完成事件），已自动释放 loading')
+          return
+        }
+        try {
+          const project = await apiGetProject(projectId)
+          // 项目状态已变为 completed（合成成功）但 SSE 事件丢失
+          if (project.status === 'completed' && project.final_video_url) {
+            this._stopMergePolling()
+            this.mergeLoading = false
+            this.mergeProgress = { status: 'completed', progress: 100, final_video_url: project.final_video_url }
+            this.setCurrentProject(project)
+            console.info('[merge-polling] 检测到合成已完成（SSE 事件丢失），已恢复状态')
+            return
+          }
+          // 项目状态回滚为 in_progress（合成失败）但 SSE 事件丢失
+          if (project.status === 'in_progress') {
+            this._stopMergePolling()
+            this.mergeLoading = false
+            this.mergeProgress = null
+            this.setCurrentProject(project)
+            console.warn('[merge-polling] 检测到合成已失败回滚（SSE 事件丢失），已恢复状态')
+            return
+          }
+        } catch (e) {
+          console.warn('[merge-polling] 轮询项目状态失败:', e)
+        }
+      }, 5000)
+    },
+    _stopMergePolling() {
+      if (this._mergePollingTimer) {
+        clearInterval(this._mergePollingTimer)
+        this._mergePollingTimer = null
       }
     },
   },

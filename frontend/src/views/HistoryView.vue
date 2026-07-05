@@ -538,11 +538,12 @@ function getVideoStreamUrl(item: GenerationRecord) {
  * 解决 <img src="url"> 或 new Image().src 无法携带 JWT 的问题
  */
 async function fetchBlobAsUrl(url: string): Promise<string> {
-  const blob = await client.get(url, {
+  const resp = await client.get<Blob>(url, {
     responseType: 'blob',
     silent: true,
-  }) as unknown as Blob
-  return URL.createObjectURL(blob)
+  })
+  const blob = resp.data ?? resp
+  return URL.createObjectURL(blob as Blob)
 }
 
 async function loadVideoThumbnail(item: GenerationRecord) {
@@ -1176,16 +1177,18 @@ onMounted(() => {
   }
   loadList()
   if (typeof window !== 'undefined') {
-    window.addEventListener('agnes:user-login', handleUserSwitch as EventListener)
-    window.addEventListener('agnes:user-logout', handleUserSwitch as EventListener)
+    const handleLogin = (e: Event) => handleUserSwitch()
+    const handleLogout = (e: Event) => handleUserSwitch()
+    window.addEventListener('agnes:user-login', handleLogin as EventListener)
+    window.addEventListener('agnes:user-logout', handleLogout as EventListener)
   }
 })
 
 onBeforeUnmount(() => {
   clearVideoBlobUrls()
   if (typeof window !== 'undefined') {
-    window.removeEventListener('agnes:user-login', handleUserSwitch as EventListener)
-    window.removeEventListener('agnes:user-logout', handleUserSwitch as EventListener)
+    window.removeEventListener('agnes:user-login', handleLogin as EventListener)
+    window.removeEventListener('agnes:user-logout', handleLogout as EventListener)
   }
 })
 </script>

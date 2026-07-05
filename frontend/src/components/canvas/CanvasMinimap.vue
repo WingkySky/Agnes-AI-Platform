@@ -24,7 +24,7 @@
         :y="nodeRect(p).y"
         :width="nodeRect(p).w"
         :height="nodeRect(p).h"
-        :fill="nodeColor(p.type)"
+        :fill="nodeColor(p.type || 'image')"
         :opacity="0.8"
         rx="1"
       />
@@ -45,10 +45,11 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import type { CanvasPanel } from '@/stores/canvas'
 
 const props = defineProps({
   theme: { type: Object, required: true },
-  panels: { type: Array as () => any[], default: () => [] }, // 所有节点
+  panels: { type: Array as () => CanvasPanel[], default: () => [] }, // 所有节点
   viewport: { type: Object, required: true }, // { x, y, zoom }
   canvasSize: {
     type: Object,
@@ -80,11 +81,11 @@ const minimapBounds = computed(() => {
   let minY = Infinity
   let maxX = -Infinity
   let maxY = -Infinity
-  for (const node of props.panels as any[]) {
-    const nx = (node as any).x ?? 0
-    const ny = (node as any).y ?? 0
-    const nw = (node as any).width ?? 0
-    const nh = (node as any).height ?? 0
+  for (const node of props.panels) {
+    const nx = node.x ?? 0
+    const ny = node.y ?? 0
+    const nw = node.width ?? 0
+    const nh = node.height ?? 0
     minX = Math.min(minX, nx)
     minY = Math.min(minY, ny)
     maxX = Math.max(maxX, nx + nw)

@@ -611,6 +611,12 @@ class TimelineClipResponse(BaseModel):
     sort_order: int = 0
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # 源文件信息（get_timeline_data 关联注入，供前端预览使用，非数据库字段）
+    source_file_url: Optional[str] = None
+    source_duration_ms: Optional[int] = None
+    source_width: Optional[int] = None
+    source_height: Optional[int] = None
+    source_thumbnail_url: Optional[str] = None
 
 
 class TimelineClipCreate(BaseModel):

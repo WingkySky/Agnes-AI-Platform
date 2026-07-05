@@ -214,7 +214,12 @@ async def delete_clip(db: AsyncSession, project_id: int, clip_id: int) -> bool:
 # =====================================================
 
 async def get_timeline_data(db: AsyncSession, project_id: int) -> Dict[str, Any]:
-    """获取完整时间线数据（片段 + 字幕样式 + 总时长）"""
+    """
+    获取完整时间线数据（片段 + 字幕样式 + 总时长）
+
+    为支持前端预览，每个 clip 附带源文件信息（source_file_url / source_duration_ms /
+    source_width / source_height / source_thumbnail_url），避免前端 N+1 查询。
+    """
     clips = await list_clips(db, project_id)
     project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
 
@@ -222,27 +227,72 @@ async def get_timeline_data(db: AsyncSession, project_id: int) -> Dict[str, Any]
     subtitle_style = timeline_data.get("subtitle_style", DEFAULT_SUBTITLE_STYLE)
     total_duration = timeline_data.get("total_duration", project.total_duration if project else 0)
 
+    # 批量预取视频/音频源数据，避免逐 clip N+1 查询
+    video_ids = {c.source_id for c in clips if c.source_type == "shot_video" and c.source_id}
+    audio_ids = {c.source_id for c in clips if c.source_type == "shot_audio" and c.source_id}
+
+    video_map: Dict[int, ProjectShotVideo] = {}
+    audio_map: Dict[int, ProjectShotAudio] = {}
+
+    if video_ids:
+        rows = (
+            await db.execute(
+                select(ProjectShotVideo).where(ProjectShotVideo.id.in_(video_ids))
+            )
+        ).scalars().all()
+        video_map = {v.id: v for v in rows}
+
+    if audio_ids:
+        rows = (
+            await db.execute(
+                select(ProjectShotAudio).where(ProjectShotAudio.id.in_(audio_ids))
+            )
+        ).scalars().all()
+        audio_map = {a.id: a for a in rows}
+
+    # 序列化片段，注入 source_* 字段
+    serialized_clips = []
+    for c in clips:
+        item: Dict[str, Any] = {
+            "id": c.id,
+            "project_id": c.project_id,
+            "track_type": c.track_type,
+            "track_index": c.track_index,
+            "source_type": c.source_type,
+            "source_id": c.source_id,
+            "shot_id": c.shot_id,
+            "start_time": c.start_time,
+            "duration": c.duration,
+            "trim_start": c.trim_start,
+            "trim_end": c.trim_end,
+            "transition_type": c.transition_type,
+            "transition_duration": c.transition_duration,
+            "subtitle_text": c.subtitle_text,
+            "sort_order": c.sort_order,
+            "source_file_url": None,
+            "source_duration_ms": None,
+            "source_width": None,
+            "source_height": None,
+            "source_thumbnail_url": None,
+        }
+
+        # 根据来源类型注入源文件信息
+        if c.source_type == "shot_video" and c.source_id and c.source_id in video_map:
+            v = video_map[c.source_id]
+            item["source_file_url"] = v.file_url
+            item["source_duration_ms"] = v.duration_ms
+            item["source_width"] = v.width
+            item["source_height"] = v.height
+            item["source_thumbnail_url"] = v.thumbnail_url
+        elif c.source_type == "shot_audio" and c.source_id and c.source_id in audio_map:
+            a = audio_map[c.source_id]
+            item["source_file_url"] = a.file_url
+            item["source_duration_ms"] = a.duration_ms
+
+        serialized_clips.append(item)
+
     return {
-        "clips": [
-            {
-                "id": c.id,
-                "project_id": c.project_id,
-                "track_type": c.track_type,
-                "track_index": c.track_index,
-                "source_type": c.source_type,
-                "source_id": c.source_id,
-                "shot_id": c.shot_id,
-                "start_time": c.start_time,
-                "duration": c.duration,
-                "trim_start": c.trim_start,
-                "trim_end": c.trim_end,
-                "transition_type": c.transition_type,
-                "transition_duration": c.transition_duration,
-                "subtitle_text": c.subtitle_text,
-                "sort_order": c.sort_order,
-            }
-            for c in clips
-        ],
+        "clips": serialized_clips,
         "subtitle_style": subtitle_style,
         "total_duration": total_duration,
     }

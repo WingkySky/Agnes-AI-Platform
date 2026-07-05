@@ -620,6 +620,12 @@ export interface TimelineClip {
   sort_order: number
   created_at?: string | null
   updated_at?: string | null
+  // 源文件信息（后端 get_timeline_data 关联注入，供前端预览使用）
+  source_file_url?: string | null
+  source_duration_ms?: number | null
+  source_width?: number | null
+  source_height?: number | null
+  source_thumbnail_url?: string | null
 }
 
 export interface TimelineClipCreateRequest {

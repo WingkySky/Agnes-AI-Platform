@@ -75,27 +75,27 @@ export interface WatermarkConfig {
 
 /** 获取角色列表 */
 export function getRoles(): Promise<RoleItem[]> {
-  return client.get('/api/admin/roles') as any
+  return client.get('/api/admin/roles')
 }
 
 /** 获取权限列表 */
 export function getPermissions(): Promise<PermissionItem[]> {
-  return client.get('/api/admin/roles/permissions') as any
+  return client.get('/api/admin/roles/permissions')
 }
 
 /** 创建角色 */
 export function createRole(data: Partial<RoleItem>): Promise<RoleItem> {
-  return client.post('/api/admin/roles', data) as any
+  return client.post('/api/admin/roles', data)
 }
 
 /** 更新角色 */
 export function updateRole(name: string, data: Partial<RoleItem>): Promise<RoleItem> {
-  return client.put(`/api/admin/roles/${name}`, data) as any
+  return client.put(`/api/admin/roles/${name}`, data)
 }
 
 /** 删除角色 */
 export function deleteRole(name: string): Promise<{ success: boolean }> {
-  return client.delete(`/api/admin/roles/${name}`) as any
+  return client.delete(`/api/admin/roles/${name}`)
 }
 
 // ---------- 敏感词 ----------
@@ -107,7 +107,7 @@ export function getSensitiveWords(params: {
   page?: number
   page_size?: number
 }): Promise<SensitiveWordListResponse> {
-  return client.get('/api/admin/sensitive-words', { params }) as any
+  return client.get('/api/admin/sensitive-words', { params })
 }
 
 /** 创建敏感词 */
@@ -116,7 +116,7 @@ export function createSensitiveWord(
   category: string,
   description?: string
 ): Promise<SensitiveWordItem> {
-  return client.post('/api/admin/sensitive-words', { word, category, description }) as any
+  return client.post('/api/admin/sensitive-words', { word, category, description })
 }
 
 /** 更新敏感词 */
@@ -124,12 +124,12 @@ export function updateSensitiveWord(
   id: number,
   data: Partial<Omit<SensitiveWordItem, 'id' | 'created_at' | 'updated_at'>>
 ): Promise<SensitiveWordItem> {
-  return client.put(`/api/admin/sensitive-words/${id}`, data) as any
+  return client.put(`/api/admin/sensitive-words/${id}`, data)
 }
 
 /** 删除敏感词 */
 export function deleteSensitiveWord(id: number): Promise<{ success: boolean }> {
-  return client.delete(`/api/admin/sensitive-words/${id}`) as any
+  return client.delete(`/api/admin/sensitive-words/${id}`)
 }
 
 /** 批量导入敏感词 */
@@ -143,36 +143,36 @@ export function batchImportSensitiveWords(data: {
   skipped_count: number
   total_count: number
 }> {
-  return client.post('/api/admin/sensitive-words/batch-import', data) as any
+  return client.post('/api/admin/sensitive-words/batch-import', data)
 }
 
 // ---------- 水印配置 ----------
 
 /** 获取水印配置 */
 export function getWatermarkConfig(): Promise<WatermarkConfig> {
-  return client.get('/api/admin/watermark/config') as any
+  return client.get('/api/admin/watermark/config')
 }
 
 /** 更新水印配置 */
 export function updateWatermarkConfig(data: Partial<WatermarkConfig>): Promise<WatermarkConfig> {
-  return client.put('/api/admin/watermark/config', data) as any
+  return client.put('/api/admin/watermark/config', data)
 }
 
 // ---------- 用户扩展 ----------
 
 /** 更新用户水印开关 */
 export function updateUserWatermark(userId: number, enabled: boolean): Promise<{ success: boolean }> {
-  return client.put(`/api/auth/users/${userId}/watermark`, { enabled }) as any
+  return client.put(`/api/auth/users/${userId}/watermark`, { enabled })
 }
 
 /** 更新用户内容安全开关 */
 export function updateUserContentSafety(userId: number, enabled: boolean): Promise<{ success: boolean }> {
-  return client.put(`/api/auth/users/${userId}/content-safety`, { enabled }) as any
+  return client.put(`/api/auth/users/${userId}/content-safety`, { enabled })
 }
 
 /** 更新用户角色 */
 export function updateUserRole(userId: number, role: string): Promise<{ success: boolean }> {
-  return client.put(`/api/auth/users/${userId}/role`, { role }) as any
+  return client.put(`/api/auth/users/${userId}/role`, { role })
 }
 
 // ---------- 系统配置 - SMTP ----------
@@ -191,15 +191,15 @@ export interface SmtpConfig {
 
 /** 获取 SMTP 配置 */
 export function getSmtpConfig(): Promise<SmtpConfig> {
-  return client.get('/api/admin/system-config/smtp') as any
+  return client.get('/api/admin/system-config/smtp')
 }
 
 /** 更新 SMTP 配置 */
 export function updateSmtpConfig(data: Partial<SmtpConfig>): Promise<{ message: string }> {
-  return client.put('/api/admin/system-config/smtp', data) as any
+  return client.put('/api/admin/system-config/smtp', data)
 }
 
 /** 测试 SMTP 邮件发送 */
 export function testSmtpConfig(testEmail: string): Promise<{ message: string }> {
-  return client.post('/api/admin/system-config/smtp/test', { test_email: testEmail }) as any
+  return client.post('/api/admin/system-config/smtp/test', { test_email: testEmail })
 }

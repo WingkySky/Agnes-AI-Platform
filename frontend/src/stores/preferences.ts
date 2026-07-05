@@ -123,7 +123,7 @@ async function saveDirectoryHandleToDB(handle: FileSystemDirectoryHandle | null)
 async function verifyDirectoryHandle(handle: FileSystemDirectoryHandle | null): Promise<boolean> {
   if (!handle) return false
   try {
-    const opts: any = { mode: 'readwrite' }
+    const opts = { mode: 'readwrite' as const }
     if ('queryPermission' in handle) {
       const status = await (handle as any).queryPermission(opts)
       if (status === 'granted') return true
@@ -179,7 +179,7 @@ async function pickDownloadDirectory(): Promise<{
     return { handle: null, error: 'unsupported' }
   }
   try {
-    const handle = await (window as any).showDirectoryPicker({ mode: 'readwrite' })
+    const handle = await (window.showDirectoryPicker as unknown as (options: { mode: string }) => Promise<FileSystemDirectoryHandle>)({ mode: 'readwrite' })
     await setDirectoryHandle(handle)
     return { handle }
   } catch (e: any) {

@@ -202,6 +202,18 @@ export interface ImageGenerationResponse {
   message?: string | null
 }
 
+/** 视频生成状态响应 — 对齐 VideoStatusResponse */
+export interface VideoStatusResponse {
+  id?: number | null
+  status: string
+  url?: string | null
+  poster_url?: string | null
+  model: string
+  prompt: string
+  created_at?: string | null
+  message?: string | null
+}
+
 /** 图片异步任务创建响应（内联 dict） */
 export interface ImageTaskCreatedResponse {
   task_id: string
@@ -500,6 +512,10 @@ export interface QueueTask {
   pollIntervalMs: number
   rawResponse: unknown
   backendTaskId: string | null
+  /** base64 编码的图片数据（来自 rawResponse.b64_json） */
+  imageB64?: string
+  /** 结果 URL（来自 rawResponse.url，优先使用 resultUrl） */
+  url?: string
   source?: 'chat' | 'canvas' | 'project' | null
   /** 画布来源任务的节点 ID，用于任务完成后回填结果 */
   panelId?: string | null
@@ -544,6 +560,13 @@ export interface RegisterCanvasTaskParams {
   backendTaskId?: string
   /** 画布节点 ID，用于任务完成后回填结果 */
   panelId?: string
+}
+
+/** 任务创建响应（后端提交生成任务后返回 task_id + status） */
+export interface TaskCreationResponse {
+  task_id: string
+  status: string
+  message?: string | null
 }
 
 // =====================================================

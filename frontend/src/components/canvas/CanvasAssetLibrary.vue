@@ -507,7 +507,7 @@ async function fetchBlobAsUrl(url: string): Promise<string> {
   const blob = await client.get(url, {
     responseType: 'blob',
     silent: true,
-  }) as unknown as Blob
+  }) as Blob
   return URL.createObjectURL(blob)
 }
 
@@ -580,21 +580,29 @@ function onResize() {
   if (previewItem.value) updatePreviewPosition()
 }
 
+/** 登录/切换用户后，切换素材库数据空间 */
+const handleUserSwitchWrapper: EventListener = (e: Event) => {
+  handleUserSwitch(e as CustomEvent)
+}
+const handleUserLogoutWrapper: EventListener = () => {
+  handleUserLogout()
+}
+
 // ---------- 生命周期 ----------
 onMounted(() => {
   assetStore.hydrate()
   loadHistory()
   window.addEventListener('resize', onResize)
   // 监听用户登录/退出，切换素材库数据空间
-  window.addEventListener('agnes:user-login', handleUserSwitch as unknown as EventListener)
-  window.addEventListener('agnes:user-logout', handleUserLogout as unknown as EventListener)
+  window.addEventListener('agnes:user-login', handleUserSwitchWrapper)
+  window.addEventListener('agnes:user-logout', handleUserLogoutWrapper)
 })
 
 onBeforeUnmount(() => {
   clearVideoBlobUrls()
   window.removeEventListener('resize', onResize)
-  window.removeEventListener('agnes:user-login', handleUserSwitch as unknown as EventListener)
-  window.removeEventListener('agnes:user-logout', handleUserLogout as unknown as EventListener)
+  window.removeEventListener('agnes:user-login', handleUserSwitchWrapper)
+  window.removeEventListener('agnes:user-logout', handleUserLogoutWrapper)
 })
 
 /** 登录/切换用户后，切换素材库数据空间 */

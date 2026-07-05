@@ -239,14 +239,14 @@
               @click="openViewerWithUrl(resultUrl)"
             />
             <ImageWithWatermark
-              v-else-if="(activeTask as any).imageB64"
-              :src="'data:image/png;base64,' + (activeTask as any).imageB64"
+              v-else-if="activeTask?.imageB64"
+              :src="'data:image/png;base64,' + activeTask.imageB64"
               :alt="'generated'"
               :img-class="'result-img'"
               fit="contain"
               :title="t('imageViewer.title')"
               style="cursor: zoom-in"
-              @click="openViewerWithUrl('data:image/png;base64,' + (activeTask as any).imageB64)"
+              @click="openViewerWithUrl('data:image/png;base64,' + activeTask.imageB64)"
             />
             <div class="result-meta">
               <div class="meta-row">
@@ -471,7 +471,7 @@ const taskElapsedSec = computed(() => {
 // 结果 URL
 const resultUrl = computed(() => {
   if (!activeTask.value) return ''
-  return activeTask.value.resultUrl || (activeTask.value as any).url || ''
+  return activeTask.value.resultUrl || activeTask.value.url || ''
 })
 
 // 状态标签（使用 i18n 显示本地化名称）

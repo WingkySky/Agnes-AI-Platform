@@ -39,6 +39,7 @@
         :clip="clip"
         :pixels-per-second="pixelsPerSecond"
         :selected="clip.id === selectedClipId"
+        :is-playing-clip="clip.id === activeClipId"
         :editable="editable"
         :style="{ left: (clip.start_time * pixelsPerSecond) + 'px' }"
         @select="$emit('select-clip', $event)"
@@ -63,6 +64,8 @@ const props = defineProps<{
   pixelsPerSecond: number
   totalDuration: number
   selectedClipId?: number | null
+  /** 当前播放中的片段 ID（高亮显示） */
+  activeClipId?: number | null
   editable?: boolean
 }>()
 

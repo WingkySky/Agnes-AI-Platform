@@ -68,37 +68,37 @@ export function getPlazaWorks(params: {
   page_size?: number
   preset_id?: number
 }): Promise<PlazaListResponse> {
-  return client.get('/api/plaza/works', { params }) as any
+  return client.get('/api/plaza/works', { params })
 }
 
 /** 获取广场作品详情 */
 export function getPlazaWorkDetail(id: number): Promise<PlazaWork> {
-  return client.get(`/api/plaza/works/${id}`) as any
+  return client.get(`/api/plaza/works/${id}`)
 }
 
 /** 点赞作品 */
 export function likePlazaWork(id: number): Promise<LikeActionResponse> {
-  return client.post(`/api/plaza/works/${id}/like`) as any
+  return client.post(`/api/plaza/works/${id}/like`)
 }
 
 /** 取消点赞 */
 export function unlikePlazaWork(id: number): Promise<LikeActionResponse> {
-  return client.delete(`/api/plaza/works/${id}/like`) as any
+  return client.delete(`/api/plaza/works/${id}/like`)
 }
 
 /** 批量查询点赞状态 */
 export function getLikeStatus(ids: number[]): Promise<LikeStatusResponse> {
   return client.get('/api/plaza/likes/status', {
     params: { ids: ids.join(',') },
-  }) as any
+  })
 }
 
 /** 单条切换分享状态 */
 export function updateShareStatus(id: number, isPublic: boolean): Promise<ShareStatusResponse> {
-  return client.patch(`/api/history/${id}/share`, { is_public: isPublic }) as any
+  return client.patch(`/api/history/${id}/share`, { is_public: isPublic })
 }
 
 /** 批量设置分享状态 */
 export function batchUpdateShareStatus(ids: number[], isPublic: boolean): Promise<BatchShareResponse> {
-  return client.patch('/api/history/batch-share', { ids, is_public: isPublic }) as any
+  return client.patch('/api/history/batch-share', { ids, is_public: isPublic })
 }

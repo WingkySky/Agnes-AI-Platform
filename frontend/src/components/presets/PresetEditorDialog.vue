@@ -351,8 +351,9 @@ const promptTextPlaceholder = computed(() => {
 // 类型切换时清理不相关字段
 function onTypeChange() {
   // 清空摄像机参数
-  Object.keys(cameraParams).forEach((k) => {
-    (cameraParams as any)[k] = ''
+  const params = cameraParams as Record<string, string>
+  Object.keys(params).forEach((k) => {
+    params[k] = ''
   })
   pipelineConfigStr.value = '{}'
 }

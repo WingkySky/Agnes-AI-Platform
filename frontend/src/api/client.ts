@@ -38,8 +38,7 @@ client.interceptors.request.use(
       } catch (_) { /* ignore */ }
     }
     if (accessToken) {
-      config.headers = config.headers || {}
-      ;(config.headers as any).Authorization = `Bearer ${accessToken}`
+      ;(config as any).headers.Authorization = `Bearer ${accessToken}`
     }
     return config
   },

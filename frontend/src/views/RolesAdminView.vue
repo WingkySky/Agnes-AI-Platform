@@ -186,13 +186,13 @@ const permissionGroups = computed<PermissionGroup[]>(() => {
     if (!groups[perm.group]) {
       groups[perm.group] = {
         key: perm.group,
-        name: t(`admin.roles.permissionGroups.${perm.group}` as any),
+        name: t(`admin.roles.permissionGroups.${perm.group}`),
         permissions: []
       }
     }
     groups[perm.group].permissions.push({
       key: perm.key,
-      name: t(`admin.roles.permissions.${perm.key}` as any)
+      name: t(`admin.roles.permissions.${perm.key}`)
     })
   })
   return Object.values(groups)

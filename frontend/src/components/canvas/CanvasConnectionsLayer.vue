@@ -10,17 +10,25 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useCanvasStore } from '@/stores/canvas'
+import type { CanvasPanel, CanvasConnection } from '@/stores/canvas'
+
+/** 连线拖拽中的临时状态 */
+interface ConnectingState {
+  sourcePanelId: string
+  sourceAnchorType: string
+  endWorld?: { x: number; y: number }
+}
 
 // ---------- Props ----------
 const props = defineProps({
   // 连线数组；不传则使用 store.connections
-  connections: { type: Array, default: null },
+  connections: { type: Array as () => CanvasConnection[] | null, default: null },
   // 节点数组；不传则使用 store.panels
-  panels: { type: Array, default: null },
+  panels: { type: Array as () => CanvasPanel[] | null, default: null },
   // 当前选中的连线 id；不传则使用 store.selectedConnectionId
   selectedConnectionId: { type: String, default: null },
   // 拖拽中的临时连线状态；不传则使用 store.connecting
-  connecting: { type: Object, default: null },
+  connecting: { type: Object as () => ConnectingState | null, default: null },
   // 主题 token 对象；不传则使用 store.canvasTheme
   theme: { type: Object, default: null },
 })
@@ -46,13 +54,13 @@ const currentConnecting = computed(() => props.connecting || store.connecting)
 const currentTheme = computed(() => props.theme || store.canvasTheme)
 
 // ---------- 工具：根据 id 查找节点 ----------
-function getPanelById(id: string): any {
-  return currentPanels.value.find((p: any) => p.id === id) || null
+function getPanelById(id: string): CanvasPanel | null {
+  return currentPanels.value.find((p: CanvasPanel) => p.id === id) || null
 }
 
 // ---------- 计算贝塞尔曲线路径 ----------
 // 从源节点右侧中点到目标节点左侧中点，曲率为距离的 50%（最小 50）
-function computePath(from: any, to: any) {
+function computePath(from: CanvasPanel, to: CanvasPanel) {
   const startX = from.x + from.width
   const startY = from.y + from.height / 2
   const endX = to.x
@@ -64,8 +72,8 @@ function computePath(from: any, to: any) {
 
 // ---------- 已建立连线路径列表 ----------
 const connectionPaths = computed(() => {
-  const result: any[] = []
-  for (const conn of currentConnections.value as any[]) {
+  const result: { id: string; path: string; active: boolean }[] = []
+  for (const conn of currentConnections.value || []) {
     const from = getPanelById(conn.source_panel_id)
     const to = getPanelById(conn.target_panel_id)
     if (!from || !to) continue
@@ -81,9 +89,10 @@ const connectionPaths = computed(() => {
 // ---------- 拖拽中的临时连线路径 ----------
 // 根据源锚点类型决定方向：source 锚点从节点右侧出发，target 锚点从节点左侧出发
 const connectingPath = computed(() => {
-  const c = currentConnecting.value as any
+  const c = currentConnecting.value
   if (!c) return null
-
+  if (!c.endWorld) return null
+  
   const sourcePanel = getPanelById(c.sourcePanelId)
   if (!sourcePanel) return null
 
