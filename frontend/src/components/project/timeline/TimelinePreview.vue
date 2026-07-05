@@ -25,8 +25,13 @@
         @error="onMediaError(clip.id, $event)"
       />
 
-      <!-- 空状态 -->
-      <div v-if="!activeVideoClipId" class="preview-empty">
+      <!-- 空状态：点击也可播放 -->
+      <div
+        v-if="!activeVideoClipId"
+        class="preview-empty"
+        :class="{ 'preview-empty--clickable': canPlay }"
+        @click="canPlay && togglePlayPause()"
+      >
         <el-icon :size="48"><VideoPlay /></el-icon>
         <span class="empty-text">{{ emptyText }}</span>
       </div>
@@ -117,7 +122,7 @@ const canPlay = computed(() =>
 const emptyText = computed(() => {
   if (videoClips.value.length === 0) return '暂无视频片段，请先初始化时间线'
   if (!canPlay.value) return '视频片段源文件缺失，请检查分镜视频是否已生成'
-  return '点击播放按钮开始预览'
+  return '点击此处或下方按钮开始预览'
 })
 
 // ---------- 元素注册转发 ----------
@@ -184,6 +189,19 @@ function formatTime(seconds: number): string {
   align-items: center;
   gap: 12px;
   color: #888;
+  user-select: none;
+}
+
+.preview-empty--clickable {
+  cursor: pointer;
+}
+
+.preview-empty--clickable:hover .empty-text {
+  color: #bbb;
+}
+
+.preview-empty--clickable:hover .el-icon {
+  color: #409eff;
 }
 
 .empty-text {
