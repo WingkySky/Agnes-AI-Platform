@@ -19,6 +19,8 @@ from app.services.project._entity_versions import (
     list_versions,
     set_active_version,
     delete_version,
+    attach_active_image,
+    attach_active_image_batch,
 )
 from app.services.project.sse_manager import project_sse_manager
 from app.services.project.wizard import parse_json_loose
@@ -41,7 +43,9 @@ async def list_scenes(
         .where(ProjectScene.project_id == project_id)
         .order_by(ProjectScene.sort_order)
     )
-    return result.scalars().all()
+    items = result.scalars().all()
+    await attach_active_image_batch(db, ENTITY_TYPE, items)
+    return items
 
 
 async def get_scene(db: AsyncSession, scene_id: int) -> Optional[ProjectScene]:
@@ -49,7 +53,10 @@ async def get_scene(db: AsyncSession, scene_id: int) -> Optional[ProjectScene]:
     result = await db.execute(
         select(ProjectScene).where(ProjectScene.id == scene_id)
     )
-    return result.scalar_one_or_none()
+    item = result.scalar_one_or_none()
+    if item:
+        await attach_active_image(db, ENTITY_TYPE, item)
+    return item
 
 
 async def create_scene(
@@ -77,6 +84,7 @@ async def create_scene(
     db.add(scene)
     await db.commit()
     await db.refresh(scene)
+    await attach_active_image(db, ENTITY_TYPE, scene)
     return scene
 
 
@@ -92,6 +100,7 @@ async def update_scene(
         setattr(scene, k, v)
     await db.commit()
     await db.refresh(scene)
+    await attach_active_image(db, ENTITY_TYPE, scene)
 
     await project_sse_manager.push(
         scene.project_id,
@@ -211,6 +220,7 @@ async def generate_scene_image(
                 "file_url": image_url,
             },
         )
+        await attach_active_image(db, ENTITY_TYPE, scene)
         return scene
     except Exception as e:
         await project_sse_manager.push(
@@ -270,6 +280,7 @@ async def upload_scene_image(
         is_manual=True,
         set_active=True,
     )
+    await attach_active_image(db, ENTITY_TYPE, scene)
     return scene
 
 

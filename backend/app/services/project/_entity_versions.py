@@ -92,6 +92,70 @@ async def list_versions(
     return result.scalars().all()
 
 
+async def get_active_version(
+    db: AsyncSession, entity_type: str, entity_id: int
+) -> Optional[ProjectEntityAsset]:
+    """获取某实体的当前激活版本（无激活版返回 None）"""
+    result = await db.execute(
+        select(ProjectEntityAsset)
+        .where(
+            ProjectEntityAsset.entity_type == entity_type,
+            ProjectEntityAsset.entity_id == entity_id,
+            ProjectEntityAsset.is_active == True,  # noqa: E712
+        )
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def attach_active_image(
+    db: AsyncSession, entity_type: str, entity
+) -> entity:
+    """
+    给实体对象注入 active_image 属性（用于响应序列化）
+
+    - 通过 entity.active_image_id 查 ProjectEntityAsset 表
+    - 把 asset 挂到 entity.active_image 上（动态属性）
+    - 无激活版时挂 None
+    """
+    asset: Optional[ProjectEntityAsset] = None
+    if getattr(entity, "active_image_id", None):
+        asset = await get_version(db, entity.active_image_id)
+        # 校验归属
+        if asset and (
+            asset.entity_type != entity_type
+            or asset.entity_id != entity.id
+        ):
+            asset = None
+    if asset is None:
+        # active_image_id 缺失时回退查 is_active=True
+        asset = await get_active_version(db, entity_type, entity.id)
+    # SQLAlchemy ORM 不允许随意 setattr 动态字段，用 __dict__ 直接注入
+    entity.__dict__["active_image"] = asset
+    return entity
+
+
+async def attach_active_image_batch(
+    db: AsyncSession, entity_type: str, entities: List
+) -> List:
+    """批量注入 active_image（一次查询所有相关 asset）"""
+    if not entities:
+        return entities
+    ids = [e.id for e in entities]
+    result = await db.execute(
+        select(ProjectEntityAsset)
+        .where(
+            ProjectEntityAsset.entity_type == entity_type,
+            ProjectEntityAsset.entity_id.in_(ids),
+            ProjectEntityAsset.is_active == True,  # noqa: E712
+        )
+    )
+    asset_map = {a.entity_id: a for a in result.scalars().all()}
+    for e in entities:
+        e.__dict__["active_image"] = asset_map.get(e.id)
+    return entities
+
+
 async def get_version(
     db: AsyncSession, version_id: int
 ) -> Optional[ProjectEntityAsset]:

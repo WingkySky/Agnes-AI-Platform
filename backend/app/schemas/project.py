@@ -183,6 +183,8 @@ class CharacterResponse(BaseModel):
     sort_order: int = 0
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # service 层注入：当前激活版本详情（前端展示图像用）
+    active_image: Optional["EntityAssetResponse"] = None
 
 
 class SceneCreate(BaseModel):
@@ -220,6 +222,8 @@ class SceneResponse(BaseModel):
     sort_order: int = 0
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # service 层注入：当前激活版本详情
+    active_image: Optional["EntityAssetResponse"] = None
 
 
 class PropCreate(BaseModel):
@@ -251,6 +255,8 @@ class PropResponse(BaseModel):
     sort_order: int = 0
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # service 层注入：当前激活版本详情
+    active_image: Optional["EntityAssetResponse"] = None
 
 
 # =====================================================
@@ -477,3 +483,12 @@ class MergeStatusResponse(BaseModel):
     final_video_url: Optional[str] = None
     total_duration: float = 0
     error: Optional[str] = None
+
+
+# =====================================================
+# 解决前向引用：CharacterResponse/SceneResponse/PropResponse
+# 在定义时引用了尚未定义的 EntityAssetResponse
+# =====================================================
+CharacterResponse.model_rebuild()
+SceneResponse.model_rebuild()
+PropResponse.model_rebuild()
