@@ -66,17 +66,35 @@
         播放成片
       </el-button>
     </div>
+
+    <!-- 成片播放弹窗 -->
+    <el-dialog
+      v-model="finalVideoDialogVisible"
+      title="项目成片预览"
+      width="80%"
+      align-center
+      destroy-on-close
+    >
+      <video
+        v-if="finalVideoUrl"
+        :src="finalVideoUrl"
+        controls
+        autoplay
+        style="width: 100%; max-height: 70vh; background: #000"
+      />
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import {
   ArrowLeft, Calendar, FullScreen, Monitor, Picture, Connection,
   Grid, Histogram, VideoPlay,
 } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
+import { useUserStore } from '@/stores/user'
 import type { Project, ProjectActiveView, ProjectStatus } from '@/types/project'
 
 const props = defineProps<{
@@ -85,6 +103,28 @@ const props = defineProps<{
 }>()
 
 const projectStore = useProjectStore()
+const userStore = useUserStore()
+
+// 成片播放弹窗
+const finalVideoDialogVisible = ref(false)
+const finalVideoUrl = ref('')
+
+function buildFinalVideoUrl(): string {
+  if (!props.project?.final_video_url) return ''
+  // final_video_url 是相对路径 /api/projects/{id}/final-video?v=ts
+  // <video> 标签无法设置 Authorization header，需要拼 token query 参数
+  const rel = props.project.final_video_url
+  const token = userStore.token || ''
+  const sep = rel.includes('?') ? '&' : '?'
+  // 拼接 baseURL（开发环境走 vite 代理 /api，生产环境是同源）
+  return `${rel}${sep}token=${encodeURIComponent(token)}`
+}
+
+function playFinalVideo() {
+  if (!props.project?.final_video_url) return
+  finalVideoUrl.value = buildFinalVideoUrl()
+  finalVideoDialogVisible.value = true
+}
 
 const statusLabel = computed(() => {
   const map: Record<ProjectStatus, string> = {
@@ -121,12 +161,6 @@ async function onMerge() {
     )
     await projectStore.mergeProject()
   } catch (_) { /* 取消 */ }
-}
-
-function playFinalVideo() {
-  if (props.project?.final_video_url) {
-    window.open(props.project.final_video_url, '_blank')
-  }
 }
 
 function formatDate(s?: string | null): string {

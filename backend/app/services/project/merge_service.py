@@ -175,7 +175,14 @@ async def execute_merge(
                 abs_path = os.path.abspath(p)
                 f.write(f"file '{abs_path}'\n")
 
-        output_path = os.path.join(tmp_dir, "final.mp4")
+        # 输出到持久化目录 backend/outputs/projects/{project_id}/final.mp4
+        # 通过 /api/projects/{id}/final-video 端点流式返回，避免 file:// 协议被浏览器拦截
+        outputs_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "outputs", "projects", str(project_id),
+        )
+        os.makedirs(outputs_dir, exist_ok=True)
+        output_path = os.path.join(outputs_dir, "final.mp4")
         cmd = [
             "ffmpeg", "-y",
             "-f", "concat",
@@ -201,9 +208,11 @@ async def execute_merge(
             err_msg = stderr.decode("utf-8", errors="ignore")[:500]
             raise RuntimeError(f"ffmpeg 合成失败: {err_msg}")
 
-        # 上传最终成片（这里简化为读取文件并调用资产上传接口；先返回本地路径）
-        # TODO: 接入项目实际的上传服务后改为上传到对象存储
-        final_url = f"file://{output_path}"  # 临时方案
+        # final_video_url 存储为后端可访问的相对 URL
+        # 前端通过 baseURL + 此路径访问 /api/projects/{id}/final-video 流式端点
+        # 加版本时间戳避免缓存
+        import time as _time
+        final_url = f"/api/projects/{project_id}/final-video?v={int(_time.time())}"
 
         # 更新项目
         project.final_video_url = final_url
@@ -224,10 +233,13 @@ async def execute_merge(
         )
         return project
     finally:
-        # 清理临时目录（保留 final.mp4 用于外部访问，但合成完成后可清理）
-        # 注意：当前 final_url 是 file:// 临时路径，生产环境应上传到对象存储
-        # 这里不立即清理，保留 1 小时供访问；后台清理任务会处理
-        pass
+        # 清理临时下载目录（final.mp4 已持久化到 outputs/projects/{id}/）
+        # 保留 outputs 下的成片供前端访问，不在此清理
+        try:
+            import shutil
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        except Exception:
+            pass
 
 
 async def get_merge_status(

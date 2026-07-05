@@ -1457,3 +1457,69 @@ async def get_merge_status_api(
     project = await _get_project_or_404(db, project_id)
     _check_project_owner(project, current_user)
     return MergeStatusResponse(**await get_merge_status(db, project_id))
+
+
+@router.get("/{project_id}/final-video", summary="下载/播放项目最终成片")
+async def get_final_video_api(
+    project_id: int,
+    request: Request,
+    token: Optional[str] = Query(None, description="JWT token（用于 <video> / window.open 无法设置 header 的场景）"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """
+    流式返回项目合成后的最终成片 mp4 文件。
+
+    - 文件存储位置：backend/outputs/projects/{project_id}/final.mp4
+    - 用途：前端通过 <video> 标签或 window.open 播放
+    - 认证：支持 Authorization header 和 ?token=<jwt> query 参数两种方式
+      （<video> 标签和 window.open 无法设置 header，必须用 query token）
+    """
+    import os
+
+    # 认证：优先 header，其次 query 参数
+    auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
+    jwt_token = _extract_token_from_header(auth_header) or token
+    if not jwt_token:
+        raise HTTPException(status_code=401, detail="未登录")
+    user_id = decode_access_token(jwt_token)
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="token 已过期或无效")
+    result = await db.execute(select(User).filter(User.id == user_id))
+    current_user = result.scalar_one_or_none()
+    if current_user is None or not current_user.is_active:
+        raise HTTPException(status_code=401, detail="用户不存在或已禁用")
+
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+
+    if not project.final_video_url:
+        raise HTTPException(status_code=404, detail="项目尚未合成最终视频")
+
+    # 文件持久化在 backend/outputs/projects/{project_id}/final.mp4
+    file_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "outputs", "projects", str(project_id), "final.mp4",
+    )
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="成片文件不存在或已被清理")
+
+    file_size = os.path.getsize(file_path)
+
+    def iterfile():
+        # 1MB 分块读取，避免大文件一次性加载到内存
+        with open(file_path, "rb") as f:
+            while True:
+                chunk = f.read(1024 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+
+    return StreamingResponse(
+        iterfile(),
+        media_type="video/mp4",
+        headers={
+            "Content-Length": str(file_size),
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "no-cache",
+        },
+    )
