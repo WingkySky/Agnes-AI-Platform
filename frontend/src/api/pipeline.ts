@@ -435,3 +435,204 @@ export function buildDownloadUrl(runId: number, withWatermark: boolean = true): 
   const watermark = withWatermark ? 1 : 0
   return `/api/pipeline/runs/${runId}/download?watermark=${watermark}`
 }
+
+// =====================================================
+// Task 21.2: 步骤确认 / 元素级重试 / 失效相关类型
+// 与后端 Task 11-16 产出的人类确认流程对齐
+// =====================================================
+
+/** 步骤状态（含等待确认 / 失效） */
+export type StepStatus =
+  | 'pending'
+  | 'running'
+  | 'awaiting_confirmation'
+  | 'success'
+  | 'failed'
+  | 'skipped'
+  | 'stale'
+
+/** 步骤确认状态：null 表示该步骤不涉及确认流程 */
+export type ConfirmationStatus = 'pending' | 'confirmed' | 'rejected' | null
+
+/** 步骤产物元素（image_batch / video_batch 等步骤的单个产物） */
+export interface StepItem {
+  /** 元素唯一标识 */
+  id: string
+  /** 元素名称（如"分镜 1"） */
+  name?: string
+  /** 元素的设定文本（后端老字段名 setting_text） */
+  setting_text?: string
+  /** 元素的设定文本（后端新字段名 description，与 setting_text 等价） */
+  description?: string
+  /** 元素对应的图片/视频 URL */
+  image_url?: string
+  /** 元素执行状态 */
+  status?: 'pending' | 'running' | 'success' | 'failed'
+  /** 生成时使用的种子（用于复现） */
+  seed?: number
+  /** 元素级失败原因 */
+  error?: string
+}
+
+/** 下游失效摘要（stale_marked 事件 / apply-stale 接口返回） */
+export interface StaleSummary {
+  /** 被标记为 stale 的下游步骤 key 列表 */
+  stale_step_keys: string[]
+  /** 触发失效的编辑步骤 key */
+  edited_step_key?: string
+  /** 失效原因 */
+  reason?: string
+}
+
+/** 通用 API 响应（后端业务接口统一结构） */
+export interface ApiResponse {
+  message?: string
+  data?: any
+  [key: string]: any
+}
+
+// =====================================================
+// Task 21.1: 步骤确认 / 元素级重试 / 产物编辑 /
+// 下游失效 / 编辑锁 / 版本历史 / 自动确认 API
+// 对应后端 Task 11-16 路由
+// =====================================================
+
+/**
+ * Task 11: 确认 / 驳回步骤
+ * POST /api/pipeline/runs/{run_id}/steps/{step_key}/confirm
+ */
+export function confirmStep(
+  runId: number,
+  stepKey: string,
+  data: {
+    action: 'confirm' | 'reject'
+    comment?: string
+    edited_output?: Record<string, any>
+  }
+): Promise<ApiResponse> {
+  return client.post(`/api/pipeline/runs/${runId}/steps/${stepKey}/confirm`, data)
+}
+
+/**
+ * Task 12: 元素级重试（重试步骤中单个失败的 item）
+ * POST /api/pipeline/runs/{run_id}/steps/{step_key}/retry-item?item_id=xxx
+ * 注意：后端 item_id 为 query 参数，prompt_override / seed 在 body
+ */
+export function retryStepItem(
+  runId: number,
+  stepKey: string,
+  data: {
+    item_id: string
+    prompt_override?: string
+    seed?: number
+  }
+): Promise<ApiResponse> {
+  const { item_id, ...body } = data
+  return client.post(
+    `/api/pipeline/runs/${runId}/steps/${stepKey}/retry-item`,
+    body,
+    { params: { item_id } }
+  )
+}
+
+/**
+ * Task 13: 编辑步骤产物（整体替换 / 删除 / 追加 items）
+ * PATCH /api/pipeline/runs/{run_id}/steps/{step_key}/output
+ */
+export function editStepOutput(
+  runId: number,
+  stepKey: string,
+  data: {
+    items?: any[]
+    remove_item_ids?: string[]
+    add_items?: any[]
+  }
+): Promise<ApiResponse> {
+  return client.patch(`/api/pipeline/runs/${runId}/steps/${stepKey}/output`, data)
+}
+
+/**
+ * Task 13: 上传图片替换步骤中某个 item 的图片
+ * POST /api/pipeline/runs/{run_id}/steps/{step_key}/items/{item_id}/upload
+ * 使用 multipart/form-data 上传
+ */
+export function uploadStepItem(
+  runId: number,
+  stepKey: string,
+  itemId: string,
+  file: File
+): Promise<ApiResponse> {
+  const formData = new FormData()
+  formData.append('file', file)
+  return client.post(
+    `/api/pipeline/runs/${runId}/steps/${stepKey}/items/${itemId}/upload`,
+    formData,
+    { headers: { 'Content-Type': 'multipart/form-data' } }
+  )
+}
+
+/**
+ * Task 14: 应用下游失效（按 DAG 逆序重置 stale 步骤及下游）
+ * POST /api/pipeline/runs/{run_id}/apply-stale
+ */
+export function applyStale(runId: number): Promise<ApiResponse> {
+  return client.post(`/api/pipeline/runs/${runId}/apply-stale`)
+}
+
+/**
+ * Task 14: 忽略 stale（清除所有步骤的 stale 标记）
+ * POST /api/pipeline/runs/{run_id}/ignore-stale
+ */
+export function ignoreStale(runId: number): Promise<ApiResponse> {
+  return client.post(`/api/pipeline/runs/${runId}/ignore-stale`)
+}
+
+/**
+ * Task 15: 获取 run 级编辑锁（5 分钟超时，惰性检查）
+ * POST /api/pipeline/runs/{run_id}/lock
+ */
+export function acquireEditLock(runId: number): Promise<ApiResponse> {
+  return client.post(`/api/pipeline/runs/${runId}/lock`)
+}
+
+/**
+ * Task 15: 释放 run 级编辑锁
+ * DELETE /api/pipeline/runs/{run_id}/lock
+ */
+export function releaseEditLock(runId: number): Promise<ApiResponse> {
+  return client.delete(`/api/pipeline/runs/${runId}/lock`)
+}
+
+/**
+ * Task 15: 查看步骤产物版本历史（按 revision 降序）
+ * GET /api/pipeline/runs/{run_id}/steps/{step_key}/revisions
+ */
+export function listStepRevisions(
+  runId: number,
+  stepKey: string
+): Promise<ApiResponse> {
+  return client.get(`/api/pipeline/runs/${runId}/steps/${stepKey}/revisions`)
+}
+
+/**
+ * Task 15: 回滚步骤产物到指定版本
+ * POST /api/pipeline/runs/{run_id}/steps/{step_key}/revisions/{revision}
+ */
+export function rollbackStepRevision(
+  runId: number,
+  stepKey: string,
+  revision: number
+): Promise<ApiResponse> {
+  return client.post(`/api/pipeline/runs/${runId}/steps/${stepKey}/revisions/${revision}`)
+}
+
+/**
+ * Task 16: 切换 run.auto_confirm 标志
+ * POST /api/pipeline/runs/{run_id}/auto-confirm
+ */
+export function setAutoConfirm(
+  runId: number,
+  enabled: boolean
+): Promise<ApiResponse> {
+  return client.post(`/api/pipeline/runs/${runId}/auto-confirm`, { enabled })
+}

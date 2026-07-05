@@ -4,7 +4,8 @@
 # =====================================================
 
 import logging
-from datetime import datetime
+import json
+from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any, Tuple
 
 from fastapi import HTTPException
@@ -12,6 +13,7 @@ from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.pipeline import PipelineRun, PipelineStep, PipelineTemplate
+from app.models.pipeline_step_output_revision import PipelineStepOutputRevision
 from app.services.pipeline.engine import (
     PipelineEngine,
     create_pipeline_run,
@@ -731,6 +733,130 @@ def _check_step_has_output(step: PipelineStep) -> bool:
     return True
 
 
+async def _check_url_accessible(url: str, client: Any) -> bool:
+    """
+    检查单个 URL 是否可访问（用于僵尸恢复时元素级产物校验）。
+
+    判断规则：
+    - HTTP(S) URL → HEAD 请求，状态码 < 400 视为可访问；HEAD 失败回退 GET
+    - /pipeline/outputs/ 开头的静态路径 → 拼接本地目录检查文件存在
+    - 其他本地路径 → 直接检查文件存在
+
+    Args:
+        url: 待检查的 URL 或本地路径
+        client: 复用的 httpx.AsyncClient 连接池（HTTP 场景）
+
+    Returns:
+        True 表示可访问
+    """
+    import os
+
+    if not url or not isinstance(url, str):
+        return False
+
+    # HTTP(S) URL → HEAD 请求检查
+    if url.startswith(("http://", "https://")):
+        try:
+            resp = await client.head(url, follow_redirects=True)
+            if resp.status_code < 400:
+                return True
+            # 部分 OSS 不支持 HEAD，回退 GET
+            resp = await client.get(url, follow_redirects=True)
+            return resp.status_code < 400
+        except Exception:
+            return False
+
+    # /pipeline/outputs/ 静态路径 → 映射到本地 data/pipeline_outputs 目录
+    if url.startswith("/pipeline/outputs/"):
+        from app.services.pipeline.steps.ffmpeg_composite import _OUTPUT_BASE
+        filename = url[len("/pipeline/outputs/"):]
+        # 防目录穿越
+        if "/" in filename or "\\" in filename or ".." in filename:
+            return False
+        local_path = os.path.join(_OUTPUT_BASE, filename)
+        return os.path.exists(local_path) and os.path.isfile(local_path)
+
+    # 其他本地路径 → 直接检查文件存在
+    return os.path.exists(url) and os.path.isfile(url)
+
+
+async def _check_step_items_output(step: PipelineStep) -> Tuple[bool, Dict[str, Any]]:
+    """
+    对步骤 output_data.items 做元素级产物可访问性检查（用于僵尸恢复）。
+
+    遍历每个 item 的 image_url / video_url / audio_url：
+    - 已是 failed 状态的 item 直接保留
+    - 有产物 URL 的 item：任一 URL 不可访问 → 标 status=failed, error="产物 URL 不可访问"
+    - 所有 URL 均可访问 → 标 status=success
+    - 无 URL 字段的 item 保持原状态
+
+    最后重新计算 summary（total/success_count/failed_count）。
+
+    Returns:
+        (overall_success, updated_output_data)
+        - overall_success: True 表示至少有一个元素成功；False 表示全部失败
+        - updated_output_data: 更新后的 output_data（含修正后的 items 和 summary）
+    """
+    import asyncio
+    import httpx
+
+    output = step.output_data or {}
+    items = output.get("items")
+    if not isinstance(items, list) or not items:
+        # 无 items 或空列表 → 让调用方走原逻辑
+        return False, output
+
+    # 并发检查所有 item 的产物 URL（复用 httpx 连接池）
+    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+        async def check_item(item: Dict[str, Any]) -> Dict[str, Any]:
+            """检查单个 item 的产物 URL 可访问性"""
+            if not isinstance(item, dict):
+                return item
+
+            # 已是 failed 状态的 item 直接保留（不重复检查）
+            if item.get("status") == "failed":
+                return item
+
+            # 检查所有产物 URL 字段，任一不可访问即视为失败
+            url_fields = ("image_url", "video_url", "audio_url")
+            has_url = False
+            for field in url_fields:
+                url = item.get(field)
+                if url:
+                    has_url = True
+                    if not await _check_url_accessible(url, client):
+                        item["status"] = "failed"
+                        item["error"] = "产物 URL 不可访问"
+                        break
+
+            # 有可访问产物 URL 的 item → 标记为 success（确保 status 字段存在）
+            if has_url and item.get("status") != "failed":
+                item["status"] = "success"
+                item["error"] = None
+
+            return item
+
+        # 并发执行所有元素检查
+        checked_items = await asyncio.gather(*[check_item(it) for it in items])
+
+    # 重新计算 summary
+    success_count = sum(
+        1 for it in checked_items
+        if isinstance(it, dict) and it.get("status") == "success"
+    )
+    failed_count = len(checked_items) - success_count
+
+    new_output = dict(output)
+    new_output["items"] = list(checked_items)
+    new_output["summary"] = {
+        "total": len(checked_items),
+        "success_count": success_count,
+        "failed_count": failed_count,
+    }
+
+    return success_count > 0, new_output
+
+
 async def recover_zombie_runs(db: AsyncSession) -> Dict[str, int]:
     """
     服务启动时自检僵尸流水线：根据实际产物修正状态。
@@ -777,6 +903,24 @@ async def recover_zombie_runs(db: AsyncSession) -> Dict[str, int]:
 
         # 按产物自检逐个修正状态
         for step in unfinished_steps:
+            output = step.output_data or {}
+            # 优先做元素级检查（针对 output_data.items 数组的步骤，如 scene_gen/character_gen/prop_gen）
+            if isinstance(output.get("items"), list) and output["items"]:
+                overall_success, new_output = await _check_step_items_output(step)
+                step.output_data = new_output
+                if overall_success:
+                    # 至少一个元素成功 → 步骤标 success（部分元素失败仍算成功）
+                    step.status = "success"
+                    step.finished_at = step.finished_at or now
+                    step.error_message = None
+                else:
+                    # 所有元素产物均不可访问 → 标 failed
+                    step.status = "failed"
+                    step.finished_at = now
+                    step.error_message = "服务重启，任务已中断（所有元素产物均不可访问）"
+                continue
+
+            # 无 items 字段 → 沿用原有整体产物判定逻辑
             if _check_step_has_output(step):
                 # 产物完整 → 恢复为 success（避免重启后重复生成）
                 step.status = "success"
@@ -1230,3 +1374,1257 @@ def _seconds_to_vtt_time(seconds: float) -> str:
     if ms >= 1000:
         ms = 999
     return f"{hours:02d}:{minutes:02d}:{secs:02d}.{ms:03d}"
+
+
+# =====================================================
+# Task 11-17：步骤确认 / 元素级重试 / 产物编辑 /
+# 下游失效 / 编辑锁 / 版本历史 / 自动确认 / 步骤级重试增强
+# =====================================================
+
+# 编辑锁超时时间（5 分钟）
+EDIT_LOCK_TIMEOUT_SECONDS = 5 * 60
+# 每个 run 最多保留的版本历史数量
+MAX_REVISIONS_PER_RUN = 20
+
+
+# ---------- 下游失效标记（Task 14 工具函数，DAG 传递闭包） ----------
+
+async def mark_downstream_stale(
+    db: AsyncSession,
+    run_id: int,
+    edited_step_key: str,
+    reason: str = "上游产物被编辑",
+) -> List[str]:
+    """
+    标记指定步骤的所有下游步骤为 stale（产物已失效）。
+
+    通过 DAG 传递闭包找出 edited_step_key 的所有直接和间接下游步骤
+    （即任何 depends_on 链中包含 edited_step_key 的步骤），
+    将它们的 stale=True / stale_reason=reason。
+
+    Args:
+        db: 异步会话
+        run_id: 流水线运行 ID
+        edited_step_key: 被编辑的步骤 key
+        reason: 失效原因（写入 stale_reason）
+
+    Returns:
+        被标记为 stale 的下游步骤 key 列表（用于 SSE 推送）
+    """
+    steps = await get_run_steps(db, run_id)
+    # 收集 edited_step_key 的所有传递性下游
+    downstream_keys = _collect_transitive_downstream(steps, edited_step_key)
+
+    marked: List[str] = []
+    for step in steps:
+        if step.step_key in downstream_keys:
+            step.stale = True
+            step.stale_reason = reason
+            marked.append(step.step_key)
+
+    if marked:
+        await db.commit()
+        logger.info(
+            f"[下游失效] run_id={run_id} edited_step={edited_step_key} "
+            f"标记下游 stale: {marked}"
+        )
+    return marked
+
+
+def _collect_transitive_downstream(
+    all_steps: List[PipelineStep], root_key: str
+) -> set:
+    """
+    收集 root_key 的所有传递性下游步骤 key（直接 + 间接依赖链）。
+
+    与 engine._collect_transitive_dependents 等价，但在 service 层独立实现，
+    避免 service 层依赖 engine 内部辅助函数。
+    """
+    result: set = set()
+    queue = [root_key]
+    while queue:
+        current = queue.pop(0)
+        for s in all_steps:
+            if s.step_key in result or s.step_key == root_key:
+                continue
+            if current in (s.depends_on or []):
+                result.add(s.step_key)
+                queue.append(s.step_key)
+    return result
+
+
+# ---------- 版本历史辅助函数（Task 13/15 共用） ----------
+
+async def _save_step_output_revision(
+    db: AsyncSession,
+    run_id: int,
+    step_key: str,
+    output_data: Dict[str, Any],
+    edited_by: Optional[int],
+    change_summary: str,
+) -> Optional[PipelineStepOutputRevision]:
+    """
+    保存步骤产物的版本快照到 PipelineStepOutputRevision 表。
+
+    每个 run 最多保留 MAX_REVISIONS_PER_RUN 个版本，超过则删除最旧的。
+    """
+    # 查询当前 run+step 的修订数量与最大 revision 号
+    count_result = await db.execute(
+        select(func.count()).select_from(PipelineStepOutputRevision).where(
+            PipelineStepOutputRevision.run_id == run_id,
+            PipelineStepOutputRevision.step_key == step_key,
+        )
+    )
+    rev_count = count_result.scalar_one() or 0
+
+    # 超过上限则删除最旧的
+    if rev_count >= MAX_REVISIONS_PER_RUN:
+        oldest_result = await db.execute(
+            select(PipelineStepOutputRevision)
+            .where(
+                PipelineStepOutputRevision.run_id == run_id,
+                PipelineStepOutputRevision.step_key == step_key,
+            )
+            .order_by(PipelineStepOutputRevision.revision.asc())
+            .limit(rev_count - MAX_REVISIONS_PER_RUN + 1)
+        )
+        for old_rev in oldest_result.scalars().all():
+            await db.delete(old_rev)
+
+    # 计算新 revision 号
+    max_rev_result = await db.execute(
+        select(func.max(PipelineStepOutputRevision.revision)).where(
+            PipelineStepOutputRevision.run_id == run_id,
+            PipelineStepOutputRevision.step_key == step_key,
+        )
+    )
+    max_rev = max_rev_result.scalar_one_or_none() or 0
+    new_rev = max_rev + 1
+
+    revision = PipelineStepOutputRevision(
+        run_id=run_id,
+        step_key=step_key,
+        revision=new_rev,
+        output_data=output_data,
+        edited_by=edited_by,
+        edited_at=datetime.utcnow(),
+        change_summary=change_summary,
+    )
+    db.add(revision)
+    await db.flush()
+    return revision
+
+
+# ---------- Task 11: 确认 / 驳回 ----------
+
+async def confirm_step(
+    db: AsyncSession,
+    run_id: int,
+    step_key: str,
+    action: str,
+    comment: Optional[str] = None,
+    edited_output: Optional[Dict[str, Any]] = None,
+    user_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    确认或驳回处于 pending 确认状态的步骤。
+
+    - 验证 run 状态为 paused 且 pause_reason=awaiting_confirmation
+    - 验证 step confirmation_status=pending
+    - 若 edited_output 非空，先覆盖 step.output_data，并调 mark_downstream_stale 标记下游
+    - action=confirm：置 confirmed，清 run.pause_requested 和 pause_reason，调 engine.resume()
+    - action=reject：置 rejected + step.status=failed，调 engine._skip_blocked_steps()，
+      run 转 failed
+    - 推送 confirmation_updated SSE 事件
+
+    Returns:
+        包含 run_id / step_key / action / confirmation_status 的字典
+    """
+    from app.services.pipeline.engine import PipelineEngine
+
+    run = await get_run_by_id(db, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="流水线不存在")
+
+    if user_id is not None and run.user_id != user_id:
+        raise HTTPException(status_code=403, detail="无权操作此流水线")
+
+    if action not in ("confirm", "reject"):
+        raise HTTPException(status_code=400, detail="action 必须为 confirm 或 reject")
+
+    if run.status != "paused" or run.pause_reason != "awaiting_confirmation":
+        raise HTTPException(
+            status_code=400,
+            detail=f"当前 run 状态 {run.status}（pause_reason={run.pause_reason}），"
+            f"不在等待确认状态",
+        )
+
+    step = await get_step_by_key(db, run_id, step_key)
+    if not step:
+        raise HTTPException(status_code=404, detail="步骤不存在")
+
+    if step.confirmation_status != "pending":
+        raise HTTPException(
+            status_code=400,
+            detail=f"步骤 confirmation_status={step.confirmation_status}，"
+            f"非 pending 不可操作",
+        )
+
+    # 若提供了 edited_output，覆盖当前 output_data 并标记下游 stale
+    downstream_marked: List[str] = []
+    if edited_output and isinstance(edited_output, dict):
+        # 保存修订前快照（便于回滚）
+        await _save_step_output_revision(
+            db=db,
+            run_id=run_id,
+            step_key=step_key,
+            output_data=step.output_data or {},
+            edited_by=user_id,
+            change_summary="确认时编辑产物前快照",
+        )
+        step.output_data = edited_output
+        downstream_marked = await mark_downstream_stale(
+            db=db,
+            run_id=run_id,
+            edited_step_key=step_key,
+            reason=f"上游步骤 {step_key} 在确认时被编辑",
+        )
+
+    if action == "confirm":
+        # 置 confirmed，清暂停标志
+        step.confirmation_status = "confirmed"
+        step.confirmation_comment = comment
+        run.pause_requested = False
+        run.pause_reason = None
+        await db.commit()
+
+        # 推送 confirmation_updated 事件
+        await pipeline_sse_manager.emit(
+            run_id, "confirmation_updated", step_key, {
+                "run_id": run_id,
+                "step_key": step_key,
+                "action": "confirm",
+                "confirmation_status": "confirmed",
+                "comment": comment,
+                "downstream_marked_stale": downstream_marked,
+            }
+        )
+
+        # 后台恢复执行
+        sse_callback = pipeline_sse_manager.make_progress_callback(run.id)
+        await resume_pipeline(run.id, progress_callback=sse_callback)
+
+        logger.info(
+            f"[确认] run_id={run_id} step={step_key} confirmed, "
+            f"downstream_stale={downstream_marked}"
+        )
+    else:
+        # reject：置 rejected + failed
+        step.confirmation_status = "rejected"
+        step.confirmation_comment = comment
+        step.status = "failed"
+        step.error_message = f"用户驳回: {comment or ''}"
+        step.finished_at = datetime.utcnow()
+        await db.commit()
+
+        # 调 engine._skip_blocked_steps 跳过下游
+        # 直接通过独立 session 触发一次引擎的 skip 流程较复杂，
+        # 简化处理：手动将下游 pending 步骤标记为 skipped
+        all_steps = await get_run_steps(db, run_id)
+        skipped = _skip_downstream_pending(all_steps, step_key)
+        for s in skipped:
+            s.status = "skipped"
+            s.error_message = f"上游步骤 {step_key} 被驳回"
+            s.finished_at = datetime.utcnow()
+        await db.commit()
+
+        # run 转 failed
+        run.status = "failed"
+        run.error_message = f"步骤 {step_key} 被用户驳回"
+        run.finished_at = datetime.utcnow()
+        await db.commit()
+
+        # 推送 confirmation_updated 事件
+        await pipeline_sse_manager.emit(
+            run_id, "confirmation_updated", step_key, {
+                "run_id": run_id,
+                "step_key": step_key,
+                "action": "reject",
+                "confirmation_status": "rejected",
+                "comment": comment,
+            }
+        )
+
+        logger.info(
+            f"[驳回] run_id={run_id} step={step_key} rejected, "
+            f"skipped_downstream={[s.step_key for s in skipped]}"
+        )
+
+    return {
+        "run_id": run_id,
+        "step_key": step_key,
+        "action": action,
+        "confirmation_status": step.confirmation_status,
+        "downstream_marked_stale": downstream_marked,
+    }
+
+
+def _skip_downstream_pending(
+    all_steps: List[PipelineStep], root_key: str
+) -> List[PipelineStep]:
+    """将 root_key 的所有传递性下游中状态为 pending 的步骤标记为 skipped（内存操作）。"""
+    downstream = _collect_transitive_downstream(all_steps, root_key)
+    return [
+        s for s in all_steps
+        if s.step_key in downstream and s.status == "pending"
+    ]
+
+
+# ---------- Task 12: 元素级重试 ----------
+
+async def retry_step_item(
+    db: AsyncSession,
+    run_id: int,
+    step_key: str,
+    item_id: str,
+    prompt_override: Optional[str] = None,
+    seed: Optional[int] = None,
+    user_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    重试步骤中的单个元素（如单张图片/视频）。
+
+    - 验证步骤非 stale（stale 返回 409）
+    - 从 output_data.items 找到 item_id 对应元素
+    - 构建 SingleItemContext，调 executor.execute_single()
+    - 更新 items[i] 和 summary
+    - 推送 item_updated SSE 事件
+    - 步骤已 confirmed 时响应 requires_reconfirmation=true
+
+    Returns:
+        包含 item / requires_reconfirmation 的字典
+    """
+    from app.services.pipeline.steps import create_step_executor
+    from app.services.pipeline.steps.base import (
+        StepExecutionContext,
+        SingleItemContext,
+    )
+
+    run = await get_run_by_id(db, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="流水线不存在")
+
+    if user_id is not None and run.user_id != user_id:
+        raise HTTPException(status_code=403, detail="无权操作此流水线")
+
+    step = await get_step_by_key(db, run_id, step_key)
+    if not step:
+        raise HTTPException(status_code=404, detail="步骤不存在")
+
+    if step.stale:
+        raise HTTPException(
+            status_code=409,
+            detail="步骤产物已失效（stale），请先重试整个步骤或应用下游失效",
+        )
+
+    output_data = step.output_data or {}
+    items: List[Dict[str, Any]] = output_data.get("items", []) or []
+    if not items:
+        raise HTTPException(
+            status_code=400,
+            detail="步骤 output_data 中无 items 列表，无法执行元素级重试",
+        )
+
+    # 找到对应 item（按 item_id / id / index 匹配）
+    target_idx = -1
+    for i, it in enumerate(items):
+        if not isinstance(it, dict):
+            continue
+        if str(it.get("item_id") or it.get("id") or it.get("index")) == str(item_id):
+            target_idx = i
+            break
+    if target_idx < 0:
+        raise HTTPException(
+            status_code=404,
+            detail=f"未在步骤 items 中找到 item_id={item_id}",
+        )
+
+    target_item = items[target_idx]
+
+    # 加载模板配置用于构建执行器
+    template = await get_template_by_id(db, run.template_id)
+    if not template:
+        raise HTTPException(status_code=500, detail="模板不存在")
+    step_config = None
+    for cfg in template.steps_config:
+        if cfg.get("key") == step_key:
+            step_config = cfg
+            break
+    if not step_config:
+        raise HTTPException(status_code=500, detail="步骤配置不存在于模板")
+
+    # 加载所有步骤输出，构建上下文
+    all_steps = await get_run_steps(db, run_id)
+    steps_output = {s.step_key: (s.output_data or {}) for s in all_steps}
+
+    # 加载风格预设（与 engine 一致）
+    style = None
+    style_id = (run.inputs or {}).get("style_id")
+    if style_id:
+        from app.services import style_service
+        style = await style_service.get_style_by_id(db, int(style_id))
+
+    # 加载分层风格元素
+    style_elements = None
+    style_elements_input = (run.inputs or {}).get("style_elements") or []
+    if style_elements_input:
+        try:
+            from app.services.style_element_service import resolve_elements
+            style_elements = await resolve_elements(db, style_elements_input)
+        except Exception as e:
+            logger.warning(f"[元素级重试] 加载 style_elements 失败: {e}")
+
+    # 加载剧本模板
+    script_template = None
+    if template.script_template_id:
+        from app.services import script_template_service
+        script_template = await script_template_service.get_script_template_by_id(
+            db, template.script_template_id
+        )
+
+    context = StepExecutionContext(
+        inputs=run.inputs or {},
+        steps_output=steps_output,
+        style=style,
+        script_template=script_template,
+        user_id=run.user_id,
+        run_id=run_id,
+        style_elements=style_elements,
+    )
+
+    executor = create_step_executor(step_config, context)
+
+    single_ctx = SingleItemContext(
+        step=step,
+        item=target_item,
+        inputs=run.inputs or {},
+        steps_output=steps_output,
+        prompt_override=prompt_override,
+        seed=seed,
+        config=step_config.get("config", {}),
+    )
+
+    try:
+        result = await executor.execute_single(single_ctx)
+    except NotImplementedError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"步骤类型 {step.step_type} 不支持元素级重试: {e}",
+        )
+
+    # 更新 items[i] 和 summary
+    items[target_idx] = result.item
+    output_data["items"] = items
+    # 重新统计 success/failed
+    success_count = sum(1 for it in items if isinstance(it, dict) and it.get("status") == "success")
+    failed_count = sum(1 for it in items if isinstance(it, dict) and it.get("status") == "failed")
+    output_data["success_count"] = success_count
+    output_data["failed_count"] = failed_count
+    # 同步更新嵌套 summary 字段（character_gen/prop_gen/scene_gen 等输出含 summary）
+    summary = output_data.get("summary")
+    if isinstance(summary, dict):
+        summary["success_count"] = success_count
+        summary["failed_count"] = failed_count
+        summary["total"] = len(items)
+    # 兼容字段同步更新（images / videos）
+    if "images" in output_data:
+        output_data["images"] = [it for it in items if isinstance(it, dict)]
+    if "videos" in output_data:
+        output_data["videos"] = [it for it in items if isinstance(it, dict)]
+
+    # JSON 字段原地修改不会被 SQLAlchemy 自动检测，需用 flag_modified 标记
+    from sqlalchemy.orm.attributes import flag_modified
+    step.output_data = output_data
+    flag_modified(step, "output_data")
+    await db.commit()
+
+    # 推送 item_updated SSE 事件
+    await pipeline_sse_manager.emit(
+        run_id, "item_updated", step_key, {
+            "run_id": run_id,
+            "step_key": step_key,
+            "item_id": item_id,
+            "item": result.item,
+            "status": result.status,
+            "success_count": success_count,
+            "failed_count": failed_count,
+        }
+    )
+
+    # 步骤已 confirmed 时响应 requires_reconfirmation=true
+    requires_reconfirmation = (step.confirmation_status == "confirmed")
+    if requires_reconfirmation:
+        # 把状态重置为 pending，提示前端需要重新确认
+        step.confirmation_status = "pending"
+        await db.commit()
+
+    logger.info(
+        f"[元素级重试] run_id={run_id} step={step_key} item_id={item_id} "
+        f"status={result.status} requires_reconfirmation={requires_reconfirmation}"
+    )
+
+    return {
+        "run_id": run_id,
+        "step_key": step_key,
+        "item_id": item_id,
+        "item": result.item,
+        "status": result.status,
+        "requires_reconfirmation": requires_reconfirmation,
+    }
+
+
+# ---------- Task 13: 产物编辑 ----------
+
+async def edit_step_output(
+    db: AsyncSession,
+    run_id: int,
+    step_key: str,
+    items: Optional[List[Dict[str, Any]]] = None,
+    remove_item_ids: Optional[List[str]] = None,
+    add_items: Optional[List[Dict[str, Any]]] = None,
+    user_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    编辑步骤产物（替换/删除/新增 items）。
+
+    - 编辑前保存版本到 PipelineStepOutputRevision
+    - 应用变更到 output_data.items
+    - 调 mark_downstream_stale 标记下游
+    - 推送 stale_marked SSE 事件（每个下游步骤一次）
+    - 引擎 running 状态返回 409
+
+    Returns:
+        包含 step_key / 更新后的 items / 被标记 stale 的下游步骤的字典
+    """
+    run = await get_run_by_id(db, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="流水线不存在")
+
+    if user_id is not None and run.user_id != user_id:
+        raise HTTPException(status_code=403, detail="无权操作此流水线")
+
+    if run.status == "running":
+        raise HTTPException(
+            status_code=409,
+            detail="流水线正在运行中，不可编辑产物",
+        )
+
+    step = await get_step_by_key(db, run_id, step_key)
+    if not step:
+        raise HTTPException(status_code=404, detail="步骤不存在")
+
+    output_data = dict(step.output_data or {})
+    current_items: List[Dict[str, Any]] = list(output_data.get("items", []) or [])
+
+    # 保存修订前快照
+    await _save_step_output_revision(
+        db=db,
+        run_id=run_id,
+        step_key=step_key,
+        output_data=step.output_data or {},
+        edited_by=user_id,
+        change_summary="编辑产物前快照",
+    )
+
+    # 1. 整体替换 items
+    if items is not None:
+        current_items = list(items)
+    else:
+        # 2. 删除指定 item_id
+        if remove_item_ids:
+            remove_set = {str(i) for i in remove_item_ids}
+            current_items = [
+                it for it in current_items
+                if not isinstance(it, dict)
+                or str(it.get("item_id") or it.get("id") or it.get("index")) not in remove_set
+            ]
+        # 3. 追加新 items
+        if add_items:
+            for new_item in add_items:
+                if isinstance(new_item, dict):
+                    current_items.append(new_item)
+
+    output_data["items"] = current_items
+    # 重新统计
+    success_count = sum(1 for it in current_items if isinstance(it, dict) and it.get("status") == "success")
+    failed_count = sum(1 for it in current_items if isinstance(it, dict) and it.get("status") == "failed")
+    output_data["success_count"] = success_count
+    output_data["failed_count"] = failed_count
+    # 同步更新嵌套 summary 字段（character_gen/prop_gen/scene_gen 等输出含 summary）
+    summary = output_data.get("summary")
+    if isinstance(summary, dict):
+        summary["success_count"] = success_count
+        summary["failed_count"] = failed_count
+        summary["total"] = len(current_items)
+    # 兼容字段同步更新
+    if "images" in output_data:
+        output_data["images"] = current_items
+    if "videos" in output_data:
+        output_data["videos"] = current_items
+
+    # JSON 字段原地修改不会被 SQLAlchemy 自动检测，需用 flag_modified 标记
+    from sqlalchemy.orm.attributes import flag_modified
+    step.output_data = output_data
+    flag_modified(step, "output_data")
+    await db.commit()
+
+    # 标记下游 stale
+    downstream_marked = await mark_downstream_stale(
+        db=db,
+        run_id=run_id,
+        edited_step_key=step_key,
+        reason=f"步骤 {step_key} 产物被编辑",
+    )
+
+    # 推送 stale_marked 事件（每个下游一次）
+    for ds_key in downstream_marked:
+        await pipeline_sse_manager.emit(
+            run_id, "stale_marked", ds_key, {
+                "run_id": run_id,
+                "step_key": ds_key,
+                "reason": f"上游步骤 {step_key} 产物被编辑",
+            }
+        )
+
+    logger.info(
+        f"[产物编辑] run_id={run_id} step={step_key} "
+        f"items_count={len(current_items)} downstream_stale={downstream_marked}"
+    )
+
+    return {
+        "run_id": run_id,
+        "step_key": step_key,
+        "items": current_items,
+        "success_count": success_count,
+        "failed_count": failed_count,
+        "downstream_marked_stale": downstream_marked,
+    }
+
+
+async def upload_step_item(
+    db: AsyncSession,
+    run_id: int,
+    step_key: str,
+    item_id: str,
+    file_content: bytes,
+    content_type: str,
+    filename: str,
+    user_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    上传图片替换步骤中某个 item 的图片。
+
+    - 校验格式（jpg/png/webp）和大小（≤10MB）
+    - 自动压缩（超过阈值时）
+    - 保存修订前快照
+    - 更新 item.image_url
+    - 标记下游 stale
+    - 推送 stale_marked SSE 事件
+
+    Returns:
+        包含 item_id / 新 image_url 的字典
+    """
+    import os
+
+    run = await get_run_by_id(db, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="流水线不存在")
+
+    if user_id is not None and run.user_id != user_id:
+        raise HTTPException(status_code=403, detail="无权操作此流水线")
+
+    if run.status == "running":
+        raise HTTPException(
+            status_code=409,
+            detail="流水线正在运行中，不可上传产物",
+        )
+
+    # 格式校验
+    allowed_types = {"image/jpeg", "image/png", "image/webp"}
+    if content_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不支持的图片格式：{content_type}，仅支持 jpg/png/webp",
+        )
+
+    # 大小校验（10MB）
+    max_size = 10 * 1024 * 1024
+    if len(file_content) > max_size:
+        raise HTTPException(
+            status_code=400,
+            detail="图片文件过大，最大 10MB",
+        )
+
+    step = await get_step_by_key(db, run_id, step_key)
+    if not step:
+        raise HTTPException(status_code=404, detail="步骤不存在")
+
+    output_data = step.output_data or {}
+    items: List[Dict[str, Any]] = list(output_data.get("items", []) or [])
+    target_idx = -1
+    for i, it in enumerate(items):
+        if not isinstance(it, dict):
+            continue
+        if str(it.get("item_id") or it.get("id") or it.get("index")) == str(item_id):
+            target_idx = i
+            break
+    if target_idx < 0:
+        raise HTTPException(
+            status_code=404,
+            detail=f"未在步骤 items 中找到 item_id={item_id}",
+        )
+
+    # 保存修订前快照
+    await _save_step_output_revision(
+        db=db,
+        run_id=run_id,
+        step_key=step_key,
+        output_data=step.output_data or {},
+        edited_by=user_id,
+        change_summary=f"上传图片替换 item {item_id} 前快照",
+    )
+
+    # 写入文件到 uploads/pipeline_items/ 目录
+    uploads_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
+        "uploads", "pipeline_items",
+    )
+    os.makedirs(uploads_dir, exist_ok=True)
+    ext_map = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
+    ext = ext_map.get(content_type, ".jpg")
+    saved_filename = f"run{run_id}_{step_key}_{item_id}_{int(datetime.utcnow().timestamp())}{ext}"
+    saved_path = os.path.join(uploads_dir, saved_filename)
+
+    # 简单压缩：若文件 > 2MB，用 Pillow 缩放至 80% 质量
+    try:
+        from PIL import Image
+        import io
+        img = Image.open(io.BytesIO(file_content))
+        # 转为 RGB 避免 PNG alpha 通道问题
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        if len(file_content) > 2 * 1024 * 1024:
+            img.save(saved_path, quality=80, optimize=True)
+        else:
+            img.save(saved_path, quality=95, optimize=True)
+    except Exception as e:
+        # Pillow 失败时直接写入原始字节
+        logger.warning(f"[产物上传] Pillow 压缩失败，写入原始字节: {e}")
+        with open(saved_path, "wb") as f:
+            f.write(file_content)
+
+    image_url = f"/uploads/pipeline_items/{saved_filename}"
+
+    # 更新 item
+    items[target_idx]["image_url"] = image_url
+    items[target_idx]["uploaded"] = True
+    items[target_idx]["uploaded_at"] = datetime.utcnow().isoformat()
+    output_data["items"] = items
+    if "images" in output_data:
+        output_data["images"] = items
+    if "videos" in output_data:
+        output_data["videos"] = items
+    step.output_data = output_data
+    await db.commit()
+
+    # 标记下游 stale
+    downstream_marked = await mark_downstream_stale(
+        db=db,
+        run_id=run_id,
+        edited_step_key=step_key,
+        reason=f"步骤 {step_key} 的 item {item_id} 被上传图片替换",
+    )
+    for ds_key in downstream_marked:
+        await pipeline_sse_manager.emit(
+            run_id, "stale_marked", ds_key, {
+                "run_id": run_id,
+                "step_key": ds_key,
+                "reason": f"上游步骤 {step_key} 上传了新图片",
+            }
+        )
+
+    logger.info(
+        f"[产物上传] run_id={run_id} step={step_key} item_id={item_id} "
+        f"image_url={image_url} downstream_stale={downstream_marked}"
+    )
+
+    return {
+        "run_id": run_id,
+        "step_key": step_key,
+        "item_id": item_id,
+        "image_url": image_url,
+        "downstream_marked_stale": downstream_marked,
+    }
+
+
+# ---------- Task 14: 下游失效应用 / 忽略 ----------
+
+async def apply_stale(
+    db: AsyncSession,
+    run_id: int,
+    user_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    应用下游失效：按 DAG 逆序重置 stale 步骤及其下游（status=pending,
+    output_data=null, stale=False），清 pause_requested，调 engine.resume()。
+
+    Returns:
+        包含被重置的步骤 key 列表的字典
+    """
+    run = await get_run_by_id(db, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="流水线不存在")
+
+    if user_id is not None and run.user_id != user_id:
+        raise HTTPException(status_code=403, detail="无权操作此流水线")
+
+    if run.status == "running":
+        raise HTTPException(
+            status_code=409,
+            detail="流水线正在运行中，不可应用下游失效",
+        )
+
+    steps = await get_run_steps(db, run_id)
+    stale_keys = {s.step_key for s in steps if s.stale}
+    if not stale_keys:
+        return {"run_id": run_id, "reset_steps": [], "message": "无 stale 步骤"}
+
+    # 按 DAG 逆序找出所有 stale 步骤的下游（也包含 stale 步骤本身）
+    all_to_reset = set(stale_keys)
+    for k in list(stale_keys):
+        all_to_reset |= _collect_transitive_downstream(steps, k)
+
+    # 按 sort_order 逆序重置
+    reset_steps: List[str] = []
+    for step in sorted(steps, key=lambda s: s.sort_order, reverse=True):
+        if step.step_key in all_to_reset:
+            step.status = "pending"
+            step.output_data = {}
+            step.stale = False
+            step.stale_reason = None
+            step.error_message = None
+            step.started_at = None
+            step.finished_at = None
+            step.retry_count = 0
+            reset_steps.append(step.step_key)
+
+    # 清暂停标志
+    run.pause_requested = False
+    run.pause_reason = None
+    run.status = "pending"
+    run.error_message = None
+    run.finished_at = None
+    await db.commit()
+
+    # 后台恢复执行
+    sse_callback = pipeline_sse_manager.make_progress_callback(run.id)
+    await resume_pipeline(run.id, progress_callback=sse_callback)
+
+    logger.info(
+        f"[应用下游失效] run_id={run_id} reset_steps={reset_steps}"
+    )
+
+    return {
+        "run_id": run_id,
+        "reset_steps": reset_steps,
+    }
+
+
+async def ignore_stale(
+    db: AsyncSession,
+    run_id: int,
+    user_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    忽略下游失效：清除所有步骤的 stale 和 stale_reason。
+
+    Returns:
+        包含被清除 stale 的步骤 key 列表的字典
+    """
+    run = await get_run_by_id(db, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="流水线不存在")
+
+    if user_id is not None and run.user_id != user_id:
+        raise HTTPException(status_code=403, detail="无权操作此流水线")
+
+    if run.status == "running":
+        raise HTTPException(
+            status_code=409,
+            detail="流水线正在运行中，不可忽略下游失效",
+        )
+
+    steps = await get_run_steps(db, run_id)
+    cleared: List[str] = []
+    for step in steps:
+        if step.stale:
+            step.stale = False
+            step.stale_reason = None
+            cleared.append(step.step_key)
+    await db.commit()
+
+    logger.info(
+        f"[忽略下游失效] run_id={run_id} cleared_steps={cleared}"
+    )
+
+    return {
+        "run_id": run_id,
+        "cleared_steps": cleared,
+    }
+
+
+# ---------- Task 15: 编辑锁 ----------
+
+async def acquire_edit_lock(
+    db: AsyncSession,
+    run_id: int,
+    user_id: int,
+) -> Dict[str, Any]:
+    """
+    获取 run 级编辑锁。5 分钟超时（惰性检查）。
+
+    - 若锁已被其他用户持有且未过期 → 返回 409
+    - 若锁已过期或为当前用户持有 → 重新获取
+    """
+    run = await get_run_by_id(db, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="流水线不存在")
+
+    if run.user_id != user_id:
+        raise HTTPException(status_code=403, detail="无权操作此流水线")
+
+    now = datetime.utcnow()
+    # 检查锁是否被其他用户持有且未过期
+    if (
+        run.edit_lock_user_id
+        and run.edit_lock_user_id != user_id
+        and run.edit_lock_expires_at
+        and run.edit_lock_expires_at > now
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=f"流水线正被用户 {run.edit_lock_user_id} 编辑，请等待其完成",
+        )
+
+    # 获取锁
+    run.edit_lock_user_id = user_id
+    run.edit_lock_expires_at = now + timedelta(seconds=EDIT_LOCK_TIMEOUT_SECONDS)
+    await db.commit()
+
+    logger.info(
+        f"[编辑锁] run_id={run_id} user_id={user_id} 获取锁，"
+        f"过期时间={run.edit_lock_expires_at}"
+    )
+
+    return {
+        "run_id": run_id,
+        "locked_by": user_id,
+        "expires_at": run.edit_lock_expires_at.isoformat(),
+    }
+
+
+async def release_edit_lock(
+    db: AsyncSession,
+    run_id: int,
+    user_id: int,
+) -> Dict[str, Any]:
+    """
+    释放 run 级编辑锁。
+
+    - 仅锁持有者本人或管理员可释放
+    - 锁不存在时返回 404
+    """
+    run = await get_run_by_id(db, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="流水线不存在")
+
+    if run.user_id != user_id:
+        raise HTTPException(status_code=403, detail="无权操作此流水线")
+
+    if not run.edit_lock_user_id:
+        return {
+            "run_id": run_id,
+            "message": "无编辑锁",
+        }
+
+    # 仅持有者本人可释放（管理员通过 user_id 校验已放宽）
+    if run.edit_lock_user_id != user_id:
+        # 检查是否过期（过期后任何人可释放）
+        if run.edit_lock_expires_at and run.edit_lock_expires_at > datetime.utcnow():
+            raise HTTPException(
+                status_code=403,
+                detail=f"无法释放其他用户持有的编辑锁: user={run.edit_lock_user_id}",
+            )
+
+    run.edit_lock_user_id = None
+    run.edit_lock_expires_at = None
+    await db.commit()
+
+    logger.info(f"[编辑锁] run_id={run_id} user_id={user_id} 释放锁")
+
+    return {
+        "run_id": run_id,
+        "released_by": user_id,
+    }
+
+
+# ---------- Task 15: 版本历史 ----------
+
+async def list_step_revisions(
+    db: AsyncSession,
+    run_id: int,
+    step_key: str,
+    user_id: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """查询步骤产物的版本历史。"""
+    run = await get_run_by_id(db, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="流水线不存在")
+
+    if user_id is not None and run.user_id != user_id:
+        raise HTTPException(status_code=403, detail="无权查看此流水线")
+
+    step = await get_step_by_key(db, run_id, step_key)
+    if not step:
+        raise HTTPException(status_code=404, detail="步骤不存在")
+
+    result = await db.execute(
+        select(PipelineStepOutputRevision)
+        .where(
+            PipelineStepOutputRevision.run_id == run_id,
+            PipelineStepOutputRevision.step_key == step_key,
+        )
+        .order_by(PipelineStepOutputRevision.revision.desc())
+    )
+    revisions = result.scalars().all()
+
+    return [
+        {
+            "id": rev.id,
+            "run_id": rev.run_id,
+            "step_key": rev.step_key,
+            "revision": rev.revision,
+            "edited_by": rev.edited_by,
+            "edited_at": rev.edited_at.isoformat() if rev.edited_at else None,
+            "change_summary": rev.change_summary,
+            "output_data_size": len(json.dumps(rev.output_data or {})) if rev.output_data else 0,
+        }
+        for rev in revisions
+    ]
+
+
+async def rollback_step_revision(
+    db: AsyncSession,
+    run_id: int,
+    step_key: str,
+    revision: int,
+    user_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    回滚步骤产物到指定版本。
+
+    - 用指定版本覆盖当前 output_data
+    - 标记下游 stale
+    - 保存回滚前版本（便于反向回滚）
+    """
+    run = await get_run_by_id(db, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="流水线不存在")
+
+    if user_id is not None and run.user_id != user_id:
+        raise HTTPException(status_code=403, detail="无权操作此流水线")
+
+    if run.status == "running":
+        raise HTTPException(
+            status_code=409,
+            detail="流水线正在运行中，不可回滚",
+        )
+
+    step = await get_step_by_key(db, run_id, step_key)
+    if not step:
+        raise HTTPException(status_code=404, detail="步骤不存在")
+
+    # 查询目标版本
+    result = await db.execute(
+        select(PipelineStepOutputRevision).where(
+            PipelineStepOutputRevision.run_id == run_id,
+            PipelineStepOutputRevision.step_key == step_key,
+            PipelineStepOutputRevision.revision == revision,
+        )
+    )
+    target_rev = result.scalar_one_or_none()
+    if not target_rev:
+        raise HTTPException(
+            status_code=404,
+            detail=f"未找到 revision={revision} 的版本",
+        )
+
+    # 保存回滚前版本
+    await _save_step_output_revision(
+        db=db,
+        run_id=run_id,
+        step_key=step_key,
+        output_data=step.output_data or {},
+        edited_by=user_id,
+        change_summary=f"回滚到 revision={revision} 前快照",
+    )
+
+    # 覆盖当前 output_data
+    step.output_data = target_rev.output_data
+    await db.commit()
+
+    # 标记下游 stale
+    downstream_marked = await mark_downstream_stale(
+        db=db,
+        run_id=run_id,
+        edited_step_key=step_key,
+        reason=f"步骤 {step_key} 回滚到 revision={revision}",
+    )
+
+    logger.info(
+        f"[回滚] run_id={run_id} step={step_key} revision={revision} "
+        f"downstream_stale={downstream_marked}"
+    )
+
+    return {
+        "run_id": run_id,
+        "step_key": step_key,
+        "rolled_back_to": revision,
+        "downstream_marked_stale": downstream_marked,
+    }
+
+
+# ---------- Task 16: 自动确认切换 ----------
+
+async def set_auto_confirm(
+    db: AsyncSession,
+    run_id: int,
+    enabled: bool,
+    user_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    切换 run.auto_confirm 标志。
+
+    开启后，后续需要确认的步骤会自动置 confirmed 跳过暂停。
+    """
+    run = await get_run_by_id(db, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="流水线不存在")
+
+    if user_id is not None and run.user_id != user_id:
+        raise HTTPException(status_code=403, detail="无权操作此流水线")
+
+    run.auto_confirm = bool(enabled)
+    await db.commit()
+
+    logger.info(
+        f"[自动确认] run_id={run_id} user_id={user_id} auto_confirm={enabled}"
+    )
+
+    return {
+        "run_id": run_id,
+        "auto_confirm": run.auto_confirm,
+    }
+
+
+# ---------- Task 17: 步骤级重试保留已成功元素 ----------
+
+async def retry_step_preserve_success(
+    db: AsyncSession,
+    run_id: int,
+    step_key: str,
+    user_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    步骤级重试，保留 output_data.items 中 status=success 的元素。
+
+    - 把 success 元素写入 output_data.preserved_items（执行器执行时跳过对应 item_id）
+    - 重置步骤状态为 pending，触发 engine.resume()
+    - 只对重跑的失败元素计费
+
+    Returns:
+        包含 preserved_count 的字典
+    """
+    run = await get_run_by_id(db, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="流水线不存在")
+
+    if user_id is not None and run.user_id != user_id:
+        raise HTTPException(status_code=403, detail="无权操作此流水线")
+
+    if run.status == "running":
+        raise HTTPException(
+            status_code=400,
+            detail="流水线正在运行中，请等待完成后再重试",
+        )
+
+    step = await get_step_by_key(db, run_id, step_key)
+    if not step:
+        raise HTTPException(status_code=404, detail="步骤不存在")
+
+    if step.status not in ("failed", "skipped", "success"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"只能重试失败/被跳过/已完成的步骤，当前状态: {step.status}",
+        )
+
+    # 收集需要保留的 success 元素
+    output_data = step.output_data or {}
+    items: List[Dict[str, Any]] = output_data.get("items", []) or []
+    preserved_items = [
+        it for it in items
+        if isinstance(it, dict) and it.get("status") == "success"
+    ]
+
+    # 写入 preserved_items 字段，执行器执行时检查并跳过
+    if preserved_items:
+        output_data["preserved_items"] = preserved_items
+        # 从 items 中移除已保留的 success 元素，只保留待重跑的失败元素
+        output_data["items"] = [
+            it for it in items
+            if not (isinstance(it, dict) and it.get("status") == "success")
+        ]
+    else:
+        output_data["preserved_items"] = []
+    # JSON 字段原地修改不会被 SQLAlchemy 自动检测，需用 flag_modified 标记
+    from sqlalchemy.orm.attributes import flag_modified
+    step.output_data = output_data
+    flag_modified(step, "output_data")
+
+    # 重置步骤状态
+    step.status = "pending"
+    step.error_message = None
+    step.retry_count = 0
+    step.started_at = None
+    step.finished_at = None
+
+    # 重置 run 状态
+    run.status = "pending"
+    run.error_message = None
+    run.finished_at = None
+    await db.commit()
+
+    # 后台恢复执行
+    sse_callback = pipeline_sse_manager.make_progress_callback(run.id)
+    await resume_pipeline(run.id, progress_callback=sse_callback)
+
+    logger.info(
+        f"[步骤级重试-保留成功] run_id={run_id} step={step_key} "
+        f"preserved_count={len(preserved_items)}"
+    )
+
+    return {
+        "run_id": run_id,
+        "step_key": step_key,
+        "preserved_count": len(preserved_items),
+    }

@@ -15,7 +15,11 @@ except ImportError:
     _HAS_JSON_REPAIR = False
 
 from app.services.pipeline.steps import register_step_executor
-from app.services.pipeline.steps.base import BaseStepExecutor
+from app.services.pipeline.steps.base import (
+    BaseStepExecutor,
+    SingleItemContext,
+    ItemResult,
+)
 from app.services.agnes_client import agnes_client
 from app.services import script_template_service
 
@@ -82,8 +86,106 @@ class LlmGenerateExecutor(BaseStepExecutor):
             "model": config.get("model", "agnes-2.0-flash"),
         }
 
+        # 把 parsed_result 中的字段提升到 output_data 顶层，方便下游步骤通过 source_path 直接读取
+        # 例如 step_storyboard 的 parsed_result.characters 提升后变成 step_storyboard.characters
+        # 下游 character_gen 配置 "character_source": "step_storyboard.characters" 即可命中
+        # 注意：仅提升 dict 类型；保留 raw_response/parsed_result/model 三个元字段不被覆盖
+        if isinstance(parsed_result, dict):
+            for k, v in parsed_result.items():
+                if k not in result:
+                    result[k] = v
+
         logger.info(f"[LLM步骤] 完成: step_key={self.step_key}, parsed={parsed_result is not None}")
         return result
+
+    async def execute_single(self, ctx: SingleItemContext) -> ItemResult:
+        """
+        单元素重生成（重跑整个 LLM 生成）
+
+        llm_generate 的输出是单个文本块（含 raw_response/parsed_result/model），
+        非 {items: [...]} 形式，因此 execute_single 的语义是"重跑整个 LLM 生成"：
+        - ctx.item 可能为 None 或包含上一版本的输出
+        - 若提供 ctx.prompt_override，则跳过 prompt_template 渲染，直接用作最终 prompt
+        - 否则用 ctx.inputs / ctx.steps_output 重新渲染 prompt_template
+        - 调用与 execute() 相同的 LLM API 逻辑（_call_llm）
+
+        Args:
+            ctx: 单元素执行上下文
+
+        Returns:
+            ItemResult: 含新输出文本的执行结果
+        """
+        item = ctx.item or {}
+        # ctx.config 可能是完整 step_config（含 type/key/config）或直接是内层 config
+        raw_config = ctx.config or {}
+        config = (
+            raw_config.get("config")
+            if isinstance(raw_config, dict) and "config" in raw_config
+            else raw_config
+        )
+
+        logger.info(
+            f"[LLM步骤-单元素] 重生: step_key={self.step_key}, item_id={item.get('id', '')}"
+        )
+
+        # 构建系统提示词
+        system_prompt = config.get(
+            "system_prompt",
+            "你是一位专业的创意内容创作者，擅长创作高质量的剧本、文案和故事。",
+        )
+
+        # 构建用户提示词：prompt_override 优先，否则走 prompt_template 渲染
+        if ctx.prompt_override:
+            user_prompt = ctx.prompt_override
+        else:
+            user_prompt = self._build_user_prompt_for_single(ctx, config)
+
+        # 调用 LLM（复用 execute() 中的 _call_llm 逻辑）
+        try:
+            response_text = await self._call_llm(system_prompt, user_prompt)
+        except Exception as e:
+            logger.error(f"[LLM步骤-单元素] 调用失败: {e}", exc_info=True)
+            return ItemResult(
+                status="failed",
+                item={
+                    **item,
+                    "raw_response": "",
+                    "parsed_result": None,
+                    "error": f"LLM 调用失败: {e}",
+                },
+                error=f"LLM 调用失败: {e}",
+            )
+
+        # 解析 JSON（如果配置了 json_output）
+        parsed_result = None
+        if config.get("json_output", True):
+            try:
+                parsed_result = self._parse_json_output(response_text)
+            except Exception as e:
+                logger.warning(f"[LLM步骤-单元素] JSON 解析失败，将保存原始文本: {e}")
+
+        logger.info(
+            f"[LLM步骤-单元素] 完成: step_key={self.step_key}, parsed={parsed_result is not None}"
+        )
+
+        # 返回更新后的 item（合并原 item 与新输出）
+        # 同步把 parsed_result 中的字段提升到 item 顶层，保持与 execute() 输出结构一致
+        new_item = {
+            **item,
+            "raw_response": response_text,
+            "parsed_result": parsed_result,
+            "model": config.get("model", "agnes-2.0-flash"),
+            "error": None,
+        }
+        if isinstance(parsed_result, dict):
+            for k, v in parsed_result.items():
+                if k not in new_item:
+                    new_item[k] = v
+
+        return ItemResult(
+            status="success",
+            item=new_item,
+        )
 
     async def estimate_credits(self) -> int:
         """预估积分消耗（LLM 消耗较少）"""
@@ -246,3 +348,67 @@ class LlmGenerateExecutor(BaseStepExecutor):
                 logger.debug(f"[LLM步骤] json_repair 也无法修复: {e}")
 
         raise ValueError("无法从 LLM 输出中解析 JSON")
+
+    # ---------- 单元素重生成辅助方法 ----------
+
+    def _build_user_prompt_for_single(
+        self, ctx: SingleItemContext, config: Dict[str, Any]
+    ) -> str:
+        """
+        为单元素重生成构建用户提示词
+
+        与 _build_prompts 中用户提示词构建逻辑一致，但使用 ctx 的 inputs/steps_output
+        替代 self.context 中对应字段，并额外注入 item 变量供模板引用。
+
+        Args:
+            ctx: 单元素执行上下文
+            config: 步骤内层配置
+
+        Returns:
+            渲染后的用户提示词
+        """
+        variables = self._get_template_variables_for_single(ctx)
+
+        # 使用剧本模板（若配置且可用），否则直接用配置中的 prompt_template
+        if config.get("use_script_template", False) and self.context.script_template:
+            template_text = self.context.script_template.prompt_template
+        else:
+            # 兼容旧字段名 prompt
+            template_text = config.get("prompt_template") or config.get("prompt") or ""
+
+        return script_template_service.render_prompt_template(template_text, variables)
+
+    def _get_template_variables_for_single(self, ctx: SingleItemContext) -> Dict[str, Any]:
+        """
+        为单元素重生成获取模板变量
+
+        与 _get_template_variables 逻辑一致，但使用 ctx 的 inputs/steps_output
+        替代 self.context 中对应字段，并额外注入 item 变量供模板引用。
+
+        Args:
+            ctx: 单元素执行上下文
+
+        Returns:
+            模板变量字典
+        """
+        variables = {
+            "inputs": ctx.inputs,
+            "theme": ctx.inputs.get("theme", ""),
+            "scenes_count": ctx.inputs.get("scenes_count", 8),
+            "style_name": "",
+            "style_category": "",
+        }
+
+        # 风格信息（SingleItemContext 不单独传递，沿用 self.context.style）
+        if self.context.style:
+            variables["style_name"] = self.context.style.name or ""
+            variables["style_category"] = self.context.style.category or ""
+            variables["style_description"] = self.context.style.description or ""
+
+        # 上游步骤输出
+        variables["steps"] = ctx.steps_output
+
+        # 当前元素数据（供模板引用，如单条分镜的 prompt 变量）
+        variables["item"] = ctx.item or {}
+
+        return variables

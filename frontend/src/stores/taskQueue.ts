@@ -57,6 +57,94 @@ const HISTORY_KEEP_MS = 20 * 60 * 1000  // 已完成任务保留时长（20 分�
 const MAX_CONCURRENT = 5              // 每种类型最大并发数
 const PROGRESS_DURATION_ESTIMATE = 60000  // 预估进度填充基准（毫秒）
 
+// ---------- 自动重试常量 ----------
+const RETRY_BASE_INTERVAL = 3000   // 重试基础间隔（3 秒）
+const RETRY_MAX_ATTEMPTS = 3       // 最大重试次数（image/video 启用，其他类型为 0）
+
+/**
+ * 判断错误是否可自动重试
+ * - 可重试：网络错误、超时、5xx 服务端错误、429 限流
+ * - 不可重试：内容审核拒绝、400 参数错误、401/403 鉴权失败、其他 4xx
+ *
+ * @param error   错误对象（Error / AxiosError / { message, code, response }）
+ * @param _taskType 任务类型（保留参数，便于未来按类型差异化策略）
+ */
+function isRetryableError(error: unknown, _taskType: TaskType): boolean {
+  if (!error) return false
+
+  // 兼容字符串错误（无 status / code，保守不重试）
+  if (typeof error === 'string') {
+    // 字符串中若含审核拒绝关键词，明确不可重试
+    const lower = error.toLowerCase()
+    if (MODERATION_KEYWORDS.some((kw) => lower.includes(kw.toLowerCase()))) return false
+    return false
+  }
+
+  const err = error as {
+    code?: string
+    message?: string
+    response?: { status?: number; data?: { detail?: string; message?: string } }
+  }
+
+  const code = err.code || ''
+  const message = err.message || ''
+  const status = err.response?.status
+  const detail = err.response?.data?.detail || err.response?.data?.message || ''
+
+  // 1. 内容审核拒绝：明确不可重试（message / detail 含审核关键词）
+  const combinedMsg = `${message} ${detail}`.toLowerCase()
+  if (MODERATION_KEYWORDS.some((kw) => combinedMsg.includes(kw.toLowerCase()))) {
+    return false
+  }
+
+  // 2. 网络错误 / 超时 / 连接重置：可重试
+  if (RETRYABLE_NETWORK_CODES.includes(code)) {
+    return true
+  }
+
+  // 3. 5xx 服务端错误：可重试
+  if (status && status >= 500 && status < 600) {
+    return true
+  }
+
+  // 4. 429 限流：可重试
+  if (status === 429) {
+    return true
+  }
+
+  // 5. 400 / 401 / 403 / 其他 4xx：不可重试
+  if (status && status >= 400 && status < 500) {
+    return false
+  }
+
+  // 6. 未知错误（无 status、无 code）：保守不重试，避免无限循环
+  return false
+}
+
+/** 可重试的网络错误码（axios / node http） */
+const RETRYABLE_NETWORK_CODES = [
+  'ERR_NETWORK',      // axios: 网络错误
+  'ETIMEDOUT',        // 连接超时
+  'ECONNABORTED',     // 请求被中断（含超时）
+  'ECONNRESET',       // 连接被对端重置
+  'ECONNREFUSED',     // 连接被拒绝
+  'ENETUNREACH',      // 网络不可达
+  'EHOSTUNREACH',     // 主机不可达
+]
+
+/** 内容审核拒绝关键词（小写匹配） */
+const MODERATION_KEYWORDS = [
+  'moderation',
+  '审核',
+  '违禁',
+  '违规',
+  'rejected',
+  'inappropriate',
+  '敏感词',
+  'content policy',
+  'safety',
+]
+
 // ---------- State 接口 ----------
 interface TaskQueueState {
   // 所有任务（按 taskId 索引）
@@ -220,6 +308,10 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         pollIntervalMs: IMAGE_POLL_INTERVAL,
         rawResponse: null,
         backendTaskId: null,
+        // 自动重试：image 类型启用，最多 3 次
+        retryCount: 0,
+        maxRetries: RETRY_MAX_ATTEMPTS,
+        retryScheduledAt: null,
       }
       this.tasks[taskId] = task
       // 自动选中为活跃任务（便于立即在预览区展示）
@@ -250,6 +342,17 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         } catch (_) { /* 忽略 */ }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : 'Failed to create task'
+        // 【自动重试】检查是否可重试（autoRetry 开关 + 可重试错误 + 未达上限）
+        if (this._scheduleRetry(taskId, err)) {
+          // 已调度重试：保留错误信息供 UI 展示，status 暂保持为 'failed'，
+          // TaskCard 通过 retryScheduledAt 字段判断显示"重试中 (n/3)"
+          task.status = 'failed'
+          task.errorMessage = message
+          task.updatedAt = Date.now()
+          this._notifyTaskUpdate(taskId)
+          this._saveToStorage()
+          return
+        }
         task.status = 'failed'
         task.errorMessage = message
         task.updatedAt = Date.now()
@@ -281,6 +384,10 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         pollIntervalMs: VIDEO_POLL_INTERVAL,
         rawResponse: null,
         backendTaskId: null,
+        // 自动重试：video 类型启用，最多 3 次
+        retryCount: 0,
+        maxRetries: RETRY_MAX_ATTEMPTS,
+        retryScheduledAt: null,
       }
       this.tasks[taskId] = task
       // 自动选中为活跃任务（便于立即在预览区展示）
@@ -310,6 +417,15 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         } catch (_) { /* 忽略 */ }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : 'Failed to create task'
+        // 【自动重试】检查是否可重试（autoRetry 开关 + 可重试错误 + 未达上限）
+        if (this._scheduleRetry(taskId, err)) {
+          task.status = 'failed'
+          task.errorMessage = message
+          task.updatedAt = Date.now()
+          this._notifyTaskUpdate(taskId)
+          this._saveToStorage()
+          return
+        }
         task.status = 'failed'
         task.errorMessage = message
         task.updatedAt = Date.now()
@@ -415,9 +531,20 @@ export const useTaskQueueStore = defineStore('taskQueue', {
           this._stopPolling(taskId)
           this._saveToStorage()
         } else if (isFailed) {
-          task.status = 'failed'
-          task.errorMessage = (data as any).message as string || (data as any).error as string || 'Generation failed'
+          // 后端返回失败状态，提取错误信息
+          const failMsg = (data as any).message as string || (data as any).error as string || 'Generation failed'
           this._stopPolling(taskId)
+          // 【自动重试】后端失败也尝试重试（如 5xx / 网络抖动导致后端任务失败）
+          if (this._scheduleRetry(taskId, { message: failMsg })) {
+            task.status = 'failed'
+            task.errorMessage = failMsg
+            task.updatedAt = Date.now()
+            this._notifyTaskUpdate(taskId)
+            this._saveToStorage()
+            return
+          }
+          task.status = 'failed'
+          task.errorMessage = failMsg
           this._saveToStorage()
         } else {
           task.status = 'processing'
@@ -711,6 +838,108 @@ export const useTaskQueueStore = defineStore('taskQueue', {
       this._saveToStorage()
     },
 
+    // =====================================================
+    // 【自动重试调度】—— 指数退避 3s → 9s → 27s，最多 3 次
+    // =====================================================
+
+    /**
+     * 调度自动重试
+     * 检查条件：autoRetry 开关 + 可重试错误 + retryCount < maxRetries
+     * 满足则用 setTimeout 调度，并设置 retryScheduledAt 供 UI 展示与刷新恢复
+     *
+     * @returns true 表示已调度重试；false 表示不可重试，调用方应按最终失败处理
+     */
+    _scheduleRetry(taskId: string, error: unknown): boolean {
+      const task = this.tasks[taskId]
+      if (!task) return false
+
+      // 1. 检查 autoRetry 开关（前端本地偏好）
+      try {
+        const prefsStore = usePreferencesStore()
+        if (!prefsStore.autoRetry) return false
+      } catch (_) {
+        // preferences store 未初始化时保守不重试
+        return false
+      }
+
+      // 2. 计算并缓存 maxRetries（image/video=3，其他类型=0）
+      const maxRetries = task.maxRetries ??
+        ((task.type === 'image' || task.type === 'video') ? RETRY_MAX_ATTEMPTS : 0)
+      task.maxRetries = maxRetries
+      if (maxRetries <= 0) return false
+
+      // 3. 检查重试次数是否已达上限
+      const currentRetry = task.retryCount ?? 0
+      if (currentRetry >= maxRetries) return false
+
+      // 4. 检查错误是否可重试
+      if (!isRetryableError(error, task.type)) return false
+
+      // 5. 计算指数退避间隔：3 * 3^currentRetry → 3s / 9s / 27s
+      const delayMs = RETRY_BASE_INTERVAL * Math.pow(3, currentRetry)
+      task.retryScheduledAt = Date.now() + delayMs
+      task.updatedAt = Date.now()
+
+      // 6. 调度重试执行
+      setTimeout(() => {
+        this._executeRetry(taskId)
+      }, delayMs)
+
+      return true
+    },
+
+    /**
+     * 执行自动重试
+     * - 递增 retryCount
+     * - 清除 retryScheduledAt
+     * - 重置任务状态为 queued，重新提交后端任务
+     * - 重置 createdAt 避免 POLL_TIMEOUT 误杀重试任务
+     */
+    _executeRetry(taskId: string): void {
+      const task = this.tasks[taskId]
+      if (!task) return
+
+      // 递增重试计数
+      task.retryCount = (task.retryCount ?? 0) + 1
+      task.retryScheduledAt = null
+
+      // 重置任务状态，准备重新提交
+      task.status = 'queued'
+      task.errorMessage = ''
+      task.progress = 0
+      task.resultUrl = null
+      task.posterUrl = null
+      task.backendTaskId = null
+      task.rawResponse = null
+      // 重置 createdAt，避免轮询超时保护（POLL_TIMEOUT）误杀重试任务
+      task.createdAt = Date.now()
+      task.updatedAt = Date.now()
+
+      this._notifyTaskUpdate(taskId)
+      this._saveToStorage()
+
+      // 根据任务类型重新提交后端任务
+      if (task.type === 'video') {
+        this._createVideoTaskInBackground(taskId, task.params)
+      } else {
+        this._createImageTaskInBackground(taskId, task.params)
+      }
+    },
+
+    /**
+     * 重置所有任务的 retryCount 与重试调度状态
+     * - 由 preferences.setAutoRetry(false) 调用
+     * - 清除所有任务的 retryCount / maxRetries / retryScheduledAt
+     * - 已调度但未执行的 setTimeout 回调会被忽略（_executeRetry 内部检查 task.status）
+     */
+    resetAllRetryCounts(): void {
+      for (const task of Object.values(this.tasks)) {
+        task.retryCount = 0
+        task.retryScheduledAt = null
+      }
+      this._saveToStorage()
+    },
+
     _notifyTaskUpdate(_taskId: string): void {
       this._saveToStorage()
     },
@@ -778,6 +1007,10 @@ export const useTaskQueueStore = defineStore('taskQueue', {
           backendTaskId: t.backendTaskId,
           source: t.source || null,
           panelId: t.panelId || null,
+          // 自动重试相关字段（持久化以支持刷新页面后恢复重试状态）
+          retryCount: t.retryCount ?? 0,
+          maxRetries: t.maxRetries ?? 0,
+          retryScheduledAt: t.retryScheduledAt ?? null,
         }))
         const data = {
           tasks: tasksToSave,
@@ -807,6 +1040,18 @@ export const useTaskQueueStore = defineStore('taskQueue', {
             t.status = 'processing'
           }
           this.tasks[t.taskId] = t
+
+          // 【自动重试恢复】若任务处于失败且已调度重试，重新计算剩余等待时间并重新调度
+          if (t.status === 'failed' && t.retryScheduledAt && (t.retryCount ?? 0) < (t.maxRetries ?? 0)) {
+            const remainingMs = (t.retryScheduledAt as number) - now
+            if (remainingMs > 0) {
+              // 仍在等待重试窗口，重新设置 setTimeout
+              setTimeout(() => this._executeRetry(t.taskId), remainingMs)
+            } else {
+              // 等待时间已过（刷新期间错过了重试时机），立即执行重试
+              setTimeout(() => this._executeRetry(t.taskId), 0)
+            }
+          }
         }
         // 恢复 activeTaskId（如果该任务仍然存在）
         if (data.activeTaskId && this.tasks[data.activeTaskId]) {

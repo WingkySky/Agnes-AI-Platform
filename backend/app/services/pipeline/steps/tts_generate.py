@@ -28,13 +28,23 @@
 #         "voice": "zh-CN-XiaoxiaoNeural",
 #         "duration_seconds": 3.5,
 #         "success": true,
-#         "provider": "agn-sdk"
+#         "provider": "agn-sdk",
+#         "words": [{"word": "对白", "start": 0.0, "end": 0.5}, ...]
 #       }
 #     ],
 #     "total": 8,
 #     "success_count": 8,
-#     "failed_count": 0
+#     "failed_count": 0,
+#     "subtitle_srt": "1\n00:00:00,000 --> 00:00:01,500\n对白内容\n...",
+#     "subtitle_words": [{"word": "对白", "start": 0.0, "end": 0.5}, ...]
 #   }
+#
+# 词级字幕（P0 视频后期处理增强）：
+#   - edge-tts provider 调用时收集 WordBoundary 事件（offset/duration 单位 100ns，转秒）
+#   - 按句末标点（。！？.!?）切分，单段超 7 词时按二分切分（保证不超过 7 词）
+#   - subtitle_words: 全局时间轴的词级时间戳（按音频时长累计偏移）
+#   - subtitle_srt: 按分组规则生成的细粒度 SRT 字符串
+#   - 非 edge-tts provider（如 pyttsx3 离线兜底）跳过词级收集，沿用 duration_seconds 生成兜底字幕
 # =====================================================
 
 import asyncio
@@ -45,7 +55,11 @@ import sys
 from typing import Dict, Any, List, Optional
 
 from app.services.pipeline.steps import register_step_executor
-from app.services.pipeline.steps.base import BaseStepExecutor
+from app.services.pipeline.steps.base import (
+    BaseStepExecutor,
+    SingleItemContext,
+    ItemResult,
+)
 
 logger = logging.getLogger("agnes_platform.pipeline")
 
@@ -167,6 +181,174 @@ async def _ensure_pyttsx3() -> bool:
 
 
 # =====================================================
+# 词级字幕生成工具
+# 用于将 edge-tts WordBoundary 事件转为 SRT 字幕段落
+# =====================================================
+
+# 句末标点（中英文）：用于将词列表切分为字幕段落
+_SENTENCE_END_PUNCT = "。！？.!?"
+
+
+def _split_long_segment(
+    words: List[Dict[str, Any]],
+    max_words: int = 7,
+) -> List[List[Dict[str, Any]]]:
+    """将超长词列表二分切分，保证每段不超过 max_words
+
+    递归二分：每次从中点切分，直到每段长度 <= max_words。
+    用于在按标点切分后仍有段落超过 7 词时进行二次切分。
+    """
+    if len(words) <= max_words:
+        return [words]
+    mid = len(words) // 2
+    left = words[:mid]
+    right = words[mid:]
+    return _split_long_segment(left, max_words) + _split_long_segment(right, max_words)
+
+
+def _group_words_to_subtitles(
+    words: List[Dict[str, Any]],
+    max_words: int = 7,
+) -> List[Dict[str, Any]]:
+    """将词级时间戳分组为字幕段落
+
+    分组规则：
+    1. 按句末标点（。！？.!?）切分为初段
+    2. 单段超过 max_words 时按二分切分，保证每段不超过 max_words
+
+    每段字幕：
+    - start = 第一个词的 start
+    - end = 最后一个词的 end
+    - text = 拼接所有词
+    """
+    if not words:
+        return []
+
+    # 步骤1：按句末标点切分
+    segments: List[List[Dict[str, Any]]] = []
+    current: List[Dict[str, Any]] = []
+    for w in words:
+        current.append(w)
+        word_text = w.get("word", "")
+        # 词尾含句末标点时切分
+        if word_text and word_text[-1] in _SENTENCE_END_PUNCT:
+            segments.append(current)
+            current = []
+    if current:
+        segments.append(current)
+
+    # 步骤2：超长段落二分切分
+    final_segments: List[List[Dict[str, Any]]] = []
+    for seg in segments:
+        final_segments.extend(_split_long_segment(seg, max_words))
+
+    # 步骤3：生成字幕段落（start/end 来自词级时间戳）
+    subtitles: List[Dict[str, Any]] = []
+    for seg in final_segments:
+        if not seg:
+            continue
+        text = "".join(w.get("word", "") for w in seg)
+        start = float(seg[0].get("start", 0.0))
+        end = float(seg[-1].get("end", start))
+        subtitles.append({
+            "start": start,
+            "end": end,
+            "text": text,
+        })
+    return subtitles
+
+
+def _format_srt_time(seconds: float) -> str:
+    """格式化秒数为 SRT 时间格式 HH:MM:SS,mmm"""
+    if seconds < 0:
+        seconds = 0.0
+    total_ms = int(round(seconds * 1000))
+    hours = total_ms // 3_600_000
+    minutes = (total_ms % 3_600_000) // 60_000
+    secs = (total_ms % 60_000) // 1000
+    millis = total_ms % 1000
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+
+def _build_srt(subtitles: List[Dict[str, Any]]) -> str:
+    """从字幕段落生成 SRT 格式字符串
+
+    SRT 格式：
+        1
+        HH:MM:SS,mmm --> HH:MM:SS,mmm
+        字幕文本
+
+        2
+        ...
+    """
+    if not subtitles:
+        return ""
+    lines: List[str] = []
+    for i, sub in enumerate(subtitles, 1):
+        lines.append(str(i))
+        start_str = _format_srt_time(float(sub.get("start", 0.0)))
+        end_str = _format_srt_time(float(sub.get("end", 0.0)))
+        lines.append(f"{start_str} --> {end_str}")
+        lines.append(str(sub.get("text", "")))
+        lines.append("")  # 空行分隔
+    return "\n".join(lines).strip()
+
+
+async def _collect_edge_tts_audio_and_words(
+    text: str,
+    voice: str,
+    rate: str,
+    output_path: str,
+) -> tuple:
+    """通过 edge-tts.stream() 同时收集音频和 WordBoundary 词级时间戳
+
+    edge-tts 的 WordBoundary 事件携带 offset + duration（单位 100ns），
+    转为秒后返回。当 edge-tts 服务未返回 WordBoundary 事件时，
+    返回空列表（不报错，沿用现有时间字段生成字幕）。
+
+    Returns:
+        (success, word_boundaries)
+        word_boundaries: [{"word": str, "start": float, "end": float}, ...]
+        start/end 单位为秒，相对本段 TTS 起始
+    """
+    communicate = edge_tts.Communicate(text, voice, rate=rate)
+    word_boundaries: List[Dict[str, Any]] = []
+    audio_chunks: List[bytes] = []
+    try:
+        async for event in communicate.stream():
+            ev_type = event.get("type")
+            if ev_type == "audio":
+                audio_chunks.append(event.get("data", b""))
+            elif ev_type == "WordBoundary":
+                # edge-tts offset/duration 单位为 100ns，需转为秒
+                offset_ns = int(event.get("offset", 0))
+                duration_ns = int(event.get("duration", 0))
+                offset_sec = offset_ns / 10_000_000
+                duration_sec = duration_ns / 10_000_000
+                word_boundaries.append({
+                    "word": event.get("text", ""),
+                    "start": offset_sec,
+                    "end": offset_sec + duration_sec,
+                })
+    except Exception as e:
+        # stream 异常时已收集的部分仍可使用，但需标记失败
+        logger.warning(f"[TTS] edge-tts stream 异常: {e}")
+        return False, word_boundaries
+
+    # 写入音频文件
+    try:
+        with open(output_path, "wb") as f:
+            for chunk in audio_chunks:
+                f.write(chunk)
+    except Exception as e:
+        logger.warning(f"[TTS] 写入音频文件失败: {e}")
+        return False, word_boundaries
+
+    success = os.path.exists(output_path) and os.path.getsize(output_path) > 0
+    return success, word_boundaries
+
+
+# =====================================================
 # TTS 提供方抽象（适配层）
 # 统一接口：synthesize(text, voice, rate, output_path)
 # 子类：_AgnSdkTTSProvider / _EdgeTTSProvider
@@ -198,6 +380,27 @@ class _TTSProvider:
             是否合成成功
         """
         raise NotImplementedError
+
+    async def synthesize_with_subtitles(
+        self,
+        text: str,
+        voice: str,
+        rate: str,
+        output_path: str,
+    ) -> tuple:
+        """
+        合成语音并同时收集词级时间戳（用于生成 SRT 字幕）
+
+        默认实现：调用 synthesize 并返回空词列表。
+        支持 WordBoundary 事件的 provider（如 edge-tts）重写此方法。
+
+        Returns:
+            (success, word_boundaries)
+            word_boundaries: [{"word": str, "start": float, "end": float}, ...]
+            start/end 单位为秒，相对本段 TTS 起始
+        """
+        success = await self.synthesize(text, voice, rate, output_path)
+        return success, []
 
 
 class _AgnSdkTTSProvider(_TTSProvider):
@@ -257,6 +460,28 @@ class _AgnSdkTTSProvider(_TTSProvider):
         result.save_to_file(output_path)
         return os.path.exists(output_path) and os.path.getsize(output_path) > 0
 
+    async def synthesize_with_subtitles(
+        self,
+        text: str,
+        voice: str,
+        rate: str,
+        output_path: str,
+    ) -> tuple:
+        """
+        合成语音并收集词级时间戳
+
+        AGN-SDK 的 SpeechResult 未直接暴露 WordBoundary 事件，
+        因此在需要词级字幕时直接走 edge-tts 路径收集
+        （底层与 AGN-SDK 等价，仅音频来源切换为直连 edge-tts）。
+        edge-tts 不可用时回退到默认实现（无词级时间戳）。
+        """
+        if _HAS_EDGE_TTS:
+            return await _collect_edge_tts_audio_and_words(
+                text, voice, rate, output_path
+            )
+        # edge-tts 不可用时，回退到默认实现（无词级时间戳）
+        return await super().synthesize_with_subtitles(text, voice, rate, output_path)
+
     async def close(self) -> None:
         """关闭 client 释放资源（应用退出时调用）"""
         if self._client is not None and self._started:
@@ -283,6 +508,23 @@ class _EdgeTTSProvider(_TTSProvider):
         communicate = edge_tts.Communicate(text, voice, rate=rate)
         await communicate.save(output_path)
         return os.path.exists(output_path) and os.path.getsize(output_path) > 0
+
+    async def synthesize_with_subtitles(
+        self,
+        text: str,
+        voice: str,
+        rate: str,
+        output_path: str,
+    ) -> tuple:
+        """通过 edge-tts.stream() 同时收集音频和 WordBoundary 词级时间戳
+
+        edge-tts 的 WordBoundary 事件携带 offset + duration（单位 100ns），
+        转为秒后返回。当 edge-tts 服务未返回 WordBoundary 事件时，
+        返回空列表（不报错）。
+        """
+        return await _collect_edge_tts_audio_and_words(
+            text, voice, rate, output_path
+        )
 
 
 # TTS 提供方单例（避免每次合成都新建 client，未来 AGN-SDK client 可复用连接）
@@ -369,7 +611,14 @@ class TTSGenerateExecutor(BaseStepExecutor):
         scenes = parsed_result.get("scenes", []) or []
         if not scenes:
             logger.warning(f"[TTS] 上游步骤没有 scenes，跳过: step_key={self.step_key}")
-            return {"audios": [], "total": 0, "success_count": 0, "failed_count": 0}
+            return {
+                "audios": [],
+                "total": 0,
+                "success_count": 0,
+                "failed_count": 0,
+                "subtitle_srt": "",
+                "subtitle_words": [],
+            }
 
         # 3. 提取角色列表（用于声音分配）
         characters = parsed_result.get("characters", []) or []
@@ -400,7 +649,14 @@ class TTSGenerateExecutor(BaseStepExecutor):
 
         if not tts_tasks:
             logger.warning(f"[TTS] 没有可合成的任务: step_key={self.step_key}")
-            return {"audios": [], "total": 0, "success_count": 0, "failed_count": 0}
+            return {
+                "audios": [],
+                "total": 0,
+                "success_count": 0,
+                "failed_count": 0,
+                "subtitle_srt": "",
+                "subtitle_words": [],
+            }
 
         logger.info(f"[TTS] 开始合成 {len(tts_tasks)} 个音频片段")
         self._total = len(tts_tasks)
@@ -420,12 +676,21 @@ class TTSGenerateExecutor(BaseStepExecutor):
         # 6. 按 index 排序
         success_audios.sort(key=lambda x: x.get("index", 0))
 
+        # 7. 生成 word-level 时间戳的细粒度 SRT 字幕
+        # 收集所有成功音频段的词级时间戳，按音频时长累计偏移到全局时间轴
+        subtitle_words, subtitle_srt = self._build_subtitle_from_audios(success_audios)
+
         return {
             "audios": success_audios,
             "total": len(results),
             "success_count": len(success_audios),
             "failed_count": len(failed_audios),
             "failed_audios": failed_audios,
+            # 词级字幕（P0 视频后期处理增强）：
+            # - subtitle_words: 全局时间轴的词级时间戳数组
+            # - subtitle_srt: 按句末标点或 3-7 词分组生成的 SRT 字符串
+            "subtitle_srt": subtitle_srt,
+            "subtitle_words": subtitle_words,
         }
 
     async def estimate_credits(self) -> int:
@@ -445,6 +710,82 @@ class TTSGenerateExecutor(BaseStepExecutor):
             "phase": "synthesizing",
             "phase_text": "语音合成中",
         }
+
+    async def execute_single(self, ctx: SingleItemContext) -> ItemResult:
+        """
+        单条 TTS 重生成
+
+        复用 execute() 中的 _generate_single_audio 逻辑，
+        仅处理 ctx.item 这一条 TTS 元素。
+
+        Args:
+            ctx: 单元素执行上下文，item 含 index/text/speaker/voice/rate 等字段
+
+        Returns:
+            ItemResult: 单元素执行结果，含更新后的 audio_url 和 status
+        """
+        item = ctx.item or {}
+
+        # 构建 TTS 任务（用 prompt_override 替换原 text，若提供）
+        text = ctx.prompt_override if ctx.prompt_override else item.get("text", "")
+        task = {
+            "index": item.get("index", 0),
+            "text": text,
+            "speaker": item.get("speaker"),
+            "voice": item.get("voice", _DEFAULT_NARRATOR_VOICE),
+            "rate": item.get("rate", "+0%"),
+        }
+
+        if not task["text"].strip():
+            error = "TTS 文本为空"
+            logger.warning(f"[TTS-单元素] {error}: index={task['index']}")
+            return ItemResult(
+                status="failed",
+                item={**item, "audio_url": "", "status": "failed", "error": error},
+                error=error,
+            )
+
+        logger.info(
+            f"[TTS-单元素] 重生音频: index={task['index']}, "
+            f"voice={task['voice']}, text={task['text'][:30]}..."
+        )
+
+        # 初始化进度计数器（_generate_single_audio 内部会自增 _completed_count）
+        self._total = 1
+        self._completed_count = 0
+
+        # 调用与 execute() 相同的合成逻辑（含重试 + pyttsx3 离线兜底）
+        result = await self._generate_single_audio(task)
+
+        if result.get("success"):
+            logger.info(f"[TTS-单元素] 合成成功: index={task['index']}")
+            return ItemResult(
+                status="success",
+                item={
+                    **item,
+                    "audio_url": result.get("audio_url", ""),
+                    "audio_path": result.get("audio_path", ""),
+                    "duration_seconds": result.get("duration_seconds", 0),
+                    "provider": result.get("provider", ""),
+                    "voice": task["voice"],
+                    "text": task["text"],
+                    "status": "success",
+                    "error": None,
+                },
+            )
+        else:
+            error = result.get("error", "TTS 合成失败")
+            logger.error(f"[TTS-单元素] 合成失败: index={task['index']}, error={error}")
+            return ItemResult(
+                status="failed",
+                item={
+                    **item,
+                    "audio_url": "",
+                    "status": "failed",
+                    "error": error,
+                },
+                error=error,
+            )
 
     # ---------- 内部方法 ----------
 
@@ -635,7 +976,9 @@ class TTSGenerateExecutor(BaseStepExecutor):
         for attempt in range(max_retries + 1):
             try:
                 provider = _get_tts_provider()
-                success = await provider.synthesize(
+                # 使用 synthesize_with_subtitles 同时收集 edge-tts WordBoundary 词级时间戳
+                # 非 edge-tts provider（如 pyttsx3 兜底）不经过此路径，自然跳过词级收集
+                success, word_boundaries = await provider.synthesize_with_subtitles(
                     text=text,
                     voice=voice,
                     rate=rate,
@@ -651,7 +994,8 @@ class TTSGenerateExecutor(BaseStepExecutor):
 
                 logger.debug(
                     f"[TTS] 合成成功 #{index}: provider={provider.name}, voice={voice}, "
-                    f"duration={duration}s, attempt={attempt+1}, text={text[:30]}..."
+                    f"duration={duration}s, words={len(word_boundaries)}, "
+                    f"attempt={attempt+1}, text={text[:30]}..."
                 )
 
                 self._completed_count += 1
@@ -663,6 +1007,8 @@ class TTSGenerateExecutor(BaseStepExecutor):
                     "audio_url": audio_url,
                     "duration_seconds": duration,
                     "provider": provider.name,
+                    # 词级时间戳（相对本段 TTS 起始；非 edge-tts 路径为空数组）
+                    "words": word_boundaries,
                 }
             except Exception as e:
                 last_error = e
@@ -741,3 +1087,67 @@ class TTSGenerateExecutor(BaseStepExecutor):
             return float(stdout.decode().strip())
         except Exception:
             return 0.0
+
+    def _build_subtitle_from_audios(
+        self,
+        audios: List[Dict[str, Any]],
+    ) -> tuple:
+        """从音频列表构建全局字幕（P0 视频后期处理增强）
+
+        将每段音频的词级时间戳（相对本段起始）按音频时长累计偏移到全局时间轴，
+        然后按句末标点或 3-7 词分组生成 SRT 字幕段落。
+
+        回退策略：
+        - edge-tts 路径：使用 WordBoundary 词级时间戳，按句末标点/3-7 词分组
+        - 非 edge-tts 路径（如 pyttsx3 离线兜底）：无词级时间戳，
+          沿用现有 duration_seconds 字段生成整段兜底字幕
+        - edge-tts 调用未产生 WordBoundary 事件：返回空字段，不报错
+
+        Args:
+            audios: 已按 index 排序的成功音频列表
+
+        Returns:
+            (subtitle_words, subtitle_srt)
+            - subtitle_words: [{"word": str, "start": float, "end": float}, ...]
+              全局时间轴的词级时间戳（仅 edge-tts 路径有数据）
+            - subtitle_srt: SRT 格式字符串（含 edge-tts 词级字幕与 pyttsx3 兜底字幕）
+        """
+        all_words: List[Dict[str, Any]] = []
+        fallback_subtitles: List[Dict[str, Any]] = []
+        cumulative_time = 0.0
+
+        for audio in audios:
+            seg_words = audio.get("words") or []
+            seg_duration = float(audio.get("duration_seconds", 0.0) or 0.0)
+
+            if seg_words:
+                # edge-tts 路径：使用词级时间戳，累计偏移到全局时间轴
+                for w in seg_words:
+                    all_words.append({
+                        "word": w.get("word", ""),
+                        "start": float(w.get("start", 0.0)) + cumulative_time,
+                        "end": float(w.get("end", 0.0)) + cumulative_time,
+                    })
+            else:
+                # 非 edge-tts 路径（如 pyttsx3 兜底）：用整段时长生成兜底字幕
+                text = audio.get("text", "")
+                if text and seg_duration > 0:
+                    fallback_subtitles.append({
+                        "start": cumulative_time,
+                        "end": cumulative_time + seg_duration,
+                        "text": text,
+                    })
+
+            # 累计下一段的起始时间（基于本段音频时长）
+            cumulative_time += seg_duration
+
+        # 主体字幕：词级时间戳按句末标点或 3-7 词分组
+        subtitles = _group_words_to_subtitles(all_words)
+        # 合并兜底字幕（pyttsx3 等无词级时间戳的段落）
+        subtitles.extend(fallback_subtitles)
+        # 按起始时间排序，保证 SRT 时间顺序正确
+        subtitles.sort(key=lambda x: float(x.get("start", 0.0)))
+
+        # 生成 SRT 字符串
+        subtitle_srt = _build_srt(subtitles)
+        return all_words, subtitle_srt

@@ -6,6 +6,8 @@
 #   3. 可选：混入 BGM 背景音乐（amix）
 #   4. 可选：替换原音轨为配音音轨（来自 tts_generate 步骤）
 #   5. 生成独立 SRT 字幕文件（时间戳基于实际片段时长累积）
+#   6. P0 增强：兼容 transition_compose 步骤输出（merged_video_path），跳过自身 concat
+#   7. P0 增强：优先使用 edge-tts 的 subtitle_srt 烧入字幕（subtitles 滤镜，时间戳更精确）
 #
 # 输出：
 #   {
@@ -118,65 +120,119 @@ class FFmpegCompositeExecutor(BaseStepExecutor):
         # 来自 video-use render.py Rule 3
         with_audio_fade = config.get("with_audio_fade", True)
 
-        # 1. 获取上游视频列表（按 index 排序）
-        step_output = self.context.steps_output.get(from_step, {})
-        videos = step_output.get("videos", [])
-        if not videos:
-            raise ValueError(f"上游步骤 '{from_step}' 没有视频产出")
+        # === P0 视频后期处理增强：检测上游 transition_compose 输出 ===
+        # 若存在 transition_compose 步骤的 merged_video_path，使用合并后的视频作为输入，
+        # 跳过自身的 concat demuxer 逻辑（转场已由 transition_compose 处理）
+        transition_merged_path = self._find_transition_compose_output()
 
-        videos = sorted(videos, key=lambda v: v.get("index", 0))
-        self._total = len(videos)
-        logger.info(f"[FFmpeg合成] 开始合成 {len(videos)} 个视频片段")
+        # === P0 视频后期处理增强：检测上游 tts_generate 的 edge-tts SRT 字幕 ===
+        # 若 tts_generate 提供了 subtitle_srt（edge-tts 词级时间戳生成），
+        # 优先使用该 SRT 烧入字幕（时间戳更精确），而非 LLM 时间字段估算的 drawtext
+        edge_srt_content = self._find_edge_subtitle_srt(audio_step)
 
-        # 2. 提取字幕文本（可选）
-        subtitles: List[str] = []
-        if with_subtitle:
-            subtitles = self._extract_subtitles(config)
-
-        # 3. 获取配音音频（可选，来自 tts_generate 步骤）
-        audios: List[Dict[str, Any]] = []
-        if audio_step:
-            audio_output = self.context.steps_output.get(audio_step, {})
-            audios = audio_output.get("audios", [])
-
-        # 4. 下载所有视频片段到临时目录
-        self._progress_phase = "downloading"
-        self._completed_count = 0
-        video_paths = await self._download_all_videos(videos)
-
-        # 5. 对每个视频烧录字幕 + 混入配音（如果有）
-        # 同时获取每个片段的实际时长，用于生成 SRT 时间戳
-        self._progress_phase = "composing"
-        self._completed_count = 0
+        # 公共变量：合成片段列表、字幕文本列表、片段时长列表、配音音频列表
         composed_paths: List[str] = []
+        subtitles: List[str] = []
         segment_durations: List[float] = []  # 每个片段的实际时长（秒）
-        for idx, vpath in enumerate(video_paths):
-            if not vpath:
-                logger.warning(f"[FFmpeg合成] 跳过空视频 #{idx}")
-                continue
-            subtitle_text = subtitles[idx] if idx < len(subtitles) else ""
-            audio_path = audios[idx].get("audio_path") if idx < len(audios) else None
-            composed = await self._compose_single(
-                vpath, idx, subtitle_text, audio_path,
-                grade_preset=grade_preset,
-                with_audio_fade=with_audio_fade,
+        audios: List[Dict[str, Any]] = []
+
+        if transition_merged_path:
+            # ---------- 路径 A：使用 transition_compose 的合并视频（跳过 concat） ----------
+            logger.info(
+                f"[FFmpeg合成] 检测到 transition_compose 输出，使用合并视频: {transition_merged_path}"
             )
-            composed_paths.append(composed)
-            # 获取合成后片段的实际时长（关键：用实际时长而非配置时长，确保 SRT 与视频对齐）
-            seg_duration = await self._get_video_duration(composed)
-            segment_durations.append(seg_duration)
-            self._completed_count = idx + 1
+            final_path = transition_merged_path
+            composed_paths = [transition_merged_path]
+            self._total = 1
 
-        if not composed_paths:
-            raise ValueError("没有可合成的视频片段（全部下载失败或为空）")
+            # 提取字幕文本（仅在无 edge SRT 时需要，用于生成外挂 SRT/VTT）
+            if with_subtitle and not edge_srt_content:
+                subtitles = self._extract_subtitles(config)
 
-        # 6. 拼接所有视频
-        self._progress_phase = "concatenating"
-        if len(composed_paths) == 1:
-            # 只有一个片段，直接作为最终视频
-            final_path = composed_paths[0]
+            # 应用调色 + 音频淡入淡出（如果配置了）
+            # 复用 _compose_single：传入空字幕（无 drawtext）和空音频（无音频替换）
+            if (grade_preset and grade_preset != "none") or with_audio_fade:
+                self._progress_phase = "composing"
+                self._completed_count = 0
+                composed = await self._compose_single(
+                    final_path, 0, "", None,
+                    grade_preset=grade_preset,
+                    with_audio_fade=with_audio_fade,
+                )
+                if composed != final_path:
+                    final_path = composed
+                self._completed_count = 1
+
+            # 优先使用 edge-tts SRT 烧入字幕（subtitles 滤镜）
+            if with_subtitle and edge_srt_content:
+                self._progress_phase = "burning_subtitles"
+                final_path = await self._burn_srt_subtitles(final_path, edge_srt_content)
         else:
-            final_path = await self._concat_videos(composed_paths)
+            # ---------- 路径 B：现有 concat 流程（向后兼容） ----------
+            # 1. 获取上游视频列表（按 index 排序）
+            step_output = self.context.steps_output.get(from_step, {})
+            videos = step_output.get("videos", [])
+            if not videos:
+                raise ValueError(f"上游步骤 '{from_step}' 没有视频产出")
+
+            videos = sorted(videos, key=lambda v: v.get("index", 0))
+            self._total = len(videos)
+            logger.info(f"[FFmpeg合成] 开始合成 {len(videos)} 个视频片段")
+
+            # 2. 提取字幕文本（可选）
+            if with_subtitle:
+                subtitles = self._extract_subtitles(config)
+
+            # 3. 获取配音音频（可选，来自 tts_generate 步骤）
+            if audio_step:
+                audio_output = self.context.steps_output.get(audio_step, {})
+                audios = audio_output.get("audios", [])
+
+            # 4. 下载所有视频片段到临时目录
+            self._progress_phase = "downloading"
+            self._completed_count = 0
+            video_paths = await self._download_all_videos(videos)
+
+            # 5. 对每个视频烧录字幕 + 混入配音（如果有）
+            # 同时获取每个片段的实际时长，用于生成 SRT 时间戳
+            self._progress_phase = "composing"
+            self._completed_count = 0
+            for idx, vpath in enumerate(video_paths):
+                if not vpath:
+                    logger.warning(f"[FFmpeg合成] 跳过空视频 #{idx}")
+                    continue
+                # 若有 edge SRT，跳过 per-segment drawtext（后续用 subtitles 滤镜统一烧入）
+                if edge_srt_content:
+                    subtitle_text = ""
+                else:
+                    subtitle_text = subtitles[idx] if idx < len(subtitles) else ""
+                audio_path = audios[idx].get("audio_path") if idx < len(audios) else None
+                composed = await self._compose_single(
+                    vpath, idx, subtitle_text, audio_path,
+                    grade_preset=grade_preset,
+                    with_audio_fade=with_audio_fade,
+                )
+                composed_paths.append(composed)
+                # 获取合成后片段的实际时长（关键：用实际时长而非配置时长，确保 SRT 与视频对齐）
+                seg_duration = await self._get_video_duration(composed)
+                segment_durations.append(seg_duration)
+                self._completed_count = idx + 1
+
+            if not composed_paths:
+                raise ValueError("没有可合成的视频片段（全部下载失败或为空）")
+
+            # 6. 拼接所有视频
+            self._progress_phase = "concatenating"
+            if len(composed_paths) == 1:
+                # 只有一个片段，直接作为最终视频
+                final_path = composed_paths[0]
+            else:
+                final_path = await self._concat_videos(composed_paths)
+
+            # 优先使用 edge-tts SRT 烧入字幕（在 concat 之后，确保时间戳对齐）
+            if with_subtitle and edge_srt_content:
+                self._progress_phase = "burning_subtitles"
+                final_path = await self._burn_srt_subtitles(final_path, edge_srt_content)
 
         # 7. 混入 BGM（如果配置了）
         if with_bgm and bgm_url:
@@ -190,18 +246,24 @@ class FFmpegCompositeExecutor(BaseStepExecutor):
 
         logger.info(f"[FFmpeg合成] 完成: {final_path}, 时长={duration}s, URL={final_url}")
 
-        # 9. 生成独立 SRT + VTT 字幕文件（时间戳基于每个片段的实际时长累积）
+        # 9. 生成独立 SRT + VTT 字幕文件
+        # 优先级：edge-tts SRT（词级时间戳）> segment_durations 累积生成
         srt_url = ""
-        vtt_url = ""  # 新增 VTT URL（浏览器 <track> 标签需要 VTT 格式）
+        vtt_url = ""  # VTT URL（浏览器 <track> 标签需要 VTT 格式）
         subtitles_list: List[Dict[str, Any]] = []
-        if with_subtitle and subtitles:
-            srt_url, subtitles_list = await self._generate_srt_file(
-                subtitles, segment_durations
-            )
-            # 同步生成 VTT（复用已计算的 entries，避免重复计算）
-            vtt_url, _ = await self._generate_vtt_file(
-                subtitles, segment_durations, entries=subtitles_list
-            )
+        if with_subtitle:
+            if edge_srt_content:
+                # 优先使用 edge-tts SRT（时间戳来自词级时间戳，更精确）
+                srt_url, vtt_url, subtitles_list = await self._save_edge_srt_files(edge_srt_content)
+            elif subtitles and segment_durations:
+                # 回退：基于 segment_durations 累积生成 SRT/VTT（时间戳基于每个片段的实际时长累积）
+                srt_url, subtitles_list = await self._generate_srt_file(
+                    subtitles, segment_durations
+                )
+                # 同步生成 VTT（复用已计算的 entries，避免重复计算）
+                vtt_url, _ = await self._generate_vtt_file(
+                    subtitles, segment_durations, entries=subtitles_list
+                )
 
         # 10. 保存到 generations 表（result_url 存相对 URL，前端可直接访问）
         if self.context.run_id:
@@ -266,9 +328,10 @@ class FFmpegCompositeExecutor(BaseStepExecutor):
 
         phase_map = {
             "downloading": (0.0, 0.3, "下载视频片段"),
-            "composing": (0.3, 0.7, "烧录字幕/混入配音"),
-            "concatenating": (0.7, 0.9, "拼接视频"),
-            "mixing_bgm": (0.9, 1.0, "混入背景音乐"),
+            "composing": (0.3, 0.65, "烧录字幕/混入配音"),
+            "concatenating": (0.65, 0.8, "拼接视频"),
+            "burning_subtitles": (0.8, 0.95, "烧录 SRT 字幕"),
+            "mixing_bgm": (0.95, 1.0, "混入背景音乐"),
         }
         if phase not in phase_map:
             return {}
@@ -820,6 +883,214 @@ class FFmpegCompositeExecutor(BaseStepExecutor):
                 os.remove(path)
         except Exception:
             pass
+
+    # ---------- P0 视频后期处理增强：transition_compose / edge-tts SRT 支持 ----------
+
+    def _find_transition_compose_output(self) -> Optional[str]:
+        """检测上游是否有 transition_compose 步骤成功输出，返回 merged_video_path 或 None
+
+        遍历 context.steps_output，查找含 merged_video_path 字段且文件存在的步骤输出。
+        transition_compose 步骤输出 merged_video_path 字段（见 transition_compose.py）。
+        """
+        for step_output in self.context.steps_output.values():
+            if not isinstance(step_output, dict):
+                continue
+            merged_path = step_output.get("merged_video_path")
+            if merged_path and isinstance(merged_path, str) and os.path.exists(merged_path):
+                return merged_path
+        return None
+
+    def _find_edge_subtitle_srt(self, audio_step: Optional[str]) -> Optional[str]:
+        """检测上游 tts_generate 步骤是否提供了 subtitle_srt（edge-tts 词级字幕）
+
+        优先从 audio_from_step 指定的步骤查找；若未找到，遍历所有上游步骤兜底。
+        subtitle_srt 由 tts_generate 步骤的 edge-tts 路径生成（见 tts_generate.py），
+        非 edge-tts provider（如 pyttsx3 离线兜底）不产生此字段。
+
+        Returns:
+            SRT 字符串（非空）或 None
+        """
+        # 优先从 audio_from_step 查找
+        if audio_step:
+            audio_output = self.context.steps_output.get(audio_step, {})
+            srt = audio_output.get("subtitle_srt")
+            if srt and isinstance(srt, str) and srt.strip():
+                return srt
+        # 兜底：遍历所有上游 step 查找 tts_generate 输出
+        for step_output in self.context.steps_output.values():
+            if not isinstance(step_output, dict):
+                continue
+            srt = step_output.get("subtitle_srt")
+            if srt and isinstance(srt, str) and srt.strip():
+                return srt
+        return None
+
+    async def _burn_srt_subtitles(self, video_path: str, srt_content: str) -> str:
+        """用 FFmpeg subtitles 滤镜将 SRT 字幕烧入视频
+
+        将 SRT 内容写入临时文件，通过 subtitles 滤镜（依赖 libass）烧入视频。
+        失败时返回原视频路径（保留外挂 SRT）。
+
+        Args:
+            video_path: 输入视频路径
+            srt_content: SRT 格式字符串
+
+        Returns:
+            烧入字幕后的视频路径；失败时返回原路径
+        """
+        # 写入临时 SRT 文件
+        srt_path = ""
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".srt", prefix="agnes_sub_",
+                delete=False, encoding="utf-8"
+            ) as f:
+                f.write(srt_content)
+                srt_path = f.name
+
+            out_path = video_path.replace(".mp4", "_subbed.mp4")
+
+            # subtitles 滤镜需要转义路径中的特殊字符（: 和 ' 和 \）
+            escaped_srt = (
+                srt_path.replace("\\", "\\\\")
+                .replace(":", "\\:")
+                .replace("'", "\\'")
+            )
+
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", video_path,
+                "-vf", f"subtitles='{escaped_srt}'",
+                "-c:v", "libx264",
+                "-c:a", "copy",  # 音频不变
+                "-preset", "fast",
+                "-pix_fmt", "yuv420p",
+                "-movflags", "+faststart",
+                out_path,
+            ]
+
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await asyncio.wait_for(proc.communicate(), timeout=300.0)
+                if proc.returncode != 0:
+                    err_text = stderr.decode(errors="ignore")
+                    logger.warning(
+                        f"[FFmpeg合成] SRT 字幕烧入失败（subtitles 滤镜）: {err_text[-300:]}"
+                    )
+                    return video_path
+                logger.info(f"[FFmpeg合成] SRT 字幕烧入成功: {out_path}")
+                return out_path
+            except asyncio.TimeoutError:
+                logger.warning("[FFmpeg合成] SRT 字幕烧入超时")
+                return video_path
+            except Exception as e:
+                logger.warning(f"[FFmpeg合成] SRT 字幕烧入异常: {e}")
+                return video_path
+        finally:
+            if srt_path:
+                self._cleanup_file(srt_path)
+
+    async def _save_edge_srt_files(self, srt_content: str) -> tuple:
+        """将 edge-tts SRT 写入文件，并解析为 subtitles_list；同时生成 VTT
+
+        edge-tts SRT 的时间戳来自 WordBoundary 词级时间戳，比 segment_durations 累积更精确。
+
+        Returns:
+            (srt_url, vtt_url, subtitles_list)
+            - srt_url: 前端可访问的 SRT URL
+            - vtt_url: 前端可访问的 VTT URL（浏览器 <track> 标签需要）
+            - subtitles_list: 字幕条目列表（供前端预览/编辑）
+        """
+        run_id = self.context.run_id or "tmp"
+
+        # 写 SRT
+        srt_filename = f"subtitles_{run_id}.srt"
+        srt_path = os.path.join(_OUTPUT_BASE, srt_filename)
+        try:
+            with open(srt_path, "w", encoding="utf-8") as f:
+                f.write(srt_content)
+        except Exception as e:
+            logger.warning(f"[FFmpeg合成] edge SRT 保存失败: {e}")
+            return "", "", []
+        srt_url = f"/api/pipeline/outputs/{srt_filename}"
+
+        # 解析为 entries（供前端预览/编辑和 VTT 生成复用）
+        entries = self._parse_srt_to_list(srt_content)
+
+        # 生成 VTT
+        vtt_url = ""
+        if entries:
+            vtt_content = self._format_vtt(entries)
+            vtt_filename = f"subtitles_{run_id}.vtt"
+            vtt_path = os.path.join(_OUTPUT_BASE, vtt_filename)
+            try:
+                with open(vtt_path, "w", encoding="utf-8") as f:
+                    f.write(vtt_content)
+                vtt_url = f"/api/pipeline/outputs/{vtt_filename}"
+            except Exception as e:
+                logger.warning(f"[FFmpeg合成] VTT 生成失败: {e}")
+
+        logger.info(
+            f"[FFmpeg合成] edge SRT 字幕保存: {srt_path}, 共 {len(entries)} 条"
+        )
+        return srt_url, vtt_url, entries
+
+    def _parse_srt_to_list(self, srt_content: str) -> List[Dict[str, Any]]:
+        """解析 SRT 字符串为字幕条目列表
+
+        SRT 格式：
+            1
+            00:00:00,000 --> 00:00:05,200
+            字幕文本
+
+        Returns:
+            [{"index":0, "scene_index":0, "start":0.0, "end":5.2, "text":"..."}, ...]
+        """
+        entries: List[Dict[str, Any]] = []
+        blocks = srt_content.strip().split("\n\n")
+        for block in blocks:
+            lines = block.strip().split("\n")
+            if len(lines) < 3:
+                continue
+            try:
+                # 第二行是时间戳行
+                time_line = lines[1]
+                if " --> " not in time_line:
+                    continue
+                start_str, end_str = time_line.split(" --> ", 1)
+                start = self._srt_time_to_seconds(start_str.strip())
+                end = self._srt_time_to_seconds(end_str.strip())
+                # 第三行及以后是字幕文本（可能多行）
+                text = "\n".join(lines[2:]).strip()
+                entries.append({
+                    "index": len(entries),
+                    "scene_index": len(entries),
+                    "start": start,
+                    "end": end,
+                    "text": text,
+                })
+            except Exception:
+                continue
+        return entries
+
+    def _srt_time_to_seconds(self, time_str: str) -> float:
+        """将 SRT 时间格式 HH:MM:SS,mmm 转为秒
+
+        例: "00:00:05,200" -> 5.2
+        兼容 VTT 时间格式（用 . 而非 , 分隔毫秒）
+        """
+        time_str = time_str.strip()
+        # 兼容 SRT（逗号）和 VTT（点号）分隔毫秒
+        time_str = time_str.replace(",", ".")
+        parts = time_str.split(":")
+        if len(parts) == 3:
+            h, m, s = parts
+            return int(h) * 3600 + int(m) * 60 + float(s)
+        return 0.0
 
     async def _generate_srt_file(
         self,

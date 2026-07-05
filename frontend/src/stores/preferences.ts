@@ -33,6 +33,21 @@ import type {
   NotificationPreferences,
 } from '@/types'
 
+// ================ 任务自动重试开关（纯前端本地偏好） ================
+// 持久化到 localStorage，默认开启；关闭后 taskQueue 不会自动重试失败任务
+const AUTO_RETRY_STORAGE_KEY = 'agnes_prefs_auto_retry'
+
+/** 从 localStorage 读取 autoRetry 初始值（默认 true） */
+function loadAutoRetryFromStorage(): boolean {
+  if (typeof localStorage === 'undefined') return true
+  try {
+    const v = localStorage.getItem(AUTO_RETRY_STORAGE_KEY)
+    return v === null ? true : v === 'true'
+  } catch (_) {
+    return true
+  }
+}
+
 // ================ IndexedDB：目录句柄持久化 ================
 // FileSystemDirectoryHandle 支持 structured clone，可以存入 IndexedDB
 // 这样用户授权一次后，刷新页面也能继续使用
@@ -420,6 +435,9 @@ export const usePreferencesStore = defineStore('preferences', () => {
   const loading = ref(false)
   const initialized = ref(false)
 
+  // 任务失败自动重试开关（纯前端本地偏好，默认 true，持久化到 localStorage）
+  const autoRetry = ref<boolean>(loadAutoRetryFromStorage())
+
   // ================ getters ================
   /** 完整偏好对象（未加载时返回 undefined） */
   const preferences = computed(() => data.value?.preferences)
@@ -568,11 +586,35 @@ export const usePreferencesStore = defineStore('preferences', () => {
     await triggerAutoDownload(url, fileType, metadata)
   }
 
+  /**
+   * 设置任务失败自动重试开关
+   * - 同步更新本地 ref 与 localStorage
+   * - 关闭时通知 taskQueue 重置已有任务的 retryCount（避免遗留状态干扰）
+   */
+  async function setAutoRetry(value: boolean): Promise<void> {
+    autoRetry.value = value
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem(AUTO_RETRY_STORAGE_KEY, String(value))
+      } catch (_) { /* localStorage 写入失败，静默忽略 */ }
+    }
+    // 关闭自动重试时，重置已有任务的 retryCount 与调度状态
+    if (!value) {
+      try {
+        // 动态 import 避免与 taskQueue.ts 形成模块级循环依赖
+        const { useTaskQueueStore } = await import('@/stores/taskQueue')
+        const queue = useTaskQueueStore()
+        queue.resetAllRetryCounts?.()
+      } catch (_) { /* taskQueue 未初始化时忽略 */ }
+    }
+  }
+
   return {
     // state
     data,
     loading,
     initialized,
+    autoRetry,
     // getters
     preferences,
     generation,
@@ -592,5 +634,6 @@ export const usePreferencesStore = defineStore('preferences', () => {
     clearDirectoryHandle,
     autoDownload,
     notifyComplete,
+    setAutoRetry,
   }
 })

@@ -6,6 +6,7 @@
  * ===================================================== */
 
 import { defineStore } from 'pinia'
+import { ElMessage } from 'element-plus'
 import {
   getPipelineTemplates,
   getPipelineRuns,
@@ -17,6 +18,18 @@ import {
   pausePipelineRun as apiPauseRun,
   updatePipelineRunInputs as apiUpdateRunInputs,
   exportRunToCanvas as apiExportRunToCanvas,
+  // Task 21: 步骤确认 / 元素级重试 / 产物编辑 / 失效 / 编辑锁 / 版本历史 / 自动确认
+  confirmStep as apiConfirmStep,
+  retryStepItem as apiRetryStepItem,
+  editStepOutput as apiEditStepOutput,
+  uploadStepItem as apiUploadStepItem,
+  applyStale as apiApplyStale,
+  ignoreStale as apiIgnoreStale,
+  acquireEditLock as apiAcquireEditLock,
+  releaseEditLock as apiReleaseEditLock,
+  listStepRevisions as apiListStepRevisions,
+  rollbackStepRevision as apiRollbackStepRevision,
+  setAutoConfirm as apiSetAutoConfirm,
 } from '@/api/pipeline'
 import type {
   PipelineTemplate,
@@ -25,7 +38,14 @@ import type {
   ListResult,
   CreateRunRequest,
 } from '@/types'
+import type { StaleSummary } from '@/api/pipeline'
 import { useTaskQueueStore } from '@/stores/taskQueue'
+
+/** 编辑锁状态（run 级，5 分钟超时，惰性检查） */
+interface EditLockState {
+  userId: number
+  expiresAt: string
+}
 
 interface PipelineState {
   /* 模板相关 */
@@ -48,6 +68,16 @@ interface PipelineState {
   runHistory: PipelineRun[]
   runHistoryLoading: boolean
   runHistoryTotal: number
+
+  /* ===== Task 22: 步骤确认 / 编辑锁 / 失效 / 版本历史相关 state ===== */
+  /** 当前选中查看的步骤 key */
+  currentStepKey: string | null
+  /** 编辑锁状态（null 表示未持锁） */
+  editingLock: EditLockState | null
+  /** 下游失效摘要（stale_marked 事件 / apply-stale 接口返回） */
+  staleSummary: StaleSummary | null
+  /** 步骤版本历史缓存（key: stepKey, value: revisions 数组） */
+  stepRevisions: Record<string, any[]>
 }
 
 export const usePipelineStore = defineStore('pipeline', {
@@ -68,6 +98,12 @@ export const usePipelineStore = defineStore('pipeline', {
     runHistory: [],
     runHistoryLoading: false,
     runHistoryTotal: 0,
+
+    /* Task 22: 步骤确认 / 编辑锁 / 失效 / 版本历史 */
+    currentStepKey: null,
+    editingLock: null,
+    staleSummary: null,
+    stepRevisions: {},
   }),
 
   getters: {
@@ -250,6 +286,214 @@ export const usePipelineStore = defineStore('pipeline', {
       } else if (eventType === 'pipeline_started') {
         this.currentRun.status = 'running'
         this.currentRun.started_at = new Date().toISOString()
+      }
+    },
+
+    /* =====================================================
+     * Task 22: 步骤确认 / 元素级重试 / 产物编辑 /
+     * 下游失效 / 编辑锁 / 版本历史 / 自动确认
+     * 对应后端 Task 11-16 路由，API 函数来自 Task 21
+     * ===================================================== */
+
+    /** Task 11: 确认 / 驳回步骤 */
+    async confirmStep(stepKey: string, action: 'confirm' | 'reject', comment?: string, editedOutput?: any): Promise<boolean> {
+      if (!this.currentRunId) {
+        ElMessage.error('当前没有运行中的流水线')
+        return false
+      }
+      try {
+        await apiConfirmStep(this.currentRunId, stepKey, {
+          action,
+          comment,
+          edited_output: editedOutput,
+        })
+        ElMessage.success(action === 'confirm' ? '步骤已确认' : '步骤已驳回')
+        return true
+      } catch (e: any) {
+        ElMessage.error(e.message || '确认步骤失败')
+        return false
+      }
+    },
+
+    /** Task 12: 元素级重试（重试步骤中单个失败的 item） */
+    async retryStepItem(stepKey: string, itemId: string, promptOverride?: string, seed?: number): Promise<boolean> {
+      if (!this.currentRunId) {
+        ElMessage.error('当前没有运行中的流水线')
+        return false
+      }
+      try {
+        await apiRetryStepItem(this.currentRunId, stepKey, {
+          item_id: itemId,
+          prompt_override: promptOverride,
+          seed,
+        })
+        ElMessage.success('已提交元素重试')
+        return true
+      } catch (e: any) {
+        ElMessage.error(e.message || '元素重试失败')
+        return false
+      }
+    },
+
+    /** Task 13: 编辑步骤产物（整体替换 / 删除 / 追加 items） */
+    async editStepOutput(stepKey: string, data: { items?: any[], remove_item_ids?: string[], add_items?: any[] }): Promise<boolean> {
+      if (!this.currentRunId) {
+        ElMessage.error('当前没有运行中的流水线')
+        return false
+      }
+      try {
+        await apiEditStepOutput(this.currentRunId, stepKey, data)
+        ElMessage.success('步骤产物已更新')
+        return true
+      } catch (e: any) {
+        ElMessage.error(e.message || '编辑步骤产物失败')
+        return false
+      }
+    },
+
+    /** Task 13: 上传图片替换步骤中某个 item 的图片 */
+    async uploadStepItem(stepKey: string, itemId: string, file: File): Promise<boolean> {
+      if (!this.currentRunId) {
+        ElMessage.error('当前没有运行中的流水线')
+        return false
+      }
+      try {
+        await apiUploadStepItem(this.currentRunId, stepKey, itemId, file)
+        ElMessage.success('图片已上传')
+        return true
+      } catch (e: any) {
+        ElMessage.error(e.message || '上传图片失败')
+        return false
+      }
+    },
+
+    /** Task 14: 应用下游失效（按 DAG 逆序重置 stale 步骤及下游） */
+    async applyStale(): Promise<boolean> {
+      if (!this.currentRunId) {
+        ElMessage.error('当前没有运行中的流水线')
+        return false
+      }
+      try {
+        await apiApplyStale(this.currentRunId)
+        // 应用后失效标记已消费，清空摘要
+        this.staleSummary = null
+        ElMessage.success('已应用下游失效，将重新执行受影响步骤')
+        return true
+      } catch (e: any) {
+        ElMessage.error(e.message || '应用下游失效失败')
+        return false
+      }
+    },
+
+    /** Task 14: 忽略 stale（清除所有步骤的 stale 标记） */
+    async ignoreStale(): Promise<boolean> {
+      if (!this.currentRunId) {
+        ElMessage.error('当前没有运行中的流水线')
+        return false
+      }
+      try {
+        await apiIgnoreStale(this.currentRunId)
+        this.staleSummary = null
+        ElMessage.success('已忽略下游失效标记')
+        return true
+      } catch (e: any) {
+        ElMessage.error(e.message || '忽略 stale 失败')
+        return false
+      }
+    },
+
+    /** Task 15: 获取 run 级编辑锁（5 分钟超时，惰性检查） */
+    async acquireEditLock(): Promise<boolean> {
+      if (!this.currentRunId) {
+        ElMessage.error('当前没有运行中的流水线')
+        return false
+      }
+      try {
+        const res = await apiAcquireEditLock(this.currentRunId)
+        // 兼容后端返回 { user_id, expires_at } 或 { data: { user_id, expires_at } }
+        const lockData = res.data ?? res
+        this.editingLock = {
+          userId: lockData.user_id ?? lockData.userId,
+          expiresAt: lockData.expires_at ?? lockData.expiresAt,
+        }
+        ElMessage.success('已获取编辑锁')
+        return true
+      } catch (e: any) {
+        ElMessage.error(e.message || '获取编辑锁失败')
+        return false
+      }
+    },
+
+    /** Task 15: 释放 run 级编辑锁 */
+    async releaseEditLock(): Promise<boolean> {
+      if (!this.currentRunId) {
+        ElMessage.error('当前没有运行中的流水线')
+        return false
+      }
+      try {
+        await apiReleaseEditLock(this.currentRunId)
+        this.editingLock = null
+        ElMessage.success('已释放编辑锁')
+        return true
+      } catch (e: any) {
+        ElMessage.error(e.message || '释放编辑锁失败')
+        return false
+      }
+    },
+
+    /** Task 15: 查看步骤产物版本历史（按 revision 降序） */
+    async listStepRevisions(stepKey: string): Promise<boolean> {
+      if (!this.currentRunId) {
+        ElMessage.error('当前没有运行中的流水线')
+        return false
+      }
+      try {
+        const res = await apiListStepRevisions(this.currentRunId, stepKey)
+        // 兼容后端返回 { items: [...] } / { data: [...] } / { revisions: [...] }
+        const revisions = res.items ?? res.data ?? res.revisions ?? []
+        this.stepRevisions = { ...this.stepRevisions, [stepKey]: revisions }
+        return true
+      } catch (e: any) {
+        ElMessage.error(e.message || '获取版本历史失败')
+        return false
+      }
+    },
+
+    /** Task 15: 回滚步骤产物到指定版本 */
+    async rollbackStepRevision(stepKey: string, revision: number): Promise<boolean> {
+      if (!this.currentRunId) {
+        ElMessage.error('当前没有运行中的流水线')
+        return false
+      }
+      try {
+        await apiRollbackStepRevision(this.currentRunId, stepKey, revision)
+        ElMessage.success(`已回滚到版本 ${revision}`)
+        // 回滚后刷新该步骤的版本历史
+        await this.listStepRevisions(stepKey)
+        return true
+      } catch (e: any) {
+        ElMessage.error(e.message || '回滚版本失败')
+        return false
+      }
+    },
+
+    /** Task 16: 切换 run.auto_confirm 标志 */
+    async toggleAutoConfirm(enabled: boolean): Promise<boolean> {
+      if (!this.currentRunId) {
+        ElMessage.error('当前没有运行中的流水线')
+        return false
+      }
+      try {
+        await apiSetAutoConfirm(this.currentRunId, enabled)
+        // PipelineRun 类型未声明 auto_confirm 字段，运行实例可能携带，做兼容处理
+        if (this.currentRun) {
+          (this.currentRun as any).auto_confirm = enabled
+        }
+        ElMessage.success(enabled ? '已开启自动确认' : '已关闭自动确认')
+        return true
+      } catch (e: any) {
+        ElMessage.error(e.message || '切换自动确认失败')
+        return false
       }
     },
 

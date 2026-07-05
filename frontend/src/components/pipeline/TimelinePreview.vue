@@ -5,6 +5,8 @@
   - 鼠标 hover 显示完整字幕 + 时长
   - 点击某片段 emit 'seek' 事件，父组件可跳转视频到对应时间
   - 当前播放位置高亮（可选，通过 current-time prop 同步）
+  - 相邻片段之间渲染转场入口按钮（hasTransitionStep 控制显隐）
+    点击按钮弹出 TransitionEditor，配置变更通过 update:transitions 同步给父组件
 -->
 <template>
   <div class="timeline-preview">
@@ -64,6 +66,41 @@
         </el-tooltip>
       </div>
 
+      <!-- 转场入口按钮：相邻片段之间，通过 hasTransitionStep 控制显隐 -->
+      <template v-if="hasTransitionStep && subtitles.length > 1">
+        <el-tooltip
+          v-for="i in subtitles.length - 1"
+          :key="`transition-${i}`"
+          placement="top"
+          :show-after="200"
+        >
+          <template #content>
+            <div class="segment-tooltip">
+              <div class="tooltip-line">
+                <strong>{{ t('pipeline.transition.entryTip', { n: i }) }}</strong>
+              </div>
+              <div v-if="getTransition(i - 1)" class="tooltip-line">
+                {{ t('pipeline.transition.currentLabel') }}: {{ getTransitionLabel(getTransition(i - 1)!) }}
+              </div>
+              <div v-else class="tooltip-line tooltip-time">
+                {{ t('pipeline.transition.hardCutHint') }}
+              </div>
+            </div>
+          </template>
+          <button
+            type="button"
+            class="transition-entry"
+            :class="{ 'transition-entry--active': !!getTransition(i - 1) }"
+            :style="transitionEntryStyle(i - 1)"
+            @click.stop="openTransitionEditor(i - 1)"
+          >
+            <el-icon :size="14">
+              <Connection />
+            </el-icon>
+          </button>
+        </el-tooltip>
+      </template>
+
       <!-- 播放游标（current-time 同步时显示） -->
       <div
         v-if="typeof currentTime === 'number' && currentTime > 0 && totalDuration > 0"
@@ -74,13 +111,24 @@
         <div class="cursor-handle" />
       </div>
     </div>
+
+    <!-- 转场编辑器 Dialog -->
+    <TransitionEditor
+      v-model="transitionDialogVisible"
+      :transition="editingTransition"
+      :index="editingTransitionIndex"
+      @update:transition="handleTransitionUpdate"
+      @remove="handleTransitionRemove"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import { ElEmpty, ElTooltip } from 'element-plus'
+import { ref, computed } from 'vue'
+import { ElEmpty, ElTooltip, ElIcon } from 'element-plus'
+import { Connection } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
+import TransitionEditor from './TransitionEditor.vue'
 
 /** 字幕条目结构（与后端 ffmpeg_composite 输出的 subtitles 字段一致） */
 interface SubtitleEntry {
@@ -91,6 +139,12 @@ interface SubtitleEntry {
   text: string
 }
 
+/** 转场配置结构（与后端 transition_compose 的 input_data.transitions[] 对齐） */
+interface TransitionConfig {
+  type: string
+  duration_ms: number
+}
+
 const props = defineProps<{
   /** 字幕条目列表 */
   subtitles: SubtitleEntry[]
@@ -98,14 +152,24 @@ const props = defineProps<{
   duration?: number
   /** 当前播放时间（秒），用于游标位置 */
   currentTime?: number
+  /** 是否显示转场入口（父组件根据是否存在 transition_compose 步骤控制） */
+  hasTransitionStep?: boolean
+  /** 转场配置数组（对应 transition_compose 步骤的 input_data.transitions） */
+  transitions?: TransitionConfig[]
 }>()
 
 const emit = defineEmits<{
   (e: 'seek', time: number): void
   (e: 'select', sub: SubtitleEntry): void
+  (e: 'update:transitions', value: TransitionConfig[]): void
 }>()
 
 const { t } = useI18n()
+
+// ================ 转场编辑器状态 ================
+const transitionDialogVisible = ref(false)
+const editingTransitionIndex = ref(0)
+const editingTransition = ref<TransitionConfig | null>(null)
 
 // 总时长：优先用 prop，否则取最后一条字幕的 end
 const totalDuration = computed(() => {
@@ -152,6 +216,61 @@ function onTrackClick(ev: MouseEvent) {
 function onSegmentClick(sub: SubtitleEntry) {
   emit('seek', sub.start)
   emit('select', sub)
+}
+
+// ================ 转场入口逻辑 ================
+
+// 获取第 i 个转场配置（i 对应 subtitles[i] 与 subtitles[i+1] 之间的转场）
+function getTransition(i: number): TransitionConfig | null {
+  if (!props.transitions || i < 0 || i >= props.transitions.length) return null
+  const t = props.transitions[i]
+  return t && typeof t === 'object' && t.type ? t : null
+}
+
+// 转场入口按钮位置：放在相邻片段交界处（前一片段 end 位置）
+function transitionEntryStyle(i: number): Record<string, string> {
+  const total = totalDuration.value
+  if (total <= 0 || !props.subtitles.length) return { left: '50%' }
+  const sub = props.subtitles[i]
+  if (!sub) return { left: '50%' }
+  const leftPct = (sub.end / total) * 100
+  return { left: leftPct + '%' }
+}
+
+// 转场类型的本地化标签（用于 tooltip 显示）
+function getTransitionLabel(trans: TransitionConfig): string {
+  return t(`pipeline.transition.types.${trans.type}`)
+}
+
+// 打开转场编辑器
+function openTransitionEditor(i: number) {
+  editingTransitionIndex.value = i
+  editingTransition.value = getTransition(i)
+  transitionDialogVisible.value = true
+}
+
+// 转场配置更新（确认）：写入 transitions 数组并 emit 给父组件
+function handleTransitionUpdate(updated: TransitionConfig | null) {
+  const idx = editingTransitionIndex.value
+  const list = [...(props.transitions || [])]
+  // 补齐到 idx + 1 长度（中间空位用 hard cut 即 null 表示，但数组里保持 undefined）
+  while (list.length <= idx) list.push(undefined as unknown as TransitionConfig)
+  if (updated) {
+    list[idx] = updated
+  } else {
+    // 删除：用 undefined 占位，过滤后输出
+    list[idx] = undefined as unknown as TransitionConfig
+  }
+  // 过滤掉末尾的 undefined，但保留中间的 undefined（hard cut）
+  // 实际上后端 _parse_transitions 会用 None 兜底，前端可以传稀疏数组
+  // 但 JSON 序列化时 undefined 会丢失，所以这里转成 dense 数组（中间的 hard cut 用 null）
+  const dense = list.map(item => item || null)
+  emit('update:transitions', dense.filter((_, i) => i < props.subtitles.length - 1) as TransitionConfig[])
+}
+
+// 转场删除：与 update 等价（设为 null 后 emit）
+function handleTransitionRemove() {
+  handleTransitionUpdate(null)
 }
 
 // ================ 格式化工具 ================
@@ -268,6 +387,37 @@ function formatTime(seconds: number): string {
 .segment-tooltip-trigger {
   position: absolute;
   inset: 0;
+}
+
+/* 转场入口按钮：相邻片段交界处 */
+.transition-entry {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--agnes-border);
+  background: var(--agnes-bg-card);
+  color: var(--agnes-text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 4;
+  padding: 0;
+  transition: background 0.2s, color 0.2s, transform 0.2s;
+}
+.transition-entry:hover {
+  background: var(--agnes-primary);
+  color: #fff;
+  transform: translate(-50%, -50%) scale(1.1);
+}
+/* 已配置转场：高亮显示 */
+.transition-entry--active {
+  background: var(--agnes-primary);
+  color: #fff;
+  border-color: var(--agnes-primary);
 }
 
 /* 播放游标 */

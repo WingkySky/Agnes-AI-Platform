@@ -227,6 +227,11 @@ class PipelineRun(Base):
     - output_summary: 输出摘要（最终成片 URL 等）
     - error_message: 整体错误信息
     - canvas_export_data: 导出到画布的数据（Phase 3）
+    - pause_requested: 是否请求暂停
+    - pause_reason: 暂停原因：user_manual/awaiting_confirmation/null
+    - auto_confirm: 是否自动确认（开启后跳过 requires_confirmation 的自动暂停）
+    - edit_lock_user_id: 编辑锁持有者用户 ID（运行级互斥锁，5 分钟超时）
+    - edit_lock_expires_at: 编辑锁过期时间（惰性检查，超时自动释放）
     """
 
     __tablename__ = "pipeline_runs"
@@ -245,6 +250,14 @@ class PipelineRun(Base):
     error_message = Column(Text, nullable=True)
     canvas_export_data = Column(JSON, nullable=True)
     pause_requested = Column(Boolean, default=False, nullable=False)
+    # 暂停原因：user_manual/awaiting_confirmation/null
+    pause_reason = Column(String(30), nullable=True)
+    # 是否自动确认（开启后跳过 requires_confirmation 的自动暂停）
+    auto_confirm = Column(Boolean, default=False, nullable=False)
+    # 编辑锁持有者用户 ID（运行级互斥锁，5 分钟超时，惰性检查）
+    edit_lock_user_id = Column(Integer, nullable=True)
+    # 编辑锁过期时间（超过此时间视为锁已释放）
+    edit_lock_expires_at = Column(DateTime, nullable=True)
     is_deleted = Column(Boolean, default=False, nullable=False, index=True)
     deleted_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
@@ -283,6 +296,11 @@ class PipelineStep(Base):
     - max_retries: 最大重试次数
     - timeout_sec: 超时时间（秒）
     - depends_on: 依赖的步骤 key 数组（JSON）
+    - requires_confirmation: 是否需要用户确认后才继续下游
+    - confirmation_status: 确认状态：pending/confirmed/rejected/null（不需要确认时）
+    - confirmation_comment: 用户确认/驳回时填写的备注
+    - stale: 产物是否已失效（上游被编辑/替换后标记）
+    - stale_reason: 失效原因
     - sort_order: 排序序号
     """
 
@@ -304,6 +322,16 @@ class PipelineStep(Base):
     max_retries = Column(Integer, default=1, nullable=False)
     timeout_sec = Column(Integer, default=300, nullable=False)
     depends_on = Column(JSON, default=list, nullable=False)
+    # 是否需要用户确认后才继续下游
+    requires_confirmation = Column(Boolean, default=False, nullable=False)
+    # 确认状态：pending/confirmed/rejected/null（不需要确认时）
+    confirmation_status = Column(String(20), nullable=True)
+    # 用户确认/驳回时填写的备注
+    confirmation_comment = Column(Text, nullable=True)
+    # 产物是否已失效（上游被编辑/替换后标记）
+    stale = Column(Boolean, default=False, nullable=False)
+    # 失效原因
+    stale_reason = Column(String(500), nullable=True)
     sort_order = Column(Integer, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

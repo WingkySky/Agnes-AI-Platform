@@ -10,7 +10,11 @@ from typing import Dict, Any, List, Optional
 
 from app.core.database import new_async_session
 from app.services.pipeline.steps import register_step_executor
-from app.services.pipeline.steps.base import BaseStepExecutor
+from app.services.pipeline.steps.base import (
+    BaseStepExecutor,
+    SingleItemContext,
+    ItemResult,
+)
 from app.services.agnes_client import agnes_client
 from app.services import style_service
 from app.services.pipeline import integration
@@ -172,6 +176,114 @@ class VideoBatchExecutor(BaseStepExecutor):
         else:
             return {}
 
+    async def execute_single(self, ctx: SingleItemContext) -> ItemResult:
+        """
+        单视频重生成（重跑创建任务 + 轮询两阶段）
+
+        复用 execute() 中的 _create_single_video / _poll_all_videos 逻辑，
+        仅处理 ctx.item 这一个视频元素。
+
+        Args:
+            ctx: 单元素执行上下文，item 含 index/image_url/prompt/mode/seconds/aspect_ratio 等字段
+
+        Returns:
+            ItemResult: 单元素执行结果，含更新后的 video_url 和 status
+        """
+        item = ctx.item or {}
+        # ctx.config 可能是完整 step_config（含 type/key/config）或直接是内层 config
+        raw_config = ctx.config or {}
+
+        # 临时把 ctx.config 设置为 self.config，让 _create_single_video / _poll_all_videos
+        # 等内部方法读到正确的步骤配置（这些方法复用了 execute() 的逻辑，从 self.config 读取）
+        saved_config = self.config
+        try:
+            if isinstance(raw_config, dict) and "config" in raw_config:
+                self.config = raw_config
+            elif raw_config:
+                # 内层 config，包装为完整 step_config 结构
+                self.config = {"config": raw_config}
+            # else: raw_config 为空，保持 self.config 不变
+
+            # 构建单个视频任务（用 prompt_override 替换原 prompt，若提供）
+            prompt = ctx.prompt_override if ctx.prompt_override else item.get("prompt", "")
+            task = {
+                "index": item.get("index", 0),
+                "image_url": item.get("image_url", ""),
+                "prompt": prompt,
+                "mode": item.get("mode", "text2video"),
+                "seconds": item.get("seconds", 5),
+                "aspect_ratio": item.get("aspect_ratio", "16:9"),
+                "scene_data": item.get("scene_data"),
+            }
+            # 有 image_url 时强制使用 image2video 模式（与 _build_tasks_from_parsed_result 一致）
+            if task["image_url"]:
+                task["mode"] = "image2video"
+
+            logger.info(
+                f"[视频批量-单元素] 重生视频: index={task['index']}, "
+                f"mode={task['mode']}, prompt={task['prompt'][:50]}..."
+            )
+
+            # 阶段一：创建视频任务（复用 execute() 的 _create_single_video 逻辑）
+            create_result = await self._create_single_video(task)
+
+            if not create_result.get("success"):
+                error = create_result.get("error", "创建视频任务失败")
+                logger.error(
+                    f"[视频批量-单元素] 创建任务失败: index={task['index']}, error={error}"
+                )
+                return ItemResult(
+                    status="failed",
+                    item={
+                        **item,
+                        "video_url": "",
+                        "status": "failed",
+                        "error": error,
+                    },
+                    error=error,
+                )
+
+            # 阶段二：轮询等待完成（复用 execute() 的 _poll_all_videos 逻辑）
+            config = self.config.get("config", {})
+            completed = await self._poll_all_videos([create_result], config)
+            poll_result = completed[0] if completed else create_result
+
+            status = poll_result.get("status", "processing")
+            video_url = poll_result.get("video_url", "")
+
+            if status in ("succeeded", "completed", "success") and video_url:
+                logger.info(f"[视频批量-单元素] 视频生成成功: index={task['index']}")
+                return ItemResult(
+                    status="success",
+                    item={
+                        **item,
+                        "video_url": video_url,
+                        "status": "success",
+                        "task_id": poll_result.get("task_id", ""),
+                        "video_id": poll_result.get("video_id", ""),
+                        "model": poll_result.get("model", ""),
+                        "error": None,
+                    },
+                )
+            else:
+                error = poll_result.get("error", f"视频生成失败: status={status}")
+                logger.error(
+                    f"[视频批量-单元素] 视频生成失败: index={task['index']}, error={error}"
+                )
+                return ItemResult(
+                    status="failed",
+                    item={
+                        **item,
+                        "video_url": "",
+                        "status": "failed",
+                        "error": error,
+                    },
+                    error=error,
+                )
+        finally:
+            # 恢复原始 self.config
+            self.config = saved_config
+
     # ---------- 内部方法 ----------
 
     def _build_video_tasks(self) -> List[Dict[str, Any]]:
@@ -187,6 +299,23 @@ class VideoBatchExecutor(BaseStepExecutor):
             tasks = self._build_tasks_from_input(config)
         else:
             tasks = []
+
+        # Task 17: 步骤级重试保留已成功元素
+        # 过滤掉 preserved_items 中已成功的元素，只重跑失败元素
+        preserved_ids = self.get_preserved_item_ids()
+        if preserved_ids and tasks:
+            original_count = len(tasks)
+            tasks = [
+                t for t in tasks
+                if str(t.get("index")) not in preserved_ids
+                and str(t.get("item_id") or t.get("id") or t.get("index")) not in preserved_ids
+            ]
+            skipped = original_count - len(tasks)
+            if skipped > 0:
+                logger.info(
+                    f"[视频批量-Task17] 跳过 {skipped} 个已成功元素，"
+                    f"仅重跑 {len(tasks)} 个: step_key={self.step_key}"
+                )
 
         # 缓存任务总数供进度查询
         self._total_videos = len(tasks)

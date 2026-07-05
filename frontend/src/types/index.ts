@@ -502,6 +502,12 @@ export interface QueueTask {
   source?: 'chat' | 'canvas' | 'pipeline' | null
   /** 画布来源任务的节点 ID，用于任务完成后回填结果 */
   panelId?: string | null
+  /** 当前已重试次数（默认 0；自动重试启用时递增） */
+  retryCount?: number
+  /** 最大重试次数（image/video=3，其他类型=0） */
+  maxRetries?: number
+  /** 下次重试调度时间戳（用于刷新页面后恢复重试计时） */
+  retryScheduledAt?: number | null
 }
 
 /** 注册聊天任务参数 */

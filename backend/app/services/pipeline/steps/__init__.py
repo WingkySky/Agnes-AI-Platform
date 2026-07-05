@@ -95,6 +95,21 @@ def _import_all_executors():
         logger.debug(f"步骤执行器未加载（可能尚未实现）: image_batch - {e}")
 
     try:
+        from app.services.pipeline.steps import character_gen  # noqa: F401
+    except ImportError as e:
+        logger.debug(f"步骤执行器未加载（可能尚未实现）: character_gen - {e}")
+
+    try:
+        from app.services.pipeline.steps import prop_gen  # noqa: F401
+    except ImportError as e:
+        logger.debug(f"步骤执行器未加载（可能尚未实现）: prop_gen - {e}")
+
+    try:
+        from app.services.pipeline.steps import scene_gen  # noqa: F401
+    except ImportError as e:
+        logger.debug(f"步骤执行器未加载（可能尚未实现）: scene_gen - {e}")
+
+    try:
         from app.services.pipeline.steps import video_batch  # noqa: F401
     except ImportError as e:
         logger.debug(f"步骤执行器未加载（可能尚未实现）: video_batch - {e}")
@@ -118,6 +133,16 @@ def _import_all_executors():
         from app.services.pipeline.steps import video_edit  # noqa: F401
     except ImportError as e:
         logger.debug(f"步骤执行器未加载（可能尚未实现）: video_edit - {e}")
+
+    try:
+        from app.services.pipeline.steps import transition_compose  # noqa: F401
+    except ImportError as e:
+        logger.debug(f"步骤执行器未加载（可能尚未实现）: transition_compose - {e}")
+
+    try:
+        from app.services.pipeline.steps import human_gate  # noqa: F401
+    except ImportError as e:
+        logger.debug(f"步骤执行器未加载（可能尚未实现）: human_gate - {e}")
 
 
 # 调用一次以触发注册（但在模块未实现时不会报错）

@@ -413,6 +413,7 @@ def calculate_template_credits(
         "ffmpeg_composite": 5,
         "color_grade": 3,         # 调色：本地 ffmpeg 处理，象征性 3 积分
         "video_edit": 5,          # 剪辑：本地 ffmpeg 处理 + 拼接，象征性 5 积分
+        "transition_compose": 5,  # 转场合成：本地 ffmpeg xfade 处理，与 composite 同级
         # 旧名兜底（仅防回归，新代码不应再产出这些 type）
         "image_gen": 20,
         "video_gen": 150,
@@ -453,6 +454,10 @@ def calculate_template_credits(
 
         elif step_type in ("ffmpeg_composite", "composite"):
             total += DEFAULT_COSTS["ffmpeg_composite"]
+
+        elif step_type in ("transition_compose",):
+            # 转场合成：本地 ffmpeg xfade 处理，与 composite 同级（5 积分）
+            total += DEFAULT_COSTS["transition_compose"]
 
         elif step_type == "color_grade":
             # 调色：本地 ffmpeg 处理，按视频数量计费（每段 3 积分）

@@ -408,6 +408,145 @@ class CanvasExportData(BaseModel):
     viewport: Dict[str, Any] = Field(default_factory=dict, description="视口位置")
 
 
+# =====================================================
+# Task 11-17: 步骤确认 / 元素级重试 / 产物编辑 /
+# 下游失效 / 编辑锁 / 版本历史 / 自动确认 Schema
+# =====================================================
+
+# ---------- Task 11: 确认 / 驳回 ----------
+
+class StepConfirmRequest(BaseModel):
+    """步骤确认/驳回请求"""
+    action: str = Field(..., description="操作类型：confirm 或 reject")
+    comment: Optional[str] = Field(None, description="确认/驳回备注")
+    edited_output: Optional[Dict[str, Any]] = Field(None, description="确认时可选编辑产物覆盖")
+
+
+class StepConfirmResponse(BaseModel):
+    """步骤确认/驳回响应"""
+    run_id: int
+    step_key: str
+    action: str
+    confirmation_status: str
+    downstream_marked_stale: List[str] = Field(default_factory=list)
+
+
+# ---------- Task 12: 元素级重试 ----------
+
+class ItemRetryRequest(BaseModel):
+    """元素级重试请求"""
+    prompt_override: Optional[str] = Field(None, description="覆盖原 prompt（可选）")
+    seed: Optional[int] = Field(None, description="指定种子（可选）")
+
+
+class ItemRetryResponse(BaseModel):
+    """元素级重试响应"""
+    run_id: int
+    step_key: str
+    item_id: str
+    item: Dict[str, Any]
+    status: str
+    requires_reconfirmation: bool = Field(False, description="步骤已确认时为 true，需重新确认")
+
+
+# ---------- Task 13: 产物编辑 ----------
+
+class StepOutputEditRequest(BaseModel):
+    """步骤产物编辑请求"""
+    items: Optional[List[Dict[str, Any]]] = Field(None, description="整体替换 items 列表")
+    remove_item_ids: Optional[List[str]] = Field(None, description="要删除的 item_id 列表")
+    add_items: Optional[List[Dict[str, Any]]] = Field(None, description="要追加的新 items")
+
+
+class StepOutputEditResponse(BaseModel):
+    """步骤产物编辑响应"""
+    run_id: int
+    step_key: str
+    items: List[Dict[str, Any]] = Field(default_factory=list)
+    success_count: int = 0
+    failed_count: int = 0
+    downstream_marked_stale: List[str] = Field(default_factory=list)
+
+
+class ItemUploadResponse(BaseModel):
+    """产物上传响应"""
+    run_id: int
+    step_key: str
+    item_id: str
+    image_url: str
+    downstream_marked_stale: List[str] = Field(default_factory=list)
+
+
+# ---------- Task 14: 下游失效应用 / 忽略 ----------
+
+class StaleApplyResponse(BaseModel):
+    """应用下游失效响应"""
+    run_id: int
+    reset_steps: List[str] = Field(default_factory=list)
+    message: Optional[str] = None
+
+
+class StaleIgnoreResponse(BaseModel):
+    """忽略下游失效响应"""
+    run_id: int
+    cleared_steps: List[str] = Field(default_factory=list)
+
+
+# ---------- Task 15: 编辑锁 ----------
+
+class EditLockResponse(BaseModel):
+    """编辑锁响应（获取/释放）"""
+    run_id: int
+    locked_by: Optional[int] = None
+    expires_at: Optional[str] = None
+    released_by: Optional[int] = None
+    message: Optional[str] = None
+
+
+# ---------- Task 15: 版本历史 ----------
+
+class StepRevisionItem(BaseModel):
+    """版本历史条目"""
+    id: int
+    run_id: int
+    step_key: str
+    revision: int
+    edited_by: Optional[int] = None
+    edited_at: Optional[str] = None
+    change_summary: Optional[str] = None
+    output_data_size: int = 0
+
+
+class StepRevisionRollbackResponse(BaseModel):
+    """版本回滚响应"""
+    run_id: int
+    step_key: str
+    rolled_back_to: int
+    downstream_marked_stale: List[str] = Field(default_factory=list)
+
+
+# ---------- Task 16: 自动确认 ----------
+
+class AutoConfirmRequest(BaseModel):
+    """自动确认切换请求"""
+    enabled: bool = Field(..., description="是否开启自动确认")
+
+
+class AutoConfirmResponse(BaseModel):
+    """自动确认切换响应"""
+    run_id: int
+    auto_confirm: bool
+
+
+# ---------- Task 17: 步骤级重试保留已成功元素 ----------
+
+class StepRetryPreserveResponse(BaseModel):
+    """步骤级重试（保留成功元素）响应"""
+    run_id: int
+    step_key: str
+    preserved_count: int = Field(0, description="保留的已成功元素数量")
+
+
 # 修复前向引用
 PipelineRunDetailResponse.model_rebuild()
 

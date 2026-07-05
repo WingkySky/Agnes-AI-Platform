@@ -19,6 +19,18 @@
 #   /api/pipeline/runs/{id}/inputs     - 编辑流水线输入参数 (PUT)
 #   /api/pipeline/runs/{id}/export-to-canvas - 导出到画布 (POST)
 #   /api/pipeline/runs/{id}/steps/{key}/retry - 重试单步骤
+#   Task 11-17 新增端点：
+#   /api/pipeline/runs/{run_id}/steps/{step_key}/confirm - 确认/驳回步骤 (POST)
+#   /api/pipeline/runs/{run_id}/steps/{step_key}/retry-item - 元素级重试 (POST)
+#   /api/pipeline/runs/{run_id}/steps/{step_key}/output - 编辑步骤产物 (PATCH)
+#   /api/pipeline/runs/{run_id}/steps/{step_key}/items/{item_id}/upload - 上传图片替换 item (POST)
+#   /api/pipeline/runs/{run_id}/apply-stale - 应用下游失效 (POST)
+#   /api/pipeline/runs/{run_id}/ignore-stale - 忽略下游失效 (POST)
+#   /api/pipeline/runs/{run_id}/lock - 获取/释放编辑锁 (POST/DELETE)
+#   /api/pipeline/runs/{run_id}/steps/{step_key}/revisions - 版本历史 (GET)
+#   /api/pipeline/runs/{run_id}/steps/{step_key}/revisions/{revision} - 回滚版本 (POST)
+#   /api/pipeline/runs/{run_id}/auto-confirm - 切换自动确认 (POST)
+#   /api/pipeline/runs/{run_id}/steps/{step_key}/retry-preserve - 步骤级重试保留成功元素 (POST)
 #   /api/pipeline/outputs              - 获取流水线产物列表 (GET)
 #   /api/pipeline/outputs/{filename}   - 合成产物静态文件（最终视频等）
 #   /api/pipeline/styles               - 风格预设列表
@@ -63,6 +75,22 @@ from app.schemas.pipeline import (
     RecomposeRequest,
     PostProcessRequest,
     PostProcessResponse,
+    # Task 11-17 Schema
+    StepConfirmRequest,
+    StepConfirmResponse,
+    ItemRetryRequest,
+    ItemRetryResponse,
+    StepOutputEditRequest,
+    StepOutputEditResponse,
+    ItemUploadResponse,
+    StaleApplyResponse,
+    StaleIgnoreResponse,
+    EditLockResponse,
+    StepRevisionItem,
+    StepRevisionRollbackResponse,
+    AutoConfirmRequest,
+    AutoConfirmResponse,
+    StepRetryPreserveResponse,
 )
 from app.schemas.assets import (
     StylePresetOut,
@@ -92,6 +120,21 @@ from app.services.pipeline import (
 from app.services.pipeline import template_service
 from app.services.pipeline import template_scenarios
 from app.services.pipeline.run_service import recompose_video
+# Task 11-17 服务层函数直接导入（避免改动 __init__.py）
+from app.services.pipeline.run_service import (
+    confirm_step,
+    retry_step_item,
+    edit_step_output,
+    upload_step_item,
+    apply_stale,
+    ignore_stale,
+    acquire_edit_lock,
+    release_edit_lock,
+    list_step_revisions,
+    rollback_step_revision,
+    set_auto_confirm,
+    retry_step_preserve_success,
+)
 from app.services.pipeline import post_process_video
 from app.services.watermark_service import (
     get_watermark_config,
@@ -1427,6 +1470,337 @@ async def export_pipeline_run_to_canvas(
 
 
 # =====================================================
+# Task 11-17: 步骤确认 / 元素级重试 / 产物编辑 /
+# 下游失效 / 编辑锁 / 版本历史 / 自动确认 / 步骤级重试增强
+# =====================================================
+
+# ---------- Task 11: 确认 / 驳回 ----------
+
+@router.post(
+    "/pipeline/runs/{run_id}/steps/{step_key}/confirm",
+    summary="确认或驳回处于等待确认状态的步骤",
+)
+async def confirm_pipeline_step(
+    run_id: int,
+    step_key: str,
+    req: StepConfirmRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    确认或驳回处于 pending 确认状态的步骤。
+
+    - action=confirm：置 confirmed，清暂停标志，后台恢复执行
+    - action=reject：置 rejected + failed，跳过下游，run 转 failed
+    - 若提供 edited_output，会先覆盖 step.output_data 并标记下游 stale
+    """
+    result = await confirm_step(
+        db=db,
+        run_id=run_id,
+        step_key=step_key,
+        action=req.action,
+        comment=req.comment,
+        edited_output=req.edited_output,
+        user_id=current_user.id,
+    )
+    return StepConfirmResponse(**result)
+
+
+# ---------- Task 12: 元素级重试 ----------
+
+@router.post(
+    "/pipeline/runs/{run_id}/steps/{step_key}/retry-item",
+    summary="重试步骤中的单个元素",
+)
+async def retry_pipeline_step_item(
+    run_id: int,
+    step_key: str,
+    item_id: str,
+    req: ItemRetryRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    重试步骤中的单个元素（如单张图片/视频）。
+
+    - 从 output_data.items 找到 item_id 对应元素
+    - 构建 SingleItemContext，调 executor.execute_single()
+    - 步骤已 confirmed 时响应 requires_reconfirmation=true
+    """
+    result = await retry_step_item(
+        db=db,
+        run_id=run_id,
+        step_key=step_key,
+        item_id=item_id,
+        prompt_override=req.prompt_override,
+        seed=req.seed,
+        user_id=current_user.id,
+    )
+    return ItemRetryResponse(**result)
+
+
+# ---------- Task 13: 产物编辑 ----------
+
+@router.patch(
+    "/pipeline/runs/{run_id}/steps/{step_key}/output",
+    summary="编辑步骤产物（替换/删除/新增 items）",
+)
+async def edit_pipeline_step_output(
+    run_id: int,
+    step_key: str,
+    req: StepOutputEditRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    编辑步骤产物（items 整体替换 / 删除指定 item_id / 追加新 items）。
+
+    - 编辑前保存版本到 PipelineStepOutputRevision
+    - 应用变更后调 mark_downstream_stale 标记下游
+    - 引擎 running 状态返回 409
+    """
+    result = await edit_step_output(
+        db=db,
+        run_id=run_id,
+        step_key=step_key,
+        items=req.items,
+        remove_item_ids=req.remove_item_ids,
+        add_items=req.add_items,
+        user_id=current_user.id,
+    )
+    return StepOutputEditResponse(**result)
+
+
+@router.post(
+    "/pipeline/runs/{run_id}/steps/{step_key}/items/{item_id}/upload",
+    summary="上传图片替换步骤中某个 item 的图片",
+)
+async def upload_pipeline_step_item(
+    run_id: int,
+    step_key: str,
+    item_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    上传图片替换步骤中某个 item 的图片。
+
+    - 支持格式：jpg/png/webp，最大 10MB
+    - 自动压缩（>2MB 用 quality=80，否则 quality=95）
+    - 保存修订前快照，更新 item.image_url
+    - 标记下游 stale
+    """
+    content_type = request.headers.get("content-type", "")
+
+    # 支持 multipart/form-data 和 raw body 两种上传方式
+    if content_type.startswith("multipart/form-data"):
+        form = await request.form()
+        file = form.get("file")
+        if not file:
+            raise HTTPException(status_code=400, detail="未提供文件，请用 file 字段上传")
+        file_content = await file.read()
+        ct = file.content_type or "image/jpeg"
+        filename = file.filename or "uploaded.jpg"
+    else:
+        # raw body 上传
+        file_content = await request.body()
+        ct = content_type or "image/jpeg"
+        filename = f"{item_id}.jpg"
+
+    if not file_content:
+        raise HTTPException(status_code=400, detail="上传内容为空")
+
+    result = await upload_step_item(
+        db=db,
+        run_id=run_id,
+        step_key=step_key,
+        item_id=item_id,
+        file_content=file_content,
+        content_type=ct,
+        filename=filename,
+        user_id=current_user.id,
+    )
+    return ItemUploadResponse(**result)
+
+
+# ---------- Task 14: 下游失效应用 / 忽略 ----------
+
+@router.post(
+    "/pipeline/runs/{run_id}/apply-stale",
+    summary="应用下游失效（按 DAG 逆序重置 stale 步骤及下游）",
+)
+async def apply_pipeline_stale(
+    run_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    应用下游失效：按 DAG 逆序重置 stale 步骤及其下游
+    （status=pending, output_data=null, stale=False），
+    清 pause_requested，调 engine.resume()。
+    """
+    result = await apply_stale(db=db, run_id=run_id, user_id=current_user.id)
+    return StaleApplyResponse(**result)
+
+
+@router.post(
+    "/pipeline/runs/{run_id}/ignore-stale",
+    summary="忽略下游失效（清除所有步骤的 stale 标记）",
+)
+async def ignore_pipeline_stale(
+    run_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    忽略下游失效：清除所有步骤的 stale 和 stale_reason。
+    适用于用户确认当前产物仍然有效、不需要重新执行的场景。
+    """
+    result = await ignore_stale(db=db, run_id=run_id, user_id=current_user.id)
+    return StaleIgnoreResponse(**result)
+
+
+# ---------- Task 15: 编辑锁 ----------
+
+@router.post(
+    "/pipeline/runs/{run_id}/lock",
+    summary="获取 run 级编辑锁（5 分钟超时）",
+)
+async def acquire_pipeline_edit_lock(
+    run_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    获取 run 级编辑锁（5 分钟超时，惰性检查）。
+
+    - 若锁已被其他用户持有且未过期 → 返回 409
+    - 若锁已过期或为当前用户持有 → 重新获取
+    """
+    result = await acquire_edit_lock(
+        db=db, run_id=run_id, user_id=current_user.id
+    )
+    return EditLockResponse(**result)
+
+
+@router.delete(
+    "/pipeline/runs/{run_id}/lock",
+    summary="释放 run 级编辑锁",
+)
+async def release_pipeline_edit_lock(
+    run_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    释放 run 级编辑锁。
+
+    - 仅锁持有者本人可释放
+    - 锁已过期时任何人可释放
+    """
+    result = await release_edit_lock(
+        db=db, run_id=run_id, user_id=current_user.id
+    )
+    return EditLockResponse(**result)
+
+
+# ---------- Task 15: 版本历史 ----------
+
+@router.get(
+    "/pipeline/runs/{run_id}/steps/{step_key}/revisions",
+    summary="查询步骤产物的版本历史",
+    response_model=List[StepRevisionItem],
+)
+async def list_pipeline_step_revisions(
+    run_id: int,
+    step_key: str,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """查询步骤产物的版本历史（按 revision 降序）。"""
+    return await list_step_revisions(
+        db=db, run_id=run_id, step_key=step_key, user_id=current_user.id
+    )
+
+
+@router.post(
+    "/pipeline/runs/{run_id}/steps/{step_key}/revisions/{revision}",
+    summary="回滚步骤产物到指定版本",
+)
+async def rollback_pipeline_step_revision(
+    run_id: int,
+    step_key: str,
+    revision: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    回滚步骤产物到指定版本。
+
+    - 用指定版本覆盖当前 output_data
+    - 保存回滚前版本（便于反向回滚）
+    - 标记下游 stale
+    """
+    result = await rollback_step_revision(
+        db=db,
+        run_id=run_id,
+        step_key=step_key,
+        revision=revision,
+        user_id=current_user.id,
+    )
+    return StepRevisionRollbackResponse(**result)
+
+
+# ---------- Task 16: 自动确认切换 ----------
+
+@router.post(
+    "/pipeline/runs/{run_id}/auto-confirm",
+    summary="切换 run.auto_confirm 标志",
+)
+async def toggle_pipeline_auto_confirm(
+    run_id: int,
+    req: AutoConfirmRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    切换 run.auto_confirm 标志。
+
+    开启后，后续需要确认的步骤会自动置 confirmed 跳过暂停。
+    """
+    result = await set_auto_confirm(
+        db=db, run_id=run_id, enabled=req.enabled, user_id=current_user.id
+    )
+    return AutoConfirmResponse(**result)
+
+
+# ---------- Task 17: 步骤级重试保留已成功元素 ----------
+
+@router.post(
+    "/pipeline/runs/{run_id}/steps/{step_key}/retry-preserve",
+    summary="步骤级重试（保留已成功元素，仅重跑失败元素）",
+)
+async def retry_pipeline_step_preserve(
+    run_id: int,
+    step_key: str,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    步骤级重试，保留 output_data.items 中 status=success 的元素。
+
+    - 把 success 元素写入 output_data.preserved_items
+    - 执行器执行时跳过对应 item_id，只重跑失败元素
+    - 只对重跑的失败元素计费
+    """
+    result = await retry_step_preserve_success(
+        db=db, run_id=run_id, step_key=step_key, user_id=current_user.id
+    )
+    return StepRetryPreserveResponse(**result)
+
+
+# =====================================================
 # 风格预设 API
 # =====================================================
 
@@ -1840,6 +2214,22 @@ async def create_template_from_scenario(
         # 如果用户提供了自定义步骤配置，则使用它
         if req.custom_steps_config:
             steps_config = req.custom_steps_config
+            # 兜底：从场景预设回填前端可能遗漏的字段（例如 requires_confirmation）
+            # 前端 map 步骤时若漏传 requires_confirmation，引擎读取后恒为 False，
+            # 会导致需要确认的步骤直接放行，整个流程一路跑完不暂停
+            preset_steps = scenario.get("steps_config_template", [])
+            preset_by_key = {s.get("key"): s for s in preset_steps if isinstance(s, dict)}
+            for step in steps_config:
+                if not isinstance(step, dict):
+                    continue
+                key = step.get("key")
+                preset = preset_by_key.get(key)
+                if not preset:
+                    continue
+                # 仅回填缺失的字段，不覆盖用户显式设置的值
+                for field_name in ("requires_confirmation",):
+                    if field_name not in step and field_name in preset:
+                        step[field_name] = preset[field_name]
         else:
             # 否则，使用场景预设渲染步骤配置
             steps_config = template_scenarios.render_steps_config(

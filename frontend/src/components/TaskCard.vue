@@ -24,7 +24,7 @@
     <!-- 中间内容区 -->
     <div class="task-body">
       <div class="task-header">
-        <span class="task-status-badge" :class="task.status">
+        <span class="task-status-badge" :class="[task.status, { 'is-retrying': isRetrying }]">
           {{ statusLabel }}
         </span>
         <span class="task-type-label">
@@ -67,10 +67,15 @@
         <span class="success-text">{{ t('taskStatus.successText') }} · {{ formatTime(task.updatedAt) }}</span>
       </div>
 
-      <!-- 失败状态：展示错误信息 -->
-      <div v-else-if="task.status === 'failed'" class="task-failed">
-        <el-icon class="failed-icon"><Close /></el-icon>
-        <span class="failed-text">{{ task.errorMessage || t('taskStatus.failedText') }}</span>
+      <!-- 失败状态：重试中 或 最终失败 -->
+      <div v-else-if="task.status === 'failed'" class="task-failed" :class="{ 'is-retrying': isRetrying }">
+        <el-icon v-if="isRetrying" class="retrying-icon"><Loading /></el-icon>
+        <el-icon v-else class="failed-icon"><Close /></el-icon>
+        <span class="failed-text">
+          {{ isRetrying
+            ? t('taskStatus.retrying', { n: (task.retryCount ?? 0) + 1 })
+            : (task.errorMessage || t('taskStatus.failedText')) }}
+        </span>
       </div>
 
       <!-- 已取消 -->
@@ -96,7 +101,7 @@
         {{ t('taskStatus.cancel') }}
       </button>
       <button
-        v-if="task.status === 'failed' || task.status === 'cancelled'"
+        v-if="(task.status === 'failed' && !isRetrying) || task.status === 'cancelled'"
         class="action-btn retry-btn"
         :title="t('taskStatus.retryTitle')"
         @click="handleRetry"
@@ -149,8 +154,19 @@ const isRunning = computed(() => {
   return ['queued', 'pending', 'processing'].includes(props.task.status)
 })
 
+// 是否处于自动重试等待中（status=failed 但已调度重试且未达上限）
+const isRetrying = computed(() => {
+  return props.task.status === 'failed' &&
+    props.task.retryScheduledAt != null &&
+    (props.task.retryCount ?? 0) < (props.task.maxRetries ?? 0)
+})
+
 // ------ 状态标签国际化 ------
 const statusLabel = computed(() => {
+  // 优先展示重试中状态（n = 即将执行的重试次数 = 已重试次数 + 1）
+  if (isRetrying.value) {
+    return t('taskStatus.retrying', { n: (props.task.retryCount ?? 0) + 1 })
+  }
   switch (props.task.status) {
     case 'queued': return t('taskStatus.queued')
     case 'pending': return t('taskStatus.pending')
@@ -299,6 +315,11 @@ function getPipelineStatusText(status: string): string {
   background: var(--agnes-error-bg);
   color: var(--agnes-error);
 }
+/* 重试中状态：badge 用主色调（进行中）而非错误色（失败） */
+.task-status-badge.is-retrying {
+  background: var(--agnes-info-bg);
+  color: var(--agnes-primary-soft);
+}
 .task-status-badge.cancelled {
   background: var(--agnes-bg-hover);
   color: var(--agnes-text-muted);
@@ -366,6 +387,15 @@ function getPipelineStatusText(status: string): string {
 }
 .task-success { color: var(--agnes-success); }
 .task-failed { color: var(--agnes-error); }
+/* 重试中状态：失败区块用主色调（进行中）而非错误色 */
+.task-failed.is-retrying { color: var(--agnes-primary-soft); }
+.retrying-icon {
+  animation: spin 1.2s linear infinite;
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
 .task-cancelled { color: var(--agnes-text-muted); }
 .task-queued { color: var(--agnes-primary-soft); }
 

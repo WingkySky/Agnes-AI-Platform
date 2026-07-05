@@ -194,6 +194,25 @@ class PipelineSSEManager:
         """同步版本的 emit（用于非 async 上下文，通过 create_task 调度）"""
         asyncio.create_task(self.emit(run_id, event_type, step_key, data))
 
+    async def notify_step_awaiting_confirmation(
+        self, run_id: int, step_key: str, step_data: Dict[str, Any]
+    ) -> None:
+        """
+        推送步骤等待确认事件。
+
+        当步骤需要用户确认才能继续下游时调用（requires_confirmation=True 或 human_gate 类型）。
+
+        Args:
+            run_id: 流水线 ID
+            step_key: 步骤 key
+            step_data: 步骤的序列化数据（含 output_data / confirmation_status 等）
+        """
+        await self.emit(run_id, "step_awaiting_confirmation", step_key, {
+            "run_id": run_id,
+            "step_key": step_key,
+            "step": step_data,
+        })
+
     # ---------- 状态快照 ----------
 
     def _update_snapshot(self, run_id: int, event_type: str, step_key: str, data: Dict[str, Any]) -> None:
@@ -235,6 +254,14 @@ class PipelineSSEManager:
                 snapshot["steps"][step_key]["status"] = "success"
                 snapshot["steps"][step_key]["completed_at"] = time.time()
                 snapshot["steps"][step_key]["output_summary"] = data.get("output_summary")
+        elif event_type == "step_awaiting_confirmation":
+            # 步骤执行成功但等待用户确认：记录 confirmation_status=pending
+            snapshot["steps"][step_key] = snapshot["steps"].get(step_key, {
+                "name": (data.get("step") or {}).get("name"),
+            })
+            snapshot["steps"][step_key]["status"] = "awaiting_confirmation"
+            snapshot["steps"][step_key]["confirmation_status"] = "pending"
+            snapshot["steps"][step_key]["awaiting_confirmation_at"] = time.time()
         elif event_type == "step_failed":
             if step_key in snapshot["steps"]:
                 snapshot["steps"][step_key]["status"] = "failed"

@@ -6,11 +6,16 @@
 
 import asyncio
 import logging
+import random
 from typing import Dict, Any, List, Optional
 
 from app.core.database import new_async_session
 from app.services.pipeline.steps import register_step_executor
-from app.services.pipeline.steps.base import BaseStepExecutor
+from app.services.pipeline.steps.base import (
+    BaseStepExecutor,
+    SingleItemContext,
+    ItemResult,
+)
 from app.services.agnes_client import agnes_client
 from app.services import style_service
 from app.services.pipeline import integration
@@ -105,6 +110,79 @@ class ImageBatchExecutor(BaseStepExecutor):
         estimated_count = config.get("estimated_count", 10)
         return estimated_count * 10  # 每张图约 10 积分
 
+    async def execute_single(self, ctx: SingleItemContext) -> ItemResult:
+        """
+        单张图片重生成（仅重跑图片阶段，不涉及 LLM）
+
+        用于元素级重试场景：用户针对某张失败/不满意的图片单独重生。
+        从 ctx.item 读取原元素数据（prompt、reference_images、scene_data 等），
+        应用 ctx.prompt_override 和 ctx.seed 覆盖，复用 execute() 的图片生成逻辑。
+
+        Args:
+            ctx: 单元素执行上下文，item 含 index/prompt/size/scene_data/
+                 reference_images/style_reference_image 等字段
+
+        Returns:
+            ItemResult: 单元素执行结果，item 含新的 image_url/seed/status/error
+        """
+        item = ctx.item or {}
+        index = item.get("index", 0)
+
+        logger.info(f"[图片批量-单元素] 重生图片 #{index}: step_key={self.step_key}")
+
+        # 用 ctx.prompt_override 替换原 prompt（若提供），否则沿用原 item 的 prompt
+        prompt = ctx.prompt_override if ctx.prompt_override else item.get("prompt", "")
+        # 用 ctx.seed 替换图片生成种子（若提供），否则生成新的随机 seed
+        # 注意：Agnes Image API 当前不支持 seed 参数，seed 仅作记录用于跟踪
+        seed = ctx.seed if ctx.seed is not None else random.randint(0, 2**31 - 1)
+
+        # 从 step config 读取默认 size 和 style_reference_image
+        config = self.config.get("config", {})
+
+        # 构建单张图片生成任务（保留原 item 的 reference_images / scene_data）
+        # reference_images 来自上游 character_images 步骤（角色参考图，保持人物一致性）
+        # style_reference_image 来自 step config（风格参考图，取视觉氛围）
+        task = {
+            "index": index,
+            "prompt": prompt,
+            "size": item.get("size") or config.get("size", "1024x1024"),
+            "scene_data": item.get("scene_data"),
+            "reference_images": item.get("reference_images", []) or [],
+            "style_reference_image": item.get("style_reference_image") or config.get("style_reference_image"),
+        }
+
+        # 复用 execute() 的核心图片生成逻辑（含风格应用、模型路由、参考图合并、API 调用）
+        result = await self._generate_single_image(task)
+
+        # 将生成结果转换为 ItemResult
+        if result.get("success"):
+            return ItemResult(
+                status="success",
+                item={
+                    **item,
+                    "prompt": prompt,
+                    "image_url": result.get("image_url", ""),
+                    "seed": seed,
+                    "model": result.get("model", ""),
+                    "status": "success",
+                    "error": None,
+                },
+            )
+
+        error_msg = result.get("error", "图片生成失败")
+        return ItemResult(
+            status="failed",
+            item={
+                **item,
+                "prompt": prompt,
+                "image_url": "",
+                "seed": seed,
+                "status": "failed",
+                "error": error_msg,
+            },
+            error=error_msg,
+        )
+
     async def get_progress(self) -> Dict[str, Any]:
         """
         获取当前执行进度。
@@ -172,6 +250,23 @@ class ImageBatchExecutor(BaseStepExecutor):
         if style_reference_image:
             for task in tasks:
                 task["style_reference_image"] = style_reference_image
+
+        # Task 17: 步骤级重试保留已成功元素
+        # 过滤掉 preserved_items 中已成功的元素，只重跑失败元素
+        preserved_ids = self.get_preserved_item_ids()
+        if preserved_ids and tasks:
+            original_count = len(tasks)
+            tasks = [
+                t for t in tasks
+                if str(t.get("index")) not in preserved_ids
+                and str(t.get("item_id") or t.get("id") or t.get("index")) not in preserved_ids
+            ]
+            skipped = original_count - len(tasks)
+            if skipped > 0:
+                logger.info(
+                    f"[图片批量-Task17] 跳过 {skipped} 个已成功元素，"
+                    f"仅重跑 {len(tasks)} 个: step_key={self.step_key}"
+                )
 
         # 缓存任务列表供进度查询
         self._image_tasks_cache = tasks
@@ -333,27 +428,41 @@ class ImageBatchExecutor(BaseStepExecutor):
 
     def _build_character_image_map(self, from_step_key: str) -> Dict[str, str]:
         """
-        从上游 character_images 步骤构建 {角色名: image_url} 映射。
+        从上游角色图步骤构建 {角色名: image_url} 映射。
 
         用于 scene_images 步骤的参考图传递：每个 scene 根据 characters_in_scene
         字段找到对应角色图，作为图生图的参考图，保持人物一致性。
 
+        兼容两种上游输出结构：
+        - 旧版 character_images（image_batch 类型）：输出 `images` 数组，
+          元素结构 `{image_url, scene_data: {name}}`
+        - 新版 character_gen（Task 4）：输出 `items` 数组，
+          元素结构 `{id, name, image_url, status, ...}`，需过滤 status=success
+
         Args:
-            from_step_key: 上游角色图步骤的 step_key（如 "character_images"）
+            from_step_key: 上游角色图步骤的 step_key（如 "character_images" / "step_character_gen"）
 
         Returns:
             {角色名: image_url} 字典；
             如上游步骤无输出、无角色名、或角色图 URL 为空，返回空字典
         """
         step_output = self.context.steps_output.get(from_step_key, {})
-        images = step_output.get("images", [])
+        # 兼容 character_gen 的 items 字段与旧版 image_batch 的 images 字段
+        items = step_output.get("items") or step_output.get("images") or []
 
         mapping: Dict[str, str] = {}
-        for img_data in images:
-            # character_images 步骤的 scene_data 是角色对象（含 name 字段）
-            scene_data = img_data.get("scene_data") or {}
-            name = scene_data.get("name", "")
-            image_url = img_data.get("image_url", "")
+        for item in items:
+            # 新版 character_gen：元素直接含 name / image_url / status
+            name = item.get("name", "")
+            image_url = item.get("image_url", "")
+            # 旧版 character_images：name 在 scene_data 中
+            if not name:
+                scene_data = item.get("scene_data") or {}
+                name = scene_data.get("name", "")
+            # 仅记录生成成功的角色图（避免失败占位图污染参考图）
+            status = item.get("status")
+            if status and status != "success":
+                continue
             if name and image_url:
                 mapping[name] = image_url
 

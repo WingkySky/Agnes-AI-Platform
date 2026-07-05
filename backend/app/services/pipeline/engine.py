@@ -110,6 +110,9 @@ async def create_pipeline_run(
             timeout_sec=step_cfg.get("timeout", 300),
             depends_on=step_cfg.get("depends_on", []),
             sort_order=idx,
+            # 步骤确认机制：模板配置的 requires_confirmation 必须传递到 PipelineStep 记录
+            # 否则引擎的 _handle_step_confirmation 永远判定为无需确认，步骤会直接放行
+            requires_confirmation=step_cfg.get("requires_confirmation", False),
         )
         db.add(step)
 
@@ -192,6 +195,29 @@ class PipelineEngine:
             self._db = db
             try:
                 await self._load_run_data()
+
+                # 确认机制检查：如果暂停原因是 awaiting_confirmation，
+                # 必须至少有一个步骤的 confirmation_status 从 pending 变为 confirmed 才允许恢复，
+                # 防止用户在没有确认任何步骤的情况下误调用 resume
+                if self._run.pause_reason == "awaiting_confirmation":
+                    has_confirmed = any(
+                        step.confirmation_status == "confirmed"
+                        for step in self._steps.values()
+                    )
+                    if not has_confirmed:
+                        logger.info(
+                            f"[流水线] 暂停等待确认中，无步骤被确认，拒绝恢复: "
+                            f"run_id={self.run_id}"
+                        )
+                        # 推送恢复被拒事件，提示前端需要先确认步骤
+                        self._emit_progress("pipeline_paused", "", {
+                            "run_id": self.run_id,
+                            "status": "paused",
+                            "message": "流水线等待步骤确认中，请先确认至少一个步骤",
+                            "pause_reason": "awaiting_confirmation",
+                        })
+                        return
+
                 await self._set_run_status(STATUS_RUNNING)
 
                 # 断点续跑前重置可执行的 SKIPPED 步骤
@@ -302,6 +328,10 @@ class PipelineEngine:
         run_user_id = self._run.user_id
         run_inputs = self._run.inputs
         run_template_id = self._run.template_id
+        # 预加载确认机制相关字段（Task 2 新增）
+        _ = self._run.pause_reason
+        _ = self._run.auto_confirm
+        _ = self._run.pause_requested
 
         # 加载 template
         self._template = await get_template_by_id(self._db, self._run.template_id)
@@ -328,6 +358,10 @@ class PipelineEngine:
             _ = step.error_message
             _ = step.retry_count
             _ = step.max_retries
+            # 预加载确认机制相关字段（Task 2 新增）
+            _ = step.requires_confirmation
+            _ = step.confirmation_status
+            _ = step.confirmation_comment
 
         # 加载风格预设（如果输入了 style_id）
         style_id = run_inputs.get("style_id")
@@ -425,6 +459,12 @@ class PipelineEngine:
         检查数据库中 pause_requested 标志。
         如果为 True，将 run 状态置为 paused，退出执行循环。
         步骤保持当前状态，后续 resume 可继续执行。
+
+        暂停原因 pause_reason 有两种：
+          - user_manual：用户主动请求暂停
+          - awaiting_confirmation：步骤需要用户确认（_handle_step_confirmation 设置）
+        两种情况都通过 pause_requested=True 触发相同的暂停流程，无需分别处理。
+        pause_reason 字段在 resume() 中用于判断是否需要先确认才能恢复。
         """
         if not self._db:
             return
@@ -436,6 +476,7 @@ class PipelineEngine:
             if pause_requested:
                 logger.info(f"[流水线] 收到暂停请求: run_id={self.run_id}")
                 # 清除标志位，将状态设为 paused
+                # 注意：pause_reason 字段不在此处清除，留给 resume() 判断暂停类型
                 await self._db.execute(
                     sa_update(PipelineRun)
                     .where(PipelineRun.id == self.run_id)
@@ -444,7 +485,9 @@ class PipelineEngine:
                         pause_requested=False,
                     )
                 )
+                # 同步内存对象（expire_on_commit=False，需手动同步避免状态不一致）
                 self._run.status = "paused"
+                self._run.pause_requested = False
                 await self._safe_commit()
                 self._cancelled = True
                 self._emit_progress("pipeline_paused", "", {
@@ -481,6 +524,13 @@ class PipelineEngine:
                 if dep_step.status != STATUS_SUCCESS:
                     all_deps_satisfied = False
                     break
+                # 上游若需要确认（requires_confirmation=True 或 step_type=human_gate），
+                # 必须 confirmation_status=="confirmed" 当前步骤才算就绪；
+                # pending/rejected 状态下当前步骤不就绪
+                if dep_step.requires_confirmation or dep_step.step_type == "human_gate":
+                    if dep_step.confirmation_status != "confirmed":
+                        all_deps_satisfied = False
+                        break
 
             if not all_deps_satisfied:
                 continue
@@ -671,7 +721,32 @@ class PipelineEngine:
             "step_type": step.step_type,
         })
 
+        # ---------- human_gate 特殊处理 ----------
+        # human_gate 步骤本身没有"执行"概念，引擎直接置 success（无产物）并触发确认流程
+        # human_gate 的执行器在 Task 3 实现，引擎层不调用 executor.execute()
+        if step.step_type == "human_gate":
+            # 直接置 success（无产物），跳过正常的执行+检查产物流程
+            await self._complete_step(step_key, {}, 0)
+            self._emit_progress("step_completed", step_key, {
+                "name": step.name,
+                "output_summary": {},
+                "credits_consumed": 0,
+                "output": {},
+            })
+            # 触发确认流程（human_gate 始终需要确认）
+            await self._handle_step_confirmation(step_key)
+            return
+
         # 构建执行上下文
+        # Task 17: 若 step.output_data 中存在 preserved_items（由 retry_step_preserve_success
+        # 写入），通过 context.extra 传递给执行器，执行器构建任务时跳过这些已成功的元素
+        preserved_items: List[Dict[str, Any]] = []
+        if isinstance(step.output_data, dict) and step.output_data.get("preserved_items"):
+            preserved_items = [
+                p for p in step.output_data.get("preserved_items") or []
+                if isinstance(p, dict)
+            ]
+
         context = StepExecutionContext(
             inputs=self._run.inputs if self._run else {},
             steps_output={
@@ -683,6 +758,8 @@ class PipelineEngine:
             run_id=self.run_id,
             extra={
                 "step_config": step_config,
+                # Task 17: 传递已成功元素，执行器构建任务时跳过对应 item_id
+                "preserved_items": preserved_items,
             },
             style_elements=self._style_elements,
         )
@@ -829,6 +906,12 @@ class PipelineEngine:
             # 执行
             output_data = await executor.execute()
 
+            # Task 17: 合并 preserved_items 回到新 output_data
+            # 执行器只重跑了失败元素，需要把之前保留的成功元素合并回来，
+            # 保证最终 output_data.items/images/videos 包含完整结果。
+            if preserved_items:
+                output_data = self._merge_preserved_items(output_data, preserved_items)
+
             # 校验执行结果：如果预期有任务但全部失败，标记步骤失败
             total = output_data.get("total", 0)
             success_count = output_data.get("success_count", len(output_data.get("images", [])) + len(output_data.get("videos", [])))
@@ -859,11 +942,19 @@ class PipelineEngine:
                     error_msg = f"全部 {total} 个任务失败。首个错误: {first_error}" if first_error else f"全部 {total} 个任务失败"
                 raise RuntimeError(error_msg)
 
+            # Task 17: 移除 preserved_items 临时字段（已合并回主列表，不再需要）
+            if "preserved_items" in output_data:
+                output_data.pop("preserved_items", None)
+
             # 按实际成功数量计算积分（图片每张10，视频每个30）
+            # Task 17: preserved_items 是之前已计费的成功元素，本次不再计费
             if "images" in output_data:
-                actual_credits = len(output_data.get("images", [])) * 10
+                # 只对本次新执行的图片计费（总数减去保留的已成功数量）
+                new_image_count = max(0, len(output_data.get("images", [])) - len(preserved_items))
+                actual_credits = new_image_count * 10
             elif "videos" in output_data:
-                actual_credits = len(output_data.get("videos", [])) * 30
+                new_video_count = max(0, len(output_data.get("videos", [])) - len(preserved_items))
+                actual_credits = new_video_count * 30
             else:
                 actual_credits = step_credits if success_count > 0 or total == 0 else 0
 
@@ -882,6 +973,11 @@ class PipelineEngine:
                 # 包含 images/videos/parsed_result 等字段
                 "output": output_data,
             })
+
+            # ---------- 步骤确认机制 ----------
+            # 步骤成功完成后，若需要用户确认才能继续下游，触发暂停
+            # （requires_confirmation=True 的普通步骤；human_gate 已在上方 early-return 分支处理）
+            await self._handle_step_confirmation(step_key)
 
         except Exception as e:
             error_msg = str(e)
@@ -943,6 +1039,94 @@ class PipelineEngine:
         if "parsed_result" in output_data:
             summary["has_parsed_result"] = True
         return summary
+
+    # ---------- Task 17: 合并保留的已成功元素 ----------
+
+    def _merge_preserved_items(
+        self,
+        new_output: Dict[str, Any],
+        preserved_items: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """
+        将 preserved_items（之前已成功的元素）合并回新执行结果的 output_data。
+
+        - 合并到 items / images / videos 列表（按 index 排序去重）
+        - 重新统计 success_count / failed_count / total
+        - 保留新执行结果的失败元素，避免重复执行已成功元素
+        """
+        if not preserved_items:
+            return new_output
+
+        # 收集保留元素的标识集合，用于去重（避免新结果中重复包含）
+        preserved_ids: set = set()
+        for it in preserved_items:
+            for key in ("item_id", "id", "index"):
+                val = it.get(key)
+                if val is not None:
+                    preserved_ids.add(str(val))
+
+        # 合并到 items 列表
+        if "items" in new_output and isinstance(new_output["items"], list):
+            existing_ids: set = set()
+            for it in new_output["items"]:
+                if not isinstance(it, dict):
+                    continue
+                for key in ("item_id", "id", "index"):
+                    val = it.get(key)
+                    if val is not None:
+                        existing_ids.add(str(val))
+            # 仅追加新结果中不存在的保留元素
+            for it in preserved_items:
+                it_id = None
+                for key in ("item_id", "id", "index"):
+                    if it.get(key) is not None:
+                        it_id = str(it.get(key))
+                        break
+                if it_id and it_id not in existing_ids:
+                    new_output["items"].append(it)
+                    existing_ids.add(it_id)
+            # 按 index 排序
+            new_output["items"].sort(key=lambda x: x.get("index", 0) if isinstance(x, dict) else 0)
+
+        # 同步合并到 images / videos 列表（兼容字段）
+        for list_key in ("images", "videos"):
+            if list_key in new_output and isinstance(new_output[list_key], list):
+                existing_ids_list: set = set()
+                for it in new_output[list_key]:
+                    if not isinstance(it, dict):
+                        continue
+                    for key in ("item_id", "id", "index"):
+                        val = it.get(key)
+                        if val is not None:
+                            existing_ids_list.add(str(val))
+                for it in preserved_items:
+                    it_id = None
+                    for key in ("item_id", "id", "index"):
+                        if it.get(key) is not None:
+                            it_id = str(it.get(key))
+                            break
+                    if it_id and it_id not in existing_ids_list:
+                        new_output[list_key].append(it)
+                        existing_ids_list.add(it_id)
+                new_output[list_key].sort(key=lambda x: x.get("index", 0) if isinstance(x, dict) else 0)
+
+        # 重新统计
+        all_items = new_output.get("items") or new_output.get("images") or new_output.get("videos") or []
+        new_output["success_count"] = sum(
+            1 for it in all_items if isinstance(it, dict) and it.get("status") == "success"
+        )
+        new_output["failed_count"] = sum(
+            1 for it in all_items if isinstance(it, dict) and it.get("status") == "failed"
+        )
+        new_output["total"] = len(all_items)
+
+        logger.info(
+            f"[Task 17] 合并保留元素: preserved={len(preserved_items)}, "
+            f"total={new_output.get('total', 0)}, "
+            f"success={new_output.get('success_count', 0)}, "
+            f"failed={new_output.get('failed_count', 0)}"
+        )
+        return new_output
 
     # ---------- 事务安全辅助方法 ----------
 
@@ -1129,6 +1313,71 @@ class PipelineEngine:
             self._run.current_step_key = step_key
 
         await self._safe_commit()
+
+    # ---------- 步骤确认机制（Task 2 新增）----------
+
+    async def _handle_step_confirmation(self, step_key: str) -> None:
+        """
+        处理步骤确认机制：若步骤需要确认，置 confirmation_status 并按需暂停流水线。
+
+        触发条件（任一满足）:
+          - step.requires_confirmation == True
+          - step.step_type == "human_gate"
+
+        行为:
+          - run.auto_confirm=True：直接置 confirmation_status=confirmed，不暂停，继续下游调度
+          - 否则：置 confirmation_status=pending + pause_requested=True
+                  + pause_reason="awaiting_confirmation" + 推送 step_awaiting_confirmation 事件
+                  下次循环 _check_pause_request 检测到 pause_requested 后会退出执行循环
+        """
+        step = self._steps.get(step_key)
+        if not step or not self._run:
+            return
+
+        # 仅当步骤需要确认时触发
+        needs_confirmation = step.requires_confirmation or step.step_type == "human_gate"
+        if not needs_confirmation:
+            return
+
+        # auto_confirm=True：跳过暂停，直接置 confirmed
+        if self._run.auto_confirm:
+            step.confirmation_status = "confirmed"
+            await self._safe_commit()
+            logger.info(
+                f"[流水线] auto_confirm=True，跳过暂停直接置 confirmed: "
+                f"step={step_key}, run_id={self.run_id}"
+            )
+            return
+
+        # 置 pending + 暂停
+        step.confirmation_status = "pending"
+        self._run.pause_requested = True
+        self._run.pause_reason = "awaiting_confirmation"
+        await self._safe_commit()
+
+        # 推送等待确认事件（通过 progress_callback 触发 SSE manager）
+        step_data = self._serialize_step(step)
+        self._emit_progress("step_awaiting_confirmation", step_key, {
+            "run_id": self.run_id,
+            "step_key": step_key,
+            "step": step_data,
+        })
+        logger.info(
+            f"[流水线] 步骤等待用户确认: step={step_key}, run_id={self.run_id}"
+        )
+
+    def _serialize_step(self, step: PipelineStep) -> Dict[str, Any]:
+        """序列化步骤为字典（用于 SSE 推送，含 output_data 与确认状态）"""
+        return {
+            "step_key": step.step_key,
+            "name": step.name,
+            "step_type": step.step_type,
+            "status": step.status,
+            "output_data": step.output_data or {},
+            "requires_confirmation": step.requires_confirmation,
+            "confirmation_status": step.confirmation_status,
+            "confirmation_comment": step.confirmation_comment,
+        }
 
     async def _fail_step(self, step_key: str, error_msg: str) -> None:
         """标记步骤失败"""
@@ -1381,6 +1630,14 @@ async def retry_pipeline_step(
         step = step_result.scalar_one_or_none()
         if not step:
             raise HTTPException(status_code=404, detail=f"步骤不存在: {step_key}")
+
+        # 健壮性修复：允许 pending/running 状态的重试请求返回 202（已在重试中），
+        # 避免后端自动重试与用户手动重试竞争时返回 400 误导前端
+        if step.status in (STATUS_PENDING, STATUS_RUNNING):
+            logger.info(
+                f"步骤 {step_key} 已在重试/执行中（status={step.status}），跳过重复触发"
+            )
+            return
 
         if step.status not in (STATUS_FAILED, STATUS_SKIPPED, STATUS_SUCCESS):
             raise HTTPException(

@@ -245,6 +245,18 @@
           @change="markDirty"
         />
       </div>
+
+      <!-- 任务失败自动重试开关（纯前端本地偏好） -->
+      <div class="pref-row">
+        <div class="pref-info">
+          <span class="pref-label">{{ t('prefs.generation.autoRetry') }}</span>
+          <span class="pref-hint">{{ t('prefs.generation.autoRetryHint') }}</span>
+        </div>
+        <el-switch
+          v-model="form.generation.autoRetry"
+          @change="markDirty"
+        />
+      </div>
     </section>
 
     <!-- ========== 界面偏好 ========== -->
@@ -403,6 +415,8 @@ const form = reactive({
     default_aspect_ratio: '1:1',
     auto_copy_prompt: true,
     default_image_count: 1,
+    // 任务失败自动重试（纯前端本地偏好，不通过后端 preferences 同步）
+    autoRetry: true,
   },
   ui: {
     theme: 'dark' as 'dark' | 'light' | 'system',
@@ -545,6 +559,8 @@ function syncFormFromStore() {
   form.generation.default_aspect_ratio = g.default_aspect_ratio
   form.generation.auto_copy_prompt = g.auto_copy_prompt
   form.generation.default_image_count = g.default_image_count
+  // 任务失败自动重试开关（纯前端本地偏好，从 prefsStore.autoRetry 同步）
+  form.generation.autoRetry = prefsStore.autoRetry
 
   const u = prefsStore.ui
   form.ui.theme = u.theme
@@ -586,12 +602,18 @@ onMounted(async () => {
 async function handleSave() {
   saving.value = true
   try {
+    // 1. 保存后端偏好（不含 autoRetry，因为是纯前端本地偏好）
+    //    解构剔除 autoRetry，避免后端 GenerationPreferences 收到未知字段
+    const { autoRetry: _autoRetry, ...generationForBackend } = form.generation
+    void _autoRetry  // 仅用于剔除，不使用
     await prefsStore.updatePreferences({
       download: { ...form.download },
-      generation: { ...form.generation },
+      generation: generationForBackend,
       ui: { ...form.ui },
       notification: { ...form.notification },
     })
+    // 2. 单独保存 autoRetry 到本地 localStorage（立即生效，关闭时通知 taskQueue 重置）
+    await prefsStore.setAutoRetry(form.generation.autoRetry)
     dirty.value = false
     lastSaved.value = new Date().toLocaleString()
     ElMessage.success({ message: t('prefs.saveSuccess'), duration: 1500 })

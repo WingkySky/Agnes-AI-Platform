@@ -538,12 +538,14 @@ async function handleCreate() {
   creating.value = true
   try {
     // 构建自定义的 steps_config（使用用户编辑后的配置）
+    // 注意：requires_confirmation 必须显式传递，否则引擎不会在步骤完成后暂停等待确认
     const customStepsConfig = editableSteps.value.map((step: any) => ({
       key: step.key,
       name: step.name,
       name_i18n: step.name_i18n,
       type: step.type,
       depends_on: step.depends_on || [],
+      requires_confirmation: step.requires_confirmation ?? false,
       config: { ...step.config },
     }))
     
