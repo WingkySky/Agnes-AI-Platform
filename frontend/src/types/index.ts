@@ -499,9 +499,17 @@ export interface QueueTask {
   pollIntervalMs: number
   rawResponse: unknown
   backendTaskId: string | null
-  source?: 'chat' | 'canvas' | 'pipeline' | null
+  source?: 'chat' | 'canvas' | 'pipeline' | 'project' | null
   /** 画布来源任务的节点 ID，用于任务完成后回填结果 */
   panelId?: string | null
+  /** 项目来源任务的上下文（用于任务完成后认领结果到项目实体） */
+  projectContext?: {
+    projectId: number
+    entityType?: 'character' | 'scene' | 'prop'
+    entityId?: number
+    shotId?: number
+    claimUrl: string
+  } | null
   /** 当前已重试次数（默认 0；自动重试启用时递增） */
   retryCount?: number
   /** 最大重试次数（image/video=3，其他类型=0） */

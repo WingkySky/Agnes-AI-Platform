@@ -20,6 +20,8 @@ from app.models.project import (
     ProjectEntityAsset,
 )
 from app.services.agnes_client import agnes_client
+from app.services.project._async_gen import submit_image_task, claim_generation
+from app.services.project._generation_history import record_manual_upload
 from app.services.project.sse_manager import project_sse_manager
 
 logger = logging.getLogger("agnes_platform.project.frame_image")
@@ -112,12 +114,11 @@ async def generate_frame_image(
     model: str = "",
     size: str = "1024x1024",
     reference_character_ids: Optional[List[int]] = None,
-) -> Optional[ProjectShotFrameImage]:
+) -> dict:
     """
-    生成分镜帧图（基于分镜的 image_prompt + 角色参考图）
+    生成分镜帧图（异步模式）
 
-    Args:
-        reference_character_ids: 参考角色 ID 数组，不传则取该分镜已绑定的所有角色
+    提交到 image_poller_manager，立即返回 task_id。
     """
     shot = (
         await db.execute(select(ProjectShot).where(ProjectShot.id == shot_id))
@@ -127,7 +128,6 @@ async def generate_frame_image(
 
     # 确定参考角色
     if reference_character_ids is None:
-        # 取该分镜已绑定的角色
         chars_result = await db.execute(
             select(ProjectShotCharacter.character_id).where(
                 ProjectShotCharacter.shot_id == shot_id
@@ -145,6 +145,15 @@ async def generate_frame_image(
 
     # 获取参考图 URL
     ref_urls = await _get_character_ref_urls(db, reference_character_ids)
+    mode = "image2image" if ref_urls else "text2image"
+    used_model = model or "agnes-image-2.0-flash"
+
+    # 提交到 image_poller
+    task_id = await submit_image_task(
+        db, user_id, prompt, used_model, size, mode=mode,
+        image_urls=ref_urls or None,
+        ref_type="project_frame_image",
+    )
 
     await project_sse_manager.push(
         shot.project_id,
@@ -154,71 +163,67 @@ async def generate_frame_image(
             "version_type": "frame_image",
             "user_id": user_id,
             "reference_character_ids": reference_character_ids,
+            "task_id": task_id,
         },
     )
 
-    try:
-        kwargs = {
-            "prompt": prompt,
-            "model": model or "agnes-image-2.0-flash",
-            "size": size,
-            "response_format": "url",
-        }
-        if ref_urls:
-            kwargs["image_urls"] = ref_urls
+    return {
+        "task_id": task_id,
+        "shot_id": shot_id,
+        "status": "pending",
+        "prompt": prompt,
+    }
 
-        result = await agnes_client.create_image(**kwargs)
-        data_list = result.get("data", [])
-        if not data_list:
-            raise RuntimeError("图片生成返回空数据")
-        image_url = data_list[0].get("url", "")
-        if not image_url:
-            raise RuntimeError("图片生成未返回 URL")
 
-        # 创建新版本
-        version_no = await _next_version(db, shot_id)
-        await _reset_active_flags(db, shot_id)
+async def claim_frame_image(
+    db: AsyncSession, shot_id: int, task_id: str, reference_character_ids: Optional[List[int]] = None
+) -> Optional[ProjectShotFrameImage]:
+    """任务完成后认领结果：从 Generation 拿 result_url，创建帧图新版本"""
+    shot = (
+        await db.execute(select(ProjectShot).where(ProjectShot.id == shot_id))
+    ).scalar_one_or_none()
+    if not shot:
+        return None
 
-        frame_image = ProjectShotFrameImage(
-            shot_id=shot_id,
-            version=version_no,
-            is_active=True,
-            is_manual=False,
-            file_url=image_url,
-            thumbnail_url=image_url,
-            prompt=prompt,
-            model=model or "agnes-image-2.0-flash",
-            reference_character_ids=reference_character_ids,
-            file_type="image",
-            created_by="ai",
-        )
-        db.add(frame_image)
-        await db.flush()
+    gen = await claim_generation(db, task_id)
+    if not gen or not gen.result_url:
+        return None
 
-        shot.active_frame_image_id = frame_image.id
-        await db.commit()
-        await db.refresh(frame_image)
+    version_no = await _next_version(db, shot_id)
+    await _reset_active_flags(db, shot_id)
 
-        await project_sse_manager.push(
-            shot.project_id,
-            "generation_completed",
-            {
-                "target": f"shot:{shot_id}:frame_image",
-                "version_id": frame_image.id,
-                "file_url": image_url,
-            },
-        )
-        return frame_image
-    except Exception as e:
-        await project_sse_manager.push(
-            shot.project_id,
-            "generation_failed",
-            {
-                "target": f"shot:{shot_id}:frame_image",
-                "error": str(e),
-            },
-        )
-        raise
+    frame_image = ProjectShotFrameImage(
+        shot_id=shot_id,
+        version=version_no,
+        is_active=True,
+        is_manual=False,
+        file_url=gen.result_url,
+        thumbnail_url=gen.result_url,
+        prompt=gen.prompt or "",
+        model=gen.model or "",
+        generation_id=gen.id,
+        reference_character_ids=reference_character_ids or [],
+        created_by="ai",
+    )
+    db.add(frame_image)
+    await db.flush()
+
+    shot.active_frame_image_id = frame_image.id
+    await db.commit()
+    await db.refresh(frame_image)
+
+    await project_sse_manager.push(
+        shot.project_id,
+        "generation_completed",
+        {
+            "target": f"shot:{shot_id}:frame_image",
+            "version_id": frame_image.id,
+            "file_url": gen.result_url,
+            "generation_id": gen.id,
+            "task_id": task_id,
+        },
+    )
+    return frame_image
 
 
 async def batch_generate_frame_images(
@@ -265,6 +270,10 @@ async def upload_frame_image(
     if not shot:
         return None
 
+    gen_record = await record_manual_upload(
+        db, user_id, "image", file_url, name=shot.title or f"分镜{shot.sequence_no}",
+    )
+
     version_no = await _next_version(db, shot_id)
     await _reset_active_flags(db, shot_id)
 
@@ -276,8 +285,8 @@ async def upload_frame_image(
         file_url=file_url,
         thumbnail_url=thumbnail_url or file_url,
         prompt="(用户上传)",
+        generation_id=gen_record.id,
         reference_character_ids=[],
-        file_type="image",
         file_size=file_size,
         width=width,
         height=height,

@@ -21,6 +21,8 @@ from app.services.project._entity_versions import (
     attach_active_image,
     attach_active_image_batch,
 )
+from app.services.project._async_gen import submit_image_task, claim_generation
+from app.services.project._generation_history import record_manual_upload
 from app.services.project.sse_manager import project_sse_manager
 from app.services.project.wizard import parse_json_loose
 
@@ -153,8 +155,8 @@ async def generate_prop_image(
     style_config: Optional[dict] = None,
     model: str = "",
     size: str = "1024x1024",
-) -> Optional[ProjectProp]:
-    """生成单个道具图"""
+) -> dict:
+    """生成单个道具图（异步模式）"""
     prop = await get_prop(db, prop_id)
     if not prop:
         return None
@@ -165,6 +167,12 @@ async def generate_prop_image(
             if v:
                 prompt_parts.append(f"{k}: {v}")
     prompt = ", ".join(prompt_parts)
+    used_model = model or "agnes-image-2.0-flash"
+
+    task_id = await submit_image_task(
+        db, user_id, prompt, used_model, size, mode="text2image",
+        ref_type="project_prop_image",
+    )
 
     await project_sse_manager.push(
         prop.project_id,
@@ -173,54 +181,58 @@ async def generate_prop_image(
             "target": f"{ENTITY_TYPE}:{prop_id}",
             "version_type": "image",
             "user_id": user_id,
+            "task_id": task_id,
         },
     )
 
-    try:
-        result = await agnes_client.create_image(
-            prompt=prompt,
-            model=model or "agnes-image-2.0-flash",
-            size=size,
-            response_format="url",
-        )
-        data_list = result.get("data", [])
-        if not data_list:
-            raise RuntimeError("图片生成返回空数据")
-        image_url = data_list[0].get("url", "")
-        if not image_url:
-            raise RuntimeError("图片生成未返回 URL")
+    return {
+        "task_id": task_id,
+        "entity_type": ENTITY_TYPE,
+        "entity_id": prop_id,
+        "status": "pending",
+        "prompt": prompt,
+    }
 
-        asset, _ = await create_version(
-            db,
-            project_id=prop.project_id,
-            entity_type=ENTITY_TYPE,
-            entity_id=prop_id,
-            file_url=image_url,
-            thumbnail_url=image_url,
-            prompt=prompt,
-            model=model or "agnes-image-2.0-flash",
-            file_type="image",
-            set_active=True,
-        )
 
-        await project_sse_manager.push(
-            prop.project_id,
-            "generation_completed",
-            {
-                "target": f"{ENTITY_TYPE}:{prop_id}",
-                "version_id": asset.id,
-                "file_url": image_url,
-            },
-        )
-        await attach_active_image(db, ENTITY_TYPE, prop)
-        return prop
-    except Exception as e:
-        await project_sse_manager.push(
-            prop.project_id,
-            "generation_failed",
-            {"target": f"{ENTITY_TYPE}:{prop_id}", "error": str(e)},
-        )
-        raise
+async def claim_prop_image(
+    db: AsyncSession, prop_id: int, task_id: str
+) -> Optional[ProjectProp]:
+    """任务完成后认领结果"""
+    prop = await get_prop(db, prop_id)
+    if not prop:
+        return None
+
+    gen = await claim_generation(db, task_id)
+    if not gen or not gen.result_url:
+        return None
+
+    asset, _ = await create_version(
+        db,
+        project_id=prop.project_id,
+        entity_type=ENTITY_TYPE,
+        entity_id=prop_id,
+        file_url=gen.result_url,
+        thumbnail_url=gen.result_url,
+        prompt=gen.prompt or "",
+        model=gen.model or "",
+        file_type="image",
+        generation_id=gen.id,
+        set_active=True,
+    )
+
+    await project_sse_manager.push(
+        prop.project_id,
+        "generation_completed",
+        {
+            "target": f"{ENTITY_TYPE}:{prop_id}",
+            "version_id": asset.id,
+            "file_url": gen.result_url,
+            "generation_id": gen.id,
+            "task_id": task_id,
+        },
+    )
+    await attach_active_image(db, ENTITY_TYPE, prop)
+    return prop
 
 
 async def batch_generate_props(
@@ -257,6 +269,10 @@ async def upload_prop_image(
     if not prop:
         return None
 
+    gen_record = await record_manual_upload(
+        db, user_id, "image", file_url, name=prop.name,
+    )
+
     await create_version(
         db,
         project_id=prop.project_id,
@@ -270,6 +286,7 @@ async def upload_prop_image(
         width=width,
         height=height,
         is_manual=True,
+        generation_id=gen_record.id,
         set_active=True,
     )
     await attach_active_image(db, ENTITY_TYPE, prop)

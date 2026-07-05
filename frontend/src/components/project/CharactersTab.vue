@@ -123,7 +123,7 @@ async function onBatchGenerate() {
   // 标记为生成中
   generatingIds.value.push(...selectedIds.value)
   try {
-    await projectStore.batchGenerateCharacters({ character_ids: selectedIds.value })
+    await projectStore.batchGenerateCharacters({ ids: selectedIds.value })
     ElMessage.success('批量生成任务已启动')
   } catch (e: any) {
     ElMessage.error(e?.message || '批量生成失败')

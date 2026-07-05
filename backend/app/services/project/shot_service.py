@@ -16,6 +16,8 @@ from app.models.project import (
     ProjectShot,
     ProjectShotCharacter,
     ProjectShotProp,
+    ProjectShotFrameImage,
+    ProjectShotVideo,
     ProjectCharacter,
     ProjectScene,
     ProjectProp,
@@ -30,13 +32,164 @@ logger = logging.getLogger("agnes_platform.project.shot")
 
 
 # =====================================================
+# 内部工具：给 shot 注入关联数据（用于响应序列化）
+# =====================================================
+
+async def _attach_shot_relations(db: AsyncSession, shot: ProjectShot) -> None:
+    """
+    给单个 shot 注入关联数据到 __dict__（避免 SQLAlchemy async lazy load 报错）：
+    - characters / props（关联实体）
+    - frame_images / videos（多版本列表）
+    - active_frame_image / active_video（采用版）
+    """
+    # 角色
+    chars_result = await db.execute(
+        select(ProjectCharacter)
+        .join(
+            ProjectShotCharacter,
+            ProjectShotCharacter.character_id == ProjectCharacter.id,
+        )
+        .where(ProjectShotCharacter.shot_id == shot.id)
+        .order_by(ProjectShotCharacter.sort_order)
+    )
+    shot.__dict__["characters"] = chars_result.scalars().all()
+
+    # 道具
+    props_result = await db.execute(
+        select(ProjectProp)
+        .join(ProjectShotProp, ProjectShotProp.prop_id == ProjectProp.id)
+        .where(ProjectShotProp.shot_id == shot.id)
+        .order_by(ProjectShotProp.sort_order)
+    )
+    shot.__dict__["props"] = props_result.scalars().all()
+
+    # 帧图版本列表
+    frames_result = await db.execute(
+        select(ProjectShotFrameImage)
+        .where(ProjectShotFrameImage.shot_id == shot.id)
+        .order_by(ProjectShotFrameImage.version.desc())
+    )
+    frames = frames_result.scalars().all()
+    shot.__dict__["frame_images"] = frames
+
+    # 视频版本列表
+    videos_result = await db.execute(
+        select(ProjectShotVideo)
+        .where(ProjectShotVideo.shot_id == shot.id)
+        .order_by(ProjectShotVideo.version.desc())
+    )
+    videos = videos_result.scalars().all()
+    shot.__dict__["videos"] = videos
+
+    # 采用帧图
+    active_frame = None
+    if shot.active_frame_image_id:
+        active_frame = next((f for f in frames if f.id == shot.active_frame_image_id), None)
+    if not active_frame and frames:
+        # 回退：取 is_active=True 的
+        active_frame = next((f for f in frames if f.is_active), None)
+    shot.__dict__["active_frame_image"] = active_frame
+
+    # 采用视频
+    active_vid = None
+    if shot.active_video_id:
+        active_vid = next((v for v in videos if v.id == shot.active_video_id), None)
+    if not active_vid and videos:
+        active_vid = next((v for v in videos if v.is_active), None)
+    shot.__dict__["active_video"] = active_vid
+
+
+async def _attach_shot_relations_batch(db: AsyncSession, shots: List[ProjectShot]) -> None:
+    """批量给 shots 注入关联数据（减少查询次数）"""
+    if not shots:
+        return
+    shot_ids = [s.id for s in shots]
+
+    # 角色关联（一次查所有）
+    char_rows = (
+        await db.execute(
+            select(ProjectShotCharacter.shot_id, ProjectCharacter)
+            .join(
+                ProjectCharacter,
+                ProjectCharacter.id == ProjectShotCharacter.character_id,
+            )
+            .where(ProjectShotCharacter.shot_id.in_(shot_ids))
+            .order_by(ProjectShotCharacter.shot_id, ProjectShotCharacter.sort_order)
+        )
+    ).all()
+    char_map: dict = {}
+    for sid, char in char_rows:
+        char_map.setdefault(sid, []).append(char)
+
+    # 道具关联
+    prop_rows = (
+        await db.execute(
+            select(ProjectShotProp.shot_id, ProjectProp)
+            .join(ProjectProp, ProjectProp.id == ProjectShotProp.prop_id)
+            .where(ProjectShotProp.shot_id.in_(shot_ids))
+            .order_by(ProjectShotProp.shot_id, ProjectShotProp.sort_order)
+        )
+    ).all()
+    prop_map: dict = {}
+    for sid, prop in prop_rows:
+        prop_map.setdefault(sid, []).append(prop)
+
+    # 帧图
+    frame_rows = (
+        await db.execute(
+            select(ProjectShotFrameImage)
+            .where(ProjectShotFrameImage.shot_id.in_(shot_ids))
+            .order_by(ProjectShotFrameImage.shot_id, ProjectShotFrameImage.version.desc())
+        )
+    ).scalars().all()
+    frame_map: dict = {}
+    for f in frame_rows:
+        frame_map.setdefault(f.shot_id, []).append(f)
+
+    # 视频
+    video_rows = (
+        await db.execute(
+            select(ProjectShotVideo)
+            .where(ProjectShotVideo.shot_id.in_(shot_ids))
+            .order_by(ProjectShotVideo.shot_id, ProjectShotVideo.version.desc())
+        )
+    ).scalars().all()
+    video_map: dict = {}
+    for v in video_rows:
+        video_map.setdefault(v.shot_id, []).append(v)
+
+    for shot in shots:
+        sid = shot.id
+        frames = frame_map.get(sid, [])
+        videos = video_map.get(sid, [])
+        shot.__dict__["characters"] = char_map.get(sid, [])
+        shot.__dict__["props"] = prop_map.get(sid, [])
+        shot.__dict__["frame_images"] = frames
+        shot.__dict__["videos"] = videos
+
+        active_frame = None
+        if shot.active_frame_image_id:
+            active_frame = next((f for f in frames if f.id == shot.active_frame_image_id), None)
+        if not active_frame and frames:
+            active_frame = next((f for f in frames if f.is_active), None)
+        shot.__dict__["active_frame_image"] = active_frame
+
+        active_vid = None
+        if shot.active_video_id:
+            active_vid = next((v for v in videos if v.id == shot.active_video_id), None)
+        if not active_vid and videos:
+            active_vid = next((v for v in videos if v.is_active), None)
+        shot.__dict__["active_video"] = active_vid
+
+
+# =====================================================
 # 分镜 CRUD
 # =====================================================
 
 async def list_shots(db: AsyncSession, project_id: int) -> List[ProjectShot]:
     """
     列出项目所有分镜（按 sort_order）
-    含关联的角色/场景/道具（用于前端列表展示）
+    含关联的角色/场景/道具/帧图/视频（用于前端列表展示）
     """
     result = await db.execute(
         select(ProjectShot)
@@ -44,65 +197,19 @@ async def list_shots(db: AsyncSession, project_id: int) -> List[ProjectShot]:
         .order_by(ProjectShot.sort_order)
     )
     shots = result.scalars().all()
-
-    # 批量加载关联（避免 N+1）
-    for shot in shots:
-        # 加载关联角色
-        chars_result = await db.execute(
-            select(ProjectCharacter)
-            .join(
-                ProjectShotCharacter,
-                ProjectShotCharacter.character_id == ProjectCharacter.id,
-            )
-            .where(ProjectShotCharacter.shot_id == shot.id)
-            .order_by(ProjectShotCharacter.sort_order)
-        )
-        shot._characters = chars_result.scalars().all()
-
-        # 加载关联道具
-        props_result = await db.execute(
-            select(ProjectProp)
-            .join(
-                ProjectShotProp,
-                ProjectShotProp.prop_id == ProjectProp.id,
-            )
-            .where(ProjectShotProp.shot_id == shot.id)
-            .order_by(ProjectShotProp.sort_order)
-        )
-        shot._props = props_result.scalars().all()
-
+    await _attach_shot_relations_batch(db, shots)
     return shots
 
 
 async def get_shot(db: AsyncSession, shot_id: int) -> Optional[ProjectShot]:
-    """获取分镜详情（含关联实体）"""
+    """获取分镜详情（含关联实体/帧图/视频）"""
     result = await db.execute(
         select(ProjectShot).where(ProjectShot.id == shot_id)
     )
     shot = result.scalar_one_or_none()
     if not shot:
         return None
-
-    # 加载关联
-    chars_result = await db.execute(
-        select(ProjectCharacter)
-        .join(
-            ProjectShotCharacter,
-            ProjectShotCharacter.character_id == ProjectCharacter.id,
-        )
-        .where(ProjectShotCharacter.shot_id == shot_id)
-        .order_by(ProjectShotCharacter.sort_order)
-    )
-    shot._characters = chars_result.scalars().all()
-
-    props_result = await db.execute(
-        select(ProjectProp)
-        .join(ProjectShotProp, ProjectShotProp.prop_id == ProjectProp.id)
-        .where(ProjectShotProp.shot_id == shot_id)
-        .order_by(ProjectShotProp.sort_order)
-    )
-    shot._props = props_result.scalars().all()
-
+    await _attach_shot_relations(db, shot)
     return shot
 
 
@@ -351,20 +458,8 @@ async def generate_frame_prompt(
     if not shot:
         return None
 
-    # 构建上下文
-    char_info = ", ".join(
-        [f"{c.name}({c.appearance_desc or c.description})" for c in shot._props]
-    ) if hasattr(shot, "_characters") else ""
-    # 重新加载角色（_props 可能未加载）
-    chars_result = await db.execute(
-        select(ProjectCharacter)
-        .join(
-            ProjectShotCharacter,
-            ProjectShotCharacter.character_id == ProjectCharacter.id,
-        )
-        .where(ProjectShotCharacter.shot_id == shot_id)
-    )
-    chars = chars_result.scalars().all()
+    # 构建上下文（get_shot 已注入 characters 到 __dict__）
+    chars = shot.__dict__.get("characters") or []
     char_info = ", ".join(
         [f"{c.name}({c.appearance_desc or c.description or ''})" for c in chars]
     )

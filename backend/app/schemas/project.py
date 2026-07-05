@@ -354,8 +354,12 @@ class ShotResponse(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     # 关联实体（可选展开）
-    characters: Optional[List[CharacterResponse]] = None
-    props: Optional[List[PropResponse]] = None
+    characters: Optional[List["CharacterResponse"]] = None
+    props: Optional[List["PropResponse"]] = None
+    frame_images: Optional[List["FrameImageResponse"]] = None
+    videos: Optional[List["VideoResponse"]] = None
+    active_frame_image: Optional["FrameImageResponse"] = None
+    active_video: Optional["VideoResponse"] = None
 
 
 class ReorderRequest(BaseModel):

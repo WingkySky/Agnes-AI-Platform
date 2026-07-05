@@ -235,7 +235,7 @@ async function onBatchGenerateFrames() {
   batchGenerating.value = true
   generatingFrameIds.value.push(...selectedIds.value)
   try {
-    await projectStore.batchGenerateFrameImages({ shot_ids: selectedIds.value })
+    await projectStore.batchGenerateFrameImages({ ids: selectedIds.value })
     ElMessage.success('批量生成任务已启动')
   } catch (e: any) {
     ElMessage.error(e?.message || '批量生成失败')
@@ -277,7 +277,7 @@ async function onBatchGenerateVideos() {
 async function onReorder() {
   const ids = sortedShots.value.map(s => s.id)
   try {
-    await projectStore.reorderShots({ shot_ids: ids })
+    await projectStore.reorderShots({ ids })
     ElMessage.success('已按序号重排')
   } catch (e: any) {
     ElMessage.error(e?.message || '重排失败')

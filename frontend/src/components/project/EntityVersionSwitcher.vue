@@ -15,7 +15,7 @@
   >
     <template #reference>
       <el-button link :icon="Switch" @click.stop="onOpen">
-        <span v-if="activeVersion">v{{ activeVersion.version_no }}</span>
+        <span v-if="activeVersion">v{{ activeVersion.version }}</span>
         <span v-else>版本</span>
       </el-button>
     </template>
@@ -38,12 +38,12 @@
           :class="{ active: ver.is_active }"
         >
           <div class="version-thumb">
-            <img v-if="ver.thumbnail_url" :src="ver.thumbnail_url" :alt="`v${ver.version_no}`" />
+            <img v-if="ver.thumbnail_url" :src="ver.thumbnail_url" :alt="`v${ver.version}`" />
             <el-icon v-else><Picture /></el-icon>
           </div>
           <div class="version-info">
             <div class="version-no">
-              v{{ ver.version_no }}
+              v{{ ver.version }}
               <el-tag v-if="ver.is_active" type="success" size="small">采用中</el-tag>
               <el-tag v-if="ver.is_manual" type="warning" size="small">手动上传</el-tag>
             </div>
@@ -115,6 +115,12 @@ async function loadVersions() {
   }
 }
 
+function formatDate(s?: string | null): string {
+  if (!s) return ''
+  const d = new Date(s)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
 function onOpen() {
   if (versions.value.length === 0) {
     loadVersions()
@@ -124,7 +130,7 @@ function onOpen() {
 async function onSetActive(ver: ProjectEntityAsset) {
   try {
     await projectStore.setEntityActiveVersion(props.entityType, props.entityId, ver.id)
-    ElMessage.success(`已切换到 v${ver.version_no}`)
+    ElMessage.success(`已切换到 v${ver.version}`)
     emit('change')
     await loadVersions()
   } catch (e: any) {
@@ -135,7 +141,7 @@ async function onSetActive(ver: ProjectEntityAsset) {
 async function onDelete(ver: ProjectEntityAsset) {
   try {
     await ElMessageBox.confirm(
-      `确定删除 v${ver.version_no}？此操作不可撤销。`,
+      `确定删除 v${ver.version}？此操作不可撤销。`,
       '删除版本',
       { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
     )

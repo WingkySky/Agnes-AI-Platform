@@ -70,7 +70,7 @@ export function createProject(data: ProjectCreateRequest): Promise<Project> {
 }
 
 export function updateProject(id: number, data: ProjectUpdateRequest): Promise<Project> {
-  return client.put(`/api/projects/${id}`, data)
+  return client.patch(`/api/projects/${id}`, data)
 }
 
 export function deleteProject(id: number): Promise<{ status: string; message: string }> {
@@ -82,7 +82,7 @@ export function archiveProject(id: number): Promise<Project> {
 }
 
 export function updateActiveView(id: number, data: ActiveViewUpdateRequest): Promise<Project> {
-  return client.put(`/api/projects/${id}/active-view`, data)
+  return client.patch(`/api/projects/${id}/active-view`, data)
 }
 
 // =====================================================
@@ -131,7 +131,7 @@ export function createScript(projectId: number, data: ScriptCreateRequest): Prom
 }
 
 export function updateScript(projectId: number, scriptId: number, data: ScriptUpdateRequest): Promise<ProjectScript> {
-  return client.put(`/api/projects/${projectId}/scripts/${scriptId}`, data)
+  return client.patch(`/api/projects/${projectId}/scripts/${scriptId}`, data)
 }
 
 export function deleteScript(projectId: number, scriptId: number): Promise<{ status: string; message: string }> {
@@ -168,9 +168,9 @@ function buildEntityApi(prefix: string): EntityEndpoints {
     list: (projectId: number) => client.get(`/api/projects/${projectId}/${prefix}`),
     get: (projectId: number, id: number) => client.get(`/api/projects/${projectId}/${prefix}/${id}`),
     create: (projectId: number, data: any) => client.post(`/api/projects/${projectId}/${prefix}`, data),
-    update: (projectId: number, id: number, data: any) => client.put(`/api/projects/${projectId}/${prefix}/${id}`, data),
+    update: (projectId: number, id: number, data: any) => client.patch(`/api/projects/${projectId}/${prefix}/${id}`, data),
     delete: (projectId: number, id: number) => client.delete(`/api/projects/${projectId}/${prefix}/${id}`),
-    reorder: (projectId: number, ids: number[]) => client.post(`/api/projects/${projectId}/${prefix}/reorder`, { ids }),
+    reorder: (projectId: number, ids: number[]) => client.patch(`/api/projects/${projectId}/${prefix}/reorder`, { ids }),
     generateImage: (projectId: number, id: number, data: any) =>
       client.post(`/api/projects/${projectId}/${prefix}/${id}/generate-image`, data),
     batchGenerate: (projectId: number, data: any) =>
@@ -185,11 +185,11 @@ function buildEntityApi(prefix: string): EntityEndpoints {
     listVersions: (projectId: number, id: number) =>
       client.get(`/api/projects/${projectId}/${prefix}/${id}/versions`),
     setActiveVersion: (projectId: number, id: number, data: SetActiveVersionRequest) =>
-      client.post(`/api/projects/${projectId}/${prefix}/${id}/versions/set-active`, data),
+      client.post(`/api/projects/${projectId}/${prefix}/${id}/set-active`, data),
     deleteVersion: (projectId: number, id: number, versionId: number) =>
       client.delete(`/api/projects/${projectId}/${prefix}/${id}/versions/${versionId}`),
-    extractFromScript: (projectId: number, scriptId: number) =>
-      client.post(`/api/projects/${projectId}/${prefix}/extract-from-script`, { script_id: scriptId }),
+    extractFromScript: (projectId: number, _scriptId: number) =>
+      client.post(`/api/projects/${projectId}/${prefix}/extract-from-script`),
   }
 }
 
@@ -245,7 +245,7 @@ export function createShot(projectId: number, data: ShotCreateRequest): Promise<
 }
 
 export function updateShot(projectId: number, shotId: number, data: ShotUpdateRequest): Promise<ProjectShot> {
-  return client.put(`/api/projects/${projectId}/shots/${shotId}`, data)
+  return client.patch(`/api/projects/${projectId}/shots/${shotId}`, data)
 }
 
 export function deleteShot(projectId: number, shotId: number): Promise<{ status: string; message: string }> {
@@ -253,31 +253,31 @@ export function deleteShot(projectId: number, shotId: number): Promise<{ status:
 }
 
 export function reorderShots(projectId: number, data: ShotReorderRequest): Promise<any> {
-  return client.post(`/api/projects/${projectId}/shots/reorder`, data)
+  return client.patch(`/api/projects/${projectId}/shots/reorder`, data)
 }
 
 export function generateFramePrompt(projectId: number, shotId: number): Promise<ProjectShot> {
   return client.post(`/api/projects/${projectId}/shots/${shotId}/generate-frame-prompt`)
 }
 
-export function splitShotsFromScript(projectId: number, scriptId: number): Promise<any> {
-  return client.post(`/api/projects/${projectId}/shots/split-from-script`, { script_id: scriptId })
+export function splitShotsFromScript(projectId: number, _scriptId: number): Promise<any> {
+  return client.post(`/api/projects/${projectId}/shots/split`)
 }
 
 export function bindCharacterToShot(projectId: number, shotId: number, data: ShotBindEntityRequest): Promise<any> {
-  return client.post(`/api/projects/${projectId}/shots/${shotId}/characters`, data)
+  return client.post(`/api/projects/${projectId}/shots/${shotId}/bind-character`, data)
 }
 
 export function unbindCharacterFromShot(projectId: number, shotId: number, characterId: number): Promise<any> {
-  return client.delete(`/api/projects/${projectId}/shots/${shotId}/characters/${characterId}`)
+  return client.post(`/api/projects/${projectId}/shots/${shotId}/unbind-character`, { entity_id: characterId })
 }
 
 export function bindPropToShot(projectId: number, shotId: number, data: ShotBindEntityRequest): Promise<any> {
-  return client.post(`/api/projects/${projectId}/shots/${shotId}/props`, data)
+  return client.post(`/api/projects/${projectId}/shots/${shotId}/bind-prop`, data)
 }
 
 export function unbindPropFromShot(projectId: number, shotId: number, propId: number): Promise<any> {
-  return client.delete(`/api/projects/${projectId}/shots/${shotId}/props/${propId}`)
+  return client.post(`/api/projects/${projectId}/shots/${shotId}/unbind-prop`, { entity_id: propId })
 }
 
 // =====================================================
@@ -293,7 +293,7 @@ export function generateFrameImage(projectId: number, shotId: number, data: Gene
 }
 
 export function batchGenerateFrameImages(projectId: number, data: BatchGenerateFrameImagesRequest): Promise<any> {
-  return client.post(`/api/projects/${projectId}/frame-images/batch-generate`, data)
+  return client.post(`/api/projects/${projectId}/shots/frame-images/batch-generate`, data)
 }
 
 export function uploadFrameImage(projectId: number, shotId: number, file: File): Promise<ProjectFrameImage> {
@@ -304,8 +304,8 @@ export function uploadFrameImage(projectId: number, shotId: number, file: File):
   })
 }
 
-export function setActiveFrameImage(projectId: number, shotId: number, data: SetActiveVersionRequest): Promise<ProjectFrameImage> {
-  return client.post(`/api/projects/${projectId}/shots/${shotId}/frame-images/set-active`, data)
+export function setActiveFrameImage(projectId: number, shotId: number, versionId: number): Promise<ProjectFrameImage> {
+  return client.post(`/api/projects/${projectId}/shots/${shotId}/frame-images/${versionId}/set-active`)
 }
 
 export function deleteFrameImage(projectId: number, shotId: number, frameImageId: number): Promise<{ status: string; message: string }> {
@@ -332,8 +332,8 @@ export function uploadVideo(projectId: number, shotId: number, file: File): Prom
   })
 }
 
-export function setActiveVideo(projectId: number, shotId: number, data: SetActiveVersionRequest): Promise<ProjectVideo> {
-  return client.post(`/api/projects/${projectId}/shots/${shotId}/videos/set-active`, data)
+export function setActiveVideo(projectId: number, shotId: number, versionId: number): Promise<ProjectVideo> {
+  return client.post(`/api/projects/${projectId}/shots/${shotId}/videos/${versionId}/set-active`)
 }
 
 export function deleteVideo(projectId: number, shotId: number, videoId: number): Promise<{ status: string; message: string }> {
@@ -344,12 +344,12 @@ export function deleteVideo(projectId: number, shotId: number, videoId: number):
 // 资产桥接 API
 // =====================================================
 
-export function importAssetToProject(projectId: number, data: ImportAssetRequest): Promise<any> {
-  return client.post(`/api/projects/${projectId}/assets/import`, data)
+export function importAssetToProject(projectId: number, entityType: EntityType, data: ImportAssetRequest): Promise<any> {
+  return client.post(`/api/projects/${projectId}/entities/${entityType}/import-asset`, data)
 }
 
-export function promoteEntityToAsset(projectId: number, data: PromoteAssetRequest): Promise<any> {
-  return client.post(`/api/projects/${projectId}/assets/promote`, data)
+export function promoteEntityToAsset(projectId: number, entityType: EntityType, entityId: number, data: PromoteAssetRequest): Promise<any> {
+  return client.post(`/api/projects/${projectId}/entities/${entityType}/${entityId}/promote-asset`, data)
 }
 
 // =====================================================
@@ -361,7 +361,7 @@ export function getCanvasLayout(projectId: number): Promise<CanvasLayoutResponse
 }
 
 export function saveCanvasLayout(projectId: number, data: CanvasDataUpdate): Promise<CanvasLayoutResponse> {
-  return client.put(`/api/projects/${projectId}/canvas`, data)
+  return client.patch(`/api/projects/${projectId}/canvas`, data)
 }
 
 // =====================================================
@@ -369,7 +369,7 @@ export function saveCanvasLayout(projectId: number, data: CanvasDataUpdate): Pro
 // =====================================================
 
 export function mergeProject(projectId: number): Promise<{ status: string; message: string }> {
-  return client.post(`/api/projects/${projectId}/merge`)
+  return client.post(`/api/projects/${projectId}/merge`, {})
 }
 
 export function getMergeStatus(projectId: number): Promise<MergeStatusResponse> {

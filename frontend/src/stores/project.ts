@@ -248,7 +248,7 @@ export const useProjectStore = defineStore('project', {
     },
 
     async updateActiveView(id: number, view: ProjectActiveView) {
-      const data: ActiveViewUpdateRequest = { active_view: view }
+      const data: ActiveViewUpdateRequest = { view }
       const project = await apiUpdateActiveView(id, data)
       this.activeView = view
       if (this.currentProjectId === id) {
@@ -376,15 +376,25 @@ export const useProjectStore = defineStore('project', {
     async generateEntityImage(entityType: EntityType, id: number, data: any) {
       if (!this.currentProjectId) throw new Error('未选择项目')
       const api = getEntityApi(entityType)
-      const entity = await api.generateImage(this.currentProjectId, id, data)
-      const replace = (arr: any[]) => {
-        const idx = arr.findIndex(e => e.id === id)
-        if (idx >= 0) arr[idx] = entity
-      }
-      if (entityType === 'character') replace(this.characters)
-      else if (entityType === 'scene') replace(this.scenes)
-      else if (entityType === 'prop') replace(this.props)
-      return entity
+      // 调用 generate-image 端点 → 后端提交到 image_poller，返回 { task_id, status: 'pending' }
+      const resp = await api.generateImage(this.currentProjectId, id, data) as any
+      const taskId = resp?.task_id
+      if (!taskId) throw new Error('生成任务提交失败：未返回 task_id')
+
+      // 注册到 taskQueue，轮询 + 完成后自动 claim
+      const { useTaskQueueStore } = await import('@/stores/taskQueue')
+      const taskQueue = useTaskQueueStore()
+      taskQueue.registerProjectTask(
+        taskId,
+        { type: 'image', prompt: resp.prompt, model: data?.model },
+        {
+          projectId: this.currentProjectId,
+          entityType,
+          entityId: id,
+          claimUrl: `/api/projects/${this.currentProjectId}/${entityType === 'character' ? 'characters' : entityType === 'scene' ? 'scenes' : 'props'}/${id}/claim-image`,
+        },
+      )
+      return resp
     },
 
     async batchGenerateCharacters(data: BatchGenerateCharactersRequest) {
@@ -415,7 +425,11 @@ export const useProjectStore = defineStore('project', {
     async setEntityActiveVersion(entityType: EntityType, id: number, versionId: number) {
       if (!this.currentProjectId) throw new Error('未选择项目')
       const api = getEntityApi(entityType)
-      const data: SetActiveVersionRequest = { version_id: versionId }
+      const data: SetActiveVersionRequest = {
+        entity_type: entityType,
+        entity_id: id,
+        version_id: versionId,
+      }
       const entity = await api.setActiveVersion(this.currentProjectId, id, data)
       const replace = (arr: any[]) => {
         const idx = arr.findIndex(e => e.id === id)
@@ -528,9 +542,22 @@ export const useProjectStore = defineStore('project', {
     // ================ 帧图 ================
     async generateFrameImage(shotId: number, data: GenerateFrameImageRequest) {
       if (!this.currentProjectId) throw new Error('未选择项目')
-      const frameImage = await apiGenerateFrameImage(this.currentProjectId, shotId, data)
-      await this.refreshShot(shotId)
-      return frameImage
+      const resp = await apiGenerateFrameImage(this.currentProjectId, shotId, data) as any
+      const taskId = resp?.task_id
+      if (!taskId) throw new Error('生成任务提交失败：未返回 task_id')
+
+      const { useTaskQueueStore } = await import('@/stores/taskQueue')
+      const taskQueue = useTaskQueueStore()
+      taskQueue.registerProjectTask(
+        taskId,
+        { type: 'image', prompt: resp.prompt, model: data?.model },
+        {
+          projectId: this.currentProjectId,
+          shotId,
+          claimUrl: `/api/projects/${this.currentProjectId}/shots/${shotId}/frame-images/claim`,
+        },
+      )
+      return resp
     },
 
     async batchGenerateFrameImages(data: BatchGenerateFrameImagesRequest) {
@@ -547,8 +574,7 @@ export const useProjectStore = defineStore('project', {
 
     async setActiveFrameImage(shotId: number, versionId: number) {
       if (!this.currentProjectId) throw new Error('未选择项目')
-      const data: SetActiveVersionRequest = { version_id: versionId }
-      const frameImage = await apiSetActiveFrameImage(this.currentProjectId, shotId, data)
+      const frameImage = await apiSetActiveFrameImage(this.currentProjectId, shotId, versionId)
       await this.refreshShot(shotId)
       return frameImage
     },
@@ -562,9 +588,58 @@ export const useProjectStore = defineStore('project', {
     // ================ 视频 ================
     async generateVideo(shotId: number, data: GenerateVideoRequest) {
       if (!this.currentProjectId) throw new Error('未选择项目')
-      const video = await apiGenerateVideo(this.currentProjectId, shotId, data)
-      await this.refreshShot(shotId)
-      return video
+      const projectId = this.currentProjectId
+      const { useTaskQueueStore } = await import('@/stores/taskQueue')
+      const taskQueue = useTaskQueueStore()
+
+      // 先在队列中注册 queued 占位任务，让用户立即看到任务
+      // （Agnes AI 视频生成有每分钟 1 次的速率限制，后端会串行排队，
+      //   如果不先注册 queued，用户点批量生成后要等很久才看到任务进队列）
+      const queuedTaskId = taskQueue.registerProjectTaskQueued(
+        { type: 'video', prompt: '', model: data?.model },
+        {
+          projectId,
+          shotId,
+          claimUrl: `/api/projects/${projectId}/shots/${shotId}/videos/claim`,
+        },
+      )
+
+      // 异步提交（不 await）：API 调用会因后端速率限制挂起 60+ 秒，
+      // 不能阻塞调用方，否则 Promise.all 会卡住无法继续注册其他任务
+      // 内部已 try/catch，不会抛 unhandled rejection
+      void this._submitVideoTaskInBackground(queuedTaskId, projectId, shotId, data)
+
+      // 立即返回，调用方（如批量生成）可继续处理下一个分镜
+      return { task_id: queuedTaskId, shot_id: shotId, status: 'queued' }
+    },
+
+    /**
+     * 后台异步提交视频生成任务到后端。
+     * - 成功：更新 backendTaskId + 状态切换为 processing + 启动轮询
+     * - 失败：标记任务为 failed（保留 errorMessage 供 UI 展示）
+     */
+    async _submitVideoTaskInBackground(
+      queuedTaskId: string,
+      projectId: number,
+      shotId: number,
+      data: GenerateVideoRequest,
+    ): Promise<void> {
+      const { useTaskQueueStore } = await import('@/stores/taskQueue')
+      const taskQueue = useTaskQueueStore()
+      try {
+        const resp = await apiGenerateVideo(projectId, shotId, data) as any
+        const backendTaskId = resp?.task_id
+        if (!backendTaskId) {
+          throw new Error('生成任务提交失败：未返回 task_id')
+        }
+        // 切换为 processing + 启动轮询
+        taskQueue.updateProjectTaskBackendId(queuedTaskId, backendTaskId)
+      } catch (e: any) {
+        // 标记为 failed，保留错误信息供 UI 展示
+        // 注意：HTTP 429 / 503 等错误已经在 axios 拦截器弹过 ElMessage，
+        // 这里只需更新队列状态，不再重复提示
+        taskQueue.markProjectTaskFailed(queuedTaskId, e?.message || '提交失败')
+      }
     },
 
     async uploadVideo(shotId: number, file: File) {
@@ -576,8 +651,7 @@ export const useProjectStore = defineStore('project', {
 
     async setActiveVideo(shotId: number, versionId: number) {
       if (!this.currentProjectId) throw new Error('未选择项目')
-      const data: SetActiveVersionRequest = { version_id: versionId }
-      const video = await apiSetActiveVideo(this.currentProjectId, shotId, data)
+      const video = await apiSetActiveVideo(this.currentProjectId, shotId, versionId)
       await this.refreshShot(shotId)
       return video
     },
@@ -591,7 +665,7 @@ export const useProjectStore = defineStore('project', {
     // ================ 资产桥接 ================
     async importAsset(data: ImportAssetRequest) {
       if (!this.currentProjectId) throw new Error('未选择项目')
-      const result = await apiImportAsset(this.currentProjectId, data)
+      const result = await apiImportAsset(this.currentProjectId, data.entity_type, data)
       // 导入后刷新对应实体列表
       await this.fetchEntities(data.entity_type)
       return result
@@ -599,7 +673,7 @@ export const useProjectStore = defineStore('project', {
 
     async promoteAsset(data: PromoteAssetRequest) {
       if (!this.currentProjectId) throw new Error('未选择项目')
-      return await apiPromoteAsset(this.currentProjectId, data)
+      return await apiPromoteAsset(this.currentProjectId, data.entity_type, data.entity_id, data)
     },
 
     // ================ 画布 ================

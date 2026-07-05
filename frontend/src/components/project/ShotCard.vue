@@ -43,21 +43,29 @@
       </div>
 
       <!-- 生成中遮罩 -->
-      <div v-if="generatingFrame" class="generating-mask">
+      <div v-if="generatingFrame || localGeneratingFrame" class="generating-mask">
         <el-icon class="loading-icon" :size="28"><Loading /></el-icon>
         <span>帧图生成中...</span>
       </div>
 
       <!-- 操作浮层 -->
-      <div v-if="projectStore.isEditable && !generatingFrame" class="frame-overlay">
-        <el-button type="primary" size="small" :icon="MagicStick" @click.stop="onGenerateFrame">生成帧图</el-button>
-        <el-upload
-          :show-file-list="false"
-          :before-upload="onUploadFrame"
-          accept="image/*"
-        >
-          <el-button size="small" :icon="Upload" @click.stop>上传</el-button>
-        </el-upload>
+      <div v-if="projectStore.isEditable && !generatingFrame && !localGeneratingFrame" class="frame-overlay">
+        <el-button
+          type="primary"
+          size="small"
+          :icon="MagicStick"
+          :loading="localGeneratingFrame"
+          @click.stop="onGenerateFrame"
+        >生成帧图</el-button>
+        <div class="upload-wrapper" @click.stop>
+          <el-upload
+            :show-file-list="false"
+            :before-upload="onUploadFrame"
+            accept="image/*"
+          >
+            <el-button size="small" :icon="Upload" :loading="uploadingFrame">上传</el-button>
+          </el-upload>
+        </div>
       </div>
 
       <!-- 帧图版本切换器 -->
@@ -68,7 +76,7 @@
       >
         <el-dropdown trigger="click" @command="onSetActiveFrame">
           <el-button link size="small" type="primary">
-            v{{ activeFrameImage?.version_no || '-' }}
+            v{{ activeFrameImage?.version || '-' }}
             <el-icon><ArrowDown /></el-icon>
           </el-button>
           <template #dropdown>
@@ -79,7 +87,7 @@
                 :command="fi.id"
                 :disabled="fi.is_active"
               >
-                v{{ fi.version_no }}
+                v{{ fi.version }}
                 <el-tag v-if="fi.is_active" type="success" size="small">采用</el-tag>
                 <el-tag v-if="fi.is_manual" type="warning" size="small">手动</el-tag>
               </el-dropdown-item>
@@ -94,7 +102,7 @@
       <template v-if="activeVideo?.file_url">
         <video
           :src="activeVideo.file_url"
-          :poster="activeFrameImage?.file_url"
+          :poster="activeFrameImage?.file_url || undefined"
           controls
           preload="metadata"
           class="video-player"
@@ -107,7 +115,7 @@
         >
           <el-dropdown trigger="click" @command="onSetActiveVideo">
             <el-button link size="small" type="primary">
-              v{{ activeVideo?.version_no || '-' }}
+              v{{ activeVideo?.version || '-' }}
               <el-icon><ArrowDown /></el-icon>
             </el-button>
             <template #dropdown>
@@ -118,7 +126,7 @@
                   :command="vid.id"
                   :disabled="vid.is_active"
                 >
-                  v{{ vid.version_no }}
+                  v{{ vid.version }}
                   <el-tag v-if="vid.is_active" type="success" size="small">采用</el-tag>
                   <el-tag v-if="vid.is_manual" type="warning" size="small">手动</el-tag>
                 </el-dropdown-item>
@@ -130,27 +138,29 @@
       <template v-else>
         <div class="video-placeholder">
           <el-icon :size="32"><VideoPlay /></el-icon>
-          <span v-if="generatingVideo" class="generating-text">
+          <span v-if="generatingVideo || localGeneratingVideo" class="generating-text">
             <el-icon class="loading-icon"><Loading /></el-icon>
             视频生成中...
           </span>
           <span v-else>暂无视频</span>
           <el-button
-            v-if="projectStore.isEditable && !generatingVideo && activeFrameImage"
+            v-if="projectStore.isEditable && !generatingVideo && !localGeneratingVideo && activeFrameImage"
             type="primary"
             size="small"
             :icon="VideoPlay"
-            :loading="generatingVideo"
+            :loading="localGeneratingVideo"
             @click.stop="onGenerateVideo"
           >生成视频</el-button>
-          <el-upload
-            v-if="projectStore.isEditable && !generatingVideo"
-            :show-file-list="false"
-            :before-upload="onUploadVideo"
-            accept="video/*"
-          >
-            <el-button size="small" :icon="Upload" @click.stop>上传视频</el-button>
-          </el-upload>
+          <div class="upload-wrapper" @click.stop>
+            <el-upload
+              v-if="projectStore.isEditable && !generatingVideo && !localGeneratingVideo"
+              :show-file-list="false"
+              :before-upload="onUploadVideo"
+              accept="video/*"
+            >
+              <el-button size="small" :icon="Upload" :loading="uploadingVideo">上传视频</el-button>
+            </el-upload>
+          </div>
         </div>
       </template>
     </div>
@@ -255,6 +265,10 @@ const projectStore = useProjectStore()
 
 // ---------- 内部状态 ----------
 const generatingPrompt = ref(false)
+const localGeneratingFrame = ref(false)
+const localGeneratingVideo = ref(false)
+const uploadingFrame = ref(false)
+const uploadingVideo = ref(false)
 
 // ---------- 计算 ----------
 const activeFrameImage = computed(() => props.shot.active_frame_image)
@@ -290,22 +304,28 @@ async function onGenerateFrame() {
     )
   } catch (_) { return }
 
+  localGeneratingFrame.value = true
   try {
     await projectStore.generateFrameImage(props.shot.id, {})
-    ElMessage.success('帧图生成任务已启动')
+    ElMessage.success('帧图已生成')
     emit('refresh')
   } catch (e: any) {
     ElMessage.error(e?.message || '生成失败')
+  } finally {
+    localGeneratingFrame.value = false
   }
 }
 
 async function onUploadFrame(file: File): Promise<boolean> {
+  uploadingFrame.value = true
   try {
     await projectStore.uploadFrameImage(props.shot.id, file)
     ElMessage.success('帧图已上传')
     emit('refresh')
   } catch (e: any) {
     ElMessage.error(e?.message || '上传失败')
+  } finally {
+    uploadingFrame.value = false
   }
   return false
 }
@@ -320,22 +340,30 @@ async function onGenerateVideo() {
     )
   } catch (_) { return }
 
+  localGeneratingVideo.value = true
   try {
+    // generateVideo 立即返回（任务已入队列，后端按速率限制串行提交）
+    // 实际生成进度通过右下角任务队列面板查看
     await projectStore.generateVideo(props.shot.id, {})
-    ElMessage.success('视频生成任务已启动')
+    ElMessage.success('视频生成任务已加入队列，请在右下角任务面板查看进度')
     emit('refresh')
   } catch (e: any) {
     ElMessage.error(e?.message || '生成失败')
+  } finally {
+    localGeneratingVideo.value = false
   }
 }
 
 async function onUploadVideo(file: File): Promise<boolean> {
+  uploadingVideo.value = true
   try {
     await projectStore.uploadVideo(props.shot.id, file)
     ElMessage.success('视频已上传')
     emit('refresh')
   } catch (e: any) {
     ElMessage.error(e?.message || '上传失败')
+  } finally {
+    uploadingVideo.value = false
   }
   return false
 }
@@ -514,6 +542,10 @@ async function onDelete() {
   opacity: 0; transition: opacity 0.2s;
 }
 .shot-card:hover .frame-overlay { opacity: 1; }
+
+.upload-wrapper {
+  display: inline-flex;
+}
 
 .version-switcher {
   position: absolute;

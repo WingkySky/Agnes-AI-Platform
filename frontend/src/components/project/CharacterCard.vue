@@ -9,7 +9,7 @@
 <template>
   <div
     class="entity-card"
-    :class="{ selected: selected, generating: generating }"
+    :class="{ selected: selected, generating: generating || localGenerating }"
     @click="$emit('toggle-select', entity.id)"
   >
     <!-- 预览图区域 -->
@@ -37,28 +37,31 @@
       </div>
 
       <!-- 生成中遮罩 -->
-      <div v-if="generating" class="generating-mask">
+      <div v-if="generating || localGenerating" class="generating-mask">
         <el-icon class="loading-icon" :size="32"><Loading /></el-icon>
         <span>生成中...</span>
       </div>
 
       <!-- 操作按钮浮层 -->
-      <div v-if="!generating" class="card-overlay">
+      <div v-if="!generating && !localGenerating" class="card-overlay">
         <el-button
           v-if="projectStore.isEditable"
           type="primary"
           size="small"
           :icon="MagicStick"
+          :loading="localGenerating"
           @click.stop="onGenerate"
         >AI 生成</el-button>
-        <el-upload
-          v-if="projectStore.isEditable"
-          :show-file-list="false"
-          :before-upload="onUpload"
-          accept="image/*"
-        >
-          <el-button size="small" :icon="Upload" @click.stop>上传</el-button>
-        </el-upload>
+        <div class="upload-wrapper" @click.stop>
+          <el-upload
+            v-if="projectStore.isEditable"
+            :show-file-list="false"
+            :before-upload="onUpload"
+            accept="image/*"
+          >
+            <el-button size="small" :icon="Upload" :loading="uploading">上传</el-button>
+          </el-upload>
+        </div>
       </div>
     </div>
 
@@ -67,7 +70,6 @@
       <div class="card-title-row">
         <div class="card-title" :title="entity.name">{{ entity.name }}</div>
         <EntityVersionSwitcher
-          v-if="activeImage"
           :entity-type="entityType"
           :entity-id="entity.id"
           :active-version="activeImage"
@@ -120,7 +122,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Picture, Check, Loading, MagicStick, Upload, Edit, Delete, Share,
@@ -136,7 +138,7 @@ const props = defineProps<{
   activeImage?: ProjectEntityAsset | null
   /** 是否选中（用于批量操作） */
   selected?: boolean
-  /** 是否生成中 */
+  /** 是否生成中（外部传入，用于批量生成遮罩） */
   generating?: boolean
 }>()
 
@@ -147,6 +149,10 @@ const emit = defineEmits<{
 }>()
 
 const projectStore = useProjectStore()
+
+// 单个生成/上传的本地 loading 状态（与外部 generating 互补）
+const localGenerating = ref(false)
+const uploading = ref(false)
 
 // ---------- 计算属性 ----------
 const roleTypeLabel = computed(() => {
@@ -191,23 +197,29 @@ async function onGenerate() {
     )
   } catch (_) { return }
 
+  localGenerating.value = true
   try {
     await projectStore.generateEntityImage(props.entityType, props.entity.id, {})
-    ElMessage.success('生成任务已启动，请稍候')
+    ElMessage.success('图像已生成')
     emit('refresh')
   } catch (e: any) {
     ElMessage.error(e?.message || '生成失败')
+  } finally {
+    localGenerating.value = false
   }
 }
 
 async function onUpload(file: File): Promise<boolean> {
   if (!props.entity?.id) return false
+  uploading.value = true
   try {
     await projectStore.uploadEntityImage(props.entityType, props.entity.id, file)
     ElMessage.success('图像已上传')
     emit('refresh')
   } catch (e: any) {
     ElMessage.error(e?.message || '上传失败')
+  } finally {
+    uploading.value = false
   }
   return false // 阻止 el-upload 默认上传行为
 }
@@ -340,6 +352,10 @@ async function onPromote() {
 
 .entity-card:hover .card-overlay {
   opacity: 1;
+}
+
+.upload-wrapper {
+  display: inline-flex;
 }
 
 .card-body {

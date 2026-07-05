@@ -27,6 +27,8 @@ from app.services.project._entity_versions import (
     attach_active_image,
     attach_active_image_batch,
 )
+from app.services.project._async_gen import submit_image_task, claim_generation
+from app.services.project._generation_history import record_manual_upload
 from app.services.project.sse_manager import project_sse_manager
 from app.services.project.wizard import parse_json_loose
 
@@ -166,28 +168,31 @@ async def generate_character_image(
     style_config: Optional[dict] = None,
     model: str = "",
     size: str = "1024x1024",
-) -> Optional[ProjectCharacter]:
+) -> dict:
     """
-    生成单个角色形象图（调用 agnes_client.create_image）
+    生成单个角色形象图（异步模式）
 
-    Args:
-        style_config: 风格配置（可包含画风/光影/配色等）
-        model: 自定义模型，空则用默认
-        size: 图片尺寸
-    Returns:
-        更新后的角色对象
+    提交到 image_poller_manager，立即返回 task_id。
+    任务完成后前端调 claim 端点认领结果到 ProjectEntityAsset。
     """
     character = await get_character(db, character_id)
     if not character:
         return None
 
-    # 拼接 prompt: 外观描述 + 风格配置
+    # 拼接 prompt
     prompt_parts = [character.appearance_desc or character.description or character.name]
     if style_config:
         for k, v in style_config.items():
             if v:
                 prompt_parts.append(f"{k}: {v}")
     prompt = ", ".join(prompt_parts)
+    used_model = model or "agnes-image-2.0-flash"
+
+    # 提交到 image_poller（poller 负责扣费 + AI 调用 + 写 Generation + confirm/refund）
+    task_id = await submit_image_task(
+        db, user_id, prompt, used_model, size, mode="text2image",
+        ref_type="project_character_image",
+    )
 
     await project_sse_manager.push(
         character.project_id,
@@ -196,58 +201,58 @@ async def generate_character_image(
             "target": f"{ENTITY_TYPE}:{character_id}",
             "version_type": "image",
             "user_id": user_id,
+            "task_id": task_id,
         },
     )
 
-    try:
-        result = await agnes_client.create_image(
-            prompt=prompt,
-            model=model or "agnes-image-2.0-flash",
-            size=size,
-            response_format="url",
-        )
-        # 提取图片 URL
-        data_list = result.get("data", [])
-        if not data_list:
-            raise RuntimeError("图片生成返回空数据")
-        image_url = data_list[0].get("url", "")
-        if not image_url:
-            raise RuntimeError("图片生成未返回 URL")
+    return {
+        "task_id": task_id,
+        "entity_type": ENTITY_TYPE,
+        "entity_id": character_id,
+        "status": "pending",
+        "prompt": prompt,
+    }
 
-        asset, _ = await create_version(
-            db,
-            project_id=character.project_id,
-            entity_type=ENTITY_TYPE,
-            entity_id=character_id,
-            file_url=image_url,
-            thumbnail_url=image_url,
-            prompt=prompt,
-            model=model or "agnes-image-2.0-flash",
-            file_type="image",
-            set_active=True,
-        )
 
-        await project_sse_manager.push(
-            character.project_id,
-            "generation_completed",
-            {
-                "target": f"{ENTITY_TYPE}:{character_id}",
-                "version_id": asset.id,
-                "file_url": image_url,
-            },
-        )
-        await attach_active_image(db, ENTITY_TYPE, character)
-        return character
-    except Exception as e:
-        await project_sse_manager.push(
-            character.project_id,
-            "generation_failed",
-            {
-                "target": f"{ENTITY_TYPE}:{character_id}",
-                "error": str(e),
-            },
-        )
-        raise
+async def claim_character_image(
+    db: AsyncSession, character_id: int, task_id: str
+) -> Optional[ProjectCharacter]:
+    """任务完成后认领结果：从 Generation 拿 result_url，创建 ProjectEntityAsset 新版本"""
+    character = await get_character(db, character_id)
+    if not character:
+        return None
+
+    gen = await claim_generation(db, task_id)
+    if not gen or not gen.result_url:
+        return None
+
+    asset, _ = await create_version(
+        db,
+        project_id=character.project_id,
+        entity_type=ENTITY_TYPE,
+        entity_id=character_id,
+        file_url=gen.result_url,
+        thumbnail_url=gen.result_url,
+        prompt=gen.prompt or "",
+        model=gen.model or "",
+        file_type="image",
+        generation_id=gen.id,
+        set_active=True,
+    )
+
+    await project_sse_manager.push(
+        character.project_id,
+        "generation_completed",
+        {
+            "target": f"{ENTITY_TYPE}:{character_id}",
+            "version_id": asset.id,
+            "file_url": gen.result_url,
+            "generation_id": gen.id,
+            "task_id": task_id,
+        },
+    )
+    await attach_active_image(db, ENTITY_TYPE, character)
+    return character
 
 
 async def batch_generate_characters(
@@ -304,6 +309,11 @@ async def upload_character_image(
     if not character:
         return None
 
+    # 写入生成历史（手动上传，不计费）
+    gen_record = await record_manual_upload(
+        db, user_id, "image", file_url, name=character.name,
+    )
+
     await create_version(
         db,
         project_id=character.project_id,
@@ -317,6 +327,7 @@ async def upload_character_image(
         width=width,
         height=height,
         is_manual=True,
+        generation_id=gen_record.id,
         set_active=True,
     )
     await attach_active_image(db, ENTITY_TYPE, character)

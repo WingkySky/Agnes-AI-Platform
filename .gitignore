@@ -45,3 +45,7 @@ uploads/
 
 #数据
 backend/data/
+
+#test
+backend/test/
+backend/test_data/

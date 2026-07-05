@@ -87,18 +87,21 @@ from app.services.project.character_service import (
     reorder_characters, generate_character_image, batch_generate_characters,
     upload_character_image, list_character_versions, set_active_character_version,
     delete_character_version, extract_characters_from_script,
+    claim_character_image,
 )
 from app.services.project.scene_service import (
     list_scenes, get_scene, create_scene, update_scene, delete_scene,
     reorder_scenes, generate_scene_image, batch_generate_scenes,
     upload_scene_image, list_scene_versions, set_active_scene_version,
     delete_scene_version, extract_scenes_from_script,
+    claim_scene_image,
 )
 from app.services.project.prop_service import (
     list_props, get_prop, create_prop, update_prop, delete_prop,
     reorder_props, generate_prop_image, batch_generate_props,
     upload_prop_image, list_prop_versions, set_active_prop_version,
     delete_prop_version, extract_props_from_script,
+    claim_prop_image,
 )
 from app.services.project.shot_service import (
     list_shots, get_shot, create_shot, update_shot, delete_shot, reorder_shots,
@@ -109,10 +112,12 @@ from app.services.project.frame_image_service import (
     list_frame_images, get_frame_image, generate_frame_image,
     batch_generate_frame_images, upload_frame_image,
     set_active_frame_image, delete_frame_image,
+    claim_frame_image,
 )
 from app.services.project.video_service import (
     list_videos, get_video, generate_video, upload_video,
     set_active_video, delete_video,
+    claim_video,
 )
 from app.services.project.asset_bridge import (
     import_asset_to_project, promote_entity_to_asset,
@@ -559,6 +564,7 @@ def _build_entity_routes(prefix: str, entity_type: str):
         set_v_fn = set_active_character_version
         del_v_fn = delete_character_version
         extract_fn = extract_characters_from_script
+        claim_fn = claim_character_image
         create_schema = CharacterCreate
         update_schema = CharacterUpdate
         response_schema = CharacterResponse
@@ -577,6 +583,7 @@ def _build_entity_routes(prefix: str, entity_type: str):
         set_v_fn = set_active_scene_version
         del_v_fn = delete_scene_version
         extract_fn = extract_scenes_from_script
+        claim_fn = claim_scene_image
         create_schema = SceneCreate
         update_schema = SceneUpdate
         response_schema = SceneResponse
@@ -595,6 +602,7 @@ def _build_entity_routes(prefix: str, entity_type: str):
         set_v_fn = set_active_prop_version
         del_v_fn = delete_prop_version
         extract_fn = extract_props_from_script
+        claim_fn = claim_prop_image
         create_schema = PropCreate
         update_schema = PropUpdate
         response_schema = PropResponse
@@ -698,8 +706,7 @@ def _build_entity_routes(prefix: str, entity_type: str):
 
     @router.post(
         f"/{{project_id}}/{prefix}/{{entity_id}}/generate-image",
-        response_model=response_schema,
-        summary=f"生成{entity_label}形象图",
+        summary=f"生成{entity_label}形象图（异步）",
     )
     async def generate_image_api(
         project_id: int,
@@ -717,6 +724,29 @@ def _build_entity_routes(prefix: str, entity_type: str):
             )
         except (ValueError, RuntimeError) as e:
             raise HTTPException(status_code=400, detail=str(e))
+
+    @router.post(
+        f"/{{project_id}}/{prefix}/{{entity_id}}/claim-image",
+        response_model=response_schema,
+        summary=f"认领{entity_label}生成结果",
+    )
+    async def claim_image_api(
+        project_id: int,
+        entity_id: int,
+        task_id: str = Query(..., description="图片任务 ID"),
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user),
+    ):
+        """任务完成后认领结果：从 Generation 拿 result_url，创建实体形象图新版本"""
+        project = await _get_project_or_404(db, project_id)
+        _check_project_owner(project, current_user)
+        try:
+            entity = await claim_fn(db, entity_id, task_id)
+        except (ValueError, RuntimeError) as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        if not entity:
+            raise HTTPException(status_code=404, detail="实体不存在或任务结果未就绪")
+        return entity
 
     @router.post(
         f"/{{project_id}}/{prefix}/batch-generate",
@@ -1045,8 +1075,7 @@ async def list_frame_images_api(
 
 @router.post(
     "/{project_id}/shots/{shot_id}/frame-images/generate",
-    response_model=FrameImageResponse,
-    summary="生成帧图",
+    summary="生成帧图（异步）",
 )
 async def generate_frame_image_api(
     project_id: int,
@@ -1058,19 +1087,40 @@ async def generate_frame_image_api(
     project = await _get_project_or_404(db, project_id)
     _check_project_owner(project, current_user)
     try:
-        fi = await generate_frame_image(
+        return await generate_frame_image(
             db, shot_id, current_user.id,
             data.style_config, data.model, data.size or "1024x1024",
         )
     except (ValueError, RuntimeError) as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post(
+    "/{project_id}/shots/{shot_id}/frame-images/claim",
+    response_model=FrameImageResponse,
+    summary="认领帧图生成结果",
+)
+async def claim_frame_image_api(
+    project_id: int,
+    shot_id: int,
+    task_id: str = Query(..., description="图片任务 ID"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """任务完成后认领结果：从 Generation 拿 result_url，创建帧图新版本"""
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    try:
+        fi = await claim_frame_image(db, shot_id, task_id)
+    except (ValueError, RuntimeError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not fi:
-        raise HTTPException(status_code=404, detail="分镜不存在")
+        raise HTTPException(status_code=404, detail="分镜不存在或任务结果未就绪")
     return fi
 
 
 @router.post(
-    "/{project_id}/shots/{shot_id}/frame-images/batch-generate",
+    "/{project_id}/shots/frame-images/batch-generate",
     summary="批量生成帧图",
 )
 async def batch_generate_frame_images_api(
@@ -1171,8 +1221,7 @@ async def list_videos_api(
 
 @router.post(
     "/{project_id}/shots/{shot_id}/videos/generate",
-    response_model=VideoResponse,
-    summary="生成视频",
+    summary="生成视频（异步）",
 )
 async def generate_video_api(
     project_id: int,
@@ -1184,14 +1233,36 @@ async def generate_video_api(
     project = await _get_project_or_404(db, project_id)
     _check_project_owner(project, current_user)
     try:
-        video = await generate_video(
+        return await generate_video(
             db, shot_id, current_user.id,
             data.frame_image_id, data.model, data.duration_ms,
         )
     except (ValueError, RuntimeError) as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post(
+    "/{project_id}/shots/{shot_id}/videos/claim",
+    response_model=VideoResponse,
+    summary="认领视频生成结果",
+)
+async def claim_video_api(
+    project_id: int,
+    shot_id: int,
+    task_id: str = Query(..., description="视频任务 ID"),
+    frame_image_id: Optional[int] = Query(None, description="来源帧图 ID"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """任务完成后认领结果：从 Generation 拿 result_url，创建视频新版本"""
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    try:
+        video = await claim_video(db, shot_id, task_id, frame_image_id)
+    except (ValueError, RuntimeError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not video:
-        raise HTTPException(status_code=404, detail="分镜不存在")
+        raise HTTPException(status_code=404, detail="分镜不存在或任务结果未就绪")
     return video
 
 

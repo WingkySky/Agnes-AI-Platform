@@ -73,7 +73,7 @@ export interface ProjectUpdateRequest {
 }
 
 export interface ActiveViewUpdateRequest {
-  active_view: ProjectActiveView
+  view: ProjectActiveView
 }
 
 export interface ProjectListParams {
@@ -132,22 +132,26 @@ export interface ProjectEntityAsset {
   id: number
   entity_type: EntityType
   entity_id: number
-  version_no: number
+  version: number
   file_url?: string | null
   thumbnail_url?: string | null
   prompt?: string | null
   model?: string | null
-  generation_id?: string | null
+  generation_id?: number | null
   file_type?: string | null
   file_size?: number | null
   width?: number | null
   height?: number | null
+  duration_ms?: number | null
   is_manual: boolean
   is_active: boolean
+  created_by?: string | null
   created_at: string
 }
 
 export interface SetActiveVersionRequest {
+  entity_type: EntityType
+  entity_id: number
   version_id: number
 }
 
@@ -192,9 +196,10 @@ export interface CharacterGenerateImageRequest {
 }
 
 export interface BatchGenerateCharactersRequest {
-  character_ids: number[]
+  ids: number[]
   model?: string
   style_config?: Record<string, any>
+  size?: string
 }
 
 // =====================================================
@@ -322,7 +327,7 @@ export interface ShotUpdateRequest {
 }
 
 export interface ShotReorderRequest {
-  shot_ids: number[]
+  ids: number[]
 }
 
 export interface ShotBindEntityRequest {
@@ -336,28 +341,33 @@ export interface ShotBindEntityRequest {
 export interface ProjectFrameImage {
   id: number
   shot_id: number
-  version_no: number
+  version: number
   file_url?: string | null
   thumbnail_url?: string | null
   prompt?: string | null
   model?: string | null
-  generation_id?: string | null
+  generation_id?: number | null
+  reference_character_ids?: number[]
   width?: number | null
   height?: number | null
+  file_size?: number | null
   is_manual: boolean
   is_active: boolean
+  created_by?: string | null
   created_at: string
 }
 
 export interface GenerateFrameImageRequest {
   model?: string
   style_config?: Record<string, any>
+  size?: string
 }
 
 export interface BatchGenerateFrameImagesRequest {
-  shot_ids: number[]
+  ids: number[]
   model?: string
   style_config?: Record<string, any>
+  size?: string
 }
 
 // =====================================================
@@ -367,28 +377,27 @@ export interface BatchGenerateFrameImagesRequest {
 export interface ProjectVideo {
   id: number
   shot_id: number
-  version_no: number
+  version: number
   file_url?: string | null
+  thumbnail_url?: string | null
+  frame_image_id?: number | null
   prompt?: string | null
   model?: string | null
-  generation_id?: string | null
+  generation_id?: number | null
   duration_ms?: number | null
   width?: number | null
   height?: number | null
+  file_size?: number | null
   is_manual: boolean
   is_active: boolean
-  status: string
-  error_message?: string | null
+  created_by?: string | null
   created_at: string
-  updated_at: string
 }
 
 export interface GenerateVideoRequest {
+  frame_image_id?: number
   model?: string
-  width?: number
-  height?: number
-  num_frames?: number
-  frame_rate?: number
+  duration_ms?: number
 }
 
 // =====================================================

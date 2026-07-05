@@ -6,7 +6,6 @@
 # 通过 agnes_client.create_video_task 创建任务并轮询。
 # =====================================================
 
-import asyncio
 import logging
 from typing import List, Optional
 
@@ -18,8 +17,13 @@ from app.models.project import (
     ProjectShotVideo,
     ProjectShotFrameImage,
 )
-from app.services.agnes_client import agnes_client
+from app.services.provider_registry import provider_registry
+from app.services.project._async_gen import submit_video_task, claim_generation
+from app.services.project._generation_history import record_manual_upload
 from app.services.project.sse_manager import project_sse_manager
+
+# 默认视频模型（仅当 Provider 未配置任何视频模型时使用）
+_DEFAULT_VIDEO_MODEL_FALLBACK = "agnes-video-2.0"
 
 logger = logging.getLogger("agnes_platform.project.video")
 
@@ -99,6 +103,22 @@ def _duration_to_num_frames(duration_ms: int) -> int:
     return 441
 
 
+async def _resolve_video_model(model: str) -> str:
+    """
+    解析实际使用的视频模型 ID：
+    1. 用户传了 model 且 Provider 已配置该模型 → 直接使用
+    2. 否则取 Provider 已配置的第一个视频模型
+    3. 都没有则回退到 _DEFAULT_VIDEO_MODEL_FALLBACK（由上游报错）
+    """
+    available = await provider_registry.list_models_by_type("video")
+    available_ids = [m.id for m in available if m.id]
+    if available_ids:
+        if model and model in available_ids:
+            return model
+        return available_ids[0]
+    return model or _DEFAULT_VIDEO_MODEL_FALLBACK
+
+
 # =====================================================
 # 视频版本查询
 # =====================================================
@@ -136,13 +156,12 @@ async def generate_video(
     frame_image_id: Optional[int] = None,
     model: str = "",
     duration_ms: Optional[int] = 3000,
-) -> Optional[ProjectShotVideo]:
+) -> dict:
     """
-    生成分镜视频（图生视频，基于采用帧图或指定帧图）
+    生成分镜视频（异步模式）
 
-    Args:
-        frame_image_id: 来源帧图 ID，不传则用 shot.active_frame_image_id
-        duration_ms: 视频时长（毫秒）
+    提交到 video_poller_manager，立即返回 task_id。
+    任务完成后前端调 claim 端点认领结果到 ProjectShotVideo。
     """
     shot = (
         await db.execute(select(ProjectShot).where(ProjectShot.id == shot_id))
@@ -153,7 +172,20 @@ async def generate_video(
     # 确定来源帧图
     source_frame_id = frame_image_id or shot.active_frame_image_id
     if not source_frame_id:
-        raise ValueError("分镜没有采用帧图，无法生成视频")
+        # 自动 fallback：取该分镜最新帧图（按 id 倒序）
+        latest_frame = (
+            await db.execute(
+                select(ProjectShotFrameImage)
+                .where(ProjectShotFrameImage.shot_id == shot_id)
+                .order_by(ProjectShotFrameImage.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if latest_frame:
+            source_frame_id = latest_frame.id
+            logger.info("[视频生成] 无采用帧图，自动选择最新帧图: shot_id=%s frame_id=%s", shot_id, source_frame_id)
+        else:
+            raise ValueError("分镜没有帧图，无法生成视频（请先生成或上传帧图）")
 
     frame_image = (
         await db.execute(
@@ -169,7 +201,6 @@ async def generate_video(
     duration = duration_ms or shot.duration_ms or 3000
     num_frames = _duration_to_num_frames(duration)
 
-    # 获取项目分辨率/宽高比
     from app.models.project import Project
     project = (
         await db.execute(select(Project).where(Project.id == shot.project_id))
@@ -179,8 +210,21 @@ async def generate_video(
         project.aspect_ratio if project else "16:9",
     )
 
-    # 取 prompt（优先 image_prompt）
     prompt = shot.image_prompt or shot.visual_desc or shot.title or "scene"
+    # 动态解析视频模型：优先用户传入，否则取 Provider 已配置的第一个视频模型
+    used_model = await _resolve_video_model(model)
+    logger.info(
+        "[视频生成] 解析视频模型: input=%s → used=%s shot_id=%s",
+        model or "(empty)", used_model, shot_id,
+    )
+
+    # 提交到 video_poller（poller 负责扣费 + AI 调用 + 轮询 + 写 Generation + confirm/refund）
+    task_id = await submit_video_task(
+        db, user_id, prompt, used_model, duration, num_frames,
+        width, height, frame_rate=24, mode="image2video",
+        image_url=frame_image.file_url,
+        ref_type="project_video",
+    )
 
     await project_sse_manager.push(
         shot.project_id,
@@ -190,161 +234,84 @@ async def generate_video(
             "version_type": "video",
             "user_id": user_id,
             "frame_image_id": source_frame_id,
+            "task_id": task_id,
         },
     )
 
-    try:
-        # 创建视频任务
-        task = await agnes_client.create_video_task(
-            prompt=prompt,
-            model=model or "agnes-video-2.0",
-            num_frames=num_frames,
-            frame_rate=24,
-            width=width,
-            height=height,
-            mode="ti2vid",  # 图生视频
-            image=frame_image.file_url,
-        )
-        video_id = task.get("video_id") or task.get("task_id")
-        if not video_id:
-            raise RuntimeError("视频任务创建未返回 ID")
-
-        # 创建新版本（status=running，文件 URL 等待轮询完成后回填）
-        version_no = await _next_version(db, shot_id)
-        await _reset_active_flags(db, shot_id)
-
-        video = ProjectShotVideo(
-            shot_id=shot_id,
-            version=version_no,
-            is_active=True,
-            is_manual=False,
-            file_url=None,  # 等待轮询完成
-            thumbnail_url=frame_image.thumbnail_url,
-            frame_image_id=source_frame_id,
-            prompt=prompt,
-            model=model or "agnes-video-2.0",
-            duration_ms=duration,
-            width=width,
-            height=height,
-            created_by="ai",
-        )
-        db.add(video)
-        await db.flush()
-
-        shot.active_video_id = video.id
-        await db.commit()
-        await db.refresh(video)
-
-        await project_sse_manager.push(
-            shot.project_id,
-            "generation_progress",
-            {
-                "target": f"shot:{shot_id}:video",
-                "version_id": video.id,
-                "progress": 0,
-                "status": "running",
-            },
-        )
-
-        # 后台轮询视频状态（不阻塞当前请求）
-        asyncio.create_task(
-            _poll_video_and_update(
-                shot.project_id, shot_id, video.id, video_id
-            )
-        )
-        return video
-    except Exception as e:
-        await project_sse_manager.push(
-            shot.project_id,
-            "generation_failed",
-            {"target": f"shot:{shot_id}:video", "error": str(e)},
-        )
-        raise
+    return {
+        "task_id": task_id,
+        "shot_id": shot_id,
+        "status": "pending",
+        "prompt": prompt,
+    }
 
 
-async def _poll_video_and_update(
-    project_id: int, shot_id: int, video_record_id: int, task_video_id: str
-) -> None:
-    """
-    后台轮询视频任务状态，完成后回填 file_url 并推送 SSE
+async def claim_video(
+    db: AsyncSession, shot_id: int, task_id: str, frame_image_id: Optional[int] = None
+) -> Optional[ProjectShotVideo]:
+    """任务完成后认领结果：从 Generation 拿 result_url，创建视频新版本"""
+    shot = (
+        await db.execute(select(ProjectShot).where(ProjectShot.id == shot_id))
+    ).scalar_one_or_none()
+    if not shot:
+        return None
 
-    使用 new_async_session 创建独立 session（不依赖原请求 session）
-    """
-    from app.core.database import new_async_session
+    gen = await claim_generation(db, task_id)
+    if not gen or not gen.result_url:
+        return None
 
-    db = new_async_session()
-    try:
-        # 轮询 agnes_client.poll_video_status
-        result = await agnes_client.poll_video_status(task_video_id)
-        status = result.get("status", "")
-        video_url = result.get("video_url") or result.get("url", "")
-        duration_ms = result.get("duration_ms")
-        width = result.get("width")
-        height = result.get("height")
-
-        # 更新记录
-        video = (
+    # 取来源帧图作为缩略图
+    thumbnail_url = None
+    source_frame_id = frame_image_id or shot.active_frame_image_id
+    if source_frame_id:
+        fi = (
             await db.execute(
-                select(ProjectShotVideo).where(
-                    ProjectShotVideo.id == video_record_id
+                select(ProjectShotFrameImage).where(
+                    ProjectShotFrameImage.id == source_frame_id
                 )
             )
         ).scalar_one_or_none()
-        if not video:
-            return
+        if fi:
+            thumbnail_url = fi.thumbnail_url
 
-        if status == "succeeded" and video_url:
-            video.file_url = video_url
-            if duration_ms:
-                video.duration_ms = duration_ms
-            if width:
-                video.width = width
-            if height:
-                video.height = height
-            await db.commit()
+    version_no = await _next_version(db, shot_id)
+    await _reset_active_flags(db, shot_id)
 
-            await project_sse_manager.push(
-                project_id,
-                "generation_completed",
-                {
-                    "target": f"shot:{shot_id}:video",
-                    "version_id": video_record_id,
-                    "file_url": video_url,
-                },
-            )
-        elif status == "failed":
-            await project_sse_manager.push(
-                project_id,
-                "generation_failed",
-                {
-                    "target": f"shot:{shot_id}:video",
-                    "error": result.get("error", "视频生成失败"),
-                },
-            )
-        else:
-            # 仍在处理中，推送进度
-            await project_sse_manager.push(
-                project_id,
-                "generation_progress",
-                {
-                    "target": f"shot:{shot_id}:video",
-                    "version_id": video_record_id,
-                    "status": status,
-                    "progress": result.get("progress", 0),
-                },
-            )
-    except Exception as e:
-        logger.error(f"轮询视频状态失败 video_record_id={video_record_id}: {e}")
-        await project_sse_manager.push(
-            project_id,
-            "generation_failed",
-            {
-                "target": f"shot:{shot_id}:video",
-                "error": f"轮询失败: {e}",
-            },
-        )
-    finally:
-        await db.close()
+    video = ProjectShotVideo(
+        shot_id=shot_id,
+        version=version_no,
+        is_active=True,
+        is_manual=False,
+        file_url=gen.result_url,
+        thumbnail_url=thumbnail_url,
+        frame_image_id=source_frame_id,
+        prompt=gen.prompt or "",
+        model=gen.model or "",
+        generation_id=gen.id,
+        duration_ms=gen.params.get("duration_ms") if gen.params else None,
+        width=gen.params.get("width") if gen.params else None,
+        height=gen.params.get("height") if gen.params else None,
+        created_by="ai",
+    )
+    db.add(video)
+    await db.flush()
+
+    shot.active_video_id = video.id
+    await db.commit()
+    await db.refresh(video)
+
+    await project_sse_manager.push(
+        shot.project_id,
+        "generation_completed",
+        {
+            "target": f"shot:{shot_id}:video",
+            "version_id": video.id,
+            "file_url": gen.result_url,
+            "generation_id": gen.id,
+            "task_id": task_id,
+        },
+    )
+    return video
 
 
 # =====================================================
@@ -369,6 +336,11 @@ async def upload_video(
     if not shot:
         return None
 
+    # 写入生成历史（手动上传，不计费）
+    gen_record = await record_manual_upload(
+        db, user_id, "video", file_url, name=shot.title or f"分镜{shot.sequence_no}",
+    )
+
     version_no = await _next_version(db, shot_id)
     await _reset_active_flags(db, shot_id)
 
@@ -380,6 +352,7 @@ async def upload_video(
         file_url=file_url,
         thumbnail_url=thumbnail_url,
         prompt="(用户上传)",
+        generation_id=gen_record.id,
         duration_ms=duration_ms,
         width=width,
         height=height,

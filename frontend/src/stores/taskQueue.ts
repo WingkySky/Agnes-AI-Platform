@@ -526,6 +526,10 @@ export const useTaskQueueStore = defineStore('taskQueue', {
           } catch (_) {
             // 忽略偏好通知失败
           }
+          // 【项目任务认领】source='project' 的任务完成后，调 claim 端点把结果写入项目实体
+          if (task.source === 'project' && task.projectContext) {
+            this._claimProjectResult(taskId).catch(() => {/* 忽略认领失败 */})
+          }
         } else if (isCancelled) {
           task.status = 'cancelled'
           this._stopPolling(taskId)
@@ -790,7 +794,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
           cancelled: 'failed',
           waiting_review: 'processing',
         }
-        task.status = statusMap[status] || 'processing'
+        task.status = (statusMap[status] || 'processing') as TaskStatus
       }
 
       task.updatedAt = Date.now()
@@ -802,6 +806,244 @@ export const useTaskQueueStore = defineStore('taskQueue', {
       }
 
       this._saveToStorage()
+    },
+
+    // =====================================================
+    // 【项目任务集成】— 供 project store 调用
+    // =====================================================
+
+    /**
+     * 注册项目生成任务到队列（复用 taskQueue 的轮询能力）。
+     * 任务完成后自动调 claim 端点把结果写入项目实体。
+     *
+     * @param backendTaskId 后端返回的 task_id（image_poller / video_poller 的任务 ID）
+     * @param params 任务参数
+     * @param projectContext 项目上下文（含 claim 端点 URL）
+     */
+    registerProjectTask(
+      backendTaskId: string,
+      params: {
+        type: 'image' | 'video'
+        prompt?: string
+        model?: string
+      },
+      projectContext: {
+        projectId: number
+        entityType?: 'character' | 'scene' | 'prop'
+        entityId?: number
+        shotId?: number
+        claimUrl: string
+      },
+    ): string {
+      const taskId = `project-${backendTaskId}`
+      if (this.tasks[taskId]) return taskId
+
+      this.tasks[taskId] = {
+        taskId,
+        type: params.type,
+        status: 'processing',
+        prompt: params.prompt || '',
+        params: { ...params, model: params.model },
+        resultUrl: null,
+        posterUrl: null,
+        progress: 0,
+        errorMessage: '',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        pollIntervalMs: params.type === 'video' ? VIDEO_POLL_INTERVAL : IMAGE_POLL_INTERVAL,
+        rawResponse: null,
+        backendTaskId,
+        source: 'project',
+        projectContext,
+      }
+      this._saveToStorage()
+      this.setActiveTask(taskId)
+
+      // 启动轮询（复用 taskQueue 的轮询机制，走 /api/images/tasks/{id} 或 /api/videos/{id}）
+      this._startProjectPolling(taskId)
+
+      // 积分刷新
+      try {
+        const userStore = useUserStore()
+        if (userStore.isAuthenticated) userStore.fetchCredits()
+      } catch (_) { /* 忽略 */ }
+
+      return taskId
+    },
+
+    /**
+     * 注册项目任务为 queued 状态（尚未拿到后端 task_id）。
+     *
+     * 用于批量提交场景：先在队列中占位显示 queued，让用户立即看到所有任务，
+     * 后端按速率限制串行提交，拿到 backendTaskId 后再调
+     * updateProjectTaskBackendId 切换为 processing 并启动轮询。
+     *
+     * @param params 任务参数
+     * @param projectContext 项目上下文
+     * @returns 临时 taskId（后续用它来更新 backendTaskId）
+     */
+    registerProjectTaskQueued(
+      params: {
+        type: 'image' | 'video'
+        prompt?: string
+        model?: string
+      },
+      projectContext: {
+        projectId: number
+        entityType?: 'character' | 'scene' | 'prop'
+        entityId?: number
+        shotId?: number
+        claimUrl: string
+      },
+    ): string {
+      // 临时 taskId 用 uuid，避免和真实 backendTaskId 冲突
+      const taskId = `project-queued-${uid()}`
+      this.tasks[taskId] = {
+        taskId,
+        type: params.type,
+        status: 'queued',
+        prompt: params.prompt || '',
+        params: { ...params, model: params.model },
+        resultUrl: null,
+        posterUrl: null,
+        progress: 0,
+        errorMessage: '',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        pollIntervalMs: params.type === 'video' ? VIDEO_POLL_INTERVAL : IMAGE_POLL_INTERVAL,
+        rawResponse: null,
+        backendTaskId: null,
+        source: 'project',
+        projectContext,
+      }
+      this._saveToStorage()
+      this.setActiveTask(taskId)
+      return taskId
+    },
+
+    /**
+     * 更新项目任务的 backendTaskId，切换为 processing 并启动轮询。
+     * 配合 registerProjectTaskQueued 使用：API 成功后调用。
+     */
+    updateProjectTaskBackendId(taskId: string, backendTaskId: string): void {
+      const task = this.tasks[taskId]
+      if (!task) return
+      task.backendTaskId = backendTaskId
+      task.status = 'processing'
+      task.updatedAt = Date.now()
+      this._notifyTaskUpdate(taskId)
+      this._saveToStorage()
+      // 启动轮询
+      this._startProjectPolling(taskId)
+      // 积分刷新
+      try {
+        const userStore = useUserStore()
+        if (userStore.isAuthenticated) userStore.fetchCredits()
+      } catch (_) { /* 忽略 */ }
+    },
+
+    /**
+     * 标记项目任务为 failed（API 提交失败时使用）。
+     */
+    markProjectTaskFailed(taskId: string, errorMessage: string): void {
+      const task = this.tasks[taskId]
+      if (!task) return
+      task.status = 'failed'
+      task.errorMessage = errorMessage || '提交失败'
+      task.updatedAt = Date.now()
+      this._notifyTaskUpdate(taskId)
+      this._saveToStorage()
+      // 失败也刷新积分（后端可能已退积分）
+      try {
+        const userStore = useUserStore()
+        if (userStore.isAuthenticated) userStore.fetchCredits()
+      } catch (_) { /* 忽略 */ }
+    },
+
+    /**
+     * 项目任务的轮询（走 /api/images/tasks/{id} 或 /api/videos/{id}）
+     */
+    _startProjectPolling(taskId: string): void {
+      const task = this.tasks[taskId]
+      if (!task) return
+
+      const pollFn = async () => {
+        if (!this.tasks[taskId]) return
+        try {
+          let data: any
+          if (task.type === 'image') {
+            data = await getImageTaskStatus(task.backendTaskId!)
+          } else {
+            data = await getVideoStatus(task.backendTaskId!)
+          }
+          // 复用现有的状态解析逻辑
+          const rawStatus = String(data?.status || 'processing').toLowerCase()
+          const isSuccess = ['success', 'completed', 'done', 'succeeded', 'finished'].includes(rawStatus)
+          const isFailed = ['failed', 'error', 'timeout'].includes(rawStatus)
+
+          if (isSuccess) {
+            task.status = 'success'
+            task.resultUrl = data?.result_url || data?.url || data?.video_url || data?.image_url || null
+            task.progress = 100
+            task.updatedAt = Date.now()
+            this._stopPolling(taskId)
+            this._notifyTaskComplete(task)
+            this._saveToStorage()
+            try { useUserStore().fetchCredits() } catch (_) {}
+            // 认领结果到项目实体
+            if (task.projectContext) {
+              this._claimProjectResult(taskId).catch(() => {})
+            }
+          } else if (isFailed) {
+            task.status = 'failed'
+            task.errorMessage = data?.error_message || data?.message || '生成失败'
+            task.updatedAt = Date.now()
+            this._stopPolling(taskId)
+            this._saveToStorage()
+            try { useUserStore().fetchCredits() } catch (_) {}
+          } else {
+            // 处理中
+            task.status = 'processing'
+            task.progress = typeof data?.progress === 'number' ? data.progress : task.progress
+            task.updatedAt = Date.now()
+            this._notifyTaskUpdate(taskId)
+          }
+        } catch (err: any) {
+          // 轮询失败，不中断，下次重试
+          console.warn('[TaskQueue] 项目任务轮询失败:', taskId, err?.message)
+        }
+      }
+
+      pollFn() // 立即执行一次
+      this.pollTimers[taskId] = setInterval(pollFn, task.pollIntervalMs)
+    },
+
+    /**
+     * 调用项目的 claim 端点，把生成结果认领到项目实体
+     */
+    async _claimProjectResult(taskId: string): Promise<void> {
+      const task = this.tasks[taskId]
+      if (!task?.projectContext) return
+
+      const ctx = task.projectContext
+      try {
+        // claim 端点用 query 参数传 task_id
+        const url = `${ctx.claimUrl}?task_id=${encodeURIComponent(task.backendTaskId || '')}`
+        const resp = await (await import('@/api/client')).default.post(url)
+        // 认领成功后，触发项目 store 刷新对应实体
+        try {
+          const { useProjectStore } = await import('@/stores/project')
+          const projectStore = useProjectStore()
+          if (ctx.entityType && ctx.entityId) {
+            await projectStore.fetchEntities(ctx.entityType)
+          } else if (ctx.shotId) {
+            await projectStore.refreshShot(ctx.shotId)
+          }
+        } catch (_) { /* 忽略 store 刷新失败 */ }
+        this.historyRefreshSignal++
+      } catch (err: any) {
+        console.warn('[TaskQueue] 项目认领失败:', taskId, err?.message)
+      }
     },
 
     // =====================================================
