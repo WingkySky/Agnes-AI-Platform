@@ -617,6 +617,7 @@ class TimelineClipResponse(BaseModel):
     source_width: Optional[int] = None
     source_height: Optional[int] = None
     source_thumbnail_url: Optional[str] = None
+    source_ref: Optional[str] = None  # BGM 字符串 id（source_id 是 Integer 不够用时使用）
 
 
 class TimelineClipCreate(BaseModel):
@@ -634,6 +635,7 @@ class TimelineClipCreate(BaseModel):
     transition_duration: float = 0
     subtitle_text: Optional[str] = None
     sort_order: int = 0
+    source_ref: Optional[str] = None
 
 
 class TimelineClipUpdate(BaseModel):
@@ -647,6 +649,7 @@ class TimelineClipUpdate(BaseModel):
     subtitle_text: Optional[str] = None
     track_index: Optional[int] = None
     sort_order: Optional[int] = None
+    source_ref: Optional[str] = None
 
 
 class TimelineDataUpdate(BaseModel):
@@ -676,6 +679,55 @@ class GenerateSubtitleAdvancedRequest(BaseModel):
     shot_ids: Optional[List[int]] = Field(None, description="不传则全部有对白的分镜")
     mode: str = Field("llm", description="字幕模式: llm（默认）/ whisper（forced alignment）")
     whisper_model_size: str = Field("small", description="whisper 模型大小: tiny/base/small/medium/large-v3")
+
+
+# =====================================================
+# 素材库 & 标记 Schema（Phase 2 增强）
+# =====================================================
+
+# ---------- 素材库（Phase 2 增强） ----------
+
+class MediaLibraryItem(BaseModel):
+    """素材库统一项结构（用于拖拽到时间线）"""
+    id: int
+    type: str  # shot_video / shot_audio / shot_frame_image / bgm
+    name: str
+    file_url: str
+    thumbnail_url: Optional[str] = None
+    duration_ms: int
+    width: Optional[int] = None
+    height: Optional[int] = None
+    shot_id: Optional[int] = None
+    meta: Optional[Dict[str, Any]] = None
+
+
+class MediaLibraryResponse(BaseModel):
+    """素材库按类型分组的响应"""
+    videos: List[MediaLibraryItem]
+    audios: List[MediaLibraryItem]
+    frame_images: List[MediaLibraryItem]
+    bgms: List[MediaLibraryItem]
+
+
+# ---------- 标记 Markers（Phase 2 增强） ----------
+
+class MarkerCreate(BaseModel):
+    """创建标记请求"""
+    time: float = Field(..., ge=0, description="标记时间（秒）")
+    name: Optional[str] = Field(None, max_length=100)
+    color: str = Field("#4a9eff", max_length=20)
+
+
+class MarkerResponse(BaseModel):
+    """标记响应"""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    project_id: int
+    time: float
+    name: Optional[str] = None
+    color: str
+    created_at: Optional[datetime] = None
 
 
 # =====================================================
