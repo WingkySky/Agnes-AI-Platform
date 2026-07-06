@@ -71,6 +71,11 @@ import type {
   BGMItem,
   BGMMood,
   MergeAdvancedRequest,
+  // Phase 2 增强
+  MediaLibraryItem,
+  MediaLibraryResponse,
+  ProjectMarker,
+  MarkerCreateRequest,
 } from '@/types/project'
 
 // =====================================================
@@ -569,6 +574,25 @@ export function deleteTimelineClip(
   return client.delete(`/api/projects/${projectId}/timeline/clips/${clipId}`)
 }
 
+/** 分割时间线片段（Ctrl+K） */
+export function splitTimelineClip(
+  projectId: number,
+  clipId: number,
+  splitTime: number,
+): Promise<{ original: { id: number; start_time: number; duration: number; trim_start: number }; new: { id: number; start_time: number; duration: number; trim_start: number } }> {
+  return client.post(`/api/projects/${projectId}/timeline/clips/${clipId}/split`, null, {
+    params: { split_time: splitTime },
+  })
+}
+
+/** 波纹删除：删除片段后同轨后续片段自动前移 */
+export function rippleDeleteTimelineClip(
+  projectId: number,
+  clipId: number,
+): Promise<{ deleted_clip_id: number; shifted_clips: Array<{ clip_id: number; new_start_time: number }>; shift_duration: number }> {
+  return client.delete(`/api/projects/${projectId}/timeline/clips/${clipId}/ripple`)
+}
+
 export function getTimelineData(projectId: number): Promise<TimelineDataResponse> {
   return client.get(`/api/projects/${projectId}/timeline/data`)
 }
@@ -598,4 +622,33 @@ export function mergeProjectAdvanced(
   data: MergeAdvancedRequest = {},
 ): Promise<{ status: string }> {
   return client.post(`/api/projects/${projectId}/merge/advanced`, data)
+}
+
+// =====================================================
+// 素材库 / BGM 文件 / 标记 API（Phase 2 增强）
+// =====================================================
+
+/** 获取项目素材库（4 类素材聚合） */
+export function getMediaLibrary(projectId: number): Promise<MediaLibraryResponse> {
+  return client.get(`/api/projects/${projectId}/media-library`)
+}
+
+/** BGM 文件 URL 拼接（供拖拽到时间线使用） */
+export function getBgmFileUrl(projectId: number, bgmId: string): string {
+  return `/api/projects/${projectId}/bgms/${bgmId}/file`
+}
+
+/** 列出项目标记 */
+export function listMarkers(projectId: number): Promise<ProjectMarker[]> {
+  return client.get(`/api/projects/${projectId}/markers`)
+}
+
+/** 创建标记 */
+export function createMarker(projectId: number, data: MarkerCreateRequest): Promise<ProjectMarker> {
+  return client.post(`/api/projects/${projectId}/markers`, data)
+}
+
+/** 删除标记 */
+export function deleteMarker(projectId: number, markerId: number): Promise<{ status: string; message: string }> {
+  return client.delete(`/api/projects/${projectId}/markers/${markerId}`)
 }

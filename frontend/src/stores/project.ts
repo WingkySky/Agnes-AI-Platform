@@ -78,11 +78,18 @@ import {
   createTimelineClip as apiCreateTimelineClip,
   updateTimelineClip as apiUpdateTimelineClip,
   deleteTimelineClip as apiDeleteTimelineClip,
+  splitTimelineClip as apiSplitTimelineClip,
+  rippleDeleteTimelineClip as apiRippleDeleteTimelineClip,
   getTimelineData as apiGetTimelineData,
   saveTimelineData as apiSaveTimelineData,
   listBgms as apiListBgms,
   listBgmMoods as apiListBgmMoods,
   mergeProjectAdvanced as apiMergeProjectAdvanced,
+  // Phase 2 增强
+  getMediaLibrary as apiGetMediaLibrary,
+  listMarkers as apiListMarkers,
+  createMarker as apiCreateMarker,
+  deleteMarker as apiDeleteMarker,
 } from '@/api/projects'
 import type {
   Project,
@@ -145,6 +152,11 @@ import type {
   BGMItem,
   BGMMood,
   MergeAdvancedRequest,
+  // Phase 2 增强
+  MediaLibraryResponse,
+  ProjectMarker,
+  MarkerCreateRequest,
+  TrackState,
 } from '@/types/project'
 
 interface ProjectState {
@@ -185,6 +197,11 @@ interface ProjectState {
   whisperAvailable: boolean
   bgmList: BGMItem[]
   bgmMoods: string[]
+
+  /* Phase 2 增强 — 素材库 / 标记 / 轨道状态 */
+  mediaLibrary: MediaLibraryResponse | null
+  markers: ProjectMarker[]
+  trackStates: Record<string, TrackState>
 }
 
 export const useProjectStore = defineStore('project', {
@@ -220,6 +237,11 @@ export const useProjectStore = defineStore('project', {
     whisperAvailable: false,
     bgmList: [],
     bgmMoods: [],
+
+    // Phase 2 增强
+    mediaLibrary: null,
+    markers: [],
+    trackStates: {},
   }),
 
   getters: {
@@ -286,6 +308,10 @@ export const useProjectStore = defineStore('project', {
       this.mergeStatus = null
       this.mergeLoading = false
       this.mergeProgress = null
+      // Phase 2 增强
+      this.mediaLibrary = null
+      this.markers = []
+      this.trackStates = {}
       this._stopMergePolling()
     },
 
@@ -963,6 +989,22 @@ export const useProjectStore = defineStore('project', {
       await this.fetchTimelineData()
     },
 
+    /** 分割时间线片段（Ctrl+K）— 在指定时间点切两段 */
+    async splitTimelineClip(clipId: number, splitTime: number) {
+      if (!this.currentProjectId) throw new Error('未选择项目')
+      const result = await apiSplitTimelineClip(this.currentProjectId, clipId, splitTime)
+      await this.fetchTimelineData()
+      return result
+    },
+
+    /** 波纹删除：删除片段后同轨后续片段自动前移 */
+    async rippleDeleteTimelineClip(clipId: number) {
+      if (!this.currentProjectId) throw new Error('未选择项目')
+      const result = await apiRippleDeleteTimelineClip(this.currentProjectId, clipId)
+      await this.fetchTimelineData()
+      return result
+    },
+
     async saveTimelineData(data: TimelineDataUpdateRequest) {
       if (!this.currentProjectId) throw new Error('未选择项目')
       this.timelineData = await apiSaveTimelineData(this.currentProjectId, data)
@@ -1056,6 +1098,53 @@ export const useProjectStore = defineStore('project', {
         clearInterval(this._mergePollingTimer)
         this._mergePollingTimer = null
       }
+    },
+
+    // ================ Phase 2 增强: 素材库 ================
+    async fetchMediaLibrary() {
+      if (!this.currentProjectId) return
+      this.mediaLibrary = await apiGetMediaLibrary(this.currentProjectId)
+    },
+
+    // ================ Phase 2 增强: 标记 ================
+    async fetchMarkers() {
+      if (!this.currentProjectId) return
+      this.markers = await apiListMarkers(this.currentProjectId)
+    },
+
+    async addMarker(data: MarkerCreateRequest) {
+      if (!this.currentProjectId) return
+      const marker = await apiCreateMarker(this.currentProjectId, data)
+      this.markers.push(marker)
+      this.markers.sort((a, b) => a.time - b.time)
+      return marker
+    },
+
+    async removeMarker(markerId: number) {
+      if (!this.currentProjectId) return
+      await apiDeleteMarker(this.currentProjectId, markerId)
+      this.markers = this.markers.filter(m => m.id !== markerId)
+    },
+
+    // ================ Phase 2 增强: 轨道状态 ================
+    setTrackMuted(trackType: string, trackIndex: number, muted: boolean) {
+      const key = `${trackType}:${trackIndex}`
+      const cur = this.trackStates[key] || { muted: false, locked: false }
+      this.trackStates[key] = { ...cur, muted }
+    },
+
+    setTrackLocked(trackType: string, trackIndex: number, locked: boolean) {
+      const key = `${trackType}:${trackIndex}`
+      const cur = this.trackStates[key] || { muted: false, locked: false }
+      this.trackStates[key] = { ...cur, locked }
+    },
+
+    isTrackMuted(trackType: string, trackIndex: number): boolean {
+      return this.trackStates[`${trackType}:${trackIndex}`]?.muted ?? false
+    },
+
+    isTrackLocked(trackType: string, trackIndex: number): boolean {
+      return this.trackStates[`${trackType}:${trackIndex}`]?.locked ?? false
     },
   },
 })

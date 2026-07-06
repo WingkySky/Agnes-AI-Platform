@@ -626,6 +626,7 @@ export interface TimelineClip {
   source_width?: number | null
   source_height?: number | null
   source_thumbnail_url?: string | null
+  source_ref?: string | null  // BGM 字符串 id 引用（source_id 是 Integer 不够用时使用）
 }
 
 export interface TimelineClipCreateRequest {
@@ -642,6 +643,7 @@ export interface TimelineClipCreateRequest {
   transition_duration?: number
   subtitle_text?: string
   sort_order?: number
+  source_ref?: string  // BGM 字符串 id 引用
 }
 
 export interface TimelineClipUpdateRequest {
@@ -687,4 +689,68 @@ export interface MergeAdvancedRequest {
   with_bgm?: boolean
   bgm_id?: string
   use_timeline?: boolean
+}
+
+// =====================================================
+// 素材库 / 标记 / 轨道状态 / 布局状态（Phase 2 增强）
+// =====================================================
+
+/** 素材库项类型 */
+export type MediaItemType = 'shot_video' | 'shot_audio' | 'shot_frame_image' | 'bgm'
+
+/** 素材库统一项结构（用于拖拽到时间线） */
+export interface MediaLibraryItem {
+  id: number
+  type: MediaItemType
+  name: string
+  file_url: string
+  thumbnail_url?: string | null
+  duration_ms: number
+  width?: number | null
+  height?: number | null
+  shot_id?: number | null
+  meta?: {
+    voice_name?: string
+    mood?: string
+    is_static_image?: boolean
+    bgm_id?: string  // BGM 字符串 id
+  }
+}
+
+/** 素材库按类型分组的响应 */
+export interface MediaLibraryResponse {
+  videos: MediaLibraryItem[]
+  audios: MediaLibraryItem[]
+  frame_images: MediaLibraryItem[]
+  bgms: MediaLibraryItem[]
+}
+
+/** 项目标记 */
+export interface ProjectMarker {
+  id: number
+  project_id: number
+  time: number
+  name?: string | null
+  color: string
+  created_at?: string
+}
+
+/** 标记创建请求 */
+export interface MarkerCreateRequest {
+  time: number
+  name?: string
+  color?: string
+}
+
+/** 轨道状态（会话级 UI 状态） */
+export interface TrackState {
+  muted: boolean
+  locked: boolean
+}
+
+/** 时间线布局状态（localforage 持久化） */
+export interface TimelineLayoutState {
+  libraryWidth: number
+  libraryHidden: boolean
+  timelineHeight: number
 }
