@@ -20,9 +20,11 @@
 import asyncio
 import logging
 import os
+import re
 import tempfile
 from datetime import datetime, timedelta
-from typing import Optional, List
+from typing import Optional, List, Any
+from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,6 +34,7 @@ from app.models.project import (
     ProjectShot,
     ProjectShotVideo,
     ProjectShotAudio,
+    ProjectShotFrameImage,  # Phase 2 增强：帧图源（shot_frame_image）
     PROJECT_STATUS_MERGING,
     PROJECT_STATUS_COMPLETED,
 )
@@ -44,15 +47,23 @@ logger = logging.getLogger("agnes_platform.project.merge")
 _subtitles_filter_cache: Optional[bool] = None
 
 
-async def _check_subtitles_filter_available() -> bool:
-    """
-    检测当前 ffmpeg 是否支持 subtitles 滤镜（需要编译 libass）。
+# ffmpeg -filters 输出中滤镜条目正则：匹配 "  T. subtitles  V->V  ..." 这类行
+# 滤镜名前后有空格，前面可能有标志位（T./S/C/..），后面跟输入输出流规格
+_FILTER_LINE_RE = re.compile(r"^\s*[A-Z.]*\s+(\S+)\s+[AVN]->[AVN]", re.MULTILINE)
 
-    结果缓存，避免每次合成重复执行 ffmpeg -filters。
+
+async def _get_ffmpeg_filter_list() -> set:
     """
-    global _subtitles_filter_cache
-    if _subtitles_filter_cache is not None:
-        return _subtitles_filter_cache
+    获取 ffmpeg 支持的滤镜名集合，缓存结果。
+
+    解析 `ffmpeg -filters` 输出，每行格式如:
+      T.. subtitles       V->V  Render text subtitles onto input video using the libass library
+      ...C drawtext        V->V  Draw text on top of video frames using libfreetype
+    """
+    global _subtitles_filter_cache, _drawtext_filter_cache
+    # 同时缓存两个滤镜的检测结果，避免重复执行 ffmpeg -filters
+    if _subtitles_filter_cache is not None and _drawtext_filter_cache is not None:
+        return set()
     try:
         proc = await asyncio.create_subprocess_exec(
             "ffmpeg", "-filters",
@@ -61,11 +72,28 @@ async def _check_subtitles_filter_available() -> bool:
         )
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
         output = stdout.decode("utf-8", errors="ignore")
-        # 匹配滤镜列表中的 subtitles 条目（如 "  T. subtitles  V->V  ..."）
-        _subtitles_filter_cache = " subtitles " in output or "subtitles " in output
+        names = set(_FILTER_LINE_RE.findall(output))
+        if _subtitles_filter_cache is None:
+            _subtitles_filter_cache = "subtitles" in names
+        if _drawtext_filter_cache is None:
+            _drawtext_filter_cache = "drawtext" in names
+        return names
     except Exception as e:
-        logger.warning("检测 ffmpeg subtitles 滤镜失败，默认不可用: %s", e)
+        logger.warning("检测 ffmpeg 滤镜列表失败: %s", e)
         _subtitles_filter_cache = False
+        _drawtext_filter_cache = False
+        return set()
+
+
+async def _check_subtitles_filter_available() -> bool:
+    """
+    检测当前 ffmpeg 是否支持 subtitles 滤镜（需要编译 libass）。
+
+    结果缓存，避免每次合成重复执行 ffmpeg -filters。
+    """
+    global _subtitles_filter_cache
+    if _subtitles_filter_cache is None:
+        await _get_ffmpeg_filter_list()
     if not _subtitles_filter_cache:
         logger.warning(
             "[合成] 当前 ffmpeg 未编译 libass，subtitles 滤镜不可用，"
@@ -85,20 +113,8 @@ async def _check_drawtext_filter_available() -> bool:
     作为 subtitles 滤镜不可用时的兜底硬烧方案。
     """
     global _drawtext_filter_cache
-    if _drawtext_filter_cache is not None:
-        return _drawtext_filter_cache
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "ffmpeg", "-filters",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
-        output = stdout.decode("utf-8", errors="ignore")
-        _drawtext_filter_cache = " drawtext " in output or "drawtext " in output
-    except Exception as e:
-        logger.warning("检测 ffmpeg drawtext 滤镜失败，默认不可用: %s", e)
-        _drawtext_filter_cache = False
+    if _drawtext_filter_cache is None:
+        await _get_ffmpeg_filter_list()
     if not _drawtext_filter_cache:
         logger.warning(
             "[合成] 当前 ffmpeg 不支持 drawtext 滤镜，"
@@ -351,10 +367,8 @@ async def execute_merge(
         async with httpx.AsyncClient(timeout=300) as client:
             for idx, url in enumerate(video_urls):
                 local_path = os.path.join(tmp_dir, f"shot_{idx:04d}.mp4")
-                resp = await client.get(url)
-                resp.raise_for_status()
-                with open(local_path, "wb") as f:
-                    f.write(resp.content)
+                # 流式下载，避免大视频一次性读入内存导致 OOM
+                await _stream_download(client, url, local_path)
                 local_paths.append(local_path)
 
                 await project_sse_manager.push(
@@ -362,14 +376,30 @@ async def execute_merge(
                     "merge_progress",
                     {
                         "status": "downloading",
-                        "progress": 10 + int(40 * (idx + 1) / len(video_urls)),
+                        "progress": 10 + int(20 * (idx + 1) / len(video_urls)),
                     },
                 )
+
+        # 视频归一化：分镜视频分辨率/编码/SAR 不一致时直接 concat 会失败或前几秒黑屏
+        # 统一分辨率/帧率/SAR/像素格式后再 concat（-c copy 最快）
+        width, height = _parse_resolution(project.aspect_ratio or "16:9")
+        normalized_paths: list = []
+        for idx, p in enumerate(local_paths):
+            norm_path = os.path.join(tmp_dir, f"norm_{idx:04d}.mp4")
+            cmd_norm = _video_normalize_only_cmd(p, norm_path, width, height)
+            await _run_ffmpeg(cmd_norm, timeout=300, error_label=f"ffmpeg 视频归一化（分镜 {idx}）")
+            normalized_paths.append(norm_path)
+
+            await project_sse_manager.push(
+                project_id,
+                "merge_progress",
+                {"status": "compositing", "progress": 30 + int(20 * (idx + 1) / len(normalized_paths))},
+            )
 
         # ffmpeg concat demuxer
         concat_list_path = os.path.join(tmp_dir, "concat_list.txt")
         with open(concat_list_path, "w") as f:
-            for p in local_paths:
+            for p in normalized_paths:
                 # ffmpeg concat demuxer 要求绝对路径，单引号转义
                 abs_path = os.path.abspath(p)
                 f.write(f"file '{abs_path}'\n")
@@ -394,7 +424,7 @@ async def execute_merge(
         await project_sse_manager.push(
             project_id,
             "merge_progress",
-            {"status": "compositing", "progress": 60},
+            {"status": "compositing", "progress": 70},
         )
 
         proc = await asyncio.create_subprocess_exec(
@@ -530,33 +560,64 @@ async def execute_merge_advanced(
     audio_paths: List[str] = []
     try:
         async with httpx.AsyncClient(timeout=300) as client:
+            # 视频归一化目标尺寸（用于 shot_frame_image 静态图转视频流）
+            norm_width, norm_height = _parse_resolution(project.aspect_ratio or "16:9")
             # 下载主视频轨（track_index=0）的片段
             for idx, clip in enumerate(video_clips):
                 if clip.track_index != 0 or not clip.source_id:
                     continue
-                video = (
-                    await db.execute(
-                        select(ProjectShotVideo).where(ProjectShotVideo.id == clip.source_id)
+                if clip.source_type == "shot_frame_image":
+                    # 静态图作视频段：下载后用 ffmpeg -loop 1 -t duration 转视频流
+                    frame_img = (
+                        await db.execute(
+                            select(ProjectShotFrameImage).where(
+                                ProjectShotFrameImage.id == clip.source_id
+                            )
+                        )
+                    ).scalar_one_or_none()
+                    if not frame_img or not frame_img.file_url:
+                        continue
+                    # 下载帧图到临时文件
+                    img_path = os.path.join(tmp_dir, f"frame_{idx:04d}.png")
+                    await _stream_download(client, frame_img.file_url, img_path)
+                    # 用 ffmpeg 转视频流：-loop 1 -i image -t duration -r 30 + 归一化
+                    normalized_path = await _normalize_frame_image(
+                        img_path, float(clip.duration or 3.0),
+                        norm_width, norm_height, tmp_dir,
                     )
-                ).scalar_one_or_none()
-                if not video or not video.file_url:
-                    continue
-                local_path = os.path.join(tmp_dir, f"video_{idx:04d}.mp4")
-                resp = await client.get(video.file_url)
-                resp.raise_for_status()
-                with open(local_path, "wb") as f:
-                    f.write(resp.content)
-                video_paths.append(local_path)
+                    video_paths.append(normalized_path)
+                else:
+                    # shot_video（默认行为）：下载分镜视频
+                    video = (
+                        await db.execute(
+                            select(ProjectShotVideo).where(ProjectShotVideo.id == clip.source_id)
+                        )
+                    ).scalar_one_or_none()
+                    if not video or not video.file_url:
+                        continue
+                    local_path = os.path.join(tmp_dir, f"video_{idx:04d}.mp4")
+                    # 流式下载，避免大视频一次性读入内存导致 OOM
+                    await _stream_download(client, video.file_url, local_path)
+                    video_paths.append(local_path)
 
                 await project_sse_manager.push(project_id, "merge_progress", {
                     "status": "downloading",
                     "progress": 5 + int(15 * (idx + 1) / max(len(video_clips), 1)),
                 })
 
-            # 下载音频片段（TTS）
+            # 下载音频片段（TTS）+ BGM
             if audio_clips:
                 for idx, clip in enumerate(audio_clips):
-                    if clip.track_index != 0 or not clip.source_id:
+                    if clip.track_index != 0:
+                        continue
+                    if clip.source_type == "bgm" and clip.source_ref:
+                        # BGM：通过 source_ref 取本地文件路径，无需下载
+                        from app.services.project.bgm_library import get_bgm_path
+                        bgm_path = get_bgm_path(clip.source_ref)
+                        if bgm_path:
+                            audio_paths.append(bgm_path)
+                        continue
+                    if not clip.source_id:
                         continue
                     audio = (
                         await db.execute(
@@ -566,10 +627,8 @@ async def execute_merge_advanced(
                     if not audio or not audio.file_url:
                         continue
                     local_path = os.path.join(tmp_dir, f"audio_{idx:04d}.mp3")
-                    resp = await client.get(audio.file_url)
-                    resp.raise_for_status()
-                    with open(local_path, "wb") as f:
-                        f.write(resp.content)
+                    # 流式下载
+                    await _stream_download(client, audio.file_url, local_path)
                     audio_paths.append(local_path)
 
         await project_sse_manager.push(project_id, "merge_progress", {
@@ -608,6 +667,7 @@ async def execute_merge_advanced(
             )
             composite_audio_path = os.path.join(tmp_dir, "composite_audio.aac")
             await _mix_audio_tracks(
+                audio_clips=[c for c in audio_clips if c.track_index == 0 and c.source_id],
                 audio_paths=audio_paths,
                 output_path=composite_audio_path,
                 with_bgm=with_bgm,
@@ -765,24 +825,187 @@ def _parse_resolution(aspect_ratio: str) -> tuple:
     return ratio_map.get(aspect_ratio, (1280, 720))
 
 
+# =====================================================
+# 命令构造层：把 clip 字段 → ffmpeg 命令的转换收敛到此
+# 后续新增能力（转场、特效、start_time 留白等）只改这里
+# =====================================================
+
+def _clip_trim_range(clip) -> tuple:
+    """读取片段的裁剪起点与时长，集中默认值和边界处理。
+
+    语义对齐预览端：成片中片段占据 [start_time, start_time+duration]，
+    源素材取 [trim_start, trim_start+duration]。
+    """
+    trim_start = max(0.0, float(getattr(clip, "trim_start", 0.0) or 0.0))
+    duration = max(0.1, float(getattr(clip, "duration", 0.0) or 0.0))
+    return trim_start, duration
+
+
+def _video_normalize_cmd(
+    clip, src_path: str, out_path: str, width: int, height: int,
+) -> List[str]:
+    """构造视频归一化 + 裁剪截取命令。
+
+    统一分辨率/帧率/SAR/像素格式（避免拼接失败），并按 trim_start/duration 截取源素材。
+    """
+    trim_start, duration = _clip_trim_range(clip)
+    return [
+        "ffmpeg", "-y",
+        "-ss", f"{trim_start}",
+        "-t", f"{duration}",
+        "-i", src_path,
+        "-vf", f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+               f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=30",
+        "-c:v", "libx264", "-preset", "medium", "-crf", "23",
+        "-pix_fmt", "yuv420p",
+        "-an",  # 转场拼接阶段不需要音频，最终合成时再混入
+        out_path,
+    ]
+
+
+def _video_normalize_only_cmd(src_path: str, out_path: str, width: int, height: int) -> List[str]:
+    """构造视频归一化命令（不裁剪，保留完整时长）。
+
+    用于简单合成 execute_merge：分镜视频分辨率/编码/SAR 不一致时直接 concat 会失败或前几秒黑屏，
+    因此先用此命令统一格式再 concat。
+    """
+    return [
+        "ffmpeg", "-y",
+        "-i", src_path,
+        "-vf", f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+               f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=30",
+        "-c:v", "libx264", "-preset", "medium", "-crf", "23",
+        "-pix_fmt", "yuv420p",
+        "-an",  # 简单合成不含音频
+        out_path,
+    ]
+
+
+async def _stream_download(client: Any, url: str, dest_path: str) -> None:
+    """流式下载文件到指定路径，避免大文件一次性读入内存导致 OOM。
+
+    使用 8KB 块写入磁盘，内存占用恒定。
+    client 参数为 httpx.AsyncClient 实例（httpx 在调用函数内导入）。
+    """
+    async with client.stream("GET", url) as response:
+        response.raise_for_status()
+        with open(dest_path, "wb") as f:
+            async for chunk in response.aiter_bytes(chunk_size=8192):
+                f.write(chunk)
+
+
+def _audio_clip_cmd(clip, src_path: str, out_path: str) -> List[str]:
+    """构造音频裁剪截取命令（按 trim_start/duration 截取为 aac）。"""
+    trim_start, duration = _clip_trim_range(clip)
+    return [
+        "ffmpeg", "-y",
+        "-ss", f"{trim_start}",
+        "-t", f"{duration}",
+        "-i", src_path,
+        "-c:a", "aac", "-b:a", "128k",
+        out_path,
+    ]
+
+
+def _timeline_total_duration(clips: List) -> float:
+    """按片段在时间线上的结束位置计算总时长。"""
+    return max(
+        (float(getattr(c, "start_time", 0.0) or 0.0) + float(getattr(c, "duration", 0.0) or 0.0) for c in clips),
+        default=0.0,
+    )
+
+
+def _has_timeline_offsets(clips: List, epsilon: float = 0.05) -> bool:
+    """判断片段 start_time 是否存在留白/偏移，存在时不能简单顺序拼接。"""
+    cursor = 0.0
+    for clip in sorted(clips, key=lambda c: float(getattr(c, "start_time", 0.0) or 0.0)):
+        start = float(getattr(clip, "start_time", 0.0) or 0.0)
+        duration = float(getattr(clip, "duration", 0.0) or 0.0)
+        if abs(start - cursor) > epsilon:
+            return True
+        cursor = start + duration
+    return False
+
+
+async def _compose_videos_on_timeline(
+    clips: List, normalized_paths: List[str], output_path: str, width: int, height: int,
+) -> None:
+    """用黑底画布按 start_time 放置片段，保留时间线空白。"""
+    ordered = sorted(
+        zip(clips, normalized_paths),
+        key=lambda item: float(getattr(item[0], "start_time", 0.0) or 0.0),
+    )
+    total_duration = max(_timeline_total_duration(clips), 0.1)
+
+    inputs: List[str] = [
+        "-f", "lavfi",
+        "-i", f"color=c=black:s={width}x{height}:r=30:d={total_duration}",
+    ]
+    for _, path in ordered:
+        inputs.extend(["-i", path])
+
+    filter_parts: List[str] = []
+    base_label = "0:v"
+    for idx, (clip, _) in enumerate(ordered, start=1):
+        start = max(0.0, float(getattr(clip, "start_time", 0.0) or 0.0))
+        duration = max(0.1, float(getattr(clip, "duration", 0.0) or 0.0))
+        end = start + duration
+        out_label = f"v{idx}"
+        filter_parts.append(
+            f"[{base_label}][{idx}:v]overlay=x=0:y=0:eof_action=pass:"
+            f"enable='between(t,{start:.3f},{end:.3f})'[{out_label}]"
+        )
+        base_label = out_label
+
+    cmd = [
+        "ffmpeg", "-y",
+        *inputs,
+        "-filter_complex", ";".join(filter_parts),
+        "-map", f"[{base_label}]",
+        "-c:v", "libx264", "-preset", "medium", "-crf", "23",
+        "-pix_fmt", "yuv420p",
+        "-an",
+        output_path,
+    ]
+    await _run_ffmpeg(cmd, timeout=900, error_label="ffmpeg 时间线视频合成")
+
+
 async def _concat_videos_with_xfade(
     clips: List, video_paths: List[str], output_path: str, aspect_ratio: str
 ) -> None:
     """
-    拼接视频片段，含 xfade 转场。
+    拼接视频片段，含 xfade 转场，并应用每个片段的裁剪（trim_start）与时长（duration）。
 
     策略:
-    - 单个片段: 直接 copy
-    - 多个片段 + 所有 transition_type=none: 用 concat demuxer（-c copy，最快）
-    - 多个片段 + 有转场: 用 xfade 滤镜逐对拼接（需 reencode，较慢）
+    - 先对每个片段归一化（统一分辨率/帧率/SAR/像素格式）并按 trim_start/duration 截取
+    - 单片段: 直接用归一化结果
+    - 多片段 + 无转场: concat demuxer（-c copy）
+    - 多片段 + 有转场: xfade 滤镜逐对拼接（reencode）
+
+    语义对齐预览端：源素材取 [trim_start, trim_start+duration]。
     """
     if not video_paths:
         raise ValueError("无视频片段可拼接")
 
-    # 单个片段：直接 copy
-    if len(video_paths) == 1:
+    width, height = _parse_resolution(aspect_ratio)
+
+    # 第一步：归一化 + 按 trim_start/duration 截取每个片段（无转场/有转场共用）
+    normalized_paths: List[str] = []
+    for idx, p in enumerate(video_paths):
+        clip = clips[idx] if clips and idx < len(clips) else None
+        norm_path = output_path + f".norm_{idx:04d}.mp4"
+        cmd = _video_normalize_cmd(clip, p, norm_path, width, height)
+        await _run_ffmpeg(cmd, timeout=300, error_label=f"ffmpeg 视频归一化（片段 {idx}）")
+        normalized_paths.append(norm_path)
+
+    if _has_timeline_offsets(clips):
+        await _compose_videos_on_timeline(clips, normalized_paths, output_path, width, height)
+        return
+
+    # 单片段：归一化结果即输出
+    if len(normalized_paths) == 1:
         import shutil
-        shutil.copy2(video_paths[0], output_path)
+        shutil.copy2(normalized_paths[0], output_path)
         return
 
     # 检查是否有转场（clips 和 paths 顺序对应）
@@ -792,11 +1015,11 @@ async def _concat_videos_with_xfade(
         for i in range(min(len(clips), len(video_paths)))
     )
 
-    # 无转场：用 concat demuxer（快速，-c copy）
+    # 无转场：归一化后参数一致，用 concat demuxer（-c copy，最快）
     if not has_transition:
         concat_list_path = output_path + ".concat.txt"
         with open(concat_list_path, "w") as f:
-            for p in video_paths:
+            for p in normalized_paths:
                 f.write(f"file '{os.path.abspath(p)}'\n")
         cmd = [
             "ffmpeg", "-y",
@@ -808,28 +1031,10 @@ async def _concat_videos_with_xfade(
         await _run_ffmpeg(cmd, timeout=600, error_label="ffmpeg 视频拼接（concat）")
         return
 
-    # 有转场：用 xfade 滤镜逐对拼接（reencode）
-    width, height = _parse_resolution(aspect_ratio)
-
-    # 第一步：统一每个片段的分辨率、帧率、sar（避免 xfade 失败）
-    normalized_paths: List[str] = []
-    for idx, p in enumerate(video_paths):
-        norm_path = output_path + f".norm_{idx:04d}.mp4"
-        cmd = [
-            "ffmpeg", "-y", "-i", p,
-            "-vf", f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-                   f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=30",
-            "-c:v", "libx264", "-preset", "medium", "-crf", "23",
-            "-an",  # 转场拼接阶段不需要音频，最终合成时再混入
-            norm_path,
-        ]
-        await _run_ffmpeg(cmd, timeout=300, error_label=f"ffmpeg 视频归一化（片段 {idx}）")
-        normalized_paths.append(norm_path)
-
-    # 第二步：用 ffprobe 获取每个归一化片段的时长
+    # 有转场：用 ffprobe 获取每个归一化片段的时长，再 xfade 逐对拼接
     durations = await _probe_durations(normalized_paths)
 
-    # 第三步：逐对 xfade 拼接
+    # 逐对 xfade 拼接
     # xfade 滤镜链：[0:v][1:v]xfade=transition=X:duration=D:offset=O[v01]
     # offset = 累积时长 - 转场时长
     filter_parts: List[str] = []
@@ -926,6 +1131,7 @@ async def _probe_video_resolution(video_path: str) -> tuple:
 
 
 async def _mix_audio_tracks(
+    audio_clips: List,
     audio_paths: List[str],
     output_path: str,
     with_bgm: bool = False,
@@ -937,9 +1143,11 @@ async def _mix_audio_tracks(
 
     策略:
     - 无 TTS 且无 BGM: 不生成音频文件（调用方应判断）
-    - 仅 TTS: concat + afade
+    - 仅 TTS: 按每个片段 trim_start/duration 截取后 concat + afade
     - 仅 BGM: 取 BGM 文件，按 total_duration 截取
-    - TTS + BGM: TTS concat + afade → 与 BGM amix（BGM 音量降低到 0.15）
+    - TTS + BGM: TTS 截取 concat + afade → 与 BGM amix（BGM 音量降低到 0.15）
+
+    audio_clips 与 audio_paths 顺序对应，用于按 trim_start/duration 截取每个 TTS 片段。
     """
     if not audio_paths and not (with_bgm and bgm_id):
         return
@@ -966,41 +1174,59 @@ async def _mix_audio_tracks(
 
     # 仅 TTS（无 BGM）
     if audio_paths and not bgm_path:
-        # concat + 30ms 淡入淡出（避免拼接点爆音）
-        concat_list_path = output_path + ".concat.txt"
-        with open(concat_list_path, "w") as f:
-            for p in audio_paths:
-                f.write(f"file '{os.path.abspath(p)}'\n")
+        # 先按每个片段的 trim_start/duration 截取（语义对齐预览端：源素材取 [trim_start, trim_start+duration]）
+        clipped_paths: List[str] = []
+        for idx, p in enumerate(audio_paths):
+            clip = audio_clips[idx] if audio_clips and idx < len(audio_clips) else None
+            clipped_path = output_path + f".clip_{idx:04d}.aac"
+            cmd_clip = _audio_clip_cmd(clip, p, clipped_path)
+            await _run_ffmpeg(cmd_clip, timeout=300, error_label=f"ffmpeg TTS 截取（片段 {idx}）")
+            clipped_paths.append(clipped_path)
 
-        # 先 concat，再对整体加淡入淡出
-        merged_path = output_path + ".merged.aac"
-        cmd_concat = [
-            "ffmpeg", "-y",
-            "-f", "concat", "-safe", "0",
-            "-i", concat_list_path,
-            "-c", "copy",
-            merged_path,
-        ]
-        await _run_ffmpeg(cmd_concat, timeout=300, error_label="ffmpeg TTS 拼接")
+        inputs: List[str] = []
+        for p in clipped_paths:
+            inputs.extend(["-i", p])
 
-        # 获取拼接后总时长
-        durations = await _probe_durations([merged_path])
-        total_dur = durations[0] if durations else 3.0
-        fade_out_start = max(0, total_dur - 0.03)
+        filter_parts: List[str] = []
+        delayed_labels: List[str] = []
+        for idx, _ in enumerate(clipped_paths):
+            clip = audio_clips[idx] if audio_clips and idx < len(audio_clips) else None
+            start = max(0.0, float(getattr(clip, "start_time", 0.0) or 0.0))
+            duration = max(0.1, float(getattr(clip, "duration", 0.0) or 0.0))
+            delay_ms = int(start * 1000)
+            fade_out_start = max(0, duration - 0.03)
+            label = f"a{idx}"
+            filter_parts.append(
+                f"[{idx}:a]afade=t=in:st=0:d=0.03,"
+                f"afade=t=out:st={fade_out_start:.3f}:d=0.03,"
+                f"adelay={delay_ms}:all=1[{label}]"
+            )
+            delayed_labels.append(f"[{label}]")
+
+        if len(delayed_labels) == 1:
+            filter_parts.append(f"{delayed_labels[0]}anull[aout]")
+        else:
+            filter_parts.append(
+                f"{''.join(delayed_labels)}amix=inputs={len(delayed_labels)}:"
+                "duration=longest:dropout_transition=0[aout]"
+            )
 
         cmd_fade = [
-            "ffmpeg", "-y", "-i", merged_path,
-            "-af", f"afade=t=in:st=0:d=0.03,afade=t=out:st={fade_out_start}:d=0.03",
+            "ffmpeg", "-y",
+            *inputs,
+            "-filter_complex", ";".join(filter_parts),
+            "-map", "[aout]",
             "-c:a", "aac", "-b:a", "128k",
             output_path,
         ]
-        await _run_ffmpeg(cmd_fade, timeout=300, error_label="ffmpeg TTS 淡变")
+        await _run_ffmpeg(cmd_fade, timeout=300, error_label="ffmpeg TTS 时间线混音")
         return
 
     # TTS + BGM（amix 混音）
     # 1. 先处理 TTS（concat + 淡变）
     tts_processed_path = output_path + ".tts.aac"
     await _mix_audio_tracks(
+        audio_clips=audio_clips,
         audio_paths=audio_paths,
         output_path=tts_processed_path,
         with_bgm=False,
@@ -1098,3 +1324,29 @@ async def _ffmpeg_final_composite(
     cmd.append(output_path)
 
     await _run_ffmpeg(cmd, timeout=900, error_label="ffmpeg 最终合成")
+
+
+async def _normalize_frame_image(
+    src_path: str, duration: float,
+    target_width: int, target_height: int, tmp_dir: str,
+) -> str:
+    """
+    把静态图归一化为视频流（-loop 1 -i image -t duration -r 30）。
+
+    复用视频归一化参数：scale+pad 到目标尺寸 + setsar=1 + fps=30，libx264 crf=23。
+    用于 shot_frame_image 类型的片段：静态图按 duration 时长转成视频流后参与拼接。
+    """
+    out_path = os.path.join(tmp_dir, f"frame_{uuid4().hex}.mp4")
+    # 归一化：scale+pad 到目标尺寸，30fps，libx264 crf=23，-t duration
+    cmd = [
+        "ffmpeg", "-y",
+        "-loop", "1", "-i", src_path,
+        "-t", str(duration),
+        "-r", "30",
+        "-vf", f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease,"
+               f"pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2,setsar=1",
+        "-c:v", "libx264", "-crf", "23", "-pix_fmt", "yuv420p",
+        out_path,
+    ]
+    await _run_ffmpeg(cmd, timeout=300, error_label="ffmpeg 静态图归一化为视频流")
+    return out_path
