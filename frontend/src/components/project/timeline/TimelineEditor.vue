@@ -4,33 +4,118 @@
      - 多轨道区（视频/音频/字幕，按 track_index 分组）
      - 播放头（点击标尺跳转 / 拖拽移动）
      - 缩放控件（pixelsPerSecond 调节）
+     - 顶部工具条集成剪辑操作（分割/波纹删除/帧步进/播放控制）
+       剪辑按钮紧贴时间线，避免被预览区割裂
      - 本地维护 clipDrafts 副本，拖拽/裁剪实时更新；结束时 emit 保存
      ===================================================== -->
 
 <template>
   <div class="timeline-editor">
-    <!-- 缩放控件 -->
+    <!-- 顶部工具条：缩放 + 剪辑操作 + 播放头读数 -->
     <div class="zoom-bar">
+      <!-- 左侧：缩放控件 -->
       <span class="zoom-label">缩放</span>
       <el-slider
         v-model="zoomLevel"
         :min="20"
         :max="200"
         :step="10"
-        style="width: 180px"
+        style="width: 140px"
         @input="onZoom"
       />
       <span class="zoom-value">{{ pixelsPerSecond }} px/s</span>
+
       <el-divider direction="vertical" />
-      <span class="playhead-label">播放头：{{ formatTime(playheadTime) }}</span>
+
+      <!-- 撤销 / 重做 -->
+      <el-tooltip content="撤销（Ctrl+Z）" placement="bottom">
+        <span>
+          <el-button
+            size="small"
+            :icon="RefreshLeft"
+            :disabled="!canUndo"
+            @click="$emit('undo')"
+          />
+        </span>
+      </el-tooltip>
+      <el-tooltip content="重做（Ctrl+Shift+Z）" placement="bottom">
+        <span>
+          <el-button
+            size="small"
+            :icon="RefreshRight"
+            :disabled="!canRedo"
+            @click="$emit('redo')"
+          />
+        </span>
+      </el-tooltip>
+
+      <el-divider direction="vertical" />
+
+      <!-- 添加片段 -->
+      <el-button size="small" type="success" :icon="Plus" @click="$emit('add-clip')">添加片段</el-button>
+
+      <el-divider direction="vertical" />
+
+      <!-- 中间：剪辑操作按钮组（紧贴时间线） -->
       <el-button-group>
-        <el-button size="small" :icon="VideoPause" @click="seekTo(0)">回起点</el-button>
-        <el-button size="small" :icon="VideoPlay" @click="$emit('play')">播放</el-button>
+        <el-button size="small" :icon="VideoPause" @click="seekTo(0)" title="回到起点">起点</el-button>
+        <el-button size="small" :icon="VideoPlay" @click="$emit('play')" title="播放/暂停">播放</el-button>
       </el-button-group>
+
+      <el-button-group>
+        <el-button
+          size="small"
+          :icon="Back"
+          @click="$emit('seek-by-frames', -1)"
+          title="后退 1 帧（←）"
+        />
+        <el-button
+          size="small"
+          :icon="Right"
+          @click="$emit('seek-by-frames', 1)"
+          title="前进 1 帧（→）"
+        />
+      </el-button-group>
+
+      <el-tooltip content="在播放头位置分割选中片段（Ctrl+K）" placement="bottom">
+        <span>
+          <el-button
+            size="small"
+            type="primary"
+            :icon="Switch"
+            :disabled="!editable || !hasSelectedClip"
+            @click="$emit('split-at-playhead')"
+          >分割</el-button>
+        </span>
+      </el-tooltip>
+
+      <el-tooltip content="波纹删除选中片段，同轨后续自动前移（Delete）" placement="bottom">
+        <span>
+          <el-button
+            size="small"
+            type="danger"
+            :icon="Delete"
+            :disabled="!editable || !hasSelectedClip"
+            @click="$emit('ripple-delete')"
+          >波纹删除</el-button>
+        </span>
+      </el-tooltip>
+
+      <!-- 右侧：播放头时间读数 -->
+      <span class="playhead-label">播放头：{{ formatTime(playheadTime) }}</span>
     </div>
 
     <!-- 滚动容器 -->
     <div ref="scrollEl" class="editor-scroll">
+      <!-- 标记旗帜条（标尺上方） -->
+      <MarkersRuler
+        v-if="markers && markers.length"
+        :markers="markers"
+        :pixels-per-second="pixelsPerSecond"
+        :total-width="rulerWidth"
+        @seek="$emit('marker-seek', $event)"
+        @delete="$emit('marker-delete', $event)"
+      />
       <!-- 时间标尺 -->
       <div class="ruler" :style="{ width: rulerWidth + 'px' }" @mousedown="onRulerClick">
         <div
@@ -64,11 +149,18 @@
           :selected-clip-id="selectedClipId"
           :active-clip-id="activeClipIdForTrack(trackType)"
           :editable="editable"
+          :playhead-time="playheadTime"
+          :muted="trackStates ? !!(trackStates[`${trackType}:0`]?.muted) : false"
+          :locked="trackStates ? !!(trackStates[`${trackType}:0`]?.locked) : false"
           @deselect="$emit('deselect')"
           @select-clip="$emit('select-clip', $event)"
           @clip-drag="onClipDrag"
           @clip-trim="onClipTrim"
           @clip-updated="$emit('clip-updated', $event)"
+          @context-menu="(clipId: number, x: number, y: number) => $emit('context-menu', clipId, x, y)"
+          @toggle-mute="$emit('toggle-track-mute', trackType, 0)"
+          @toggle-lock="$emit('toggle-track-lock', trackType, 0)"
+          @drop-media="(item: MediaLibraryItem, tt: string, ti: number, st: number) => $emit('drop-media', item, tt, ti, st)"
         />
       </div>
 
@@ -83,9 +175,13 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { VideoPlay, VideoPause, Film } from '@element-plus/icons-vue'
+import {
+  VideoPlay, VideoPause, Film, Switch, Delete, Back, Right,
+  RefreshLeft, RefreshRight, Plus,
+} from '@element-plus/icons-vue'
 import TimelineTrack from './TimelineTrack.vue'
-import type { TimelineClip, TimelineTrackType } from '@/types/project'
+import MarkersRuler from './MarkersRuler.vue'
+import type { MediaLibraryItem, ProjectMarker, TimelineClip, TimelineTrackType, TrackState } from '@/types/project'
 
 const props = defineProps<{
   /** 所有片段（含三种 track_type） */
@@ -101,6 +197,14 @@ const props = defineProps<{
   activeAudioClipId?: number | null
   /** 当前播放中的字幕片段 ID */
   activeSubtitleClipId?: number | null
+  /** 是否可撤销 */
+  canUndo?: boolean
+  /** 是否可重做 */
+  canRedo?: boolean
+  /** 标记列表（用于标尺上方旗帜渲染） */
+  markers?: ProjectMarker[]
+  /** 轨道状态（用于轨道头部 M/L 按钮） */
+  trackStates?: Record<string, TrackState>
 }>()
 
 const emit = defineEmits<{
@@ -111,7 +215,34 @@ const emit = defineEmits<{
   (e: 'clip-updated', clipId: number): void
   (e: 'play'): void
   (e: 'seek', time: number): void
+  /** 在播放头处分割选中片段 */
+  (e: 'split-at-playhead'): void
+  /** 波纹删除选中片段 */
+  (e: 'ripple-delete'): void
+  /** 帧步进（正/负帧数） */
+  (e: 'seek-by-frames', deltaFrames: number): void
+  /** 右键菜单 */
+  (e: 'context-menu', clipId: number, x: number, y: number): void
+  /** 撤销 */
+  (e: 'undo'): void
+  /** 重做 */
+  (e: 'redo'): void
+  /** 添加片段 */
+  (e: 'add-clip'): void
+  /** 拖拽素材到轨道 */
+  (e: 'drop-media', item: MediaLibraryItem, trackType: string, trackIndex: number, startTime: number): void
+  /** 轨道静音切换 */
+  (e: 'toggle-track-mute', trackType: string, trackIndex: number): void
+  /** 轨道锁定切换 */
+  (e: 'toggle-track-lock', trackType: string, trackIndex: number): void
+  /** 标记：点击旗帜跳转 */
+  (e: 'marker-seek', time: number): void
+  /** 标记：右键删除 */
+  (e: 'marker-delete', markerId: number): void
 }>()
+
+// 是否有选中片段（控制分割/波纹删除按钮启用）
+const hasSelectedClip = computed(() => props.selectedClipId != null)
 
 const trackTypes: TimelineTrackType[] = ['video', 'audio', 'subtitle']
 
@@ -177,7 +308,7 @@ const playheadPosition = computed(() => playheadTime.value * pixelsPerSecond.val
 
 function onRulerClick(e: MouseEvent) {
   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-  const x = e.clientX - rect.left + (scrollEl.value?.scrollLeft ?? 0)
+  const x = e.clientX - rect.left
   const t = Math.max(0, x / pixelsPerSecond.value)
   internalPlayheadTime.value = t
   emit('seek', t)
@@ -253,8 +384,8 @@ const scrollEl = ref<HTMLElement | null>(null)
 .zoom-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 14px;
+  gap: 8px;
+  padding: 8px 12px;
   background: var(--el-fill-color-light);
   border-bottom: 1px solid var(--el-border-color-lighter);
   flex-wrap: wrap;
@@ -269,7 +400,7 @@ const scrollEl = ref<HTMLElement | null>(null)
   font-size: 12px;
   color: var(--el-text-color-secondary);
   font-family: 'Menlo', monospace;
-  min-width: 60px;
+  min-width: 56px;
 }
 
 .playhead-label {
@@ -277,6 +408,9 @@ const scrollEl = ref<HTMLElement | null>(null)
   font-size: 12px;
   color: var(--el-text-color-secondary);
   font-family: 'Menlo', monospace;
+  background: var(--el-fill-color);
+  padding: 2px 8px;
+  border-radius: 3px;
 }
 
 .editor-scroll {
