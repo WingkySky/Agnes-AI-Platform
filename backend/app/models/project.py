@@ -538,7 +538,7 @@ class ProjectTimelineClip(Base):
     - project_id: 所属项目
     - track_type: 轨道类型（video/audio/subtitle）
     - track_index: 轨道序号（0=主轨, 1=次轨）
-    - source_type: 来源类型（shot_video/shot_audio/bgm/subtitle）
+    - source_type: 来源类型（shot_video/shot_audio/shot_frame_image/bgm/subtitle）
     - source_id: 来源 ID（多态引用 project_shot_videos/audios.id）
     - shot_id: 关联分镜（便于溯源）
     - start_time: 起始时间（秒）
@@ -571,5 +571,30 @@ class ProjectTimelineClip(Base):
     transition_duration = Column(Float, default=0, nullable=False)
     subtitle_text = Column(Text, nullable=True)  # 字幕片段的文本
     sort_order = Column(Integer, default=0, nullable=False)
+    source_ref = Column(String(100), nullable=True)  # BGM 字符串 id 引用（source_id 是 Integer 不够用）
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ProjectMarker(Base):
+    """
+    项目时间线标记 — Phase 2 增强
+
+    字段说明:
+    - project_id: 所属项目
+    - time: 标记时间点（秒）
+    - name: 可选命名（如"重要节点"）
+    - color: 颜色（默认 #4a9eff）
+    """
+    __tablename__ = "project_markers"
+    __table_args__ = (
+        Index("idx_pm_project", "project_id"),
+        Index("idx_pm_project_time", "project_id", "time"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    time = Column(Float, nullable=False)
+    name = Column(String(100), nullable=True)
+    color = Column(String(20), default="#4a9eff", nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
