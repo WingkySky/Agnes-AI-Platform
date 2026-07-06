@@ -20,6 +20,8 @@
 #  15. 字幕（Phase 2）:     /projects/{id}/subtitles[/generate][/generate-whisper][/clips][/style]
 #  16. 时间线（Phase 2）:   /projects/{id}/timeline[/init][/clips[/{cid}]][/data]
 #  17. BGM 库（Phase 2）:   /projects/{id}/bgms[/moods]
+#  18. 素材库（Phase 2 增强）: /projects/{id}/media-library
+#  19. 标记 Markers（Phase 2 增强）: /projects/{id}/markers[/{mid}]
 # =====================================================
 
 import asyncio
@@ -27,7 +29,7 @@ import logging
 from typing import AsyncGenerator, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -83,6 +85,8 @@ from app.schemas.project import (
     SubtitleStyle, SubtitleClip,
     TimelineClipResponse, TimelineClipCreate, TimelineClipUpdate,
     TimelineDataUpdate, TimelineDataResponse,
+    # Phase 2 增强 — 素材库 / 标记
+    MediaLibraryResponse, MarkerCreate, MarkerResponse,
 )
 from app.services.project import project_sse_manager
 from app.services.project.project_service import (
@@ -156,12 +160,22 @@ from app.services.project.timeline_service import (
     create_clip as create_timeline_clip,
     update_clip as update_timeline_clip,
     delete_clip as delete_timeline_clip,
+    split_clip as split_timeline_clip,
+    ripple_delete_clip as ripple_delete_timeline_clip,
     get_timeline_data, save_timeline_data,
     get_subtitle_style, update_subtitle_style,
+    get_media_library,
 )
 from app.services.project.bgm_library import (
     list_bgms as list_bgm_library,
     list_moods as list_bgm_moods,
+    get_bgm_path,
+)
+from app.services.project.marker_service import (
+    list_markers as list_project_markers,
+    create_marker as create_project_marker,
+    delete_marker as delete_project_marker,
+    find_nearest_marker as find_nearest_project_marker,
 )
 
 logger = logging.getLogger("agnes_platform.project.routes")
@@ -2075,6 +2089,53 @@ async def delete_timeline_clip_api(
     return {"success": ok}
 
 
+@router.post(
+    "/{project_id}/timeline/clips/{clip_id}/split",
+    summary="分割时间线片段",
+)
+async def split_timeline_clip_api(
+    project_id: int,
+    clip_id: int,
+    split_time: float = Query(..., description="分割点（项目时间线上的绝对时间，秒）"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    在指定时间点分割时间线片段（Ctrl+K）
+
+    原片段保留 [start_time, split_time]，新片段承担 [split_time, end_time]。
+    """
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    result = await split_timeline_clip(db, project_id, clip_id, split_time)
+    if not result:
+        raise HTTPException(status_code=400, detail="分割点不在片段范围内")
+    return result
+
+
+@router.delete(
+    "/{project_id}/timeline/clips/{clip_id}/ripple",
+    summary="波纹删除时间线片段",
+)
+async def ripple_delete_timeline_clip_api(
+    project_id: int,
+    clip_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    波纹删除：删除片段后，同轨后续片段自动前移填补空隙
+
+    普通删除留空隙，波纹删除自动收紧。
+    """
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    result = await ripple_delete_timeline_clip(db, project_id, clip_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="时间线片段不存在")
+    return result
+
+
 @router.get(
     "/{project_id}/timeline/data",
     response_model=TimelineDataResponse,
@@ -2150,3 +2211,104 @@ async def list_bgm_moods_api(
     project = await _get_project_or_404(db, project_id)
     _check_project_owner(project, current_user)
     return {"moods": list_bgm_moods()}
+
+
+@router.get(
+    "/{project_id}/bgms/{bgm_id}/file",
+    summary="BGM 文件 HTTP URL（供前端预览/拖拽使用）",
+)
+async def get_bgm_file_api(
+    project_id: int,
+    bgm_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """暴露 BGM 文件 HTTP URL（FileResponse）"""
+    path = get_bgm_path(bgm_id)
+    if not path:
+        raise HTTPException(status_code=404, detail="BGM 文件不存在")
+    return FileResponse(path, media_type="audio/mpeg")
+
+
+# =====================================================
+# 18. 素材库（Phase 2 增强）
+# -------------------------------------------------
+# 路由:
+#   GET  /projects/{id}/media-library   聚合四类素材
+# =====================================================
+
+@router.get(
+    "/{project_id}/media-library",
+    response_model=MediaLibraryResponse,
+    summary="项目素材库（4 类素材聚合）",
+)
+async def get_media_library_api(
+    project_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """聚合项目下所有可拖拽到时间线的素材（视频/音频/帧图/BGM）"""
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    return await get_media_library(db, project_id)
+
+
+# =====================================================
+# 19. 标记 Markers（Phase 2 增强）
+# -------------------------------------------------
+# 路由:
+#   GET    /projects/{id}/markers        列出标记
+#   POST   /projects/{id}/markers        创建标记
+#   DELETE /projects/{id}/markers/{mid}  删除标记
+# =====================================================
+
+@router.get(
+    "/{project_id}/markers",
+    response_model=List[MarkerResponse],
+    summary="列出项目标记",
+)
+async def list_markers_api(
+    project_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    return await list_project_markers(db, project_id)
+
+
+@router.post(
+    "/{project_id}/markers",
+    response_model=MarkerResponse,
+    status_code=201,
+    summary="创建标记",
+)
+async def create_marker_api(
+    project_id: int,
+    data: MarkerCreate,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    return await create_project_marker(
+        db, project_id,
+        time=data.time, name=data.name, color=data.color,
+    )
+
+
+@router.delete(
+    "/{project_id}/markers/{marker_id}",
+    summary="删除标记",
+)
+async def delete_marker_api(
+    project_id: int,
+    marker_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    ok = await delete_project_marker(db, project_id, marker_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="标记不存在")
+    return {"status": "ok", "message": "标记已删除"}
