@@ -16,19 +16,21 @@
 // =====================================================
 
 import { ref, computed, onUnmounted, type Ref, type ComputedRef } from 'vue'
-import type { TimelineClip, SubtitleStyle } from '@/types/project'
+import type { TimelineClip, SubtitleStyle, TrackState } from '@/types/project'
 
 interface UseTimelinePreviewOptions {
   clips: Ref<TimelineClip[]> | ComputedRef<TimelineClip[]>
   subtitleStyle: Ref<SubtitleStyle | null> | ComputedRef<SubtitleStyle | null>
   totalDuration: Ref<number> | ComputedRef<number>
+  /** 轨道状态（用于播放时静音检查，跳过被静音的音频轨） */
+  trackStates?: Ref<Record<string, TrackState>> | ComputedRef<Record<string, TrackState>>
 }
 
 // seek 容差：小于此差值不 seek，避免频繁 seek 卡顿
 const SEEK_TOLERANCE = 0.1
 
 export function useTimelinePreview(options: UseTimelinePreviewOptions) {
-  const { clips, subtitleStyle, totalDuration } = options
+  const { clips, subtitleStyle, totalDuration, trackStates } = options
 
   // ---------- 响应式状态 ----------
   const isPlaying = ref(false)
@@ -92,17 +94,20 @@ export function useTimelinePreview(options: UseTimelinePreviewOptions) {
       return
     }
 
+    syncMediaToCurrentTime()
+    rafId = requestAnimationFrame(tick)
+  }
+
+  function syncMediaToCurrentTime() {
     // 1. 视频调度
     const activeVideo = findActiveClip(videoClips.value, currentTime.value)
     activeVideoClipId.value = activeVideo?.id ?? null
 
     videoEls.forEach((el, clipId) => {
       const clip = videoClips.value.find((c) => c.id === clipId)
-      if (!clip) return
-
-      if (activeVideo && clipId === activeVideo.id) {
-        // 激活当前片段
-        el.style.display = ''
+      // 显隐完全由模板 v-show（基于 activeVideoClipId）控制，这里只管播放/暂停
+      // 避免与 v-show 双轨操作 display 造成画面残留
+      if (activeVideo && clip && clipId === activeVideo.id) {
         const targetTime = (clip.trim_start || 0) + (currentTime.value - clip.start_time)
         // seek 容差控制
         if (Math.abs(el.currentTime - targetTime) > SEEK_TOLERANCE) {
@@ -118,9 +123,8 @@ export function useTimelinePreview(options: UseTimelinePreviewOptions) {
           })
         }
       } else {
-        // 非激活片段暂停隐藏
+        // 非激活片段暂停（显隐交给 v-show）
         if (!el.paused) el.pause()
-        el.style.display = 'none'
       }
     })
 
@@ -130,9 +134,14 @@ export function useTimelinePreview(options: UseTimelinePreviewOptions) {
 
     audioEls.forEach((el, clipId) => {
       const clip = audioClips.value.find((c) => c.id === clipId)
-      if (!clip) return
-
-      if (activeAudio && clipId === activeAudio.id) {
+      if (activeAudio && clip && clipId === activeAudio.id) {
+        // 轨道静音检查：静音轨不播放音频
+        const trackKey = `${clip.track_type}:${clip.track_index}`
+        const isMuted = trackStates?.value?.[trackKey]?.muted ?? false
+        if (isMuted) {
+          if (!el.paused) el.pause()
+          return
+        }
         const targetTime = (clip.trim_start || 0) + (currentTime.value - clip.start_time)
         if (Math.abs(el.currentTime - targetTime) > SEEK_TOLERANCE) {
           try {
@@ -155,8 +164,6 @@ export function useTimelinePreview(options: UseTimelinePreviewOptions) {
     const activeSub = findActiveClip(subtitleClips.value, currentTime.value)
     activeSubtitleClipId.value = activeSub?.id ?? null
     activeSubtitleText.value = activeSub?.subtitle_text || ''
-
-    rafId = requestAnimationFrame(tick)
   }
 
   function findActiveClip(clipsList: TimelineClip[], t: number): TimelineClip | null {
@@ -209,6 +216,13 @@ export function useTimelinePreview(options: UseTimelinePreviewOptions) {
     scheduleOnce()
   }
 
+  // 帧步进：按帧数（正/负）相对当前时间移动
+  // frameRate 默认 30fps，与合成归一化保持一致
+  function seekBy(deltaFrames: number, frameRate = 30): void {
+    const dt = deltaFrames / frameRate
+    seek(currentTime.value + dt)
+  }
+
   function stop(): void {
     pause()
     currentTime.value = 0
@@ -228,16 +242,7 @@ export function useTimelinePreview(options: UseTimelinePreviewOptions) {
 
   // 立即调度一次（用于 seek 后立即更新激活状态，不启动 RAF 循环）
   function scheduleOnce() {
-    const wasPlaying = isPlaying.value
-    isPlaying.value = true
-    tick()
-    if (!wasPlaying) {
-      isPlaying.value = false
-      if (rafId !== null) {
-        cancelAnimationFrame(rafId)
-        rafId = null
-      }
-    }
+    syncMediaToCurrentTime()
   }
 
   // ---------- 字幕样式 CSS ----------
@@ -295,6 +300,7 @@ export function useTimelinePreview(options: UseTimelinePreviewOptions) {
     play,
     pause,
     seek,
+    seekBy,
     stop,
     togglePlayPause,
   }

@@ -381,6 +381,7 @@ const preview = useTimelinePreview({
   clips: computed(() => draftClips.value),
   subtitleStyle: computed(() => projectStore.subtitleStyle),
   totalDuration,
+  trackStates: computed(() => projectStore.trackStates),
 })
 
 // ---------- Phase 2 增强：弹性布局 / 剪贴板 / 标记 / 轨道状态 ----------
