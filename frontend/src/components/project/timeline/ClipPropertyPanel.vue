@@ -1,15 +1,23 @@
 <!-- =====================================================
-     片段属性面板 ClipPropertyPanel
+     片段属性面板 ClipPropertyPanel（抽屉式）
+     - 以右侧 el-drawer 形式弹出，宽度 360px
      - 展示并编辑选中片段的属性
      - 视频片段：起始时间/时长/裁剪/转场类型/转场时长
      - 音频片段：起始时间/时长/裁剪（不可调转场）
      - 字幕片段：起始时间/时长/字幕文本
-     - 删除片段按钮
-     - 未选中时显示提示
+     - 保存 / 删除片段按钮
+     - 通过 v-model:visible 控制开合
      ===================================================== -->
 
 <template>
-  <div class="clip-property-panel">
+  <el-drawer
+    v-model="drawerVisible"
+    :title="drawerTitle"
+    :size="360"
+    direction="rtl"
+    :before-close="onClose"
+    class="clip-property-drawer"
+  >
     <div v-if="!clip" class="empty-state">
       <el-icon :size="32"><InfoFilled /></el-icon>
       <span>请选择一个片段查看属性</span>
@@ -118,28 +126,48 @@
       <!-- 底部操作 -->
       <div v-if="editable" class="panel-actions">
         <el-button type="primary" :icon="Check" @click="onSave">保存</el-button>
-        <el-button type="danger" :icon="Delete" @click="$emit('delete', clip.id)">删除片段</el-button>
+        <el-button type="danger" :icon="Delete" @click="onDelete">删除片段</el-button>
       </div>
     </template>
-  </div>
+  </el-drawer>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, reactive } from 'vue'
+import { ref, watch, reactive, computed } from 'vue'
 import {
   InfoFilled, VideoCamera, Microphone, Document, Check, Delete,
 } from '@element-plus/icons-vue'
 import type { TimelineClip, TransitionType } from '@/types/project'
 
 const props = defineProps<{
+  /** 是否显示抽屉（v-model:visible） */
+  visible: boolean
   clip: TimelineClip | null
   editable?: boolean
 }>()
 
 const emit = defineEmits<{
+  (e: 'update:visible', val: boolean): void
   (e: 'save', clipId: number, data: Partial<TimelineClip>): void
   (e: 'delete', clipId: number): void
 }>()
+
+// 抽屉显示状态（与 props.visible 双向绑定）
+const drawerVisible = computed({
+  get: () => props.visible,
+  set: (val: boolean) => emit('update:visible', val),
+})
+
+// 抽屉标题
+const drawerTitle = computed(() => {
+  if (!props.clip) return '片段属性'
+  const typeMap: Record<string, string> = {
+    video: '视频片段',
+    audio: '音频片段',
+    subtitle: '字幕片段',
+  }
+  return `${typeMap[props.clip.track_type] || '片段'}属性`
+})
 
 const form = reactive({
   start_time: 0,
@@ -151,7 +179,7 @@ const form = reactive({
   subtitle_text: '',
 })
 
-// 切换选中片段时回填
+// 切换选中片段时回填表单
 watch(
   () => props.clip,
   (c) => {
@@ -190,20 +218,24 @@ function onSave() {
     subtitle_text: form.subtitle_text,
   })
 }
+
+function onDelete() {
+  if (!props.clip) return
+  emit('delete', props.clip.id)
+}
+
+// 关闭抽屉时同步状态
+function onClose(done: () => void) {
+  done()
+}
 </script>
 
 <style scoped>
-.clip-property-panel {
-  width: 320px;
-  flex-shrink: 0;
-  padding: 12px 16px;
-  background: var(--el-bg-color);
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 6px;
+.clip-property-drawer :deep(.el-drawer__body) {
+  padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  overflow-y: auto;
 }
 
 .empty-state {
@@ -241,6 +273,7 @@ function onSave() {
   display: flex;
   gap: 8px;
   padding-top: 8px;
+  margin-top: auto;
   border-top: 1px solid var(--el-border-color-lighter);
 }
 </style>

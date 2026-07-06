@@ -93,6 +93,7 @@ import {
 } from '@/api/projects'
 import type {
   Project,
+  ProjectStatus,
   ProjectCreateRequest,
   ProjectUpdateRequest,
   ActiveViewUpdateRequest,
@@ -508,9 +509,10 @@ export const useProjectStore = defineStore('project', {
       // 注册到 taskQueue，轮询 + 完成后自动 claim
       const { useTaskQueueStore } = await import('@/stores/taskQueue')
       const taskQueue = useTaskQueueStore()
+      const promptText = typeof resp?.prompt === 'string' ? resp.prompt : undefined
       taskQueue.registerProjectTask(
         taskId,
-        { type: 'image', prompt: resp.prompt, model: data?.model },
+        { type: 'image', prompt: promptText, model: data?.model },
         {
           projectId: this.currentProjectId,
           entityType,
@@ -672,9 +674,10 @@ export const useProjectStore = defineStore('project', {
 
       const { useTaskQueueStore } = await import('@/stores/taskQueue')
       const taskQueue = useTaskQueueStore()
+      const promptText = typeof resp?.prompt === 'string' ? resp.prompt : undefined
       taskQueue.registerProjectTask(
         taskId,
-        { type: 'image', prompt: resp.prompt, model: data?.model },
+        { type: 'image', prompt: promptText, model: data?.model },
         {
           projectId: this.currentProjectId,
           shotId,
