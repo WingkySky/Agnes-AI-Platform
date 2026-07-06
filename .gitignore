@@ -50,3 +50,9 @@ outputs/
 #test
 backend/test/
 backend/test_data/
+
+# AI skill 工作目录（brainstorming 缓存等）
+.superpowers/
+
+# TypeScript 增量编译缓存
+*.tsbuildinfo
