@@ -109,7 +109,11 @@ class ProjectScript(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     project = relationship("Project", back_populates="scripts")
-    shots = relationship("ProjectShot", back_populates="script")
+    # 反向关系：剧本下的角色/场景/道具/分镜（集数隔离）
+    characters = relationship("ProjectCharacter", back_populates="script", cascade="all, delete-orphan")
+    scenes = relationship("ProjectScene", back_populates="script", cascade="all, delete-orphan")
+    props = relationship("ProjectProp", back_populates="script", cascade="all, delete-orphan")
+    shots = relationship("ProjectShot", back_populates="script", cascade="all, delete-orphan")
 
 
 class ProjectCharacter(Base):
@@ -118,6 +122,7 @@ class ProjectCharacter(Base):
 
     字段说明:
     - project_id: 所属项目
+    - script_id: 所属集剧本ID（集数隔离）
     - name: 角色名
     - description: 角色描述
     - appearance_desc: 外观描述（用于生图 prompt）
@@ -129,10 +134,18 @@ class ProjectCharacter(Base):
     __tablename__ = "project_characters"
     __table_args__ = (
         Index("idx_project_characters_project", "project_id"),
+        Index("idx_project_characters_script", "script_id"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    script_id = Column(
+        Integer,
+        ForeignKey("project_scripts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        comment="所属集剧本ID",
+    )
     name = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
     appearance_desc = Column(Text, nullable=True)
@@ -144,6 +157,7 @@ class ProjectCharacter(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     project = relationship("Project", back_populates="characters")
+    script = relationship("ProjectScript", back_populates="characters")
     asset = relationship("Asset", foreign_keys=[asset_id])
     shots = relationship("ProjectShotCharacter", back_populates="character", cascade="all, delete-orphan")
     voice_assignments = relationship("ProjectCharacterVoice", back_populates="character", cascade="all, delete-orphan")  # Phase 2
@@ -155,6 +169,7 @@ class ProjectScene(Base):
 
     字段说明:
     - project_id: 所属项目
+    - script_id: 所属集剧本ID（集数隔离）
     - name: 场景名
     - description: 场景描述
     - location: 地点
@@ -167,10 +182,18 @@ class ProjectScene(Base):
     __tablename__ = "project_scenes"
     __table_args__ = (
         Index("idx_project_scenes_project", "project_id"),
+        Index("idx_project_scenes_script", "script_id"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    script_id = Column(
+        Integer,
+        ForeignKey("project_scripts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        comment="所属集剧本ID",
+    )
     name = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
     location = Column(String(200), nullable=True)
@@ -183,6 +206,7 @@ class ProjectScene(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     project = relationship("Project", back_populates="scenes")
+    script = relationship("ProjectScript", back_populates="scenes")
     asset = relationship("Asset", foreign_keys=[asset_id])
     shots = relationship("ProjectShot", back_populates="scene")
 
@@ -193,6 +217,7 @@ class ProjectProp(Base):
 
     字段说明:
     - project_id: 所属项目
+    - script_id: 所属集剧本ID（集数隔离）
     - name: 道具名
     - description: 道具描述
     - visual_desc: 视觉描述（用于生图 prompt）
@@ -203,10 +228,18 @@ class ProjectProp(Base):
     __tablename__ = "project_props"
     __table_args__ = (
         Index("idx_project_props_project", "project_id"),
+        Index("idx_project_props_script", "script_id"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    script_id = Column(
+        Integer,
+        ForeignKey("project_scripts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        comment="所属集剧本ID",
+    )
     name = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
     visual_desc = Column(Text, nullable=True)
@@ -217,6 +250,7 @@ class ProjectProp(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     project = relationship("Project", back_populates="props")
+    script = relationship("ProjectScript", back_populates="props")
     asset = relationship("Asset", foreign_keys=[asset_id])
     shots = relationship("ProjectShotProp", back_populates="prop", cascade="all, delete-orphan")
 
@@ -281,8 +315,8 @@ class ProjectShot(Base):
 
     字段说明:
     - project_id: 所属项目
-    - script_id: 关联的剧本 ID
-    - sequence_no: 分镜序号（同一项目内唯一）
+    - script_id: 关联的剧本 ID（所属集，NOT NULL，集数隔离）
+    - sequence_no: 分镜序号（同一项目同一集内唯一）
     - title: 分镜标题
     - shot_type: 景别（特写/中景/全景等）
     - camera_movement: 运镜（推/拉/摇/移等）
@@ -301,13 +335,20 @@ class ProjectShot(Base):
     """
     __tablename__ = "project_shots"
     __table_args__ = (
-        UniqueConstraint("project_id", "sequence_no", name="uq_project_shots_seq"),
+        UniqueConstraint("project_id", "script_id", "sequence_no", name="uq_project_shots_seq"),
         Index("idx_project_shots_project", "project_id"),
+        Index("idx_project_shots_script", "script_id"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
-    script_id = Column(Integer, ForeignKey("project_scripts.id"), nullable=True)
+    script_id = Column(
+        Integer,
+        ForeignKey("project_scripts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        comment="所属集剧本ID",
+    )
     sequence_no = Column(Integer, nullable=False)
     title = Column(String(200), nullable=True)
     shot_type = Column(String(50), nullable=True)  # 景别
