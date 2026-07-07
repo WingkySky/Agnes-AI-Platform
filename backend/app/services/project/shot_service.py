@@ -9,6 +9,7 @@ import json
 import logging
 from typing import List, Optional
 
+from fastapi import HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -226,19 +227,41 @@ async def _attach_shot_relations_batch(db: AsyncSession, shots: List[ProjectShot
 # 分镜 CRUD
 # =====================================================
 
-async def list_shots(db: AsyncSession, project_id: int) -> List[ProjectShot]:
+async def list_shots(
+    db: AsyncSession, project_id: int, script_id: Optional[int] = None
+) -> List[ProjectShot]:
     """
     列出项目所有分镜（按 sort_order）
     含关联的角色/场景/道具/帧图/视频（用于前端列表展示）
+    可选按集过滤（script_id），并批量填充 episode_no 字段
     """
-    result = await db.execute(
-        select(ProjectShot)
-        .where(ProjectShot.project_id == project_id)
-        .order_by(ProjectShot.sort_order)
-    )
+    stmt = select(ProjectShot).where(ProjectShot.project_id == project_id)
+    if script_id is not None:
+        stmt = stmt.where(ProjectShot.script_id == script_id)
+    stmt = stmt.order_by(ProjectShot.sort_order)
+    result = await db.execute(stmt)
     shots = result.scalars().all()
     await _attach_shot_relations_batch(db, shots)
+    # 批量填充 episode_no（避免 N+1）
+    await _fill_episode_no(db, project_id, shots)
     return shots
+
+
+async def _fill_episode_no(db: AsyncSession, project_id: int, items: List) -> None:
+    """批量给分镜列表填充 episode_no 字段（一次查询 ProjectScript 字典映射）"""
+    if not items:
+        return
+    script_ids = {it.script_id for it in items if it.script_id is not None}
+    if not script_ids:
+        return
+    result = await db.execute(
+        select(ProjectScript.id, ProjectScript.episode_no).where(
+            ProjectScript.id.in_(script_ids)
+        )
+    )
+    ep_map = dict(result.all())
+    for it in items:
+        it.episode_no = ep_map.get(it.script_id)
 
 
 async def get_shot(db: AsyncSession, shot_id: int) -> Optional[ProjectShot]:
@@ -256,24 +279,31 @@ async def get_shot(db: AsyncSession, shot_id: int) -> Optional[ProjectShot]:
 async def create_shot(
     db: AsyncSession, project_id: int, data: ShotCreate
 ) -> ProjectShot:
-    """添加分镜（自动计算 sequence_no 和 sort_order）"""
+    """添加分镜（自动计算 sequence_no 和 sort_order，按集 script_id 维度）"""
+    # 校验 script_id 属于该项目
+    script = await db.get(ProjectScript, data.script_id)
+    if not script or script.project_id != project_id:
+        raise HTTPException(404, "剧本不存在或不属于该项目")
+
+    # 计算 sequence_no 和 sort_order 起点（按集）
     max_seq = (
         await db.execute(
-            select(func.max(ProjectShot.sequence_no)).where(
-                ProjectShot.project_id == project_id
+            select(func.coalesce(func.max(ProjectShot.sequence_no), 0)).where(
+                ProjectShot.script_id == data.script_id
             )
         )
     ).scalar() or 0
     max_order = (
         await db.execute(
-            select(func.max(ProjectShot.sort_order)).where(
-                ProjectShot.project_id == project_id
+            select(func.coalesce(func.max(ProjectShot.sort_order), 0)).where(
+                ProjectShot.script_id == data.script_id
             )
         )
     ).scalar() or 0
 
     shot = ProjectShot(
         project_id=project_id,
+        script_id=data.script_id,
         sequence_no=data.sequence_no or (max_seq + 1),
         sort_order=max_order + 1,
         title=data.title,
@@ -551,23 +581,28 @@ async def generate_frame_prompt(
 # =====================================================
 
 async def split_shots_from_script(
-    db: AsyncSession, project_id: int
+    db: AsyncSession, project_id: int, script_id: int
 ) -> dict:
     """
     从剧本重新 AI 拆分分镜（追加，不覆盖现有分镜）
+    按集 script_id 精确取剧本，序号按集从 1 开始递增
 
     Returns:
         {"added": N}
     """
+    # 精确查指定集剧本
     script = (
         await db.execute(
-            select(ProjectScript)
-            .where(ProjectScript.project_id == project_id)
-            .order_by(ProjectScript.episode_no)
+            select(ProjectScript).where(
+                ProjectScript.id == script_id,
+                ProjectScript.project_id == project_id,
+            )
         )
     ).scalars().first()
-    if not script or not script.content:
-        return {"added": 0}
+    if not script:
+        raise HTTPException(404, "剧本不存在或不属于该项目")
+    if not script.content:
+        raise HTTPException(400, "剧本内容为空，无法拆分分镜")
 
     # 注入实体清单（E2）
     chars = (
@@ -627,18 +662,18 @@ async def split_shots_from_script(
     scene_map = {s.name: s.id for s in scenes}
     prop_map = {p.name: p.id for p in props}
 
-    # 计算 sequence_no / sort_order 起点
+    # 计算 sequence_no / sort_order 起点（按集）
     max_seq = (
         await db.execute(
-            select(func.max(ProjectShot.sequence_no)).where(
-                ProjectShot.project_id == project_id
+            select(func.coalesce(func.max(ProjectShot.sequence_no), 0)).where(
+                ProjectShot.script_id == script_id
             )
         )
     ).scalar() or 0
     max_order = (
         await db.execute(
-            select(func.max(ProjectShot.sort_order)).where(
-                ProjectShot.project_id == project_id
+            select(func.coalesce(func.max(ProjectShot.sort_order), 0)).where(
+                ProjectShot.script_id == script_id
             )
         )
     ).scalar() or 0
