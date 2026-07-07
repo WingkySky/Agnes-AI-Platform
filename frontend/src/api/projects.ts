@@ -182,7 +182,7 @@ export function regenerateScript(projectId: number, scriptId: number, data: Scri
 // =====================================================
 
 interface EntityEndpoints {
-  list: (projectId: number) => Promise<any[]>
+  list: (projectId: number, scriptId?: number) => Promise<any[]>
   get: (projectId: number, id: number) => Promise<any>
   create: (projectId: number, data: any) => Promise<any>
   update: (projectId: number, id: number, data: any) => Promise<any>
@@ -195,12 +195,18 @@ interface EntityEndpoints {
   setActiveVersion: (projectId: number, id: number, data: SetActiveVersionRequest) => Promise<any>
   deleteVersion: (projectId: number, id: number, versionId: number) => Promise<{ status: string; message: string }>
   extractFromScript: (projectId: number, scriptId: number) => Promise<any>
+  /** 跨集复制：将实体复制到目标剧本（集） */
+  copyTo: (projectId: number, entityId: number, targetScriptId: number) => Promise<any>
 }
 
 /** 构造某实体类型对应的 API 端点集合 */
 function buildEntityApi(prefix: string): EntityEndpoints {
   return {
-    list: (projectId: number) => client.get(`/api/projects/${projectId}/${prefix}`),
+    // list 支持按 scriptId 过滤（集数隔离）
+    list: (projectId: number, scriptId?: number) =>
+      client.get(`/api/projects/${projectId}/${prefix}`, {
+        params: scriptId !== undefined ? { script_id: scriptId } : undefined,
+      }),
     get: (projectId: number, id: number) => client.get(`/api/projects/${projectId}/${prefix}/${id}`),
     create: (projectId: number, data: any) => client.post(`/api/projects/${projectId}/${prefix}`, data),
     update: (projectId: number, id: number, data: any) => client.patch(`/api/projects/${projectId}/${prefix}/${id}`, data),
@@ -223,8 +229,14 @@ function buildEntityApi(prefix: string): EntityEndpoints {
       client.post(`/api/projects/${projectId}/${prefix}/${id}/set-active`, data),
     deleteVersion: (projectId: number, id: number, versionId: number) =>
       client.delete(`/api/projects/${projectId}/${prefix}/${id}/versions/${versionId}`),
-    extractFromScript: (projectId: number, _scriptId: number) =>
-      client.post(`/api/projects/${projectId}/${prefix}/extract-from-script`),
+    // extractFromScript 真正发送 script_id（修复原来 _scriptId 丢弃的 bug）
+    extractFromScript: (projectId: number, scriptId: number) =>
+      client.post(`/api/projects/${projectId}/${prefix}/extract-from-script`, { script_id: scriptId }),
+    // copyTo 跨集复制：将实体复制到目标剧本
+    copyTo: (projectId: number, entityId: number, targetScriptId: number) =>
+      client.post(`/api/projects/${projectId}/${prefix}/${entityId}/copy-to`, {
+        target_script_id: targetScriptId,
+      }),
   }
 }
 
@@ -233,7 +245,7 @@ function buildEntityApi(prefix: string): EntityEndpoints {
 // =====================================================
 
 export const charactersApi = buildEntityApi('characters') as EntityEndpoints & {
-  list: (projectId: number) => Promise<ProjectCharacter[]>
+  list: (projectId: number, scriptId?: number) => Promise<ProjectCharacter[]>
   get: (projectId: number, id: number) => Promise<ProjectCharacter>
   create: (projectId: number, data: CharacterCreateRequest) => Promise<ProjectCharacter>
   update: (projectId: number, id: number, data: CharacterUpdateRequest) => Promise<ProjectCharacter>
@@ -246,7 +258,7 @@ export const charactersApi = buildEntityApi('characters') as EntityEndpoints & {
 // =====================================================
 
 export const scenesApi = buildEntityApi('scenes') as EntityEndpoints & {
-  list: (projectId: number) => Promise<ProjectScene[]>
+  list: (projectId: number, scriptId?: number) => Promise<ProjectScene[]>
   get: (projectId: number, id: number) => Promise<ProjectScene>
   create: (projectId: number, data: SceneCreateRequest) => Promise<ProjectScene>
   update: (projectId: number, id: number, data: SceneUpdateRequest) => Promise<ProjectScene>
@@ -257,7 +269,7 @@ export const scenesApi = buildEntityApi('scenes') as EntityEndpoints & {
 // =====================================================
 
 export const propsApi = buildEntityApi('props') as EntityEndpoints & {
-  list: (projectId: number) => Promise<ProjectProp[]>
+  list: (projectId: number, scriptId?: number) => Promise<ProjectProp[]>
   get: (projectId: number, id: number) => Promise<ProjectProp>
   create: (projectId: number, data: PropCreateRequest) => Promise<ProjectProp>
   update: (projectId: number, id: number, data: PropUpdateRequest) => Promise<ProjectProp>
@@ -267,8 +279,10 @@ export const propsApi = buildEntityApi('props') as EntityEndpoints & {
 // 分镜 API
 // =====================================================
 
-export function listShots(projectId: number): Promise<ProjectShot[]> {
-  return client.get(`/api/projects/${projectId}/shots`)
+export function listShots(projectId: number, scriptId?: number): Promise<ProjectShot[]> {
+  return client.get(`/api/projects/${projectId}/shots`, {
+    params: scriptId !== undefined ? { script_id: scriptId } : undefined,
+  })
 }
 
 export function getShot(projectId: number, shotId: number): Promise<ProjectShot> {
@@ -295,8 +309,9 @@ export function generateFramePrompt(projectId: number, shotId: number): Promise<
   return client.post(`/api/projects/${projectId}/shots/${shotId}/generate-frame-prompt`)
 }
 
-export function splitShotsFromScript(projectId: number, _scriptId: number): Promise<any> {
-  return client.post(`/api/projects/${projectId}/shots/split`)
+// splitShotsFromScript 真正发送 script_id（修复原来 _scriptId 丢弃的 bug）
+export function splitShotsFromScript(projectId: number, scriptId: number): Promise<any> {
+  return client.post(`/api/projects/${projectId}/shots/split`, { script_id: scriptId })
 }
 
 export function bindCharacterToShot(projectId: number, shotId: number, data: ShotBindEntityRequest): Promise<any> {

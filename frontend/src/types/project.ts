@@ -160,6 +160,8 @@ export interface SetActiveVersionRequest {
 export interface ProjectCharacter {
   id: number
   project_id: number
+  script_id: number
+  episode_no: number | null
   name: string
   description?: string | null
   appearance_desc?: string | null
@@ -207,6 +209,8 @@ export interface BatchGenerateCharactersRequest {
 export interface ProjectScene {
   id: number
   project_id: number
+  script_id: number
+  episode_no: number | null
   name: string
   description?: string | null
   location?: string | null
@@ -244,6 +248,8 @@ export interface SceneUpdateRequest {
 export interface ProjectProp {
   id: number
   project_id: number
+  script_id: number
+  episode_no: number | null
   name: string
   description?: string | null
   visual_desc?: string | null
@@ -275,6 +281,8 @@ export interface PropUpdateRequest {
 export interface ProjectShot {
   id: number
   project_id: number
+  script_id: number
+  episode_no: number | null
   sequence_no: number
   title?: string | null
   shot_type?: string | null
