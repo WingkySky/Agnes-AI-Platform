@@ -133,6 +133,11 @@ class ScriptResponse(BaseModel):
     status: str
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # 关联计数（service 层注入，便于前端列表展示）
+    shot_count: int | None = None
+    character_count: int | None = None
+    scene_count: int | None = None
+    prop_count: int | None = None
 
 
 class ScriptRegenerateRequest(BaseModel):
@@ -147,6 +152,7 @@ class ScriptRegenerateRequest(BaseModel):
 
 class CharacterCreate(BaseModel):
     """添加角色"""
+    script_id: int = Field(..., description="所属集剧本ID")
     name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = None
     appearance_desc: Optional[str] = None
@@ -168,6 +174,8 @@ class CharacterResponse(BaseModel):
 
     id: int
     project_id: int
+    script_id: int
+    episode_no: int | None = None  # 来自 join ProjectScript，便于前端直接展示"第N集"
     name: str
     description: Optional[str] = None
     appearance_desc: Optional[str] = None
@@ -183,6 +191,7 @@ class CharacterResponse(BaseModel):
 
 class SceneCreate(BaseModel):
     """添加场景"""
+    script_id: int = Field(..., description="所属集剧本ID")
     name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = None
     location: Optional[str] = None
@@ -206,6 +215,8 @@ class SceneResponse(BaseModel):
 
     id: int
     project_id: int
+    script_id: int
+    episode_no: int | None = None  # 来自 join ProjectScript，便于前端直接展示"第N集"
     name: str
     description: Optional[str] = None
     location: Optional[str] = None
@@ -222,6 +233,7 @@ class SceneResponse(BaseModel):
 
 class PropCreate(BaseModel):
     """添加道具"""
+    script_id: int = Field(..., description="所属集剧本ID")
     name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = None
     visual_desc: Optional[str] = None
@@ -241,6 +253,8 @@ class PropResponse(BaseModel):
 
     id: int
     project_id: int
+    script_id: int
+    episode_no: int | None = None  # 来自 join ProjectScript，便于前端直接展示"第N集"
     name: str
     description: Optional[str] = None
     visual_desc: Optional[str] = None
@@ -295,6 +309,7 @@ class SetActiveVersionRequest(BaseModel):
 
 class ShotCreate(BaseModel):
     """添加分镜"""
+    script_id: int = Field(..., description="所属集剧本ID")
     sequence_no: Optional[int] = None
     title: Optional[str] = None
     shot_type: Optional[str] = None
@@ -329,7 +344,8 @@ class ShotResponse(BaseModel):
 
     id: int
     project_id: int
-    script_id: Optional[int] = None
+    script_id: int
+    episode_no: int | None = None  # 来自 join ProjectScript，便于前端直接展示"第N集"
     sequence_no: int
     title: Optional[str] = None
     shot_type: Optional[str] = None
@@ -728,6 +744,20 @@ class MarkerResponse(BaseModel):
     name: Optional[str] = None
     color: str
     created_at: Optional[datetime] = None
+
+
+# =====================================================
+# 集数隔离：从剧本提取 / 跨集复制 请求体
+# =====================================================
+
+class ExtractFromScriptRequest(BaseModel):
+    """从剧本提取/拆分 请求体"""
+    script_id: int
+
+
+class CopyToScriptRequest(BaseModel):
+    """跨集复制到目标集 请求体"""
+    target_script_id: int
 
 
 # =====================================================
