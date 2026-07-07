@@ -12,7 +12,22 @@
     <!-- 工具栏 -->
     <div class="toolbar">
       <div class="toolbar-left">
-        <el-button type="primary" :icon="Plus" @click="onCreate">新建分镜</el-button>
+        <!-- 新建分镜：全部集视图下禁用（需先选定集数） -->
+        <el-button type="primary" :icon="Plus" :disabled="!canCreate" @click="onCreate">
+          {{ t('project.createShot') }}
+        </el-button>
+        <el-tooltip v-if="!canCreate" :content="t('project.selectEpisodeFirst')" placement="top">
+          <el-icon class="disabled-hint"><InfoFilled /></el-icon>
+        </el-tooltip>
+        <!-- 从剧本拆分：全部集视图下禁用（需先选定集数） -->
+        <el-button
+          :icon="MagicStick"
+          :loading="splitting"
+          :disabled="!canCreate"
+          @click="onSplitFromScript"
+        >
+          {{ t('project.splitFromScript') }}
+        </el-button>
         <el-button
           v-if="selectedIds.length > 0"
           :icon="MagicStick"
@@ -46,6 +61,28 @@
     </div>
 
     <!-- 分镜卡片网格 -->
+    <!-- 全部集视图：按集折叠分组展示 -->
+    <template v-else-if="isAllEpisodeView">
+      <el-collapse v-for="(epShots, ep) in shotsByEpisode" :key="ep">
+        <el-collapse-item :title="`第${ep}集（${epShots.length} 个分镜）`">
+          <div class="card-grid">
+            <ShotCard
+              v-for="shot in epShots"
+              :key="shot.id"
+              :shot="shot"
+              :selected="selectedIds.includes(shot.id)"
+              :generating-frame="generatingFrameIds.includes(shot.id)"
+              :generating-video="generatingVideoIds.includes(shot.id)"
+              @toggle-select="onToggleSelect"
+              @edit="onEdit"
+              @refresh="onRefresh"
+            />
+          </div>
+        </el-collapse-item>
+      </el-collapse>
+    </template>
+
+    <!-- 单集视图：直接展示当前集分镜 -->
     <div v-else class="card-grid">
       <ShotCard
         v-for="shot in sortedShots"
@@ -123,16 +160,22 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh, MagicStick, VideoPlay, Film, Sort } from '@element-plus/icons-vue'
+import { Plus, Refresh, MagicStick, VideoPlay, Film, Sort, InfoFilled } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
+import { useI18n } from '@/i18n'
 import ShotCard from './ShotCard.vue'
 import type { ProjectShot, ShotCreateRequest, ShotUpdateRequest } from '@/types/project'
 
 const projectStore = useProjectStore()
+const { t } = useI18n()
 
 const loading = ref(false)
 const sortedShots = computed(() => projectStore.sortedShots)
 const shots = computed(() => projectStore.shots)
+/* 集数隔离：全部集视图按 episode_no 分组；单集视图直接展示当前集 */
+const isAllEpisodeView = computed(() => projectStore.currentScriptId === null)
+const shotsByEpisode = computed(() => projectStore.shotsByEpisode)
+const canCreate = computed(() => projectStore.currentScriptId !== null)
 
 // 选中状态
 const selectedIds = ref<number[]>([])
@@ -284,6 +327,21 @@ async function onReorder() {
   }
 }
 
+// 从剧本拆分分镜（使用当前选中的集 currentScriptId）
+const splitting = ref(false)
+async function onSplitFromScript() {
+  if (!projectStore.currentScriptId) return
+  splitting.value = true
+  try {
+    await projectStore.splitShotsFromScript(projectStore.currentScriptId)
+    ElMessage.success('已从剧本拆分分镜')
+  } catch (e: any) {
+    ElMessage.error(e?.message || '拆分失败')
+  } finally {
+    splitting.value = false
+  }
+}
+
 function onRefresh() {
   loading.value = true
   projectStore.fetchShots().finally(() => {
@@ -303,8 +361,15 @@ onMounted(() => {
   display: flex; justify-content: space-between; align-items: center;
   margin-bottom: 16px;
 }
-.toolbar-left { display: flex; gap: 8px; flex-wrap: wrap; }
+.toolbar-left { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .toolbar-right { display: flex; gap: 8px; }
+
+/* 禁用提示图标：与按钮垂直对齐 */
+.disabled-hint {
+  color: var(--el-text-color-secondary);
+  font-size: 16px;
+  cursor: help;
+}
 
 .empty-state {
   text-align: center; padding: 60px 0; color: var(--el-text-color-secondary);
