@@ -320,6 +320,8 @@ export interface ShotCreateRequest {
   atmosphere?: string
   duration_ms?: number
   image_prompt?: string
+  /** 所属集剧本 ID（store 层 setCurrentScript 后会自动注入） */
+  script_id?: number
 }
 
 export interface ShotUpdateRequest {

@@ -172,6 +172,8 @@ interface ProjectState {
   currentProjectId: number | null
   currentProject: Project | null
   currentLoading: boolean
+  /* 当前选中的集剧本 ID（null=全部集视图，number=某集） */
+  currentScriptId: number | null
 
   /* 当前项目下的实体（详情接口已返回，这里独立保存便于局部刷新） */
   scripts: ProjectScript[]
@@ -216,6 +218,7 @@ export const useProjectStore = defineStore('project', {
     currentProjectId: null,
     currentProject: null,
     currentLoading: false,
+    currentScriptId: null,
 
     scripts: [],
     characters: [],
@@ -257,6 +260,43 @@ export const useProjectStore = defineStore('project', {
     isMerging: (state) => state.currentProject?.status === 'merging',
     /** 按序列号排序的分镜 */
     sortedShots: (state) => [...state.shots].sort((a, b) => a.sequence_no - b.sequence_no),
+
+    /** 按 episode_no 分组的分镜（全部集视图用；episode_no 为 null 时归到 0） */
+    shotsByEpisode(state): Record<number, ProjectShot[]> {
+      const grouped: Record<number, ProjectShot[]> = {}
+      for (const shot of state.shots) {
+        const ep = shot.episode_no ?? 0
+        ;(grouped[ep] ??= []).push(shot)
+      }
+      return grouped
+    },
+    /** 按 episode_no 分组的角色 */
+    charactersByEpisode(state): Record<number, ProjectCharacter[]> {
+      const grouped: Record<number, ProjectCharacter[]> = {}
+      for (const c of state.characters) {
+        const ep = c.episode_no ?? 0
+        ;(grouped[ep] ??= []).push(c)
+      }
+      return grouped
+    },
+    /** 按 episode_no 分组的场景 */
+    scenesByEpisode(state): Record<number, ProjectScene[]> {
+      const grouped: Record<number, ProjectScene[]> = {}
+      for (const s of state.scenes) {
+        const ep = s.episode_no ?? 0
+        ;(grouped[ep] ??= []).push(s)
+      }
+      return grouped
+    },
+    /** 按 episode_no 分组的道具 */
+    propsByEpisode(state): Record<number, ProjectProp[]> {
+      const grouped: Record<number, ProjectProp[]> = {}
+      for (const p of state.props) {
+        const ep = p.episode_no ?? 0
+        ;(grouped[ep] ??= []).push(p)
+      }
+      return grouped
+    },
   },
 
   actions: {
@@ -298,9 +338,22 @@ export const useProjectStore = defineStore('project', {
       this.shots = project?.shots ?? []
     },
 
+    /** 切换当前集——自动重新拉取四类资源（分镜/角色/场景/道具） */
+    async setCurrentScript(scriptId: number | null) {
+      this.currentScriptId = scriptId
+      if (!this.currentProjectId) return
+      await Promise.all([
+        this.fetchShots(),
+        this.fetchEntities('character'),
+        this.fetchEntities('scene'),
+        this.fetchEntities('prop'),
+      ])
+    },
+
     clearCurrent() {
       this.currentProject = null
       this.currentProjectId = null
+      this.currentScriptId = null
       this.scripts = []
       this.characters = []
       this.scenes = []
@@ -454,12 +507,12 @@ export const useProjectStore = defineStore('project', {
 
     // ================ 实体通用（角色/场景/道具） ================
     /**
-     * 刷新某类型实体列表
+     * 刷新某类型实体列表（按 currentScriptId 过滤；null=全部集视图）
      */
     async fetchEntities(entityType: EntityType) {
       if (!this.currentProjectId) return
       const api = getEntityApi(entityType)
-      const list = await api.list(this.currentProjectId)
+      const list = await api.list(this.currentProjectId, this.currentScriptId ?? undefined)
       if (entityType === 'character') this.characters = list as ProjectCharacter[]
       else if (entityType === 'scene') this.scenes = list as ProjectScene[]
       else if (entityType === 'prop') this.props = list as ProjectProp[]
@@ -467,12 +520,29 @@ export const useProjectStore = defineStore('project', {
 
     async createEntity(entityType: EntityType, data: any) {
       if (!this.currentProjectId) throw new Error('未选择项目')
+      if (!this.currentScriptId) throw new Error('请先选择集数后再新建')
       const api = getEntityApi(entityType)
-      const entity = await api.create(this.currentProjectId, data)
+      // 自动注入当前集 script_id（集数隔离）
+      const entity = await api.create(this.currentProjectId, {
+        ...data,
+        script_id: this.currentScriptId,
+      })
       if (entityType === 'character') this.characters.push(entity)
       else if (entityType === 'scene') this.scenes.push(entity)
       else if (entityType === 'prop') this.props.push(entity)
       return entity
+    },
+
+    /** 跨集复制角色/场景/道具到目标集（不自动切换到目标集，留在当前集） */
+    async copyEntityTo(
+      entityType: EntityType,
+      entityId: number,
+      targetScriptId: number,
+    ) {
+      if (!this.currentProjectId) throw new Error('未选择项目')
+      const api = getEntityApi(entityType)
+      await api.copyTo(this.currentProjectId, entityId, targetScriptId)
+      // 不自动切换到目标集，留在当前集
     },
 
     async updateEntity(entityType: EntityType, id: number, data: any) {
@@ -585,12 +655,18 @@ export const useProjectStore = defineStore('project', {
     // ================ 分镜 ================
     async fetchShots() {
       if (!this.currentProjectId) return
-      this.shots = await apiListShots(this.currentProjectId)
+      // 按 currentScriptId 过滤；null=全部集视图
+      this.shots = await apiListShots(this.currentProjectId, this.currentScriptId ?? undefined)
     },
 
     async createShot(data: ShotCreateRequest) {
       if (!this.currentProjectId) throw new Error('未选择项目')
-      const shot = await apiCreateShot(this.currentProjectId, data)
+      if (!this.currentScriptId) throw new Error('请先选择集数后再新建分镜')
+      // 自动注入当前集 script_id（集数隔离）
+      const shot = await apiCreateShot(this.currentProjectId, {
+        ...data,
+        script_id: this.currentScriptId,
+      })
       this.shots.push(shot)
       return shot
     },
