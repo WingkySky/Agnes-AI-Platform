@@ -7,6 +7,7 @@
 import logging
 from typing import List, Optional
 
+from fastapi import HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,17 +37,36 @@ ENTITY_TYPE = "prop"
 # =====================================================
 
 async def list_props(
-    db: AsyncSession, project_id: int
+    db: AsyncSession, project_id: int, script_id: Optional[int] = None
 ) -> List[ProjectProp]:
-    """列出项目所有道具（按 sort_order）"""
-    result = await db.execute(
-        select(ProjectProp)
-        .where(ProjectProp.project_id == project_id)
-        .order_by(ProjectProp.sort_order)
-    )
+    """列出项目道具（可选按集过滤）"""
+    stmt = select(ProjectProp).where(ProjectProp.project_id == project_id)
+    if script_id is not None:
+        stmt = stmt.where(ProjectProp.script_id == script_id)
+    stmt = stmt.order_by(ProjectProp.sort_order)
+    result = await db.execute(stmt)
     items = result.scalars().all()
     await attach_active_image_batch(db, ENTITY_TYPE, items)
+    # 批量填充 episode_no
+    await _fill_episode_no(db, items)
     return items
+
+
+async def _fill_episode_no(db: AsyncSession, items: List) -> None:
+    """批量给道具列表填充 episode_no 字段（从 ProjectScript 查一次字典映射）"""
+    if not items:
+        return
+    script_ids = {it.script_id for it in items if it.script_id is not None}
+    if not script_ids:
+        return
+    result = await db.execute(
+        select(ProjectScript.id, ProjectScript.episode_no).where(
+            ProjectScript.id.in_(script_ids)
+        )
+    )
+    ep_map = dict(result.all())
+    for it in items:
+        it.episode_no = ep_map.get(it.script_id)
 
 
 async def get_prop(db: AsyncSession, prop_id: int) -> Optional[ProjectProp]:
@@ -64,16 +84,23 @@ async def create_prop(
     db: AsyncSession, project_id: int, data: PropCreate
 ) -> ProjectProp:
     """添加道具"""
+    # 校验 script_id 属于该项目
+    script = await db.get(ProjectScript, data.script_id)
+    if not script or script.project_id != project_id:
+        raise HTTPException(404, "剧本不存在或不属于该项目")
+
+    # 计算 sort_order（按集追加到末尾）
     max_order = (
         await db.execute(
             select(func.max(ProjectProp.sort_order)).where(
-                ProjectProp.project_id == project_id
+                ProjectProp.script_id == data.script_id
             )
         )
     ).scalar() or 0
 
     prop = ProjectProp(
         project_id=project_id,
+        script_id=data.script_id,
         name=data.name,
         description=data.description,
         visual_desc=data.visual_desc,
@@ -317,17 +344,23 @@ async def delete_prop_version(
 # 从剧本重新提取道具
 # =====================================================
 
-async def extract_props_from_script(db: AsyncSession, project_id: int) -> dict:
-    """从剧本重新提取道具（追加，不覆盖）"""
+async def extract_props_from_script(
+    db: AsyncSession, project_id: int, script_id: int
+) -> dict:
+    """从指定集剧本内容重新提取道具清单（追加到该集，不覆盖）"""
+    # 精确查指定集剧本
     script = (
         await db.execute(
-            select(ProjectScript)
-            .where(ProjectScript.project_id == project_id)
-            .order_by(ProjectScript.episode_no)
+            select(ProjectScript).where(
+                ProjectScript.id == script_id,
+                ProjectScript.project_id == project_id,
+            )
         )
     ).scalars().first()
-    if not script or not script.content:
-        return {"added": 0}
+    if not script:
+        raise HTTPException(404, "剧本不存在或不属于该项目")
+    if not script.content:
+        raise HTTPException(400, "剧本内容为空，无法提取道具")
 
     prompt = (
         "请从以下剧本中提取所有道具信息，返回 JSON 格式：\n"
@@ -349,18 +382,22 @@ async def extract_props_from_script(db: AsyncSession, project_id: int) -> dict:
     text = choices[0].get("message", {}).get("content", "") or ""
     parsed = parse_json_loose(text)
 
+    # 现有道具名集合（仅限该集，避免重复）
     existing = {
         p.name
         for p in (
             await db.execute(
-                select(ProjectProp).where(ProjectProp.project_id == project_id)
+                select(ProjectProp).where(
+                    ProjectProp.script_id == script_id
+                )
             )
         ).scalars().all()
     }
+
     max_order = (
         await db.execute(
             select(func.max(ProjectProp.sort_order)).where(
-                ProjectProp.project_id == project_id
+                ProjectProp.script_id == script_id
             )
         )
     ).scalar() or 0
@@ -374,6 +411,7 @@ async def extract_props_from_script(db: AsyncSession, project_id: int) -> dict:
         db.add(
             ProjectProp(
                 project_id=project_id,
+                script_id=script_id,
                 name=name,
                 description=item.get("description", ""),
                 visual_desc=item.get("visual_desc", ""),
@@ -385,3 +423,58 @@ async def extract_props_from_script(db: AsyncSession, project_id: int) -> dict:
 
     await db.commit()
     return {"added": added}
+
+
+# =====================================================
+# 跨集复制（深拷贝到目标集，不复制分镜关联）
+# =====================================================
+
+async def copy_prop_to_script(
+    db: AsyncSession, project_id: int, prop_id: int, target_script_id: int
+) -> ProjectProp:
+    """把道具深拷贝到目标集（复制名称/描述/视觉描述/形象图引用，不复制分镜关联）"""
+    # 校验源道具属于 project
+    src = await get_prop(db, prop_id)
+    if not src or src.project_id != project_id:
+        raise HTTPException(404, "源道具不存在")
+
+    # 校验目标 script 属于 project
+    target_script = await db.get(ProjectScript, target_script_id)
+    if not target_script or target_script.project_id != project_id:
+        raise HTTPException(404, "目标集剧本不存在")
+
+    # 名称冲突处理
+    existing = (
+        await db.execute(
+            select(ProjectProp).where(
+                ProjectProp.script_id == target_script_id,
+                ProjectProp.name == src.name,
+            )
+        )
+    ).scalars().first()
+    new_name = f"{src.name}（副本）" if existing else src.name
+
+    # sort_order 追加到目标集末尾
+    max_order = (
+        await db.execute(
+            select(func.max(ProjectProp.sort_order)).where(
+                ProjectProp.script_id == target_script_id
+            )
+        )
+    ).scalar() or 0
+
+    new_entity = ProjectProp(
+        project_id=project_id,
+        script_id=target_script_id,
+        name=new_name,
+        description=src.description,
+        visual_desc=src.visual_desc,
+        asset_id=src.asset_id,
+        active_image_id=src.active_image_id,
+        sort_order=max_order + 1,
+    )
+    db.add(new_entity)
+    await db.commit()
+    await db.refresh(new_entity)
+    await attach_active_image(db, ENTITY_TYPE, new_entity)
+    return new_entity
