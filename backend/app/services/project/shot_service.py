@@ -321,6 +321,8 @@ async def create_shot(
     db.add(shot)
     await db.commit()
     await db.refresh(shot)
+    # 注入关联数据（空列表），避免 response_model=ShotResponse 序列化时触发 async lazy load
+    await _attach_shot_relations(db, shot)
     return shot
 
 
