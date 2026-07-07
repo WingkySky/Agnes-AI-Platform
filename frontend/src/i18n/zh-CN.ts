@@ -2751,6 +2751,18 @@ const zhCN = {
     helpCanvasWheel: '滚轮',
     helpCanvasWheelDesc: '缩放视角（两种模式下均可用）',
   },
+
+  // ------ 项目管理（集数隔离） ------
+  project: {
+    currentEpisode: '当前集数',
+    allEpisodes: '全部集',
+    selectEpisode: '选择集数',
+    selectEpisodeFirst: '请先选择集数',
+    copyToEpisode: '复制到其他集',
+    copiedToEpisode: '已复制到目标集',
+    splitFromScript: '从剧本拆分',
+    createShot: '新建分镜',
+  },
 }
 
 export default zhCN
