@@ -125,7 +125,9 @@ async def _step_entity_extraction(
     db: AsyncSession, project: Project, step_config: dict, context: dict
 ) -> dict:
     """步骤 2: 从剧本提取角色/场景/道具清单"""
-    script_content = context.get("script_generation", {}).get("content", "")
+    script_ctx = context.get("script_generation", {})
+    script_content = script_ctx.get("content", "")
+    script_id = script_ctx.get("script_id")
     prompt = step_config["prompt_template"].format(script=script_content)
     result_text = await _call_llm(
         prompt, step_config.get("model"), step_config.get("temperature", 0.5)
@@ -138,6 +140,7 @@ async def _step_entity_extraction(
     for item in parsed.get("characters", []):
         char = ProjectCharacter(
             project_id=project.id,
+            script_id=script_id,  # 集数隔离：强属于该集剧本
             name=item.get("name", "未命名"),
             description=item.get("description", ""),
             appearance_desc=item.get(
@@ -152,6 +155,7 @@ async def _step_entity_extraction(
     for item in parsed.get("scenes", []):
         scene = ProjectScene(
             project_id=project.id,
+            script_id=script_id,  # 集数隔离：强属于该集剧本
             name=item.get("name", "未命名场景"),
             description=item.get("description", ""),
             location=item.get("location", ""),
@@ -165,6 +169,7 @@ async def _step_entity_extraction(
     for item in parsed.get("props", []):
         prop = ProjectProp(
             project_id=project.id,
+            script_id=script_id,  # 集数隔离：强属于该集剧本
             name=item.get("name", "未命名道具"),
             description=item.get("description", ""),
             visual_desc=item.get("visual_desc", item.get("description", "")),
@@ -180,7 +185,9 @@ async def _step_storyboard_split(
     db: AsyncSession, project: Project, step_config: dict, context: dict
 ) -> dict:
     """步骤 3: 基于已确认实体清单拆分分镜（E2 - 注入 charList/sceneList/propList）"""
-    script_content = context.get("script_generation", {}).get("content", "")
+    script_ctx = context.get("script_generation", {})
+    script_content = script_ctx.get("content", "")
+    script_id = script_ctx.get("script_id")
 
     # 注入实体清单
     chars = (
@@ -234,6 +241,7 @@ async def _step_storyboard_split(
     ):
         shot = ProjectShot(
             project_id=project.id,
+            script_id=script_id,  # 集数隔离：强属于该集剧本
             sequence_no=idx,
             sort_order=idx - 1,
             title=shot_data.get("title", f"分镜 {idx}"),
