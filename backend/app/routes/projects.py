@@ -66,7 +66,8 @@ from app.schemas.project import (
     PropCreate, PropUpdate, PropResponse,
     # 实体素材
     EntityAssetResponse, SetActiveVersionRequest,
-    # 分镜
+    # 分镜 / 跨集请求体
+    ExtractFromScriptRequest, CopyToScriptRequest,
     ShotCreate, ShotUpdate, ShotResponse, ReorderRequest, BindEntityRequest,
     # 帧图/视频
     FrameImageResponse, VideoResponse,
@@ -104,21 +105,21 @@ from app.services.project.character_service import (
     reorder_characters, generate_character_image, batch_generate_characters,
     upload_character_image, list_character_versions, set_active_character_version,
     delete_character_version, extract_characters_from_script,
-    claim_character_image,
+    claim_character_image, copy_character_to_script,
 )
 from app.services.project.scene_service import (
     list_scenes, get_scene, create_scene, update_scene, delete_scene,
     reorder_scenes, generate_scene_image, batch_generate_scenes,
     upload_scene_image, list_scene_versions, set_active_scene_version,
     delete_scene_version, extract_scenes_from_script,
-    claim_scene_image,
+    claim_scene_image, copy_scene_to_script,
 )
 from app.services.project.prop_service import (
     list_props, get_prop, create_prop, update_prop, delete_prop,
     reorder_props, generate_prop_image, batch_generate_props,
     upload_prop_image, list_prop_versions, set_active_prop_version,
     delete_prop_version, extract_props_from_script,
-    claim_prop_image,
+    claim_prop_image, copy_prop_to_script,
 )
 from app.services.project.shot_service import (
     list_shots, get_shot, create_shot, update_shot, delete_shot, reorder_shots,
@@ -650,6 +651,7 @@ def _build_entity_routes(prefix: str, entity_type: str):
         del_v_fn = delete_character_version
         extract_fn = extract_characters_from_script
         claim_fn = claim_character_image
+        copy_to_fn = copy_character_to_script
         create_schema = CharacterCreate
         update_schema = CharacterUpdate
         response_schema = CharacterResponse
@@ -669,6 +671,7 @@ def _build_entity_routes(prefix: str, entity_type: str):
         del_v_fn = delete_scene_version
         extract_fn = extract_scenes_from_script
         claim_fn = claim_scene_image
+        copy_to_fn = copy_scene_to_script
         create_schema = SceneCreate
         update_schema = SceneUpdate
         response_schema = SceneResponse
@@ -688,6 +691,7 @@ def _build_entity_routes(prefix: str, entity_type: str):
         del_v_fn = delete_prop_version
         extract_fn = extract_props_from_script
         claim_fn = claim_prop_image
+        copy_to_fn = copy_prop_to_script
         create_schema = PropCreate
         update_schema = PropUpdate
         response_schema = PropResponse
@@ -700,12 +704,13 @@ def _build_entity_routes(prefix: str, entity_type: str):
     )
     async def list_api(
         project_id: int,
+        script_id: Optional[int] = Query(None, description="按集过滤"),
         db: AsyncSession = Depends(get_async_db),
         current_user: User = Depends(get_current_user),
     ):
         project = await _get_project_or_404(db, project_id)
         _check_project_owner(project, current_user)
-        return await list_fn(db, project_id)
+        return await list_fn(db, project_id, script_id)
 
     @router.post(
         f"/{{project_id}}/{prefix}",
@@ -928,12 +933,37 @@ def _build_entity_routes(prefix: str, entity_type: str):
     )
     async def extract_api(
         project_id: int,
+        req: ExtractFromScriptRequest,
         db: AsyncSession = Depends(get_async_db),
         current_user: User = Depends(get_current_user),
     ):
+        """从指定 script_id 的剧本提取实体"""
         project = await _get_project_or_404(db, project_id)
         _check_project_owner(project, current_user)
-        return await extract_fn(db, project_id)
+        try:
+            return await extract_fn(db, project_id, req.script_id)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @router.post(
+        f"/{{project_id}}/{prefix}/{{entity_id}}/copy-to",
+        response_model=response_schema,
+        summary=f"复制{entity_label}到其他集",
+    )
+    async def copy_to_api(
+        project_id: int,
+        entity_id: int,
+        req: CopyToScriptRequest,
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user),
+    ):
+        """将{entity_label}复制到 target_script_id 指定的目标集"""
+        project = await _get_project_or_404(db, project_id)
+        _check_project_owner(project, current_user)
+        try:
+            return await copy_to_fn(db, project_id, entity_id, req.target_script_id)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
 
 # 注册三类实体路由
@@ -949,12 +979,14 @@ _build_entity_routes("props", "prop")
 @router.get("/{project_id}/shots", response_model=List[ShotResponse], summary="列出分镜")
 async def list_shots_api(
     project_id: int,
+    script_id: Optional[int] = Query(None, description="按集过滤"),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    """列出项目分镜（可选 ?script_id=N 按集过滤）"""
     project = await _get_project_or_404(db, project_id)
     _check_project_owner(project, current_user)
-    shots = await list_shots(db, project_id)
+    shots = await list_shots(db, project_id, script_id)
     # 将关联实体附加到响应
     result = []
     for shot in shots:
@@ -986,13 +1018,15 @@ async def create_shot_api(
 @router.post("/{project_id}/shots/split", summary="从剧本 AI 拆分分镜")
 async def split_shots_api(
     project_id: int,
+    req: ExtractFromScriptRequest,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    """从剧本拆分分镜（按 script_id 指定的集）"""
     project = await _get_project_or_404(db, project_id)
     _check_project_owner(project, current_user)
     try:
-        return await split_shots_from_script(db, project_id)
+        return await split_shots_from_script(db, project_id, req.script_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
