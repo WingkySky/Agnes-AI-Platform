@@ -16,6 +16,10 @@ class VideoGenerationRequest(BaseModel):
       - 单张: image 字段（1张起始帧）
       - 多张: images 数组（2+ 张参考图，指导视频生成）
     - keyframes: 关键帧动画，额外提供 images 数组（最多2张：起始帧必填 + 结束帧可选）
+    - video2video: 视频转视频（Agnes Video 2.5+），支持参考视频和音频
+      - reference_videos: 参考视频 URL 列表
+      - reference_audios: 参考音频 URL 列表（可选）
+      - Flash 版本不支持 video2video 模式
     """
 
     prompt: str = Field(..., min_length=1, max_length=15000, description="提示词")
@@ -34,12 +38,16 @@ class VideoGenerationRequest(BaseModel):
     height: Optional[int] = Field(default=None, description="视频高度")
 
     # 参考图 / 多图 / 首尾帧
-    mode: Optional[str] = Field(default="text2video", description="模式: text2video | image2video | keyframes")
+    mode: Optional[str] = Field(default="text2video", description="模式: text2video | image2video | keyframes | video2video")
     image: Optional[str] = Field(default=None, description="图生视频时的单张参考图（base64 或 URL）")
     images: Optional[List[str]] = Field(default=None, description="图生视频多图/关键帧模式时的图片列表")
     # MIME 类型（前端传递，用于构建正确的 Data URI 前缀，避免统一用 image/png 导致格式不匹配）
     image_mime_type: Optional[str] = Field(default=None, description="单张参考图的 MIME 类型（如 image/jpeg）")
     image_mime_types: Optional[List[str]] = Field(default=None, description="多张图片各图片的 MIME 类型列表")
+
+    # ── Video 2.5 新功能：视频参考和音频参考 ──
+    reference_videos: Optional[List[str]] = Field(default=None, description="参考视频 URL 列表（video2video 模式使用）")
+    reference_audios: Optional[List[str]] = Field(default=None, description="参考音频 URL 列表（video2video 模式使用）")
 
     # 种子（可选）
     seed: Optional[int] = Field(default=None, description="随机种子，不传则由 API 自动生成")
@@ -100,6 +108,7 @@ class VideoGenerationRequest(BaseModel):
         根据 mode 校验必填字段：
         - image2video: 必须有 image 或 images 字段（至少1张有效图片）
         - keyframes: 必须有 images 数组且至少 1 张有效图片（最多 2 张：起始帧+结束帧）
+        - video2video: 必须有 reference_videos（至少1个有效视频URL）
         """
         if self.mode == "image2video":
             # 过滤 images 中的空值
@@ -125,6 +134,20 @@ class VideoGenerationRequest(BaseModel):
                 raise ValueError("keyframes 模式需提供至少 1 张起始帧图片（images 字段，过滤空值后无有效图片）")
             if len(self.images) > 2:
                 raise ValueError("keyframes 模式最多提供 2 张图片（起始帧 + 结束帧）")
+        if self.mode == "video2video":
+            # video2video 模式必须有参考视频
+            if not self.reference_videos or len(self.reference_videos) == 0:
+                raise ValueError("video2video 模式需提供参考视频（reference_videos 字段不能为空）")
+            # 过滤无效的视频 URL
+            self.reference_videos = [v for v in self.reference_videos if v and isinstance(v, str) and v.strip()]
+            if not self.reference_videos:
+                raise ValueError("video2video 模式需提供至少 1 个有效的参考视频 URL")
+            # 限制参考视频数量
+            if len(self.reference_videos) > 5:
+                raise ValueError("video2video 模式最多支持 5 个参考视频")
+            # 可选：音频参考
+            if self.reference_audios:
+                self.reference_audios = [a for a in self.reference_audios if a and isinstance(a, str) and a.strip()]
         return self
 
 

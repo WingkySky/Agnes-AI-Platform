@@ -121,7 +121,7 @@ export interface GenerationRecord {
   prompt: string
   model?: string | null
   params?: Record<string, unknown> | null
-  mode?: 'text2image' | 'image2image' | 'text2video' | 'image2video' | 'keyframes' | null
+  mode?: 'text2image' | 'image2image' | 'text2video' | 'image2video' | 'keyframes' | 'video2video' | null
   result_url?: string | null
   status: string
   task_id?: string | null
@@ -272,12 +272,14 @@ export interface VideoGenerationRequest {
   frame_rate?: number | null
   width?: number | null
   height?: number | null
-  mode?: 'text2video' | 'image2video' | 'keyframes' | null
+  mode?: 'text2video' | 'image2video' | 'keyframes' | 'video2video' | null
   image?: string | null
   images?: string[] | null
   image_mime_type?: string | null
   image_mime_types?: string[] | null
   seed?: number | null
+  reference_videos?: string[] | null
+  reference_audios?: string[] | null
 }
 
 /** 视频任务创建响应 — 对齐 VideoTaskCreatedResponse */

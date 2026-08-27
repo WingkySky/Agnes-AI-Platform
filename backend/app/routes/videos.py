@@ -177,6 +177,8 @@ async def create_video_task(
             image_mime_type=req.image_mime_type,
             image_mime_types=req.image_mime_types,
             seed=req.seed,
+            reference_videos=req.reference_videos,
+            reference_audios=req.reference_audios,
         )
     except Exception as e:
         logger.exception("[视频生成] 创建任务失败（上游 Agnes 响应异常）: %s", e)

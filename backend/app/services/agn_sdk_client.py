@@ -275,12 +275,16 @@ class AGNSDKClientWrapper:
         image_mime_type: Optional[str] = None,
         image_mime_types: Optional[list] = None,
         seed: Optional[int] = None,
+        # Video 2.5 new params
+        reference_videos: Optional[List[str]] = None,
+        reference_audios: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         调用 aibridge Client.video_create() 创建视频生成任务。
 
         与 AgnesAIClient.create_video_task 接口对齐：
         - 合并 image / images 参数为 reference_images 透传给 aibridge
+        - Video 2.5: 透传 reference_videos 和 reference_audios
         - 不做 8n+1 / 8 倍数 / mode 归一化等业务适配
           （这些是 Agnes Video API 的硬性要求，其他 Provider 不一定需要；
            如果其他 Provider 也有类似约束，应在对应 aibridge Adapter 内处理）
@@ -316,6 +320,8 @@ class AGNSDKClientWrapper:
                 frame_rate=_frame_rate,
                 mode=mode,
                 reference_images=ref_images if ref_images else None,
+                reference_videos=reference_videos if reference_videos else None,
+                reference_audios=reference_audios if reference_audios else None,
                 negative_prompt=negative_prompt,
                 seed=seed,
             )

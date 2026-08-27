@@ -143,6 +143,14 @@ async def get_video_cost_async(
             except Exception as e:
                 logger.warning("[积分服务] 读取 video.image2video.per_second 失败: %s", e)
         mode_factor = 1.2
+    elif mode and mode.lower() == "video2video":
+        per_second = _get_default_value("video.video2video.per_second") or 8
+        if db is not None:
+            try:
+                per_second = await _get_rule_value(db, "video.video2video.per_second", per_second)
+            except Exception as e:
+                logger.warning("[积分服务] 读取 video.video2video.per_second 失败: %s", e)
+        mode_factor = 1.5
     else:
         per_second = _get_default_value("video.text2video.per_second") or 5
         if db is not None:
@@ -166,7 +174,12 @@ def get_video_cost(
     per_second = 5
     duration_factor = max(1.0, (seconds or 5) / 5.0)
     frame_factor = max(0.8, (num_frames or 33) / 33.0) if num_frames else 1.0
-    mode_factor = 1.2 if mode and mode.lower() in ("image2video", "keyframes") else 1.0
+    if mode and mode.lower() in ("image2video", "keyframes"):
+        mode_factor = 1.2
+    elif mode and mode.lower() == "video2video":
+        mode_factor = 1.5
+    else:
+        mode_factor = 1.0
     return max(10, int(per_second * duration_factor * frame_factor * mode_factor))
 
 

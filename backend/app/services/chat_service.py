@@ -126,8 +126,18 @@ CHAT_TOOLS = [
                     },
                     "mode": {
                         "type": "string",
-                        "description": "生成模式：text2video（纯文生视频）/ image2video（基于单张参考图动起来）/ keyframes（基于多张参考图做过渡动画）",
-                        "enum": ["text2video", "image2video", "keyframes"],
+                        "description": "生成模式：text2video（纯文生视频）/ image2video（基于单张参考图动起来）/ keyframes（基于多张参考图做过渡动画）/ video2video（视频转视频，需传入 reference_videos）",
+                        "enum": ["text2video", "image2video", "keyframes", "video2video"],
+                    },
+                    "reference_videos": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "参考视频 URL 列表（video2video 模式使用，最多 5 个）",
+                    },
+                    "reference_audios": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "参考音频 URL 列表（可选，video2video 模式使用）",
                     },
                     "camera_params": {
                         "type": "object",
@@ -1609,12 +1619,24 @@ class ChatService:
         # ── 根据 final_mode 准备调用参数
         image_param = None
         images_param = None
+        reference_videos_param = args.get("reference_videos") or []
+        reference_audios_param = args.get("reference_audios") or []
+
         if final_mode == "image2video":
             ref = attachments[0]
             # 优先使用 base64，其次使用 URL
             image_param = ref.get("base64_image") or ref.get("image_url")
         elif final_mode == "keyframes":
             images_param = [a.get("base64_image") or a.get("image_url") for a in attachments if a.get("base64_image") or a.get("image_url")]
+        elif final_mode == "video2video":
+            # video2video: 从 attachments 提取视频 URL，或从 args.reference_videos 获取
+            if not reference_videos_param and attachments:
+                reference_videos_param = [a.get("video_url") for a in attachments if a.get("video_url")]
+            # 如果有音频附件，提取音频 URL
+            if not reference_audios_param:
+                for a in attachments:
+                    if a.get("audio_url"):
+                        reference_audios_param.append(a.get("audio_url"))
 
         # 获取默认视频模型
         from app.services.model_registry import get_models_by_type as _get_models_by_type
@@ -1643,6 +1665,8 @@ class ChatService:
                 mode=final_mode,
                 image=image_param,
                 images=images_param,
+                reference_videos=reference_videos_param if reference_videos_param else None,
+                reference_audios=reference_audios_param if reference_audios_param else None,
             )
 
             video_id = result.get("video_id") or (
