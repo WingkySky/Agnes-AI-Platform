@@ -804,6 +804,7 @@ const zhCN = {
     pleaseUploadStartFrame: '请上传关键帧图片（至少1张起始帧）',
     maxKeyframes: '关键帧模式最多上传2张图片（起始帧+结束帧）',
     pleaseInputRefVideo: '请先输入参考视频 URL',
+    video2videoNotSupported: '当前模型不支持视频生视频，已切换回文生视频。请选择 agnes-video-2.5 等支持的模型',
   },
 
   // ------ 路由 / 页面标题 ------

@@ -45,7 +45,8 @@
                   </span>
                 </template>
               </el-tab-pane>
-              <el-tab-pane name="video2video">
+              <!-- 视频生视频：仅对支持视频参考的模型（如 agnes-video-2.5）显示 -->
+              <el-tab-pane v-if="supportsVideo2Video" name="video2video">
                 <template #label>
                   <span class="mode-label">
                     <el-icon class="mode-icon"><VideoCameraFilled /></el-icon>
@@ -392,6 +393,25 @@ const seconds = ref(modelsStore.defaultVideoDuration || 5)
 const frameRate = ref(modelsStore.defaultFrameRate || 24)
 const seed = ref('')
 const videoModel = ref('')  // 初始值在 store 加载后自动设置
+
+// ---------- 模型能力：视频生视频（video2video）仅对支持的模型开放 ----------
+// 优先看模型的 capabilities 标签；数据库未更新时按模型名兜底
+// （agnes-video-2.5 支持视频参考，agnes-video-2.5-flash / agnes-video-v2.0 不支持）
+const supportsVideo2Video = computed(() => {
+  const m = modelsStore.videoModels.find(x => x.id === videoModel.value)
+  const caps = m?.capabilities || []
+  if (caps.includes('video2video')) return true
+  const id = (videoModel.value || '').toLowerCase()
+  return id.includes('video-2.5') && !id.includes('flash')
+})
+
+// 切换模型后：当前模式不被新模型支持时自动回退到文生视频
+watch(videoModel, () => {
+  if (mode.value === 'video2video' && !supportsVideo2Video.value) {
+    mode.value = 'text2video'
+    ElMessage.warning(t('message.video2videoNotSupported'))
+  }
+})
 
 // ---------- 积分预估：根据 mode + seconds + frameRate 自动计算本次生成消耗 ----------
 // num_frames = seconds * frameRate，与后端计费逻辑保持一致

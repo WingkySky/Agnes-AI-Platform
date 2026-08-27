@@ -87,8 +87,14 @@ def _detect_provider(model_id: str) -> str:
 
 
 def _detect_capabilities(model_id: str, model_type: str) -> List[str]:
-    """根据类型推断默认能力列表"""
-    return list(_DEFAULT_CAPABILITIES.get(model_type, []))
+    """根据类型推断默认能力列表（Agnes Video 2.5 非 Flash 家族额外支持 video2video）"""
+    caps = list(_DEFAULT_CAPABILITIES.get(model_type, []))
+    lower = (model_id or "").lower()
+    # Agnes Video 2.5（非 Flash）支持视频参考（video2video）；Flash 不支持
+    if model_type == "video" and "video-2.5" in lower and "flash" not in lower:
+        if "video2video" not in caps:
+            caps.append("video2video")
+    return caps
 
 
 def _generate_display_name(model_id: str, provider: str, model_type: str) -> str:

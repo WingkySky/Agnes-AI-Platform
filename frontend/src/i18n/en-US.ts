@@ -803,6 +803,7 @@ const enUS = {
     pleaseUploadStartFrame: 'Please upload keyframe images (at least 1 start frame)',
     maxKeyframes: 'Maximum 2 images allowed in keyframe mode (start + end frame)',
     pleaseInputRefVideo: 'Please input a reference video URL first',
+    video2videoNotSupported: 'Current model does not support video-to-video; switched back to text-to-video. Please select a supported model such as agnes-video-2.5',
   },
 
   // ------ Router / page titles ------

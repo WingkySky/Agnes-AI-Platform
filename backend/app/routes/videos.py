@@ -33,7 +33,7 @@ from app.schemas.videos import (
     VideoStatusResponse,
 )
 from app.services.agnes_client import agnes_client
-from app.services.provider_registry import provider_registry
+from app.services.provider_registry import provider_registry, _detect_capabilities
 from app.services.credits_service import consume_credits, get_video_cost_async
 from app.services.video_poller import poller_manager
 
@@ -120,6 +120,22 @@ async def create_video_task(
                 len(img),
                 (req.image_mime_types[idx] if req.image_mime_types and idx < len(req.image_mime_types) else "image/png"),
                 img[:100],
+            )
+
+    # ---------- 模型能力校验：video2video 仅对支持的模型开放 ----------
+    # 优先用数据库中的 capabilities；数据库未更新时按模型名兜底推断
+    # （agnes-video-2.5 支持 video2video，agnes-video-2.5-flash / v2.0 不支持）
+    if req.mode == "video2video":
+        defn = await provider_registry.get_model_definition(req.model)
+        supported_caps = set((defn.capabilities if defn and defn.capabilities else []) or [])
+        supported_caps |= set(_detect_capabilities(req.model, "video"))
+        if "video2video" not in supported_caps:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"模型 {req.model or '(未指定)'} 不支持视频生视频（video2video）模式，"
+                    "请使用 agnes-video-2.5 等支持的模型"
+                ),
             )
 
     # --- 计算并预扣积分（必须登录，积分不足会抛 402）---

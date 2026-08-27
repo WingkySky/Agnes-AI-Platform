@@ -579,6 +579,18 @@ class AgnesAIClient:
         return await self._post(url, body)
 
     # ---------- 视频任务创建 ----------
+    # ── Agnes Video 2.5 / 2.5-Flash 家族（新契约）模型 ID ──
+    # 2.5 家族走 OpenAI Videos 兼容契约：mode 取 text/keyframe/reference，
+    # 参数使用 seconds/size/aspect_ratio，轮询必须带 model_name。
+    _V25_MODELS = ("agnes-video-2.5", "agnes-video-2.5-flash")
+    # 2.5 契约支持的画幅白名单（官方文档，不支持 auto 或像素直传）
+    _V25_ASPECT_RATIOS = ("21:9", "16:9", "4:3", "1:1", "3:4", "9:16")
+
+    @classmethod
+    def _is_video_v25(cls, model: str) -> bool:
+        """判断模型是否属于 Agnes Video 2.5 / 2.5-Flash 家族（新接口契约）"""
+        return (model or "").strip().lower() in cls._V25_MODELS
+
     async def create_video_task(
         self,
         prompt: str,
@@ -596,22 +608,59 @@ class AgnesAIClient:
         image_mime_type: Optional[str] = None,
         image_mime_types: Optional[list] = None,
         seed: Optional[int] = None,
+        # ── Video 2.5 新参数：视频参考 / 音频参考 ──
+        reference_videos: Optional[List[str]] = None,
+        reference_audios: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
-        创建视频生成异步任务。
+        创建视频生成异步任务（按模型版本自动分流双契约）。
 
-        Agnes Video V2.0 官方端点：POST /v1/videos
-        参数规范（参考 Yacey/agnes-ai-generation-skill references/api.md）：
+        ── 契约一：Agnes Video 2.5 / 2.5-Flash（新契约，见 _create_video_task_v25）──
+          - mode 映射：text2video → text；keyframes → keyframe；
+            image2video / video2video → reference
+          - 顶层参数：seconds（字符串 "4"-"12"）、size（720P/960P/2K）、
+            aspect_ratio（白名单）、seed、n（固定 1）
+          - reference 模式媒体字段：images（string[]）/ audios（string[]）/
+            videos（object[]，仅 2.5 支持，Flash 传入直接报错）
+          - keyframe 模式媒体字段：first_frame / last_frame
+          - 不下发 width/height/num_frames/frame_rate
+
+        ── 契约二：Agnes Video V2.0（旧契约，沿用下方原有逻辑）──
+          Agnes Video V2.0 官方端点：POST /v1/videos
           - 顶层参数：model, prompt, image(单图), mode, width, height,
             num_frames, frame_rate, seed, negative_prompt
           - 图生视频（单图）：顶层 image（字符串） + mode = "ti2vid"
           - 多图/关键帧：extra_body.image（数组） + extra_body.mode = "keyframes"
           - num_frames 必须 <= 441 且满足 8n + 1（81, 121, 161, 241, 321, 401, 441）
           - frame_rate 范围 1-60，默认 24
-          - 默认分辨率：width=1152, height=768（16:9）
+          - V2.0 不支持视频参考（video2video），传入时直接抛出明确错误
 
         创建响应可能同时包含 video_id 和 task_id，推荐优先使用 video_id 轮询。
         """
+        # ── 双契约分流：2.5 家族走新契约构建逻辑 ──
+        if self._is_video_v25(model):
+            return await self._create_video_task_v25(
+                prompt=prompt,
+                model=model,
+                width=width,
+                height=height,
+                aspect_ratio=aspect_ratio,
+                seconds=seconds,
+                mode=mode,
+                image=image,
+                images=images,
+                seed=seed,
+                reference_videos=reference_videos,
+                reference_audios=reference_audios,
+            )
+
+        # ── 旧契约（V2.0 等）不支持视频参考：提前给出明确错误，避免透传后收到含糊的 400 ──
+        if reference_videos:
+            raise RuntimeError(
+                f"模型 {model or '(未指定)'} 不支持视频参考（video2video）模式，"
+                "请使用 agnes-video-2.5"
+            )
+
         url = f"{self.base_url}/videos"
 
         # 1) 计算分辨率（width / height）
@@ -838,6 +887,143 @@ class AgnesAIClient:
             )
 
         return await self._post(url, body)
+
+    # =====================================================
+    # 【Agnes Video 2.5 / 2.5-Flash 新契约：视频任务创建】
+    # 对齐官方文档（agnes-ai.com/docs/agnes-video-25-flash）与
+    # aibridge Rust AgnesAdapter::build_video_body_v25 的请求体结构：
+    #   - mode：text / keyframe / reference（由统一 mode 映射）
+    #   - seconds：字符串 "4"-"12"（默认 "5"）
+    #   - size：720P / 960P / 2K（Flash 固定 720P）
+    #   - aspect_ratio：白名单 21:9/16:9/4:3/1:1/3:4/9:16
+    #   - n：固定 1；seed 可选；不下发 width/height/num_frames/frame_rate
+    #   - keyframe 模式：first_frame / last_frame（顶层字符串）
+    #   - reference 模式：images / audios（顶层 string[]）、
+    #     videos（顶层 object[]，仅 2.5 支持，Flash 前置拦截）
+    # 前置校验（违规直接抛中文错误，不发请求）：
+    #   - Flash 不支持视频参考；Flash 参考图 ≤ 5 张
+    #   - keyframe 至少 1 张起始帧；reference 至少一类参考素材
+    # =====================================================
+    async def _create_video_task_v25(
+        self,
+        prompt: str,
+        model: str,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+        aspect_ratio: Optional[str] = None,
+        seconds: Optional[float] = None,
+        mode: str = "text2video",
+        image: Optional[str] = None,
+        images: Optional[list] = None,
+        seed: Optional[int] = None,
+        reference_videos: Optional[List[str]] = None,
+        reference_audios: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """构建 Agnes Video 2.5 契约请求体并发送（见上方模块注释）。"""
+        is_flash = (model or "").strip().lower() == "agnes-video-2.5-flash"
+        normalized_mode = (mode or "text2video").strip().lower()
+
+        # ── 合并参考图：image 单图 + images 多图 → 统一列表 ──
+        ref_images: List[str] = []
+        if image and isinstance(image, str) and image.strip():
+            ref_images.append(image.strip())
+        if images and isinstance(images, (list, tuple)):
+            ref_images.extend([i for i in images if i and isinstance(i, str) and i.strip()])
+
+        # ── 过滤参考视频 / 音频中的空值 ──
+        ref_videos = [
+            v for v in (reference_videos or [])
+            if v and isinstance(v, str) and v.strip()
+        ]
+        ref_audios = [
+            a for a in (reference_audios or [])
+            if a and isinstance(a, str) and a.strip()
+        ]
+
+        # ── Flash 前置校验：不支持视频参考、参考图最多 5 张 ──
+        if is_flash:
+            if ref_videos:
+                raise RuntimeError(
+                    "agnes-video-2.5-flash 不支持视频参考（video2video），请改用 agnes-video-2.5"
+                )
+            if len(ref_images) > 5:
+                raise RuntimeError(
+                    f"agnes-video-2.5-flash 参考图最多 5 张，实际收到 {len(ref_images)} 张"
+                )
+
+        # ── 统一 mode 映射为 2.5 契约的 text / keyframe / reference ──
+        if normalized_mode == "text2video":
+            v25_mode = "text"
+        elif normalized_mode == "keyframes":
+            v25_mode = "keyframe"
+        else:
+            # image2video / video2video → reference（图/音/视频参考统一入口）
+            v25_mode = "reference"
+
+        # ── 时长 seconds：字符串 "4"-"12"，默认 "5"（超范围自动收敛到边界） ──
+        _seconds = int(round(seconds)) if seconds and seconds > 0 else 5
+        _seconds = max(4, min(12, _seconds))
+
+        # ── 分辨率档位 size：Flash 固定 720P；其余按 height 映射 720P/960P/2K ──
+        if is_flash:
+            v25_size = "720P"
+        else:
+            _h = int(height) if height and height > 0 else 720
+            v25_size = "720P" if _h < 960 else ("960P" if _h < 1440 else "2K")
+
+        # ── 画幅 aspect_ratio：白名单校验，默认 16:9 ──
+        ar = (aspect_ratio or "16:9").strip()
+        if ar not in self._V25_ASPECT_RATIOS:
+            raise RuntimeError(
+                f"模型 {model} 不支持的画幅比例: {ar}，"
+                f"可选值: {'/'.join(self._V25_ASPECT_RATIOS)}"
+            )
+
+        # ── 构建请求体（顶层字段，不下发 width/height/num_frames/frame_rate） ──
+        body: Dict[str, Any] = {
+            "model": model,
+            "prompt": prompt,
+            "mode": v25_mode,
+            "seconds": str(_seconds),
+            "size": v25_size,
+            "aspect_ratio": ar,
+            "n": 1,
+        }
+        if seed is not None:
+            body["seed"] = seed
+
+        # ── 按 mode 分流媒体字段（均为顶层字段，媒体需公网可访问 URL） ──
+        if v25_mode == "keyframe":
+            # 首尾帧模式：images[0] → first_frame，images[-1] → last_frame（可选）
+            if not ref_images:
+                raise RuntimeError("keyframes 模式需提供至少 1 张起始帧图片")
+            body["first_frame"] = ref_images[0]
+            if len(ref_images) >= 2:
+                body["last_frame"] = ref_images[-1]
+        elif v25_mode == "reference":
+            # 参考模式：images / audios / videos 至少一类非空
+            if not ref_images and not ref_audios and not ref_videos:
+                raise RuntimeError(
+                    "reference 模式需提供参考图片 / 参考音频 / 参考视频中的至少一种"
+                )
+            if ref_images:
+                body["images"] = ref_images
+            if ref_audios:
+                body["audios"] = ref_audios
+            if ref_videos:
+                # 视频参考为 object[]（与 aibridge 统一结构一致）
+                body["videos"] = [
+                    {"url": v.strip(), "start_seconds": 0, "require_audio": False}
+                    for v in ref_videos
+                ]
+
+        logger.info(
+            "[视频生成] Agnes Video 2.5 契约: model=%s, mode=%s(%s), seconds=%s, "
+            "size=%s, ar=%s, images=%d, videos=%d, audios=%d, prompt=%s",
+            model, v25_mode, normalized_mode, _seconds, v25_size, ar,
+            len(ref_images), len(ref_videos), len(ref_audios), prompt[:80],
+        )
+        return await self._post(f"{self.base_url}/videos", body)
 
     @staticmethod
     def _fit_image_size(w: int, h: int) -> str:
@@ -1080,11 +1266,14 @@ class AgnesAIClient:
         # 视频 URL 提取：按优先级检查多种可能字段
         # 优先使用 remixed_from_video_id（公开可访问），其次是 url/result_url
         # 检查范围：根级别 → 外层 data → 内层 data.data
+        # Video 2.5 轮询响应成功地址在 metadata.url（与 aibridge 解析规则对齐）
+        _metadata = data.get("metadata")
         video_url = (
             data.get("remixed_from_video_id")           # 根级别（agnesapi 路径）
             or data.get("url")                          # 根级别 url
             or data.get("result_url")                   # 根级别 result_url
             or data.get("video_url")                    # 根级别 video_url
+            or (isinstance(_metadata, dict) and _metadata.get("url"))  # Video 2.5 metadata.url
             or (isinstance(outer, dict) and outer.get("remixed_from_video_id"))  # 外层
             or (isinstance(outer, dict) and outer.get("url"))          # 外层 url
             or (isinstance(outer, dict) and outer.get("result_url"))   # 外层 result_url
