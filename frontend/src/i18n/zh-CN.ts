@@ -210,6 +210,8 @@ const zhCN = {
       imageOnly: '加参考图',
       singleOrMultiImage: '单张/多张',
       keyframesHint: '首帧+尾帧插值',
+      video2video: '视频生视频',
+      video2videoHint: '上传参考视频',
     },
     referenceImages: '参考图片',
     referenceImagesHint: '上传1张或多张参考图片，指导视频生成',
@@ -217,6 +219,14 @@ const zhCN = {
     keyframeImagesHint: '上传起始帧和结束帧（最多2张）',
     keyframesMode: '关键帧模式',
     keyframesModeHint: '开启后将在上传的图片之间生成平滑过渡动画（起始帧→结束帧），最多支持2张图片',
+    referenceVideos: '参考视频',
+    referenceVideosHint: '输入参考视频 URL，用于视频风格迁移或动作复刻',
+    referenceVideoUrlPlaceholder: '请输入参考视频 URL（https://...）',
+    referenceVideoUrlHint: '视频源地址，支持 mp4/mov/webm 等格式',
+    referenceAudios: '参考音频',
+    referenceAudiosHint: '输入参考音频 URL（可选），用于同步口型或音频驱动',
+    referenceAudioUrlPlaceholder: '请输入参考音频 URL（https://...，可选）',
+    referenceAudioUrlHint: '音频源地址，支持 mp3/wav 等格式，留空则不使用',
     // 提示词长度分阶提示
     promptLengthGood: '提示词长度适中',
     promptLengthLong: '提示词较长，建议精简核心要素',
@@ -793,6 +803,7 @@ const zhCN = {
     pleaseUploadRefImage: '请先上传参考图',
     pleaseUploadStartFrame: '请上传关键帧图片（至少1张起始帧）',
     maxKeyframes: '关键帧模式最多上传2张图片（起始帧+结束帧）',
+    pleaseInputRefVideo: '请先输入参考视频 URL',
   },
 
   // ------ 路由 / 页面标题 ------

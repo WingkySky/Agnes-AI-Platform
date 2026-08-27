@@ -4,6 +4,7 @@
        - 文生视频 (text2video)
        - 图生视频 (image2video)
        - 关键帧动画 (keyframes)
+       - 视频生视频 (video2video)
      - 所有 UI 文案通过 i18n.t() 调用实现多语言
      ===================================================== -->
 
@@ -44,6 +45,17 @@
                   </span>
                 </template>
               </el-tab-pane>
+              <el-tab-pane name="video2video">
+                <template #label>
+                  <span class="mode-label">
+                    <el-icon class="mode-icon"><VideoCameraFilled /></el-icon>
+                    <span class="mode-text">
+                      <span class="mode-title">{{ t('params.mode.video2video') }}</span>
+                      <span class="mode-sub">{{ t('params.mode.video2videoHint') }}</span>
+                    </span>
+                  </span>
+                </template>
+              </el-tab-pane>
           </el-tabs>
 
           <!-- 图生视频：支持单张或多张参考图，关键帧模式开关 -->
@@ -63,6 +75,26 @@
                 <el-icon class="info-icon"><InfoFilled /></el-icon>
               </el-tooltip>
             </div>
+          </div>
+
+          <!-- 视频生视频：支持上传参考视频或输入视频 URL -->
+          <div v-if="mode === 'video2video'" class="video-reference-section">
+            <el-form-item :label="t('params.referenceVideos')">
+              <el-input
+                v-model="referenceVideoUrl"
+                :placeholder="t('params.referenceVideoUrlPlaceholder')"
+                clearable
+              />
+              <div class="field-hint">{{ t('params.referenceVideoUrlHint') }}</div>
+            </el-form-item>
+            <el-form-item :label="t('params.referenceAudios')">
+              <el-input
+                v-model="referenceAudioUrl"
+                :placeholder="t('params.referenceAudioUrlPlaceholder')"
+                clearable
+              />
+              <div class="field-hint">{{ t('params.referenceAudioUrlHint') }}</div>
+            </el-form-item>
           </div>
 
           <el-form label-position="top" class="param-form">
@@ -401,6 +433,10 @@ watch(() => modelsStore.defaultFrameRate, (v) => {
 const isKeyframesMode = ref(false)              // 是否开启关键帧模式
 const referenceFiles = ref<FileInfo[]>([])      // 图生视频/关键帧模式的参考图列表
 
+// ---------- 视频生视频参考资源 ----------
+const referenceVideoUrl = ref('')               // video2video 参考视频 URL
+const referenceAudioUrl = ref('')               // video2video 参考音频 URL（可选）
+
 // ---------- 视频播放状态 ----------
 const videoEl = ref<HTMLVideoElement | null>(null)
 const posterUrl = ref('')
@@ -553,6 +589,12 @@ async function startGenerate() {
       return
     }
   }
+  if (mode.value === 'video2video') {
+    if (!referenceVideoUrl.value.trim()) {
+      ElMessage.warning(t('message.pleaseInputRefVideo'))
+      return
+    }
+  }
   if (queue.runningVideoCount >= 5) {
     ElMessage.warning(t('generate.concurrentVideoLimit'))
     return
@@ -611,6 +653,12 @@ async function startGenerate() {
       params.images = imgs
       params.image_mime_types = mimeTypes
     }
+  }
+  if (mode.value === 'video2video') {
+    const refVideo = referenceVideoUrl.value.trim()
+    const refAudio = referenceAudioUrl.value.trim()
+    if (refVideo) params.reference_videos = [refVideo]
+    if (refAudio) params.reference_audios = [refAudio]
   }
 
   try {
@@ -1067,6 +1115,16 @@ function handleVideoError(e: Event) {
 /* 图生视频区域样式 */
 .image-upload-section {
   margin-bottom: 12px;
+}
+
+/* 视频生视频参考资源区域 */
+.video-reference-section {
+  margin-bottom: 12px;
+}
+.video-reference-section .field-hint {
+  font-size: 12px;
+  color: var(--agnes-text-muted);
+  margin-top: 4px;
 }
 
 /* 关键帧模式开关 */

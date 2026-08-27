@@ -209,6 +209,8 @@ const enUS = {
       imageOnly: 'Plus image',
       singleOrMultiImage: 'Single/Multi',
       keyframesHint: 'Start+End frames',
+      video2video: 'Video to Video',
+      video2videoHint: 'Reference video',
     },
     referenceImages: 'Reference Images',
     referenceImagesHint: 'Upload one or more reference images to guide video generation',
@@ -216,6 +218,14 @@ const enUS = {
     keyframeImagesHint: 'Upload start and end frames (max 2 images)',
     keyframesMode: 'Keyframe Mode',
     keyframesModeHint: 'Enable to generate smooth transition between uploaded images (start→end frame), max 2 images supported',
+    referenceVideos: 'Reference Videos',
+    referenceVideosHint: 'Input reference video URLs for video style transfer or motion replication',
+    referenceVideoUrlPlaceholder: 'Enter reference video URL (https://...)',
+    referenceVideoUrlHint: 'Video source URL, supports mp4/mov/webm formats',
+    referenceAudios: 'Reference Audio',
+    referenceAudiosHint: 'Input reference audio URL (optional), for lip-sync or audio-driven generation',
+    referenceAudioUrlPlaceholder: 'Enter reference audio URL (https://..., optional)',
+    referenceAudioUrlHint: 'Audio source URL, supports mp3/wav formats, leave empty to skip',
     // Prompt length tier hints
     promptLengthGood: 'Prompt length is good',
     promptLengthLong: 'Prompt is long — consider focusing on key elements',
@@ -792,6 +802,7 @@ const enUS = {
     pleaseUploadRefImage: 'Please upload a reference image first',
     pleaseUploadStartFrame: 'Please upload keyframe images (at least 1 start frame)',
     maxKeyframes: 'Maximum 2 images allowed in keyframe mode (start + end frame)',
+    pleaseInputRefVideo: 'Please input a reference video URL first',
   },
 
   // ------ Router / page titles ------

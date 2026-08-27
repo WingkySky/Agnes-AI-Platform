@@ -262,6 +262,7 @@
             <el-option label="text2video" value="text2video" />
             <el-option label="image2video" value="image2video" />
             <el-option label="keyframes" value="keyframes" />
+            <el-option label="video2video" value="video2video" />
             <el-option label="text" value="text" />
           </el-select>
         </el-form-item>
