@@ -577,7 +577,7 @@ export interface TaskCreationResponse {
 export interface ApiProvider {
   id: number
   name: string
-  /** agn-sdk adapter 标识：agnes / volcengine_cv / kling / runway / pika 等 */
+  /** aibridge adapter 标识：agnes / volcengine_cv / kling / runway / pika 等 */
   provider_type: string
   base_url: string
   /** API Key 脱敏后的展示值，如 sk-a****b123 */
@@ -599,7 +599,7 @@ export interface ProviderListResponse {
 /** 创建 Provider 请求 — 对齐 ProviderCreateRequest */
 export interface ProviderCreateRequest {
   name: string
-  /** agn-sdk adapter 标识（默认 agnes） */
+  /** aibridge adapter 标识（默认 agnes） */
   provider_type?: string
   base_url: string
   api_key: string
@@ -612,7 +612,7 @@ export interface ProviderCreateRequest {
 /** 更新 Provider 请求 — 对齐 ProviderUpdateRequest */
 export interface ProviderUpdateRequest {
   name?: string
-  /** agn-sdk adapter 标识（变更后重建 client） */
+  /** aibridge adapter 标识（变更后重建 client） */
   provider_type?: string
   base_url?: string
   /** 留空表示不修改 */

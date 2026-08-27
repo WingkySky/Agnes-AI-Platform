@@ -144,7 +144,7 @@ Visit http://localhost:5173 — you're ready to go.
 | Frontend | Vue 3 (Composition API) + Vite + TypeScript + Vue Router + Pinia + Element Plus |
 | Backend | Python 3.10+ · FastAPI · SQLAlchemy 2.0 (async) · httpx (async HTTP client) |
 | Database | SQLite (default, zero-config) / PostgreSQL (optional) |
-| AI Provider | Agnes AI API (OpenAI-compatible) |
+| AI Provider | AIBridge SDK (38+ providers: Agnes, OpenAI, Anthropic, Claude, Gemini, Qwen, DeepSeek...) |
 
 ## FAQ
 

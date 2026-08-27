@@ -5,7 +5,7 @@
 #   2. 为每个 Provider 按 provider_type 路由到对应的 client 实现：
 #      - "agnes" → AgnesAIClient（保留业务适配层：8n+1 / 8 倍数 / mode 归一化等 Agnes-specific 经验）
 #      - 其他 provider_type（volcengine_cv / kling / runway / pika 等）→ AGNSDKClientWrapper
-#        （封装 agn-sdk Client，统一协议层接入，无业务字段适配）
+#        （封装 aibridge Client，统一协议层接入，无业务字段适配）
 #   3. 从数据库加载 Provider 配置和模型定义，支持运行时增删改
 #   4. 调用 Provider 的 /models API 自动同步模型列表（保留用户自定义模型）
 #   5. 启动时配置全局 agnes_client 单例指向默认 Provider（兼容现有代码）
@@ -36,9 +36,9 @@ from app.services.agn_sdk_client import AGNSDKClientWrapper
 
 logger = logging.getLogger("agnes_platform")
 
-# ---------- agn-sdk Adapter 类型与 client 实现的映射 ----------
+# ---------- aibridge Adapter 类型与 client 实现的映射 ----------
 # "agnes" 走现有 AgnesAIClient（业务适配层 + 协议层一体）
-# 其他 provider_type 走 AGNSDKClientWrapper（agn-sdk 统一协议层）
+# 其他 provider_type 走 AGNSDKClientWrapper（aibridge 统一协议层）
 _PROVIDER_TYPE_AGNES = "agnes"
 
 # ---------- 模型类型推断规则（与原 model_registry 保持一致） ----------
@@ -136,7 +136,7 @@ class ProviderRegistry:
     def __init__(self):
         # {provider_id: AgnesAIClient | AGNSDKClientWrapper} - 每个 Provider 一个独立 client
         # provider_type="agnes" 用 AgnesAIClient（保留业务适配层）
-        # 其他 provider_type 用 AGNSDKClientWrapper（agn-sdk 统一协议层）
+        # 其他 provider_type 用 AGNSDKClientWrapper（aibridge 统一协议层）
         self._clients: Dict[int, Union[AgnesAIClient, AGNSDKClientWrapper]] = {}
         # 默认 Provider 的 ID（用于 agnes_client 单例兼容）
         self._default_provider_id: Optional[int] = None
@@ -250,7 +250,7 @@ class ProviderRegistry:
 
         按 provider_type 路由：
         - "agnes" → AgnesAIClient（保留业务适配层：8n+1 / 8 倍数 / mode 归一化等 Agnes-specific 经验）
-        - 其他 provider_type → AGNSDKClientWrapper（封装 agn-sdk Client，统一协议层接入）
+        - 其他 provider_type → AGNSDKClientWrapper（封装 aibridge Client，统一协议层接入）
         """
         decrypted_key = decrypt_api_key(provider.api_key_encrypted or "")
         provider_type = (provider.provider_type or _PROVIDER_TYPE_AGNES).strip().lower()
@@ -263,12 +263,11 @@ class ProviderRegistry:
                 poll_url=provider.poll_url or "",
             )
         else:
-            # 其他 provider_type 走 agn-sdk 统一协议层
+            # 其他 provider_type 走 aibridge 统一协议层
             client = AGNSDKClientWrapper(
                 provider_type=provider_type,
                 base_url=provider.base_url,
                 api_key=decrypted_key,
-                poll_url=provider.poll_url or "",
             )
         await client.start()
         self._clients[provider.id] = client

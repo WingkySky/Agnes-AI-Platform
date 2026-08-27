@@ -2350,7 +2350,7 @@ const enUS = {
     formNamePlaceholder: 'e.g. Agnes AI (Default)',
     formProviderType: 'Adapter Type',
     formProviderTypePlaceholder: 'Select or input adapter type',
-    formProviderTypeHint: 'Determines which agn-sdk adapter is used; "agnes" uses the business adaptation layer, others use the unified protocol layer',
+    formProviderTypeHint: 'Determines which aibridge adapter is used; "agnes" uses the business adaptation layer, others use the unified protocol layer',
     formBaseUrl: 'API Base URL',
     formBaseUrlPlaceholder: 'e.g. https://apihub.agnes-ai.com/v1',
     formApiKey: 'API Key',

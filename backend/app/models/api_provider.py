@@ -18,8 +18,8 @@ class ApiProvider(Base):
     字段说明:
     - id: 主键
     - name: 显示名称（如 "Agnes 官方" / "自建代理"）
-    - provider_type: agn-sdk 的 adapter 标识（如 agnes / volcengine_cv / kling 等），
-                    决定 provider_registry 用哪个 agn-sdk Adapter 路由请求。
+    - provider_type: aibridge 的 adapter 标识（如 agnes / volcengine_cv / kling 等），
+                    决定 provider_registry 用哪个 aibridge Adapter 路由请求。
                     默认 "agnes"，兼容历史 Provider 数据。
     - base_url: API Base URL（如 https://apihub.agnes-ai.com/v1）
     - api_key_encrypted: 加密后的 API Key（Fernet）
@@ -39,7 +39,7 @@ class ApiProvider(Base):
         nullable=False,
         default="agnes",
         server_default="agnes",
-        comment="agn-sdk adapter 标识：agnes / volcengine_cv / kling / runway / pika 等",
+        comment="aibridge adapter 标识：agnes / volcengine_cv / kling / runway / pika 等",
     )
     base_url = Column(String(500), nullable=False, comment="API Base URL")
     api_key_encrypted = Column(Text, nullable=True, comment="加密后的 API Key")

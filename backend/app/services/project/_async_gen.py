@@ -312,7 +312,7 @@ async def submit_video_task(
 
     路由：按 model 路由到对应 Provider 的 client
       - agnes provider_type → AgnesAIClient（业务适配层：8n+1 / 8 倍数 / mode 归一化等）
-      - 其他 provider_type（volcengine_cv / kling 等）→ AGNSDKClientWrapper（agn-sdk 统一协议层）
+      - 其他 provider_type（volcengine_cv / kling 等）→ AGNSDKClientWrapper（aibridge 统一协议层）
     与 video_poller._poll_loop 轮询路径保持一致，避免创建走默认 client、轮询走路由 client 的不一致。
 
     注意：image_url 为本地路径（/uploads/...）时，自动转为纯 base64 字符串，

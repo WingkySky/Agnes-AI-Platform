@@ -332,7 +332,7 @@ function handleModelProviderChange(tab: { name: string }) {
   selectedModelProvider.value = tab.name
 }
 
-// ---------- Provider Type 选项（对齐 agn-sdk 已注册的 adapter） ----------
+// ---------- Provider Type 选项（对齐 aibridge 已注册的 adapter） ----------
 // 仅展示常见的视频/图像/对话类 Provider，其他可通过 allow-create 自由输入
 const PROVIDER_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: 'agnes', label: 'Agnes AI（默认）' },

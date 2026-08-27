@@ -2343,7 +2343,7 @@ const zhCN = {
     formNamePlaceholder: '如：Agnes AI（默认）',
     formProviderType: 'Adapter 类型',
     formProviderTypePlaceholder: '选择或输入 adapter 类型',
-    formProviderTypeHint: '决定走哪个 agn-sdk 适配器；agnes 走业务适配层，其他走统一协议层',
+    formProviderTypeHint: '决定走哪个 aibridge 适配器；agnes 走业务适配层，其他走统一协议层',
     formBaseUrl: 'API 基础地址',
     formBaseUrlPlaceholder: '如：https://apihub.agnes-ai.com/v1',
     formApiKey: 'API Key',
