@@ -9,36 +9,35 @@ cd "$SCRIPT_DIR"
 
 echo ""
 echo "============================================"
-echo "   Agnes AI Platform - 启动中"
+echo "   Agnes AI Platform - Starting"
 echo "============================================"
 
 # ── 检查依赖 ──────────────────────────────────────
 
 command -v python3 >/dev/null 2>&1 || {
-    echo "错误: 需要 Python 3，请先安装"
+    echo "Error: Python 3 required, please install"
     exit 1
 }
 
 PYTHON_CMD="python3"
-# 如果有 python 命令（非 python3）也用上
 command -v python >/dev/null 2>&1 && PYTHON_CMD="python"
 
 PY_VER=$($PYTHON_CMD -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
 if [ "$(echo "$PY_VER < 3.10" | bc)" = "1" ]; then
-    echo "错误: Python $PY_VER 不满足要求（需要 3.10+）"
+    echo "Error: Python $PY_VER not supported (need 3.10+)"
     exit 1
 fi
-echo "  Python $PY_VER ✓"
+echo "  Python $PY_VER OK"
 
 command -v node >/dev/null 2>&1 || {
-    echo "警告: 未检测到 Node.js，前端将无法启动"
+    echo "Warning: Node.js not found, frontend will not start"
 }
-command -v npm >/dev/null 2>&1 && echo "  npm ✓"
+command -v npm >/dev/null 2>&1 && echo "  npm OK"
 
 # ── 启动后端 ──────────────────────────────────────
 
 echo ""
-echo "启动后端..."
+echo "Starting backend..."
 BACKEND_DIR="$SCRIPT_DIR/backend"
 cd "$BACKEND_DIR"
 
@@ -46,105 +45,126 @@ cd "$BACKEND_DIR"
 if [ ! -f ".env" ]; then
     if [ -f ".env.example" ]; then
         cp .env.example .env
-        echo "  [提示] 已从 .env.example 创建 .env，请编辑填入 AGNES_API_KEY"
+        echo "  [Note] Created .env from .env.example, please set AGNES_API_KEY"
     fi
 fi
 
 # 优先使用虚拟环境
 if [ -d ".venv" ]; then
-    source .venv/bin/activate
-    PY="$SCRIPT_DIR/backend/.venv/bin/python"
+    PY=".venv/bin/python"
+    echo "  Using virtual environment: .venv"
 else
     PY="$PYTHON_CMD"
 fi
 
 # 检查后端依赖
 $PY -c "import fastapi" 2>/dev/null || {
-    echo "  安装后端依赖..."
+    echo "  Installing backend dependencies..."
     $PY -m pip install -r requirements.txt -q
 }
 
-# 初始化数据库（幂等：表/管理员已存在则跳过）
+# 初始化数据库（幂等）
 echo ""
-echo "  初始化数据库（创建表 + 默认超级管理员）..."
+echo "  Initializing database..."
 $PY init_db.py
 
 # 查找空闲端口
 PORT=8000
-while nc -z 127.0.0.1 $PORT >/dev/null 2>&1; do
-    PORT=$((PORT + 1))
-done
+if nc -z 127.0.0.1 $PORT >/dev/null 2>&1; then
+    echo "  [Warning] Port $PORT is in use, trying next available port..."
+    while nc -z 127.0.0.1 $PORT >/dev/null 2>&1; do
+        PORT=$((PORT + 1))
+    done
+fi
 
 echo ""
-echo "  后端启动中 (端口 $PORT)..."
-echo "  API 文档: http://localhost:$PORT/docs"
-echo "  健康检查: http://localhost:$PORT/health"
+echo "  Backend starting on port $PORT..."
+echo "  API Docs: http://localhost:$PORT/docs"
+echo "  Health:   http://localhost:$PORT/health"
 echo ""
 
-# 后台启动后端（--reload-delay 3 防止热重载检测到启动时的临时文件导致快速重启循环）
+# 后台启动后端
 $PY -m uvicorn app.main:app --host 0.0.0.0 --port $PORT --reload --reload-delay 3 &
 BACKEND_PID=$!
 
-# 等待后端启动
-sleep 3
+# 等待后端启动并验证
+echo "  Waiting for backend to start..."
+for i in $(seq 1 10); do
+    if curl -s "http://localhost:$PORT/health" >/dev/null 2>&1; then
+        echo "  Backend started successfully"
+        break
+    fi
+    sleep 1
+done
 
 # ── 启动前端 ──────────────────────────────────────
 
 if command -v npm >/dev/null 2>&1; then
     echo ""
-    echo "启动前端..."
+    echo "Starting frontend..."
     FRONTEND_DIR="$SCRIPT_DIR/frontend"
     cd "$FRONTEND_DIR"
 
     # 检查 node_modules
     if [ ! -d "node_modules" ]; then
-        echo "  安装前端依赖（首次较慢）..."
+        echo "  Installing frontend dependencies (first time, this may take a while)..."
         npm install
     fi
 
     # 查找空闲端口
-    FE_PORT=5173
-    while nc -z 127.0.0.1 $FE_PORT >/dev/null 2>&1; do
-        FE_PORT=$((FE_PORT + 1))
-    done
+    FE_PORT=5174
+    if nc -z 127.0.0.1 $FE_PORT >/dev/null 2>&1; then
+        echo "  [Warning] Port $FE_PORT is in use, trying next available port..."
+        while nc -z 127.0.0.1 $FE_PORT >/dev/null 2>&1; do
+            FE_PORT=$((FE_PORT + 1))
+        done
+    fi
 
     echo ""
-    echo "  前端启动中 (端口 $FE_PORT)..."
-    echo "  访问地址: http://localhost:$FE_PORT"
+    echo "  Frontend starting on port $FE_PORT..."
+    echo "  Access: http://localhost:$FE_PORT"
     echo ""
 
-    npm run dev -- --port $FE_PORT &
+    npm run dev -- --port $FE_PORT > /tmp/agnes-frontend.log 2>&1 &
     FE_PID=$!
+
+    # 等待前端启动
+    sleep 3
+    if curl -s "http://localhost:$FE_PORT" | grep -q "<title>" 2>/dev/null; then
+        echo "  Frontend started successfully"
+    else
+        echo "  Frontend may still be starting..."
+    fi
 else
     echo ""
-    echo "  [跳过] 未检测到 npm，前端未启动"
-    echo "  请手动运行: cd frontend && npm install && npm run dev"
+    echo "  [Skipped] npm not found, frontend not started"
+    echo "  Run manually: cd frontend && npm install && npm run dev"
 fi
 
 # ── 清理函数 ──────────────────────────────────────
 
 cleanup() {
     echo ""
-    echo "正在停止服务..."
+    echo "Stopping services..."
     [ -n "$BACKEND_PID" ] && kill $BACKEND_PID 2>/dev/null
     [ -n "$FE_PID" ] && kill $FE_PID 2>/dev/null
-    echo "已停止"
+    echo "Stopped"
     exit 0
 }
 trap cleanup SIGINT SIGTERM
 
 echo ""
 echo "============================================"
-echo "   所有服务已启动"
+echo "   All services started"
 echo "============================================"
 echo ""
 if command -v npm >/dev/null 2>&1; then
-    echo "  前端: http://localhost:$FE_PORT"
+    echo "  Frontend: http://localhost:$FE_PORT"
 fi
-echo "  后端: http://localhost:$PORT"
-echo "  API:  http://localhost:$PORT/docs"
+echo "  Backend:  http://localhost:$PORT"
+echo "  API Docs: http://localhost:$PORT/docs"
 echo ""
-echo "  按 Ctrl+C 停止所有服务"
+echo "  Press Ctrl+C to stop all services"
 echo "============================================"
 
 # 等待子进程

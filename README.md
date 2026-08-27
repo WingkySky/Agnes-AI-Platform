@@ -124,11 +124,11 @@ cd frontend
 # Install dependencies
 npm install
 
-# Start dev server (port 5173, auto-proxies /api → backend:8000)
+# Start dev server (port 5174, auto-proxies /api → backend:8000)
 npm run dev
 ```
 
-Visit http://localhost:5173 — you're ready to go.
+Visit http://localhost:5174 — you're ready to go.
 
 ### 3. First-Time Setup
 

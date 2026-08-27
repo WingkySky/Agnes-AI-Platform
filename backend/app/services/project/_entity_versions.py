@@ -8,7 +8,7 @@
 # 通过传入 entity_type 复用本模块的函数。
 # =====================================================
 
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -109,8 +109,8 @@ async def get_active_version(
 
 
 async def attach_active_image(
-    db: AsyncSession, entity_type: str, entity
-) -> entity:
+    db: AsyncSession, entity_type: str, entity: Any
+) -> Any:
     """
     给实体对象注入 active_image 属性（用于响应序列化）
 

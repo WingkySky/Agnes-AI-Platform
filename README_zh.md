@@ -124,11 +124,11 @@ cd frontend
 # 安装依赖
 npm install
 
-# 启动开发服务器（端口 5173，自动代理 /api → 后端:8000）
+# 启动开发服务器（端口 5174，自动代理 /api → 后端:8000）
 npm run dev
 ```
 
-访问 http://localhost:5173 即可使用。
+访问 http://localhost:5174 即可使用。
 
 ### 3. 首次配置
 
@@ -144,7 +144,7 @@ npm run dev
 | 前端 | Vue 3（Composition API）+ Vite + TypeScript + Vue Router + Pinia + Element Plus |
 | 后端 | Python 3.10+ · FastAPI · SQLAlchemy 2.0（异步）· httpx（异步 HTTP 客户端） |
 | 数据库 | SQLite（默认，零配置）/ PostgreSQL（可选） |
-| AI 服务 | Agnes AI API（兼容 OpenAI 格式） |
+| AI 服务 | AIBridge SDK（38+ 提供商：Agnes、OpenAI、Anthropic、Claude、Gemini、Qwen、DeepSeek...） |
 
 ## 常见问题
 
