@@ -26,6 +26,10 @@ import { analyzeFlow, analyzeExecutionOrder } from '@/lib/canvas-flow-analyzer'
  *   - text/image/video/audio/config 保持现有行为（不限制）
  */
 function validateConnectionTypes(sourceType: string, targetType: string): string | null {
+  // script（脚本节点）只允许出边到 config（批量派生生成配置）
+  if (sourceType === 'script' && targetType !== 'config') {
+    return '脚本节点只能连接到生成配置节点'
+  }
   const ALLOWED_INPUTS: Record<string, string[]> = {
     tts: ['text'],
     subtitle: ['text'],
@@ -36,7 +40,7 @@ function validateConnectionTypes(sourceType: string, targetType: string): string
 
   if (!allowed.includes(sourceType)) {
     const targetLabel = { tts: '配音', subtitle: '字幕', compose: '成片合成' }[targetType] || targetType
-    const sourceLabel = { text: '文本', image: '图片', video: '视频', audio: '音频', config: '配置', tts: '配音', subtitle: '字幕', compose: '合成' }[sourceType] || sourceType
+    const sourceLabel = { text: '文本', image: '图片', video: '视频', audio: '音频', config: '配置', tts: '配音', subtitle: '字幕', compose: '合成', script: '脚本' }[sourceType] || sourceType
     return `${targetLabel}节点不接受 ${sourceLabel} 类型输入`
   }
   return null
@@ -261,6 +265,10 @@ interface CanvasState {
   // 当值等于某 panel.id 时，对应 CanvasNode 自动进入文本编辑态
   editingPanelId: string | null
 
+  // ---------- 分镜向导（外部触发脚本节点打开向导） ----------
+  // 当值等于某 script panel.id 时，对应 ScriptNodeContent 自动打开分镜向导，消费后置空
+  openScriptWizardId: string | null
+
   // ---------- 背景 ----------
   backgroundMode: 'dots' | 'lines' | 'blank'
 
@@ -339,6 +347,10 @@ export const useCanvasStore = defineStore('canvas', {
     // ---------- 文本编辑（外部触发节点进入编辑模式） ----------
     // 当值等于某 panel.id 时，对应 CanvasNode 自动进入文本编辑态
     editingPanelId: null,
+
+    // ---------- 分镜向导（外部触发脚本节点打开向导） ----------
+    // 当值等于某 script panel.id 时，对应 ScriptNodeContent 自动打开分镜向导，消费后置空
+    openScriptWizardId: null,
 
     // ---------- 背景 ----------
     backgroundMode: 'dots',

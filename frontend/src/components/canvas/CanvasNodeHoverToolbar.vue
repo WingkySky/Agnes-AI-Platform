@@ -57,6 +57,7 @@ import {
   ZoomIn, Sparkles, Camera, Maximize2,
 } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
+import { getShotLineageInfo } from '@/lib/canvas-storyboard'
 
 const { t } = useI18n()
 
@@ -73,6 +74,7 @@ const emit = defineEmits([
   'upload-image', 'upload-video', 'upload-audio',
   'copy-prompt', 'describe', 'replace-image', 'toggle-ratio',
   'mask-edit', 'crop', 'split', 'upscale', 'super-resolution', 'angle', 'view-large',
+  'derive-video', 'reshoot',
 ])
 
 /* ---------- 节点元数据计算 ---------- */
@@ -140,6 +142,25 @@ const tools = computed(() => {
       title: t('canvas.hoverToolbar.regenerate'),
       icon: RefreshCw,
       onClick: () => emit('retry', props.panel),
+    })
+  }
+
+  // 2.5 分镜派生结果节点（LibTV P0）：图生视频 / 重拍此镜头
+  const lineageInfo = getShotLineageInfo(props.panel)
+  if (lineageInfo && hasContent.value) {
+    if (lineageInfo.lineage.kind === 'image' && isImage.value) {
+      list.push({
+        id: 'derive-video',
+        title: t('canvas.hoverToolbar.deriveVideo'),
+        icon: Video,
+        onClick: () => emit('derive-video', props.panel),
+      })
+    }
+    list.push({
+      id: 'reshoot',
+      title: t('canvas.hoverToolbar.reshoot'),
+      icon: RefreshCw,
+      onClick: () => emit('reshoot', props.panel),
     })
   }
 

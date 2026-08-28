@@ -129,7 +129,6 @@
           @view-image="handleViewImage"
           @edit-text="(text) => handleNodeEditText(panel.id, text)"
           @generate-image="handleNodeGenerateImage"
-          @generate="handleConfigGenerate"
           @retry="handleNodeRetry"
           @upload="(p) => handleNodeUpload(p)"
         />
@@ -140,6 +139,15 @@
         v-if="selectionBox.active"
         class="selection-box"
         :style="selectionBoxStyle"
+      />
+
+      <!-- 节点悬浮 AI 对话框（LibTV 复刻）：单选 script/text/config 节点时显示在节点正下方 -->
+      <CanvasNodeComposer
+        v-if="composerPanelId"
+        :key="composerPanelId"
+        :panel-id="composerPanelId"
+        :style="composerStyle"
+        @generate="generateComposerConfig"
       />
 
       <!-- ============ 底部浮动工具栏 ============ -->
@@ -229,6 +237,8 @@
           @super-resolution="handleHoverSuperResolution"
           @angle="handleHoverAngle"
           @view-large="handleHoverViewLarge"
+          @derive-video="handleHoverDeriveVideo"
+          @reshoot="handleHoverReshoot"
         />
       </div>
 
@@ -391,29 +401,7 @@
   </div>
 </template>
 
-/** 图片任务状态响应（扩展字段，覆盖层可能在 status 外返回 image_url/error/data） */
-interface ImageTaskPollStatus {
-  status: string
-  task_id?: string
-  progress?: number
-  result_url?: string | null
-  url?: string | null
-  message?: string | null
-  image_url?: string | null
-  data?: { url?: string }[]
-  error?: string
-}
-
-/** 视频任务状态响应（扩展字段） */
-interface VideoTaskPollStatus {
-  status: string
-  progress?: number
-  message?: string
-  video_url?: string
-  error?: string
-}
-
-// ========== 任务状态响应（扩展字段） ==========<script setup lang="ts">
+<script setup lang="ts">
 /* =====================================================
  * CanvasView 无限画布主视图
  * - 整合 9 个子组件：InfiniteCanvas / CanvasConnectionsLayer /
@@ -433,6 +421,7 @@ import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useModelsStore } from '@/stores/models'
 import { usePreferencesStore } from '@/stores/preferences'
 import InfiniteCanvas from '@/components/canvas/InfiniteCanvas.vue'
+import CanvasNodeComposer from '@/components/canvas/CanvasNodeComposer.vue'
 import CanvasConnectionsLayer from '@/components/canvas/CanvasConnectionsLayer.vue'
 import CanvasNode from '@/components/canvas/CanvasNode.vue'
 import CanvasToolbar from '@/components/canvas/CanvasToolbar.vue'
@@ -463,8 +452,39 @@ import {
   createWorkspaceFromTemplate,
 } from '@/lib/canvas-templates'
 // 画布生成：上游节点查找（用于配置节点 prompt 为空时检查上游文本）
-import { getUpstreamNodes } from '@/lib/canvas-generation'
+import { getUpstreamNodes, type CanvasGenerationStore } from '@/lib/canvas-generation'
+// 分镜派生：单镜头图生视频（LibTV P0）
+import { deriveVideoForShot } from '@/lib/canvas-storyboard'
 import { getErrorMessage } from '@/lib/type-helpers'
+import type { ImageGenerationRequest } from '@/types'
+
+// ---------- 任务状态轮询响应（扩展字段） ----------
+/** 图片任务状态轮询响应（覆盖层可能在 status 外返回 image_url/error/data） */
+interface ImageTaskPollStatus {
+  status: string
+  task_id?: string
+  progress?: number
+  result_url?: string | null
+  url?: string | null
+  message?: string | null
+  image_url?: string | null
+  data?: { url?: string }[]
+  error?: string
+}
+
+/** 视频任务状态轮询响应（扩展字段） */
+interface VideoTaskPollStatus {
+  status: string
+  progress?: number
+  message?: string | null
+  video_url?: string | null
+  error?: string | null
+}
+
+/** 从画布节点 content（Record<string, unknown>）中安全读取字符串字段 */
+function contentString(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
 
 const { t } = useI18n()
 const { downloadViaProxy, downloadWatermarkedImage } = useDownload()
@@ -483,6 +503,8 @@ const NODE_DEFAULT_SIZES = {
   tts: { width: 340, height: 180 },
   subtitle: { width: 340, height: 180 },
   compose: { width: 360, height: 240 },
+  // 脚本节点（LibTV 复刻）：紧凑卡片 + 全屏分镜向导入口
+  script: { width: 340, height: 300 },
 }
 
 // ---------- 节点类型名称（国际化） ----------
@@ -492,6 +514,7 @@ function getNodeName(type: string): string {
     tts: '配音',
     subtitle: '字幕',
     compose: '成片合成',
+    script: '脚本',
   }
   const i18nKey = `canvas.nodeNames.${type}`
   const translated = t(i18nKey)
@@ -962,6 +985,35 @@ function handleNodeEditText(panelId: string, text: string) {
   store.updatePanel(panelId, { content: { content: text } })
 }
 
+// ==================== 节点悬浮 AI 对话框（LibTV 复刻） ====================
+
+/** 对话框目标节点：单选且类型支持（script/text/config/image/video）时显示 */
+const composerPanelId = computed(() => {
+  if (store.selectedPanelIds.length !== 1) return null
+  const p = store.panels.find((x) => x.id === store.selectedPanelIds[0])
+  if (!p || !['script', 'text', 'config', 'image', 'video'].includes(p.type || '')) return null
+  return p.id
+})
+
+/** 对话框定位：节点正下方，跟随视口变换（screen = world * zoom + viewport.x/y） */
+const composerStyle = computed(() => {
+  const p = store.panels.find((x) => x.id === composerPanelId.value)
+  if (!p) return { display: 'none' }
+  const { x: vx, y: vy, zoom } = store.viewport
+  const width = Math.min(520, Math.max(300, p.width * zoom))
+  return {
+    left: `${p.x * zoom + vx}px`,
+    top: `${(p.y + p.height) * zoom + vy + 12}px`,
+    width: `${width}px`,
+  }
+})
+
+/** 对话框生成（config 节点）：prompt/参数已写回 content，走现有配置节点生成流程 */
+function generateComposerConfig() {
+  const p = store.panels.find((x) => x.id === composerPanelId.value)
+  if (p) void handleConfigGenerate(p)
+}
+
 // 从文本节点生图：读取文本内容作为 prompt，在源节点旁创建 image 节点并连线
 async function handleNodeGenerateImage(panel: typeof store.panels[number]) {
   const prompt = (panel.content?.content || panel.content?.prompt || '') as string
@@ -985,7 +1037,7 @@ const quickGenerateState = reactive({
 function handleQuickGenerate({ panel, mode }: { panel: typeof store.panels[number]; mode: string }) {
   // 校验源内容非空
   if (panel.type === 'text') {
-    const text = (panel.content?.content || '').trim()
+    const text = contentString(panel.content?.content).trim()
     if (!text) {
       ElMessage.warning(t('canvas.messages.textNodeEmpty'))
       return
@@ -1014,11 +1066,11 @@ async function handleQuickGenerateConfirm(payload: any) {
 
   if (mode.startsWith('text')) {
     // 文本源：主提示词 = 文本内容 + 辅助提示词（可选）
-    const textContent = (sourcePanel.content?.content || '').trim()
+    const textContent = contentString(sourcePanel.content?.content).trim()
     finalPrompt = auxPrompt.trim() ? `${textContent}\n\n${auxPrompt.trim()}` : textContent
   } else {
     // 图片源：参考图 = 图片内容，prompt = 辅助提示词
-    referenceImages = [sourcePanel.content?.content || '']
+    referenceImages = [contentString(sourcePanel.content?.content)]
     finalPrompt = auxPrompt.trim()
   }
 
@@ -1094,12 +1146,12 @@ async function generateImageFromPrompt(sourcePanel: typeof store.panels[number],
     const maxAttempts = 150
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise((r) => setTimeout(r, 2000))
-      const status = await getImageTaskStatus(taskId)
+      const status: ImageTaskPollStatus = await getImageTaskStatus(taskId)
       const isSuccess = ['completed', 'succeeded', 'success', 'done'].includes(status.status)
       const isFailed = ['failed', 'error'].includes(status.status)
 
       if (isSuccess) {
-        const imageUrl = (status as ImageTaskPollStatus).result_url || (status as ImageTaskPollStatus).image_url || status.url || (status as ImageTaskPollStatus).data?.[0]?.url
+        const imageUrl = status.result_url || status.image_url || status.url || status.data?.[0]?.url
         store.updatePanel(newPanelId!, { content: { content: imageUrl, status: 'success' } })
         store.pushSnapshot()
         taskQueue.updateCanvasTask(taskId, { status: 'success', resultUrl: imageUrl, progress: 100 })
@@ -1107,12 +1159,14 @@ async function generateImageFromPrompt(sourcePanel: typeof store.panels[number],
         showCostConsumedMessage({ type: 'image', mode: 'text2image', size }, t('canvas.messages.imageGenerationDone'))
         // 【用户偏好】自动下载 + 完成通知
         const prefsStore = usePreferencesStore()
-        prefsStore.autoDownload(imageUrl, 'image', { modelId: useModelsStore().defaultImageModel })
+        if (imageUrl) {
+          prefsStore.autoDownload(imageUrl, 'image', { modelId: useModelsStore().defaultImageModel })
+        }
         prefsStore.notifyComplete('image', { prompt, modelId: useModelsStore().defaultImageModel })
         return
       }
       if (isFailed) {
-        const errMsg = (status as ImageTaskPollStatus).message || (status as ImageTaskPollStatus).error || t('canvas.messages.generateFailed')
+        const errMsg = status.message || status.error || t('canvas.messages.generateFailed')
         store.updatePanel(newPanelId!, { content: { status: 'error', errorDetails: errMsg } })
         taskQueue.updateCanvasTask(taskId, { status: 'failed' })
         ElMessage.error(`${t('canvas.messages.imageGenerationFailed')}: ${errMsg}`)
@@ -1206,24 +1260,26 @@ async function generateImageFromSource(
     const maxAttempts = 150
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise((r) => setTimeout(r, 2000))
-      const status = await getImageTaskStatus(taskId)
+      const status: ImageTaskPollStatus = await getImageTaskStatus(taskId)
       const isSuccess = ['completed', 'succeeded', 'success', 'done'].includes(status.status)
       const isFailed = ['failed', 'error'].includes(status.status)
 
       if (isSuccess) {
-        const imageUrl = (status as ImageTaskPollStatus).result_url || (status as ImageTaskPollStatus).image_url || status.url || (status as ImageTaskPollStatus).data?.[0]?.url
+        const imageUrl = status.result_url || status.image_url || status.url || status.data?.[0]?.url
         store.updatePanel(newPanelId, { content: { content: imageUrl, status: 'success' } })
         store.pushSnapshot()
         taskQueue.updateCanvasTask(taskId, { status: 'success', resultUrl: imageUrl, progress: 100 })
         showCostConsumedMessage({ type: 'image', mode, size }, t('canvas.messages.imageGenerationDone'))
         // 【用户偏好】自动下载 + 完成通知
         const prefsStore = usePreferencesStore()
-        prefsStore.autoDownload(imageUrl, 'image', { modelId: model || useModelsStore().defaultImageModel })
+        if (imageUrl) {
+          prefsStore.autoDownload(imageUrl, 'image', { modelId: model || useModelsStore().defaultImageModel })
+        }
         prefsStore.notifyComplete('image', { prompt, modelId: model || useModelsStore().defaultImageModel })
         return
       }
       if (isFailed) {
-        const errMsg = (status as ImageTaskPollStatus).message || (status as ImageTaskPollStatus).error || t('canvas.messages.generateFailed')
+        const errMsg = status.message || status.error || t('canvas.messages.generateFailed')
         store.updatePanel(newPanelId, { content: { status: 'error', errorDetails: errMsg } })
         taskQueue.updateCanvasTask(taskId, { status: 'failed' })
         ElMessage.error(`${t('canvas.messages.imageGenerationFailed')}: ${errMsg}`)
@@ -1309,7 +1365,7 @@ async function generateVideoFromSource(
     const maxAttempts = 100
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise((r) => setTimeout(r, 3000))
-      const status = await getVideoStatus(taskId)
+      const status: VideoTaskPollStatus = await getVideoStatus(taskId)
       const isSuccess = ['completed', 'succeeded', 'success', 'done'].includes(status.status)
       const isFailed = ['failed', 'error'].includes(status.status)
 
@@ -1328,7 +1384,7 @@ async function generateVideoFromSource(
         return
       }
       if (isFailed) {
-        const errMsg = (status as ImageTaskPollStatus).message || (status as ImageTaskPollStatus).error || t('canvas.messages.generateFailed')
+        const errMsg = status.message || status.error || t('canvas.messages.generateFailed')
         store.updatePanel(newPanelId, { content: { status: 'error', errorDetails: errMsg } })
         taskQueue.updateCanvasTask(taskId, { status: 'failed' })
         ElMessage.error(`${t('canvas.messages.videoGenerationFailed')}: ${errMsg}`)
@@ -1380,7 +1436,7 @@ async function retryGeneration(panel: typeof store.panels[number]) {
       store.updatePanel(panel.id, { content: { status: 'loading', errorDetails: null } })
       ElMessage.info(t('canvas.messages.regenerate'))
       // 异步执行，不阻塞
-      fn(configNode.id, store as CanvasGenerationStore, {
+      fn(configNode.id, store, {
         onProgress: (stage, data) => {
           if (stage === 'done') {
             // 成功提示附带消耗积分数量
@@ -1458,7 +1514,7 @@ async function handleConfigGenerate(panel: typeof store.panels[number]) {
     const fn = isVideo ? executeMergeVideoGeneration : executeMergeGeneration
 
     // 异步执行：立刻创建 loading 结果节点，后台轮询
-    const newNodeId = await fn(panel.id, store as CanvasGenerationStore, {
+    const newNodeId = await fn(panel.id, store, {
       onProgress: (stage, data) => {
         if (stage === 'done') {
           // 成功提示附带消耗积分数量
@@ -1651,7 +1707,7 @@ async function handleHoverSaveAsset() {
   const panel = hoveredPanel.value
   if (!panel) return
 
-  const content = panel.content || {} as Record<string, unknown>
+  const content: Record<string, unknown> = panel.content || {}
   const url = (content.content || content.url) as string
   if (!url) {
     ElMessage.warning(t('canvas.messages.noSaveContent'))
@@ -1878,7 +1934,7 @@ async function handleHoverDescribe() {
 
     // 创建临时会话
     const session = await createChatSession({ title: '图片反推' })
-    const sessionId = (session as { id?: number; session_id?: number }).id || (session as { id?: number; session_id?: number }).session_id
+    const sessionId = session.id
 
     // 反推指令：让 AI 描述图片并输出适合 AI 绘画的英文提示词
     // 措辞要点：明确这是"看图描述"任务，不是"生成图片"任务，避免 AI 误触发生图工具
@@ -2039,7 +2095,7 @@ async function handleMaskConfirm(
       response_format: 'url',
       base64_images: [base64Image],
       mask,
-    } as ImageGenerationRequest)
+    })
 
     const taskId = resp.task_id
 
@@ -2055,12 +2111,12 @@ async function handleMaskConfirm(
     // 轮询任务状态
     for (let i = 0; i < 150; i++) {
       await new Promise(r => setTimeout(r, 2000))
-      const status = await getImageTaskStatus(taskId)
+      const status: ImageTaskPollStatus = await getImageTaskStatus(taskId)
       const isSuccess = ['completed', 'succeeded', 'success', 'done'].includes(status.status)
       const isFailed = ['failed', 'error'].includes(status.status)
 
       if (isSuccess) {
-        const resultUrl = (status as ImageTaskPollStatus).result_url || (status as ImageTaskPollStatus).image_url || status.url || (status as ImageTaskPollStatus).data?.[0]?.url
+        const resultUrl = status.result_url || status.image_url || status.url || status.data?.[0]?.url
         store.updatePanel(panelId!, { content: { content: resultUrl, status: 'success' } })
         store.pushSnapshot()
         taskQueue.updateCanvasTask(taskId, { status: 'success', resultUrl, progress: 100 })
@@ -2068,12 +2124,14 @@ async function handleMaskConfirm(
         showCostConsumedMessage({ type: 'image', mode: 'image2image', size: '1024x1024' }, t('canvas.messages.maskEditDone'))
         // 【用户偏好】自动下载 + 完成通知
         const prefsStore = usePreferencesStore()
-        prefsStore.autoDownload(resultUrl, 'image', { modelId: useModelsStore().defaultImageModel })
+        if (resultUrl) {
+          prefsStore.autoDownload(resultUrl, 'image', { modelId: useModelsStore().defaultImageModel })
+        }
         prefsStore.notifyComplete('image', { prompt, modelId: useModelsStore().defaultImageModel })
         return
       }
       if (isFailed) {
-        const errMsg = (status as ImageTaskPollStatus).message || (status as ImageTaskPollStatus).error || t('canvas.messages.maskEditFailed')
+        const errMsg = status.message || status.error || t('canvas.messages.maskEditFailed')
         store.updatePanel(panelId!, { content: { status: 'error', errorDetails: errMsg } })
         taskQueue.updateCanvasTask(taskId, { status: 'failed' })
         ElMessage.error(`${t('canvas.messages.maskEditFailed')}: ${errMsg}`)
@@ -2280,7 +2338,7 @@ async function handleAngleConfirm({ prompt }: { prompt: string }) {
       // 用数组形式传参，与当前后端 schema 对齐；旧字段也保留一份兜底
       base64_images: [base64Image],
       base64_image: base64Image,
-    } as ImageGenerationRequest)
+    })
 
     const taskId = resp.task_id
     taskQueue.registerCanvasTask({
@@ -2294,24 +2352,26 @@ async function handleAngleConfirm({ prompt }: { prompt: string }) {
     // 轮询任务状态
     for (let i = 0; i < 150; i++) {
       await new Promise(r => setTimeout(r, 2000))
-      const status = await getImageTaskStatus(taskId)
+      const status: ImageTaskPollStatus = await getImageTaskStatus(taskId)
       const isSuccess = ['completed', 'succeeded', 'success', 'done'].includes(status.status)
       const isFailed = ['failed', 'error'].includes(status.status)
 
       if (isSuccess) {
-        const resultUrl = (status as ImageTaskPollStatus).result_url || (status as ImageTaskPollStatus).image_url || status.url || (status as ImageTaskPollStatus).data?.[0]?.url
+        const resultUrl = status.result_url || status.image_url || status.url || status.data?.[0]?.url
         store.updatePanel(newId, { content: { content: resultUrl, status: 'success' } })
         store.pushSnapshot()
         taskQueue.updateCanvasTask(taskId, { status: 'success', resultUrl, progress: 100 })
         showCostConsumedMessage({ type: 'image', mode: 'image2image', size: '1024x1024' }, t('canvas.messages.angleDone'))
         // 【用户偏好】自动下载 + 完成通知
         const prefsStore = usePreferencesStore()
-        prefsStore.autoDownload(resultUrl, 'image', { modelId: useModelsStore().defaultImageModel })
+        if (resultUrl) {
+          prefsStore.autoDownload(resultUrl, 'image', { modelId: useModelsStore().defaultImageModel })
+        }
         prefsStore.notifyComplete('image', { prompt, modelId: useModelsStore().defaultImageModel })
         return
       }
       if (isFailed) {
-        const errMsg = (status as ImageTaskPollStatus).message || (status as ImageTaskPollStatus).error || t('canvas.messages.angleFailed')
+        const errMsg = status.message || status.error || t('canvas.messages.angleFailed')
         store.updatePanel(newId, { content: { status: 'error', errorDetails: errMsg } })
         taskQueue.updateCanvasTask(taskId, { status: 'failed' })
         ElMessage.error(`${t('canvas.messages.angleFailed')}: ${errMsg}`)
@@ -2354,6 +2414,26 @@ function createImageChildNode(parentPanel: any, imageContent: string, name: stri
 function handleHoverViewLarge() {
   const p = hoveredPanel.value
   if (p?.content?.content) previewImage.value = p.content.content as string
+}
+
+// 分镜图节点一键派生视频节点（LibTV P0：单镜头图生视频）
+async function handleHoverDeriveVideo() {
+  const panel = hoveredPanel.value
+  if (!panel) return
+  try {
+    await deriveVideoForShot(panel)
+  } catch (err) {
+    ElMessage.error(`${t('canvas.messages.generateFailed')}: ${getErrorMessage(err) || err}`)
+  }
+}
+
+// 重拍此镜头（LibTV P0）：找到来源 config 节点，重新执行生成
+async function handleHoverReshoot() {
+  const panel = hoveredPanel.value
+  const sourceFrom = panel?.content?.sourceFrom
+  if (typeof sourceFrom !== 'string') return
+  const configPanel = store.panels.find(p => p.id === sourceFrom)
+  if (configPanel) await handleConfigGenerate(configPanel)
 }
 
 /**
@@ -2580,6 +2660,13 @@ function createNodeAtCenter(type: string) {
       audio_from_node: null,
       subtitle_from_node: null,
     }
+  } else if (type === 'script') {
+    // 脚本节点（LibTV 复刻）：剧情/镜头/资产/生成全部在向导内编辑
+    initialContent = {
+      story: '',
+      shots: [],
+      assets: { characters: [], scenes: [] },
+    }
   }
   const id = store.addPanel({
     type,
@@ -2785,8 +2872,8 @@ onMounted(async () => {
   window.addEventListener('keyup', handleKeyUp)
   window.addEventListener('click', handleGlobalClick)
   // 监听用户登录/退出，切换画布数据空间
-  window.addEventListener('agnes:user-login', handleUserSwitch as EventListener)
-  window.addEventListener('agnes:user-logout', handleUserLogout as EventListener)
+  window.addEventListener('agnes:user-login', handleUserSwitch)
+  window.addEventListener('agnes:user-logout', handleUserLogout)
 })
 
 onBeforeUnmount(() => {
@@ -2798,15 +2885,16 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointerup', handleSelectionUp)
   window.removeEventListener('pointermove', handleConnectingMove)
   window.removeEventListener('pointerup', handleConnectingUp)
-  window.removeEventListener('agnes:user-login', handleUserSwitch as EventListener)
-  window.removeEventListener('agnes:user-logout', handleUserLogout as EventListener)
+  window.removeEventListener('agnes:user-login', handleUserSwitch)
+  window.removeEventListener('agnes:user-logout', handleUserLogout)
   // 清理 hover 定时器
   cancelHoverHide()
 })
 
 /** 登录/切换用户后，切换到对应的数据空间 */
-async function handleUserSwitch(e: CustomEvent) {
-  const userId: number | null = (e?.detail?.id as number) ?? null
+async function handleUserSwitch(e: Event) {
+  const detail = e instanceof CustomEvent ? e.detail : undefined
+  const userId: number | null = typeof detail?.id === 'number' ? detail.id : null
   await store._switchUserStorage(userId)
   if (!store.activeWorkspaceId && store.workspaces.length === 0) {
     store.createWorkspace(`${t('canvas.canvas')} 1`)

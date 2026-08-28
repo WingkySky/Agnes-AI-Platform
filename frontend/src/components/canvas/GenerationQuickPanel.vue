@@ -75,17 +75,18 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, type PropType } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useI18n } from '@/i18n'
 import { useModelsStore } from '@/stores/models'
+import type { CanvasPanel } from '@/stores/canvas'
 
 const { t } = useI18n()
 const modelsStore = useModelsStore()
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
-  sourcePanel: { type: Object, default: null },
+  sourcePanel: { type: Object as PropType<CanvasPanel | null>, default: null },
   mode: { type: String, default: 'text2image' },
 })
 
@@ -95,7 +96,7 @@ const emit = defineEmits(['update:modelValue', 'generate'])
 const title = computed(() => t(`canvas.node.configMode.${props.mode}`))
 
 // 源内容预览
-const sourceContent = computed(() => props.sourcePanel?.content?.content || '')
+const sourceContent = computed(() => String(props.sourcePanel?.content?.content ?? ''))
 const isTextSource = computed(() => props.mode.startsWith('text'))
 const isImageSource = computed(() => props.mode.startsWith('image'))
 const sourceLabel = computed(() =>

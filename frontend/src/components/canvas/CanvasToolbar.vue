@@ -63,7 +63,7 @@ import { ref, computed } from 'vue'
 import {
   Hand, MousePointer2, Undo2, Redo2, Type, Image, Video, Music2, Settings2, Upload,
   FolderOpen, Palette, Trash2, Eraser, Keyboard, GitBranch,
-  Mic, FileText, Puzzle,
+  Mic, FileText, Puzzle, Clapperboard,
 } from 'lucide-vue-next'
 import CanvasAppearancePanel from './CanvasAppearancePanel.vue'
 import { useI18n } from '@/i18n'
@@ -127,6 +127,8 @@ const buttonGroups = computed<any[][]>(() => [
     { id: 'tool-video', label: t('canvas.toolbar.toolVideo'), icon: Video, emit: 'add-node', payload: 'video' },
     { id: 'tool-audio', label: t('canvas.toolbar.toolAudio'), icon: Music2, emit: 'add-node', payload: 'audio' },
     { id: 'tool-config', label: t('canvas.toolbar.toolConfig'), icon: Settings2, emit: 'add-node', payload: 'config' },
+    // 脚本节点（LibTV P0）：短剧分镜主链路源头
+    { id: 'tool-script', label: t('canvas.toolbar.toolScript'), icon: Clapperboard, emit: 'add-node', payload: 'script' },
     // 新增 3 种节点类型（spec 5.4.3）：配音/字幕/合成
     { id: 'tool-tts', label: t('canvas.toolbar.toolTts') || '配音', icon: Mic, emit: 'add-node', payload: 'tts' },
     { id: 'tool-subtitle', label: t('canvas.toolbar.toolSubtitle') || '字幕', icon: FileText, emit: 'add-node', payload: 'subtitle' },
@@ -187,6 +189,7 @@ const tip = computed(() => {
     'tool-video': t('canvas.toolbar.toolVideo'),
     'tool-audio': t('canvas.toolbar.toolAudio'),
     'tool-config': t('canvas.toolbar.toolConfig'),
+    'tool-script': t('canvas.toolbar.toolScript'),
     'tool-upload': t('canvas.toolbar.toolUpload'),
     'tool-assets': t('canvas.toolbar.toolAssets'),
     'tool-style': t('canvas.toolbar.toolStyle'),

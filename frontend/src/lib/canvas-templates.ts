@@ -90,8 +90,8 @@ function deepClone<T>(obj: T): T {
 const PRESET_TEMPLATES: CanvasTemplate[] = [
   {
     id: 'preset-text2image',
-    name: 'canvas.templates.presetItems.text2image.name',
-    description: 'canvas.templates.presetItems.text2image.desc',
+    name: 'canvas.presetItems.text2image.name',
+    description: 'canvas.presetItems.text2image.desc',
     category: 'preset',
     icon: 'EditPen',
     workspace_data: {
@@ -100,14 +100,14 @@ const PRESET_TEMPLATES: CanvasTemplate[] = [
         {
           id: 'preset-text-1',
           type: 'text',
-          name: 'canvas.templates.nodeNames.prompt',
+          name: 'canvas.nodeNames.prompt',
           x: 100, y: 200, width: 340, height: 240,
           content: { content: '一只可爱的橘猫，坐在窗台上，阳光明媚，写实风格，高清细节', status: 'idle', fontSize: 14 },
         },
         {
           id: 'preset-config-1',
           type: 'config',
-          name: 'canvas.templates.nodeNames.generateConfig',
+          name: 'canvas.nodeNames.generateConfig',
           x: 520, y: 200, width: 340, height: 240,
           content: {
             mode: 'text2image',
@@ -127,8 +127,8 @@ const PRESET_TEMPLATES: CanvasTemplate[] = [
   },
   {
     id: 'preset-image2image',
-    name: 'canvas.templates.presetItems.image2image.name',
-    description: 'canvas.templates.presetItems.image2image.desc',
+    name: 'canvas.presetItems.image2image.name',
+    description: 'canvas.presetItems.image2image.desc',
     category: 'preset',
     icon: 'Picture',
     workspace_data: {
@@ -137,21 +137,21 @@ const PRESET_TEMPLATES: CanvasTemplate[] = [
         {
           id: 'preset-image-1',
           type: 'image',
-          name: 'canvas.templates.nodeNames.referenceImage',
+          name: 'canvas.nodeNames.referenceImage',
           x: 100, y: 200, width: 340, height: 240,
           content: { content: '', status: 'idle', prompt: '' },
         },
         {
           id: 'preset-text-1',
           type: 'text',
-          name: 'canvas.templates.nodeNames.modifyPrompt',
+          name: 'canvas.nodeNames.modifyPrompt',
           x: 100, y: 500, width: 340, height: 180,
           content: { content: '把这张图片转换为水彩画风格，保持构图不变', status: 'idle', fontSize: 14 },
         },
         {
           id: 'preset-config-1',
           type: 'config',
-          name: 'canvas.templates.nodeNames.generateConfig',
+          name: 'canvas.nodeNames.generateConfig',
           x: 520, y: 300, width: 340, height: 240,
           content: {
             mode: 'image2image',
@@ -172,8 +172,8 @@ const PRESET_TEMPLATES: CanvasTemplate[] = [
   },
   {
     id: 'preset-image2video',
-    name: 'canvas.templates.presetItems.image2video.name',
-    description: 'canvas.templates.presetItems.image2video.desc',
+    name: 'canvas.presetItems.image2video.name',
+    description: 'canvas.presetItems.image2video.desc',
     category: 'preset',
     icon: 'VideoCamera',
     workspace_data: {
@@ -182,21 +182,21 @@ const PRESET_TEMPLATES: CanvasTemplate[] = [
         {
           id: 'preset-image-1',
           type: 'image',
-          name: 'canvas.templates.nodeNames.startImage',
+          name: 'canvas.nodeNames.startImage',
           x: 100, y: 200, width: 340, height: 240,
           content: { content: '', status: 'idle', prompt: '' },
         },
         {
           id: 'preset-text-1',
           type: 'text',
-          name: 'canvas.templates.nodeNames.motionDesc',
+          name: 'canvas.nodeNames.motionDesc',
           x: 100, y: 500, width: 340, height: 180,
           content: { content: '镜头缓慢推进，画面中的元素随风轻轻摆动', status: 'idle', fontSize: 14 },
         },
         {
           id: 'preset-config-1',
           type: 'config',
-          name: 'canvas.templates.nodeNames.videoConfig',
+          name: 'canvas.nodeNames.videoConfig',
           x: 520, y: 300, width: 340, height: 240,
           content: {
             mode: 'image2video',
@@ -218,8 +218,8 @@ const PRESET_TEMPLATES: CanvasTemplate[] = [
   },
   {
     id: 'preset-multi-blend',
-    name: 'canvas.templates.presetItems.multiBlend.name',
-    description: 'canvas.templates.presetItems.multiBlend.desc',
+    name: 'canvas.presetItems.multiBlend.name',
+    description: 'canvas.presetItems.multiBlend.desc',
     category: 'preset',
     icon: 'Connection',
     workspace_data: {
@@ -228,28 +228,28 @@ const PRESET_TEMPLATES: CanvasTemplate[] = [
         {
           id: 'preset-image-1',
           type: 'image',
-          name: 'canvas.templates.nodeNames.referenceImage1',
+          name: 'canvas.nodeNames.referenceImage1',
           x: 100, y: 100, width: 300, height: 220,
           content: { content: '', status: 'idle', prompt: '' },
         },
         {
           id: 'preset-image-2',
           type: 'image',
-          name: 'canvas.templates.nodeNames.referenceImage2',
+          name: 'canvas.nodeNames.referenceImage2',
           x: 100, y: 380, width: 300, height: 220,
           content: { content: '', status: 'idle', prompt: '' },
         },
         {
           id: 'preset-text-1',
           type: 'text',
-          name: 'canvas.templates.nodeNames.blendPrompt',
+          name: 'canvas.nodeNames.blendPrompt',
           x: 100, y: 660, width: 300, height: 160,
           content: { content: '融合两张图片的风格，生成一张新图片', status: 'idle', fontSize: 14 },
         },
         {
           id: 'preset-config-1',
           type: 'config',
-          name: 'canvas.templates.nodeNames.blendConfig',
+          name: 'canvas.nodeNames.blendConfig',
           x: 480, y: 320, width: 340, height: 240,
           content: {
             mode: 'image2image',
@@ -271,8 +271,8 @@ const PRESET_TEMPLATES: CanvasTemplate[] = [
   },
   {
     id: 'preset-describe',
-    name: 'canvas.templates.presetItems.describe.name',
-    description: 'canvas.templates.presetItems.describe.desc',
+    name: 'canvas.presetItems.describe.name',
+    description: 'canvas.presetItems.describe.desc',
     category: 'preset',
     icon: 'ChatDotRound',
     workspace_data: {
@@ -281,21 +281,21 @@ const PRESET_TEMPLATES: CanvasTemplate[] = [
         {
           id: 'preset-image-1',
           type: 'image',
-          name: 'canvas.templates.nodeNames.originalImage',
+          name: 'canvas.nodeNames.originalImage',
           x: 100, y: 200, width: 340, height: 240,
           content: { content: '', status: 'idle', prompt: '' },
         },
         {
           id: 'preset-text-1',
           type: 'text',
-          name: 'canvas.templates.nodeNames.reversePrompt',
+          name: 'canvas.nodeNames.reversePrompt',
           x: 520, y: 200, width: 340, height: 240,
           content: { content: '（点击图片工具栏的"反推"按钮，AI 会自动填充此处）', status: 'idle', fontSize: 14 },
         },
         {
           id: 'preset-config-1',
           type: 'config',
-          name: 'canvas.templates.nodeNames.generateConfig',
+          name: 'canvas.nodeNames.generateConfig',
           x: 940, y: 200, width: 340, height: 240,
           content: {
             mode: 'text2image',

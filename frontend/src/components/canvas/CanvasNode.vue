@@ -155,145 +155,41 @@
           </div>
         </div>
 
-        <!-- 配置节点：生成配置面板（模式切换 + 模型选择 + 参数 + 提示词 + 生成按钮） -->
+        <!-- 配置节点：提示词/模型/参数与生成入口在悬浮 AI 对话框（CanvasNodeComposer）中，
+             节点内仅保留摄像机参数与预设入口 -->
         <div v-else-if="panel.type === 'config'" class="config-content">
-          <!-- 上半部分：参数 + 提示词，可滚动 -->
           <div class="config-scroll-area">
-            <!-- 生成模式切换 -->
-            <div class="config-mode-tabs">
-              <button
-                v-for="m in configModes"
-                :key="m.value"
-                type="button"
-                :class="['config-mode-tab', { active: configContent.mode === m.value }]"
-                @click="updateConfigContent('mode', m.value)"
-                @mousedown.stop
-              >
-                {{ m.label }}
-              </button>
-            </div>
-
-            <!-- 模型选择（按当前模式自动筛选对应类型模型） -->
-            <select
-              class="config-select"
-              :value="configContent.model"
-              @change="updateConfigContent('model', ($event.target as HTMLSelectElement)?.value)"
-              @mousedown.stop
-            >
-              <option v-for="m in availableModels" :key="m.id" :value="m.id">{{ m.name }}</option>
-            </select>
-
-            <!-- 尺寸选择（图片模式）：显示友好标签 -->
-            <select
-              v-if="isImageMode"
-              class="config-select"
-              :value="configContent.size"
-              @change="updateConfigContent('size', ($event.target as HTMLSelectElement)?.value)"
-              @mousedown.stop
-            >
-              <option v-for="s in imageSizeOptions" :key="s.value" :value="s.value">{{ s.label }}</option>
-            </select>
-
-            <!-- 视频参数（视频模式）：分辨率 + 比例 + 帧率 + 时长，两行两列紧凑布局 -->
-            <div v-if="isVideoMode" class="config-video-params">
-              <select
-                class="config-select"
-                :value="configContent.resolution"
-                @change="updateConfigContent('resolution', Number(($event.target as HTMLSelectElement)?.value))"
-                @mousedown.stop
-              >
-                <option v-for="r in videoResolutionOptions" :key="r.value" :value="r.value">{{ r.label }}</option>
-              </select>
-              <select
-                class="config-select"
-                :value="configContent.aspect_ratio"
-                @change="updateConfigContent('aspect_ratio', ($event.target as HTMLSelectElement)?.value)"
-                @mousedown.stop
-              >
-                <option v-for="r in videoAspectRatioOptions" :key="r.value" :value="r.value">{{ r.label }}</option>
-              </select>
-              <select
-                class="config-select"
-                :value="configContent.frame_rate"
-                @change="onFrameRateChange(Number(($event.target as HTMLSelectElement)?.value))"
-                @mousedown.stop
-              >
-                <option v-for="fr in videoFrameRateOptions" :key="fr" :value="fr">{{ fr }} FPS</option>
-              </select>
-              <select
-                class="config-select"
-                :value="configContent.seconds"
-                @change="updateConfigContent('seconds', Number(($event.target as HTMLSelectElement)?.value))"
-                @mousedown.stop
-              >
-                <option v-for="s in availableDurations" :key="s" :value="s">{{ s }}{{ t('canvas.node.secondsSuffix') }}</option>
-              </select>
-            </div>
-            <!-- 关键帧模式开关（仅图生视频模式显示） -->
-            <div v-if="configContent.mode === 'image2video'" class="keyframes-toggle-row">
-              <el-switch
-                :model-value="configContent.use_keyframes || false"
-                @update:model-value="updateConfigContent('use_keyframes', $event)"
-                @mousedown.stop
-                size="small"
-              />
-              <span class="toggle-label">{{ t('canvas.node.keyframesMode') }}</span>
-              <el-tooltip :content="t('canvas.node.keyframesModeHint')" placement="top">
-                <el-icon class="info-icon"><InfoFilled /></el-icon>
-              </el-tooltip>
-            </div>
-
-            <!-- 提示词输入（支持 @ 提及接入节点） -->
-            <div class="config-prompt-wrapper">
-              <textarea
-                ref="configPromptRef"
-                class="config-prompt"
-                v-model="configPrompt"
-                :placeholder="t('canvas.node.configPromptPlaceholder')"
-                @mousedown.stop
-                @wheel.stop
-                @input="handleConfigMentionInput"
-                @keydown="handleConfigMentionKeyDown"
-                @blur="handleConfigMentionBlur"
-              />
-            </div>
-          </div>
-
-          <!-- 摄像机参数面板 -->
-          <CanvasCameraPanel
-            v-if="isImageMode || isVideoMode"
-            v-model="configCameraParams"
-            class="config-camera-panel"
-          />
-
-          <!-- 预设快捷入口 -->
-          <el-popover
-            v-if="isImageMode || isVideoMode"
-            placement="bottom-start"
-            :width="320"
-            trigger="click"
-            :teleported="true"
-          >
-            <template #reference>
-              <button type="button" class="preset-trigger-btn">
-                预设
-              </button>
-            </template>
-            <PresetQuickPanel
-              @select="onQuickPanelSelect"
-              :exclude-types="[]"
+            <!-- 摄像机参数面板 -->
+            <CanvasCameraPanel
+              v-if="isImageMode || isVideoMode"
+              v-model="configCameraParams"
+              class="config-camera-panel"
             />
-          </el-popover>
 
-          <!-- 底部固定：生成按钮（异步操作，点击后不阻塞，可连续点击） -->
-          <button
-            type="button"
-            class="config-generate-btn"
-            @click="handleConfigGenerate"
-            @mousedown.stop
-          >
-            {{ isVideoMode ? t('canvas.node.generateVideoBtn') : t('canvas.node.generateImageBtn') }}
-          </button>
+            <!-- 预设快捷入口 -->
+            <el-popover
+              v-if="isImageMode || isVideoMode"
+              placement="bottom-start"
+              :width="320"
+              trigger="click"
+              :teleported="true"
+            >
+              <template #reference>
+                <button type="button" class="preset-trigger-btn">
+                  预设
+                </button>
+              </template>
+              <PresetQuickPanel
+                @select="onQuickPanelSelect"
+                :exclude-types="[]"
+              />
+            </el-popover>
+          </div>
+        </div>
+
+        <!-- 脚本节点（LibTV 复刻）：紧凑卡片 + 全屏分镜向导入口 -->
+        <div v-else-if="panel.type === 'script'" class="script-content">
+          <ScriptNodeContent :panel-id="panel.id" />
         </div>
 
         <!-- 配音节点（spec 5.4.1）：音色/语速/来源 -->
@@ -302,7 +198,7 @@
             <span class="tts-label">{{ t('canvas.node.voice') || '音色' }}</span>
             <select
               class="tts-select"
-              :value="(panel.content as Record<string, unknown>).voice || 'default'"
+              :value="nodeStr(panel.content.voice) || 'default'"
               @change="updatePanelContent('voice', ($event.target as HTMLSelectElement)?.value)"
               @mousedown.stop
             >
@@ -314,7 +210,7 @@
           <div class="tts-row">
             <span class="tts-label">{{ t('canvas.node.speed') || '语速' }}</span>
             <el-slider
-              :model-value="(panel.content as Record<string, unknown>).speed ?? 1.0"
+              :model-value="nodeNum(panel.content.speed, 1.0)"
               :min="0.5" :max="2.0" :step="0.1"
               @update:model-value="updatePanelContent('speed', $event)"
               @mousedown.stop
@@ -333,7 +229,7 @@
           </div>
           <textarea
             class="subtitle-prompt"
-            :value="(panel.content as Record<string, unknown>).prompt || ''"
+            :value="nodeStr(panel.content.prompt) || ''"
             :placeholder="t('canvas.node.subtitlePromptPlaceholder') || '字幕生成提示词（可选）'"
             @input="updatePanelContent('prompt', ($event.target as HTMLTextAreaElement)?.value)"
             @mousedown.stop
@@ -345,7 +241,7 @@
         <div v-else-if="panel.type === 'compose'" class="compose-content">
           <div class="compose-row">
             <el-switch
-              :model-value="(panel.content as Record<string, unknown>).with_subtitle ?? true"
+              :model-value="nodeBool(panel.content.with_subtitle, true)"
               @update:model-value="updatePanelContent('with_subtitle', $event)"
               @mousedown.stop
               size="small"
@@ -422,28 +318,15 @@
       {{ badge.index }}
     </div>
 
-    <!-- @ 提及候选项弹窗（通过 Teleport 传送到 body，使用 fixed 定位避免被面板/画布裁剪遮挡） -->
-    <Teleport to="body">
-      <div
-        v-if="configMentionVisible && configMentionCandidates.length > 0"
-        class="mention-popup"
-        :style="{ position: 'fixed', top: configMentionPosition.top + 'px', left: configMentionPosition.left + 'px', zIndex: 99999 }"
-        @mousedown="handleConfigPopupMouseDown"
-      >
-        <div
-          v-for="(candidate, idx) in configMentionCandidates"
-          :key="candidate.id"
-          class="mention-item"
-          :class="{ active: idx === configMentionActiveIndex }"
-          @mousedown.prevent.stop="selectConfigMention(candidate)"
-        >
-          <span class="mention-index">{{ candidate.index }}</span>
-          <span class="mention-icon">{{ getMentionTypeIcon(candidate.type) }}</span>
-          <span class="mention-name">{{ candidate.label }}</span>
-          <span v-if="candidate.preview" class="mention-preview">{{ candidate.preview }}</span>
-        </div>
-      </div>
-    </Teleport>
+    <!-- 分镜出处标记：script 节点派生的 config/结果节点显示"镜头 N" -->
+    <div
+      v-if="shotBadge"
+      class="input-index-badge shot-lineage-badge"
+      :style="inputBadgeStyle"
+      :title="shotBadge"
+    >
+      {{ shotBadge }}
+    </div>
   </div>
 </template>
 
@@ -463,14 +346,14 @@
 
 import { computed, ref, nextTick, watch, onMounted, onUnmounted } from 'vue'
 import { Image as ImageIcon, Video, Music2, RefreshCw } from 'lucide-vue-next'
-import { InfoFilled } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { useCanvasStore } from '@/stores/canvas'
 import { useModelsStore } from '@/stores/models'
 import ImageWithWatermark from '@/components/ImageWithWatermark.vue'
 import CanvasCameraPanel from '@/components/CanvasCameraPanel.vue'
 import PresetQuickPanel from '@/components/presets/PresetQuickPanel.vue'
-import { useNodeMention } from '@/composables/useNodeMention'
+import ScriptNodeContent from '@/components/canvas/nodes/ScriptNodeContent.vue'
+import { readLineage, getShotLineageInfo } from '@/lib/canvas-storyboard'
 
 /* ---------- i18n ---------- */
 const { t } = useI18n()
@@ -484,6 +367,17 @@ const props = defineProps({
   theme: { type: Object, required: true }, // 主题 token
   viewport: { type: Object, required: true }, // { x, y, zoom }
 })
+
+/* ---------- content 字段安全读取（content 为 Record<string, unknown>） ---------- */
+function nodeStr(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
+function nodeNum(value: unknown, fallback: number): number {
+  return typeof value === 'number' ? value : fallback
+}
+function nodeBool(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback
+}
 
 /* ---------- Emits 定义 ---------- */
 const emit = defineEmits([
@@ -501,7 +395,6 @@ const emit = defineEmits([
   'view-image', // (imageUrl)
   'edit-text', // (text)
   'generate-image', // 从 text 节点生图（保留用于 retry 等场景）
-  'generate', // 从 config 节点触发合并生成
   'retry', // 重试生成
   'upload', // 上传文件
 ])
@@ -512,104 +405,14 @@ const MIN_HEIGHT = 160 // 最小高度
 
 /* ---------- Store 实例（供 config 节点直接更新面板内容） ---------- */
 const store = useCanvasStore()
-
-/* ---------- 配置节点常量 ---------- */
-// 生成模式：文生图 / 图生图 / 文生视频 / 图生视频（关键帧由接入图片数量自动触发）
-const configModes = computed(() => [
-  { value: 'text2image', label: t('canvas.node.configMode.text2image') },
-  { value: 'image2image', label: t('canvas.node.configMode.image2image') },
-  { value: 'text2video', label: t('canvas.node.configMode.text2video') },
-  { value: 'image2video', label: t('canvas.node.configMode.image2video') },
-])
-// 模型列表：从后端 API 获取，按类型自动分类
 const modelsStore = useModelsStore()
-const availableModels = computed(() => modelsStore.getModelsByMode(configContent.value.mode || 'text2image'))
-// 图片尺寸选项（结构化，含友好标签）
-const imageSizeOptions = computed(() => {
-  const opts = modelsStore.imageSizeOptions
-  if (opts.length > 0) return opts
-  // 兜底：从纯字符串列表生成
-  return (modelsStore.imageSizes.length > 0 ? modelsStore.imageSizes : ['1024x1024', '768x1024', '1024x768', '1280x720'])
-    .map(v => ({ value: v, w: 1, h: 1, label: v }))
-})
-// 视频宽高比选项（结构化，含友好标签）
-const videoAspectRatioOptions = computed(() => {
-  const config = modelsStore.getModelParamsConfig()
-  return config.videoAspectRatios
-})
-// 视频分辨率选项（以高度为基准）
-const videoResolutionOptions = computed(() => {
-  const config = modelsStore.getModelParamsConfig()
-  return config.videoResolutions || []
-})
-// 视频帧率选项
-const videoFrameRateOptions = computed(() => {
-  const config = modelsStore.getModelParamsConfig()
-  return config.videoFrameRates
-})
-// 可用视频时长：根据帧率自动过滤（FPS 越高时长越短）
-// 官方 Q&A 限制：24 FPS ≤ 15s；30 FPS ≤ 10s；60 FPS ≤ 5s
-const availableDurations = computed(() => {
-  const config = modelsStore.getModelParamsConfig()
-  const fps = configContent.value.frame_rate || 24
-  const maxDuration = fps >= 60 ? 5 : fps >= 30 ? 10 : 15
-  return config.videoDurations.filter((s: number) => s <= maxDuration)
-})
 
 /* ---------- 响应式状态 ---------- */
 const hovered = ref(false) // 是否悬停
 const isEditingContent = ref(false) // 是否正在编辑文本
 const textareaRef = ref<HTMLTextAreaElement | null>(null) // 文本节点编辑区引用
-const configPromptRef = ref<HTMLTextAreaElement | null>(null) // 配置节点提示词输入框引用
 
-/* ---------- @ 提及功能（配置节点提示词） ---------- */
-const {
-  mentionPopupVisible: configMentionVisible,
-  mentionActiveIndex: configMentionActiveIndex,
-  mentionCandidates: configMentionCandidates,
-  mentionPopupPosition: configMentionPosition,
-  handleInput: handleConfigMentionInput,
-  handleKeyDown: handleConfigMentionKeyDown,
-  handleBlur: handleConfigMentionBlur,
-  handlePopupMouseDown: handleConfigPopupMouseDown,
-  selectMention: selectConfigMention,
-  setCurrentPanel: setConfigMentionPanel,
-  getTypeIcon: getMentionTypeIcon,
-} = useNodeMention(configPromptRef)
-
-/* ---------- @ 提及功能（文本节点，暂不启用但保留初始化） ---------- */
-const {
-  mentionPopupVisible: textMentionVisible,
-  mentionActiveIndex: textMentionActiveIndex,
-  mentionCandidates: textMentionCandidates,
-  mentionPopupPosition: textMentionPosition,
-  handleInput: handleTextMentionInput,
-  handleKeyDown: handleTextMentionKeyDown,
-  handleBlur: handleTextMentionBlur,
-  handlePopupMouseDown: handleTextPopupMouseDown,
-  selectMention: selectTextMention,
-  setCurrentPanel: setTextMentionPanel,
-} = useNodeMention(textareaRef)
-
-// 监听 panel.id 变化，更新 mention 的当前面板（文本节点需要查找它连接到的 config 节点的上游？不，文本节点作为源时，@ 的是下游 config 的输入？
-// 实际上：@ 提及应该是在接收输入的节点（config）的 prompt 中使用，用来引用上游输入
-// 文本节点本身如果连接到 config，那它自己的编辑框中不需要 @；
-// 但用户说"多元素接入时多文本面板"，这里理解为：当多个文本节点连接到某个合并节点时，也需要支持 @
-// 为了简化：config 节点支持 @ 即可，文本节点暂时不支持（因为文本节点是源，不是接收输入的节点）
-// 所以文本节点的 mention 我们不初始化 panelId，只有 config 节点设置
-
-watch(
-  () => props.panel?.id,
-  (newId) => {
-    if (props.panel?.type === 'config' && newId) {
-      setConfigMentionPanel(newId)
-    } else {
-      setConfigMentionPanel(null)
-    }
-    setTextMentionPanel(null)
-  },
-  { immediate: true }
-)
+// config 节点的 @ 提及已随提示词输入迁移至悬浮 AI 对话框（CanvasNodeComposer）
 
 /* ---------- 四角缩放手柄配置 ---------- */
 const resizeCorners = [
@@ -735,6 +538,19 @@ const inputBadges = computed(() => {
   return badges
 })
 
+/** 分镜出处标记：script 派生的 config 节点及其结果节点显示"镜头 N" */
+const shotBadge = computed<string | null>(() => {
+  if (props.panel.type === 'config') {
+    const lineage = readLineage(props.panel)
+    return lineage ? t('canvas.node.shotBadge', { no: lineage.shotNo }) : null
+  }
+  if (props.panel.type === 'image' || props.panel.type === 'video') {
+    const info = getShotLineageInfo(props.panel)
+    return info ? t('canvas.node.shotBadge', { no: info.lineage.shotNo }) : null
+  }
+  return null
+})
+
 /** 序号标记样式（固定在节点左上角，蓝色圆形徽章） */
 const inputBadgeStyle = computed(() => ({
   background: props.theme.node.activeStroke,
@@ -811,7 +627,7 @@ const configPrompt = computed({
   set: (val) => updateConfigContent('prompt', val),
 })
 
-/** 摄像机参数 — 与 CanvasCameraPanel 双向绑定 */
+/** 摄像机参数 — 与 CanvasCameraPanel 双向绑定（初值回读已保存的 camera_params，变更即时持久化） */
 const configCameraParams = ref<Record<string, any>>({
   enabled: false,
   camera_model: undefined,
@@ -824,6 +640,7 @@ const configCameraParams = ref<Record<string, any>>({
   camera_angle: undefined,
   aspect_ratio: undefined,
   visual_style: undefined,
+  ...((props.panel.content?.camera_params as Record<string, any>) || {}),
 })
 
 /** 预设快捷面板选中回调 — 将 preset 内容填入当前节点 */
@@ -1117,23 +934,14 @@ function updatePanelContent(key: string, value: any) {
   })
 }
 
-/** 帧率变化：如果当前时长超过新帧率的最大限制，自动调整为最大可用时长 */
-function onFrameRateChange(newFps: number) {
-  const updates: Record<string, any> = { frame_rate: newFps }
-  const maxDuration = newFps >= 60 ? 5 : newFps >= 30 ? 10 : 15
-  const currentSeconds = configContent.value.seconds
-  if (currentSeconds > maxDuration) {
-    updates.seconds = maxDuration
-  }
-  store.updatePanel(props.panel.id, { content: updates })
-}
-
-/** 点击配置节点的生成按钮：emit generate 事件交由父组件执行生成流程 */
-function handleConfigGenerate() {
-  // 将摄像机参数注入 panel content 供父组件读取
-  store.updatePanel(props.panel.id, { content: { camera_params: { ...configCameraParams.value } } })
-  emit('generate', props.panel)
-}
+/** 摄像机参数变更即时持久化（生成入口在悬浮 AI 对话框，读取 content.camera_params） */
+watch(
+  configCameraParams,
+  (val) => {
+    store.updatePanel(props.panel.id, { content: { camera_params: { ...val } } })
+  },
+  { deep: true },
+)
 
 /* ---------- 交互：hover / 右键菜单 ---------- */
 
@@ -1417,146 +1225,6 @@ onUnmounted(() => {
   background: var(--agnes-text-faint);
 }
 
-/* 生成模式切换标签栏 */
-.config-mode-tabs {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-
-.config-mode-tab {
-  flex: 1;
-  min-width: 60px;
-  height: 28px;
-  padding: 0 8px;
-  border-radius: 8px;
-  border: 1px solid var(--agnes-border);
-  background: transparent;
-  font-size: 11px;
-  font-weight: 500;
-  color: inherit;
-  cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
-  white-space: nowrap;
-}
-
-.config-mode-tab:hover {
-  background: var(--agnes-nav-hover-bg);
-}
-
-.config-mode-tab.active {
-  background: var(--agnes-info-bg);
-  border-color: var(--agnes-primary);
-  color: var(--agnes-primary);
-}
-
-/* 下拉选择框 */
-.config-select {
-  height: 30px;
-  padding: 0 8px;
-  border-radius: 8px;
-  border: 1px solid var(--agnes-border);
-  background: var(--agnes-bg-input);
-  font-size: 12px;
-  color: inherit;
-  cursor: pointer;
-  outline: none;
-  box-sizing: border-box;
-}
-
-.config-select:focus {
-  border-color: var(--agnes-primary);
-}
-
-/* 视频参数区：分辨率+比例 / 帧率+时长，两行两列网格布局 */
-.config-video-params {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
-.config-video-params .config-select {
-  width: 100%;
-  min-width: 0;
-}
-
-/* 关键帧模式开关行 */
-.keyframes-toggle-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 4px;
-  padding: 6px 8px;
-  background: var(--agnes-bg-secondary);
-  border-radius: 6px;
-  font-size: 12px;
-}
-.keyframes-toggle-row .toggle-label {
-  color: var(--agnes-text-primary);
-  font-weight: 500;
-}
-.keyframes-toggle-row .info-icon {
-  font-size: 13px;
-  color: var(--agnes-text-tertiary);
-  cursor: help;
-  margin-left: auto;
-}
-.keyframes-toggle-row .info-icon:hover {
-  color: var(--agnes-primary);
-}
-
-/* 提示词输入框 */
-.config-prompt {
-  flex: 1;
-  min-height: 120px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--agnes-border);
-  background: var(--agnes-bg-input);
-  font-size: 12px;
-  font-family: monospace;
-  color: inherit;
-  resize: vertical;
-  outline: none;
-  box-sizing: border-box;
-  line-height: 1.6;
-  overflow-y: auto;
-}
-
-.config-prompt:focus {
-  border-color: var(--agnes-primary);
-}
-
-.config-prompt::placeholder {
-  color: var(--agnes-text-faint);
-}
-
-/* 生成按钮（底部固定，不随内容滚动消失） */
-.config-generate-btn {
-  flex-shrink: 0;
-  height: 38px;
-  border-radius: 10px;
-  border: 1px solid var(--agnes-primary);
-  background: var(--agnes-info-bg);
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--agnes-primary);
-  cursor: pointer;
-  transition: background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
-  margin-top: auto;
-}
-
-.config-generate-btn:hover {
-  background: var(--agnes-primary);
-  color: #fff;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(47, 128, 255, 0.25);
-}
-
-.config-generate-btn:active {
-  transform: translateY(0);
-}
-
 /* ===== 未知节点 ===== */
 .unknown-content {
   display: flex;
@@ -1730,82 +1398,13 @@ onUnmounted(() => {
   user-select: none;
 }
 
-/* ===== 配置节点提示词包裹层（相对定位，用于放置 mention 弹窗） ===== */
-.config-prompt-wrapper {
-  position: relative;
-  flex: 1;
-  min-height: 120px;
-  display: flex;
-  flex-direction: column;
-}
-
-.config-prompt-wrapper .config-prompt {
-  flex: 1;
-}
-
-/* ===== @ 提及候选项弹窗 ===== */
-.mention-popup {
-  position: absolute;
-  z-index: 100;
-  max-height: 200px;
-  overflow-y: auto;
-  background: var(--agnes-bg-secondary);
-  border: 1px solid var(--agnes-border);
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
-  padding: 4px;
-  min-width: 180px;
-}
-
-.mention-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 12px;
-  transition: background 0.1s ease;
-}
-
-.mention-item:hover,
-.mention-item.active {
-  background: var(--agnes-info-bg);
-}
-
-.mention-index {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 20px;
-  height: 20px;
-  border-radius: 10px;
-  background: var(--agnes-primary);
-  color: #fff;
+/* ===== 分镜出处标记：显示在节点右上角（与输入序号错开） ===== */
+.shot-lineage-badge {
+  top: -10px;
+  left: auto;
+  right: -10px;
   font-size: 11px;
   font-weight: 600;
-  flex-shrink: 0;
-}
-
-.mention-icon {
-  font-size: 14px;
-  flex-shrink: 0;
-}
-
-.mention-name {
-  font-weight: 500;
-  color: var(--agnes-text-primary);
-  flex-shrink: 0;
-}
-
-.mention-preview {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--agnes-text-tertiary);
-  font-size: 11px;
 }
 
 /* ===== 新增节点类型样式（spec 5.4）===== */
