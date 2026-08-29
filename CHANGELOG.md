@@ -35,10 +35,11 @@
   - 广场新增「创作」Tab（M4）：`GET /api/plaza/creations` 返回已公开且审核通过的资产，支持 `asset_type` / `kind` / `sort(latest|popular)` 筛选与分页；复用 `asset_likes` 表新增 `POST/DELETE /api/plaza/creations/{id}/like` 点赞/取消与 `GET /api/plaza/creations/likes/status` 批量状态查询；`GET /api/plaza/creations/{id}` 详情浏览量自增；前端 `PlazaView` 增加作品/创作双 Tab、类型标签、点赞按钮与创作详情弹窗
   - 资产「用于生成」闭环（M5）：`POST /api/pipeline/assets/{id}/use` 记录使用并递增 `use_count`；资产卡「用于生成」写入 Pinia `pendingUse`，跳转生图/视频页在 `onMounted` 预填参考图/视频并调用 use 接口；替换「功能开发中」占位文案并补充 i18n（zh-CN / en-US）
   - 生成配置下放 Phase A（设计文档 `docs/superpowers/specs/2026-08-29-generation-config-downshift-design.md`）：模型与参数选择从硬编码/默认值下沉到每个生成入口
-    - 默认值链统一：`modelsStore.getDefaultModel(type)` 优先级为偏好 `generation.default_model_id`（校验存在且类型匹配）> 该类型列表第一个；`defaultImageModel` / `defaultVideoModel` 改为其封装，全链路消费方零改动即获得偏好感知
+    - 默认值链统一：`modelsStore.getDefaultModel(type)` 优先级为偏好默认模型（校验存在且类型匹配）> 该类型列表第一个；`defaultImageModel` / `defaultVideoModel` 改为其封装，全链路消费方零改动即获得偏好感知；偏好字段拆分为 `default_image_model_id` / `default_video_model_id`，偏好页新增"默认生图/生视频模型"两个下拉（原 `default_model_id` 从未有 UI 入口）
     - 新增 `ComposerParamBar`：复用 `ParamSelector` 的选项逻辑，只做驼峰↔蛇形字段适配与 content 持久化（支持 `contentKey` 分区）；image / video / config 三类节点 Composer 接入，config 节点原生 select 整体替换后字段名与读写路径不变，`executeMerge*` 零改动
     - script 节点新增分镜聊天模型选择（存 `content.chat_model`）；`POST /api/storyboard` 新增可选 `model`，命中 chat 模型注册表时使用指定模型，未传或未命中回退第一个 chat 模型
     - 剧本向导步骤② 新增资产图参数栏、步骤③ 新增分镜图/分镜视频批量参数区，按 `asset_image_params` / `shot_image_params` / `shot_video_params` 分区持久化到 script 节点；批量派生与单镜头重拍改为同源读取，视频时长优先级为参数栏显式选择 > 镜头表格时长，视频 `aspect_ratio` / `resolution` / `frame_rate` 不再硬编码
+- 分镜直出 B1 地基与派生切换（设计文档 `docs/superpowers/specs/2026-08-29-canvas-node-evolution-roadmap.md`）：脚本批量派生分镜图不再产生 config 中间节点，每镜头直接创建 1 个可生图的图片节点（prompt/模型/参考图/lineage 内嵌节点，结果就地回填 `content.content`）；`findDerivedPanels` 同时识别直出节点与存量 config 派生（幂等不重复派生）；`getShotLineageInfo` 兼容直出节点（镜头徽章与派生/重拍按钮可用）；批量生视频兼容直出节点源图读取；直出节点重试走就地执行（保留节点上的模型/参数/角色参考图）；批量失败汇总提示；视频配置节点暂排分镜网格右侧专属列（B2 改覆盖式布局）
     - 手工验证清单见 `docs/superpowers/specs/2026-08-29-phase-a-smoke-checklist.md`
 
 ### 修复（归档功能验收问题）

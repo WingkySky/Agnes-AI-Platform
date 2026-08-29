@@ -784,13 +784,14 @@ export async function executeMergeGeneration(configId: string, store: CanvasGene
  * 1. 读取节点上的模型/尺寸参数，取 content.prompt 与 content.referenceImages 作为生成上下文
  * 2. 节点置 loading -> 建任务 + 注册队列（panelId 为节点自身，便于队列定位）-> 轮询 -> 回填
  *
- * @returns 节点自身 ID（loading 状态）
+ * @returns 节点自身 ID；waitFor 模式下生成失败返回 null（供批量编排汇总失败数，
+ *          失败详情已写入节点 content.errorDetails，这里不抛，避免打断并发池其余任务）
  */
 export async function executeInNodeGeneration(
   panel: CanvasPanel,
   store: CanvasGenerationStore,
   options: GenerationOptions = {},
-): Promise<string> {
+): Promise<string | null> {
   const { onProgress } = options
   const queueStore = useTaskQueueStore()
   const prefsStore = usePreferencesStore()
@@ -814,6 +815,7 @@ export async function executeInNodeGeneration(
   // 置 loading：此处只写状态字段，不传 referenceImages 数组（deepMerge 会把数组转成索引对象）
   store.updatePanel(panel.id, { content: { status: 'loading', errorDetails: null } })
 
+  let failed = false
   const run = async (): Promise<void> => {
     try {
       if (onProgress) onProgress('creating', { index: 0, total: 1 })
@@ -841,6 +843,7 @@ export async function executeInNodeGeneration(
       prefsStore.autoDownload(result.resultUrl, 'image', { modelId: config.model })
       prefsStore.notifyComplete('image', { prompt, modelId: config.model })
     } catch (err) {
+      failed = true
       const errMsg = getErrorMessage(err) || '生成失败'
       store.updatePanel(panel.id, { content: { status: 'error', errorDetails: errMsg } })
       if (onProgress) onProgress('error', { resultNodeIds: [panel.id], error: errMsg })
@@ -853,7 +856,7 @@ export async function executeInNodeGeneration(
     void run()
   }
 
-  return panel.id
+  return failed ? null : panel.id
 }
 
 // ---------- 节点生成参数读写 ----------
@@ -875,7 +878,7 @@ function isParamsRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * 读取节点上的生成参数，未选择的项回落到该类型的默认参数
- * - 默认值链：节点 content > 用户偏好 default_model_id > 该类型列表第一个（getDefaultModel）
+ * - 默认值链：节点 content > 用户偏好默认模型（default_image_model_id / default_video_model_id）> 该类型列表第一个（getDefaultModel）
  * - Config / image / video 节点读 content 根字段；script 节点多套参数用 contentKey 分区存放
  * - fallback 用于覆盖逐项回落值（如批量派生沿用偏好比例尺寸、逐镜头时长）
  */

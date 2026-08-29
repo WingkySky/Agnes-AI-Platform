@@ -11,7 +11,7 @@ import { useCanvasStore, type CanvasPanel } from '@/stores/canvas'
 import { usePreferencesStore } from '@/stores/preferences'
 import { getModelParams } from '@/config/model-params'
 import {
-  executeMergeGeneration,
+  executeInNodeGeneration,
   executeMergeVideoGeneration,
   getUpstreamNodes,
   readPanelGenParams,
@@ -60,16 +60,14 @@ export interface ShotLineage {
 const MAX_SHOTS = 30
 const IMAGE_CONCURRENCY = 3
 const VIDEO_CONCURRENCY = 2
-// 网格布局：script 节点右侧 3 列；列距预留结果图位置（config 300 + 结果图 200 + 间隙）
+// 网格布局：script 节点右侧 3 列；分镜直出后每镜头只有 1 个节点，列距按节点宽 + 间隙
 const GRID_COLS = 3
 const IMG_CONFIG_W = 300
 const IMG_CONFIG_H = 320
-const IMG_PITCH_X = 640
+const IMG_PITCH_X = 400
 const IMG_PITCH_Y = 380
-// 视频配置排在分镜图结果节点右侧（config 300 + 40 间隙 + 结果图 200 + 80 间隙）
 const VIDEO_CONFIG_W = 320
 const VIDEO_CONFIG_H = 300
-const VIDEO_OFFSET_X = 620
 
 /* script 节点 content 上三套生成参数的分区键：向导参数栏写入，批量派生读取 */
 export const ASSET_IMAGE_PARAMS_KEY = 'asset_image_params'
@@ -385,7 +383,7 @@ function ensureShotStep(scriptPanel: CanvasPanel): string {
 
 /* ---------- 批量派生分镜图 ---------- */
 
-/** 派生指定镜头的分镜图（批量/单镜头共用）：上游收集 -> 积分确认 -> 创建 config 并入队 */
+/** 派生指定镜头的分镜图（批量/单镜头共用）：上游收集 -> 积分确认 -> 创建直出 image 节点并入队 */
 async function deriveImagesInternal(scriptPanel: CanvasPanel, pending: CanvasShot[]): Promise<void> {
   const { t } = useI18n()
   const store = useCanvasStore()
@@ -415,22 +413,24 @@ async function deriveImagesInternal(scriptPanel: CanvasPanel, pending: CanvasSho
   const stepId = ensureShotStep(scriptPanel)
   const baseX = scriptPanel.x + scriptPanel.width + 80
   const tasks: Array<() => Promise<void>> = []
+  let failedCount = 0
 
   for (const shot of pending) {
     // 用全量镜头序号布局，保持网格位置稳定
     const idx = allShots.findIndex((s) => s.id === shot.id)
     const contexts = buildShotContexts(shot, assets, upstreamTexts)
+    // 参考图必须在 addPanel 时一次性写入：updatePanel 的 deepMerge 会把数组转成索引对象
     const referenceImages = [...upstreamRefImages, ...contexts.characterImages, ...contexts.sceneImages].filter(Boolean)
-    const mode = referenceImages.length > 0 ? 'image2image' : 'text2image'
-    const configId = store.addPanel({
-      type: 'config',
+    // 直出分镜图：节点自身同时承载配置与结果，lineage 记录出处，不再建 script -> image 连线（连线校验也不允许）
+    const panelId = store.addPanel({
+      type: 'image',
       name: `#${shot.no} ${scriptPanel.name || ''}`.trim(),
       x: baseX + (idx % GRID_COLS) * IMG_PITCH_X,
       y: scriptPanel.y + Math.floor(idx / GRID_COLS) * IMG_PITCH_Y,
       width: IMG_CONFIG_W,
       height: IMG_CONFIG_H,
       content: {
-        mode,
+        status: 'pending',
         model: imageParams.model,
         size: imageParams.size,
         prompt: buildShotImagePrompt(scriptPanel, shot, contexts),
@@ -438,16 +438,20 @@ async function deriveImagesInternal(scriptPanel: CanvasPanel, pending: CanvasSho
         lineage: { kind: 'image', scriptPanelId: scriptPanel.id, shotId: shot.id, shotNo: shot.no },
       },
     })
-    store.addConnection({ source_panel_id: scriptPanel.id, target_panel_id: configId, type: 'auto' })
-    store.addPanelToStep(stepId, configId)
+    store.addPanelToStep(stepId, panelId)
     tasks.push(async () => {
-      await executeMergeGeneration(configId, store, { waitFor: true })
+      const target = store.panels.find((p) => p.id === panelId)
+      if (!target) return
+      const generatedId = await executeInNodeGeneration(target, store, { waitFor: true })
+      if (!generatedId) failedCount++
     })
   }
 
   ElMessage.success(`${t('canvas.messages.batchImagesQueued')} (${pending.length})`)
-  // 后台并发池执行，不阻塞交互
-  void runPool(tasks, IMAGE_CONCURRENCY)
+  // 后台并发池执行，不阻塞交互；异常在 waitFor 内部已转节点 error 态，这里补一条汇总提示
+  void runPool(tasks, IMAGE_CONCURRENCY).then(() => {
+    if (failedCount > 0) ElMessage.warning(t('canvas.messages.batchImagesFailed', { n: failedCount }))
+  })
 }
 
 /** 批量派生分镜图（幂等：跳过已派生镜头，重做单个镜头用单镜头入口） */
@@ -497,7 +501,12 @@ export async function deriveStoryboardVideos(scriptPanel: CanvasPanel): Promise<
   for (const shot of shots) {
     if (videoShotIds.has(shot.id)) continue
     const entry = derivedImages.find((d) => d.lineage.shotId === shot.id)
-    const resultNode = entry ? findResultNode(entry.panel.id, 'image') : null
+    // 直出节点：源图即节点自身（结果写在自己的 content.content）；存量/手搭 config：反查其结果节点
+    const resultNode = entry
+      ? (entry.panel.type === 'image'
+          ? (entry.panel.content?.status === 'success' ? entry.panel : null)
+          : findResultNode(entry.panel.id, 'image'))
+      : null
     const imageUrl = resultNode ? readString(resultNode.content, 'content') : ''
     if (!entry || !resultNode || !imageUrl) {
       notReady++
@@ -519,6 +528,9 @@ export async function deriveStoryboardVideos(scriptPanel: CanvasPanel): Promise<
   const stepId = ensureShotStep(scriptPanel)
   const tasks: Array<() => Promise<void>> = []
 
+  // 视频配置统一排在分镜网格右侧的专属列（B2 将改为覆盖式布局，此处仅保证不与其他节点重叠）
+  const videoBaseX = scriptPanel.x + scriptPanel.width + 80 + GRID_COLS * IMG_PITCH_X + 40
+
   for (const item of items) {
     // 时长：参数栏显式选择优先，未选择时沿用该镜头在表格里设的时长
     const params = readPanelGenParams(scriptPanel, 'video', SHOT_VIDEO_PARAMS_KEY, {
@@ -527,7 +539,7 @@ export async function deriveStoryboardVideos(scriptPanel: CanvasPanel): Promise<
     const configId = store.addPanel({
       type: 'config',
       name: `#${item.shot.no} ${t('canvas.script.videoSuffix')}`,
-      x: item.imgConfig.x + VIDEO_OFFSET_X,
+      x: videoBaseX,
       y: item.imgConfig.y,
       width: VIDEO_CONFIG_W,
       height: VIDEO_CONFIG_H,

@@ -454,7 +454,7 @@ import {
 // 画布生成：上游节点查找（用于配置节点 prompt 为空时检查上游文本）+ 生成归档上下文
 import { getUpstreamNodes, buildCanvasContext, type CanvasGenerationStore } from '@/lib/canvas-generation'
 // 分镜派生：单镜头图生视频（LibTV P0）
-import { deriveVideoForShot } from '@/lib/canvas-storyboard'
+import { deriveVideoForShot, readLineage } from '@/lib/canvas-storyboard'
 import { getErrorMessage } from '@/lib/type-helpers'
 import type { ImageGenerationRequest } from '@/types'
 
@@ -1410,6 +1410,18 @@ async function generateVideoFromSource(
 // - 查找上游 config 节点，重新执行合并生成（创建新的 loading 结果节点）
 // - 没有上游 config 节点时，用节点自身 prompt 重新生成（直接更新当前节点）
 async function retryGeneration(panel: typeof store.panels[number]) {
+  // 直出分镜节点（自带 lineage）：就地重试，保留节点上的模型/参数/角色参考图
+  if (panel.type === 'image' && readLineage(panel)) {
+    const refs = Array.isArray(panel.content?.referenceImages) ? (panel.content?.referenceImages as unknown[]).length : 0
+    const size = (panel.content?.size as string) || '1024x1024'
+    const canGenerate = await checkCreditsBeforeGenerate({ type: 'image', mode: refs > 0 ? 'image2image' : 'text2image', size })
+    if (!canGenerate) return
+    ElMessage.info(t('canvas.messages.regenerate'))
+    const { executeInNodeGeneration } = await import('@/lib/canvas-generation')
+    await executeInNodeGeneration(panel, store)
+    return
+  }
+
   // 查找上游 config 节点
   const upstreamConnections = store.connections.filter((c) => c.target_panel_id === panel.id)
   const configConn = upstreamConnections.find((c) => {
