@@ -853,8 +853,8 @@ export interface CreditRuleUpdateRequest {
 // 注意：字段命名保持 snake_case，与后端 API 返回一致
 // =====================================================
 
-/** 资产类型（与后端 VALID_ASSET_TYPES 一致） */
-export type AssetType = 'character' | 'prop' | 'scene' | 'brand'
+/** 资产类型（与后端 VALID_ASSET_TYPES 一致；material/clip/final 为创作归档产物） */
+export type AssetType = 'character' | 'prop' | 'scene' | 'brand' | 'material' | 'clip' | 'final'
 
 /** 风格预设 */
 export interface StylePreset {

@@ -124,7 +124,7 @@ function resourceLabel(type: string, index: number): string {
  * - 其余画布节点统一归档到「画布」容器
  * - source=canvas：历史页默认过滤
  */
-function buildCanvasContext(node: GenerationPanel, store: CanvasGenerationStore): GenerationContextPayload {
+export function buildCanvasContext(node: GenerationPanel, store: CanvasGenerationStore): GenerationContextPayload {
   const lineage = node.content?.lineage as { scriptPanelId?: unknown; shotNo?: unknown } | undefined
   if (lineage && typeof lineage.scriptPanelId === 'string' && lineage.scriptPanelId) {
     const scriptPanel = store.panels.find((p) => p.id === lineage.scriptPanelId)

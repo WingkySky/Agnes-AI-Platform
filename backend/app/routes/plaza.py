@@ -552,6 +552,7 @@ async def like_plaza_creation(
     stmt = select(Asset).filter(
         Asset.id == creation_id,
         Asset.is_public == True,               # noqa: E712
+        Asset.moderation_status == "approved",  # 被拒审的资产不可点赞
     )
     result = await db.execute(stmt)
     asset = result.scalar_one_or_none()

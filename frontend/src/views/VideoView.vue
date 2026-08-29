@@ -470,8 +470,7 @@ onMounted(async () => {
     mode.value = 'video2video'
     referenceVideoUrl.value = pending.asset_url
   } else {
-    // 当前模型不支持视频生视频，保留参考视频链接并提示
-    referenceVideoUrl.value = pending.asset_url
+    // 当前模型不支持视频生视频：不预填（该链接在 image2video 模式下不可用），提示用户换模型或手动操作
     ElMessage.warning(t('assets.video2videoUnsupported'))
   }
   try {

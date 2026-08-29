@@ -130,6 +130,18 @@ Swagger UI（交互式文档）：`http://localhost:8000/docs`
 }
 ```
 
+### `POST /api/images/tasks`
+
+创建图片生成异步任务（前端任务队列使用）。立即返回 `task_id`，通过 `GET /api/images/tasks/{task_id}` 轮询状态。
+
+**请求体：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `prompt` | string | ✅ | 提示词 |
+| `model` / `size` / `mode` / `image_urls` / `base64_images` 等 | - | | 与 `POST /api/images/generations` 一致 |
+| `context` | object | | 创作上下文（可选），结构与视频接口相同：`{ source, container_type, container_id, container_name, asset_type, asset_name }`。带 `container_type`/`container_id` 时生成结果自动归档进资产库 |
+
 ---
 
 ## 3. 视频生成
@@ -170,6 +182,7 @@ Swagger UI（交互式文档）：`http://localhost:8000/docs`
 | `image` | string | | 图生视频模式：单张参考图（URL 或 base64，可选，也可使用 images 数组） |
 | `images` | string[] | | 参考图数组（URL/base64）：图生视频支持任意数量，关键帧模式最多2张 |
 | `seed` | int | | 随机种子，可选（用于可复现结果） |
+| `context` | object | | 创作上下文（可选）：`{ source, container_type, container_id, container_name, asset_type, asset_name }`。带 `container_type`/`container_id` 时生成结果自动归档进资产库，`source`（`independent`/`canvas`/`project`）用于历史来源筛选 |
 
 **帧数与时长对照表（@24fps）：**
 
@@ -369,6 +382,7 @@ Swagger UI（交互式文档）：`http://localhost:8000/docs`
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `type` | string | | `all`（默认）\| `image` \| `video` |
+| `source` | string | | 来源筛选：`independent`（默认，独立生成）\| `canvas`（画布创作）\| `project`（项目创作）\| `all` |
 | `page` | int | | 页码，从 1 开始，默认 1 |
 | `page_size` | int | | 每页数量，默认 20 |
 | `content_id` | string | | 按内容 ID 精确搜索 |

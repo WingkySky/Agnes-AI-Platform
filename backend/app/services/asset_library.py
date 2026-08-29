@@ -21,7 +21,7 @@ from app.schemas.assets import (
 logger = logging.getLogger("agnes_platform")
 
 # 允许的资产类型
-VALID_ASSET_TYPES = {"character", "prop", "scene", "brand"}
+VALID_ASSET_TYPES = {"character", "prop", "scene", "brand", "material", "clip", "final"}
 
 
 # ---------- 查询 ----------

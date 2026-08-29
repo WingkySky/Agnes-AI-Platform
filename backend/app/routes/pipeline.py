@@ -25,7 +25,7 @@ from datetime import datetime
 from typing import Optional, List
 
 from fastapi import APIRouter, HTTPException, Depends, Query
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_db
@@ -33,6 +33,7 @@ from app.core.security import get_current_user, get_current_user_optional
 from app.models.user import User
 from app.models.pipeline import StylePreset, ScriptTemplate
 from app.models.asset import Asset
+from app.models.asset_like import AssetLike
 from app.schemas.assets import (
     StylePresetOut,
     ScriptTemplateOut,
@@ -419,7 +420,8 @@ async def update_asset_share_status(
     if body.is_public and not was_public and not asset.public_shared_at:
         asset.public_shared_at = datetime.utcnow()
 
-    # 设为公开时：进入待审核，敏感词快速筛查 + 异步 AI 内容审核
+    # 设为公开时：进入待审核，敏感词快速筛查；AI 审核在提交后异步触发
+    moderation_args = None
     if body.is_public and not was_public:
         asset.moderation_status = "pending"
         asset.moderation_reason = "审核中：等待系统预审"
@@ -437,23 +439,25 @@ async def update_asset_share_status(
         except Exception as mod_err:
             logger.warning("[广场] 资产分享时敏感词检测失败: %s", mod_err)
 
-        # 异步触发 AI 图像/视频内容审核（不阻塞接口响应）
-        try:
-            from app.services.moderation_service import run_async_asset_moderation
-            gen_type = "video" if (
-                asset.kind == "video" or asset.type in ("clip", "final")
-            ) else "image"
-            result_url = asset.asset_url or (
-                asset.reference_images[0] if asset.reference_images else None
-            )
-            asyncio.create_task(
-                run_async_asset_moderation(asset.id, gen_type, result_url, asset.name)
-            )
-        except Exception as task_err:
-            logger.warning("[广场] 资产启动 AI 异步审核失败 id=%d: %s", asset.id, task_err)
+        # 计算审核参数（AI 审核在事务提交后异步触发，后台任务需读到本次提交的数据）
+        from app.services.moderation_service import run_async_asset_moderation
+        gen_type = "video" if (
+            asset.kind == "video" or asset.type in ("clip", "final")
+        ) else "image"
+        result_url = asset.asset_url or (
+            asset.reference_images[0] if asset.reference_images else None
+        )
+        moderation_args = (asset.id, gen_type, result_url, asset.name)
 
     await db.commit()
     await db.refresh(asset)
+
+    # 异步触发 AI 图像/视频内容审核（不阻塞接口响应）
+    if moderation_args:
+        try:
+            asyncio.create_task(run_async_asset_moderation(*moderation_args))
+        except Exception as task_err:
+            logger.warning("[广场] 资产启动 AI 异步审核失败 id=%d: %s", moderation_args[0], task_err)
 
     msg = (
         "已提交分享，正在审核中，审核通过后将展示到广场"
@@ -488,6 +492,8 @@ async def delete_asset_endpoint(
         raise HTTPException(status_code=404, detail="未找到对应资产或无权操作")
 
     is_archive = bool(asset.container_type)
+    # 清理点赞关系（SQLite 未启用外键 CASCADE，防孤儿行）
+    await db.execute(delete(AssetLike).where(AssetLike.asset_id == asset_id))
     await asset_library.delete_asset(db, asset_id, user_id=current_user.id)
     logger.info(
         "[资产] 用户 %s 删除资产 %s（归档影子记录=%s）",
