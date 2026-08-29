@@ -810,6 +810,8 @@ defineExpose({
   padding: 12px;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
+  /* auto 行在 Chrome 里会忽略固定高度子元素的贡献导致行高塌陷，显式按内容计算 */
+  grid-auto-rows: min-content;
   gap: 10px;
   align-content: start;
 }

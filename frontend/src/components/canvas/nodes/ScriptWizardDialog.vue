@@ -530,8 +530,9 @@ function stepTitleStyle(s: { no: number }) {
 }
 </script>
 
-<style>
-/* 向导为 Teleport 到 body 的全屏覆盖层，样式不做 scoped 隔离但类名带 wiz-/wizard- 前缀防冲突 */
+<style scoped>
+/* 向导为 Teleport 到 body 的全屏覆盖层；scoped 不影响 Teleport（data-v 仍打在本组件模板元素上），
+   必须保持 scoped，否则 .asset-card/.asset-grid 等通用类名会泄漏污染素材库面板 */
 .wizard-overlay {
   position: fixed;
   inset: 0;
