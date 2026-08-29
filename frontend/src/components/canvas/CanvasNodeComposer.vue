@@ -29,7 +29,7 @@
       v-model="text"
       class="composer-input"
       :style="inputStyle"
-      rows="2"
+      rows="3"
       :placeholder="placeholder"
       @input="onInput"
       @keydown="onKeyDown"
@@ -248,12 +248,12 @@ function onInput() {
   autosize()
 }
 
-/** 自适应高度（上限 180px 后滚动） */
+/** 自适应高度（上限 300px 后滚动，长提示词可直接回看） */
 function autosize() {
   const el = inputRef.value
   if (!el) return
   el.style.height = 'auto'
-  el.style.height = Math.min(el.scrollHeight, 180) + 'px'
+  el.style.height = Math.min(el.scrollHeight, 300) + 'px'
 }
 
 /** 键盘：Enter 发送（@ 弹窗打开时交给提及导航），Shift+Enter 换行 */
@@ -463,8 +463,8 @@ const sendStyle = computed(() => {
   resize: none;
   box-sizing: border-box;
   font-family: inherit;
-  min-height: 52px;
-  max-height: 180px;
+  min-height: 84px;
+  max-height: 300px;
   overflow-y: auto;
 }
 .composer-input:focus {

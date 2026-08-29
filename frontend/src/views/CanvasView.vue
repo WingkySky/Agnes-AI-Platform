@@ -1074,9 +1074,12 @@ const composerStyle = computed(() => {
   const p = store.panels.find((x) => x.id === composerPanelId.value)
   if (!p) return { display: 'none' }
   const { x: vx, y: vy, zoom } = store.viewport
-  const width = Math.min(520, Math.max(300, p.width * zoom))
+  // 宽输入条：窄节点也保持宽敞下限，超宽节点随节点宽度放大到上限
+  const width = Math.max(560, Math.min(800, p.width * zoom, window.innerWidth - 32))
+  // 画布容器 overflow hidden，贴右缘时收拢左边界避免裁剪
+  const left = Math.max(12, Math.min(p.x * zoom + vx, window.innerWidth - width - 16))
   return {
-    left: `${p.x * zoom + vx}px`,
+    left: `${left}px`,
     top: `${(p.y + p.height) * zoom + vy + 12}px`,
     width: `${width}px`,
   }
