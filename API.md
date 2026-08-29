@@ -534,7 +534,36 @@ Swagger UI（交互式文档）：`http://localhost:8000/docs`
 
 ---
 
-## 6. 错误码说明
+## 6. 分镜脚本生成
+
+### `POST /api/storyboard`
+
+为无限画布 script 节点生成分镜脚本 + 全剧资产清单（无状态，不存储，结果由前端写回画布节点）。
+
+**请求体：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `story` | string | ✅ | 剧情概述 |
+| `characters` | object[] | | 已有角色设定 `[{ name, description, ref_image_url }]`（画布上游节点 + 资产卡回传） |
+| `scenes` | object[] | | 已有场景设定（反向通道，分镜沿用已有设定） |
+| `shot_count_min` / `shot_count_max` | int | | 期望镜头数范围，默认 6-12，上限 30 |
+| `style` | string | | 画面风格 |
+
+**响应 `data`：**
+
+```json
+{
+  "shots": [{ "no": 1, "shot_size": "中景", "camera": "缓推", "characters": ["林小雨"], "location": "咖啡店", "description": "...", "dialogue": "..." }],
+  "assets": { "characters": [{ "name": "林小雨", "description": "外貌/服饰/气质描述" }], "scenes": [{ "name": "咖啡店", "description": "环境/时间/氛围描述" }] }
+}
+```
+
+> LLM 输出兼容旧的纯分镜数组格式（此时 `assets` 为空）。镜头的 `characters`/`location` 与资产清单按名关联，前端据此预填资产卡、并按镜头命中注入生成提示词与参考图。
+
+---
+
+## 7. 错误码说明
 
 | HTTP 状态 | 含义 |
 |----------|------|
@@ -551,7 +580,7 @@ Swagger UI（交互式文档）：`http://localhost:8000/docs`
 
 ---
 
-## 7. 后端到 Agnes AI 的请求流
+## 8. 后端到 Agnes AI 的请求流
 
 ```
 前端 axios
@@ -578,7 +607,7 @@ FastAPI backend (8000)
 
 ---
 
-## 8. 视频生成 Prompt 最佳实践
+## 9. 视频生成 Prompt 最佳实践
 
 ### 文生视频推荐结构
 `[主体] + [动作] + [场景] + [镜头运动] + [光照] + [风格]`
@@ -602,7 +631,7 @@ Create a smooth transition from the first keyframe to the second keyframe, maint
 
 ---
 
-## 9. 图片生成 Prompt 最佳实践
+## 10. 图片生成 Prompt 最佳实践
 
 ### 推荐结构
 `[主体] + [场景 / 环境] + [风格] + [光照] + [构图] + [质量要求]`

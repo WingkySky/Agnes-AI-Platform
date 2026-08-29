@@ -18,7 +18,7 @@ import {
 } from '@/lib/canvas-generation'
 import { estimateCanvasCost, checkCreditsBeforeGenerate } from '@/lib/canvas-credits'
 
-/** 单个分镜（存于 script 节点 content.shots） */
+/** 单个分镜（存于 script 节点 content.shots；characters/location 与资产卡按名关联） */
 export interface CanvasShot {
   id: string
   no: number
@@ -28,6 +28,10 @@ export interface CanvasShot {
   camera: string
   description: string
   dialogue: string
+  /** 出场角色名列表（资产卡按名命中） */
+  characters: string[]
+  /** 场景名（资产卡按名命中） */
+  location: string
 }
 
 /** 资产卡（角色/场景参考，存于 script 节点 content.assets，画布本地） */
@@ -105,6 +109,10 @@ export function readShots(panel: { content?: Record<string, unknown> }): CanvasS
       camera: typeof item.camera === 'string' ? item.camera : '',
       description: item.description,
       dialogue: typeof item.dialogue === 'string' ? item.dialogue : '',
+      characters: Array.isArray(item.characters)
+        ? item.characters.filter((c): c is string => typeof c === 'string')
+        : [],
+      location: typeof item.location === 'string' ? item.location : '',
     })
   }
   return shots
@@ -144,6 +152,92 @@ export function buildAssetContexts(assets: ScriptAssets): { characters: string[]
     characters: assets.characters.map(assetText).filter(Boolean),
     scenes: assets.scenes.map(assetText).filter(Boolean),
   }
+}
+
+/* ---------- 分镜与资产的关联（LLM 提取预填 + 按镜头命中注入） ---------- */
+
+function newAssetId(): string {
+  return `asset_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
+}
+
+/** 把 LLM 提取的资产按名（trim 后）去重追加到已有卡；无新增时返回 null，调用方跳过写入 */
+export function mergeExtractedAssets(
+  current: ScriptAssets,
+  extracted?: { characters?: Array<{ name?: unknown; description?: unknown }>; scenes?: Array<{ name?: unknown; description?: unknown }> } | null,
+): ScriptAssets | null {
+  const trim = (v: unknown) => (typeof v === 'string' ? v.trim() : '')
+  const pick = (existing: ShotAsset[], items?: Array<{ name?: unknown; description?: unknown }>): ShotAsset[] =>
+    (items || [])
+      .map((item) => ({ name: trim(item?.name), description: trim(item?.description) }))
+      .filter((item) => item.name && !existing.some((a) => a.name.trim() === item.name))
+      .map((item) => ({ id: newAssetId(), name: item.name, description: item.description, imageUrl: '' }))
+  const characters = pick(current.characters, extracted?.characters)
+  const scenes = pick(current.scenes, extracted?.scenes)
+  if (characters.length === 0 && scenes.length === 0) return null
+  return { characters: [...current.characters, ...characters], scenes: [...current.scenes, ...scenes] }
+}
+
+/** 某资产卡在分镜中的出场镜头号（角色按 characters 含名，场景按 location 同名） */
+export function shotNosForAsset(shots: CanvasShot[], kind: 'characters' | 'scenes', name: string): number[] {
+  const trimmed = name.trim()
+  if (!trimmed) return []
+  return shots
+    .filter((s) => (kind === 'characters' ? s.characters.includes(trimmed) : s.location.trim() === trimmed))
+    .map((s) => s.no)
+}
+
+/** 镜头级上下文：设定文本 + 命中资产参考图（未标注维取全量；标注后命中为空时文本回退全量、图片不并入，避免带错人） */
+export interface ShotContexts {
+  characters: string[]
+  scenes: string[]
+  characterImages: string[]
+  sceneImages: string[]
+}
+
+export function buildShotContexts(shot: CanvasShot, assets: ScriptAssets, extraCharacters: string[] = []): ShotContexts {
+  const all = buildAssetContexts(assets)
+  const extras = extraCharacters.filter(Boolean)
+  const shotNames = shot.characters.map((c) => c.trim()).filter(Boolean)
+  const location = shot.location.trim()
+
+  const hitCharacters = shotNames.length > 0
+    ? assets.characters.filter((a) => shotNames.includes(a.name.trim()))
+    : assets.characters
+  const hitScenes = location
+    ? assets.scenes.filter((a) => a.name.trim() === location)
+    : assets.scenes
+  const hitCharacterTexts = hitCharacters.map(assetText).filter(Boolean)
+  const hitSceneTexts = hitScenes.map(assetText).filter(Boolean)
+
+  return {
+    characters: [...extras, ...(hitCharacterTexts.length > 0 ? hitCharacterTexts : all.characters)],
+    scenes: hitSceneTexts.length > 0 ? hitSceneTexts : all.scenes,
+    characterImages: hitCharacters.map((a) => a.imageUrl).filter(Boolean),
+    sceneImages: hitScenes.map((a) => a.imageUrl).filter(Boolean),
+  }
+}
+
+/** 资产参考图 prompt：名称 + 描述 + 关联镜头剧情（最多 3 条）+ 剧情概述（截断 200 字）+ 风格 */
+export function buildAssetImagePrompt(
+  scriptPanel: CanvasPanel,
+  asset: ShotAsset,
+  kind: 'characters' | 'scenes',
+  label: string,
+): string {
+  const shots = readShots(scriptPanel)
+  const nos = shotNosForAsset(shots, kind, asset.name)
+  const related = shots
+    .filter((s) => nos.includes(s.no))
+    .slice(0, 3)
+    .map((s) => s.description)
+    .filter(Boolean)
+  const story = readString(scriptPanel.content, 'story')
+  const style = readString(scriptPanel.content, 'style')
+  const lines = [`${label}：${asset.name || ''}`.trim(), asset.description.trim()]
+  if (related.length > 0) lines.push(`相关剧情：${related.join('；')}`)
+  if (story) lines.push(`剧情概述：${story.slice(0, 200)}`)
+  if (style) lines.push(`画面风格：${style}`)
+  return lines.filter(Boolean).join('\n')
 }
 
 /** 分镜图 prompt：画面描述 + 景别/运镜 + 风格 + 角色/场景设定 */
@@ -282,23 +376,23 @@ async function deriveImagesInternal(scriptPanel: CanvasPanel, pending: CanvasSho
   const modelsStore = useModelsStore()
   const allShots = readShots(scriptPanel)
 
-  // 上游收集：图片节点=参考图，文本节点=设定；资产卡（角色/场景）参考图与设定一并并入
+  // 上游收集：图片节点=参考图，文本节点=设定；资产卡按镜头命中注入（未标注镜头回退全量）
   const upstreams = getUpstreamNodes(scriptPanel.id, store.panels, store.connections)
   const assets = readAssets(scriptPanel)
-  const refImages = [
-    ...upstreams.filter((p) => p.type === 'image').map((p) => readString(p.content, 'content')),
-    ...assets.characters.map((a) => a.imageUrl),
-    ...assets.scenes.map((a) => a.imageUrl),
-  ].filter(Boolean)
-  const characterTexts = [
-    ...upstreams.filter((p) => p.type === 'text').map((p) => readString(p.content, 'content')),
-    ...buildAssetContexts(assets).characters,
-  ].filter(Boolean)
-  const sceneTexts = buildAssetContexts(assets).scenes
+  const upstreamRefImages = upstreams
+    .filter((p) => p.type === 'image')
+    .map((p) => readString(p.content, 'content'))
+    .filter(Boolean)
+  const upstreamTexts = upstreams
+    .filter((p) => p.type === 'text')
+    .map((p) => readString(p.content, 'content'))
+    .filter(Boolean)
 
-  const mode = refImages.length > 0 ? 'image2image' : 'text2image'
+  // 积分预估：任一素材来源存在即按 image2image 估算（部分镜头可能命中为空，轻微高估可接受）
+  const mayReference = upstreamRefImages.length > 0 ||
+    [...assets.characters, ...assets.scenes].some((a) => a.imageUrl)
   const size = defaultImageSize()
-  const ok = await confirmBatchCost({ type: 'image', mode, size }, pending.length)
+  const ok = await confirmBatchCost({ type: 'image', mode: mayReference ? 'image2image' : 'text2image', size }, pending.length)
   if (!ok) return
 
   store.pushSnapshot()
@@ -309,6 +403,9 @@ async function deriveImagesInternal(scriptPanel: CanvasPanel, pending: CanvasSho
   for (const shot of pending) {
     // 用全量镜头序号布局，保持网格位置稳定
     const idx = allShots.findIndex((s) => s.id === shot.id)
+    const contexts = buildShotContexts(shot, assets, upstreamTexts)
+    const referenceImages = [...upstreamRefImages, ...contexts.characterImages, ...contexts.sceneImages].filter(Boolean)
+    const mode = referenceImages.length > 0 ? 'image2image' : 'text2image'
     const configId = store.addPanel({
       type: 'config',
       name: `#${shot.no} ${scriptPanel.name || ''}`.trim(),
@@ -320,8 +417,8 @@ async function deriveImagesInternal(scriptPanel: CanvasPanel, pending: CanvasSho
         mode,
         model: modelsStore.defaultImageModel,
         size,
-        prompt: buildShotImagePrompt(scriptPanel, shot, { characters: characterTexts, scenes: sceneTexts }),
-        referenceImages: refImages,
+        prompt: buildShotImagePrompt(scriptPanel, shot, contexts),
+        referenceImages,
         lineage: { kind: 'image', scriptPanelId: scriptPanel.id, shotId: shot.id, shotNo: shot.no },
       },
     })

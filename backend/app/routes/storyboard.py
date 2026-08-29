@@ -20,7 +20,7 @@ class StoryboardResponse(BaseModel):
     """统一响应结构"""
     status: str
     message: str
-    data: Optional[dict] = Field(None, description="{ shots: [...] }")
+    data: Optional[dict] = Field(None, description="{ shots: [...], assets: { characters: [...], scenes: [...] } }")
 
 
 @router.post("", response_model=StoryboardResponse, summary="生成分镜脚本")
@@ -28,9 +28,9 @@ async def generate_storyboard(
     req: StoryboardRequest,
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
-    """剧情概述 + 角色设定 → 结构化分镜数组（无状态，不存储）"""
+    """剧情概述 + 角色/场景设定 → 分镜数组 + 全剧资产清单（无状态，不存储）"""
     try:
-        shots = await storyboard_service.generate_storyboard(req)
+        result = await storyboard_service.generate_storyboard(req)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -38,5 +38,8 @@ async def generate_storyboard(
     return StoryboardResponse(
         status="success",
         message="ok",
-        data={"shots": [s.model_dump() for s in shots]},
+        data={
+            "shots": [s.model_dump() for s in result.shots],
+            "assets": result.assets.model_dump(),
+        },
     )

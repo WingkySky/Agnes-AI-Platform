@@ -40,6 +40,8 @@
               <th class="col-duration">{{ t('canvas.script.wizard.colDuration') }}</th>
               <th class="col-size">{{ t('canvas.script.wizard.colSize') }}</th>
               <th class="col-camera">{{ t('canvas.script.wizard.colCamera') }}</th>
+              <th class="col-scene">{{ t('canvas.script.wizard.colScene') }}</th>
+              <th class="col-characters">{{ t('canvas.script.wizard.colCharacters') }}</th>
               <th>{{ t('canvas.script.wizard.colDesc') }}</th>
               <th>{{ t('canvas.script.wizard.colDialogue') }}</th>
               <th class="col-action"></th>
@@ -63,6 +65,12 @@
               </td>
               <td class="col-camera">
                 <input v-model="shot.camera" class="wiz-input" :style="inputStyle" :placeholder="t('canvas.script.cameraPlaceholder')" @input="persistShots">
+              </td>
+              <td class="col-scene">
+                <input v-model="shot.location" class="wiz-input" :style="inputStyle" :placeholder="t('canvas.script.wizard.scenePlaceholder')" @input="persistShots">
+              </td>
+              <td class="col-characters">
+                <input :value="shot.characters.join('，')" class="wiz-input" :style="inputStyle" :placeholder="t('canvas.script.wizard.charactersPlaceholder')" @input="onCharactersInput(shot, $event)">
               </td>
               <td>
                 <textarea v-model="shot.description" rows="2" class="wiz-input" :style="inputStyle" :placeholder="t('canvas.script.descPlaceholder')" @input="persistShots"></textarea>
@@ -124,6 +132,9 @@
                 :placeholder="t('canvas.script.wizard.descPlaceholder')"
                 @input="persistAssets"
               ></textarea>
+              <span v-if="assetShotLabel(section.kind, a.name)" class="asset-shots" :style="mutedStyle">
+                {{ t('canvas.script.wizard.assocShots', { nos: assetShotLabel(section.kind, a.name) }) }}
+              </span>
             </div>
             <button type="button" class="asset-add" :style="addCardStyle" @click="addAsset(section.kind)">+ {{ section.addLabel }}</button>
           </div>
@@ -194,7 +205,7 @@ import { ElMessage } from 'element-plus'
 import { useCanvasStore } from '@/stores/canvas'
 import { useModelsStore } from '@/stores/models'
 import { checkCreditsBeforeGenerate } from '@/lib/canvas-credits'
-import { createGenerationTask, pollImageTask } from '@/lib/canvas-generation'
+import { createGenerationTask, pollImageTask, getUpstreamNodes } from '@/lib/canvas-generation'
 import { getErrorMessage } from '@/lib/type-helpers'
 import {
   deriveStoryboardImages,
@@ -202,8 +213,10 @@ import {
   getDerivedShotIds,
   readAssets,
   readShots,
-  buildAssetContexts,
+  buildAssetImagePrompt,
+  buildShotContexts,
   buildShotImagePrompt,
+  shotNosForAsset,
   type CanvasShot,
   type ScriptAssets,
   type ShotAsset,
@@ -300,8 +313,22 @@ function addShot() {
     camera: '',
     description: '',
     dialogue: '',
+    characters: [],
+    location: '',
   })
   persistShots()
+}
+
+/** 出场角色输入：逗号分隔文本 ↔ 字符串数组 */
+function onCharactersInput(shot: CanvasShot, event: Event) {
+  const raw = (event.target as HTMLInputElement)?.value || ''
+  shot.characters = raw.split(/[，,]/).map((s) => s.trim()).filter(Boolean)
+  persistShots()
+}
+
+/** 资产卡在分镜中的出场镜头标签（"#1、#3"，无关联返回空） */
+function assetShotLabel(kind: 'characters' | 'scenes', name: string): string {
+  return shotNosForAsset(shots.value, kind, name).map((n) => `#${n}`).join('、')
 }
 
 function removeShot(idx: number) {
@@ -335,10 +362,8 @@ async function generateAssetImage(asset: ShotAsset, kind: 'characters' | 'scenes
   generatingAssets.value = new Set([...generatingAssets.value, asset.id])
   try {
     const label = kind === 'characters' ? t('canvas.script.wizard.characterLabel') : t('canvas.script.wizard.sceneLabel')
-    const lines = [`${label}：${asset.name || ''}`.trim(), asset.description.trim()]
-    if (style.value.trim()) lines.push(`画面风格：${style.value.trim()}`)
     const ctx = {
-      prompt: lines.filter(Boolean).join('\n'),
+      prompt: buildAssetImagePrompt(panel.value!, asset, kind, label),
       referenceImages: [] as string[],
       referenceTexts: [] as string[],
       inputSummary: { textCount: 0, imageCount: 0, videoCount: 0, total: 0 },
@@ -407,14 +432,17 @@ const shotStatus = computed(() =>
     : { image: new Set<string>(), video: new Set<string>() },
 )
 
-/** 各镜头最终提示词（画面描述 + 景别/运镜 + 风格 + 角色/场景设定） */
+/** 各镜头最终提示词（画面描述 + 景别/运镜 + 风格 + 按镜头命中的角色/场景设定，与实际派生一致） */
 const shotPrompts = computed(() => {
-  const contexts = buildAssetContexts(assets.value)
   const map = new Map<string, string>()
-  if (panel.value) {
-    for (const shot of shots.value) {
-      map.set(shot.id, buildShotImagePrompt(panel.value, shot, contexts))
-    }
+  if (!panel.value) return map
+  const upstreams = getUpstreamNodes(panel.value.id, store.panels, store.connections)
+  const upstreamTexts = upstreams
+    .filter((p) => p.type === 'text')
+    .map((p) => (typeof p.content?.content === 'string' ? p.content.content : ''))
+  for (const shot of shots.value) {
+    const contexts = buildShotContexts(shot, assets.value, upstreamTexts)
+    map.set(shot.id, buildShotImagePrompt(panel.value, shot, contexts))
   }
   return map
 })
@@ -641,7 +669,13 @@ function stepTitleStyle(s: { no: number }) {
   width: 96px;
 }
 .shot-table .col-camera {
-  width: 160px;
+  width: 140px;
+}
+.shot-table .col-scene {
+  width: 110px;
+}
+.shot-table .col-characters {
+  width: 140px;
 }
 .shot-table .col-action {
   width: 36px;
@@ -760,6 +794,10 @@ function stepTitleStyle(s: { no: number }) {
 }
 .asset-desc {
   resize: none;
+}
+.asset-shots {
+  font-size: 11px;
+  line-height: 1.4;
 }
 .asset-add {
   min-height: 160px;

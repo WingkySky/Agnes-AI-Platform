@@ -143,7 +143,7 @@ import {
   executeImageReferenceGeneration,
   executeVideoFromFrameGeneration,
 } from '@/lib/canvas-generation'
-import { readShots } from '@/lib/canvas-storyboard'
+import { mergeExtractedAssets, readAssets, readShots } from '@/lib/canvas-storyboard'
 import { checkCreditsBeforeGenerate } from '@/lib/canvas-credits'
 import { useNodeMention } from '@/composables/useNodeMention'
 
@@ -333,16 +333,27 @@ async function sendScript() {
   busy.value = true
   try {
     persistText()
-    // 上游图片节点 = 角色参考图，上游文本节点 = 角色设定
+    // 上游图片节点 = 角色参考图，上游文本节点 = 角色设定；已有资产卡一并回传（反向通道，分镜沿用已有设定）
     const upstreamNodes = getUpstreamNodes(panel.value.id, store.panels, store.connections)
-    const characters = upstreamNodes.map((p) => {
-      const content = typeof p.content?.content === 'string' ? p.content.content : ''
-      if (p.type === 'image') return { name: p.name || '', description: '', ref_image_url: content }
-      return { name: p.name || '', description: content, ref_image_url: null }
+    const assets = readAssets(panel.value)
+    const toSetting = (a: { name: string; description: string; imageUrl: string }) => ({
+      name: a.name,
+      description: a.description,
+      ref_image_url: a.imageUrl || null,
     })
+    const characters = [
+      ...upstreamNodes.map((p) => {
+        const content = typeof p.content?.content === 'string' ? p.content.content : ''
+        if (p.type === 'image') return { name: p.name || '', description: '', ref_image_url: content }
+        return { name: p.name || '', description: content, ref_image_url: null }
+      }),
+      ...assets.characters.filter((a) => a.name.trim()).map(toSetting),
+    ]
+    const scenes = assets.scenes.filter((a) => a.name.trim()).map(toSetting)
     const resp = await generateStoryboard({
       story: text.value.trim(),
       characters,
+      scenes,
       shot_count_min: scriptShotMin.value,
       shot_count_max: scriptShotMax.value,
       style: scriptStyle.value.trim() || undefined,
@@ -355,8 +366,13 @@ async function sendScript() {
       camera: s.camera || '',
       description: s.description || '',
       dialogue: s.dialogue || '',
+      characters: Array.isArray(s.characters) ? s.characters : [],
+      location: typeof s.location === 'string' ? s.location : '',
     }))
     updateContent({ shots: JSON.parse(JSON.stringify(shots)) })
+    // LLM 提取的资产清单按名去重预填资产卡（不覆盖已有卡）
+    const merged = mergeExtractedAssets(readAssets(panel.value!), resp.data?.assets)
+    if (merged) updateContent({ assets: JSON.parse(JSON.stringify(merged)) })
     // 已有分镜数量变化时清空旧的派生标记由向导处理；这里唤起向导进入确认镜头
     if (readShots(panel.value!).length > 0) {
       store.openScriptWizardId = panel.value!.id
