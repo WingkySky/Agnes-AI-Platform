@@ -14,12 +14,13 @@
 #   - 旁白（无角色）使用 default_narrator
 #
 # 可插拔 TTS provider:
-#   - _call_tts_provider 先抛 NotImplementedError
-#   - 后续接入 Agnes 自有 TTS 或第三方（阿里云 / 字节火山 / Edge TTS）
+#   - _call_tts_provider 当前实现为 Edge TTS（免费直连，经 edge_tts 包）
+#   - 后续可接入 Agnes 自有 TTS 或第三方（阿里云 / 字节火山 / ElevenLabs）
 # =====================================================
 
 import asyncio
 import logging
+import os
 from typing import Optional, List
 
 from sqlalchemy import select, update, func
@@ -33,6 +34,7 @@ from app.models.project import (
     ProjectCharacterVoice,
 )
 from app.services.project.sse_manager import project_sse_manager
+from app.services.upload_service import UPLOADS_DIR, save_audio_bytes
 
 logger = logging.getLogger("agnes_platform.project.audio")
 
@@ -142,32 +144,91 @@ async def _resolve_voice_for_shot(
 
 
 # =====================================================
-# TTS provider 调用（可插拔）
+# TTS provider 调用（Edge TTS 实现）
 # =====================================================
+
+# 内置音色 → Edge TTS 实际音色名映射（经 list_voices 实测，集中在此外可调）
+EDGE_VOICE_MAP = {
+    "narrator_male_zh":   "zh-CN-YunxiNeural",     # 阳光男声
+    "narrator_female_zh": "zh-CN-XiaoxiaoNeural",  # 标准女声
+    "young_male_zh":      "zh-CN-YunjianNeural",   # 年轻有力男声
+    "young_female_zh":    "zh-CN-XiaoyiNeural",    # 年轻女声
+    "mature_male_zh":     "zh-CN-YunyangNeural",   # 沉稳新闻男声
+    "mature_female_zh":   "zh-CN-XiaoxiaoNeural",  # 暂无成熟女声音色，回落标准女声
+    "child_zh":           "zh-CN-YunxiaNeural",    # 少年音（最接近童声）
+    "elder_zh":           "zh-CN-YunyangNeural",   # 暂无老年音色，回落沉稳男声
+}
+
+
+def _resolve_edge_voice(voice_id: str) -> str:
+    """内置音色 → Edge TTS 音色名；已是 Edge 音色名（含 Neural）直接透传"""
+    if "Neural" in voice_id:
+        return voice_id
+    return EDGE_VOICE_MAP.get(voice_id, "zh-CN-YunxiNeural")
+
+
+async def _probe_duration_ms(file_path: str) -> Optional[int]:
+    """ffprobe 探测音频时长（毫秒），失败返回 None 不阻塞入库"""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", file_path,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        out, _ = await proc.communicate()
+        return int(float(out.decode().strip()) * 1000)
+    except Exception as e:
+        logger.warning("[TTS] ffprobe 时长探测失败: %s", e)
+        return None
+
 
 async def _call_tts_provider(
     text: str,
     voice_id: str,
     model: Optional[str] = None,
     provider: Optional[str] = None,
+    save_folder: Optional[str] = None,
 ) -> tuple:
     """
     调用 TTS provider 生成音频
 
-    可插拔策略:
-    1. 若 provider 显式指定，走 provider_registry 路由
-    2. 否则尝试 agnes_client.create_tts_task
-    3. 若 Agnes 不支持 TTS，抛出明确错误提示
+    当前实现：Edge TTS（免费、无需 API Key，经 edge_tts 包直连，
+    aibridge 的 speech 封装握手 403 不可用）。音频落盘到 uploads
+    目录，返回可访问 URL。
 
     返回: (audio_url, duration_ms, file_size)
     """
-    # TODO: 实现 1 — 通过 provider_registry 路由到支持 TTS 的 provider
-    # TODO: 实现 2 — 调用 agnes_client.create_tts_task
-    # 临时实现：抛出明确错误，提示需要配置 TTS provider
-    raise NotImplementedError(
-        "TTS provider 未配置。请在 provider_registry 中配置支持 TTS 的 provider，"
-        "或在 agnes_client 中实现 create_tts_task 方法。"
+    try:
+        import edge_tts
+    except ImportError as e:
+        raise RuntimeError("edge_tts 未安装，无法进行 TTS 合成（pip install edge-tts）") from e
+
+    edge_voice = _resolve_edge_voice(voice_id)
+    communicate = edge_tts.Communicate(text, edge_voice)
+    chunks: List[bytes] = []
+    try:
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                chunks.append(chunk["data"])
+    except Exception as e:
+        raise RuntimeError(f"Edge TTS 合成失败: {e}") from e
+
+    audio_data = b"".join(chunks)
+    if not audio_data:
+        raise RuntimeError("Edge TTS 未返回音频数据")
+
+    audio_url = await save_audio_bytes(
+        audio_data,
+        folder=save_folder or "projects/tts",
+        ext=".mp3",
     )
+    file_path = os.path.join(UPLOADS_DIR, audio_url.removeprefix("/uploads/"))
+    duration_ms = await _probe_duration_ms(file_path)
+    logger.info(
+        "[TTS] Edge TTS 合成完成: voice=%s bytes=%s duration=%sms url=%s",
+        edge_voice, len(audio_data), duration_ms, audio_url,
+    )
+    return audio_url, duration_ms, len(audio_data)
 
 
 # =====================================================
@@ -220,6 +281,7 @@ async def generate_audio(
         voice_id=voice_id,
         model=model,
         provider=provider,
+        save_folder=f"projects/{shot.project_id}/shots/{shot.id}/audios",
     )
 
     # 创建新版本记录
@@ -234,7 +296,7 @@ async def generate_audio(
         voice_id=voice_id,
         voice_name=voice_name,
         character_id=resolved_char_id,
-        provider=provider or "agnes",
+        provider=provider or "edge-tts",
         model=model,
         duration_ms=duration_ms,
         file_size=file_size,

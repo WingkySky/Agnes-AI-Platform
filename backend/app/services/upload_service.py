@@ -102,6 +102,36 @@ async def save_upload_file(
     return url
 
 
+async def save_audio_bytes(
+    content: bytes,
+    folder: str = "projects",
+    ext: str = ".mp3",
+) -> str:
+    """
+    保存服务端生成的音频字节（如 TTS 产物）到 uploads 目录
+
+    Returns:
+        可访问的 URL（/uploads/<folder>/<filename>）
+    """
+    if not content:
+        raise HTTPException(status_code=400, detail="音频内容为空")
+    if len(content) > MAX_FILE_BYTES:
+        raise HTTPException(status_code=400, detail=f"音频文件过大，最大 {MAX_FILE_BYTES // 1024 // 1024}MB")
+
+    target_dir = os.path.join(UPLOADS_DIR, folder)
+    os.makedirs(target_dir, exist_ok=True)
+
+    import secrets
+    filename = f"{int(time.time())}_{secrets.token_hex(4)}{ext}"
+    filepath = os.path.join(target_dir, filename)
+    with open(filepath, "wb") as f:
+        f.write(content)
+
+    url = f"/uploads/{folder}/{filename}"
+    logger.info(f"[音频落盘] 保存到 {filepath}, url={url}")
+    return url
+
+
 async def save_image_upload(file: UploadFile, folder: str = "projects") -> str:
     """仅允许图片的上传快捷函数"""
     return await save_upload_file(
