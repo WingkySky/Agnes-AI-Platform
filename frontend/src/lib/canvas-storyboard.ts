@@ -48,7 +48,7 @@ export interface ScriptAssets {
   scenes: ShotAsset[]
 }
 
-/** 派生节点出处（存于 config 节点 content.lineage） */
+/** 派生节点出处（存于派生出的节点自身 content.lineage：分镜图为直出 image 节点，视频为 config 节点） */
 export interface ShotLineage {
   kind: 'image' | 'video'
   scriptPanelId: string
@@ -259,12 +259,19 @@ export function buildShotVideoPrompt(shot: CanvasShot): string {
 
 /* ---------- 派生节点查找 ---------- */
 
-/** 某脚本节点指定 kind 的全部派生 config 节点 */
-function findDerivedConfigs(scriptPanelId: string, kind: 'image' | 'video'): Array<{ panel: CanvasPanel; lineage: ShotLineage }> {
+/**
+ * 某脚本节点指定 kind 的全部派生节点（自身带 lineage）
+ * - image：直出的分镜图节点（type === 'image'）与存量/手搭场景的 config 派生节点并存，两者都识别
+ * - video：config 节点（本期视频派生仍走 config，第二阶段再变）
+ */
+function findDerivedPanels(scriptPanelId: string, kind: 'image' | 'video'): Array<{ panel: CanvasPanel; lineage: ShotLineage }> {
   const store = useCanvasStore()
   const result: Array<{ panel: CanvasPanel; lineage: ShotLineage }> = []
   for (const p of store.panels) {
-    if (p.type !== 'config') continue
+    const matches = kind === 'image'
+      ? p.type === 'image' || p.type === 'config'
+      : p.type === 'config'
+    if (!matches) continue
     const lineage = readLineage(p)
     if (lineage && lineage.scriptPanelId === scriptPanelId && lineage.kind === kind) {
       result.push({ panel: p, lineage })
@@ -273,16 +280,16 @@ function findDerivedConfigs(scriptPanelId: string, kind: 'image' | 'video'): Arr
   return result
 }
 
-/** 某脚本节点是否已有指定 kind 的派生 config 节点 */
+/** 某脚本节点是否已有指定 kind 的派生节点 */
 export function hasDerivedConfigs(scriptPanelId: string, kind: 'image' | 'video'): boolean {
-  return findDerivedConfigs(scriptPanelId, kind).length > 0
+  return findDerivedPanels(scriptPanelId, kind).length > 0
 }
 
 /** 某脚本节点各镜头的派生状态（shotId -> 是否已派生分镜图/视频，供面板状态点显示） */
 export function getDerivedShotIds(scriptPanelId: string): { image: Set<string>; video: Set<string> } {
   return {
-    image: new Set(findDerivedConfigs(scriptPanelId, 'image').map((d) => d.lineage.shotId)),
-    video: new Set(findDerivedConfigs(scriptPanelId, 'video').map((d) => d.lineage.shotId)),
+    image: new Set(findDerivedPanels(scriptPanelId, 'image').map((d) => d.lineage.shotId)),
+    video: new Set(findDerivedPanels(scriptPanelId, 'video').map((d) => d.lineage.shotId)),
   }
 }
 
@@ -294,9 +301,20 @@ function findResultNode(configPanelId: string, type: 'image' | 'video'): CanvasP
   ) || null
 }
 
-/** 结果节点 -> 来源 config 的 lineage 信息（供工具栏/视图识别分镜派生节点） */
-export function getShotLineageInfo(panel: { content?: Record<string, unknown> }): { configPanel: CanvasPanel; lineage: ShotLineage } | null {
+/**
+ * 节点 -> 其分镜 lineage 信息（供工具栏/视图识别分镜派生节点）
+ * - 直出节点（分镜图/视频自身带 lineage）：configPanel 即节点自身
+ * - 其余：按 content.sourceFrom 反查来源 config 节点
+ */
+export function getShotLineageInfo(
+  panel: { id?: string; content?: Record<string, unknown> },
+): { configPanel: CanvasPanel; lineage: ShotLineage } | null {
   const store = useCanvasStore()
+  const own = readLineage(panel)
+  if (own) {
+    const self = panel.id ? store.panels.find((p) => p.id === panel.id) : undefined
+    return self ? { configPanel: self, lineage: own } : null
+  }
   const sourceFrom = panel.content?.sourceFrom
   if (typeof sourceFrom !== 'string') return null
   const configPanel = store.panels.find((p) => p.id === sourceFrom)
@@ -440,7 +458,7 @@ export async function deriveStoryboardImages(scriptPanel: CanvasPanel): Promise<
     ElMessage.warning(t('canvas.messages.shotsEmpty'))
     return
   }
-  const derivedShotIds = new Set(findDerivedConfigs(scriptPanel.id, 'image').map((d) => d.lineage.shotId))
+  const derivedShotIds = new Set(findDerivedPanels(scriptPanel.id, 'image').map((d) => d.lineage.shotId))
   const pending = shots.filter((s) => !derivedShotIds.has(s.id))
   if (pending.length === 0) {
     ElMessage.info(t('canvas.messages.batchAllDerived'))
@@ -452,7 +470,7 @@ export async function deriveStoryboardImages(scriptPanel: CanvasPanel): Promise<
 /** 单镜头派生分镜图（脚本面板内逐镜头生成，已派生时提示跳过） */
 export async function deriveImageForShot(scriptPanel: CanvasPanel, shot: CanvasShot): Promise<void> {
   const { t } = useI18n()
-  if (findDerivedConfigs(scriptPanel.id, 'image').some((d) => d.lineage.shotId === shot.id)) {
+  if (findDerivedPanels(scriptPanel.id, 'image').some((d) => d.lineage.shotId === shot.id)) {
     ElMessage.info(t('canvas.messages.batchAllDerived'))
     return
   }
@@ -470,8 +488,8 @@ export async function deriveStoryboardVideos(scriptPanel: CanvasPanel): Promise<
     return
   }
 
-  const videoShotIds = new Set(findDerivedConfigs(scriptPanel.id, 'video').map((d) => d.lineage.shotId))
-  const derivedImages = findDerivedConfigs(scriptPanel.id, 'image')
+  const videoShotIds = new Set(findDerivedPanels(scriptPanel.id, 'video').map((d) => d.lineage.shotId))
+  const derivedImages = findDerivedPanels(scriptPanel.id, 'image')
 
   // 只处理"已有成功分镜图"且未派生过视频的镜头
   const items: Array<{ shot: CanvasShot; imgConfig: CanvasPanel; imageNodeId: string }> = []

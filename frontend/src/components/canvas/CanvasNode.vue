@@ -77,22 +77,11 @@
           </div>
         </div>
 
-        <!-- 图片节点：空状态 / 有图显示图片 -->
+        <!-- 图片节点：有图显示图片 / 生成本体（有 prompt 展示提示词）/ 空状态 -->
         <div v-else-if="panel.type === 'image'" class="image-content">
-          <!-- 空状态：Image 图标 + "空图片节点" -->
-          <div
-            v-if="!hasImageContent"
-            class="empty-state"
-            :style="{ color: theme.node.placeholder }"
-          >
-            <div class="empty-icon" :style="{ background: theme.toolbar.activeBg }">
-              <ImageIcon :size="24" />
-            </div>
-            <span class="empty-text">{{ t('canvas.node.emptyImage') }}</span>
-          </div>
           <!-- 有图：显示图片（object-contain） -->
           <ImageWithWatermark
-            v-else
+            v-if="hasImageContent"
             :src="metadata.content"
             :alt="panel.title || ''"
             :img-class="['image-img', { 'object-fill': metadata.freeResize }]"
@@ -101,6 +90,25 @@
             @dragstart.prevent
             @load="onImageLoad"
           />
+          <!-- 生成本体：无图但有提示词时展示提示词（截断显示，title 看全量） -->
+          <div
+            v-else-if="nodePrompt"
+            class="image-prompt"
+            :style="{ color: theme.node.text }"
+          >
+            <span class="image-prompt-text" :title="nodePrompt">{{ nodePrompt }}</span>
+          </div>
+          <!-- 空状态：Image 图标 + "空图片节点" -->
+          <div
+            v-else
+            class="empty-state"
+            :style="{ color: theme.node.placeholder }"
+          >
+            <div class="empty-icon" :style="{ background: theme.toolbar.activeBg }">
+              <ImageIcon :size="24" />
+            </div>
+            <span class="empty-text">{{ t('canvas.node.emptyImage') }}</span>
+          </div>
         </div>
 
         <!-- 视频节点：空状态 / 有视频显示播放器 -->
@@ -427,9 +435,15 @@ const resizeCorners = [
 /** 节点元数据（统一访问 panel.content） */
 const metadata = computed(() => props.panel.content || {})
 
-/** 是否有图片内容 */
+/** 是否有图片内容（生成中视为有内容，避免 loading 骨架之外再渲染空态） */
 const hasImageContent = computed(
-  () => props.panel.type === 'image' && Boolean(metadata.value.content),
+  () => props.panel.type === 'image'
+    && (Boolean(metadata.value.content) || metadata.value.status === 'loading'),
+)
+
+/** 图片节点内嵌提示词（生成本体形态：无结果图时展示在节点内） */
+const nodePrompt = computed(
+  () => (props.panel.type === 'image' ? nodeStr(metadata.value.prompt) : ''),
 )
 
 /** 是否有视频内容 */
@@ -544,7 +558,12 @@ const shotBadge = computed<string | null>(() => {
     const lineage = readLineage(props.panel)
     return lineage ? t('canvas.node.shotBadge', { no: lineage.shotNo }) : null
   }
-  if (props.panel.type === 'image' || props.panel.type === 'video') {
+  // 分镜图为直出 image 节点，lineage 挂在自身
+  if (props.panel.type === 'image') {
+    const lineage = readLineage(props.panel)
+    return lineage ? t('canvas.node.shotBadge', { no: lineage.shotNo }) : null
+  }
+  if (props.panel.type === 'video') {
     const info = getShotLineageInfo(props.panel)
     return info ? t('canvas.node.shotBadge', { no: info.lineage.shotNo }) : null
   }
@@ -1135,6 +1154,31 @@ onUnmounted(() => {
 
 .image-img.object-fill {
   object-fit: fill;
+}
+
+/* ===== 图片节点：生成本体的内嵌提示词（不撑破节点） ===== */
+.image-prompt {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+  height: 100%;
+  padding: 14px 16px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.image-prompt-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  line-clamp: 5;
+  overflow: hidden;
+  max-height: 100%;
+  font-size: 11px;
+  line-height: 1.6;
+  letter-spacing: 0.01em;
+  word-break: break-word;
+  opacity: 0.75;
 }
 
 /* ===== 视频节点 ===== */

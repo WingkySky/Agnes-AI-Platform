@@ -1028,15 +1028,17 @@ export const useCanvasStore = defineStore('canvas', {
       this.selectedPanelId = null
     },
 
-    /** 复制单个面板（向右下偏移 20 像素） */
+    /** 复制单个面板（向右下偏移 20 像素；副本不带 lineage，避免同一 shotId 出现两个节点） */
     duplicatePanel(id: string): string | undefined {
       const orig = this.panels.find((p) => p.id === id)
       if (!orig) return
+      const content: Record<string, unknown> = JSON.parse(JSON.stringify(orig.content ?? {}))
+      delete content.lineage
       return this.addPanel({
         ...orig,
         x: orig.x + 20,
         y: orig.y + 20,
-        content: JSON.parse(JSON.stringify(orig.content ?? {})),
+        content,
       })
     },
 
@@ -1050,6 +1052,9 @@ export const useCanvasStore = defineStore('canvas', {
       const newIds: string[] = []
       for (let i = 0; i < origs.length; i++) {
         const orig = origs[i]
+        // 副本不带 lineage，避免同一 shotId 在画布上出现两个节点
+        const content: Record<string, unknown> = JSON.parse(JSON.stringify(orig.content ?? {}))
+        delete content.lineage
         const newPanel: CanvasPanel = {
           ...orig,
           id: uid(),
@@ -1057,7 +1062,7 @@ export const useCanvasStore = defineStore('canvas', {
           x: orig.x + 20,
           y: orig.y + 20,
           zIndex: maxZ + i + 1,
-          content: JSON.parse(JSON.stringify(orig.content ?? {})),
+          content,
           created_at: now,
           updated_at: now,
         }

@@ -779,6 +779,83 @@ export async function executeMergeGeneration(configId: string, store: CanvasGene
   return newNodeId
 }
 
+/**
+ * 执行就地生成（分镜直出节点：结果回填节点自身，不新建结果节点、不加 config 连线）
+ * 1. 读取节点上的模型/尺寸参数，取 content.prompt 与 content.referenceImages 作为生成上下文
+ * 2. 节点置 loading -> 建任务 + 注册队列（panelId 为节点自身，便于队列定位）-> 轮询 -> 回填
+ *
+ * @returns 节点自身 ID（loading 状态）
+ */
+export async function executeInNodeGeneration(
+  panel: CanvasPanel,
+  store: CanvasGenerationStore,
+  options: GenerationOptions = {},
+): Promise<string> {
+  const { onProgress } = options
+  const queueStore = useTaskQueueStore()
+  const prefsStore = usePreferencesStore()
+
+  const prompt = typeof panel.content?.prompt === 'string' ? panel.content.prompt.trim() : ''
+  if (!prompt) {
+    throw new Error('提示词为空，请在节点上填写 prompt')
+  }
+  const referenceImages = Array.isArray(panel.content?.referenceImages)
+    ? panel.content.referenceImages.filter((u): u is string => typeof u === 'string')
+    : []
+  const ctx: GenerationContext = {
+    prompt,
+    referenceImages,
+    referenceTexts: [],
+    inputSummary: { textCount: 0, imageCount: referenceImages.length, videoCount: 0, total: referenceImages.length },
+  }
+  const params = readPanelGenParams(panel, 'image')
+  const config: GenerationConfig = { model: params.model, size: normalizeSize(params.size), response_format: 'url' }
+
+  // 置 loading：此处只写状态字段，不传 referenceImages 数组（deepMerge 会把数组转成索引对象）
+  store.updatePanel(panel.id, { content: { status: 'loading', errorDetails: null } })
+
+  const run = async (): Promise<void> => {
+    try {
+      if (onProgress) onProgress('creating', { index: 0, total: 1 })
+
+      const taskResp = await createGenerationTask(ctx, config, buildCanvasContext(panel, store))
+      const taskId = taskResp.task_id
+
+      queueStore.registerCanvasTask({
+        taskId,
+        type: 'image',
+        prompt,
+        backendTaskId: taskId,
+        panelId: panel.id,
+      })
+
+      if (onProgress) onProgress('polling', { index: 0, taskId })
+
+      const result = await pollImageTask(taskId, (status, data) => {
+        if (onProgress) onProgress('generating', { index: 0, status, progress: data.progress })
+      })
+
+      store.updatePanel(panel.id, { content: { content: result.resultUrl, status: 'success' } })
+      store.pushSnapshot()
+      if (onProgress) onProgress('done', { resultNodeIds: [panel.id] })
+      prefsStore.autoDownload(result.resultUrl, 'image', { modelId: config.model })
+      prefsStore.notifyComplete('image', { prompt, modelId: config.model })
+    } catch (err) {
+      const errMsg = getErrorMessage(err) || '生成失败'
+      store.updatePanel(panel.id, { content: { status: 'error', errorDetails: errMsg } })
+      if (onProgress) onProgress('error', { resultNodeIds: [panel.id], error: errMsg })
+    }
+  }
+
+  if (options.waitFor) {
+    await run()
+  } else {
+    void run()
+  }
+
+  return panel.id
+}
+
 // ---------- 节点生成参数读写 ----------
 
 function readContentString(content: Record<string, unknown>, key: string, fallback: string): string {
