@@ -56,3 +56,6 @@ backend/test_data/
 
 # TypeScript 增量编译缓存
 *.tsbuildinfo
+
+#pytest
+pytest_cache/
