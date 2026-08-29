@@ -34,6 +34,12 @@
   - 审核逻辑下沉至 `moderation_service.run_async_asset_moderation` 共用（资产分享与历史分享统一走敏感词 + AI 预审管道）
   - 广场新增「创作」Tab（M4）：`GET /api/plaza/creations` 返回已公开且审核通过的资产，支持 `asset_type` / `kind` / `sort(latest|popular)` 筛选与分页；复用 `asset_likes` 表新增 `POST/DELETE /api/plaza/creations/{id}/like` 点赞/取消与 `GET /api/plaza/creations/likes/status` 批量状态查询；`GET /api/plaza/creations/{id}` 详情浏览量自增；前端 `PlazaView` 增加作品/创作双 Tab、类型标签、点赞按钮与创作详情弹窗
   - 资产「用于生成」闭环（M5）：`POST /api/pipeline/assets/{id}/use` 记录使用并递增 `use_count`；资产卡「用于生成」写入 Pinia `pendingUse`，跳转生图/视频页在 `onMounted` 预填参考图/视频并调用 use 接口；替换「功能开发中」占位文案并补充 i18n（zh-CN / en-US）
+  - 生成配置下放 Phase A（设计文档 `docs/superpowers/specs/2026-08-29-generation-config-downshift-design.md`）：模型与参数选择从硬编码/默认值下沉到每个生成入口
+    - 默认值链统一：`modelsStore.getDefaultModel(type)` 优先级为偏好 `generation.default_model_id`（校验存在且类型匹配）> 该类型列表第一个；`defaultImageModel` / `defaultVideoModel` 改为其封装，全链路消费方零改动即获得偏好感知
+    - 新增 `ComposerParamBar`：复用 `ParamSelector` 的选项逻辑，只做驼峰↔蛇形字段适配与 content 持久化（支持 `contentKey` 分区）；image / video / config 三类节点 Composer 接入，config 节点原生 select 整体替换后字段名与读写路径不变，`executeMerge*` 零改动
+    - script 节点新增分镜聊天模型选择（存 `content.chat_model`）；`POST /api/storyboard` 新增可选 `model`，命中 chat 模型注册表时使用指定模型，未传或未命中回退第一个 chat 模型
+    - 剧本向导步骤② 新增资产图参数栏、步骤③ 新增分镜图/分镜视频批量参数区，按 `asset_image_params` / `shot_image_params` / `shot_video_params` 分区持久化到 script 节点；批量派生与单镜头重拍改为同源读取，视频时长优先级为参数栏显式选择 > 镜头表格时长，视频 `aspect_ratio` / `resolution` / `frame_rate` 不再硬编码
+    - 手工验证清单见 `docs/superpowers/specs/2026-08-29-phase-a-smoke-checklist.md`
 
 ### 修复（归档功能验收问题）
 - 分享审核闭环断裂：资产分享后无人复审则永远无法上广场——统一审核后台（列表/通过/驳回/统计/批量）新增 `asset` 类型，`UnifiedReview` 增加资产 Tab 与图片/视频预览
