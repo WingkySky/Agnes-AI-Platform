@@ -140,19 +140,18 @@ P0 主链路（commit 4ce3db1）已实现 script 节点→批量分镜→批量�
 
 新增：`colCharacters`（出场角色）、`colScene`（场景）、`charactersPlaceholder`（多个角色用逗号分隔）、`scenePlaceholder`、`assocShots`（出现镜头）。
 
-### 4.4 资产参考图 prompt 带剧情上下文
+### 4.4 资产参考图：纯设定图 prompt
 
-`canvas-storyboard.ts` 新增导出 `buildAssetImagePrompt(panel, asset, kind)`（替换 `ScriptWizardDialog.vue:337-339` 的内联三行拼装）：
+`canvas-storyboard.ts` 导出 `buildAssetImagePrompt(panel, asset, kind, label)`（替换 `ScriptWizardDialog.vue` 的内联三行拼装）：
 
 ```
 {角色设定图|场景设定图}：{name}
 {description}
-相关剧情：{该资产关联镜头的 description，最多 3 条，逗号拼接}
-剧情概述：{content.story 截断 200 字}
+{纯粹性约束：角色=单人全身立绘/正面标准站姿/纯色简洁背景/画面只有这一个角色；场景=空场景环境全景/无人物}
 画面风格：{style}
 ```
 
-关联镜头通过 `shotNosForAsset` 同源逻辑（kind=characters 按 `shot.characters` 含 name，kind=scenes 按 `shot.location` 等于 name）取描述；无关联时省略"相关剧情"行。`generateAssetImage` 改调此函数，其余生成/轮询流程不变。
+**不注入剧情**（相关镜头描述、剧情概述一律不进参考图 prompt）。实测教训：把镜头描述注入参考图 prompt 会导致提示词污染——角色图混入其他角色与战斗背景、场景图混入人物。参考图必须是纯设定图（角色单人立绘 / 场景空镜），才能在后续 image2image 分镜派生中作为干净的底图；剧情上下文只通过 §4.5 的分镜图 prompt 注入。资产与镜头的关联（`shotNosForAsset`）仅用于向导"出现镜头"提示，不进生图 prompt。
 
 ### 4.5 分镜图派生：按镜头命中注入设定与参考图
 

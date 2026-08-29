@@ -217,25 +217,18 @@ export function buildShotContexts(shot: CanvasShot, assets: ScriptAssets, extraC
   }
 }
 
-/** 资产参考图 prompt：名称 + 描述 + 关联镜头剧情（最多 3 条）+ 剧情概述（截断 200 字）+ 风格 */
+/** 资产参考图 prompt：纯设定图——角色单人立绘、场景空镜无人物（不注入剧情，避免把其他角色/动作污染进参考图） */
 export function buildAssetImagePrompt(
   scriptPanel: CanvasPanel,
   asset: ShotAsset,
   kind: 'characters' | 'scenes',
   label: string,
 ): string {
-  const shots = readShots(scriptPanel)
-  const nos = shotNosForAsset(shots, kind, asset.name)
-  const related = shots
-    .filter((s) => nos.includes(s.no))
-    .slice(0, 3)
-    .map((s) => s.description)
-    .filter(Boolean)
-  const story = readString(scriptPanel.content, 'story')
   const style = readString(scriptPanel.content, 'style')
-  const lines = [`${label}：${asset.name || ''}`.trim(), asset.description.trim()]
-  if (related.length > 0) lines.push(`相关剧情：${related.join('；')}`)
-  if (story) lines.push(`剧情概述：${story.slice(0, 200)}`)
+  const purity = kind === 'characters'
+    ? '单人全身立绘，正面标准站姿，纯色简洁背景，画面中只有这一个角色，无其他人物，无文字'
+    : '空场景环境全景，画面中无人物出现，无文字'
+  const lines = [`${label}：${asset.name || ''}`.trim(), asset.description.trim(), purity]
   if (style) lines.push(`画面风格：${style}`)
   return lines.filter(Boolean).join('\n')
 }
