@@ -149,18 +149,43 @@
         <input ref="fileInputRef" type="file" accept="image/*" class="wiz-file" @change="handleFileSelect">
       </div>
 
-      <!-- 步骤3：批量生成（最终提示词预览 + 批量派生） -->
+      <!-- 步骤3：批量生成（最终提示词预览 + 分镜图结果关联 + 批量派生） -->
       <div v-else class="wizard-body">
         <div class="gen-list">
-          <div v-for="shot in shots" :key="shot.id" class="gen-row" :style="cardStyle">
-            <div class="gen-row-head">
-              <span class="gen-no" :style="badgeStyle">#{{ shot.no }}</span>
-              <span class="gen-status" :class="{ ready: shotStatus.image.has(shot.id) }">
-                {{ shotStatus.image.has(shot.id) ? t('canvas.script.wizard.shotReady') : t('canvas.script.wizard.shotPending') }}
-              </span>
-              <span class="gen-duration" :style="mutedStyle">{{ shot.duration }}s</span>
+          <div v-for="row in genRows" :key="row.shot.id" class="gen-row" :style="cardStyle">
+            <div class="gen-info">
+              <div class="gen-row-head">
+                <span class="gen-no" :style="badgeStyle">#{{ row.shot.no }}</span>
+                <span class="gen-status" :class="{ ready: shotStatus.image.has(row.shot.id) }">
+                  {{ shotStatus.image.has(row.shot.id) ? t('canvas.script.wizard.shotReady') : t('canvas.script.wizard.shotPending') }}
+                </span>
+                <span v-if="row.promptEdited" class="gen-edited">{{ t('canvas.script.wizard.promptEdited') }}</span>
+                <span class="gen-duration" :style="mutedStyle">{{ row.shot.duration }}s</span>
+              </div>
+              <div class="gen-prompt" :style="mutedStyle">{{ row.prompt }}</div>
             </div>
-            <div class="gen-prompt" :style="mutedStyle">{{ shotPrompts.get(shot.id) || '—' }}</div>
+            <div class="gen-media">
+              <div v-if="row.imagePanel" class="gen-thumb">
+                <img
+                  v-if="row.thumbUrl"
+                  :src="row.thumbUrl"
+                  :alt="`#${row.shot.no}`"
+                  @click="openGenViewer(row.thumbUrl)"
+                >
+                <span v-else class="gen-thumb-empty" :style="mutedStyle">
+                  {{ row.thumbFailed ? t('canvas.node.generateFailed') : t('canvas.node.generating') }}
+                </span>
+                <div class="gen-thumb-actions">
+                  <button type="button" class="gen-act" @click="locateShotPanel(row.imagePanel)">
+                    {{ t('canvas.script.wizard.locateNode') }}
+                  </button>
+                  <button type="button" class="gen-act" :disabled="row.generating" @click="reshootShotImage(row.imagePanel)">
+                    {{ t('canvas.script.wizard.reshoot') }}
+                  </button>
+                </div>
+              </div>
+              <span v-else class="gen-none" :style="mutedStyle">{{ t('canvas.script.wizard.noImage') }}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -217,7 +242,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from '@/i18n'
 import { ElMessage } from 'element-plus'
-import { useCanvasStore } from '@/stores/canvas'
+import { useCanvasStore, type CanvasPanel } from '@/stores/canvas'
 import ComposerParamBar from '@/components/canvas/ComposerParamBar.vue'
 import { checkCreditsBeforeGenerate } from '@/lib/canvas-credits'
 import { createGenerationTask, pollImageTask, getUpstreamNodes, readPanelGenParams } from '@/lib/canvas-generation'
@@ -226,12 +251,14 @@ import ImageViewer from '@/components/ImageViewer.vue'
 import {
   deriveStoryboardImages,
   deriveStoryboardVideos,
+  findDerivedPanels,
   getDerivedShotIds,
   ASSET_IMAGE_PARAMS_KEY,
   SHOT_IMAGE_PARAMS_KEY,
   SHOT_VIDEO_PARAMS_KEY,
   readAssets,
   readShots,
+  reshootImagePanel,
   buildAssetImagePrompt,
   buildShotContexts,
   buildShotImagePrompt,
@@ -475,6 +502,57 @@ const shotPrompts = computed(() => {
   }
   return map
 })
+
+/* ---------- 步骤3：分镜图结果关联（缩略图 / 定位 / 重拍） ---------- */
+
+/** 每行渲染数据：镜头 + 最终提示词 + 已派生的分镜图节点（直出 image 节点，取首个） */
+const genRows = computed(() => {
+  if (!panel.value) return []
+  const imagePanels = new Map<string, CanvasPanel>()
+  for (const d of findDerivedPanels(panel.value.id, 'image')) {
+    if (d.panel.type !== 'image' || imagePanels.has(d.lineage.shotId)) continue
+    imagePanels.set(d.lineage.shotId, d.panel)
+  }
+  return shots.value.map((shot) => {
+    const p = imagePanels.get(shot.id) || null
+    const rawUrl = p?.content?.content
+    const status = p?.content?.status
+    // 派生节点上被手动编辑过的 prompt 是重新生成的实际依据，优先于按镜头数据拼装的预览
+    const nodePromptRaw = p?.content?.prompt
+    const nodePrompt = typeof nodePromptRaw === 'string' && nodePromptRaw.trim() ? nodePromptRaw : ''
+    const assembled = shotPrompts.value.get(shot.id) || '—'
+    return {
+      shot,
+      prompt: nodePrompt || assembled,
+      promptEdited: Boolean(nodePrompt) && nodePrompt !== shotPrompts.value.get(shot.id),
+      imagePanel: p,
+      thumbUrl: typeof rawUrl === 'string' ? rawUrl : '',
+      generating: status === 'loading' || status === 'pending',
+      thumbFailed: status === 'error',
+    }
+  })
+})
+
+/** 关闭向导并定位到画布上的分镜图节点 */
+function locateShotPanel(target: CanvasPanel | null) {
+  if (!target) return
+  emitClose()
+  store.selectPanel(target.id, { append: false })
+  store.centerOnPanel(target.id)
+}
+
+/** 单镜头重拍（就地重新生成，保留模型/参数/参考图） */
+function reshootShotImage(target: CanvasPanel | null) {
+  if (!target) return
+  void reshootImagePanel(target)
+}
+
+/** 放大查看分镜图结果 */
+function openGenViewer(url: string) {
+  if (!url) return
+  viewerUrl.value = url
+  viewerVisible.value = true
+}
 
 function onBatchImages() {
   if (panel.value) void deriveStoryboardImages(panel.value)
@@ -852,20 +930,90 @@ function stepTitleStyle(s: { no: number }) {
   white-space: nowrap;
 }
 
-/* 步骤3：生成列表 */
+/* 步骤3：生成列表（左信息右缩略图） */
 .gen-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-width: 920px;
+  max-width: 1100px;
 }
 .gen-row {
   border: 1px solid;
   border-radius: 10px;
   padding: 10px 12px;
   display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 14px;
+}
+.gen-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
   flex-direction: column;
   gap: 6px;
+}
+.gen-media {
+  flex: none;
+  width: 220px;
+  display: flex;
+}
+.gen-thumb {
+  position: relative;
+  width: 100%;
+  min-height: 110px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(120, 150, 200, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.gen-thumb img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  cursor: zoom-in;
+}
+.gen-thumb-empty {
+  font-size: 12px;
+  padding: 16px 10px;
+}
+.gen-thumb-actions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.65));
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.gen-thumb:hover .gen-thumb-actions {
+  opacity: 1;
+}
+.gen-act {
+  flex: 1;
+  border: none;
+  border-radius: 6px;
+  background: rgba(20, 28, 46, 0.85);
+  color: #fff;
+  font-size: 11px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.gen-act:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.gen-none {
+  align-self: center;
+  font-size: 12px;
 }
 .gen-row-head {
   display: flex;
@@ -884,6 +1032,10 @@ function stepTitleStyle(s: { no: number }) {
 }
 .gen-status.ready {
   color: #4cc38a;
+}
+.gen-edited {
+  font-size: 11px;
+  color: #e5a03c;
 }
 .gen-duration {
   font-size: 11px;

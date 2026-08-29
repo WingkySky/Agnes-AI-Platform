@@ -52,7 +52,7 @@
 import { computed } from 'vue'
 import {
   Info, Trash2, RefreshCw, FolderPlus, Download, MessageSquare,
-  Image as ImageIcon, Minus, Plus, Upload, Video, Music2,
+  Image as ImageIcon, Minus, Plus, Upload, Video, Music2, Play,
   Copy, FileText, Lock, LockOpen, Brush, Scissors, Grid2x2,
   ZoomIn, Sparkles, Camera, Maximize2,
 } from 'lucide-vue-next'
@@ -74,7 +74,7 @@ const emit = defineEmits([
   'upload-image', 'upload-video', 'upload-audio',
   'copy-prompt', 'describe', 'replace-image', 'toggle-ratio',
   'mask-edit', 'crop', 'split', 'upscale', 'super-resolution', 'angle', 'view-large',
-  'derive-video', 'reshoot',
+  'derive-video', 'reshoot', 'run-node',
 ])
 
 /* ---------- 节点元数据计算 ---------- */
@@ -161,6 +161,30 @@ const tools = computed(() => {
       title: t('canvas.hoverToolbar.reshoot'),
       icon: RefreshCw,
       onClick: () => emit('reshoot', props.panel),
+    })
+  }
+
+  // 2.6 非分镜派生的图/视频节点：已有提示词时提供「重新生成」（成功态也可见，与失败重试同链路；
+  //     分镜派生节点上方已有「重拍此镜头」，不重复展示）
+  const nodePrompt = typeof content.value.prompt === 'string' ? content.value.prompt.trim() : ''
+  const isMedia = isImage.value || isVideo.value
+  if (isMedia && !isError.value && !lineageInfo && nodePrompt && content.value.status !== 'loading') {
+    list.push({
+      id: 'regenerate',
+      title: t('canvas.hoverToolbar.regenerate'),
+      icon: RefreshCw,
+      onClick: () => emit('retry', props.panel),
+    })
+  }
+
+  // 2.7 三类执行节点（spec M3）：配音/字幕/成片合成 → 生成按钮
+  const isRunNode = ['tts', 'subtitle', 'compose'].includes(panelType.value || '')
+  if (isRunNode && content.value.status !== 'loading') {
+    list.push({
+      id: 'run-node',
+      title: t('canvas.hoverToolbar.runNode'),
+      icon: Play,
+      onClick: () => emit('run-node', props.panel),
     })
   }
 

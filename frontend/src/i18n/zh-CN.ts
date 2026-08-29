@@ -1555,11 +1555,14 @@ const zhCN = {
       voiceMale: '男声',
       speed: '语速',
       ttsHint: '连接文本节点作为配音来源',
+      runTts: '生成配音',
       // 字幕节点
       subtitleHint: '连接文本节点，自动生成 SRT 字幕',
+      runSubtitle: '生成字幕',
       burnSubtitle: '烧录字幕',
       // 合成节点
       composeHint: '连接视频节点（必须）+ 可选配音/字幕节点',
+      runCompose: '生成成片',
       // 分镜出处标记（script 节点派生节点）
       shotBadge: '镜头 {no}',
       // 未知节点类型
@@ -1577,6 +1580,8 @@ const zhCN = {
       retry: '重试',
       deriveVideo: '生成视频（图生视频）',
       reshoot: '重拍此镜头',
+      // 三类执行节点（配音/字幕/成片合成）的生成按钮
+      runNode: '生成',
       saveAsset: '存素材',
       download: '下载',
       edit: '编辑',
@@ -1611,6 +1616,22 @@ const zhCN = {
       viewNodeInfo: '查看节点信息',
       deleteNode: '删除节点',
       regenerate: '重新生成',
+    },
+    // 节点信息弹窗（查看节点提示词等元数据）
+    nodeInfo: {
+      title: '节点信息',
+      name: '名称',
+      type: '类型',
+      status: '状态',
+      statusIdle: '待生成',
+      statusSuccess: '已生成',
+      model: '模型',
+      size: '尺寸',
+      referenceImages: '参考图',
+      refCount: '{n} 张',
+      shotFromLabel: '分镜来源',
+      shotFrom: '来自剧本「{name}」镜头 #{no}',
+      prompt: '提示词',
     },
     // 节点类型名称
     nodeNames: {
@@ -1707,6 +1728,10 @@ const zhCN = {
         assetsReady: '所有资产均已有参考图',
         shotReady: '已生成图',
         shotPending: '待生成',
+        noImage: '尚未生成图片',
+        locateNode: '定位节点',
+        reshoot: '重拍',
+        promptEdited: '提示词已手动调整',
         batchImages: '批量生成分镜图',
         batchVideos: '批量生成视频',
       },
@@ -1716,8 +1741,8 @@ const zhCN = {
       placeholderScript: '输入剧情概述，Enter 生成分镜脚本并打开向导',
       placeholderText: '输入提示词，AI 生成内容回填节点（Enter 发送）',
       placeholderGenerate: '描述想生成的画面，@ 引用接入素材（Enter 发送）',
-      placeholderImage: '描述修改效果，AI 基于当前图片生成新图片（Enter 发送）',
-      placeholderVideo: '描述想要的画面与运镜，AI 从当前视频首帧生成新视频（Enter 发送）',
+      placeholderImage: '节点提示词（可编辑，Enter 重新生成此图）',
+      placeholderVideo: '节点提示词（可编辑，Enter 重新生成此视频）',
       send: '发送',
       sendTip: 'Enter 发送 · Shift+Enter 换行',
       chatModel: '分镜模型',
@@ -2014,6 +2039,14 @@ const zhCN = {
       flowModeEnabled: '已进入流程模式',
       generateFailed: '生成失败',
       generateTimeout: '生成超时',
+      // 画布三节点执行（spec M3）
+      ttsDone: '配音生成完成',
+      subtitleDone: '字幕生成完成',
+      composeDone: '成片合成完成',
+      composeNoVideo: '请先连接视频节点再合成',
+      composeFailed: '成片合成失败',
+      batchConnectDone: '已批量接入选中节点',
+      batchConnectEmpty: '选中节点中没有可接入的类型',
       imageGenerationDone: '图片生成完成',
       imageGenerationFailed: '图片生成失败',
       imageNodeEmpty: '请先上传或生成图片',

@@ -264,7 +264,7 @@ export function buildShotVideoPrompt(shot: CanvasShot): string {
  * - image：直出的分镜图节点（type === 'image'）与存量/手搭场景的 config 派生节点并存，两者都识别
  * - video：config 节点（本期视频派生仍走 config，第二阶段再变）
  */
-function findDerivedPanels(scriptPanelId: string, kind: 'image' | 'video'): Array<{ panel: CanvasPanel; lineage: ShotLineage }> {
+export function findDerivedPanels(scriptPanelId: string, kind: 'image' | 'video'): Array<{ panel: CanvasPanel; lineage: ShotLineage }> {
   const store = useCanvasStore()
   const result: Array<{ panel: CanvasPanel; lineage: ShotLineage }> = []
   for (const p of store.panels) {
@@ -481,6 +481,22 @@ export async function deriveImageForShot(scriptPanel: CanvasPanel, shot: CanvasS
     return
   }
   await deriveImagesInternal(scriptPanel, [shot])
+}
+
+/** 单镜头重拍：分镜图节点就地重新生成（保留节点上的模型/尺寸/参考图，供向导与工具栏复用） */
+export async function reshootImagePanel(target: CanvasPanel): Promise<void> {
+  const { t } = useI18n()
+  const refs = Array.isArray(target.content?.referenceImages)
+    ? target.content.referenceImages.filter((u): u is string => typeof u === 'string')
+    : []
+  const ok = await checkCreditsBeforeGenerate({
+    type: 'image',
+    mode: refs.length > 0 ? 'image2image' : 'text2image',
+    size: typeof target.content?.size === 'string' ? target.content.size : undefined,
+  })
+  if (!ok) return
+  ElMessage.info(t('canvas.messages.regenerate'))
+  await executeInNodeGeneration(target, useCanvasStore())
 }
 
 /* ---------- 批量派生视频（图生视频） ---------- */

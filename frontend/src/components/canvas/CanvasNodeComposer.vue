@@ -2,6 +2,8 @@
   CanvasNodeComposer 节点悬浮 AI 对话框（LibTV 复刻）
   - 选中节点时悬浮在节点正下方，所有可 AI 生成的节点共用此输入条
   - 支持：script（剧情→生分镜）/ text（提示词→AI 生成回填）/ config（生图/视频提示词生成）
+  - image / video：输入框即节点提示词本体（打开回填 content.prompt，输入即保存），
+    Enter 保存并就地重新生成（"从当前图派生新节点"走工具栏图生图/图生视频快捷面板）
   - config 模式切换/模型/参数全部在条内，写回节点 content，发送复用现有生成链路
   - 文本节点走会话 SSE 流式回填（会话 id 存节点 content 复用）
   - 定位由父组件（CanvasView）按视口变换计算，本组件只管交互
@@ -113,18 +115,12 @@ import ComposerParamBar from '@/components/canvas/ComposerParamBar.vue'
 import { createChatSession, sendMessageStream } from '@/api/chat'
 import { generateStoryboard, type StoryboardShot } from '@/api/storyboard'
 import { getErrorMessage } from '@/lib/type-helpers'
-import {
-  getUpstreamNodes,
-  readPanelGenParams,
-  executeImageReferenceGeneration,
-  executeVideoFromFrameGeneration,
-} from '@/lib/canvas-generation'
+import { getUpstreamNodes } from '@/lib/canvas-generation'
 import { mergeExtractedAssets, readAssets, readShots } from '@/lib/canvas-storyboard'
-import { checkCreditsBeforeGenerate } from '@/lib/canvas-credits'
 import { useNodeMention } from '@/composables/useNodeMention'
 
 const props = defineProps<{ panelId: string }>()
-const emit = defineEmits<{ (e: 'generate'): void }>()
+const emit = defineEmits<{ (e: 'generate'): void; (e: 'regenerate'): void }>()
 
 const { t } = useI18n()
 const store = useCanvasStore()
@@ -176,11 +172,12 @@ const placeholder = computed(() => {
   return t('canvas.composer.placeholderGenerate')
 })
 
-/** 输入写回：config→prompt，script→story，text→仅本地 */
+/** 输入写回：config→prompt，script→story，image/video→prompt（即节点重生成的实际依据），text→仅本地 */
 function persistText() {
   if (!panel.value) return
   if (panelType.value === 'config') store.updatePanel(panel.value.id, { content: { prompt: text.value } })
   else if (panelType.value === 'script') store.updatePanel(panel.value.id, { content: { story: text.value } })
+  else if (isMedia.value) store.updatePanel(panel.value.id, { content: { prompt: text.value } })
 }
 
 function updateContent(patch: Record<string, unknown>) {
@@ -209,6 +206,11 @@ watch(() => props.panelId, () => {
     scriptShotMin.value = typeof panel.value?.content?.shotMin === 'number' ? panel.value.content.shotMin : 6
     scriptShotMax.value = typeof panel.value?.content?.shotMax === 'number' ? panel.value.content.shotMax : 12
     scriptStyle.value = typeof panel.value?.content?.style === 'string' ? panel.value.content.style : ''
+  }
+  else if (isMedia.value) {
+    // 图/视频节点：输入框即节点提示词本体，回填当前 content.prompt
+    const prompt = panel.value?.content?.prompt
+    text.value = typeof prompt === 'string' ? prompt : ''
   }
   else text.value = ''
   nextTick(autosize)
@@ -274,8 +276,7 @@ function onSend() {
   if (panelType.value === 'config') sendConfig()
   else if (panelType.value === 'script') void sendScript()
   else if (panelType.value === 'text') void sendText()
-  else if (panelType.value === 'image') void sendImage()
-  else if (panelType.value === 'video') void sendVideo()
+  else if (isMedia.value) sendMediaRegenerate()
   else ElMessage.info(t('canvas.composer.unsupported'))
 }
 
@@ -283,6 +284,12 @@ function onSend() {
 function sendConfig() {
   persistText()
   emit('generate')
+}
+
+/** image / video：输入即节点提示词，保存后交由父组件就地重新生成（保留模型/参数/参考图） */
+function sendMediaRegenerate() {
+  persistText()
+  emit('regenerate')
 }
 
 /** script：剧情 → 生成分镜脚本 → 唤起分镜向导 */
@@ -377,72 +384,6 @@ async function sendText() {
   } finally {
     busy.value = false
   }
-}
-
-/** image：图生图 —— 以当前图片为参考图生成新图片节点 */
-async function sendImage() {
-  if (!panel.value) return
-  const params = readPanelGenParams(panel.value, 'image')
-  const ok = await checkCreditsBeforeGenerate({ type: 'image', mode: 'image2image', size: params.size })
-  if (!ok) return
-  busy.value = true
-  try {
-    await executeImageReferenceGeneration(panel.value, text.value.trim(), store, params)
-    text.value = ''
-    autosize()
-  } finally {
-    busy.value = false
-  }
-}
-
-/** video：首帧生视频 —— 抽取当前视频首帧作为参考图图生视频，生成新视频节点 */
-async function sendVideo() {
-  if (!panel.value) return
-  const videoUrl = String(panel.value.content?.content || '')
-  if (!videoUrl) {
-    ElMessage.warning(t('canvas.composer.emptyVideo'))
-    return
-  }
-  const params = readPanelGenParams(panel.value, 'video')
-  const ok = await checkCreditsBeforeGenerate({ type: 'video', mode: 'image2video', seconds: params.seconds })
-  if (!ok) return
-  busy.value = true
-  try {
-    const frame = await extractFirstFrame(videoUrl)
-    await executeVideoFromFrameGeneration(panel.value, frame, text.value.trim(), store, params)
-    text.value = ''
-    autosize()
-  } catch (err) {
-    ElMessage.error(getErrorMessage(err) || t('canvas.composer.firstFrameFailed'))
-  } finally {
-    busy.value = false
-  }
-}
-
-/** 抽取视频首帧：加载视频 -> 跳到 0.1s -> 绘制到 canvas 导出 dataURI */
-function extractFirstFrame(videoUrl: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const video = document.createElement('video')
-    video.crossOrigin = 'anonymous'
-    video.muted = true
-    video.src = videoUrl
-    video.addEventListener('loadeddata', () => {
-      video.currentTime = 0.1
-    })
-    video.addEventListener('seeked', () => {
-      try {
-        const canvas = document.createElement('canvas')
-        canvas.width = video.videoWidth || 1280
-        canvas.height = video.videoHeight || 720
-        canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height)
-        resolve(canvas.toDataURL('image/png'))
-      } catch (err) {
-        // 跨域污染画布时无法导出
-        reject(err instanceof Error ? err : new Error(String(err)))
-      }
-    })
-    video.addEventListener('error', () => reject(new Error('video load failed')))
-  })
 }
 
 /* ---------- 主题样式 ---------- */

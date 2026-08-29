@@ -23,7 +23,7 @@ import { useModelsStore } from '@/stores/models'
 import { usePreferencesStore } from '@/stores/preferences'
 import { parseSize } from '@/config/model-params'
 import type { CanvasPanel, CanvasConnection } from '@/stores/canvas'
-import type { ImageGenerationRequest, VideoGenerationRequest, GenerationContextPayload } from '@/types'
+import type { ImageGenerationRequest, VideoGenerationRequest, GenerationContextPayload, ImageTaskStatusResponse, VideoStatusResponse } from '@/types'
 import { getErrorMessage } from '@/lib/type-helpers'
 
 // ---------- 类型定义 ----------
@@ -479,6 +479,9 @@ function buildComposerContext(
 
 // ---------- API 调用与轮询 ----------
 
+/** 轮询连续失败容忍次数（网络抖动/后端重启时不因单次查询失败就判死任务） */
+const MAX_POLL_ERRORS = 6
+
 /**
  * 将图片 URL 转为 base64 data URI
  * - blob URL / 本地 URL：fetch 后转 data URI
@@ -574,6 +577,7 @@ export async function pollImageTask(
   const startTime = Date.now()
   const interval = 2000
   const queueStore = useTaskQueueStore()
+  let consecutiveErrors = 0
 
   while (true) {
     if (Date.now() - startTime > timeout) {
@@ -582,11 +586,21 @@ export async function pollImageTask(
       throw new Error('生成任务超时（超过 5 分钟未完成）')
     }
 
-    const data = await getImageTaskStatus(taskId)
+    // 单次查询失败静默重试（网络抖动/后端重启），连续多次才判失败
+    let data: ImageTaskStatusResponse | null = null
+    try {
+      data = await getImageTaskStatus(taskId)
+    } catch (_) { /* 按连续错误计数处理 */ }
     if (!data) {
-      queueStore.updateCanvasTask(taskId, { status: 'failed' })
-      throw new Error('查询任务状态失败')
+      consecutiveErrors += 1
+      if (consecutiveErrors >= MAX_POLL_ERRORS) {
+        queueStore.updateCanvasTask(taskId, { status: 'failed' })
+        throw new Error('查询任务状态失败')
+      }
+      await new Promise((resolve) => setTimeout(resolve, interval))
+      continue
     }
+    consecutiveErrors = 0
 
     const status = data.status || 'pending'
     if (onProgress) onProgress(status, data)
@@ -1228,6 +1242,7 @@ export async function pollVideoTask(
   const startTime = Date.now()
   const interval = 5000
   const queueStore = useTaskQueueStore()
+  let consecutiveErrors = 0
 
   while (true) {
     if (Date.now() - startTime > timeout) {
@@ -1235,11 +1250,21 @@ export async function pollVideoTask(
       throw new Error('视频生成任务超时（超过 10 分钟未完成）')
     }
 
-    const data = await getVideoStatus(taskId)
+    // 单次查询失败静默重试（网络抖动/后端重启），连续多次才判失败
+    let data: VideoStatusResponse | null = null
+    try {
+      data = await getVideoStatus(taskId)
+    } catch (_) { /* 按连续错误计数处理 */ }
     if (!data) {
-      queueStore.updateCanvasTask(taskId, { status: 'failed' })
-      throw new Error('查询视频任务状态失败')
+      consecutiveErrors += 1
+      if (consecutiveErrors >= MAX_POLL_ERRORS) {
+        queueStore.updateCanvasTask(taskId, { status: 'failed' })
+        throw new Error('查询视频任务状态失败')
+      }
+      await new Promise((resolve) => setTimeout(resolve, interval))
+      continue
     }
+    consecutiveErrors = 0
 
     const status = data.status || 'pending'
     if (onProgress) onProgress(status, data)
@@ -1380,4 +1405,74 @@ export async function executeMergeVideoGeneration(configId: string, store: Canva
 
   // 返回新节点 ID（loading 状态）
   return newNodeId
+}
+
+// ---------- 中断任务恢复 ----------
+
+/** 正在恢复轮询的节点 id（防止同一节点重复拉起轮询） */
+const resumingPanelIds = new Set<string>()
+
+/**
+ * 恢复中断的画布生成任务（画布加载完成 / 切换工作区时调用）
+ * - 页面刷新会杀掉内存中的轮询循环，节点 content.status 停留在 'loading'、队列任务停留在 processing
+ * - 按队列任务的 panelId 匹配 loading 节点：已完成的直接回填，进行中的用 backendTaskId 重新拉起轮询
+ * - 队列中找不到对应任务（记录过期/流式中断）时标记失败，避免节点永久显示"生成中"
+ */
+export function resumeLoadingCanvasNodes(store: CanvasGenerationStore): void {
+  const queueStore = useTaskQueueStore()
+  const prefsStore = usePreferencesStore()
+
+  const loadingPanels = store.panels.filter((p) => p.content?.status === 'loading')
+  for (const panel of loadingPanels) {
+    if (resumingPanelIds.has(panel.id)) continue
+    const task = queueStore.taskList
+      .filter((t) => t.source === 'canvas' && t.panelId === panel.id)
+      .sort((a, b) => b.createdAt - a.createdAt)[0]
+
+    // 队列任务已完成：直接回填，不再查询后端
+    if (task?.status === 'success' && task.resultUrl) {
+      store.updatePanel(panel.id, { content: { content: task.resultUrl, status: 'success' } })
+      store.pushSnapshot()
+      continue
+    }
+    // 队列任务已失败：保留原始错误信息直接标错
+    if (task?.status === 'failed') {
+      store.updatePanel(panel.id, { content: { status: 'error', errorDetails: task.errorMessage || '生成失败' } })
+      continue
+    }
+    // 队列中找不到进行中的任务：无法查询后端状态，标记失败
+    if (!task?.backendTaskId) {
+      store.updatePanel(panel.id, { content: { status: 'error', errorDetails: '生成任务已中断，请重新生成' } })
+      continue
+    }
+
+    // 任务进行中：用 backendTaskId 重新轮询，完成后回填节点（队列状态由 poll 函数同步更新）
+    resumingPanelIds.add(panel.id)
+    const isVideo = task.type === 'video'
+    const pollResult = isVideo
+      ? pollVideoTask(task.backendTaskId).then((r) => r.videoUrl)
+      : pollImageTask(task.backendTaskId).then((r) => r.resultUrl)
+    pollResult
+      .then((url) => {
+        // 恢复期间用户若重新生成了该节点（出现更新的任务），放弃回填旧结果
+        const hasNewerTask = queueStore.taskList.some(
+          (t) => t.source === 'canvas' && t.panelId === panel.id && t.createdAt > task.createdAt,
+        )
+        if (hasNewerTask) return
+        store.updatePanel(panel.id, { content: { content: url, status: 'success' } })
+        store.pushSnapshot()
+        prefsStore.autoDownload(url, isVideo ? 'video' : 'image')
+        prefsStore.notifyComplete(isVideo ? 'video' : 'image', { prompt: task.prompt })
+      })
+      .catch((err) => {
+        const hasNewerTask = queueStore.taskList.some(
+          (t) => t.source === 'canvas' && t.panelId === panel.id && t.createdAt > task.createdAt,
+        )
+        if (hasNewerTask) return
+        store.updatePanel(panel.id, { content: { status: 'error', errorDetails: getErrorMessage(err) || '生成失败' } })
+      })
+      .finally(() => {
+        resumingPanelIds.delete(panel.id)
+      })
+  }
 }

@@ -188,6 +188,7 @@ async def _call_tts_provider(
     model: Optional[str] = None,
     provider: Optional[str] = None,
     save_folder: Optional[str] = None,
+    speed: float = 1.0,
 ) -> tuple:
     """
     调用 TTS provider 生成音频
@@ -195,6 +196,8 @@ async def _call_tts_provider(
     当前实现：Edge TTS（免费、无需 API Key，经 edge_tts 包直连，
     aibridge 的 speech 封装握手 403 不可用）。音频落盘到 uploads
     目录，返回可访问 URL。
+
+    speed: 语速倍率（1.0 正常，0.5-2.0），经 Edge TTS rate 参数生效
 
     返回: (audio_url, duration_ms, file_size)
     """
@@ -204,7 +207,8 @@ async def _call_tts_provider(
         raise RuntimeError("edge_tts 未安装，无法进行 TTS 合成（pip install edge-tts）") from e
 
     edge_voice = _resolve_edge_voice(voice_id)
-    communicate = edge_tts.Communicate(text, edge_voice)
+    rate = f"{int(round((speed - 1) * 100)):+d}%" if speed and abs(speed - 1.0) > 0.01 else None
+    communicate = edge_tts.Communicate(text, edge_voice, rate=rate) if rate else edge_tts.Communicate(text, edge_voice)
     chunks: List[bytes] = []
     try:
         async for chunk in communicate.stream():

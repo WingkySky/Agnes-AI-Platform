@@ -1560,11 +1560,14 @@ const enUS = {
       voiceMale: 'Male',
       speed: 'Speed',
       ttsHint: 'Connect a text node as the audio source',
+      runTts: 'Generate Voiceover',
       // subtitle node
       subtitleHint: 'Connect a text node to auto-generate SRT subtitles',
+      runSubtitle: 'Generate Subtitles',
       burnSubtitle: 'Burn in subtitles',
       // compose node
       composeHint: 'Connect a video node (required) + optional audio/subtitle nodes',
+      runCompose: 'Compose Final Video',
       // Shot lineage badge (nodes derived from script node)
       shotBadge: 'Shot {no}',
       // Unknown node type
@@ -1587,6 +1590,8 @@ const enUS = {
       retry: 'Retry',
       deriveVideo: 'Generate Video (image-to-video)',
       reshoot: 'Reshoot this shot',
+      // Run button for tts/subtitle/compose nodes
+      runNode: 'Generate',
       saveAsset: 'Save Asset',
       download: 'Download',
       edit: 'Edit',
@@ -1621,6 +1626,22 @@ const enUS = {
       viewNodeInfo: 'View Node Info',
       deleteNode: 'Delete Node',
       regenerate: 'Regenerate',
+    },
+    // Node info dialog (view node prompt and other metadata)
+    nodeInfo: {
+      title: 'Node Info',
+      name: 'Name',
+      type: 'Type',
+      status: 'Status',
+      statusIdle: 'Pending',
+      statusSuccess: 'Generated',
+      model: 'Model',
+      size: 'Size',
+      referenceImages: 'Reference Images',
+      refCount: '{n} image(s)',
+      shotFromLabel: 'Storyboard Source',
+      shotFrom: 'From script "{name}", shot #{no}',
+      prompt: 'Prompt',
     },
     // Node type names
     nodeNames: {
@@ -1717,6 +1738,10 @@ const enUS = {
         assetsReady: 'All assets already have images',
         shotReady: 'Image ready',
         shotPending: 'Pending',
+        noImage: 'No image yet',
+        locateNode: 'Locate Node',
+        reshoot: 'Reshoot',
+        promptEdited: 'Prompt manually edited',
         batchImages: 'Batch generate shot images',
         batchVideos: 'Batch generate videos',
       },
@@ -1726,8 +1751,8 @@ const enUS = {
       placeholderScript: 'Enter the story synopsis; press Enter to generate shots and open the wizard',
       placeholderText: 'Enter a prompt; AI generates content into the node (Enter to send)',
       placeholderGenerate: 'Describe the scene; @ to reference connected nodes (Enter to send)',
-      placeholderImage: 'Describe the edit; AI generates a new image from the current one (Enter to send)',
-      placeholderVideo: 'Describe the scene and camera move; AI generates a new video from the current video\'s first frame (Enter to send)',
+      placeholderImage: 'Node prompt (editable; press Enter to regenerate this image)',
+      placeholderVideo: 'Node prompt (editable; press Enter to regenerate this video)',
       send: 'Send',
       sendTip: 'Enter to send · Shift+Enter for newline',
       chatModel: 'Storyboard model',
@@ -2014,6 +2039,14 @@ const enUS = {
       flowModeEnabled: 'Flow mode enabled',
       generateFailed: 'Generation failed',
       generateTimeout: 'Generation timed out',
+      // Canvas run nodes (spec M3)
+      ttsDone: 'Voiceover generated',
+      subtitleDone: 'Subtitles generated',
+      composeDone: 'Final video composed',
+      composeNoVideo: 'Connect video nodes before composing',
+      composeFailed: 'Compose failed',
+      batchConnectDone: 'Selected nodes connected',
+      batchConnectEmpty: 'No connectable nodes in selection',
       imageGenerationDone: 'Image generated',
       imageGenerationFailed: 'Image generation failed',
       imageNodeEmpty: 'Please upload or generate an image first',

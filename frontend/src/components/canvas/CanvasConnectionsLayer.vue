@@ -17,6 +17,8 @@ interface ConnectingState {
   sourcePanelId: string
   sourceAnchorType: string
   endWorld?: { x: number; y: number }
+  /** 框选批量接入：随主连线一起预览的其他选中节点 id */
+  extraSourceIds?: string[]
 }
 
 // ---------- Props ----------
@@ -117,6 +119,27 @@ const connectingPath = computed(() => {
   return `M ${startX} ${startY} C ${startX + curvature} ${startY}, ${endX - curvature} ${endY}, ${endX} ${endY}`
 })
 
+// ---------- 框选批量接入的预览线 ----------
+// 每个待批量接入的选中节点都画一条到鼠标位置的虚线，让用户在拖拽时就能看到整组接入
+const extraConnectingPaths = computed(() => {
+  const c = currentConnecting.value
+  if (!c || !c.endWorld || !c.extraSourceIds?.length) return [] as string[]
+  const paths: string[] = []
+  for (const id of c.extraSourceIds) {
+    if (id === c.sourcePanelId) continue
+    const panel = getPanelById(id)
+    if (!panel) continue
+    // 批量接入方向固定：选中节点右侧输出锚点 → 鼠标位置
+    const startX = panel.x + panel.width
+    const startY = panel.y + panel.height / 2
+    const endX = c.endWorld.x
+    const endY = c.endWorld.y
+    const curvature = Math.abs(endX - startX) * 0.5
+    paths.push(`M ${startX} ${startY} C ${startX + curvature} ${startY}, ${endX - curvature} ${endY}, ${endX} ${endY}`)
+  }
+  return paths
+})
+
 // ---------- 选中连线 ----------
 function handleSelectConnection(id: string) {
   // 兼容旧用法：直接更新 store 选中状态
@@ -180,6 +203,19 @@ function handleDeleteConnection(id: string) {
       :d="connectingPath"
       :stroke="currentTheme.node.activeStroke"
       :stroke-width="2"
+      fill="none"
+      stroke-dasharray="5,5"
+      class="connection-preview"
+    />
+
+    <!-- 框选批量接入预览线：每个待接入的选中节点一条（略淡，区分主连线）-->
+    <path
+      v-for="(path, idx) in extraConnectingPaths"
+      :key="'preview-' + idx"
+      :d="path"
+      :stroke="currentTheme.node.activeStroke"
+      :stroke-width="2"
+      stroke-opacity="0.55"
       fill="none"
       stroke-dasharray="5,5"
       class="connection-preview"

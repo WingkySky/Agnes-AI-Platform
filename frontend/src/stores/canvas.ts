@@ -156,6 +156,8 @@ interface ConnectingState {
   sourceAnchorType: string
   startWorld: { x: number; y: number }
   endWorld: { x: number; y: number }
+  /** 框选批量接入：随主连线一起预览/接入的其他选中节点 id */
+  extraSourceIds?: string[]
 }
 
 /** 待创建连线载荷 */
@@ -1177,8 +1179,8 @@ export const useCanvasStore = defineStore('canvas', {
       this._save()
     },
 
-    /** 开始拖拽连线：记录源节点和锚点类型 */
-    startConnecting(sourcePanelId: string, anchorType: string): void {
+    /** 开始拖拽连线：记录源节点和锚点类型；extraSourceIds 为框选批量接入的其他选中节点 */
+    startConnecting(sourcePanelId: string, anchorType: string, extraSourceIds: string[] = []): void {
       const source = this.panels.find((p) => p.id === sourcePanelId)
       if (!source) return
       // 源节点锚点的世界坐标（中心左/右）
@@ -1191,6 +1193,7 @@ export const useCanvasStore = defineStore('canvas', {
         sourceAnchorType: anchorType,
         startWorld: { x, y },
         endWorld: { x, y },
+        extraSourceIds: extraSourceIds.filter((id) => id !== sourcePanelId),
       }
     },
 

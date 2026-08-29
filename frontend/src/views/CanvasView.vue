@@ -130,6 +130,7 @@
           @edit-text="(text) => handleNodeEditText(panel.id, text)"
           @generate-image="handleNodeGenerateImage"
           @retry="handleNodeRetry"
+          @run-node="handleNodeRun"
           @upload="(p) => handleNodeUpload(p)"
         />
       </InfiniteCanvas>
@@ -148,6 +149,7 @@
         :panel-id="composerPanelId"
         :style="composerStyle"
         @generate="generateComposerConfig"
+        @regenerate="generateComposerRegenerate"
       />
 
       <!-- ============ 底部浮动工具栏 ============ -->
@@ -239,6 +241,7 @@
           @view-large="handleHoverViewLarge"
           @derive-video="handleHoverDeriveVideo"
           @reshoot="handleHoverReshoot"
+          @run-node="handleHoverRunNode"
         />
       </div>
 
@@ -364,6 +367,58 @@
         </template>
       </el-dialog>
 
+      <!-- ============ 节点信息对话框（查看提示词等元数据） ============ -->
+      <el-dialog
+        v-model="nodeInfoVisible"
+        :title="t('canvas.nodeInfo.title')"
+        width="520px"
+        :append-to-body="true"
+      >
+        <div class="node-info">
+          <div v-if="nodeInfoPanel?.name" class="node-info-row">
+            <span class="node-info-label">{{ t('canvas.nodeInfo.name') }}</span>
+            <span class="node-info-value">{{ nodeInfoPanel.name }}</span>
+          </div>
+          <div class="node-info-row">
+            <span class="node-info-label">{{ t('canvas.nodeInfo.type') }}</span>
+            <span class="node-info-value">{{ getNodeName(nodeInfoPanel?.type || '') }}</span>
+          </div>
+          <div class="node-info-row">
+            <span class="node-info-label">{{ t('canvas.nodeInfo.status') }}</span>
+            <span class="node-info-value">{{ nodeInfoStatusText }}</span>
+          </div>
+          <div v-if="nodeInfoModel" class="node-info-row">
+            <span class="node-info-label">{{ t('canvas.nodeInfo.model') }}</span>
+            <span class="node-info-value">{{ nodeInfoModel }}</span>
+          </div>
+          <div v-if="nodeInfoSize" class="node-info-row">
+            <span class="node-info-label">{{ t('canvas.nodeInfo.size') }}</span>
+            <span class="node-info-value">{{ nodeInfoSize }}</span>
+          </div>
+          <div v-if="nodeInfoRefCount" class="node-info-row">
+            <span class="node-info-label">{{ t('canvas.nodeInfo.referenceImages') }}</span>
+            <span class="node-info-value">{{ t('canvas.nodeInfo.refCount', { n: nodeInfoRefCount }) }}</span>
+          </div>
+          <div v-if="nodeInfoShotFrom" class="node-info-row">
+            <span class="node-info-label">{{ t('canvas.nodeInfo.shotFromLabel') }}</span>
+            <span class="node-info-value">{{ nodeInfoShotFrom }}</span>
+          </div>
+          <div v-if="nodeInfoPrompt" class="node-info-prompt">
+            <div class="node-info-prompt-head">
+              <span class="node-info-label">{{ t('canvas.nodeInfo.prompt') }}</span>
+              <el-button link size="small" type="primary" @click="handleInfoCopyPrompt">
+                {{ t('canvas.hoverToolbar.copyPrompt') }}
+              </el-button>
+            </div>
+            <div class="node-info-prompt-text">{{ nodeInfoPrompt }}</div>
+          </div>
+          <div class="node-info-row">
+            <span class="node-info-label">ID</span>
+            <span class="node-info-value node-info-id">{{ nodeInfoPanel?.id }}</span>
+          </div>
+        </div>
+      </el-dialog>
+
       <!-- ============ 图片预览弹窗 ============ -->
       <div v-if="previewImage" class="preview-overlay" @click="previewImage = null">
         <!-- 关闭按钮 -->
@@ -411,7 +466,7 @@
  * - 处理节点创建/拖拽/缩放/删除、连线创建/删除、框选、撤销/重做、快捷键
  * ===================================================== */
 
-import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Download, Pencil, Plus, LayoutGrid } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
@@ -452,9 +507,12 @@ import {
   createWorkspaceFromTemplate,
 } from '@/lib/canvas-templates'
 // 画布生成：上游节点查找（用于配置节点 prompt 为空时检查上游文本）+ 生成归档上下文
-import { getUpstreamNodes, buildCanvasContext, type CanvasGenerationStore } from '@/lib/canvas-generation'
+import { getUpstreamNodes, buildCanvasContext, resumeLoadingCanvasNodes, type CanvasGenerationStore } from '@/lib/canvas-generation'
 // 分镜派生：单镜头图生视频（LibTV P0）
-import { deriveVideoForShot, readLineage } from '@/lib/canvas-storyboard'
+import { deriveVideoForShot, readLineage, getShotLineageInfo } from '@/lib/canvas-storyboard'
+// 画布三节点执行（spec M3：配音/字幕/成片合成）
+import { generateCanvasTts, generateCanvasSubtitles, composeCanvasVideos, type CanvasSubtitleSegment } from '@/api/canvas'
+import { parseSrt } from '@/lib/canvas-media'
 import { getErrorMessage } from '@/lib/type-helpers'
 import type { ImageGenerationRequest } from '@/types'
 
@@ -832,7 +890,16 @@ function handleNodeResizeEnd({ id }: { id: string }) {
 
 // 节点开始连线：启动全局 pointermove/pointerup 监听
 function handleNodeStartConnecting(panelId: string, anchorType: string) {
-  store.startConnecting(panelId, anchorType)
+  // 框选多选拖线：预览线从每个待批量接入的选中节点拉出（config 作为发送方不参与批量）
+  let extraSourceIds: string[] = []
+  if (store.selectedPanelIds.length > 1) {
+    extraSourceIds = store.selectedPanelIds.filter((id) => {
+      if (id === panelId) return false
+      const p = store.panels.find((x) => x.id === id)
+      return !!p && p.type !== 'config'
+    })
+  }
+  store.startConnecting(panelId, anchorType, extraSourceIds)
   window.addEventListener('pointermove', handleConnectingMove)
   window.addEventListener('pointerup', handleConnectingUp)
 }
@@ -867,15 +934,16 @@ function handleConnectingUp(event: PointerEvent) {
       realTarget = sourceId
     }
 
-    // 判断目标节点是否为"接收多输入"类型（config、未来的 multi-text 等）
+    // 判断目标节点是否为"接收多输入"类型（config 生成配置、compose 成片合成）
     const targetPanel = store.panels.find(p => p.id === realTarget)
-    const isReceiverNode = targetPanel?.type === 'config' // 可扩展: || targetPanel?.type === 'multi-text'
+    const isReceiverNode = ['config', 'compose'].includes(targetPanel?.type || '')
     const hasMultipleSelection = store.selectedPanelIds.length > 1
     const isBatchConnect = isReceiverNode && hasMultipleSelection
 
     if (isBatchConnect) {
       store.pushSnapshot()
       const connectedIds = new Set<string>()
+      let batchAdded = 0
 
       // 确定本次连线的起始节点（拖拽发起的那个节点）
       const dragSourceId = sourceAnchor === 'source' ? sourceId : targetId
@@ -891,12 +959,16 @@ function handleConnectingUp(event: PointerEvent) {
           c => c.source_panel_id === selectedId && c.target_panel_id === realTarget
         )
         if (exists) continue
-        store.addConnection({
+        const conn = store.addConnection({
           source_panel_id: selectedId,
           target_panel_id: realTarget,
           type: 'flow',
         })
-        connectedIds.add(selectedId)
+        // addConnection 内部做类型校验，不合法的（如 text → compose）返回 null 跳过
+        if (conn) {
+          connectedIds.add(selectedId)
+          batchAdded++
+        }
       }
 
       // 如果拖拽起始节点本身不在选中列表中，也单独连接
@@ -915,6 +987,8 @@ function handleConnectingUp(event: PointerEvent) {
           }
         }
       }
+      if (batchAdded > 0) ElMessage.success(t('canvas.messages.batchConnectDone'))
+      else ElMessage.warning(t('canvas.messages.batchConnectEmpty'))
       store.cancelConnecting()
     } else {
       // 普通单连接
@@ -1007,6 +1081,12 @@ const composerStyle = computed(() => {
     width: `${width}px`,
   }
 })
+
+/** 对话框重生成（image/video 节点）：输入框即节点提示词（已写回 content），走就地重生成链路 */
+function generateComposerRegenerate() {
+  const p = store.panels.find((x) => x.id === composerPanelId.value)
+  if (p) void retryGeneration(p)
+}
 
 /** 对话框生成（config 节点）：prompt/参数已写回 content，走现有配置节点生成流程 */
 function generateComposerConfig() {
@@ -1319,13 +1399,23 @@ async function generateVideoFromSource(
   if (!canGenerate) return
 
   // 在源节点右侧创建 video 节点（loading 状态）
+  // 持久化参考图与生成参数：失败重试走 executeInNodeVideoGeneration，就地按 image2video 重跑
   const newPanelId = store.addPanel({
     type: 'video',
     x: sourcePanel.x + sourcePanel.width + 60,
     y: sourcePanel.y,
     width: 360,
     height: 240,
-    content: { content: '', status: 'loading', prompt },
+    content: {
+      content: '',
+      status: 'loading',
+      prompt,
+      mode: 'image2video',
+      model: model || useModelsStore().defaultVideoModel,
+      aspect_ratio: aspectRatio,
+      seconds,
+      referenceImages,
+    },
   })
   store.addConnection({ source_panel_id: sourcePanel.id, target_panel_id: newPanelId })
   store.pushSnapshot()
@@ -1406,10 +1496,178 @@ async function generateVideoFromSource(
   }
 }
 
+// ==================== 画布三节点执行（spec M3：tts / subtitle / compose） ====================
+
+/** 收集节点的上游节点：按"行带 → 行内 x"排序（从上到下、行内从左到右），网格摆放也符合阅读顺序 */
+function getUpstreamRunNodes(panelId: string, types: string[]) {
+  const nodes = store.connections
+    .filter((c) => c.target_panel_id === panelId)
+    .map((c) => store.panels.find((p) => p.id === c.source_panel_id))
+    .filter((p): p is CanvasPanel => !!p && types.includes(p.type || ''))
+  // 按 y 聚成行带（容差 = 节点高度一半，避免网格/轻微错位被拆成多行），带内按 x 排序
+  const sorted = [...nodes].sort((a, b) => a.y - b.y || a.x - b.x)
+  const bands: CanvasPanel[][] = []
+  for (const p of sorted) {
+    const band = bands.find((arr) => Math.abs(p.y - arr[0].y) <= Math.max(p.height, arr[0].height) / 2)
+    if (band) band.push(p)
+    else bands.push([p])
+  }
+  return bands.flatMap((band) => band.sort((a, b) => a.x - b.x))
+}
+
+/** 收集配音/字幕来源文本：优先上游文本节点内容，兜底节点自身 text */
+function collectRunText(panel: CanvasPanel): string {
+  for (const p of getUpstreamRunNodes(panel.id, ['text'])) {
+    const text = contentString(p.content?.content).trim()
+    if (text) return text
+  }
+  return contentString(panel.content?.text).trim()
+}
+
+/** 确保执行结果节点存在：已有则复用并置 loading（重试），否则新建并连线 */
+function ensureRunResultNode(sourcePanel: CanvasPanel, type: 'audio' | 'text' | 'video', width: number, height: number): string {
+  const existing = contentString(sourcePanel.content?.result_panel_id)
+  if (existing && store.panels.some((p) => p.id === existing)) {
+    store.updatePanel(existing, { content: { content: '', status: 'loading', errorDetails: null } })
+    return existing
+  }
+  const id = store.addPanel({
+    type,
+    x: sourcePanel.x + sourcePanel.width + 60,
+    y: sourcePanel.y,
+    width,
+    height,
+    content: { content: '', status: 'loading' },
+  })
+  store.addConnection({ source_panel_id: sourcePanel.id, target_panel_id: id })
+  store.updatePanel(sourcePanel.id, { content: { result_panel_id: id } })
+  store.pushSnapshot()
+  return id
+}
+
+/** tts 节点执行：上游文本 → 配音音频节点 */
+async function runTtsNode(panel: CanvasPanel) {
+  const text = collectRunText(panel)
+  if (!text) {
+    ElMessage.warning(t('canvas.messages.textNodeEmpty'))
+    return
+  }
+  const resultId = ensureRunResultNode(panel, 'audio', 340, 120)
+  try {
+    const res = await generateCanvasTts({
+      text,
+      voice: contentString(panel.content?.voice) || 'default',
+      speed: Number(panel.content?.speed) || 1.0,
+    })
+    store.updatePanel(resultId, { content: { content: res.audio_url, status: 'success', duration_ms: res.duration_ms ?? null } })
+    store.pushSnapshot()
+    ElMessage.success(t('canvas.messages.ttsDone'))
+  } catch (err) {
+    store.updatePanel(resultId, { content: { status: 'error', errorDetails: getErrorMessage(err) } })
+    ElMessage.error(`${t('canvas.messages.generateFailed')}: ${getErrorMessage(err)}`)
+  }
+}
+
+/** subtitle 节点执行：上游文案 → SRT 文本节点 */
+async function runSubtitleNode(panel: CanvasPanel) {
+  const text = collectRunText(panel)
+  if (!text) {
+    ElMessage.warning(t('canvas.messages.textNodeEmpty'))
+    return
+  }
+  const resultId = ensureRunResultNode(panel, 'text', 340, 240)
+  try {
+    const res = await generateCanvasSubtitles({ text, max_chars: Number(panel.content?.max_chars) || 20 })
+    store.updatePanel(resultId, { content: { content: res.srt, status: 'success' } })
+    store.pushSnapshot()
+    ElMessage.success(t('canvas.messages.subtitleDone'))
+  } catch (err) {
+    store.updatePanel(resultId, { content: { status: 'error', errorDetails: getErrorMessage(err) } })
+    ElMessage.error(`${t('canvas.messages.generateFailed')}: ${getErrorMessage(err)}`)
+  }
+}
+
+/** compose 节点收集上游配音 URL：tts 节点 → 其结果音频节点 */
+function collectComposeAudioUrl(panel: CanvasPanel): string | null {
+  for (const tts of getUpstreamRunNodes(panel.id, ['tts'])) {
+    const resultId = contentString(tts.content?.result_panel_id)
+    const result = resultId ? store.panels.find((p) => p.id === resultId) : null
+    const url = result?.content?.content
+    if (result?.type === 'audio' && url) return String(url)
+  }
+  return null
+}
+
+/** compose 节点收集上游字幕：subtitle 节点 → 其 SRT 文本节点 */
+function collectComposeSubtitles(panel: CanvasPanel): CanvasSubtitleSegment[] | null {
+  for (const sub of getUpstreamRunNodes(panel.id, ['subtitle'])) {
+    const resultId = contentString(sub.content?.result_panel_id)
+    const result = resultId ? store.panels.find((p) => p.id === resultId) : null
+    if (result?.type === 'text' && result.content?.content) {
+      const segments = parseSrt(String(result.content.content))
+      if (segments.length) return segments
+    }
+  }
+  return null
+}
+
+/** compose 节点执行：多段视频（按摆放顺序）+ 可选配音/字幕 → 成片视频节点 */
+async function runComposeNode(panel: CanvasPanel) {
+  const videos = getUpstreamRunNodes(panel.id, ['video']).filter((p) => p.content?.content)
+  if (!videos.length) {
+    ElMessage.warning(t('canvas.messages.composeNoVideo'))
+    return
+  }
+  const withSubtitle = panel.content?.with_subtitle !== false
+  store.updatePanel(panel.id, { content: { status: 'loading', errorDetails: null } })
+  try {
+    const res = await composeCanvasVideos({
+      video_urls: videos.map((p) => String(p.content?.content)),
+      audio_url: collectComposeAudioUrl(panel),
+      subtitles: withSubtitle ? collectComposeSubtitles(panel) : null,
+      with_subtitle: withSubtitle,
+    })
+    const resultId = ensureRunResultNode(panel, 'video', 420, 236)
+    store.updatePanel(resultId, { content: { content: res.video_url, status: 'success' } })
+    store.updatePanel(panel.id, { content: { status: 'idle' } })
+    store.pushSnapshot()
+    ElMessage.success(t('canvas.messages.composeDone'))
+  } catch (err) {
+    store.updatePanel(panel.id, { content: { status: 'error', errorDetails: getErrorMessage(err) } })
+    ElMessage.error(`${t('canvas.messages.composeFailed')}: ${getErrorMessage(err)}`)
+  }
+}
+
+/** 三节点统一执行入口（悬停工具栏「生成」按钮） */
+async function handleNodeRun(panel: CanvasPanel) {
+  if (panel.type === 'tts') await runTtsNode(panel)
+  else if (panel.type === 'subtitle') await runSubtitleNode(panel)
+  else if (panel.type === 'compose') await runComposeNode(panel)
+}
+
+// 悬停工具栏：三节点「生成」
+async function handleHoverRunNode() {
+  const panel = hoveredPanel.value
+  if (!panel) return
+  await handleNodeRun(panel)
+}
+
 // 通用：重试生成
 // - 查找上游 config 节点，重新执行合并生成（创建新的 loading 结果节点）
 // - 没有上游 config 节点时，用节点自身 prompt 重新生成（直接更新当前节点）
 async function retryGeneration(panel: typeof store.panels[number]) {
+  // 画布三节点（spec M3）：执行节点本身重跑；其产物节点回溯到执行节点重跑
+  if (panel.type === 'tts' || panel.type === 'subtitle' || panel.type === 'compose') {
+    await handleNodeRun(panel)
+    return
+  }
+  const runConn = store.connections.find((c) => c.target_panel_id === panel.id)
+  const runNode = runConn ? store.panels.find((p) => p.id === runConn.source_panel_id) : null
+  if (runNode && ['tts', 'subtitle', 'compose'].includes(runNode.type || '')) {
+    await handleNodeRun(runNode)
+    return
+  }
+
   // 直出分镜节点（自带 lineage）：就地重试，保留节点上的模型/参数/角色参考图/源图
   if (readLineage(panel) && (panel.type === 'image' || panel.type === 'video')) {
     const isVideoNode = panel.type === 'video'
@@ -1475,10 +1733,33 @@ async function retryGeneration(panel: typeof store.panels[number]) {
       ElMessage.error(`${t('canvas.messages.retryFailed')}: ${getErrorMessage(err)}`)
     }
   } else {
-    // 没有上游 config 节点，用节点自身的 prompt 重新生成（直接更新当前节点）
+    // 没有上游 config 节点：图片节点走就地重生成（保留节点上的模型/尺寸/参考图，旧分镜图节点也走这里），
+    // 其余类型用节点自身 prompt 重新生成（直接更新当前节点）
     const prompt = (panel.content?.prompt || panel.content?.content || '') as string
     if (!prompt.trim()) {
       ElMessage.warning(t('canvas.messages.retryNoPrompt'))
+      return
+    }
+    if (panel.type === 'image') {
+      ElMessage.info(t('canvas.messages.regenerate'))
+      try {
+        const { executeInNodeGeneration } = await import('@/lib/canvas-generation')
+        await executeInNodeGeneration(panel, store)
+      } catch (err) {
+        ElMessage.error(`${t('canvas.messages.retryFailed')}: ${getErrorMessage(err)}`)
+      }
+      return
+    }
+    if (panel.type === 'video') {
+      const canGenerate = await checkCreditsBeforeGenerate({ type: 'video', mode: 'image2video', seconds: (panel.content?.seconds as number) || 5 })
+      if (!canGenerate) return
+      ElMessage.info(t('canvas.messages.regenerate'))
+      try {
+        const { executeInNodeVideoGeneration } = await import('@/lib/canvas-generation')
+        await executeInNodeVideoGeneration(panel, store)
+      } catch (err) {
+        ElMessage.error(`${t('canvas.messages.retryFailed')}: ${getErrorMessage(err)}`)
+      }
       return
     }
     await generateImageFromPrompt(panel, prompt, panel.id)
@@ -1701,9 +1982,67 @@ function cancelHoverHide() {
 
 // ---- 悬停工具栏事件处理（复杂功能简化为 ElMessage 提示） ----
 
+// 节点信息弹窗（查看节点信息：名称/类型/状态/模型/提示词等元数据）
+const nodeInfoPanel = ref<typeof store.panels[number] | null>(null)
+const nodeInfoVisible = computed({
+  get: () => nodeInfoPanel.value !== null,
+  set: (v: boolean) => { if (!v) nodeInfoPanel.value = null },
+})
+
 function handleHoverInfo() {
-  const p = hoveredPanel.value
-  if (p) ElMessage.info(`${getNodeName(p.type ?? '')} | ID: ${p.id}`)
+  nodeInfoPanel.value = hoveredPanel.value
+}
+
+/* ---------- 节点信息弹窗 ---------- */
+
+/** 信息弹窗：节点内容元数据（统一从 panel.content 读取） */
+const nodeInfoContent = computed(() => nodeInfoPanel.value?.content || {})
+
+const nodeInfoPrompt = computed(() => {
+  const v = nodeInfoContent.value.prompt
+  return typeof v === 'string' ? v : ''
+})
+
+const nodeInfoModel = computed(() => {
+  const v = nodeInfoContent.value.model
+  return typeof v === 'string' ? v : ''
+})
+
+const nodeInfoSize = computed(() => {
+  const v = nodeInfoContent.value.size
+  return typeof v === 'string' ? v : ''
+})
+
+const nodeInfoRefCount = computed(() => {
+  const v = nodeInfoContent.value.referenceImages
+  return Array.isArray(v) ? v.length : 0
+})
+
+/** 信息弹窗：分镜来源（分镜派生节点显示来源剧本与镜号） */
+const nodeInfoShotFrom = computed(() => {
+  const p = nodeInfoPanel.value
+  if (!p) return ''
+  const info = getShotLineageInfo(p)
+  if (!info) return ''
+  const script = store.panels.find((pp) => pp.id === info.lineage.scriptPanelId)
+  return t('canvas.nodeInfo.shotFrom', { name: script?.name || '', no: info.lineage.shotNo })
+})
+
+/** 信息弹窗：状态文案 */
+const nodeInfoStatusText = computed(() => {
+  switch (nodeInfoContent.value.status) {
+    case 'loading': return t('canvas.node.generating')
+    case 'success': return t('canvas.nodeInfo.statusSuccess')
+    case 'error': return t('canvas.node.generateFailed')
+    default: return t('canvas.nodeInfo.statusIdle')
+  }
+})
+
+async function handleInfoCopyPrompt() {
+  if (!nodeInfoPrompt.value) return
+  const ok = await copyTextWithFallback(nodeInfoPrompt.value)
+  if (ok) ElMessage.success(t('canvas.messages.promptCopied'))
+  else ElMessage.warning(t('canvas.messages.copyFailed'))
 }
 
 function handleHoverDelete() {
@@ -1868,47 +2207,40 @@ function handleHoverUploadAudio() {
   triggerFileUpload(hoveredPanelId.value, 'audio/*')
 }
 
+/** 复制文本到剪贴板：优先 Clipboard API，失败回退 textarea + execCommand（非安全上下文兜底） */
+async function copyTextWithFallback(text: string): Promise<boolean> {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch (_) {
+      // Clipboard API 失败（如非安全上下文），继续走兜底方案
+    }
+  }
+  try {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(textarea)
+    return ok
+  } catch (_) {
+    return false
+  }
+}
+
 function handleHoverCopyPrompt() {
   if (!hoveredPanelId.value) return
   const p = store.panels.find((pp) => pp.id === hoveredPanelId.value)
   const prompt = (p?.content?.prompt ?? '') as string
-  // 复制到剪贴板：优先用 Clipboard API，失败时回退到 textarea + execCommand
-  // （HTTP 非安全上下文或浏览器禁用 Clipboard API 时需要兜底）
-  const fallbackCopy = (text: string) => {
-    try {
-      const textarea = document.createElement('textarea')
-      textarea.value = text
-      textarea.style.position = 'fixed'
-      textarea.style.opacity = '0'
-      document.body.appendChild(textarea)
-      textarea.select()
-      const ok = document.execCommand('copy')
-      document.body.removeChild(textarea)
-      return ok
-    } catch (_) {
-      return false
-    }
-  }
 
-  if (navigator.clipboard?.writeText) {
-    navigator.clipboard?.writeText(prompt).then(() => {
-      ElMessage.success(t('canvas.messages.promptCopied'))
-    }).catch(() => {
-      // Clipboard API 失败（如非安全上下文），用兜底方案
-      if (fallbackCopy(prompt)) {
-        ElMessage.success(t('canvas.messages.promptCopied'))
-      } else {
-        ElMessage.warning(t('canvas.messages.copyFailed'))
-      }
-    })
-  } else {
-    // 无 Clipboard API，直接用兜底方案
-    if (fallbackCopy(prompt)) {
-      ElMessage.success(t('canvas.messages.promptCopied'))
-    } else {
-      ElMessage.warning(t('canvas.messages.copyFailed'))
-    }
-  }
+  void copyTextWithFallback(prompt).then((ok) => {
+    if (ok) ElMessage.success(t('canvas.messages.promptCopied'))
+    else ElMessage.warning(t('canvas.messages.copyFailed'))
+  })
 }
 
 // 悬停工具栏：反推提示词（图生文）—— 将当前 hover 图片发给 AI，生成适合 AI 绘画的英文 prompt
@@ -2888,6 +3220,11 @@ function handleGlobalClick(event: MouseEvent) {
 
 // ==================== 生命周期 ====================
 
+// 切换工作区时恢复该工作区中断的生成任务（含生成中切走又切回的场景）
+watch(() => store.activeWorkspaceId, () => {
+  resumeLoadingCanvasNodes(store)
+})
+
 onMounted(async () => {
   // 从 localforage 加载持久化数据
   await store._hydrateFromStorage()
@@ -2895,6 +3232,8 @@ onMounted(async () => {
   if (!store.activeWorkspaceId && store.workspaces.length === 0) {
     store.createWorkspace(`${t('canvas.canvas')} 1`)
   }
+  // 恢复中断的生成任务：刷新后轮询循环已丢失，按队列任务对账回填 loading 节点
+  resumeLoadingCanvasNodes(store)
   // 注册全局事件监听
   window.addEventListener('keydown', handleKeyDown)
   window.addEventListener('keyup', handleKeyUp)
@@ -3221,6 +3560,61 @@ async function handleUserLogout() {
 
 .preview-download:hover {
   background: rgba(255, 255, 255, 0.25);
+}
+
+/* ==================== 节点信息对话框 ==================== */
+.node-info {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.node-info-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.node-info-label {
+  flex: none;
+  width: 72px;
+  color: var(--agnes-text-muted);
+  font-size: 12px;
+}
+
+.node-info-value {
+  flex: 1;
+  min-width: 0;
+  word-break: break-all;
+}
+
+.node-info-id {
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--agnes-text-muted);
+}
+
+.node-info-prompt-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.node-info-prompt-text {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: var(--agnes-bg-inset);
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 180px;
+  overflow-y: auto;
 }
 
 /* ==================== 隐藏文件输入 ==================== */

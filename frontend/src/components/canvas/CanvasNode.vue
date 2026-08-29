@@ -228,6 +228,17 @@
           <div class="tts-hint">
             {{ t('canvas.node.ttsHint') || '连接文本节点作为配音来源' }}
           </div>
+          <button
+            type="button"
+            class="node-run-btn"
+            :style="runBtnStyle"
+            :disabled="metadata.status === 'loading'"
+            @click.stop="handleRunNode"
+            @mousedown.stop
+          >
+            <Play :size="14" />
+            {{ t('canvas.node.runTts') || '生成配音' }}
+          </button>
         </div>
 
         <!-- 字幕节点（spec 5.4.1）：从上游文本生成 SRT -->
@@ -243,6 +254,17 @@
             @mousedown.stop
             rows="3"
           />
+          <button
+            type="button"
+            class="node-run-btn"
+            :style="runBtnStyle"
+            :disabled="metadata.status === 'loading'"
+            @click.stop="handleRunNode"
+            @mousedown.stop
+          >
+            <Play :size="14" />
+            {{ t('canvas.node.runSubtitle') || '生成字幕' }}
+          </button>
         </div>
 
         <!-- 成片合成节点（spec 5.4.1）：拼接视频 + 字幕 + 配音 -->
@@ -259,6 +281,17 @@
           <div class="compose-hint">
             {{ t('canvas.node.composeHint') || '连接视频节点（必须）+ 可选配音/字幕节点' }}
           </div>
+          <button
+            type="button"
+            class="node-run-btn"
+            :style="runBtnStyle"
+            :disabled="metadata.status === 'loading'"
+            @click.stop="handleRunNode"
+            @mousedown.stop
+          >
+            <Play :size="14" />
+            {{ t('canvas.node.runCompose') || '生成成片' }}
+          </button>
         </div>
 
         <!-- 未知节点类型 -->
@@ -353,7 +386,7 @@
  * ===================================================== */
 
 import { computed, ref, nextTick, watch, onMounted, onUnmounted } from 'vue'
-import { Image as ImageIcon, Video, Music2, RefreshCw } from 'lucide-vue-next'
+import { Image as ImageIcon, Video, Music2, RefreshCw, Play } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
 import { useCanvasStore } from '@/stores/canvas'
 import { useModelsStore } from '@/stores/models'
@@ -405,6 +438,7 @@ const emit = defineEmits([
   'generate-image', // 从 text 节点生图（保留用于 retry 等场景）
   'retry', // 重试生成
   'upload', // 上传文件
+  'run-node', // 三类执行节点（tts/subtitle/compose）触发生成
 ])
 
 /* ---------- 常量 ---------- */
@@ -516,6 +550,12 @@ const retryBtnStyle = computed(() => ({
   background: props.theme.toolbar.panel,
   borderColor: props.theme.toolbar.border,
   color: props.theme.node.text,
+}))
+
+/** 三类执行节点（tts/subtitle/compose）生成按钮样式（强调色） */
+const runBtnStyle = computed(() => ({
+  background: props.theme.toolbar.activeBg,
+  color: props.theme.toolbar.activeText,
 }))
 
 /** 连线锚点圆点样式 */
@@ -922,6 +962,13 @@ watch(
 /** 点击重试按钮 */
 function handleRetry() {
   emit('retry', props.panel)
+}
+
+/* ---------- 交互：三类执行节点（tts/subtitle/compose）触发生成 ---------- */
+
+function handleRunNode() {
+  if (metadata.value.status === 'loading') return
+  emit('run-node', props.panel)
 }
 
 /* ---------- 交互：配置节点 ---------- */
@@ -1558,5 +1605,35 @@ onUnmounted(() => {
   font-size: 11px;
   color: var(--agnes-text-tertiary);
   line-height: 1.4;
+}
+
+/* ===== 三类执行节点（tts/subtitle/compose）生成按钮 ===== */
+.node-run-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  align-self: center;
+  height: 30px;
+  padding: 0 16px;
+  margin-top: 8px;
+  border: none;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+  flex-shrink: 0;
+}
+
+.node-run-btn:hover {
+  transform: scale(1.03);
+  opacity: 0.92;
+}
+
+.node-run-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+  transform: none;
 }
 </style>

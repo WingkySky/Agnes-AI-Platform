@@ -930,6 +930,15 @@ class AgnesAIClient:
         if images and isinstance(images, (list, tuple)):
             ref_images.extend([i for i in images if i and isinstance(i, str) and i.strip()])
 
+        # ── 参考图归一化：Data URI / 纯 base64 提纯后直传（经实测 2.5 上游接受纯 base64；
+        #    原样透传带 data: 前缀的 Data URI 会被上游挂死直到超时）；URL 原样保留 ──
+        normalized_images: List[str] = []
+        for img in ref_images:
+            uri, _size = self._normalize_image_input(img, return_pure_b64=True)
+            if uri:
+                normalized_images.append(uri)
+        ref_images = normalized_images
+
         # ── 过滤参考视频 / 音频中的空值 ──
         ref_videos = [
             v for v in (reference_videos or [])
@@ -992,7 +1001,7 @@ class AgnesAIClient:
         if seed is not None:
             body["seed"] = seed
 
-        # ── 按 mode 分流媒体字段（均为顶层字段，媒体需公网可访问 URL） ──
+        # ── 按 mode 分流媒体字段（均为顶层字段；图片支持纯 base64 / Agnes 托管 URL） ──
         if v25_mode == "keyframe":
             # 首尾帧模式：images[0] → first_frame，images[-1] → last_frame（可选）
             if not ref_images:
