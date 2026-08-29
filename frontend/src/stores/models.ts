@@ -7,6 +7,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getPlatformConfig } from '@/api/history'
+import { usePreferencesStore } from '@/stores/preferences'
 import type { ModelInfo, ConfigResponse, ImageSizeOption, VideoAspectRatioOption, VideoResolutionOption, WatermarkConfigPublic } from '@/types'
 import {
   getModelParams as getLocalModelParams,
@@ -48,9 +49,24 @@ export const useModelsStore = defineStore('models', () => {
   const videoModels = computed(() => models.value.filter((m) => m.type === 'video'))
   const chatModels = computed(() => models.value.filter((m) => m.type === 'chat'))
 
-  // 默认模型（各类型第一个）
-  const defaultImageModel = computed(() => imageModels.value[0]?.id || '')
-  const defaultVideoModel = computed(() => videoModels.value[0]?.id || '')
+  // 用户偏好（默认模型的优先来源）
+  const preferencesStore = usePreferencesStore()
+
+  /**
+   * 按类型取默认模型：用户偏好 > 该类型列表第一个
+   * 偏好未设置、模型已下架或类型不匹配时，回退到列表第一个
+   */
+  function getDefaultModel(type: 'image' | 'video' | 'chat'): string {
+    const list =
+      type === 'video' ? videoModels.value : type === 'chat' ? chatModels.value : imageModels.value
+    const preferredId = preferencesStore.generation.default_model_id
+    if (preferredId && list.some((m) => m.id === preferredId)) return preferredId
+    return list[0]?.id || ''
+  }
+
+  // 默认模型（偏好优先，未命中取各类型第一个）
+  const defaultImageModel = computed(() => getDefaultModel('image'))
+  const defaultVideoModel = computed(() => getDefaultModel('video'))
 
   /** 从后端加载配置（仅加载一次） */
   async function fetchConfig() {
@@ -141,6 +157,7 @@ export const useModelsStore = defineStore('models', () => {
     chatModels,
     defaultImageModel,
     defaultVideoModel,
+    getDefaultModel,
     fetchConfig,
     getModelById,
     getModelsByMode,
