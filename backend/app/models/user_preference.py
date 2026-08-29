@@ -23,7 +23,8 @@ from app.core.database import Base
 DEFAULT_PREFERENCES = {
     # 生成偏好
     "generation": {
-        "default_model_id": "",
+        "default_image_model_id": "",
+        "default_video_model_id": "",
         "default_aspect_ratio": "1:1",
         "auto_copy_prompt": True,
         "default_image_count": 1,

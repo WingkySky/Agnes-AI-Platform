@@ -59,7 +59,9 @@ export const useModelsStore = defineStore('models', () => {
   function getDefaultModel(type: 'image' | 'video' | 'chat'): string {
     const list =
       type === 'video' ? videoModels.value : type === 'chat' ? chatModels.value : imageModels.value
-    const preferredId = preferencesStore.generation.default_model_id
+    const gen = preferencesStore.generation
+    const preferredId =
+      type === 'video' ? gen.default_video_model_id : type === 'image' ? gen.default_image_model_id : ''
     if (preferredId && list.some((m) => m.id === preferredId)) return preferredId
     return list[0]?.id || ''
   }

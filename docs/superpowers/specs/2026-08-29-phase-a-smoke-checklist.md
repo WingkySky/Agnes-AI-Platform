@@ -67,13 +67,13 @@ python -m py_compile app/schemas/storyboard.py app/services/storyboard_service.p
 
 ```bash
 # 不传 model：回退第一个 chat 模型（行为与改动前一致）
-curl -X POST http://localhost:8000/api/storyboard -H "Content-Type: application/json" -d '{"text":"..."}'
+curl -X POST http://localhost:8000/api/storyboard -H "Content-Type: application/json" -d '{"story":"..."}'
 
 # 传合法 chat 模型 id：使用该模型
-curl -X POST http://localhost:8000/api/storyboard -H "Content-Type: application/json" -d '{"text":"...","model":"<chat-model-id>"}'
+curl -X POST http://localhost:8000/api/storyboard -H "Content-Type: application/json" -d '{"story":"...","model":"<chat-model-id>"}'
 
 # 传非法 model：后端 logger.warning 提示回退，仍正常返回
-curl -X POST http://localhost:8000/api/storyboard -H "Content-Type: application/json" -d '{"text":"...","model":"not-exist"}'
+curl -X POST http://localhost:8000/api/storyboard -H "Content-Type: application/json" -d '{"story":"...","model":"not-exist"}'
 ```
 
 ## 6. M3 向导步骤② 资产参考图
@@ -87,7 +87,7 @@ curl -X POST http://localhost:8000/api/storyboard -H "Content-Type: application/
 
 | # | 步骤 | 预期 |
 | --- | --- | --- |
-| 7.1 | 步骤③ 分镜图参数区选模型 + 尺寸 → 批量派生分镜图 | 全部 config 节点按所选生成；积分确认弹窗金额按所选尺寸估算 |
+| 7.1 | 步骤③ 分镜图参数区选模型 + 尺寸 → 批量派生分镜图 | 全部直出 image 节点按所选生成（B1 后分镜图不再产生 config）；积分确认弹窗金额按所选尺寸估算 |
 | 7.2 | 步骤③ 分镜视频参数区选模型 + 比例/分辨率/帧率/时长 → 批量派生视频 | 全部按所选（不再硬编码 16:9） |
 | 7.3 | 视频参数区**不选时长**，给镜头表格里的镜头设不同时长 → 派生 | 各镜头沿用自己表格里的时长（不破坏逐镜头时长能力） |
 | 7.4 | 视频参数区**选定时长** → 派生 | 全部镜头用参数栏时长覆盖 |

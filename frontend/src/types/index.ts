@@ -456,7 +456,8 @@ export interface ChatMessageListResponse {
 
 /** 生成偏好 */
 export interface GenerationPreferences {
-  default_model_id: string
+  default_image_model_id: string
+  default_video_model_id: string
   default_aspect_ratio: string
   auto_copy_prompt: boolean
   default_image_count: number

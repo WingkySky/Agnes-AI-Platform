@@ -8,7 +8,7 @@
  *   DELETE /api/preferences          重置为默认偏好
  *
  * 偏好数据结构（与后端 DEFAULT_PREFERENCES 对齐）：
- *   generation    : { default_model_id, default_aspect_ratio, auto_copy_prompt, default_image_count }
+ *   generation    : { default_image_model_id, default_video_model_id, default_aspect_ratio, auto_copy_prompt, default_image_count }
  *   download      : { auto_download, download_directory, file_naming_pattern, classify_by, default_format }
  *   ui            : { theme, canvas_grid_visible, canvas_grid_size, canvas_snap_to_grid }
  *   notification  : { sound_on_complete, browser_notification }

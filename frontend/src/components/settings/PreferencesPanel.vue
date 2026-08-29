@@ -198,6 +198,40 @@
         </div>
       </div>
 
+      <!-- 默认生图模型 -->
+      <div class="pref-row">
+        <div class="pref-info">
+          <span class="pref-label">{{ t('prefs.generation.defaultImageModel') }}</span>
+          <span class="pref-hint">{{ t('prefs.generation.defaultImageModelHint') }}</span>
+        </div>
+        <el-select
+          v-model="form.generation.default_image_model_id"
+          size="small"
+          style="width: 220px"
+          clearable
+          placeholder=" "
+          @change="markDirty">
+          <el-option v-for="m in modelsStore.imageModels" :key="m.id" :label="m.name || m.id" :value="m.id" />
+        </el-select>
+      </div>
+
+      <!-- 默认生视频模型 -->
+      <div class="pref-row">
+        <div class="pref-info">
+          <span class="pref-label">{{ t('prefs.generation.defaultVideoModel') }}</span>
+          <span class="pref-hint">{{ t('prefs.generation.defaultVideoModelHint') }}</span>
+        </div>
+        <el-select
+          v-model="form.generation.default_video_model_id"
+          size="small"
+          style="width: 220px"
+          clearable
+          placeholder=" "
+          @change="markDirty">
+          <el-option v-for="m in modelsStore.videoModels" :key="m.id" :label="m.name || m.id" :value="m.id" />
+        </el-select>
+      </div>
+
       <!-- 默认比例 -->
       <div class="pref-row">
         <div class="pref-info">
@@ -392,9 +426,11 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { FolderOpened, Close } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { usePreferencesStore } from '@/stores/preferences'
+import { useModelsStore } from '@/stores/models'
 
 const { t } = useI18n()
 const prefsStore = usePreferencesStore()
+const modelsStore = useModelsStore()
 
 const lastSaved = ref<string | null>(null)
 const dirty = ref(false)
@@ -411,7 +447,8 @@ const form = reactive({
     default_format: 'original' as 'original' | 'png' | 'jpg' | 'webp',
   },
   generation: {
-    default_model_id: '',
+    default_image_model_id: '',
+    default_video_model_id: '',
     default_aspect_ratio: '1:1',
     auto_copy_prompt: true,
     default_image_count: 1,
@@ -555,7 +592,8 @@ function syncFormFromStore() {
   form.download.default_format = d.default_format
 
   const g = prefsStore.generation
-  form.generation.default_model_id = g.default_model_id
+  form.generation.default_image_model_id = g.default_image_model_id
+  form.generation.default_video_model_id = g.default_video_model_id
   form.generation.default_aspect_ratio = g.default_aspect_ratio
   form.generation.auto_copy_prompt = g.auto_copy_prompt
   form.generation.default_image_count = g.default_image_count

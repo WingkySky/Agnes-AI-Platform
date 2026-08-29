@@ -63,11 +63,11 @@ ParamSelector 的 v-model 是驼峰（`size/aspectRatio/seconds/frameRate/model`
 
 | 入口 | 改造 |
 | --- | --- |
-| image 节点 Composer | 底栏加 ComposerParamBar(mode=image)；选择存 image 节点 content（image_model/image_size），sendImage 透传给 executeImageReferenceGeneration（新增可选参数，替换硬编码） |
+| image 节点 Composer | 底栏加 ComposerParamBar(mode=image)；选择存 image 节点 content（根字段 model/size，与 config 节点字段统一），sendImage 透传给 executeImageReferenceGeneration（新增可选参数，替换硬编码） |
 | video 节点 Composer | 同上（video_model/aspect_ratio/seconds…），sendVideo 透传给 executeVideoFromFrameGeneration |
 | config 节点 Composer | 现有原生 select 整体替换为 ComposerParamBar（同一交互形态；content 字段名不变，executeMerge* 零改动） |
 | script 节点 Composer | 底栏加分镜聊天模型选择（chat 模型列表，存 content.chat_model） |
-| 剧本向导②资产参考图 | 向导②顶部加一行 ComposerParamBar(mode=image)，选择存 script 节点 content（wizard_image_model/image_size），generateAssetImage 消费 |
+| 剧本向导②资产参考图 | 向导②顶部加一行 ComposerParamBar(mode=image)，选择存 script 节点 content 分区键 `asset_image_params`，generateAssetImage 消费 |
 | 剧本批量派生（步骤③） | 步骤③批量按钮旁加参数区（mode=image/video 各自的模型+关键参数），写入派生 config 节点 content（派生后仍可逐镜头在 Composer 单改） |
 | 文本节点"生成图片" | 沿用 M1 后的偏好默认模型，不加 UI（低频路径） |
 
@@ -82,7 +82,7 @@ ParamSelector 的 v-model 是驼峰（`size/aspectRatio/seconds/frameRate/model`
 | --- | --- | --- |
 | image/video/config 节点的模型参数 | 各节点 content（现有模式） | 节点即配置，重试/重跑自然继承 |
 | script 节点的 chat_model / 向导模型参数 | script 节点 content | 一个剧本一份配置，重开向导不丢 |
-| 全局默认 | preferences.generation.default_model_id | 偏好页已有 UI，接通即生效 |
+| 全局默认 | preferences.generation.default_image_model_id / default_video_model_id | 实施更正：原 default_model_id 从未有 UI 控件，本项在偏好页补"默认生图/生视频模型"两个下拉 |
 
 ## 4. 里程碑
 

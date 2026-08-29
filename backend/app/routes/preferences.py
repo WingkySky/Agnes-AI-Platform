@@ -121,7 +121,7 @@ async def patch_preferences(
 ):
     """
     部分更新偏好设置：对 req.preferences 做深度合并。
-    - 只传 {"generation": {"default_model_id": "xxx"}}，其他 generation 字段不受影响
+    - 只传 {"generation": {"default_image_model_id": "xxx"}}，其他 generation 字段不受影响
     - 新增的 category / key 会被创建
     - 传 null 可删除某个值（等效于恢复默认值）
     """
