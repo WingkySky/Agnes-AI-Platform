@@ -108,9 +108,9 @@
               class="asset-card"
               :style="cardStyle"
             >
-              <!-- 参考图区：预览 / 空态 / 生成中，悬浮操作 -->
+              <!-- 参考图区：预览（点击放大查看）/ 空态 / 生成中，悬浮操作 -->
               <div class="asset-img">
-                <img v-if="a.imageUrl" :src="a.imageUrl" alt="">
+                <img v-if="a.imageUrl" :src="a.imageUrl" alt="" @click="openAssetViewer(a)">
                 <span v-else class="asset-empty" :style="mutedStyle">{{ t('canvas.script.wizard.emptyImage') }}</span>
                 <span v-if="generatingAssets.has(a.id)" class="asset-loading">⟳</span>
                 <div class="asset-actions">
@@ -127,7 +127,7 @@
               >
               <textarea
                 v-model="a.description"
-                rows="2"
+                rows="3"
                 class="wiz-input asset-desc" :style="inputStyle"
                 :placeholder="t('canvas.script.wizard.descPlaceholder')"
                 @input="persistAssets"
@@ -194,6 +194,9 @@
           </template>
         </div>
       </div>
+
+      <!-- 图片放大查看（复用历史页 ImageViewer 模块：滚轮缩放/拖动/旋转） -->
+      <ImageViewer v-model:visible="viewerVisible" :url="viewerUrl" />
     </div>
   </Teleport>
 </template>
@@ -207,6 +210,7 @@ import { useModelsStore } from '@/stores/models'
 import { checkCreditsBeforeGenerate } from '@/lib/canvas-credits'
 import { createGenerationTask, pollImageTask, getUpstreamNodes } from '@/lib/canvas-generation'
 import { getErrorMessage } from '@/lib/type-helpers'
+import ImageViewer from '@/components/ImageViewer.vue'
 import {
   deriveStoryboardImages,
   deriveStoryboardVideos,
@@ -251,6 +255,16 @@ const style = ref('')
 const generatingAssets = ref<Set<string>>(new Set())
 const uploadTarget = ref<{ kind: 'characters' | 'scenes'; id: string } | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
+
+/** 图片放大查看（复用历史页 ImageViewer 模块） */
+const viewerVisible = ref(false)
+const viewerUrl = ref('')
+
+function openAssetViewer(asset: ShotAsset) {
+  if (!asset.imageUrl) return
+  viewerUrl.value = asset.imageUrl
+  viewerVisible.value = true
+}
 
 watch(() => props.visible, (v) => {
   if (!v || !panel.value) return
@@ -719,10 +733,10 @@ function stepTitleStyle(s: { no: number }) {
 .asset-card {
   border: 1px solid;
   border-radius: 12px;
-  padding: 10px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 .asset-img {
   position: relative;
@@ -737,6 +751,7 @@ function stepTitleStyle(s: { no: number }) {
   height: 100%;
   object-fit: cover;
   display: block;
+  cursor: zoom-in;
 }
 .asset-empty {
   position: absolute;
