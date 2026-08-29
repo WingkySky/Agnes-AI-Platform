@@ -549,6 +549,7 @@ Swagger UI（交互式文档）：`http://localhost:8000/docs`
 | `scenes` | object[] | | 已有场景设定（反向通道，分镜沿用已有设定） |
 | `shot_count_min` / `shot_count_max` | int | | 期望镜头数范围，默认 6-12，上限 30 |
 | `style` | string | | 画面风格 |
+| `model` | string | | 分镜聊天模型（chat 类型）。未传或不在聊天模型注册表中时，回退到第一个聊天模型 |
 
 **响应 `data`：**
 

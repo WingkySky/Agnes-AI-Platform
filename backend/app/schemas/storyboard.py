@@ -23,6 +23,7 @@ class StoryboardRequest(BaseModel):
     shot_count_min: int = Field(6, ge=1, le=30, description="期望镜头数下限")
     shot_count_max: int = Field(12, ge=1, le=30, description="期望镜头数上限（≤30）")
     style: Optional[str] = Field(None, description="画面风格（可空）")
+    model: Optional[str] = Field(None, description="分镜聊天模型（chat 类型，可空；未传或不在聊天模型注册表中时回退第一个聊天模型）")
 
 
 class StoryboardShot(BaseModel):

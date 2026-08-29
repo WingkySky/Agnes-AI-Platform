@@ -101,8 +101,16 @@ async def generate_storyboard(req: StoryboardRequest) -> StoryboardResult:
     chat_models = await get_models_by_type("chat")
     if not chat_models:
         raise ValueError("未配置聊天模型")
+    # 指定模型需命中聊天模型注册表，未传或未命中时回退第一个聊天模型
+    model = chat_models[0].id
+    if req.model:
+        matched = next((m.id for m in chat_models if m.id == req.model), None)
+        if matched:
+            model = matched
+        else:
+            logger.warning("[storyboard] 指定模型 %s 不在聊天模型注册表中，回退 %s", req.model, model)
     body = {
-        "model": chat_models[0].id,
+        "model": model,
         "messages": [{"role": "user", "content": _build_prompt(req)}],
         "temperature": 0.7,
     }
