@@ -18,6 +18,10 @@ venv/
 # Node
 node_modules/
 dist/
+# 临时构建验证目录（vite build --outDir 校验用）
+dist-verify-*/
+# Vite 读取配置文件时生成的临时产物
+vite.config.ts.timestamp-*.mjs
 
 # 编辑器
 .vscode/
