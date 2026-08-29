@@ -81,6 +81,8 @@ LibTV 是哩布哩布 AI（LiblibAI）推出的 AI 视频创作平台（liblib.t
 
 ## 五、与本项目现状的差距分析
 
+> 注：本表成文于分镜直出（P0）动工之前。P0 主链路已落地，逐项核实代码后的最新差距对照与补强计划见 [libtv-gap-analysis.md](libtv-gap-analysis.md)，现状以该文为准。
+
 本项目已有：自研 InfiniteCanvas（DOM/SVG，缩放/平移/连线/多选/历史/小地图/吸附对齐/导入导出）、8 种节点（text/image/video/audio/config/tts/subtitle/compose）、连线类型校验、生成任务回填（`canvas-generation.ts`）、任务队列、localforage 持久化、素材库、图像后处理（裁剪/分割/旋转/放大/蒙版）、3D 场景导演台（three.js + `routes/scenes.py`）、项目制创作（剧本/角色/场景/分镜/时间线/向导，`routes/projects.py`）。**画布底座和短剧数据模型两边其实已经对齐，缺口集中在"创作编排层"。**
 
 | # | LibTV 能力 | 本项目现状 | 差距 |

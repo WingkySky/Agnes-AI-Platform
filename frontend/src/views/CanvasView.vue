@@ -2452,6 +2452,12 @@ async function handleHoverDeriveVideo() {
 // 重拍此镜头（LibTV P0）：找到来源 config 节点，重新执行生成
 async function handleHoverReshoot() {
   const panel = hoveredPanel.value
+  if (!panel) return
+  // 直出分镜节点（自带 lineage）：就地重拍（保留模型/参数/参考图/源图），与重试同链路
+  if (readLineage(panel) && (panel.type === 'image' || panel.type === 'video')) {
+    await retryGeneration(panel)
+    return
+  }
   const sourceFrom = panel?.content?.sourceFrom
   if (typeof sourceFrom !== 'string') return
   const configPanel = store.panels.find(p => p.id === sourceFrom)
