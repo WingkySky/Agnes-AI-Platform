@@ -630,6 +630,15 @@ export function listBgmMoods(projectId: number): Promise<{ moods: string[] }> {
   return client.get(`/api/projects/${projectId}/bgms/moods`)
 }
 
+/** 上传自定义 BGM（mp3，用户自备音源） */
+export function uploadBgm(projectId: number, file: File, name: string, mood: string): Promise<BGMItem> {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('name', name)
+  form.append('mood', mood)
+  return client.post(`/api/projects/${projectId}/bgms/upload`, form)
+}
+
 // ---------- 高级合成 ----------
 
 export function mergeProjectAdvanced(

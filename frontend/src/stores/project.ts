@@ -84,6 +84,7 @@ import {
   saveTimelineData as apiSaveTimelineData,
   listBgms as apiListBgms,
   listBgmMoods as apiListBgmMoods,
+  uploadBgm as apiUploadBgm,
   mergeProjectAdvanced as apiMergeProjectAdvanced,
   // Phase 2 增强
   getMediaLibrary as apiGetMediaLibrary,
@@ -1103,6 +1104,13 @@ export const useProjectStore = defineStore('project', {
       if (!this.currentProjectId) return
       const result = await apiListBgmMoods(this.currentProjectId)
       this.bgmMoods = result.moods
+    },
+
+    async uploadBgm(file: File, name: string, mood: string) {
+      if (!this.currentProjectId) throw new Error('未选择项目')
+      const meta = await apiUploadBgm(this.currentProjectId, file, name, mood)
+      await this.fetchBgms()
+      return meta
     },
 
     // ================ Phase 2: 高级合成 ================

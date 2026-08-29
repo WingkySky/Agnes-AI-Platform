@@ -14,7 +14,7 @@
     :close-on-click-modal="false"
     append-to-body
   >
-    <!-- 情绪过滤 -->
+    <!-- 情绪过滤 + 上传自定义 BGM -->
     <div class="mood-filter">
       <el-radio-group v-model="activeMood" size="small">
         <el-radio-button :value="''">全部</el-radio-button>
@@ -24,6 +24,14 @@
           :value="mood"
         >{{ moodLabel(mood) }}</el-radio-button>
       </el-radio-group>
+      <el-upload
+        class="bgm-upload"
+        :show-file-list="false"
+        accept=".mp3,audio/mpeg"
+        :before-upload="onUploadBgm"
+      >
+        <el-button size="small" :icon="Plus" :loading="uploading">上传 BGM</el-button>
+      </el-upload>
     </div>
 
     <!-- BGM 列表 -->
@@ -83,8 +91,9 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Headset, VideoPlay } from '@element-plus/icons-vue'
+import { Headset, VideoPlay, Plus } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
+import { getBgmFileUrl } from '@/api/projects'
 import type { BGMItem, BGMMood } from '@/types/project'
 
 const props = defineProps<{
@@ -103,6 +112,7 @@ const projectStore = useProjectStore()
 const selectedBgmId = ref<string | null>(props.defaultBgmId || null)
 const activeMood = ref<'' | BGMMood>('')
 const previewingId = ref<string | null>(null)
+const uploading = ref(false)
 
 const bgms = computed<BGMItem[]>(() => projectStore.bgmList)
 const moods = computed<string[]>(() => projectStore.bgmMoods)
@@ -144,7 +154,7 @@ function formatDuration(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-// 试听（简单的 HTML5 audio 切换）
+// 试听（HTML5 audio，走后端 BGM 文件路由）
 let audioEl: HTMLAudioElement | null = null
 
 async function togglePreview(bgm: BGMItem) {
@@ -153,10 +163,38 @@ async function togglePreview(bgm: BGMItem) {
     return
   }
   stopPreview()
-  // 试听依赖后端提供 BGM 文件 URL（/api/projects/{pid}/bgm/{bgm_id}/file）
-  // 此处仅占位，实际试听需要后端支持
-  previewingId.value = bgm.id
-  ElMessage.info(`试听「${bgm.name}」需要后端 BGM 文件接口支持`)
+  audioEl = new Audio(getBgmFileUrl(projectStore.currentProjectId!, bgm.id))
+  audioEl.onended = () => stopPreview()
+  try {
+    await audioEl.play()
+    previewingId.value = bgm.id
+  } catch {
+    ElMessage.error('试听失败')
+  }
+}
+
+/** 上传自定义 BGM（用户自备音源，mp3 ≤ 20MB） */
+async function onUploadBgm(file: File): Promise<boolean> {
+  if (!file.name.toLowerCase().endsWith('.mp3')) {
+    ElMessage.warning('仅支持 .mp3 格式')
+    return false
+  }
+  if (file.size > 20 * 1024 * 1024) {
+    ElMessage.warning('文件过大，最大 20MB')
+    return false
+  }
+  uploading.value = true
+  try {
+    const name = file.name.replace(/\.mp3$/i, '')
+    const meta = await projectStore.uploadBgm(file, name, activeMood.value || 'calm')
+    ElMessage.success(`已上传「${meta.name}」`)
+    selectedBgmId.value = meta.id
+  } catch (e: any) {
+    ElMessage.error(e?.message || '上传失败')
+  } finally {
+    uploading.value = false
+  }
+  return false // 阻止 el-upload 默认上传行为
 }
 
 function stopPreview() {
@@ -184,6 +222,14 @@ function handleClear() {
 <style scoped>
 .mood-filter {
   margin-bottom: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.bgm-upload {
+  flex: none;
 }
 
 .bgm-list {

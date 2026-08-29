@@ -318,11 +318,17 @@ async function onMerge() {
   if (!props.project) return
   try {
     await ElMessageBox.confirm(
-      '将按分镜顺序合成最终视频，可能需要几分钟。是否继续？',
+      '将按分镜顺序合成最终视频（含已生成的配音与字幕），可能需要几分钟。是否继续？',
       '合成确认',
       { type: 'info', confirmButtonText: '开始合成', cancelButtonText: '取消' },
     )
-    await projectStore.mergeProject()
+    // 高级合成：带 TTS 音频混音与字幕烧录（简单 concat 不含音频字幕）
+    await projectStore.mergeProjectAdvanced({
+      with_audio: true,
+      with_subtitle: true,
+      with_bgm: false,
+      use_timeline: true,
+    })
     ElMessage.success('合成任务已启动，进度显示在右上角')
   } catch (e: any) {
     // API 调用失败（非用户取消）→ 弹错误提示

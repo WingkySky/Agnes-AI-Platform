@@ -230,7 +230,13 @@
             :loading="localGeneratingAudio"
             :disabled="!shot.dialogue"
             @click.stop="onGenerateAudio"
-          >生成配音</el-button>
+          >{{ pickedVoice ? `配音 · ${pickedVoice.name}` : '生成配音' }}</el-button>
+          <el-button
+            v-if="projectStore.isEditable && !localGeneratingAudio"
+            size="small"
+            :disabled="!shot.dialogue"
+            @click.stop="voicePickerVisible = true"
+          >音色</el-button>
           <div class="upload-wrapper" @click.stop>
             <el-upload
               v-if="projectStore.isEditable && !localGeneratingAudio"
@@ -314,12 +320,16 @@
         @click="onDelete"
       >删除</el-button>
     </div>
+
+    <!-- 音色选择（为配音指定音色，确认后立即生成） -->
+    <VoicePickerDialog v-model:visible="voicePickerVisible" @confirm="onPickVoiceConfirm" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import VoicePickerDialog from '@/components/project/timeline/VoicePickerDialog.vue'
 import {
   Picture, Loading, MagicStick, Upload, Edit, Delete, Refresh, VideoPlay, ArrowDown, Microphone,
 } from '@element-plus/icons-vue'
@@ -487,7 +497,22 @@ async function onSetActiveVideo(videoId: number) {
 }
 
 // ---------- 音频操作 ----------
+/** 手动挑选的音色（不挑则由后端按角色绑定/默认音色选取） */
+const pickedVoice = ref<{ id: string; name: string } | null>(null)
+const voicePickerVisible = ref(false)
+
 async function onGenerateAudio() {
+  await doGenerateAudio(pickedVoice.value?.id)
+}
+
+/** 音色选择器确认：记住音色并立即用该音色生成配音 */
+async function onPickVoiceConfirm(voiceId: string, voiceName: string) {
+  pickedVoice.value = { id: voiceId, name: voiceName }
+  ElMessage.success(`已选音色：${voiceName}`)
+  await doGenerateAudio(voiceId)
+}
+
+async function doGenerateAudio(voiceId?: string) {
   if (!props.shot.dialogue) {
     ElMessage.warning('该分镜没有台词，无法生成配音')
     return
@@ -502,8 +527,8 @@ async function onGenerateAudio() {
 
   localGeneratingAudio.value = true
   try {
-    // 不指定 voice_id，由后端按角色绑定/默认音色选取
-    await projectStore.generateTTS(props.shot.id, {})
+    // 指定 voice_id 则用所选音色，否则由后端按角色绑定/默认音色选取
+    await projectStore.generateTTS(props.shot.id, voiceId ? { voice_id: voiceId } : {})
     ElMessage.success('配音已生成')
     emit('refresh')
   } catch (e: any) {

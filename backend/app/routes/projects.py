@@ -28,7 +28,7 @@ import asyncio
 import logging
 from typing import AsyncGenerator, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -171,6 +171,7 @@ from app.services.project.bgm_library import (
     list_bgms as list_bgm_library,
     list_moods as list_bgm_moods,
     get_bgm_path,
+    save_uploaded_bgm,
 )
 from app.services.project.marker_service import (
     list_markers as list_project_markers,
@@ -2261,6 +2262,30 @@ async def get_bgm_file_api(
     if not path:
         raise HTTPException(status_code=404, detail="BGM 文件不存在")
     return FileResponse(path, media_type="audio/mpeg")
+
+
+@router.post(
+    "/{project_id}/bgms/upload",
+    summary="上传自定义 BGM（mp3，用户自备音源）",
+)
+async def upload_bgm_api(
+    project_id: int,
+    file: UploadFile = File(...),
+    name: str = Form(""),
+    mood: str = Form("calm"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """上传 mp3 作为自定义 BGM，登记后与内置曲目合并展示、可直接用于高级合成"""
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    if not (file.filename or "").lower().endswith(".mp3"):
+        raise HTTPException(status_code=400, detail="仅支持 .mp3 格式")
+    content = await file.read()
+    if len(content) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="BGM 文件过大，最大 20MB")
+    display_name = (name or file.filename or "自定义 BGM").rsplit(".", 1)[0]
+    return await save_uploaded_bgm(display_name, mood, content)
 
 
 # =====================================================
