@@ -24,7 +24,7 @@
 - 从 `.gitignore` 移除 `docs/`，设计文档纳入版本控制
 
 ### 新增（功能）
-- 剧本节点分镜资产一体化（设计文档 `docs/superpowers/specs/2026-08-29-script-node-asset-derivation-design.md`）：`POST /api/storyboard` 一次 LLM 调用同时输出全剧角色/场景清单与分镜数组，镜头携带 `characters`/`location` 与资产按名关联；请求新增 `scenes` 反向通道（已有资产卡回传，分镜沿用已有设定）；向导步骤①新增场景/出场角色列、步骤②资产卡按名去重自动预填（卡片显示"出现镜头"）、资产参考图为纯设定图 prompt（角色单人立绘/场景空镜无人物，不注入剧情避免提示词污染）；分镜图派生按镜头命中注入设定文本与参考图（未标注镜头保持全量注入，与旧行为一致）
+- 剧本节点分镜资产一体化（设计文档 `docs/superpowers/specs/2026-08-29-script-node-asset-derivation-design.md`）：`POST /api/storyboard` 一次 LLM 调用同时输出全剧角色/场景清单与分镜数组，镜头携带 `characters`/`location` 与资产按名关联；请求新增 `scenes` 反向通道（已有资产卡回传，分镜沿用已有设定）；向导步骤①新增场景/出场角色列、步骤②资产卡按名去重自动预填（卡片显示"出现镜头"）、资产参考图为纯设定图 prompt（角色三视图立绘：正面/侧面/背面并排；场景空镜无人物，不注入剧情避免提示词污染）；分镜图派生按镜头命中注入设定文本与参考图（未标注镜头保持全量注入，与旧行为一致）
 - 创作内容归档与资产激活（设计文档 `docs/superpowers/specs/2026-08-29-creation-archive-asset-activation-design.md`）
   - 生成记录新增来源标记（`source` / `container_type` / `container_id`），历史默认只显示独立生成，提供来源筛选（独立生成 / 画布创作 / 项目创作 / 全部）
   - 画布与项目生成自动归档进资产库（按创作容器分组），新增归档服务 `asset_archive.archive_to_asset` 与成片归档 `archive_final_video`

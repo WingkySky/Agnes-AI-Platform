@@ -217,7 +217,7 @@ export function buildShotContexts(shot: CanvasShot, assets: ScriptAssets, extraC
   }
 }
 
-/** 资产参考图 prompt：纯设定图——角色单人立绘、场景空镜无人物（不注入剧情，避免把其他角色/动作污染进参考图） */
+/** 资产参考图 prompt：纯设定图——角色三视图（正/侧/背）、场景空镜无人物（不注入剧情，避免把其他角色/动作污染进参考图） */
 export function buildAssetImagePrompt(
   scriptPanel: CanvasPanel,
   asset: ShotAsset,
@@ -226,7 +226,7 @@ export function buildAssetImagePrompt(
 ): string {
   const style = readString(scriptPanel.content, 'style')
   const purity = kind === 'characters'
-    ? '单人全身立绘，正面标准站姿，纯色简洁背景，画面中只有这一个角色，无其他人物，无文字'
+    ? '同一角色三视图设定图：正面、侧面、背面全身立绘并排排列，三个视角为同一人物，发型服装完全一致，纯色简洁背景，画面中只有这一个角色，无其他人物，无文字'
     : '空场景环境全景，画面中无人物出现，无文字'
   const lines = [`${label}：${asset.name || ''}`.trim(), asset.description.trim(), purity]
   if (style) lines.push(`画面风格：${style}`)
