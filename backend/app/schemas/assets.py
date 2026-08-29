@@ -170,6 +170,7 @@ class AssetResponse(AssetBase):
     user_id: Optional[int] = None
     is_public: bool = False
     moderation_status: str = "approved"
+    moderation_reason: Optional[str] = None
     version: int = 1
     parent_id: Optional[int] = None
     likes_count: int = 0
@@ -177,9 +178,47 @@ class AssetResponse(AssetBase):
     use_count: int = 0
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    public_shared_at: Optional[datetime] = None
+
+    # ===== 创作归档字段（container_* 非空即为画布/项目生成的自动归档影子记录）=====
+    container_type: Optional[str] = None      # project / canvas_script / canvas
+    container_id: Optional[str] = None        # 项目 ID / 剧本面板 ID / 'canvas'
+    container_name: Optional[str] = None      # 容器名快照
+    source_generation_id: Optional[int] = None  # 来源生成记录 ID（归档去重键）
+    kind: Optional[str] = None                # image / video
+    asset_url: Optional[str] = None           # 单媒体 URL
 
     class Config:
         from_attributes = True
+
+
+class AssetContainerResponse(BaseModel):
+    """创作单元（容器）分组摘要
+
+    同一 (container_type, container_id) 下的归档资产聚合成一个单元。
+    """
+    container_type: Optional[str] = None
+    container_id: Optional[str] = None
+    container_name: Optional[str] = None
+    type_label: str = ""          # 项目 / 剧本 / 画布
+    asset_count: int = 0
+    cover_url: Optional[str] = None
+    cover_kind: Optional[str] = None   # image / video
+
+
+class AssetContainersResponse(BaseModel):
+    """创作单元列表 + 我的资产（container 为空的传统资产）统计"""
+    containers: List[AssetContainerResponse] = Field(default_factory=list)
+    standalone_total: int = 0
+
+
+class AssetContainerDetailResponse(BaseModel):
+    """单元详情：单元元信息 + 单元内资产列表"""
+    container_type: Optional[str] = None
+    container_id: Optional[str] = None
+    container_name: Optional[str] = None
+    type_label: str = ""
+    items: List[AssetResponse] = Field(default_factory=list)
 
 
 class AssetListResponse(BaseModel):

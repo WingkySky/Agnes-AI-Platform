@@ -56,6 +56,12 @@
           <div class="stat-label">{{ t('admin.review.types.preset') }}</div>
         </el-card>
       </el-col>
+      <el-col :span="4">
+        <el-card class="stat-card stat-asset" shadow="hover" @click="switchType('asset')">
+          <div class="stat-num">{{ stats.asset_pending || 0 }}</div>
+          <div class="stat-label">{{ t('admin.review.types.asset') }}</div>
+        </el-card>
+      </el-col>
       <!-- AI 预审通过，待人工复审 -->
       <el-col :span="4">
         <el-card class="stat-card stat-ai-passed" shadow="hover" @click="quickFilterAi('passed')">
@@ -70,8 +76,6 @@
           <div class="stat-label">{{ t('admin.review.stats.aiViolated') }}</div>
         </el-card>
       </el-col>
-      <!-- 右侧留白占位（保持 24 栅格对齐） -->
-      <el-col :span="4" class="stat-spacer" />
     </el-row>
 
     <!-- 筛选区 -->
@@ -81,6 +85,7 @@
         <el-tab-pane :label="t('admin.review.types.all')" name="all" />
         <el-tab-pane :label="t('admin.review.types.work')" name="work" />
         <el-tab-pane :label="t('admin.review.types.preset')" name="preset" />
+        <el-tab-pane :label="t('admin.review.types.asset')" name="asset" />
       </el-tabs>
 
       <!-- 待审核状态下显示一键操作快捷条 -->
@@ -122,9 +127,9 @@
             </el-select>
           </el-form-item>
 
-          <!-- 作品子类型筛选（仅 all/work 类型时显示） -->
+          <!-- 作品/资产子类型筛选（image/video；预设无此维度） -->
           <el-form-item
-            v-if="filters.review_type === 'all' || filters.review_type === 'work'"
+            v-if="filters.review_type !== 'preset'"
             :label="t('admin.review.workType')"
             class="filter-item">
             <el-select v-model="filters.work_type" class="filter-control filter-control-sm" @change="loadList(1)">
@@ -238,7 +243,7 @@
                 {{ t(`admin.review.types.${row.review_type}`) }}
               </el-tag>
               <el-tag
-                v-if="row.review_type === 'work' && row.work_type"
+                v-if="(row.review_type === 'work' || row.review_type === 'asset') && row.work_type"
                 size="small"
                 :type="row.work_type === 'image' ? 'primary' : 'warning'"
                 effect="plain"
@@ -248,9 +253,9 @@
             </div>
           </template>
         </el-table-column>
-        <!-- 预览（作品类型显示缩略图） -->
+        <!-- 预览（作品/资产类型显示缩略图） -->
         <el-table-column
-          v-if="filters.review_type === 'all' || filters.review_type === 'work'"
+          v-if="filters.review_type === 'all' || filters.review_type === 'work' || filters.review_type === 'asset'"
           :label="t('admin.review.colPreview')"
           width="90"
           align="center">
@@ -277,6 +282,26 @@
               fit="cover"
               style="width: 56px; height: 56px; border-radius: 6px; cursor: pointer"
               @click="handleView(row)" />
+            <div
+              v-else-if="row.review_type === 'asset' && row.result_url"
+              class="preview-cell"
+              @click="handleView(row)">
+              <el-image
+                v-if="row.work_type === 'image'"
+                :src="row.result_url"
+                :preview-src-list="[row.result_url]"
+                fit="cover"
+                style="width: 56px; height: 56px; border-radius: 6px; cursor: pointer"
+                :preview-teleported="true" />
+              <div v-else class="video-preview video-placeholder">
+                <el-image
+                  v-if="row.thumbnail_url"
+                  :src="row.thumbnail_url"
+                  fit="cover"
+                  style="width: 56px; height: 56px; border-radius: 6px" />
+                <el-icon class="play-icon"><VideoPlay /></el-icon>
+              </div>
+            </div>
             <span v-else class="muted">-</span>
           </template>
         </el-table-column>
@@ -353,14 +378,14 @@
             <span v-else class="muted">-</span>
           </template>
         </el-table-column>
-        <!-- 点赞/浏览（仅作品类型显示） -->
+        <!-- 点赞/浏览（仅作品/资产类型显示） -->
         <el-table-column
-          v-if="filters.review_type === 'all' || filters.review_type === 'work'"
+          v-if="filters.review_type === 'all' || filters.review_type === 'work' || filters.review_type === 'asset'"
           :label="t('admin.review.colLikesViews')"
           width="120"
           align="center">
           <template #default="{ row }">
-            <div v-if="row.review_type === 'work'" class="stats-text">
+            <div v-if="row.review_type === 'work' || row.review_type === 'asset'" class="stats-text">
               <span>{{ row.likes_count || 0 }} {{ t('admin.review.likes') }}</span>
               <span class="muted">/</span>
               <span>{{ row.views_count || 0 }} {{ t('admin.review.views') }}</span>
@@ -443,8 +468,10 @@
           </div>
         </div>
 
-        <!-- 作品类型：图片/视频播放器 -->
-        <div v-if="currentItem.review_type === 'work' && currentItem.result_url" class="detail-media">
+        <!-- 作品/资产类型：图片/视频播放器 -->
+        <div
+          v-if="(currentItem.review_type === 'work' || currentItem.review_type === 'asset') && currentItem.result_url"
+          class="detail-media">
           <el-image
             v-if="currentItem.work_type === 'image'"
             :src="currentItem.result_url"
@@ -454,7 +481,7 @@
           <video
             v-else
             :src="currentItem.result_url"
-            :poster="currentItem.work_type === 'video' && currentItem.item_id ? `/api/history/video/${currentItem.item_id}/thumbnail` : ''"
+            :poster="currentItem.thumbnail_url || ''"
             controls
             style="width: 100%; max-height: 400px" />
         </div>
@@ -476,7 +503,7 @@
               {{ t(`admin.review.types.${currentItem.review_type}`) }}
             </el-tag>
             <el-tag
-              v-if="currentItem.review_type === 'work' && currentItem.work_type"
+              v-if="(currentItem.review_type === 'work' || currentItem.review_type === 'asset') && currentItem.work_type"
               size="small"
               :type="currentItem.work_type === 'image' ? 'primary' : 'warning'"
               effect="plain"
@@ -582,7 +609,7 @@ const { t } = useI18n()
 
 interface ReviewItem {
   id: string | number
-  review_type: 'work' | 'preset'
+  review_type: 'work' | 'preset' | 'asset'
   item_id: number
   name?: string
   description?: string
@@ -625,6 +652,7 @@ const total = ref(0)
 const stats = reactive<Record<string, number>>({
   work_pending: 0,
   preset_pending: 0,
+  asset_pending: 0,
   total_pending: 0,
   ai_passed_pending: 0,
   ai_violated: 0,
@@ -800,6 +828,7 @@ function getTypeTagType(type: string): 'primary' | 'success' | 'warning' | 'info
   const map: Record<string, any> = {
     work: 'primary',
     preset: 'warning',
+    asset: 'success',
   }
   return map[type] || 'info'
 }
@@ -1298,6 +1327,10 @@ onBeforeUnmount(() => {
   position: relative;
   width: 56px;
   height: 56px;
+}
+/* 资产视频无缩略图（成片）时的占位底色 */
+.video-placeholder {
+  background: var(--agnes-bg-hover);
 }
 
 .play-icon {

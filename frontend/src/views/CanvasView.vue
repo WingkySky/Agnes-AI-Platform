@@ -1130,7 +1130,7 @@ async function generateImageFromPrompt(sourcePanel: typeof store.panels[number],
   try {
     // 调用图片生成 API
     const { createImageTask, getImageTaskStatus } = await import('@/api/images')
-    const resp = await createImageTask({ prompt, model: useModelsStore().defaultImageModel, size, response_format: 'url' })
+    const resp = await createImageTask({ prompt, model: useModelsStore().defaultImageModel, size, response_format: 'url', context: { source: 'canvas', container_type: 'canvas', container_id: 'canvas' } })
     const taskId = resp.task_id
 
     // 注册到任务队列（让画布任务在队列面板中可见）
@@ -1244,6 +1244,7 @@ async function generateImageFromSource(
       mode: mode as 'text2image' | 'image2image',
       base64_images: base64Images.length > 0 ? base64Images : null,
       image_urls: imageUrls.length > 0 ? imageUrls : null,
+      context: { source: 'canvas', container_type: 'canvas', container_id: 'canvas' },
     })
     const taskId = resp.task_id
 
@@ -1346,6 +1347,7 @@ async function generateVideoFromSource(
       seconds,
       mode: mode as 'text2video' | 'image2video',
       image: imageBase64,
+      context: { source: 'canvas', container_type: 'canvas', container_id: 'canvas' },
     })
     const taskId = resp.task_id
     if (!taskId) {
@@ -2095,6 +2097,7 @@ async function handleMaskConfirm(
       response_format: 'url',
       base64_images: [base64Image],
       mask,
+      context: { source: 'canvas', container_type: 'canvas', container_id: 'canvas' },
     })
 
     const taskId = resp.task_id
@@ -2338,6 +2341,7 @@ async function handleAngleConfirm({ prompt }: { prompt: string }) {
       // 用数组形式传参，与当前后端 schema 对齐；旧字段也保留一份兜底
       base64_images: [base64Image],
       base64_image: base64Image,
+      context: { source: 'canvas', container_type: 'canvas', container_id: 'canvas' },
     })
 
     const taskId = resp.task_id

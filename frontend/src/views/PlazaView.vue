@@ -14,6 +14,14 @@
     <h2 class="page-title">{{ t('plaza.title') }}</h2>
     <p class="page-desc">{{ t('plaza.desc') }}</p>
 
+    <!-- 顶部 Tab：作品 / 创作 -->
+    <el-tabs v-model="activeTab" class="plaza-tabs">
+      <el-tab-pane name="works" :label="t('plaza.tabWorks')" />
+      <el-tab-pane name="creations" :label="t('plaza.tabCreations')" />
+    </el-tabs>
+
+    <!-- ============ 作品 Tab ============ -->
+    <div v-show="activeTab === 'works'">
     <!-- 筛选区：类型 Tab + 预设筛选 + 排序选择器 -->
     <div class="filter-wrap">
       <el-radio-group v-model="filterType" @change="reload">
@@ -164,6 +172,113 @@
       <span v-else class="no-more">{{ t('plaza.noMore') }}</span>
     </div>
 
+    </div>
+    <!-- ============ 作品 Tab 结束 ============ -->
+
+    <!-- ============ 创作 Tab ============ -->
+    <div v-if="activeTab === 'creations'">
+      <!-- 创作筛选区：类型标签 + 排序 -->
+      <div class="filter-wrap">
+        <el-radio-group v-model="creationType" @change="reloadCreations">
+          <el-radio-button value="all">{{ t('plaza.all') }}</el-radio-button>
+          <el-radio-button value="character">{{ t('plaza.creationType.character') }}</el-radio-button>
+          <el-radio-button value="scene">{{ t('plaza.creationType.scene') }}</el-radio-button>
+          <el-radio-button value="material">{{ t('plaza.creationType.material') }}</el-radio-button>
+          <el-radio-button value="clip">{{ t('plaza.creationType.clip') }}</el-radio-button>
+          <el-radio-button value="final">{{ t('plaza.creationType.final') }}</el-radio-button>
+          <el-radio-button value="prop">{{ t('plaza.creationType.prop') }}</el-radio-button>
+          <el-radio-button value="brand">{{ t('plaza.creationType.brand') }}</el-radio-button>
+        </el-radio-group>
+        <el-select v-model="creationSort" class="sort-select" @change="reloadCreations">
+          <el-option value="latest" :label="t('plaza.latest')" />
+          <el-option value="popular" :label="t('plaza.popular')" />
+        </el-select>
+      </div>
+
+      <!-- 创作首次加载 -->
+      <div v-if="creationLoading && creationList.length === 0" class="state-box loading-state">
+        <el-icon :size="32" class="spinner"><Loading /></el-icon>
+        <div class="state-text">{{ t('common.loading') }}</div>
+      </div>
+
+      <!-- 创作空状态 -->
+      <div v-else-if="creationList.length === 0" class="state-box empty-state">
+        <el-icon :size="48"><Picture /></el-icon>
+        <p class="state-text">{{ t('plaza.creationEmpty') }}</p>
+      </div>
+
+      <!-- 创作网格 -->
+      <div v-else class="plaza-grid">
+        <div
+          v-for="c in creationList"
+          :key="c.id"
+          class="plaza-card"
+          @click="openCreationDetail(c)">
+          <div class="card-thumb">
+            <div
+              v-if="c.kind === 'image' || c.kind === 'video'"
+              class="img-bg-blur"
+              :style="{ backgroundImage: c.asset_url ? `url(${c.asset_url})` : 'none' }"
+            />
+            <img
+              v-if="c.kind === 'image' && c.asset_url && !creationFailed[c.id]"
+              :src="c.asset_url"
+              :alt="c.name"
+              class="card-img-contain"
+              loading="lazy"
+              @error="onCreationImgError(c)"
+            />
+            <video
+              v-else-if="c.kind === 'video' && c.asset_url && !creationFailed[c.id]"
+              :src="c.asset_url"
+              class="card-img-contain"
+              muted
+              playsinline
+              preload="metadata"
+              @error="onCreationImgError(c)"
+            />
+            <div v-else class="thumb-placeholder">
+              <el-icon :size="40"><VideoPlay /></el-icon>
+            </div>
+
+            <!-- 类型标签角标 -->
+            <div v-if="c.asset_type" class="type-badge creation-type">
+              {{ creationTypeLabel(c.asset_type) }}
+            </div>
+            <div v-if="c.is_mine" class="mine-badge">{{ t('plaza.myWork') }}</div>
+
+            <!-- 底部信息条 -->
+            <div class="card-overlay">
+              <span class="author">
+                <el-avatar :size="24" :src="avatarFullUrl(c.author_avatar_url)" :icon="UserFilled" />
+                <span class="author-name">{{ c.author_nickname || t('plaza.anonymous') }}</span>
+              </span>
+              <div
+                class="like-btn"
+                :class="{ liked: c.is_liked }"
+                @click.stop="toggleCreationLike(c)">
+                <el-icon><StarFilled v-if="c.is_liked" /><Star v-else /></el-icon>
+                <span class="like-count">{{ c.likes_count }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="creationList.length > 0" class="load-more-wrap">
+        <el-button
+          v-if="creationHasMore"
+          type="primary"
+          :loading="creationLoading"
+          :icon="ArrowDown"
+          @click="loadMoreCreations">
+          {{ t('plaza.loadMore') }}
+        </el-button>
+        <span v-else class="no-more">{{ t('plaza.noMore') }}</span>
+      </div>
+    </div>
+    <!-- ============ 创作 Tab 结束 ============ -->
+
     <!-- 详情弹窗：左媒体 + 右信息 -->
     <el-dialog
       v-model="detailVisible"
@@ -266,6 +381,72 @@
         </div>
       </div>
     </el-dialog>
+
+    <!-- 创作详情弹窗 -->
+    <el-dialog
+      v-model="creationDetailVisible"
+      :title="creationDetail?.name"
+      width="80%"
+      top="5vh"
+      destroy-on-close
+      class="plaza-detail-dialog">
+      <div v-if="creationDetail" class="detail-content">
+        <div class="detail-media">
+          <ImageWithWatermark
+            v-if="creationDetail.kind === 'image' && creationDetail.asset_url"
+            :src="creationDetail.asset_url"
+            :alt="creationDetail.name"
+            :img-class="'detail-image'"
+            fit="contain" />
+          <video
+            v-else-if="creationDetail.kind === 'video' && creationDetail.asset_url"
+            :src="creationDetail.asset_url"
+            controls
+            playsinline
+            preload="metadata" />
+          <div v-else class="video-failed-placeholder">
+            <el-icon :size="64"><VideoCamera /></el-icon>
+            <span>{{ t('common.resourceExpired') }}</span>
+          </div>
+        </div>
+
+        <div class="detail-info">
+          <div class="info-block">
+            <div class="info-label-row">
+              <span class="info-label">{{ t('assets.type.label') }}</span>
+              <el-tag size="small" type="info">{{ creationTypeLabel(creationDetail.asset_type) }}</el-tag>
+            </div>
+          </div>
+          <div class="info-block" v-if="creationDetail.description">
+            <div class="info-label-row">
+              <span class="info-label">{{ t('assets.fields.description') }}</span>
+            </div>
+            <div class="prompt-text">{{ creationDetail.description }}</div>
+          </div>
+          <div class="info-row author-row" v-if="creationDetail.author_nickname">
+            <span class="info-label">{{ t('plaza.by') }}</span>
+            <el-avatar :size="24" :src="avatarFullUrl(creationDetail.author_avatar_url)" :icon="UserFilled" />
+            <span class="info-value">{{ creationDetail.author_nickname }}</span>
+          </div>
+          <div class="info-row" v-if="creationDetail.public_shared_at">
+            <el-icon class="row-icon"><Clock /></el-icon>
+            <span class="info-value">{{ formatTime(creationDetail.public_shared_at) }}</span>
+          </div>
+          <div class="stats-row">
+            <el-button
+              :type="creationDetail.is_liked ? 'primary' : 'default'"
+              :icon="creationDetail.is_liked ? StarFilled : Star"
+              @click="toggleCreationLike(creationDetail)">
+              {{ t('plaza.likes') }} {{ creationDetail.likes_count }}
+            </el-button>
+            <span class="stat-views">
+              <el-icon><View /></el-icon>
+              {{ t('plaza.views') }} {{ creationDetail.views_count }}
+            </span>
+          </div>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -278,7 +459,8 @@ import {
 } from '@element-plus/icons-vue'
 import {
   getPlazaWorks, getPlazaWorkDetail, likePlazaWork, unlikePlazaWork,
-  type PlazaWork,
+  getPlazaCreations, getPlazaCreationDetail, likePlazaCreation, unlikePlazaCreation,
+  type PlazaWork, type PlazaCreation,
 } from '@/api/plaza'
 import client from '@/api/client'
 import { useUserStore } from '@/stores/user'
@@ -299,6 +481,9 @@ const pageSize = 24
 const total = ref(0)
 const filterType = ref<'all' | 'image' | 'video'>('all')
 const sortType = ref<'latest' | 'popular'>('latest')
+
+// 顶部 Tab：作品 / 创作
+const activeTab = ref<'works' | 'creations'>('works')
 
 // ---------- 预设筛选状态 ----------
 const filterPresetId = ref<number | null>(null)
@@ -387,6 +572,118 @@ function reload() {
 function loadMore() {
   page.value += 1
   fetchPage(true)
+}
+
+// =====================================================
+// 创作 Tab 状态与逻辑
+// =====================================================
+const creationList = ref<PlazaCreation[]>([])
+const creationLoading = ref(false)
+const creationPage = ref(1)
+const creationTotal = ref(0)
+const creationType = ref('all')
+const creationSort = ref<'latest' | 'popular'>('latest')
+const creationDetailVisible = ref(false)
+const creationDetail = ref<PlazaCreation | null>(null)
+// 创作图片/视频加载失败标记（按 id 隔离）
+const creationFailed = reactive<Record<number, boolean>>({})
+
+const creationHasMore = computed(() => creationList.value.length < creationTotal.value)
+
+const CREATION_TYPE_LABELS: Record<string, string> = {
+  character: '角色',
+  scene: '场景',
+  material: '分镜图',
+  clip: '视频片段',
+  final: '成片',
+  prop: '道具',
+  brand: '品牌',
+}
+function creationTypeLabel(type: string): string {
+  return CREATION_TYPE_LABELS[type] || type
+}
+
+function onCreationImgError(c: PlazaCreation) {
+  creationFailed[c.id] = true
+}
+
+/** 拉取创作一页；append=true 时追加 */
+async function fetchCreations(append = false) {
+  creationLoading.value = true
+  try {
+    const data = await getPlazaCreations({
+      asset_type: creationType.value,
+      sort: creationSort.value,
+      page: creationPage.value,
+      page_size: 24,
+    })
+    if (append) {
+      creationList.value.push(...(data.items || []))
+    } else {
+      creationList.value = data.items || []
+    }
+    creationTotal.value = data.total || 0
+  } catch (e) {
+    // 错误已由 axios 拦截器统一提示
+  } finally {
+    creationLoading.value = false
+  }
+}
+
+function reloadCreations() {
+  creationPage.value = 1
+  fetchCreations(false)
+}
+
+function loadMoreCreations() {
+  creationPage.value += 1
+  fetchCreations(true)
+}
+
+/** 切换到创作 Tab 时首次加载 */
+watch(activeTab, (tab) => {
+  if (tab === 'creations' && creationList.value.length === 0) {
+    reloadCreations()
+  }
+})
+
+/** 打开创作详情：先用列表数据展示，再拉取详情刷新计数（同时后端浏览数 +1） */
+function openCreationDetail(c: PlazaCreation) {
+  creationDetail.value = c
+  creationDetailVisible.value = true
+  getPlazaCreationDetail(c.id)
+    .then((fresh) => {
+      if (creationDetail.value?.id === fresh.id) creationDetail.value = fresh
+      const idx = creationList.value.findIndex((x) => x.id === fresh.id)
+      if (idx >= 0) creationList.value[idx] = fresh
+    })
+    .catch(() => { /* 静默 */ })
+}
+
+/** 切换创作点赞状态；未登录时提示并拦截 */
+async function toggleCreationLike(c: PlazaCreation) {
+  if (!userStore.isAuthenticated) {
+    ElMessage.warning(t('plaza.requireLogin'))
+    return
+  }
+  const prevLiked = c.is_liked
+  const prevCount = c.likes_count
+  c.is_liked = !c.is_liked
+  c.likes_count += c.is_liked ? 1 : -1
+  try {
+    const res = c.is_liked
+      ? await likePlazaCreation(c.id)
+      : await unlikePlazaCreation(c.id)
+    c.is_liked = res.liked
+    c.likes_count = res.likes_count
+    if (creationDetail.value?.id === c.id) {
+      creationDetail.value.is_liked = res.liked
+      creationDetail.value.likes_count = res.likes_count
+    }
+  } catch (e) {
+    c.is_liked = prevLiked
+    c.likes_count = prevCount
+  }
 }
 
 // ---------- 详情弹窗 ----------

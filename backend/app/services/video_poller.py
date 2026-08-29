@@ -28,12 +28,18 @@ from app.models.generation import Generation
 from app.models.model_definition import ModelDefinition
 from app.core.database import new_async_session
 from app.services.credits_service import confirm_credits, refund_credits
+from app.services import asset_archive
 
 logger = logging.getLogger("agnes_platform")
 
 # ---------- 清理参数 ----------
 CLEANUP_INTERVAL_SEC = 300   # 每 5 分钟扫描一次过期缓存
 CLEANUP_TTL_SEC = 3600        # 已完成任务保留 1 小时后清除
+
+
+def _as_container_id(value) -> Optional[str]:
+    """容器 ID 统一存字符串（项目 ID 是数字，剧本面板 ID 是字符串）"""
+    return None if value is None or value == "" else str(value)
 
 
 # =====================================================
@@ -51,6 +57,7 @@ class VideoTask:
         user_id: Optional[int] = None,
         credits_consumed: int = 0,
         preset_id: Optional[int] = None,
+        context: Optional[Dict] = None,
     ):
         self.task_id = task_id
         self.video_id = video_id
@@ -60,6 +67,8 @@ class VideoTask:
         self.credits_consumed = credits_consumed
         # 生成时使用的预设 ID（用于追溯作品来源预设）
         self.preset_id = preset_id
+        # 创作上下文（画布/项目透传，用于历史打标与资产自动归档）
+        self.context = context
         self.status = "processing"
         self.progress = 0
         self.video_url: Optional[str] = None
@@ -121,6 +130,7 @@ class VideoPollerManager:
         user_id: Optional[int] = None,
         credits_consumed: int = 0,
         preset_id: Optional[int] = None,
+        context: Optional[Dict] = None,
     ) -> VideoTask:
         """
         创建 VideoTask 并启动后台协程轮询，不阻塞当前请求。
@@ -130,7 +140,7 @@ class VideoPollerManager:
         task = VideoTask(
             task_id=task_id, video_id=video_id, prompt=prompt, params=params,
             user_id=user_id, credits_consumed=credits_consumed,
-            preset_id=preset_id,
+            preset_id=preset_id, context=context,
         )
 
         async with self._lock:
@@ -353,6 +363,10 @@ class VideoPollerManager:
                     moderation_flags=moderation_flags,
                     moderation_reason=moderation_reason,
                     preset_id=task.preset_id,
+                    # 创作归属：画布/项目生成打标，历史页据此默认过滤
+                    source=(task.context or {}).get("source") or "independent",
+                    container_type=(task.context or {}).get("container_type"),
+                    container_id=_as_container_id((task.context or {}).get("container_id")),
                 )
                 session.add(record)
                 await session.commit()  # 先提交拿到 record.id
@@ -412,6 +426,16 @@ class VideoPollerManager:
                             "[视频轮询器] 资源转存异常: task_id=%s error=%s",
                             task.task_id, migrate_err, exc_info=True,
                         )
+                # ===== 资产自动归档：画布/项目生成自动进资产库，失败不影响主流程 =====
+                try:
+                    await asset_archive.archive_to_asset(
+                        session, record, task.context or {},
+                    )
+                except Exception as archive_err:
+                    logger.error(
+                        "[视频轮询器] 资产归档异常: task_id=%s error=%s",
+                        task.task_id, archive_err, exc_info=True,
+                    )
             logger.info("[视频轮询器] 记录已异步写入数据库: status=%s moderation=%s", task.status, moderation_status)
         except Exception as e:
             logger.error("[视频轮询器] 数据库写入失败: %s", e)

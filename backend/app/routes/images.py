@@ -136,6 +136,7 @@ async def create_image_task_async(
         credits_consumed=cost,
         task_id=task_id,
         preset_id=req.preset_id,
+        context=req.context.model_dump() if req.context else None,
     )
 
     logger.info("[图片生成] 异步任务已创建: task_id=%s user=%s cost=%d", task.task_id, current_user.username, cost)

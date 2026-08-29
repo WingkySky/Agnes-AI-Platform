@@ -284,6 +284,7 @@ async def create_video_task(
         user_id=user_id,
         credits_consumed=cost,
         preset_id=req.preset_id,
+        context=req.context.model_dump() if req.context else None,
     )
 
     return VideoTaskCreatedResponse(

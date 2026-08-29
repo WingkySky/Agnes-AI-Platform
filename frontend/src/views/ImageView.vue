@@ -51,8 +51,7 @@
           <ImageUploader
             v-if="mode === 'image2image'"
             :optional="false"
-            @change="handleImageChange"
-            @clear="handleImageClear"
+            v-model="referenceFileList"
           />
 
           <!-- Prompt 输入 -->
@@ -314,7 +313,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   MagicStick, Download, Link, PictureFilled, Edit, Loading, CircleCloseFilled, VideoPlay, Share, InfoFilled, Folder, Aim
@@ -329,6 +328,8 @@ import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useModelsStore } from '@/stores/models'
 import { useUserStore } from '@/stores/user'
 import { usePreferencesStore } from '@/stores/preferences'
+import { useAssetStore } from '@/stores/asset'
+import { useAsset } from '@/api/pipeline'
 import { useI18n } from '@/i18n'
 import { useCreditEstimate } from '@/composables/useCreditEstimate'
 import { useDownload } from '@/composables/useDownload'
@@ -559,17 +560,34 @@ watch(scenePopoverVisible, (v) => {
   if (v) loadScenes()
 })
 
-function handleImageChange(fileList: FileInfo[]) {
-  // fileList 为数组（可能为 null 表示清空）
-  referenceFileList.value = Array.isArray(fileList) ? fileList : (fileList ? [fileList] : [])
-  // 图生图自适应分辨率：上传参考图后自动匹配最接近的预设尺寸
-  if (referenceFileList.value.length > 0 && referenceFileList.value[0].previewUrl) {
-    autoMatchSize(referenceFileList.value[0])
+// 参考图变化（含「用于生成」v-model 预填）时自动匹配分辨率
+watch(referenceFileList, (list) => {
+  if (list.length > 0 && list[0]?.previewUrl) {
+    autoMatchSize(list[0])
   }
-}
-function handleImageClear() {
-  referenceFileList.value = []
-}
+})
+
+// ---------- 「用于生成」预填：从资产库点击「用于生成」跳转而来 ----------
+const assetStore = useAssetStore()
+
+onMounted(async () => {
+  const pending = assetStore.consumePendingUse()
+  if (!pending) return
+  // 图片资产（或视频资产兜底为参考图）预填到图生图
+  if (pending.asset_url) {
+    mode.value = 'image2image'
+    referenceFileList.value = [{
+      source: 'url',
+      url: pending.asset_url,
+      previewUrl: pending.asset_url,
+      name: pending.name,
+    } as FileInfo]
+  }
+  // 记录一次使用，递增 use_count（失败静默，不阻塞预填）
+  try {
+    await useAsset(pending.id)
+  } catch (_) { /* ignore */ }
+})
 
 /** 根据上传图片的实际尺寸自动匹配最接近的预设分辨率 */
 function autoMatchSize(file: FileInfo) {

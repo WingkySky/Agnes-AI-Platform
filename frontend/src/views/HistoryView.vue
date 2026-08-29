@@ -18,6 +18,13 @@
         <el-radio-button value="image">{{ t('history.image') }} ({{ imageCount }})</el-radio-button>
         <el-radio-button value="video">{{ t('history.video') }} ({{ videoCount }})</el-radio-button>
       </el-radio-group>
+      <!-- 来源筛选：默认仅独立生成（画布/项目生成已自动归档进资产库） -->
+      <el-radio-group v-model="filterSource" @change="loadList(true)" class="source-filter">
+        <el-radio-button value="independent">{{ t('history.sourceFilter.independent') }}</el-radio-button>
+        <el-radio-button value="canvas">{{ t('history.sourceFilter.canvas') }}</el-radio-button>
+        <el-radio-button value="project">{{ t('history.sourceFilter.project') }}</el-radio-button>
+        <el-radio-button value="all">{{ t('history.sourceFilter.all') }}</el-radio-button>
+      </el-radio-group>
       <div class="filter-actions">
         <el-button type="primary" :icon="Refresh" :loading="loading" @click="loadList(true)">
           {{ t('common.refresh') }}
@@ -218,6 +225,14 @@
               :title="item.moderation_status === 'rejected' ? t('history.rejectedShareWarning') : (item.is_public ? t('plaza.isPublic') : t('plaza.isPrivate'))">
               <el-icon size="16"><Share /></el-icon>
             </div>
+            <!-- 存为资产：所有生成记录均可手动保存（自动归档失败时的补存兜底；后端按生成记录幂等去重） -->
+            <div
+              v-if="item.status === 'success'"
+              class="card-action-btn"
+              @click.stop="openSaveAsAsset(item)"
+              :title="t('history.saveAsAsset')">
+              <el-icon size="16"><Collection /></el-icon>
+            </div>
             <!-- 删除：调用历史记录删除模块（带确认弹窗） -->
             <div
               class="card-action-btn card-action-delete"
@@ -406,7 +421,36 @@
       </template>
     </el-dialog>
 
-    <!-- 独立图片查看器：点击历史图片后弹出，支持缩放/平移/旋转/下载 -->
+    <!-- 存为资产弹窗：把独立生成记录保存进资产库 -->
+    <el-dialog
+      v-model="saveAsAssetVisible"
+      :title="t('history.saveAsAssetTitle')"
+      width="460px"
+      @closed="resetSaveAsAssetForm">
+      <el-form :model="saveAsAssetForm" label-width="80px">
+        <el-form-item :label="t('assets.fields.name')" required>
+          <el-input
+            v-model="saveAsAssetForm.name"
+            :placeholder="t('history.saveAsAssetNamePlaceholder')"
+            maxlength="200"
+            show-word-limit />
+        </el-form-item>
+        <el-form-item :label="t('assets.fields.type')" required>
+          <el-select v-model="saveAsAssetForm.type" :placeholder="t('assets.type.all')">
+            <el-option :label="t('assets.type.character')" value="character" />
+            <el-option :label="t('assets.type.prop')" value="prop" />
+            <el-option :label="t('assets.type.scene')" value="scene" />
+            <el-option :label="t('assets.type.brand')" value="brand" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="saveAsAssetVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="savingAsAsset" @click="confirmSaveAsAsset">
+          {{ t('history.saveAsAssetConfirm') }}
+        </el-button>
+      </template>
+    </el-dialog>
     <ImageViewer
       v-model:visible="viewerVisible"
       :url="viewerUrl"
@@ -427,9 +471,10 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Loading, Document, Delete, VideoPlay, CircleCloseFilled, VideoCamera, Edit, Close, Download, ZoomIn, Share, Warning, CopyDocument, MagicStick, Scissor } from '@element-plus/icons-vue'
+import { Refresh, Loading, Document, Delete, VideoPlay, CircleCloseFilled, VideoCamera, Edit, Close, Download, ZoomIn, Share, Warning, CopyDocument, MagicStick, Scissor, Collection } from '@element-plus/icons-vue'
 import ImageViewer from '@/components/ImageViewer.vue'
 import { getHistoryList, deleteHistoryRecord, batchDeleteHistory } from '@/api/history'
+import { saveAssetFromGeneration } from '@/api/pipeline'
 import { updateShareStatus, batchUpdateShareStatus } from '@/api/plaza'
 import client from '@/api/client'
 import { useDownload } from '@/composables/useDownload'
@@ -478,6 +523,8 @@ const videoCount = ref(0)
 const page = ref(1)
 const pageSize = ref(12)
 const filterType = ref('all')
+// 来源筛选：默认仅独立生成（画布/项目生成已自动归档进资产库）
+const filterSource = ref('independent')
 
 const detailVisible = ref(false)
 const deleteVisible = ref(false)
@@ -510,6 +557,15 @@ const batchDownloading = ref(false)
 // ---------- 广场分享状态管理：单条 / 批量切换公开与私有 ----------
 const batchSettingPublic = ref(false)
 const batchSettingPrivate = ref(false)
+
+// ---------- 存为资产：把独立生成记录手动归档进资产库 ----------
+const saveAsAssetVisible = ref(false)
+const savingAsAsset = ref(false)
+const saveAssetTarget = ref<GenerationRecord | null>(null)
+const saveAsAssetForm = reactive({
+  name: '',
+  type: 'character' as string,
+})
 
 const isAllSelected = computed(() => {
   if (!list.value.length) return false
@@ -601,6 +657,7 @@ async function loadList(resetPage = false) {
   try {
     const data = await getHistoryList({
       type: filterType.value,
+      source: filterSource.value,
       page: page.value,
       page_size: pageSize.value
     })
@@ -852,6 +909,46 @@ async function toggleShare(item: GenerationRecord) {
     ElMessage.success(res?.message || (newStatus ? t('plaza.setPublicSuccess') : t('plaza.setPrivateSuccess')))
   } catch (e) {
     // 错误已在拦截器弹出
+  }
+}
+
+/** 打开「存为资产」弹窗（仅独立生成记录可手动归档） */
+function openSaveAsAsset(item: GenerationRecord) {
+  saveAssetTarget.value = item
+  saveAsAssetForm.name = (item.prompt || '').trim().slice(0, 50) || `生成记录 ${item.id}`
+  saveAsAssetForm.type = 'character'
+  saveAsAssetVisible.value = true
+}
+
+/** 关闭弹窗时重置表单 */
+function resetSaveAsAssetForm() {
+  saveAssetTarget.value = null
+  saveAsAssetForm.name = ''
+  saveAsAssetForm.type = 'character'
+}
+
+/** 确认保存为资产 */
+async function confirmSaveAsAsset() {
+  const target = saveAssetTarget.value
+  if (!target) return
+  if (!saveAsAssetForm.name.trim()) {
+    ElMessage.warning(t('history.saveAsAssetNamePlaceholder'))
+    return
+  }
+  savingAsAsset.value = true
+  try {
+    await saveAssetFromGeneration({
+      generation_id: target.id,
+      type: saveAsAssetForm.type,
+      name: saveAsAssetForm.name.trim(),
+      visual_description: target.prompt || undefined,
+    })
+    ElMessage.success(t('history.saveAsAssetSuccess'))
+    saveAsAssetVisible.value = false
+  } catch (e) {
+    // 错误已在拦截器弹出
+  } finally {
+    savingAsAsset.value = false
   }
 }
 

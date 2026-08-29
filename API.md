@@ -424,7 +424,103 @@ Swagger UI（交互式文档）：`http://localhost:8000/docs`
 
 ---
 
-## 5. 错误码说明
+## 5. 资产库（创作归档与分享）
+
+> 画布/项目生成会自动归档进资产库（容器：`project` / `canvas_script` / `canvas`），历史默认只显示独立生成。
+> 资产可手动存为资产、按创作单元分组管理、分享到广场（复用审核管道）。
+
+### `GET /api/pipeline/assets`
+
+获取资产库列表。
+
+- `scope=market`（默认，无需登录）：返回公开资产（`is_public=true`），供广场资产浏览。
+- `scope=my`（需登录）：返回当前用户自己的传统资产（`container_type` 为空），含公开与私有，用于「我的资产」区。
+
+**查询参数**：`asset_type`（character/prop/scene/brand/...，可选）、`search`（可选）、`page`、`page_size`。
+
+**响应**：`{ items: Asset[], total, page, page_size }`
+
+### `GET /api/pipeline/assets/{id}`
+
+获取单个资产详情。
+
+### `POST /api/pipeline/assets/save-from-generation`
+
+将生成记录保存为资产（手动存为资产 / 归档失败补存）。见 `AssetSaveFromGenerationRequest`。
+
+### `GET /api/pipeline/assets/containers`
+
+获取当前用户的**创作单元分组列表**（需登录）。
+
+- `containers`：container 非空的归档资产按 `(container_type, container_id)` 聚合为单元（名称快照、类型徽标、资产数、封面）。
+- `standalone_total`：container 为空的传统资产数量（即「我的资产」区）。
+
+**响应**：`{ containers: AssetContainer[], standalone_total: int }`
+
+### `GET /api/pipeline/assets/container/{container_type}/{container_id}`
+
+获取某个创作单元内的全部资产（需登录，按用户隔离），用于单元详情按类型分栏展示。
+
+**响应**：`{ container_type, container_id, container_name, type_label, items: Asset[] }`
+
+### `PATCH /api/pipeline/assets/{id}/share`
+
+切换资产分享状态（需登录 + 归属校验）。设为公开时进入待审核（`pending`），先做敏感词快速筛查，再异步触发 AI 内容审核；未过审不展示到广场。被管理员屏蔽（`moderation_status=rejected`）的资产不可再次公开。
+
+**请求体**：`{ "is_public": true | false }`  
+**响应**：`{ success, id, is_public, message }`
+
+### `DELETE /api/pipeline/assets/{id}`
+
+删除资产（需登录 + 归属校验）。若资产是画布/项目自动归档的影子记录（`container_type` 非空），仅删除资产库影子记录，不影响画布/项目本体；若为手动保存的传统资产则一并删除。
+
+**响应**：`{ success, id, message }`
+
+### `POST /api/pipeline/assets/{id}/use`
+
+记录资产被「用于生成」，递增 `use_count`（无需登录，`get_current_user_optional`）。
+
+**响应**：`{ id: int, use_count: int }`
+
+### `GET /api/plaza/creations`
+
+广场「创作」Tab 列表（无需登录）。返回已公开、含可用 `asset_url`、且审核通过（`moderation_status=approved`）的资产。
+
+**查询参数**：
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `asset_type` | string | 类型筛选：`all`（默认）/ `character` / `scene` / `material` / `clip` / `final` / `prop` / `brand` |
+| `kind` | string | 媒体类型筛选：`all`（默认）/ `image` / `video` |
+| `sort` | string | 排序：`latest`（默认，按公开时间倒序）/ `popular`（按点赞数倒序） |
+| `page` | int | 页码，默认 1 |
+| `page_size` | int | 每页数量，默认 24 |
+
+**响应**：`{ total, page, page_size, items: PlazaCreation[] }`  
+`PlazaCreation` 字段：`id, kind, asset_type, name, description, asset_url, container_type, container_name, likes_count, views_count, author_nickname, author_avatar_url, created_at, public_shared_at, is_mine, is_liked`
+
+### `GET /api/plaza/creations/{creation_id}`
+
+创作详情（无需登录）。浏览量 `views_count` 自增 1。响应为单个 `PlazaCreation`。
+
+### `POST /api/plaza/creations/{creation_id}/like`
+
+点赞创作（需登录）。幂等：唯一约束去重后 `likes_count + 1`。响应 `{ success, id, likes_count }`。
+
+### `DELETE /api/plaza/creations/{creation_id}/like`
+
+取消点赞（需登录）。`likes_count` 下限 0。响应 `{ success, id, likes_count }`。
+
+### `GET /api/plaza/creations/likes/status`
+
+批量查询当前用户对一组创作的点赞状态（需登录）。
+
+**查询参数**：`ids`（逗号分隔的 creation_id 列表，如 `12,34,56`）。  
+**响应**：`{ liked_ids: number[] }`
+
+---
+
+## 6. 错误码说明
 
 | HTTP 状态 | 含义 |
 |----------|------|
@@ -441,7 +537,7 @@ Swagger UI（交互式文档）：`http://localhost:8000/docs`
 
 ---
 
-## 6. 后端到 Agnes AI 的请求流
+## 7. 后端到 Agnes AI 的请求流
 
 ```
 前端 axios
@@ -468,7 +564,7 @@ FastAPI backend (8000)
 
 ---
 
-## 7. 视频生成 Prompt 最佳实践
+## 8. 视频生成 Prompt 最佳实践
 
 ### 文生视频推荐结构
 `[主体] + [动作] + [场景] + [镜头运动] + [光照] + [风格]`
@@ -492,7 +588,7 @@ Create a smooth transition from the first keyframe to the second keyframe, maint
 
 ---
 
-## 8. 图片生成 Prompt 最佳实践
+## 9. 图片生成 Prompt 最佳实践
 
 ### 推荐结构
 `[主体] + [场景 / 环境] + [风格] + [光照] + [构图] + [质量要求]`

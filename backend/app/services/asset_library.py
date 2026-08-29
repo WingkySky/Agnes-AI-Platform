@@ -165,6 +165,16 @@ async def save_asset_from_generation(
     if not generation:
         raise HTTPException(status_code=404, detail="生成记录不存在")
 
+    # 幂等：同一生成记录只保存一份资产（已自动归档或已手动保存时直接返回已有记录）
+    existing = (await db.execute(
+        select(Asset).filter(
+            Asset.source_generation_id == generation.id,
+            Asset.user_id == user_id,
+        ).limit(1)
+    )).scalar_one_or_none()
+    if existing:
+        return existing
+
     visual_desc = data.visual_description or generation.prompt
     ref_images = [generation.result_url] if generation.result_url else []
 
@@ -179,6 +189,9 @@ async def save_asset_from_generation(
         is_public=False,
         tags=data.tags,
         version=1,
+        source_generation_id=generation.id,
+        kind="video" if generation.type == "video" else "image",
+        asset_url=generation.result_url,
     )
     db.add(asset)
     await db.commit()

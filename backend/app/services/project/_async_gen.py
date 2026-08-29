@@ -233,6 +233,9 @@ async def submit_image_task(
     mode: str = "text2image",
     image_urls: Optional[list] = None,
     ref_type: str = "project_image",
+    project_id: Optional[int] = None,
+    asset_type: Optional[str] = None,
+    asset_name: Optional[str] = None,
 ) -> str:
     """
     预扣积分 + 提交到 image_poller_manager，返回 task_id。
@@ -246,6 +249,26 @@ async def submit_image_task(
     user = await _get_user(db, user_id)
     if not user:
         raise ValueError(f"用户 {user_id} 不存在")
+
+    # 创作上下文：项目制生成打标，便于历史瘦身 + 自动归档进资产库
+    context = None
+    if project_id is not None:
+        context = {
+            "source": "project",
+            "container_type": "project",
+            "container_id": str(project_id),
+        }
+        try:
+            from app.services.project.project_service import get_project
+            proj = await get_project(db, project_id)
+            if proj:
+                context["container_name"] = proj.name
+        except Exception:
+            pass
+        if asset_type:
+            context["asset_type"] = asset_type
+        if asset_name:
+            context["asset_name"] = asset_name
 
     cost = await get_image_cost_async(db, mode=mode, size=size)
     task_id = f"proj_img_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
@@ -279,6 +302,7 @@ async def submit_image_task(
         user_id=user_id,
         credits_consumed=cost,
         task_id=task_id,
+        context=context,
     )
     logger.info(
         "[项目异步] 图片任务已提交: task_id=%s user=%s cost=%s mode=%s",
@@ -304,6 +328,9 @@ async def submit_video_task(
     mode: str,
     image_url: str,
     ref_type: str = "project_video",
+    project_id: Optional[int] = None,
+    asset_type: Optional[str] = None,
+    asset_name: Optional[str] = None,
 ) -> str:
     """
     预扣积分 + 通过 provider_registry 路由到对应 Provider 创建视频任务 + 提交到 video_poller_manager，返回 task_id。
@@ -321,6 +348,26 @@ async def submit_video_task(
     user = await _get_user(db, user_id)
     if not user:
         raise ValueError(f"用户 {user_id} 不存在")
+
+    # 创作上下文：项目制生成打标，便于历史瘦身 + 自动归档进资产库
+    context = None
+    if project_id is not None:
+        context = {
+            "source": "project",
+            "container_type": "project",
+            "container_id": str(project_id),
+        }
+        try:
+            from app.services.project.project_service import get_project
+            proj = await get_project(db, project_id)
+            if proj:
+                context["container_name"] = proj.name
+        except Exception:
+            pass
+        if asset_type:
+            context["asset_type"] = asset_type
+        if asset_name:
+            context["asset_name"] = asset_name
 
     seconds = max(1, (duration_ms or 3000) / 1000.0)
     cost = await get_video_cost_async(
@@ -388,6 +435,7 @@ async def submit_video_task(
         },
         user_id=user_id,
         credits_consumed=cost,
+        context=context,
     )
     logger.info(
         "[项目异步] 视频任务已提交: task_id=%s user=%s cost=%s mode=%s",

@@ -26,6 +26,8 @@ interface AssetState {
   filter: AssetFilter
   loading: boolean
   total: number
+  // 「用于生成」待消费资产：资产卡点击「用于生成」写入，生图/视频页 onMounted 读取并清除
+  pendingUse: Asset | null
 }
 
 export const useAssetStore = defineStore('pipelineAsset', {
@@ -35,6 +37,7 @@ export const useAssetStore = defineStore('pipelineAsset', {
     filter: { type: '', search: '', mine: false },
     loading: false,
     total: 0,
+    pendingUse: null,
   }),
 
   actions: {
@@ -73,6 +76,19 @@ export const useAssetStore = defineStore('pipelineAsset', {
       this.filter = { type: '', search: '', mine: false }
       this.loading = false
       this.total = 0
+      this.pendingUse = null
+    },
+
+    /** 设置「用于生成」待消费资产 */
+    setPendingUse(asset: Asset) {
+      this.pendingUse = asset
+    },
+
+    /** 取出并清除「用于生成」待消费资产（生图/视频页 onMounted 调用） */
+    consumePendingUse(): Asset | null {
+      const a = this.pendingUse
+      this.pendingUse = null
+      return a
     },
   },
 })

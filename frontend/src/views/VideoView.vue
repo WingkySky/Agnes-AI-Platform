@@ -327,7 +327,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, watch } from 'vue'
+import { ref, computed, nextTick, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   VideoPlay, Download, CopyDocument, CircleCloseFilled, VideoCameraFilled, Loading, MagicStick,
@@ -338,6 +338,8 @@ import PresetQuickPanel from '@/components/presets/PresetQuickPanel.vue'
 import ImageUploader from '@/components/ImageUploader.vue'
 import ParamSelector from '@/components/ParamSelector.vue'
 import { useTaskQueueStore } from '@/stores/taskQueue'
+import { useAssetStore } from '@/stores/asset'
+import { useAsset } from '@/api/pipeline'
 import { useModelsStore } from '@/stores/models'
 import { useUserStore } from '@/stores/user'
 import { useI18n } from '@/i18n'
@@ -456,6 +458,26 @@ const referenceFiles = ref<FileInfo[]>([])      // 图生视频/关键帧模式�
 // ---------- 视频生视频参考资源 ----------
 const referenceVideoUrl = ref('')               // video2video 参考视频 URL
 const referenceAudioUrl = ref('')               // video2video 参考音频 URL（可选）
+
+// ---------- 「用于生成」预填：从资产库点击「用于生成」跳转而来 ----------
+const assetStore = useAssetStore()
+
+onMounted(async () => {
+  const pending = assetStore.consumePendingUse()
+  if (!pending) return
+  if (pending.kind !== 'video' || !pending.asset_url) return
+  if (supportsVideo2Video.value) {
+    mode.value = 'video2video'
+    referenceVideoUrl.value = pending.asset_url
+  } else {
+    // 当前模型不支持视频生视频，保留参考视频链接并提示
+    referenceVideoUrl.value = pending.asset_url
+    ElMessage.warning(t('assets.video2videoUnsupported'))
+  }
+  try {
+    await useAsset(pending.id)
+  } catch (_) { /* ignore */ }
+})
 
 // ---------- 视频播放状态 ----------
 const videoEl = ref<HTMLVideoElement | null>(null)

@@ -224,6 +224,9 @@ async def generate_video(
         width, height, frame_rate=24, mode="image2video",
         image_url=frame_image.file_url,
         ref_type="project_video",
+        project_id=shot.project_id,
+        asset_type="clip",
+        asset_name=shot.title or None,
     )
 
     await project_sse_manager.push(

@@ -199,6 +199,9 @@ async def generate_prop_image(
     task_id = await submit_image_task(
         db, user_id, prompt, used_model, size, mode="text2image",
         ref_type="project_prop_image",
+        project_id=prop.project_id,
+        asset_type="prop",
+        asset_name=prop.name,
     )
 
     await project_sse_manager.push(

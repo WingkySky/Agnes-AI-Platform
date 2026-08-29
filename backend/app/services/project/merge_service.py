@@ -450,6 +450,13 @@ async def execute_merge(
         await db.commit()
         await db.refresh(project)
 
+        # 成片自动归档进资产库（旁路，失败仅记日志）
+        try:
+            from app.services.asset_archive import archive_final_video
+            await archive_final_video(db, project.id, project.name, project.user_id, final_url)
+        except Exception as fe:
+            logger.error("[合成] 成片归档失败: project_id=%s error=%s", project_id, fe, exc_info=True)
+
         await project_sse_manager.push(
             project_id,
             "merge_completed",
@@ -770,6 +777,13 @@ async def execute_merge_advanced(
         project.status = PROJECT_STATUS_COMPLETED
         await db.commit()
         await db.refresh(project)
+
+        # 成片自动归档进资产库（旁路，失败仅记日志）
+        try:
+            from app.services.asset_archive import archive_final_video
+            await archive_final_video(db, project.id, project.name, project.user_id, final_url)
+        except Exception as fe:
+            logger.error("[合成] 成片归档失败: project_id=%s error=%s", project_id, fe, exc_info=True)
 
         logger.info(
             "[合成] project_id=%s 合成成功: final_url=%s total_duration=%.2f",

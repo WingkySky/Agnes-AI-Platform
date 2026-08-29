@@ -2,8 +2,8 @@
   <el-card class="asset-card" shadow="hover" @click="$emit('click', asset)">
     <div class="card-cover">
       <ImageWithWatermark
-        v-if="asset.reference_images?.length"
-        :src="asset.reference_images[0]"
+        v-if="asset.asset_url || asset.reference_images?.length"
+        :src="asset.asset_url || asset.reference_images?.[0]"
         :alt="asset.name"
       />
       <div v-else class="cover-placeholder">

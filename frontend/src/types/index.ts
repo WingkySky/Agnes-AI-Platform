@@ -134,6 +134,10 @@ export interface GenerationRecord {
   moderation_status?: 'pending' | 'approved' | 'rejected'  // 审核状态
   moderation_reason?: string | null
   moderation_flags?: string[] | null
+  // ===== 创作来源标记（历史瘦身 + 自动归档）=====
+  source?: 'independent' | 'canvas' | 'project' | string
+  container_type?: string | null
+  container_id?: string | null
 }
 
 /** 历史列表响应 — 对齐 HistoryListResponse */
@@ -187,6 +191,18 @@ export interface ImageGenerationRequest {
   image_url?: string | null
   /** 蒙版局部编辑（inpainting） */
   mask?: string | null
+  /** 创作上下文：画布/项目生成时携带，用于历史瘦身 + 自动归档进资产库 */
+  context?: GenerationContextPayload
+}
+
+/** 创作上下文载荷（对齐后端 GenerationContext） */
+export interface GenerationContextPayload {
+  source?: 'independent' | 'canvas' | 'project'
+  container_type?: 'project' | 'canvas_script' | 'canvas' | null
+  container_id?: string | null
+  container_name?: string | null
+  asset_type?: string | null
+  asset_name?: string | null
 }
 
 /** 图片生成响应 — 对齐 ImageGenerationResponse */
@@ -280,6 +296,8 @@ export interface VideoGenerationRequest {
   seed?: number | null
   reference_videos?: string[] | null
   reference_audios?: string[] | null
+  /** 创作上下文：画布/项目生成时携带，用于历史瘦身 + 自动归档进资产库 */
+  context?: GenerationContextPayload
 }
 
 /** 视频任务创建响应 — 对齐 VideoTaskCreatedResponse */
@@ -892,11 +910,46 @@ export interface Asset {
   version: number
   parent_id?: number | null
   moderation_status?: string
+  moderation_reason?: string | null
   likes_count?: number
   views_count?: number
   use_count?: number
   created_at: string
   updated_at: string
+  public_shared_at?: string | null
+  // ===== 创作归档字段（container_* 非空即为画布/项目生成的自动归档影子记录）=====
+  container_type?: string | null
+  container_id?: string | null
+  container_name?: string | null
+  source_generation_id?: number | null
+  kind?: 'image' | 'video' | string | null
+  asset_url?: string | null
+}
+
+/** 创作单元（容器）分组摘要 */
+export interface AssetContainer {
+  container_type?: string | null
+  container_id?: string | null
+  container_name?: string | null
+  type_label?: string
+  asset_count?: number
+  cover_url?: string | null
+  cover_kind?: 'image' | 'video' | string | null
+}
+
+/** 创作单元分组列表响应 */
+export interface AssetContainersResponse {
+  containers: AssetContainer[]
+  standalone_total: number
+}
+
+/** 单元详情响应 */
+export interface AssetContainerDetail {
+  container_type?: string | null
+  container_id?: string | null
+  container_name?: string | null
+  type_label?: string
+  items: Asset[]
 }
 
 /** 从生成结果保存到资产库 */
@@ -915,6 +968,7 @@ export interface PipelineListParams {
   page?: number
   page_size?: number
   category?: string
+  asset_type?: string
   search?: string
   is_builtin?: boolean
   scope?: 'market' | 'my'

@@ -343,7 +343,14 @@ async function generateAssetImage(asset: ShotAsset, kind: 'characters' | 'scenes
       referenceTexts: [] as string[],
       inputSummary: { textCount: 0, imageCount: 0, videoCount: 0, total: 0 },
     }
-    const resp = await createGenerationTask(ctx, { model: modelsStore.defaultImageModel, size: '1024x1024' })
+    const resp = await createGenerationTask(ctx, { model: modelsStore.defaultImageModel, size: '1024x1024' }, {
+      source: 'canvas',
+      container_type: 'canvas_script',
+      container_id: panel.value?.id || null,
+      container_name: (panel.value?.name as string) || undefined,
+      asset_type: kind === 'characters' ? 'character' : 'scene',
+      asset_name: asset.name || desc,
+    })
     const result = await pollImageTask(resp.task_id)
     asset.imageUrl = result.resultUrl
     persistAssets()

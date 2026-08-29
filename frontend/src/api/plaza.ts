@@ -44,6 +44,33 @@ export interface LikeStatusResponse {
   liked_ids: number[]
 }
 
+// ---------- 广场「创作」Tab（来自 assets 表） ----------
+export interface PlazaCreation {
+  id: number
+  kind: 'image' | 'video'
+  asset_type: string                                   // character/scene/material/clip/final/prop/brand
+  name: string
+  description?: string | null
+  asset_url?: string | null
+  container_type?: string | null
+  container_name?: string | null
+  likes_count: number
+  views_count: number
+  author_nickname?: string
+  author_avatar_url?: string | null
+  created_at?: string
+  public_shared_at?: string
+  is_mine: boolean
+  is_liked: boolean
+}
+
+export interface PlazaCreationListResponse {
+  total: number
+  page: number
+  page_size: number
+  items: PlazaCreation[]
+}
+
 export interface ShareStatusResponse {
   success: boolean
   id: number
@@ -89,6 +116,41 @@ export function unlikePlazaWork(id: number): Promise<LikeActionResponse> {
 /** 批量查询点赞状态 */
 export function getLikeStatus(ids: number[]): Promise<LikeStatusResponse> {
   return client.get('/api/plaza/likes/status', {
+    params: { ids: ids.join(',') },
+  })
+}
+
+// ---------- 广场「创作」Tab API ----------
+
+/** 获取广场公开创作资产列表 */
+export function getPlazaCreations(params: {
+  asset_type?: string
+  kind?: 'all' | 'image' | 'video'
+  sort?: 'latest' | 'popular'
+  page?: number
+  page_size?: number
+}): Promise<PlazaCreationListResponse> {
+  return client.get('/api/plaza/creations', { params })
+}
+
+/** 获取广场创作资产详情 */
+export function getPlazaCreationDetail(id: number): Promise<PlazaCreation> {
+  return client.get(`/api/plaza/creations/${id}`)
+}
+
+/** 点赞创作 */
+export function likePlazaCreation(id: number): Promise<LikeActionResponse> {
+  return client.post(`/api/plaza/creations/${id}/like`)
+}
+
+/** 取消点赞创作 */
+export function unlikePlazaCreation(id: number): Promise<LikeActionResponse> {
+  return client.delete(`/api/plaza/creations/${id}/like`)
+}
+
+/** 批量查询创作点赞状态 */
+export function getCreationLikeStatus(ids: number[]): Promise<LikeStatusResponse> {
+  return client.get('/api/plaza/creations/likes/status', {
     params: { ids: ids.join(',') },
   })
 }

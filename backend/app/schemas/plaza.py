@@ -45,6 +45,41 @@ class PlazaListResponse(BaseModel):
 
 
 # =====================================================
+# 广场「创作」Tab 响应（来自 assets 表，与作品 Tab 平行）
+# =====================================================
+
+class PlazaCreation(BaseModel):
+    """广场创作资产（列表项 / 详情）"""
+    id: int
+    kind: str                                                    # 'image' | 'video'
+    asset_type: str                                             # character/scene/material/clip/final/prop/brand
+    name: str
+    description: Optional[str] = None
+    asset_url: Optional[str] = None                             # 单媒体 URL（图片/视频）
+    container_type: Optional[str] = None                        # project/canvas_script/canvas
+    container_name: Optional[str] = None                        # 创作单元名快照
+    likes_count: int = 0
+    views_count: int = 0
+    author_nickname: Optional[str] = None
+    author_avatar_url: Optional[str] = None
+    created_at: Optional[datetime] = None
+    public_shared_at: Optional[datetime] = None
+    is_mine: bool = False
+    is_liked: bool = False
+
+    class Config:
+        from_attributes = True
+
+
+class PlazaCreationListResponse(BaseModel):
+    """广场创作列表响应（分页）"""
+    total: int
+    page: int
+    page_size: int
+    items: List[PlazaCreation]
+
+
+# =====================================================
 # 点赞相关
 # =====================================================
 

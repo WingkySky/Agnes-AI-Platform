@@ -4,7 +4,7 @@
 
 from typing import Optional, Dict, Any, List
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class HealthResponse(BaseModel):
@@ -149,6 +149,35 @@ class ConfigResponse(BaseModel):
 # 历史记录相关 Schema
 # =====================================================
 
+class GenerationContext(BaseModel):
+    """
+    创作上下文（生成任务可选携带，用于历史瘦身与资产归档）
+
+    - source：independent（生图页/生视频页/聊天）/ canvas（画布）/ project（项目制）
+    - container_type/container_id：创作容器，如 ('canvas_script', 剧本面板 ID) /
+      ('project', 项目 ID)。两者同时存在才触发自动归档，独立生成不传
+    - container_name：容器名快照（剧本/项目改名或删除后，归档记录仍可正常分组显示）
+    - asset_type：归档后的资产类型（material / clip / character / scene / final …）
+    - asset_name：归档后的资产名（分镜序号 / 角色名 / 节点名 …）
+    """
+    source: str = Field(default="independent", description="来源：independent / canvas / project")
+    container_type: Optional[str] = Field(default=None, description="容器类型：project / canvas_script / canvas")
+    container_id: Optional[str] = Field(default=None, description="容器 ID（项目 ID / 剧本面板 ID / 'canvas'）")
+    container_name: Optional[str] = Field(default=None, description="容器名快照")
+    asset_type: Optional[str] = Field(default=None, description="归档资产类型：material / clip / character / scene / final")
+    asset_name: Optional[str] = Field(default=None, description="归档资产名")
+
+    @field_validator("source")
+    @classmethod
+    def validate_source(cls, v):
+        return v if v in ("independent", "canvas", "project") else "independent"
+
+    @field_validator("container_type")
+    @classmethod
+    def validate_container_type(cls, v):
+        return v if v in ("project", "canvas_script", "canvas") else None
+
+
 class GenerationRecord(BaseModel):
     """生成记录响应体"""
     id: int
@@ -168,6 +197,10 @@ class GenerationRecord(BaseModel):
     moderation_status: Optional[str] = None   # approved / pending / rejected
     moderation_reason: Optional[str] = None   # 审核原因
     moderation_flags: Optional[List[str]] = None  # 命中的敏感词/违规类别
+    # 创作归属（历史瘦身：画布/项目生成不进默认历史，可按来源筛选回看）
+    source: str = "independent"                # independent / canvas / project
+    container_type: Optional[str] = None       # project / canvas_script / canvas
+    container_id: Optional[str] = None
 
     class Config:
         from_attributes = True    # Pydantic v2 对应原来的 orm_mode

@@ -11,6 +11,9 @@ import type {
   StylePreset,
   ScriptTemplate,
   Asset,
+  AssetContainer,
+  AssetContainersResponse,
+  AssetContainerDetail,
   SaveAssetFromGenerationRequest,
   PipelineListParams,
   ListResult,
@@ -85,4 +88,43 @@ export function getAssetDetail(id: number): Promise<Asset> {
  */
 export function saveAssetFromGeneration(data: SaveAssetFromGenerationRequest): Promise<Asset> {
   return client.post('/api/pipeline/assets/save-from-generation', data)
+}
+
+/**
+ * 记录资产「用于生成」使用，递增 use_count
+ */
+export function useAsset(assetId: number): Promise<{ id: number; use_count: number }> {
+  return client.post(`/api/pipeline/assets/${assetId}/use`)
+}
+
+// =====================================================
+// 创作单元（容器）归组 API
+// =====================================================
+
+/**
+ * 获取当前用户的创作单元分组列表（含我的资产数）
+ */
+export function getAssetContainers(): Promise<AssetContainersResponse> {
+  return client.get('/api/pipeline/assets/containers')
+}
+
+/**
+ * 获取某个创作单元内的全部资产
+ */
+export function getContainerAssets(containerType: string, containerId: string): Promise<AssetContainerDetail> {
+  return client.get(`/api/pipeline/assets/container/${encodeURIComponent(containerType)}/${encodeURIComponent(containerId)}`)
+}
+
+/**
+ * 切换资产分享状态（复用审核管道）
+ */
+export function updateAssetShare(assetId: number, isPublic: boolean): Promise<{ success: boolean; id: number; is_public: boolean; message: string }> {
+  return client.patch(`/api/pipeline/assets/${assetId}/share`, { is_public: isPublic })
+}
+
+/**
+ * 删除资产（含归档影子记录）
+ */
+export function deleteAsset(assetId: number): Promise<{ success: boolean; id: number; message: string }> {
+  return client.delete(`/api/pipeline/assets/${assetId}`)
 }

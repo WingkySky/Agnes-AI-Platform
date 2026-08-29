@@ -18,9 +18,9 @@ import type {
  * @param params.page_size 每页数量
  */
 export function getHistoryList(
-  { type = 'all', task_id, page = 1, page_size = 50 }: { type?: string; task_id?: string; page?: number; page_size?: number } = {}
+  { type = 'all', source = 'independent', task_id, page = 1, page_size = 50 }: { type?: string; source?: string; task_id?: string; page?: number; page_size?: number } = {}
 ): Promise<HistoryListResponse> {
-  return client.get('/api/history', { params: { type, task_id, page, page_size } })
+  return client.get('/api/history', { params: { type, source, task_id, page, page_size } })
 }
 
 /**

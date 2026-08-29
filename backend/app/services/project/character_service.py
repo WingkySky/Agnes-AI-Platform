@@ -218,6 +218,9 @@ async def generate_character_image(
     task_id = await submit_image_task(
         db, user_id, prompt, used_model, size, mode="text2image",
         ref_type="project_character_image",
+        project_id=character.project_id,
+        asset_type="character",
+        asset_name=character.name,
     )
 
     await project_sse_manager.push(

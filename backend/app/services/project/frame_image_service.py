@@ -168,6 +168,9 @@ async def generate_frame_image(
         db, user_id, prompt, used_model, size, mode=mode,
         image_urls=ref_urls or None,
         ref_type="project_frame_image",
+        project_id=shot.project_id,
+        asset_type="material",
+        asset_name=shot.title or None,
     )
 
     await project_sse_manager.push(

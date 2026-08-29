@@ -462,3 +462,66 @@ async def moderate_generation_with_ai(
         return await moderate_video_with_ai(result_url, prompt)
     else:
         return await moderate_image_with_ai(result_url, prompt)
+
+
+# =====================================================
+# 资产分享审核（与 generations 复用同一套多模态预审）
+# 资产表无 ai_moderation_status 列，结果直接落在 moderation_status：
+#   - 违规 → rejected
+#   - 不违规 → pending（等待人工复审）
+#   - 失败 → pending（人工兜底）
+# =====================================================
+
+async def run_async_asset_moderation(
+    asset_id: int,
+    gen_type: str,
+    result_url: Optional[str],
+    prompt: Optional[str] = None,
+) -> None:
+    """
+    后台异步任务：调用 AI 多模态模型审核资产内容（图片/视频）。
+    结果写回 assets 表的 moderation_status 与 moderation_reason。
+    该函数由 asyncio.create_task 触发，不阻塞分享接口响应。
+    """
+    from app.core.database import async_session
+    from app.models.asset import Asset
+
+    try:
+        result = await moderate_generation_with_ai(gen_type, result_url, prompt)
+
+        async with async_session() as db:
+            stmt = select(Asset).filter(Asset.id == asset_id)
+            res = await db.execute(stmt)
+            asset = res.scalar_one_or_none()
+            if not asset:
+                return
+
+            if not result.get("success"):
+                # 审核调用失败，保持 pending，等人工审核
+                asset.moderation_status = "pending"
+                asset.moderation_reason = "系统预审失败，等待人工审核"
+                await db.commit()
+                logger.info("[AI审核] 资产 %d 审核失败，保持待审核", asset_id)
+                return
+
+            if result.get("is_violation"):
+                categories = result.get("categories", []) or []
+                reason = result.get("reason", "") or ""
+                confidence = result.get("confidence", 0)
+                asset.moderation_status = "rejected"
+                reason_text = f"AI 预审不通过：{reason}"
+                if categories:
+                    reason_text += f"（{', '.join(categories[:3])}）"
+                reason_text += f"，置信度 {int(confidence * 100)}%"
+                asset.moderation_reason = reason_text
+                await db.commit()
+                logger.info("[AI审核] 资产 %d 判定违规: %s", asset_id, reason_text)
+            else:
+                # AI 判定没问题 → 保持 pending，等人工复审
+                asset.moderation_status = "pending"
+                asset.moderation_reason = "AI 预审通过，等待人工复审"
+                await db.commit()
+                logger.info("[AI审核] 资产 %d AI 预审通过，等待人工复审", asset_id)
+
+    except Exception as e:
+        logger.exception("[AI审核] 资产后台任务异常 id=%d: %s", asset_id, e)

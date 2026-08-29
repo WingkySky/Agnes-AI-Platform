@@ -107,7 +107,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, type PropType } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Delete, UploadFilled, Document } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
@@ -120,9 +120,11 @@ const props = defineProps({
   optional: { type: Boolean, default: false },
   maxCount: { type: Number, default: 0 },      // 0 表示不限制
   title: { type: String, default: '' },         // 自定义标题
+  // v-model 支持：外部（如「用于生成」预填）可直接写入参考图列表
+  modelValue: { type: Array as PropType<FileInfo[]>, default: null },
 })
 
-const emit = defineEmits(['change', 'clear'])
+const emit = defineEmits(['change', 'clear', 'update:modelValue'])
 
 const fileList = ref<FileInfo[]>([])
 const isDragOver = ref(false)
@@ -130,6 +132,17 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const uploaderRef = ref<HTMLElement | null>(null)
 const pasteHighlight = ref(false)  // 粘贴成功时的高亮反馈
 const isActive = ref(false)         // 当前悬停激活状态 → 控制"鼠标在哪粘贴到哪"的视觉反馈
+
+// 受控：外部通过 v-model 写入时同步内部列表（用于「用于生成」参考图预填）
+watch(
+  () => props.modelValue,
+  (val) => {
+    if (val && Array.isArray(val)) {
+      fileList.value = val
+    }
+  },
+  { immediate: true },
+)
 
 // =====================================================
 // 多实例粘贴仲裁（解决：多个 ImageUploader 共存时谁接收粘贴）
@@ -162,6 +175,7 @@ defineExpose({
     fileList.value = []
     emit('clear')
     emit('change', null)
+    emit('update:modelValue', fileList.value)
   },
 })
 
@@ -293,6 +307,7 @@ function fileToBase64(file: File) {
 
 function emitChange() {
   emit('change', fileList.value.length ? fileList.value : null)
+  emit('update:modelValue', fileList.value)
 }
 
 // 检查是否已达上限

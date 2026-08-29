@@ -5,6 +5,8 @@
 from typing import Optional, List
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.schemas.common import GenerationContext
+
 
 class VideoGenerationRequest(BaseModel):
     """
@@ -66,6 +68,12 @@ class VideoGenerationRequest(BaseModel):
 
     # ── 广场分享：生成时可选择是否公开到广场 ──
     is_public: bool = Field(default=False, description="是否分享到广场")
+
+    # ── 创作上下文：画布/项目生成时携带，用于历史瘦身与资产自动归档 ──
+    context: Optional["GenerationContext"] = Field(
+        default=None,
+        description="创作上下文（画布/项目生成必传；不传按 independent 处理，仅进历史）",
+    )
 
     @field_validator("prompt")
     @classmethod

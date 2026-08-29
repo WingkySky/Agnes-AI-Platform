@@ -30,11 +30,17 @@ from app.models.generation import Generation
 from app.models.model_definition import ModelDefinition
 from app.core.database import new_async_session
 from app.services.credits_service import confirm_credits, refund_credits
+from app.services import asset_archive
 
 logger = logging.getLogger("agnes_platform")
 
 CLEANUP_INTERVAL_SEC = 300
 CLEANUP_TTL_SEC = 3600
+
+
+def _as_container_id(value) -> Optional[str]:
+    """容器 ID 统一存字符串（项目 ID 是数字，剧本面板 ID 是字符串）"""
+    return None if value is None or value == "" else str(value)
 
 
 class ImageTask:
@@ -48,6 +54,7 @@ class ImageTask:
         user_id: Optional[int] = None,
         credits_consumed: int = 0,
         preset_id: Optional[int] = None,
+        context: Optional[Dict] = None,
     ):
         self.task_id = task_id
         self.prompt = prompt
@@ -56,6 +63,8 @@ class ImageTask:
         self.credits_consumed = credits_consumed
         # 生成时使用的预设 ID（用于追溯作品来源预设）
         self.preset_id = preset_id
+        # 创作上下文（画布/项目透传，用于历史打标与资产自动归档）
+        self.context = context
         self.status = "queued"
         self.progress = 0
         self.result_url: Optional[str] = None
@@ -109,6 +118,7 @@ class ImagePollerManager:
         credits_consumed: int = 0,
         task_id: Optional[str] = None,
         preset_id: Optional[int] = None,
+        context: Optional[Dict] = None,
     ) -> ImageTask:
         # 支持外部传入 task_id（便于路由层先扣分再创建任务时保持 ref_id 一致）
         if not task_id:
@@ -120,6 +130,7 @@ class ImagePollerManager:
             user_id=user_id,
             credits_consumed=credits_consumed,
             preset_id=preset_id,
+            context=context,
         )
         task.status = "pending"
 
@@ -298,6 +309,10 @@ class ImagePollerManager:
                     moderation_flags=moderation_flags,
                     moderation_reason=moderation_reason,
                     preset_id=task.preset_id,
+                    # 创作归属：画布/项目生成打标，历史页据此默认过滤
+                    source=(task.context or {}).get("source") or "independent",
+                    container_type=(task.context or {}).get("container_type"),
+                    container_id=_as_container_id((task.context or {}).get("container_id")),
                 )
                 session.add(record)
                 await session.commit()  # 先提交拿到 record.id
@@ -360,6 +375,17 @@ class ImagePollerManager:
                         logger.error(
                             "[图片任务器] 资源转存异常: task_id=%s error=%s",
                             task.task_id, migrate_err, exc_info=True,
+                        )
+
+                # ===== 创作归档：画布/项目生成自动归档进资产库（旁路，失败仅记日志）=====
+                ctx = task.context or {}
+                if ctx.get("container_type") and ctx.get("container_id"):
+                    try:
+                        await asset_archive.archive_to_asset(session, record, ctx)
+                    except Exception as archive_err:
+                        logger.error(
+                            "[图片任务器] 创作归档失败（不影响主流程）: task_id=%s error=%s",
+                            task.task_id, archive_err, exc_info=True,
                         )
             logger.info("[图片任务器] 记录已异步写入数据库: task_id=%s moderation=%s", task.task_id, moderation_status)
         except Exception as e:

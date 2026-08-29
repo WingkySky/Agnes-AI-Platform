@@ -207,6 +207,9 @@ async def generate_scene_image(
     task_id = await submit_image_task(
         db, user_id, prompt, used_model, size, mode="text2image",
         ref_type="project_scene_image",
+        project_id=scene.project_id,
+        asset_type="scene",
+        asset_name=scene.name,
     )
 
     await project_sse_manager.push(

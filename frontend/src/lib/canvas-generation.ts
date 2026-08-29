@@ -23,7 +23,7 @@ import { useModelsStore } from '@/stores/models'
 import { usePreferencesStore } from '@/stores/preferences'
 import { parseSize } from '@/config/model-params'
 import type { CanvasPanel, CanvasConnection } from '@/stores/canvas'
-import type { ImageGenerationRequest, VideoGenerationRequest } from '@/types'
+import type { ImageGenerationRequest, VideoGenerationRequest, GenerationContextPayload } from '@/types'
 import { getErrorMessage } from '@/lib/type-helpers'
 
 // ---------- 类型定义 ----------
@@ -116,6 +116,33 @@ const MENTION_PATTERN = /@(图片|文本|视频|音频)(\d+)/g
 /** 资源类型标签生成器：图片1、图片2、文本1、视频1...（与节点显示序号一致） */
 function resourceLabel(type: string, index: number): string {
   return `${TYPE_NAME_MAP[type] || '资源'}${index}`
+}
+
+/**
+ * 构建画布创作上下文
+ * - 分镜派生节点（content.lineage 含 scriptPanelId）归档到其「剧本」容器，命名 #镜头号
+ * - 其余画布节点统一归档到「画布」容器
+ * - source=canvas：历史页默认过滤
+ */
+function buildCanvasContext(node: GenerationPanel, store: CanvasGenerationStore): GenerationContextPayload {
+  const lineage = node.content?.lineage as { scriptPanelId?: unknown; shotNo?: unknown } | undefined
+  if (lineage && typeof lineage.scriptPanelId === 'string' && lineage.scriptPanelId) {
+    const scriptPanel = store.panels.find((p) => p.id === lineage.scriptPanelId)
+    const shotNo = typeof lineage.shotNo === 'number' ? lineage.shotNo : undefined
+    return {
+      source: 'canvas',
+      container_type: 'canvas_script',
+      container_id: lineage.scriptPanelId,
+      container_name: (scriptPanel?.name as string) || undefined,
+      asset_name: shotNo ? `#${shotNo}` : ((node.name as string) || undefined),
+    }
+  }
+  return {
+    source: 'canvas',
+    container_type: 'canvas',
+    container_id: 'canvas',
+    asset_name: (node.name as string) || undefined,
+  }
 }
 
 // ---------- 资源收集 ----------
@@ -493,7 +520,11 @@ async function classifyImages(images: string[]): Promise<{ base64Images: string[
  * - 根据是否有参考图自动选择 text2image / image2image 模式
  * - 多图参考：base64_images / image_urls 数组
  */
-export async function createGenerationTask(ctx: GenerationContext, config: GenerationConfig): Promise<{ task_id: string }> {
+export async function createGenerationTask(
+  ctx: GenerationContext,
+  config: GenerationConfig,
+  context?: GenerationContextPayload,
+): Promise<{ task_id: string }> {
   const { prompt, referenceImages } = ctx
   const { base64Images, imageUrls } = await classifyImages(referenceImages || [])
 
@@ -506,6 +537,7 @@ export async function createGenerationTask(ctx: GenerationContext, config: Gener
     mode: hasReferenceImages ? 'image2image' : 'text2image',
     base64_images: base64Images.length > 0 ? base64Images : null,
     image_urls: imageUrls.length > 0 ? imageUrls : null,
+    context: context ?? undefined,
   }
 
   const resp = await createImageTask(params)
@@ -685,7 +717,7 @@ export async function executeMergeGeneration(configId: string, store: CanvasGene
       if (onProgress) onProgress('creating', { index: 0, total: 1 })
 
       // 创建任务
-      const taskResp = await createGenerationTask(ctx, config)
+      const taskResp = await createGenerationTask(ctx, config, buildCanvasContext(configNode, store))
       const taskId = taskResp.task_id
 
       // 注册到任务队列
@@ -793,7 +825,7 @@ export async function executeImageReferenceGeneration(
     store,
     newNodeId,
     false,
-    () => createGenerationTask(ctx, { model: modelId, size: '1024x1024' }),
+    () => createGenerationTask(ctx, { model: modelId, size: '1024x1024' }, buildCanvasContext(sourcePanel, store)),
     (taskId, cb) => pollImageTask(taskId, cb),
     prompt,
     modelId,
@@ -833,7 +865,7 @@ export async function executeVideoFromFrameGeneration(
     store,
     newNodeId,
     true,
-    () => createVideoGenerationTask(ctx, config),
+    () => createVideoGenerationTask(ctx, config, buildCanvasContext(sourcePanel, store)),
     (taskId, cb) => pollVideoTask(taskId, cb),
     prompt,
     modelId,
@@ -873,7 +905,11 @@ function normalizeSize(size: string | undefined): string {
  * - keyframes：关键帧动画（需 config.use_keyframes=true，最多 2 张）
  * - 模式根据参考图数量和 use_keyframes 开关自动推断
  */
-export async function createVideoGenerationTask(ctx: GenerationContext, config: GenerationConfig): Promise<{ task_id: string }> {
+export async function createVideoGenerationTask(
+  ctx: GenerationContext,
+  config: GenerationConfig,
+  context?: GenerationContextPayload,
+): Promise<{ task_id: string }> {
   const { prompt, referenceImages } = ctx
   const { base64Images, imageUrls } = await classifyImages(referenceImages || [])
 
@@ -940,6 +976,9 @@ export async function createVideoGenerationTask(ctx: GenerationContext, config: 
     params.images = allImages
     params.image_mime_types = allImages.map(() => 'image/png')
   }
+
+  // 创作上下文：画布/项目生成时携带，用于历史瘦身 + 自动归档
+  params.context = context ?? undefined
 
   const resp = await createVideoTask(params)
   if (!resp || !resp.task_id) {
@@ -1067,7 +1106,7 @@ export async function executeMergeVideoGeneration(configId: string, store: Canva
       if (onProgress) onProgress('creating', { index: 0, total: 1 })
 
       // 创建视频任务
-      const taskResp = await createVideoGenerationTask(ctx, config)
+      const taskResp = await createVideoGenerationTask(ctx, config, buildCanvasContext(configNode, store))
       const taskId = taskResp.task_id
 
       // 注册到任务队列

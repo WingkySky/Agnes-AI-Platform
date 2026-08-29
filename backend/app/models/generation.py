@@ -76,6 +76,14 @@ class Generation(Base):
     # 转存状态：done（已转存）/ pending（待重试，可由管理员接口反复触发）/ NULL（未启用转存）
     migrate_status = Column(String(20), nullable=True, index=True)
 
+    # ===== 创作归属字段（历史瘦身 + 资产归档）=====
+    # 来源：independent（生图页/生视频页/聊天）/ canvas（画布）/ project（项目制）
+    source = Column(String(20), default="independent", nullable=False, index=True)
+    # 创作容器类型：canvas（画布散件）/ canvas_script（画布剧本）/ project（项目）；独立生成为 NULL
+    container_type = Column(String(30), nullable=True)
+    # 创作容器 ID（剧本面板 ID / 项目 ID；画布散件固定为 'canvas'）
+    container_id = Column(String(100), nullable=True, index=True)
+
     def to_dict(self):
         """便捷转换为字典（用于 JSON 序列化）"""
         return {
@@ -101,6 +109,9 @@ class Generation(Base):
             "preset_id": self.preset_id,
             "original_url": self.original_url,
             "migrate_status": self.migrate_status,
+            "source": self.source,
+            "container_type": self.container_type,
+            "container_id": self.container_id,
         }
 
 

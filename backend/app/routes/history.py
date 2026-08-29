@@ -54,6 +54,7 @@ router = APIRouter()
 @router.get("/history", response_model=HistoryListResponse, summary="获取生成历史列表")
 async def get_history(
     type: Optional[str] = Query(None, description="筛选类型: image / video / all（默认）"),
+    source: Optional[str] = Query("independent", description="来源筛选: independent（默认，独立生成）/ canvas / project / all"),
     task_id: Optional[str] = Query(None, description="按 task_id 精确匹配（用于从积分明细跳转）"),
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
@@ -63,6 +64,11 @@ async def get_history(
     """
     分页获取生成历史记录（按用户隔离，异步查询，不阻塞事件循环），按创建时间倒序排列。
     支持通过 task_id 精确匹配某条记录（用于积分明细跳转）。
+
+    来源筛选（source）：
+      - independent：默认，仅独立生成（画布/项目生成已自动归档进资产库，历史页默认隐藏）
+      - canvas / project：仅对应创作容器的生成
+      - all：全部（按 task_id 跳转时忽略 source，确保能定位到任意记录）
     """
     stmt = select(Generation)
 
@@ -75,9 +81,12 @@ async def get_history(
     if type and type.lower() in ("image", "video"):
         stmt = stmt.filter(Generation.type == type.lower())
 
-    # 按 task_id 精确匹配（用于积分明细跳转到对应历史记录）
+    # 按 task_id 精确匹配（用于积分明细跳转到对应历史记录）：忽略 source 筛选
     if task_id:
         stmt = stmt.filter(Generation.task_id == task_id)
+    elif source and source != "all":
+        # 默认 independent：隐藏画布/项目生成（已自动归档进资产库）
+        stmt = stmt.filter(Generation.source == source)
 
     # 总数查询（按筛选条件）
     count_stmt = select(func.count()).select_from(stmt.subquery())
@@ -127,6 +136,9 @@ async def get_history(
             moderation_status=getattr(item, "moderation_status", "approved"),
             moderation_reason=getattr(item, "moderation_reason", None),
             moderation_flags=getattr(item, "moderation_flags", None),
+            source=getattr(item, "source", "independent") or "independent",
+            container_type=getattr(item, "container_type", None),
+            container_id=getattr(item, "container_id", None),
         ))
 
     return HistoryListResponse(
