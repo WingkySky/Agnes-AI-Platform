@@ -12,7 +12,7 @@ import { usePreferencesStore } from '@/stores/preferences'
 import { getModelParams } from '@/config/model-params'
 import {
   executeInNodeGeneration,
-  executeMergeVideoGeneration,
+  executeInNodeVideoGeneration,
   getUpstreamNodes,
   readPanelGenParams,
 } from '@/lib/canvas-generation'
@@ -68,6 +68,8 @@ const IMG_PITCH_X = 400
 const IMG_PITCH_Y = 380
 const VIDEO_CONFIG_W = 320
 const VIDEO_CONFIG_H = 300
+// 视频直出节点列距（B2 将改为覆盖在源图上，此处为网格过渡方案）
+const VIDEO_PITCH_X = VIDEO_CONFIG_W + 40
 
 /* script 节点 content 上三套生成参数的分区键：向导参数栏写入，批量派生读取 */
 export const ASSET_IMAGE_PARAMS_KEY = 'asset_image_params'
@@ -496,7 +498,7 @@ export async function deriveStoryboardVideos(scriptPanel: CanvasPanel): Promise<
   const derivedImages = findDerivedPanels(scriptPanel.id, 'image')
 
   // 只处理"已有成功分镜图"且未派生过视频的镜头
-  const items: Array<{ shot: CanvasShot; imgConfig: CanvasPanel; imageNodeId: string }> = []
+  const items: Array<{ shot: CanvasShot; imgConfig: CanvasPanel; imageNodeId: string; imageUrl: string }> = []
   let notReady = 0
   for (const shot of shots) {
     if (videoShotIds.has(shot.id)) continue
@@ -512,7 +514,7 @@ export async function deriveStoryboardVideos(scriptPanel: CanvasPanel): Promise<
       notReady++
       continue
     }
-    items.push({ shot, imgConfig: entry.panel, imageNodeId: resultNode.id })
+    items.push({ shot, imgConfig: entry.panel, imageNodeId: resultNode.id, imageUrl })
   }
 
   if (items.length === 0) {
@@ -527,8 +529,9 @@ export async function deriveStoryboardVideos(scriptPanel: CanvasPanel): Promise<
   store.pushSnapshot()
   const stepId = ensureShotStep(scriptPanel)
   const tasks: Array<() => Promise<void>> = []
+  let failedCount = 0
 
-  // 视频配置统一排在分镜网格右侧的专属列（B2 将改为覆盖式布局，此处仅保证不与其他节点重叠）
+  // 视频直出节点排在分镜网格右侧专属区，同行按镜头列位横向排开（B2 将改为覆盖在源图上）
   const videoBaseX = scriptPanel.x + scriptPanel.width + 80 + GRID_COLS * IMG_PITCH_X + 40
 
   for (const item of items) {
@@ -536,14 +539,16 @@ export async function deriveStoryboardVideos(scriptPanel: CanvasPanel): Promise<
     const params = readPanelGenParams(scriptPanel, 'video', SHOT_VIDEO_PARAMS_KEY, {
       seconds: item.shot.duration || 5,
     })
-    const configId = store.addPanel({
-      type: 'config',
+    const colIdx = Math.max(0, Math.round((item.imgConfig.x - scriptPanel.x - scriptPanel.width - 80) / IMG_PITCH_X))
+    const panelId = store.addPanel({
+      type: 'video',
       name: `#${item.shot.no} ${t('canvas.script.videoSuffix')}`,
-      x: videoBaseX,
+      x: videoBaseX + colIdx * VIDEO_PITCH_X,
       y: item.imgConfig.y,
       width: VIDEO_CONFIG_W,
       height: VIDEO_CONFIG_H,
       content: {
+        status: 'pending',
         mode: 'image2video',
         model: params.model,
         prompt: buildShotVideoPrompt(item.shot),
@@ -551,20 +556,28 @@ export async function deriveStoryboardVideos(scriptPanel: CanvasPanel): Promise<
         resolution: params.resolution,
         frame_rate: params.frame_rate,
         seconds: params.seconds,
+        // 参考图必须在 addPanel 时一次性写入：updatePanel 的 deepMerge 会把数组转成索引对象
+        referenceImages: [item.imageUrl],
         lineage: { kind: 'video', scriptPanelId: scriptPanel.id, shotId: item.shot.id, shotNo: item.shot.no },
       },
     })
-    // 连线：分镜图结果节点 -> 视频配置（图生视频的标准上游）
-    store.addConnection({ source_panel_id: item.imageNodeId, target_panel_id: configId, type: 'auto' })
-    store.addPanelToStep(stepId, configId)
+    // 连线：源分镜图 -> 视频节点（视觉血缘；image -> video 连线校验允许）
+    store.addConnection({ source_panel_id: item.imageNodeId, target_panel_id: panelId, type: 'auto' })
+    store.addPanelToStep(stepId, panelId)
     tasks.push(async () => {
-      await executeMergeVideoGeneration(configId, store, { waitFor: true })
+      const target = store.panels.find((p) => p.id === panelId)
+      if (!target) return
+      const generatedId = await executeInNodeVideoGeneration(target, store, { waitFor: true })
+      if (!generatedId) failedCount++
     })
   }
 
   ElMessage.success(`${t('canvas.messages.batchVideosQueued')} (${items.length})`)
   if (notReady > 0) ElMessage.info(`${t('canvas.messages.imagesNotReady')} (${notReady})`)
-  void runPool(tasks, VIDEO_CONCURRENCY)
+  // 后台并发池执行，不阻塞交互；异常在 waitFor 内部已转节点 error 态，这里补一条汇总提示
+  void runPool(tasks, VIDEO_CONCURRENCY).then(() => {
+    if (failedCount > 0) ElMessage.warning(t('canvas.messages.batchVideosFailed', { n: failedCount }))
+  })
 }
 
 /* ---------- 单镜头派生视频（分镜图节点一键图生视频） ---------- */
@@ -591,26 +604,29 @@ export async function deriveVideoForShot(imageResultPanel: CanvasPanel): Promise
 
   store.pushSnapshot()
   const stepId = ensureShotStep(scriptPanel)
-  const configId = store.addPanel({
-    type: 'config',
+  const panelId = store.addPanel({
+    type: 'video',
     name: `#${shot.no} ${t('canvas.script.videoSuffix')}`,
     x: imageResultPanel.x + imageResultPanel.width + 80,
     y: imageResultPanel.y,
     width: VIDEO_CONFIG_W,
     height: VIDEO_CONFIG_H,
     content: {
-        mode: 'image2video',
-        model: params.model,
-        prompt: buildShotVideoPrompt(shot),
-        aspect_ratio: params.aspect_ratio,
-        resolution: params.resolution,
-        frame_rate: params.frame_rate,
-        seconds: params.seconds,
-        lineage: { kind: 'video', scriptPanelId: scriptPanel.id, shotId: shot.id, shotNo: shot.no },
-      },
-    })
-  store.addConnection({ source_panel_id: imageResultPanel.id, target_panel_id: configId, type: 'auto' })
-  store.addPanelToStep(stepId, configId)
-  await executeMergeVideoGeneration(configId, store)
+      status: 'pending',
+      mode: 'image2video',
+      model: params.model,
+      prompt: buildShotVideoPrompt(shot),
+      aspect_ratio: params.aspect_ratio,
+      resolution: params.resolution,
+      frame_rate: params.frame_rate,
+      seconds: params.seconds,
+      referenceImages: [imageUrl],
+      lineage: { kind: 'video', scriptPanelId: scriptPanel.id, shotId: shot.id, shotNo: shot.no },
+    },
+  })
+  store.addConnection({ source_panel_id: imageResultPanel.id, target_panel_id: panelId, type: 'auto' })
+  store.addPanelToStep(stepId, panelId)
+  const target = store.panels.find((p) => p.id === panelId)
+  if (target) await executeInNodeVideoGeneration(target, store)
   ElMessage.success(t('canvas.messages.videoDerived'))
 }

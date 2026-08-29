@@ -1410,15 +1410,21 @@ async function generateVideoFromSource(
 // - 查找上游 config 节点，重新执行合并生成（创建新的 loading 结果节点）
 // - 没有上游 config 节点时，用节点自身 prompt 重新生成（直接更新当前节点）
 async function retryGeneration(panel: typeof store.panels[number]) {
-  // 直出分镜节点（自带 lineage）：就地重试，保留节点上的模型/参数/角色参考图
-  if (panel.type === 'image' && readLineage(panel)) {
-    const refs = Array.isArray(panel.content?.referenceImages) ? (panel.content?.referenceImages as unknown[]).length : 0
-    const size = (panel.content?.size as string) || '1024x1024'
-    const canGenerate = await checkCreditsBeforeGenerate({ type: 'image', mode: refs > 0 ? 'image2image' : 'text2image', size })
+  // 直出分镜节点（自带 lineage）：就地重试，保留节点上的模型/参数/角色参考图/源图
+  if (readLineage(panel) && (panel.type === 'image' || panel.type === 'video')) {
+    const isVideoNode = panel.type === 'video'
+    const canGenerate = isVideoNode
+      ? await checkCreditsBeforeGenerate({ type: 'video', mode: 'image2video', seconds: (panel.content?.seconds as number) || 5 })
+      : await checkCreditsBeforeGenerate({
+          type: 'image',
+          mode: Array.isArray(panel.content?.referenceImages) && (panel.content?.referenceImages as unknown[]).length > 0 ? 'image2image' : 'text2image',
+          size: (panel.content?.size as string) || '1024x1024',
+        })
     if (!canGenerate) return
     ElMessage.info(t('canvas.messages.regenerate'))
-    const { executeInNodeGeneration } = await import('@/lib/canvas-generation')
-    await executeInNodeGeneration(panel, store)
+    const { executeInNodeGeneration, executeInNodeVideoGeneration } = await import('@/lib/canvas-generation')
+    if (isVideoNode) await executeInNodeVideoGeneration(panel, store)
+    else await executeInNodeGeneration(panel, store)
     return
   }
 

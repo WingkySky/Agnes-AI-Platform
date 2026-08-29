@@ -39,7 +39,7 @@
     - 新增 `ComposerParamBar`：复用 `ParamSelector` 的选项逻辑，只做驼峰↔蛇形字段适配与 content 持久化（支持 `contentKey` 分区）；image / video / config 三类节点 Composer 接入，config 节点原生 select 整体替换后字段名与读写路径不变，`executeMerge*` 零改动
     - script 节点新增分镜聊天模型选择（存 `content.chat_model`）；`POST /api/storyboard` 新增可选 `model`，命中 chat 模型注册表时使用指定模型，未传或未命中回退第一个 chat 模型
     - 剧本向导步骤② 新增资产图参数栏、步骤③ 新增分镜图/分镜视频批量参数区，按 `asset_image_params` / `shot_image_params` / `shot_video_params` 分区持久化到 script 节点；批量派生与单镜头重拍改为同源读取，视频时长优先级为参数栏显式选择 > 镜头表格时长，视频 `aspect_ratio` / `resolution` / `frame_rate` 不再硬编码
-- 分镜直出 B1 地基与派生切换（设计文档 `docs/superpowers/specs/2026-08-29-canvas-node-evolution-roadmap.md`）：脚本批量派生分镜图不再产生 config 中间节点，每镜头直接创建 1 个可生图的图片节点（prompt/模型/参考图/lineage 内嵌节点，结果就地回填 `content.content`）；`findDerivedPanels` 同时识别直出节点与存量 config 派生（幂等不重复派生）；`getShotLineageInfo` 兼容直出节点（镜头徽章与派生/重拍按钮可用）；批量生视频兼容直出节点源图读取；直出节点重试走就地执行（保留节点上的模型/参数/角色参考图）；批量失败汇总提示；视频配置节点暂排分镜网格右侧专属列（B2 改覆盖式布局）
+- 分镜直出 B1 地基与派生切换（设计文档 `docs/superpowers/specs/2026-08-29-canvas-node-evolution-roadmap.md`）：脚本批量派生分镜图不再产生 config 中间节点，每镜头直接创建 1 个可生图的图片节点（prompt/模型/参考图/lineage 内嵌节点，结果就地回填 `content.content`）；**视频派生同样直出**：批量/单镜头直接创建视频节点（参数/源分镜图/lineage 内嵌，视频地址回填节点自身），不再产生"摄像机控制"config 节点，视频节点按行内列位排在分镜网格右侧专属区（B2 改覆盖式布局）；`findDerivedPanels` 同时识别直出节点与存量 config 派生（幂等不重复派生）；`getShotLineageInfo` 兼容直出节点（镜头徽章与派生/重拍按钮可用）；直出节点重试走就地执行（保留模型/参数/参考图/源图）；批量失败汇总提示（补 `batchImagesFailed` / `batchVideosFailed` 文案）
     - 手工验证清单见 `docs/superpowers/specs/2026-08-29-phase-a-smoke-checklist.md`
 
 ### 修复（归档功能验收问题）

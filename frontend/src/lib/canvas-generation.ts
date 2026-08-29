@@ -859,6 +859,91 @@ export async function executeInNodeGeneration(
   return failed ? null : panel.id
 }
 
+/**
+ * 视频节点就地生成（分镜直出）：节点自身承载参数与结果
+ * 1. 读取节点上的模型/比例/分辨率/帧率/时长，content.referenceImages[0] 为源分镜图
+ * 2. 节点置 loading -> 建任务 + 注册队列 -> 轮询 -> 视频地址回填 content.content
+ * 失败语义与 executeInNodeGeneration 一致：waitFor 模式返回 null，不打断批量并发池
+ */
+export async function executeInNodeVideoGeneration(
+  panel: CanvasPanel,
+  store: CanvasGenerationStore,
+  options: GenerationOptions = {},
+): Promise<string | null> {
+  const { onProgress } = options
+  const queueStore = useTaskQueueStore()
+  const prefsStore = usePreferencesStore()
+
+  const prompt = typeof panel.content?.prompt === 'string' ? panel.content.prompt.trim() : ''
+  const referenceImages = Array.isArray(panel.content?.referenceImages)
+    ? panel.content.referenceImages.filter((u): u is string => typeof u === 'string')
+    : []
+  if (!prompt && referenceImages.length === 0) {
+    throw new Error('提示词为空且无参考图，无法生成视频')
+  }
+  const ctx: GenerationContext = {
+    prompt,
+    referenceImages,
+    referenceTexts: [],
+    inputSummary: { textCount: 0, imageCount: referenceImages.length, videoCount: 0, total: referenceImages.length },
+  }
+  const params = readPanelGenParams(panel, 'video')
+  const config: GenerationConfig = {
+    model: params.model,
+    seconds: params.seconds,
+    aspect_ratio: params.aspect_ratio,
+    resolution: params.resolution,
+    frame_rate: params.frame_rate,
+  }
+
+  // 置 loading：此处只写状态字段，不传 referenceImages 数组（deepMerge 会把数组转成索引对象）
+  store.updatePanel(panel.id, { content: { status: 'loading', errorDetails: null } })
+
+  let failed = false
+  const run = async (): Promise<void> => {
+    try {
+      if (onProgress) onProgress('creating', { index: 0, total: 1 })
+
+      const taskResp = await createVideoGenerationTask(ctx, config, buildCanvasContext(panel, store))
+      const taskId = taskResp.task_id
+
+      queueStore.registerCanvasTask({
+        taskId,
+        type: 'video',
+        prompt,
+        backendTaskId: taskId,
+        panelId: panel.id,
+      })
+
+      if (onProgress) onProgress('polling', { index: 0, taskId })
+
+      const result = await pollVideoTask(taskId, (status, data) => {
+        if (onProgress) onProgress('generating', { index: 0, status, progress: data.progress })
+      })
+
+      const videoUrl = result.videoUrl || ''
+      store.updatePanel(panel.id, { content: { content: videoUrl, status: 'success' } })
+      store.pushSnapshot()
+      if (onProgress) onProgress('done', { resultNodeIds: [panel.id] })
+      prefsStore.autoDownload(videoUrl, 'video', { modelId: config.model })
+      prefsStore.notifyComplete('video', { prompt, modelId: config.model })
+    } catch (err) {
+      failed = true
+      const errMsg = getErrorMessage(err) || '视频生成失败'
+      store.updatePanel(panel.id, { content: { status: 'error', errorDetails: errMsg } })
+      if (onProgress) onProgress('error', { resultNodeIds: [panel.id], error: errMsg })
+    }
+  }
+
+  if (options.waitFor) {
+    await run()
+  } else {
+    void run()
+  }
+
+  return failed ? null : panel.id
+}
+
 // ---------- 节点生成参数读写 ----------
 
 function readContentString(content: Record<string, unknown>, key: string, fallback: string): string {
