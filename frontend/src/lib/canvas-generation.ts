@@ -101,6 +101,19 @@ interface GenerationOptions {
   waitFor?: boolean
 }
 
+/**
+ * 节点生成参数：字段名对齐 Config 节点 content 与 GenerationConfig
+ * Config / image / video 节点共用同一套字段名，ComposerParamBar 与各生成入口无需再做映射
+ */
+export interface PanelGenParams {
+  model: string
+  size: string
+  aspect_ratio: string
+  resolution: number
+  frame_rate: number
+  seconds: number
+}
+
 // ---------- 常量 ----------
 
 /** 节点类型中文名映射 */
@@ -766,6 +779,50 @@ export async function executeMergeGeneration(configId: string, store: CanvasGene
   return newNodeId
 }
 
+// ---------- 节点生成参数读写 ----------
+
+function readContentString(content: Record<string, unknown>, key: string, fallback: string): string {
+  const value = content[key]
+  return typeof value === 'string' && value ? value : fallback
+}
+
+function readContentNumber(content: Record<string, unknown>, key: string, fallback: number): number {
+  const value = content[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
+
+/** 类型谓词：参数子对象（script 节点多套参数分区存放时读取用） */
+function isParamsRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * 读取节点上的生成参数，未选择的项回落到该类型的默认参数
+ * - 默认值链：节点 content > 用户偏好 default_model_id > 该类型列表第一个（getDefaultModel）
+ * - Config / image / video 节点读 content 根字段；script 节点多套参数用 contentKey 分区存放
+ * - fallback 用于覆盖逐项回落值（如批量派生沿用偏好比例尺寸、逐镜头时长）
+ */
+export function readPanelGenParams(
+  panel: CanvasPanel | null | undefined,
+  mode: 'image' | 'video',
+  contentKey?: string,
+  fallback?: Partial<PanelGenParams>,
+): PanelGenParams {
+  const content = panel?.content || {}
+  const scoped = contentKey ? content[contentKey] : content
+  const source = isParamsRecord(scoped) ? scoped : {}
+  const modelsStore = useModelsStore()
+  const isVideo = mode === 'video'
+  return {
+    model: readContentString(source, 'model', fallback?.model ?? modelsStore.getDefaultModel(isVideo ? 'video' : 'image')),
+    size: readContentString(source, 'size', fallback?.size ?? modelsStore.defaultImageSize),
+    aspect_ratio: readContentString(source, 'aspect_ratio', fallback?.aspect_ratio ?? modelsStore.defaultVideoAspectRatio),
+    resolution: readContentNumber(source, 'resolution', fallback?.resolution ?? modelsStore.defaultVideoResolution),
+    frame_rate: readContentNumber(source, 'frame_rate', fallback?.frame_rate ?? modelsStore.defaultFrameRate),
+    seconds: readContentNumber(source, 'seconds', fallback?.seconds ?? modelsStore.defaultVideoDuration),
+  }
+}
+
 // ---------- 媒体节点对话框生成（LibTV 复刻：图生图 / 首帧生视频） ----------
 
 /** 单个媒体生成任务的通用执行：建任务 -> 注册队列 -> 轮询 -> 回填结果节点 -> 自动下载/通知 */
@@ -804,12 +861,14 @@ async function runMediaTask(
 
 /**
  * 图片节点对话框生成（图生图）：以当前图片为参考图，在右侧创建新图片结果节点
+ * @param params 节点上选择的模型与尺寸，不传时回落默认模型与默认尺寸
  * @returns 新结果节点 ID（调用方无需等待完成，任务后台轮询回填）
  */
 export async function executeImageReferenceGeneration(
   sourcePanel: GenerationPanel,
   prompt: string,
   store: CanvasGenerationStore,
+  params?: Partial<PanelGenParams>,
 ): Promise<string> {
   const modelsStore = useModelsStore()
   const ctx: GenerationContext = {
@@ -819,13 +878,14 @@ export async function executeImageReferenceGeneration(
     inputSummary: { textCount: 0, imageCount: 1, videoCount: 0, total: 1 },
   }
   const newNodeId = createLoadingResultNode(store, sourcePanel, false)
-  const modelId = modelsStore.defaultImageModel
+  const modelId = params?.model || modelsStore.defaultImageModel
+  const size = params?.size || modelsStore.defaultImageSize
   // 后台执行，不阻塞对话框
   void runMediaTask(
     store,
     newNodeId,
     false,
-    () => createGenerationTask(ctx, { model: modelId, size: '1024x1024' }, buildCanvasContext(sourcePanel, store)),
+    () => createGenerationTask(ctx, { model: modelId, size }, buildCanvasContext(sourcePanel, store)),
     (taskId, cb) => pollImageTask(taskId, cb),
     prompt,
     modelId,
@@ -836,6 +896,7 @@ export async function executeImageReferenceGeneration(
 /**
  * 视频节点对话框生成（首帧生视频）：抽取当前视频首帧作为参考图图生视频，右侧创建新视频节点
  * @param frameDataUrl 视频首帧 dataURI（调用方抽取）
+ * @param params 节点上选择的模型与视频参数，不传时回落默认模型与默认参数
  * @returns 新结果节点 ID
  */
 export async function executeVideoFromFrameGeneration(
@@ -843,6 +904,7 @@ export async function executeVideoFromFrameGeneration(
   frameDataUrl: string,
   prompt: string,
   store: CanvasGenerationStore,
+  params?: Partial<PanelGenParams>,
 ): Promise<string> {
   const modelsStore = useModelsStore()
   const ctx: GenerationContext = {
@@ -852,13 +914,13 @@ export async function executeVideoFromFrameGeneration(
     inputSummary: { textCount: 0, imageCount: 1, videoCount: 0, total: 1 },
   }
   const newNodeId = createLoadingResultNode(store, sourcePanel, true)
-  const modelId = modelsStore.defaultVideoModel
+  const modelId = params?.model || modelsStore.defaultVideoModel
   const config: GenerationConfig = {
     model: modelId,
-    seconds: 5,
-    aspect_ratio: '16:9',
-    resolution: modelsStore.defaultVideoResolution,
-    frame_rate: modelsStore.defaultFrameRate,
+    seconds: params?.seconds || modelsStore.defaultVideoDuration,
+    aspect_ratio: params?.aspect_ratio || modelsStore.defaultVideoAspectRatio,
+    resolution: params?.resolution || modelsStore.defaultVideoResolution,
+    frame_rate: params?.frame_rate || modelsStore.defaultFrameRate,
   }
   // 后台执行，不阻塞对话框
   void runMediaTask(

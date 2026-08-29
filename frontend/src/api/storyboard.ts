@@ -43,6 +43,8 @@ export interface StoryboardRequest {
   shot_count_min: number
   shot_count_max: number
   style?: string
+  /** 分镜 LLM 模型，不传时后端回退到 chat 注册表第一个 */
+  model?: string
 }
 
 /** 生成分镜脚本（无状态，不存储） */

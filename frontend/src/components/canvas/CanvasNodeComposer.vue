@@ -36,58 +36,32 @@
 
     <!-- 底部：参数 + 状态 + 发送 -->
     <div class="composer-bottom">
-      <!-- script 参数：镜头数 + 风格 -->
+      <!-- script 参数：镜头数 + 风格 + 分镜聊天模型 -->
       <template v-if="panelType === 'script'">
         <span class="composer-param-label">{{ t('canvas.script.shotCount') }}</span>
         <input v-model.number="scriptShotMin" type="number" min="1" max="30" class="composer-num" :style="selectStyle" @input="persistScriptParams">
         <span class="composer-param-label">–</span>
         <input v-model.number="scriptShotMax" type="number" min="1" max="30" class="composer-num" :style="selectStyle" @input="persistScriptParams">
         <input v-model="scriptStyle" class="composer-style" :style="selectStyle" :placeholder="t('canvas.script.stylePlaceholder')" @input="persistScriptParams">
+        <span class="composer-param-label">{{ t('canvas.composer.chatModel') }}</span>
+        <select v-model="scriptChatModel" class="composer-select" :style="selectStyle">
+          <option v-for="m in modelsStore.chatModels" :key="m.id" :value="m.id">{{ m.name }}</option>
+        </select>
       </template>
+      <!-- image / video 节点：模型与参数写回节点 content，随画布持久化 -->
+      <ComposerParamBar v-if="isMedia" :panel="panel" :mode="panelType === 'video' ? 'video' : 'image'" />
       <template v-if="isConfig">
-        <!-- 模型选择（按模式筛选） -->
-        <select
-          class="composer-select"
-          :style="selectStyle"
-          :value="configContent.model"
-          @change="updateContent({ model: ($event.target as HTMLSelectElement)?.value })"
-        >
-          <option v-for="m in availableModels" :key="m.id" :value="m.id">{{ m.name }}</option>
-        </select>
-        <!-- 图片尺寸 -->
-        <select
-          v-if="isImageMode"
-          class="composer-select"
-          :style="selectStyle"
-          :value="configContent.size"
-          @change="updateContent({ size: ($event.target as HTMLSelectElement)?.value })"
-        >
-          <option v-for="s in imageSizeOptions" :key="s.value" :value="s.value">{{ s.label }}</option>
-        </select>
-        <!-- 视频参数：分辨率/比例/帧率/时长 -->
-        <template v-if="isVideoMode">
-          <select class="composer-select" :style="selectStyle" :value="configContent.resolution" @change="updateContent({ resolution: Number(($event.target as HTMLSelectElement)?.value) })">
-            <option v-for="r in videoResolutionOptions" :key="r.value" :value="r.value">{{ r.label }}</option>
-          </select>
-          <select class="composer-select" :style="selectStyle" :value="configContent.aspect_ratio" @change="updateContent({ aspect_ratio: ($event.target as HTMLSelectElement)?.value })">
-            <option v-for="r in videoAspectRatioOptions" :key="r.value" :value="r.value">{{ r.label }}</option>
-          </select>
-          <select class="composer-select" :style="selectStyle" :value="configContent.frame_rate" @change="updateContent({ frame_rate: Number(($event.target as HTMLSelectElement)?.value), seconds: clampedSeconds(Number(($event.target as HTMLSelectElement)?.value), configContent.seconds) })">
-            <option v-for="fr in videoFrameRateOptions" :key="fr" :value="fr">{{ fr }} FPS</option>
-          </select>
-          <select class="composer-select" :style="selectStyle" :value="configContent.seconds" @change="updateContent({ seconds: Number(($event.target as HTMLSelectElement)?.value) })">
-            <option v-for="s in availableDurations" :key="s" :value="s">{{ s }}{{ t('canvas.node.secondsSuffix') }}</option>
-          </select>
-          <!-- 关键帧开关（仅图生视频） -->
-          <label v-if="configContent.mode === 'image2video'" class="composer-kf">
-            <el-switch
-              :model-value="configContent.use_keyframes || false"
-              size="small"
-              @update:model-value="updateContent({ use_keyframes: $event })"
-            />
-            <span class="composer-kf-label">{{ t('canvas.node.keyframesMode') }}</span>
-          </label>
-        </template>
+        <!-- 参数栏：模式决定取图参数还是视频参数，字段名与合并生成链路共用 -->
+        <ComposerParamBar :panel="panel" :mode="isVideoMode ? 'video' : 'image'" />
+        <!-- 关键帧开关（仅图生视频） -->
+        <label v-if="configContent.mode === 'image2video'" class="composer-kf">
+          <el-switch
+            :model-value="configContent.use_keyframes || false"
+            size="small"
+            @update:model-value="updateContent({ use_keyframes: $event })"
+          />
+          <span class="composer-kf-label">{{ t('canvas.node.keyframesMode') }}</span>
+        </label>
       </template>
 
       <!-- 状态提示 -->
@@ -135,11 +109,13 @@ import { useI18n } from '@/i18n'
 import { ElMessage } from 'element-plus'
 import { useCanvasStore } from '@/stores/canvas'
 import { useModelsStore } from '@/stores/models'
+import ComposerParamBar from '@/components/canvas/ComposerParamBar.vue'
 import { createChatSession, sendMessageStream } from '@/api/chat'
 import { generateStoryboard, type StoryboardShot } from '@/api/storyboard'
 import { getErrorMessage } from '@/lib/type-helpers'
 import {
   getUpstreamNodes,
+  readPanelGenParams,
   executeImageReferenceGeneration,
   executeVideoFromFrameGeneration,
 } from '@/lib/canvas-generation'
@@ -177,7 +153,6 @@ const configContent = computed<Record<string, any>>(() => ({
   ...(panel.value?.content || {}),
 }))
 
-const isImageMode = computed(() => configContent.value.mode?.includes('image') && !configContent.value.mode?.includes('video'))
 const isVideoMode = computed(() => configContent.value.mode?.includes('video'))
 
 const configModes = computed(() => [
@@ -186,31 +161,6 @@ const configModes = computed(() => [
   { value: 'text2video', label: t('canvas.node.configMode.text2video') },
   { value: 'image2video', label: t('canvas.node.configMode.image2video') },
 ])
-const availableModels = computed(() => modelsStore.getModelsByMode(configContent.value.mode || 'text2image'))
-const imageSizeOptions = computed(() => {
-  const opts = modelsStore.imageSizeOptions
-  if (opts.length > 0) return opts
-  return (modelsStore.imageSizes.length > 0 ? modelsStore.imageSizes : ['1024x1024', '768x1024', '1024x768', '1280x720'])
-    .map((v) => ({ value: v, w: 1, h: 1, label: v }))
-})
-const videoAspectRatioOptions = computed(() => modelsStore.getModelParamsConfig().videoAspectRatios)
-const videoResolutionOptions = computed(() => modelsStore.getModelParamsConfig().videoResolutions || [])
-const videoFrameRateOptions = computed(() => modelsStore.getModelParamsConfig().videoFrameRates)
-/** 可用时长随帧率过滤（24FPS≤15s，30FPS≤10s，60FPS≤5s） */
-const availableDurations = computed(() => {
-  const config = modelsStore.getModelParamsConfig()
-  const fps = configContent.value.frame_rate || 24
-  const maxDuration = fps >= 60 ? 5 : fps >= 30 ? 10 : 15
-  return config.videoDurations.filter((s: number) => s <= maxDuration)
-})
-
-/** 切帧率后把时长钳制回合法范围 */
-function clampedSeconds(fps: number, seconds: number): number {
-  const config = modelsStore.getModelParamsConfig()
-  const maxDuration = fps >= 60 ? 5 : fps >= 30 ? 10 : 15
-  const list = config.videoDurations.filter((s: number) => s <= maxDuration)
-  return list.includes(seconds) ? seconds : list[list.length - 1] || 5
-}
 
 /* ---------- 输入状态（按节点类型读写不同字段） ---------- */
 const text = ref('')
@@ -241,6 +191,14 @@ function updateContent(patch: Record<string, unknown>) {
 const scriptShotMin = ref(6)
 const scriptShotMax = ref(12)
 const scriptStyle = ref('')
+/** 分镜聊天模型：未选择时回落偏好/列表第一个，选中后随节点持久化 */
+const scriptChatModel = computed({
+  get: () => {
+    const stored = panel.value?.content?.chat_model
+    return typeof stored === 'string' && stored ? stored : modelsStore.getDefaultModel('chat')
+  },
+  set: (value: string) => updateContent({ chat_model: value }),
+})
 
 // 切换目标节点时重新载入输入内容
 watch(() => props.panelId, () => {
@@ -357,6 +315,7 @@ async function sendScript() {
       shot_count_min: scriptShotMin.value,
       shot_count_max: scriptShotMax.value,
       style: scriptStyle.value.trim() || undefined,
+      model: scriptChatModel.value || undefined,
     })
     const shots = (resp.data?.shots || []).map((s: StoryboardShot, i: number) => ({
       id: `shot_${Date.now().toString(36)}_${i}_${Math.random().toString(36).slice(2, 6)}`,
@@ -423,11 +382,12 @@ async function sendText() {
 /** image：图生图 —— 以当前图片为参考图生成新图片节点 */
 async function sendImage() {
   if (!panel.value) return
-  const ok = await checkCreditsBeforeGenerate({ type: 'image', mode: 'image2image', size: '1024x1024' })
+  const params = readPanelGenParams(panel.value, 'image')
+  const ok = await checkCreditsBeforeGenerate({ type: 'image', mode: 'image2image', size: params.size })
   if (!ok) return
   busy.value = true
   try {
-    await executeImageReferenceGeneration(panel.value, text.value.trim(), store)
+    await executeImageReferenceGeneration(panel.value, text.value.trim(), store, params)
     text.value = ''
     autosize()
   } finally {
@@ -443,12 +403,13 @@ async function sendVideo() {
     ElMessage.warning(t('canvas.composer.emptyVideo'))
     return
   }
-  const ok = await checkCreditsBeforeGenerate({ type: 'video', mode: 'image2video', seconds: 5 })
+  const params = readPanelGenParams(panel.value, 'video')
+  const ok = await checkCreditsBeforeGenerate({ type: 'video', mode: 'image2video', seconds: params.seconds })
   if (!ok) return
   busy.value = true
   try {
     const frame = await extractFirstFrame(videoUrl)
-    await executeVideoFromFrameGeneration(panel.value, frame, text.value.trim(), store)
+    await executeVideoFromFrameGeneration(panel.value, frame, text.value.trim(), store, params)
     text.value = ''
     autosize()
   } catch (err) {
