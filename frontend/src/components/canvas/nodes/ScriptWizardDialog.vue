@@ -95,6 +95,12 @@
           <input v-model="style" class="wiz-input style-input" :style="inputStyle" :placeholder="t('canvas.script.stylePlaceholder')" @input="persistStyle">
         </div>
 
+        <!-- 资产参考图生成参数：存脚本节点 content，重开向导保留 -->
+        <div class="style-row">
+          <span class="style-label" :style="accentStyle">{{ t('canvas.script.wizard.assetParams') }}</span>
+          <ComposerParamBar v-if="panel" :panel="panel" mode="image" :content-key="ASSET_IMAGE_PARAMS_KEY" />
+        </div>
+
         <!-- 角色/场景资产卡区块 -->
         <div v-for="section in assetSections" :key="section.kind" class="asset-section">
           <div class="asset-section-head">
@@ -183,8 +189,14 @@
               {{ t('canvas.script.wizard.nextGen') }}
             </button>
           </template>
-          <!-- 步骤3：批量生成 -->
+          <!-- 步骤3：批量生成（参数作为派生 config 节点的初值，派生后逐镜头可再改） -->
           <template v-else>
+            <div class="gen-params">
+              <span class="gen-params-label" :style="accentStyle">{{ t('canvas.script.wizard.imageParams') }}</span>
+              <ComposerParamBar v-if="panel" :panel="panel" mode="image" :content-key="SHOT_IMAGE_PARAMS_KEY" />
+              <span class="gen-params-label" :style="accentStyle">{{ t('canvas.script.wizard.videoParams') }}</span>
+              <ComposerParamBar v-if="panel" :panel="panel" mode="video" :content-key="SHOT_VIDEO_PARAMS_KEY" />
+            </div>
             <button type="button" class="wiz-btn primary" :style="primaryBtnStyle" @click="onBatchImages">
               {{ t('canvas.script.wizard.batchImages') }}
             </button>
@@ -206,15 +218,18 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from '@/i18n'
 import { ElMessage } from 'element-plus'
 import { useCanvasStore } from '@/stores/canvas'
-import { useModelsStore } from '@/stores/models'
+import ComposerParamBar from '@/components/canvas/ComposerParamBar.vue'
 import { checkCreditsBeforeGenerate } from '@/lib/canvas-credits'
-import { createGenerationTask, pollImageTask, getUpstreamNodes } from '@/lib/canvas-generation'
+import { createGenerationTask, pollImageTask, getUpstreamNodes, readPanelGenParams } from '@/lib/canvas-generation'
 import { getErrorMessage } from '@/lib/type-helpers'
 import ImageViewer from '@/components/ImageViewer.vue'
 import {
   deriveStoryboardImages,
   deriveStoryboardVideos,
   getDerivedShotIds,
+  ASSET_IMAGE_PARAMS_KEY,
+  SHOT_IMAGE_PARAMS_KEY,
+  SHOT_VIDEO_PARAMS_KEY,
   readAssets,
   readShots,
   buildAssetImagePrompt,
@@ -231,7 +246,6 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 
 const { t } = useI18n()
 const store = useCanvasStore()
-const modelsStore = useModelsStore()
 
 /** 当前脚本节点 */
 const panel = computed(() => store.panels.find((p) => p.id === props.panelId) || null)
@@ -370,7 +384,8 @@ async function generateAssetImage(asset: ShotAsset, kind: 'characters' | 'scenes
     ElMessage.warning(t('canvas.script.wizard.needDesc'))
     return
   }
-  const ok = await checkCreditsBeforeGenerate({ type: 'image', mode: 'text2image', size: '1024x1024' })
+  const params = readPanelGenParams(panel.value, 'image', ASSET_IMAGE_PARAMS_KEY)
+  const ok = await checkCreditsBeforeGenerate({ type: 'image', mode: 'text2image', size: params.size })
   if (!ok) return
 
   generatingAssets.value = new Set([...generatingAssets.value, asset.id])
@@ -382,7 +397,7 @@ async function generateAssetImage(asset: ShotAsset, kind: 'characters' | 'scenes
       referenceTexts: [] as string[],
       inputSummary: { textCount: 0, imageCount: 0, videoCount: 0, total: 0 },
     }
-    const resp = await createGenerationTask(ctx, { model: modelsStore.defaultImageModel, size: '1024x1024' }, {
+    const resp = await createGenerationTask(ctx, { model: params.model, size: params.size }, {
       source: 'canvas',
       container_type: 'canvas_script',
       container_id: panel.value?.id || null,
@@ -821,6 +836,19 @@ function stepTitleStyle(s: { no: number }) {
   background: transparent;
   font-size: 12px;
   cursor: pointer;
+}
+
+/* 步骤3：批量参数区（底栏宽不足时整块换行，不挤压批量按钮） */
+.gen-params {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.gen-params-label {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 /* 步骤3：生成列表 */

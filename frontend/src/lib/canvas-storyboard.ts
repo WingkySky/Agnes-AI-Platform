@@ -8,13 +8,13 @@
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from '@/i18n'
 import { useCanvasStore, type CanvasPanel } from '@/stores/canvas'
-import { useModelsStore } from '@/stores/models'
 import { usePreferencesStore } from '@/stores/preferences'
 import { getModelParams } from '@/config/model-params'
 import {
   executeMergeGeneration,
   executeMergeVideoGeneration,
   getUpstreamNodes,
+  readPanelGenParams,
 } from '@/lib/canvas-generation'
 import { estimateCanvasCost, checkCreditsBeforeGenerate } from '@/lib/canvas-credits'
 
@@ -70,6 +70,11 @@ const IMG_PITCH_Y = 380
 const VIDEO_CONFIG_W = 320
 const VIDEO_CONFIG_H = 300
 const VIDEO_OFFSET_X = 620
+
+/* script 节点 content 上三套生成参数的分区键：向导参数栏写入，批量派生读取 */
+export const ASSET_IMAGE_PARAMS_KEY = 'asset_image_params'
+export const SHOT_IMAGE_PARAMS_KEY = 'shot_image_params'
+export const SHOT_VIDEO_PARAMS_KEY = 'shot_video_params'
 
 /* ---------- content 读取（持久化边界，用类型守卫收敛） ---------- */
 
@@ -366,7 +371,6 @@ function ensureShotStep(scriptPanel: CanvasPanel): string {
 async function deriveImagesInternal(scriptPanel: CanvasPanel, pending: CanvasShot[]): Promise<void> {
   const { t } = useI18n()
   const store = useCanvasStore()
-  const modelsStore = useModelsStore()
   const allShots = readShots(scriptPanel)
 
   // 上游收集：图片节点=参考图，文本节点=设定；资产卡按镜头命中注入（未标注镜头回退全量）
@@ -384,8 +388,9 @@ async function deriveImagesInternal(scriptPanel: CanvasPanel, pending: CanvasSho
   // 积分预估：任一素材来源存在即按 image2image 估算（部分镜头可能命中为空，轻微高估可接受）
   const mayReference = upstreamRefImages.length > 0 ||
     [...assets.characters, ...assets.scenes].some((a) => a.imageUrl)
-  const size = defaultImageSize()
-  const ok = await confirmBatchCost({ type: 'image', mode: mayReference ? 'image2image' : 'text2image', size }, pending.length)
+  // 尺寸默认沿用偏好比例，向导参数栏显式选择后以选择为准
+  const imageParams = readPanelGenParams(scriptPanel, 'image', SHOT_IMAGE_PARAMS_KEY, { size: defaultImageSize() })
+  const ok = await confirmBatchCost({ type: 'image', mode: mayReference ? 'image2image' : 'text2image', size: imageParams.size }, pending.length)
   if (!ok) return
 
   store.pushSnapshot()
@@ -408,8 +413,8 @@ async function deriveImagesInternal(scriptPanel: CanvasPanel, pending: CanvasSho
       height: IMG_CONFIG_H,
       content: {
         mode,
-        model: modelsStore.defaultImageModel,
-        size,
+        model: imageParams.model,
+        size: imageParams.size,
         prompt: buildShotImagePrompt(scriptPanel, shot, contexts),
         referenceImages,
         lineage: { kind: 'image', scriptPanelId: scriptPanel.id, shotId: shot.id, shotNo: shot.no },
@@ -459,7 +464,6 @@ export async function deriveImageForShot(scriptPanel: CanvasPanel, shot: CanvasS
 export async function deriveStoryboardVideos(scriptPanel: CanvasPanel): Promise<void> {
   const { t } = useI18n()
   const store = useCanvasStore()
-  const modelsStore = useModelsStore()
   const shots = readShots(scriptPanel).slice(0, MAX_SHOTS)
   if (shots.length === 0) {
     ElMessage.warning(t('canvas.messages.shotsEmpty'))
@@ -489,7 +493,8 @@ export async function deriveStoryboardVideos(scriptPanel: CanvasPanel): Promise<
     return
   }
 
-  const ok = await confirmBatchCost({ type: 'video', mode: 'image2video', seconds: 5 }, items.length)
+  const videoParams = readPanelGenParams(scriptPanel, 'video', SHOT_VIDEO_PARAMS_KEY)
+  const ok = await confirmBatchCost({ type: 'video', mode: 'image2video', seconds: videoParams.seconds }, items.length)
   if (!ok) return
 
   store.pushSnapshot()
@@ -497,6 +502,10 @@ export async function deriveStoryboardVideos(scriptPanel: CanvasPanel): Promise<
   const tasks: Array<() => Promise<void>> = []
 
   for (const item of items) {
+    // 时长：参数栏显式选择优先，未选择时沿用该镜头在表格里设的时长
+    const params = readPanelGenParams(scriptPanel, 'video', SHOT_VIDEO_PARAMS_KEY, {
+      seconds: item.shot.duration || 5,
+    })
     const configId = store.addPanel({
       type: 'config',
       name: `#${item.shot.no} ${t('canvas.script.videoSuffix')}`,
@@ -506,10 +515,12 @@ export async function deriveStoryboardVideos(scriptPanel: CanvasPanel): Promise<
       height: VIDEO_CONFIG_H,
       content: {
         mode: 'image2video',
-        model: modelsStore.defaultVideoModel,
+        model: params.model,
         prompt: buildShotVideoPrompt(item.shot),
-        aspect_ratio: '16:9',
-        seconds: item.shot.duration || 5,
+        aspect_ratio: params.aspect_ratio,
+        resolution: params.resolution,
+        frame_rate: params.frame_rate,
+        seconds: params.seconds,
         lineage: { kind: 'video', scriptPanelId: scriptPanel.id, shotId: item.shot.id, shotNo: item.shot.no },
       },
     })
@@ -531,7 +542,6 @@ export async function deriveStoryboardVideos(scriptPanel: CanvasPanel): Promise<
 export async function deriveVideoForShot(imageResultPanel: CanvasPanel): Promise<void> {
   const { t } = useI18n()
   const store = useCanvasStore()
-  const modelsStore = useModelsStore()
   const info = getShotLineageInfo(imageResultPanel)
   if (!info || info.lineage.kind !== 'image') return
 
@@ -542,7 +552,11 @@ export async function deriveVideoForShot(imageResultPanel: CanvasPanel): Promise
   const imageUrl = readString(imageResultPanel.content, 'content')
   if (!imageUrl) return
 
-  const canGenerate = await checkCreditsBeforeGenerate({ type: 'video', mode: 'image2video', seconds: 5 })
+  // 与批量派生同源：脚本节点上的视频参数，时长未选择时沿用镜头时长
+  const params = readPanelGenParams(scriptPanel, 'video', SHOT_VIDEO_PARAMS_KEY, {
+    seconds: shot.duration || 5,
+  })
+  const canGenerate = await checkCreditsBeforeGenerate({ type: 'video', mode: 'image2video', seconds: params.seconds })
   if (!canGenerate) return
 
   store.pushSnapshot()
@@ -556,10 +570,12 @@ export async function deriveVideoForShot(imageResultPanel: CanvasPanel): Promise
     height: VIDEO_CONFIG_H,
     content: {
         mode: 'image2video',
-        model: modelsStore.defaultVideoModel,
+        model: params.model,
         prompt: buildShotVideoPrompt(shot),
-        aspect_ratio: '16:9',
-        seconds: shot.duration || 5,
+        aspect_ratio: params.aspect_ratio,
+        resolution: params.resolution,
+        frame_rate: params.frame_rate,
+        seconds: params.seconds,
         lineage: { kind: 'video', scriptPanelId: scriptPanel.id, shotId: shot.id, shotNo: shot.no },
       },
     })
