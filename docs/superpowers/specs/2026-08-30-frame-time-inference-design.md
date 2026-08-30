@@ -109,6 +109,7 @@ Agnes Video 2.5（`backend/app/services/agnes_client.py`）：
 
 - 前段帧/链帧与锚点帧的构图一致性靠提示词 + 资产参考图保障，可能出现场景漂移——与既有尾帧同级风险，后续可增强为"从锚点帧 image2image 强约束派生"；
 - keyframe 与 reference 互斥：分段视频不带资产参考图，资产一致性由链帧生成阶段保障；
+- 模型契约差异备注：2.5 的 keyframe 仅收 `first_frame`/`last_frame` 两个定长字段（1–2 张），多图素材归 reference（无时间锚点顺序语义），故画面链在 2.5 上只能相邻帧两两分段；2.0 契约的 `extra_body.image` 数组 + `extra_body.mode: "keyframes"` 支持多关键帧一链一段（受 `num_frames ≤ 441`，约 18 秒 @24fps 约束）。链节点模型（`role: 'chain'` + `chainSeq`）与编排层（`deriveChainVideosForShot`）已隔离此差异——若后续 2.5 放开 keyframe 多帧字段，或指定镜头回退走 2.0，仅需调整分段策略即可切换"一链一段"单请求生成，不改节点与 lineage 模型；
 - 链越长积分消耗越多：`chainSegments` 上限 4，且必须经积分预估确认；
 - 首帧若为衔接帧（`linkPrev` 开头、以上一镜尾帧续接），链式长视频仍以其为链锚点正常工作，不影响跨镜头衔接语义。
 
