@@ -29,6 +29,8 @@ Agnes Video 2.5（`backend/app/services/agnes_client.py`）：
 
 ## 二、目标
 
+核心逻辑：视频生成的画面控制精度取决于确定锚点帧的数量——单图直出无结束锚点，视频跑偏概率高。推演能力（尾帧 / 前段帧 / 链帧）把视频生成从"单图自由发挥"变为"确定画面间插值"：普通视频锚点下限两帧（首帧 + 尾帧），链式长视频锚点 2+n 帧，锚点越密长镜头越可用。落地动作：无尾帧镜头发起视频派生时自动补齐尾帧，普通视频一律按 keyframes [首帧, 尾帧] 生成；链式长视频在画面链补齐的基础上分段插值。
+
 1. **P1**：每张分镜图（role=first）可选生成"前段帧"（该镜头动作开始前约 N 秒的画面），与既有尾帧图对称，补齐双向时间推演；
 2. **P2**：对单个镜头可发起"画面链长视频"：以分镜图为锚点构建画面链（首帧 → 尾帧 → 后续链帧），相邻链帧两两生成 keyframes 分段视频，全部就绪后自动建 compose 节点合成完整长镜头；
 3. 全部改动收在画布分镜直出链路（前端），后端零改动；复用现有 compose 成片能力。
@@ -97,10 +99,11 @@ Agnes Video 2.5（`backend/app/services/agnes_client.py`）：
 
 | 层 | 文件 | 改动 |
 |---|---|---|
-| 编排 | `frontend/src/lib/canvas-storyboard.ts` | `ShotLineage` role/chainSeq 扩展、`derivePrevFrameForShot`、`deriveChainVideosForShot`、前段帧/链帧 prompt 附加行、节点布局行带；参考图截断改按模型生效（仅 2.5 Flash，见第九节） |
+| 编排 | `frontend/src/lib/canvas-storyboard.ts` | `ShotLineage` role/chainSeq 扩展、`derivePrevFrameForShot`、`deriveChainVideosForShot`、前段帧/链帧 prompt 附加行、节点布局行带；无尾帧视频直出自动补齐尾帧（一律 keyframes）并移除 `refAssets` 开关（见第九节） |
 | 入口 | `frontend/src/components/canvas/CanvasNodeHoverToolbar.vue` | "推演前段画面"、"生成分段视频"动作 |
-| 入口 | `frontend/src/components/canvas/nodes/ScriptWizardDialog.vue` | 行内前段帧槽位、链式动作与分段数参数 |
+| 入口 | `frontend/src/components/canvas/nodes/ScriptWizardDialog.vue` | 行内前段帧槽位、链式动作与分段数参数；移除 refAssets 复选框 |
 | 入口 | `frontend/src/views/CanvasView.vue` | 对应 handler 接线 |
+| 执行链路 | `frontend/src/lib/canvas-generation.ts` | 上游多图收集处按所选视频模型截断参考图（仅 2.5 Flash 截到 5 张，见第九节） |
 | 参数 | script 节点视频参数区 | `chainSegments` 参数项 |
 | i18n | `frontend/src/i18n/zh-CN.ts` / `en-US.ts` | 前段帧/链帧/分段视频/汇总提示文案 |
 | 后端 | 无 | 零改动（keyframes 与 compose 能力均已具备） |
@@ -109,8 +112,9 @@ Agnes Video 2.5（`backend/app/services/agnes_client.py`）：
 
 - 前段帧/链帧与锚点帧的构图一致性靠提示词 + 资产参考图保障，可能出现场景漂移——与既有尾帧同级风险，后续可增强为"从锚点帧 image2image 强约束派生"；
 - keyframe 与 reference 互斥：分段视频不带资产参考图，资产一致性由链帧生成阶段保障；
+- 无尾帧镜头视频派生自动补齐尾帧（锚点下限两帧）：单图直出没有结束锚点、跑偏概率高，因此无尾帧镜头发起视频派生时不做"首帧单图 image2video"，而是自动入队尾帧生成（内联复用既有尾帧生成实现，衔接镜头已有"等底图成功再建节点"的编排先例），尾帧成功后一律按 keyframes [首帧, 尾帧] 生成，使所有分镜视频的锚点下限都是两帧；补齐失败则该镜头视频跳过并计入批量汇总提示（与现有"尾帧未就绪跳过"语义一致），不降级为单图直出；补帧消耗计入同一次积分预估确认。连带清理：`refAssets` 开关（`readRefAssets`、向导复选框、i18n 两条文案）与 `collectShotVideoRefs` 的资产并入/张数截断分支随之移除——keyframe 模式只有 first_frame/last_frame 两个定长字段，物理上放不下资产图，资产一致性由生图阶段注入并画进锚点帧画面保障；生图侧（分镜图/尾帧/链帧/前段帧）的资产注入维持不变；
 - 模型契约差异备注：2.5 的 keyframe 仅收 `first_frame`/`last_frame` 两个定长字段（1–2 张），多图素材归 reference（无时间锚点顺序语义），故画面链在 2.5 上只能相邻帧两两分段；2.0 契约的 `extra_body.image` 数组 + `extra_body.mode: "keyframes"` 支持多关键帧一链一段（受 `num_frames ≤ 441`，约 18 秒 @24fps 约束）。链节点模型（`role: 'chain'` + `chainSeq`）与编排层（`deriveChainVideosForShot`）已隔离此差异——若后续 2.5 放开 keyframe 多帧字段，或指定镜头回退走 2.0，仅需调整分段策略即可切换"一链一段"单请求生成，不改节点与 lineage 模型；
-- 参考图张数上限是模型级差异：`images ≤5` 仅是 agnes-video-2.5-flash 的独立限制，2.5 非 Flash 与 2.0 契约均无此硬限制。前端仅在取图所选视频模型为 2.5 Flash 时把多图参考截断到 5 张（在前端拦截，避免把超限请求发往后端再回传错误信息），其余模型不截断；后端 Flash 前置校验保留作兜底，上游对非 Flash 若有隐含约束由其错误自然暴露。现状修正点：`collectShotVideoRefs` 目前对多图参考无条件 `slice(0, VIDEO_REF_MAX)`，需改为按模型判断；图片侧（image2image 派生）前端本就未做张数截断，维持现状；
+- 参考图张数上限是模型级差异：`images ≤5` 仅是 agnes-video-2.5-flash 的独立限制，2.5 非 Flash 与 2.0 契约均无此硬限制。前端仅在所选视频模型为 2.5 Flash 时把多图参考截断到 5 张（在前端拦截，避免把超限请求发往后端再回传错误信息），其余模型不截断；后端 Flash 前置校验保留作兜底，上游对非 Flash 若有隐含约束由其错误自然暴露。落点说明：script 分镜链路取图改为自动补尾帧后一律 keyframes（2 张），不再有多图 reference 场景；通用任务队列执行链路（按上游标签收集多图）保留该按模型截断；图片侧（image2image 派生）前端本就未做张数截断，维持现状；
 - 链越长积分消耗越多：`chainSegments` 上限 4，且必须经积分预估确认；
 - 首帧若为衔接帧（`linkPrev` 开头、以上一镜尾帧续接），链式长视频仍以其为链锚点正常工作，不影响跨镜头衔接语义。
 
@@ -121,7 +125,8 @@ Agnes Video 2.5（`backend/app/services/agnes_client.py`）：
 3. P2：设置 `chainSegments = n` 后发起分段生成：自动补齐缺失尾帧/链帧，积分确认数量 = 补齐帧数 + (1+n) 段视频；
 4. P2：每段视频请求 `mode=keyframes`、首尾帧为相邻链帧、张数 = 2、seconds = 档位值；
 5. P2：全部段成功后自动出现 compose 节点并连线全部段视频，成片可播放且段间过渡连贯；任一段失败时不建 compose 且有汇总提示；
-6. 回归：不启用 `chainSegments` 时，现有"派生视频 / 生成尾帧 / 跨镜头衔接"行为完全不变。
+6. 普通视频派生：无尾帧镜头发起派生时自动入队尾帧生成，尾帧成功后按 keyframes [首帧, 尾帧] 生成，积分预估含补帧消耗；补帧失败时该镜头视频跳过并计入汇总提示，不降级为单图直出；
+7. 回归：不启用 `chainSegments` 时，"生成尾帧 / 跨镜头衔接"行为不变；已有尾帧的镜头派生仍为两帧 keyframes，行为不变。
 
 ## 参考
 
