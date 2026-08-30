@@ -168,6 +168,9 @@
                 <span class="gen-duration" :style="mutedStyle">{{ row.shot.duration }}s</span>
               </div>
               <div class="gen-prompt" :style="mutedStyle">{{ row.prompt }}</div>
+              <button v-if="chainSegments > 0" type="button" class="wiz-btn small gen-chain-btn" :style="btnStyle" @click="genChainVideos(row.shot)">
+                {{ t('canvas.script.wizard.genChain') }}
+              </button>
             </div>
             <div class="gen-media">
               <div v-if="row.imagePanel" class="gen-thumb">
@@ -190,6 +193,30 @@
                 </div>
               </div>
               <span v-else class="gen-none" :style="mutedStyle">{{ t('canvas.script.wizard.noImage') }}</span>
+              <div class="gen-thumb" :title="t('canvas.script.wizard.prevLabel')">
+                <template v-if="row.prevPanel">
+                  <img v-if="row.prevUrl" :src="row.prevUrl" :alt="`#${row.shot.no} ${t('canvas.script.wizard.prevLabel')}`" @click="openGenViewer(row.prevUrl)">
+                  <span v-else class="gen-thumb-empty" :style="mutedStyle">
+                    {{ row.prevFailed ? t('canvas.node.generateFailed') : t('canvas.node.generating') }}
+                  </span>
+                  <div class="gen-thumb-actions">
+                    <button type="button" class="gen-act" @click="locateShotPanel(row.prevPanel)">
+                      {{ t('canvas.script.wizard.locateNode') }}
+                    </button>
+                    <button type="button" class="gen-act" :disabled="row.prevGenerating" @click="reshootShotImage(row.prevPanel)">
+                      {{ t('canvas.script.wizard.reshootPrev') }}
+                    </button>
+                  </div>
+                </template>
+                <template v-else>
+                  <span class="gen-thumb-empty" :style="mutedStyle">{{ t('canvas.script.wizard.noPrev') }}</span>
+                  <div class="gen-thumb-actions">
+                    <button type="button" class="gen-act" :disabled="!row.imagePanel || row.generating" @click="genPrevFrame(row.shot)">
+                      {{ t('canvas.script.wizard.genPrev') }}
+                    </button>
+                  </div>
+                </template>
+              </div>
               <div class="gen-thumb" :title="t('canvas.script.wizard.tailLabel')">
                 <template v-if="row.tailPanel">
                   <img v-if="row.tailUrl" :src="row.tailUrl" :alt="`#${row.shot.no} ${t('canvas.script.wizard.tailLabel')}`" @click="openGenViewer(row.tailUrl)">
@@ -250,7 +277,20 @@
               <ComposerParamBar v-if="panel" :panel="panel" mode="image" :content-key="SHOT_IMAGE_PARAMS_KEY" />
               <span class="gen-params-label" :style="accentStyle">{{ t('canvas.script.wizard.videoParams') }}</span>
               <ComposerParamBar v-if="panel" :panel="panel" mode="video" :content-key="SHOT_VIDEO_PARAMS_KEY" />
-              <label class="wiz-check" :style="mutedStyle" :title="t('canvas.script.wizard.refAssetsTip')">
+              <label class="wiz-check" :style="mutedStyle" :title="t('canvas.script.wizard.videoModeTip')">
+                <span>{{ t('canvas.script.wizard.videoMode') }}</span>
+                <select v-model="videoMode" class="wiz-select" :style="inputStyle">
+                  <option value="keyframe">{{ t('canvas.script.wizard.videoModeKeyframe') }}</option>
+                  <option value="reference">{{ t('canvas.script.wizard.videoModeReference') }}</option>
+                </select>
+              </label>
+              <label class="wiz-check" :style="mutedStyle" :title="t('canvas.script.wizard.chainSegmentsTip')">
+                <span>{{ t('canvas.script.wizard.chainSegments') }}</span>
+                <select v-model.number="chainSegments" class="wiz-select" :style="inputStyle">
+                  <option v-for="n in 5" :key="n - 1" :value="n - 1">{{ n - 1 === 0 ? t('canvas.script.wizard.chainOff') : n - 1 }}</option>
+                </select>
+              </label>
+              <label v-if="videoMode === 'reference'" class="wiz-check" :style="mutedStyle" :title="t('canvas.script.wizard.refAssetsTip')">
                 <input v-model="refAssets" type="checkbox">
                 {{ t('canvas.script.wizard.refAssets') }}
               </label>
@@ -289,9 +329,14 @@ import {
   deriveStoryboardVideos,
   deriveTailFrames,
   deriveTailFrameForShot,
+  derivePrevFrameForShot,
+  deriveChainVideosForShot,
   findDerivedPanels,
+  findPrevFramePanel,
   getDerivedShotIds,
   readRefAssets,
+  readShotVideoMode,
+  readChainSegments,
   ASSET_IMAGE_PARAMS_KEY,
   SHOT_IMAGE_PARAMS_KEY,
   SHOT_VIDEO_PARAMS_KEY,
@@ -545,15 +590,20 @@ const shotPrompts = computed(() => {
 
 /* ---------- 步骤3：分镜图结果关联（缩略图 / 定位 / 重拍） ---------- */
 
-/** 每行渲染数据：镜头 + 最终提示词 + 已派生的首帧/尾帧节点（直出 image 节点，按 lineage.role 分槽） */
+/** 每行渲染数据：镜头 + 最终提示词 + 已派生的首帧/前段帧/尾帧节点（直出 image 节点，按 lineage.role 分槽） */
 const genRows = computed(() => {
   if (!panel.value) return []
   const imagePanels = new Map<string, CanvasPanel>()
+  const prevPanels = new Map<string, CanvasPanel>()
   const tailPanels = new Map<string, CanvasPanel>()
   for (const d of findDerivedPanels(panel.value.id, 'image')) {
     if (d.panel.type !== 'image') continue
     if (d.lineage.role === 'last') {
       if (!tailPanels.has(d.lineage.shotId)) tailPanels.set(d.lineage.shotId, d.panel)
+      continue
+    }
+    if (d.lineage.role === 'prev') {
+      if (!prevPanels.has(d.lineage.shotId)) prevPanels.set(d.lineage.shotId, d.panel)
       continue
     }
     if (!imagePanels.has(d.lineage.shotId)) imagePanels.set(d.lineage.shotId, d.panel)
@@ -566,6 +616,9 @@ const genRows = computed(() => {
     const nodePromptRaw = p?.content?.prompt
     const nodePrompt = typeof nodePromptRaw === 'string' && nodePromptRaw.trim() ? nodePromptRaw : ''
     const assembled = shotPrompts.value.get(shot.id) || '—'
+    const pp = prevPanels.get(shot.id) || null
+    const prevRawUrl = pp?.content?.content
+    const prevStatus = pp?.content?.status
     const tp = tailPanels.get(shot.id) || null
     const tailRawUrl = tp?.content?.content
     const tailStatus = tp?.content?.status
@@ -577,6 +630,10 @@ const genRows = computed(() => {
       thumbUrl: typeof rawUrl === 'string' ? rawUrl : '',
       generating: status === 'loading' || status === 'pending',
       thumbFailed: status === 'error',
+      prevPanel: pp,
+      prevUrl: typeof prevRawUrl === 'string' ? prevRawUrl : '',
+      prevGenerating: prevStatus === 'loading' || prevStatus === 'pending',
+      prevFailed: prevStatus === 'error',
       tailPanel: tp,
       tailUrl: typeof tailRawUrl === 'string' ? tailRawUrl : '',
       tailGenerating: tailStatus === 'loading' || tailStatus === 'pending',
@@ -603,6 +660,32 @@ function reshootShotImage(target: CanvasPanel | null) {
 function genTailFrame(shot: CanvasShot) {
   if (panel.value) void deriveTailFrameForShot(panel.value, shot)
 }
+
+/** 单镜头生成前段帧（尚无前段帧时可用） */
+function genPrevFrame(shot: CanvasShot) {
+  if (panel.value) void derivePrevFrameForShot(panel.value, shot)
+}
+
+/** 单镜头发起画面链长视频（分段补帧 + 分段视频 + compose） */
+function genChainVideos(shot: CanvasShot) {
+  if (panel.value) void deriveChainVideosForShot(panel.value, shot)
+}
+
+/** 视频生成模式（存 shot_video_params.videoMode，默认关键帧参考） */
+const videoMode = computed({
+  get: () => (panel.value ? readShotVideoMode(panel.value) : 'keyframe'),
+  set: (v: 'keyframe' | 'reference') => {
+    if (panel.value) store.updatePanel(panel.value.id, { content: { [SHOT_VIDEO_PARAMS_KEY]: { videoMode: v } } })
+  },
+})
+
+/** 长镜头分段数（存 shot_video_params.chainSegments，0 = 不启用） */
+const chainSegments = computed({
+  get: () => (panel.value ? readChainSegments(panel.value) : 0),
+  set: (v: number) => {
+    if (panel.value) store.updatePanel(panel.value.id, { content: { [SHOT_VIDEO_PARAMS_KEY]: { chainSegments: v } } })
+  },
+})
 
 /** 视频参考并入资产图开关（存 shot_video_params.refAssets，默认开） */
 const refAssets = computed({
@@ -1014,6 +1097,15 @@ function stepTitleStyle(s: { no: number }) {
   font-weight: 600;
   white-space: nowrap;
 }
+.wiz-select {
+  width: auto;
+  min-width: 96px;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+.gen-chain-btn {
+  align-self: flex-start;
+}
 
 /* 步骤3：生成列表（左信息右缩略图） */
 .gen-list {
@@ -1040,7 +1132,7 @@ function stepTitleStyle(s: { no: number }) {
 }
 .gen-media {
   flex: none;
-  width: 400px;
+  width: 560px;
   display: flex;
   gap: 8px;
 }

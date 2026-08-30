@@ -30,7 +30,7 @@ from app.core.database import new_async_session
 from app.core.security import encrypt_api_key, decrypt_api_key
 from app.models.api_provider import ApiProvider
 from app.models.model_definition import ModelDefinition
-from app.schemas.common import ModelInfo
+from app.schemas.common import ModelInfo, ModelGenParams
 from app.services.agnes_client import AgnesAIClient, agnes_client
 from app.services.agn_sdk_client import AGNSDKClientWrapper
 
@@ -97,6 +97,31 @@ def _detect_capabilities(model_id: str, model_type: str) -> List[str]:
     return caps
 
 
+def _detect_gen_params(model_id: str) -> Optional[ModelGenParams]:
+    """
+    根据模型 ID 推断生成能力配置（同族模型开箱即用；DB gen_params 显式配置优先于此推断）。
+    新增画像 = 在此追加一条分支；模型特例的"分配"数据化后不再改生成代码。
+    """
+    lower = (model_id or "").lower()
+    if "seedream" in lower:
+        # 火山 Seedream 系：官方 watermark 参数可关「AI生成」显式水印；尺寸需归一化到合法档（≥2K）
+        return ModelGenParams(watermark_param_off=True, size_rule="seedream")
+    if lower.startswith("agnes-image-2.1"):
+        # Agnes Image 2.1 家族：上游参考图上限 6 张（超出 HTTP 400）
+        return ModelGenParams(max_ref_images=6)
+    return None
+
+
+def _resolve_gen_params(model_id: str, explicit: Optional[dict]) -> Optional[ModelGenParams]:
+    """合并生成能力配置：DB 显式配置（gen_params 列）优先，缺省按模型名自动画像"""
+    if explicit:
+        try:
+            return ModelGenParams(**explicit)
+        except Exception as e:
+            logger.warning("[ProviderRegistry] 模型 %s 的 gen_params 配置无效，已忽略: %s", model_id, e)
+    return _detect_gen_params(model_id)
+
+
 def _generate_display_name(model_id: str, provider: str, model_type: str) -> str:
     """根据模型 ID 生成可读的显示名称（保留版本号中的点号）"""
     import re
@@ -125,6 +150,7 @@ def _build_model_info_from_definition(defn: ModelDefinition) -> ModelInfo:
         type=model_type,
         provider=provider_name,
         capabilities=capabilities,
+        gen_params=_resolve_gen_params(defn.model_id, defn.gen_params),
     )
 
 
@@ -440,6 +466,29 @@ class ProviderRegistry:
 
         # 4) 兜底：回退到默认 agnes_client 单例
         return agnes_client
+
+    async def get_model_gen_params(self, model_id: str) -> ModelGenParams:
+        """
+        获取模型生成能力配置（解析链：模型缓存 → DB gen_params 列 → 按名自动画像）。
+        永不返回 None：无任何特例时返回全默认 ModelGenParams。
+        """
+        model_id = (model_id or "").strip()
+        if not model_id:
+            return ModelGenParams()
+
+        # 1) 模型缓存（refresh_models_cache 时已按"显式配置 > 自动画像"解析）
+        for m in self._models_cache:
+            if m.id == model_id and m.gen_params is not None:
+                return m.gen_params
+
+        # 2) 缓存未命中（停用模型/缓存过期）直查 DB，仍无则按名画像
+        async with new_async_session() as session:
+            result = await session.execute(
+                select(ModelDefinition.gen_params).where(ModelDefinition.model_id == model_id)
+            )
+            explicit = result.scalar_one_or_none()
+        resolved = _resolve_gen_params(model_id, explicit)
+        return resolved or ModelGenParams()
 
     # ---------- 模型列表管理 ----------
 
@@ -848,6 +897,7 @@ class ProviderRegistry:
         capabilities: Optional[List[str]] = None,
         sort_order: int = 0,
         asset_storage_mode: str = "auto",
+        gen_params: Optional[dict] = None,
     ) -> ModelDefinition:
         """
         添加用户自定义模型。
@@ -876,6 +926,7 @@ class ProviderRegistry:
                 is_custom=True,
                 sort_order=sort_order,
                 asset_storage_mode=asset_storage_mode,
+                gen_params=gen_params,
             )
             session.add(defn)
             await session.commit()
@@ -899,6 +950,7 @@ class ProviderRegistry:
         is_disabled: Optional[bool] = None,
         sort_order: Optional[int] = None,
         asset_storage_mode: Optional[str] = None,
+        gen_params: Optional[dict] = None,
     ) -> Optional[ModelDefinition]:
         """更新模型定义"""
         async with new_async_session() as session:
@@ -925,6 +977,8 @@ class ProviderRegistry:
                 defn.sort_order = sort_order
             if asset_storage_mode is not None:
                 defn.asset_storage_mode = asset_storage_mode
+            if gen_params is not None:
+                defn.gen_params = gen_params  # 空 dict = 清空显式配置，回退自动画像
 
             await session.commit()
             await session.refresh(defn)

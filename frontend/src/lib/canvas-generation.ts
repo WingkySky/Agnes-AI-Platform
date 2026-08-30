@@ -482,6 +482,14 @@ function buildComposerContext(
 /** 轮询连续失败容忍次数（网络抖动/后端重启时不因单次查询失败就判死任务） */
 const MAX_POLL_ERRORS = 6
 
+/** 参考图张数上限：仅 agnes-video-2.5-flash 的独立契约限制（2.5 非 Flash 与 2.0 无此硬限制） */
+const VIDEO_FLASH_REF_MAX = 5
+
+/** 图片模型参考图张数上限：仅上游契约明确限制的模型，其余模型不截断（超出上限上游会 400 拒绝） */
+const IMAGE_MODEL_REF_LIMITS: Record<string, number> = {
+  'agnes-image-2.1-flash': 6,
+}
+
 /**
  * 将图片 URL 转为 base64 data URI
  * - blob URL / 本地 URL：fetch 后转 data URI
@@ -542,12 +550,19 @@ export async function createGenerationTask(
   context?: GenerationContextPayload,
 ): Promise<{ task_id: string }> {
   const { prompt, referenceImages } = ctx
-  const { base64Images, imageUrls } = await classifyImages(referenceImages || [])
+  const model = config.model || useModelsStore().defaultImageModel
+  // 参考图按所选模型的契约上限截断：仅命中已知限制的模型（如 2.1 Flash 上游最多 6 张），其余模型原样透传；
+  // 参考图数组已按「锚点/底图 > 角色 > 场景」优先级排序，截断保留前 N 张
+  const imageRefLimit = IMAGE_MODEL_REF_LIMITS[model]
+  const effectiveRefs = imageRefLimit && referenceImages && referenceImages.length > imageRefLimit
+    ? referenceImages.slice(0, imageRefLimit)
+    : referenceImages
+  const { base64Images, imageUrls } = await classifyImages(effectiveRefs || [])
 
-  const hasReferenceImages = referenceImages && referenceImages.length > 0
+  const hasReferenceImages = effectiveRefs && effectiveRefs.length > 0
   const params: ImageGenerationRequest = {
     prompt,
-    model: config.model || useModelsStore().defaultImageModel,
+    model,
     size: config.size || '1024x1024',
     response_format: config.response_format || 'url',
     mode: hasReferenceImages ? 'image2image' : 'text2image',
@@ -895,17 +910,21 @@ export async function executeInNodeVideoGeneration(
   if (!prompt && referenceImages.length === 0) {
     throw new Error('提示词为空且无参考图，无法生成视频')
   }
-  const ctx: GenerationContext = {
-    prompt,
-    referenceImages,
-    referenceTexts: [],
-    inputSummary: { textCount: 0, imageCount: referenceImages.length, videoCount: 0, total: referenceImages.length },
-  }
   const params = readPanelGenParams(panel, 'video')
   // 首尾帧模式（分镜直出写入 use_keyframes）：参考图限首尾 2 张，路由到 keyframes
   const useKeyframes = panel.content?.use_keyframes === true
   if (useKeyframes && referenceImages.length > 2) {
     throw new Error('关键帧模式最多只能使用 2 张参考图（首帧 + 尾帧）')
+  }
+  // 参考图按所选视频模型截断：仅 2.5 Flash 限 5 张（多图参考场景前端拦截，避免发超限请求），其余模型不截断
+  const effectiveRefImages = params.model === 'agnes-video-2.5-flash' && referenceImages.length > VIDEO_FLASH_REF_MAX
+    ? referenceImages.slice(0, VIDEO_FLASH_REF_MAX)
+    : referenceImages
+  const ctx: GenerationContext = {
+    prompt,
+    referenceImages: effectiveRefImages,
+    referenceTexts: [],
+    inputSummary: { textCount: 0, imageCount: effectiveRefImages.length, videoCount: 0, total: effectiveRefImages.length },
   }
   const config: GenerationConfig = {
     model: params.model,

@@ -54,10 +54,11 @@ import {
   Info, Trash2, RefreshCw, FolderPlus, Download, MessageSquare,
   Image as ImageIcon, ImagePlus, Minus, Plus, Upload, Video, Music2, Play,
   Copy, FileText, Lock, LockOpen, Brush, Scissors, Grid2x2,
-  ZoomIn, Sparkles, Camera, Maximize2,
+  ZoomIn, Sparkles, Camera, Maximize2, History, Film,
 } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
-import { findTailFramePanel, getShotLineageInfo } from '@/lib/canvas-storyboard'
+import { useCanvasStore } from '@/stores/canvas'
+import { findTailFramePanel, findPrevFramePanel, getShotLineageInfo, readChainSegments } from '@/lib/canvas-storyboard'
 
 const { t } = useI18n()
 
@@ -74,7 +75,7 @@ const emit = defineEmits([
   'upload-image', 'upload-video', 'upload-audio',
   'copy-prompt', 'describe', 'replace-image', 'toggle-ratio',
   'mask-edit', 'crop', 'split', 'upscale', 'super-resolution', 'angle', 'view-large',
-  'derive-video', 'derive-tail', 'reshoot', 'run-node',
+  'derive-video', 'derive-tail', 'derive-prev', 'derive-chain', 'reshoot', 'run-node',
 ])
 
 /* ---------- 节点元数据计算 ---------- */
@@ -145,10 +146,13 @@ const tools = computed(() => {
     })
   }
 
-  // 2.5 分镜派生结果节点（LibTV P0）：图生视频 / 生成尾帧 / 重拍此镜头
+  // 2.5 分镜派生结果节点（LibTV P0）：图生视频 / 生成尾帧 / 推演前段画面 / 生成分段视频 / 重拍此镜头
   const lineageInfo = getShotLineageInfo(props.panel)
   if (lineageInfo && hasContent.value) {
     if (lineageInfo.lineage.kind === 'image' && isImage.value) {
+      const role = lineageInfo.lineage.role
+      // 首帧节点（前段帧/链帧节点不提供再派生入口）
+      const isFirst = role === undefined || role === 'first'
       list.push({
         id: 'derive-video',
         title: t('canvas.hoverToolbar.deriveVideo'),
@@ -157,7 +161,7 @@ const tools = computed(() => {
       })
       // 首帧节点且尚无尾帧：生成尾帧图（keyframes 结束帧 + 跨镜头衔接底图）
       if (
-        lineageInfo.lineage.role !== 'last' &&
+        isFirst &&
         !findTailFramePanel(lineageInfo.lineage.scriptPanelId, lineageInfo.lineage.shotId)
       ) {
         list.push({
@@ -165,6 +169,28 @@ const tools = computed(() => {
           title: t('canvas.hoverToolbar.deriveTail'),
           icon: ImagePlus,
           onClick: () => emit('derive-tail', props.panel),
+        })
+      }
+      // 首帧节点且尚无前段帧：推演前段画面（画面时间推演，向前延展）
+      if (
+        isFirst &&
+        !findPrevFramePanel(lineageInfo.lineage.scriptPanelId, lineageInfo.lineage.shotId)
+      ) {
+        list.push({
+          id: 'derive-prev',
+          title: t('canvas.hoverToolbar.derivePrev'),
+          icon: History,
+          onClick: () => emit('derive-prev', props.panel),
+        })
+      }
+      // 首帧节点且 script 已启用长镜头分段数：生成分段视频（画面链长视频）
+      const scriptPanel = useCanvasStore().panels.find((p) => p.id === lineageInfo.lineage.scriptPanelId)
+      if (isFirst && scriptPanel && readChainSegments(scriptPanel) > 0) {
+        list.push({
+          id: 'derive-chain',
+          title: t('canvas.hoverToolbar.deriveChain'),
+          icon: Film,
+          onClick: () => emit('derive-chain', props.panel),
         })
       }
     }

@@ -1,17 +1,19 @@
 # =====================================================
 # 提示词预设 CRUD 服务
-# 提供 PromptPreset 的增删改查业务逻辑。
-# 创建/更新/删除时同步写入/维护 preset_index 索引表。
+# 提供 PromptPreset 的增删改查业务逻辑 + 统一预设广场查询。
+# 创建/更新/删除时同步写入/维护 preset_index 索引表（审核队列依赖）。
 # =====================================================
 
+from datetime import datetime
 from typing import Optional
 
 from fastapi import HTTPException
-from sqlalchemy import and_, or_
+from sqlalchemy import String, and_, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.models.prompt_preset import PromptPreset, PresetIndex
+from app.models.user import User
+from app.models.prompt_preset import PromptPreset, PresetIndex, PresetFavorite, PresetRecentUse
 
 
 # ---------- preset_index 同步辅助 ----------
@@ -88,6 +90,9 @@ async def create_preset(
     tags: Optional[list] = None,
     camera_params: Optional[dict] = None,
     style_params: Optional[dict] = None,
+    prompt_config: Optional[dict] = None,
+    cover_image: Optional[str] = None,
+    is_official: bool = False,
     script_text: Optional[str] = None,
     pipeline_config: Optional[dict] = None,
     is_public: bool = False,
@@ -103,6 +108,9 @@ async def create_preset(
         tags=tags or [],
         camera_params=camera_params,
         style_params=style_params,
+        prompt_config=prompt_config,
+        cover_image=cover_image,
+        is_official=is_official,
         script_text=script_text,
         pipeline_config=pipeline_config,
         is_public=is_public,
@@ -123,87 +131,199 @@ async def get_preset(db: AsyncSession, preset_id: int) -> Optional[PromptPreset]
     return result.scalar_one_or_none()
 
 
-async def list_presets(
+# ---------- 统一预设广场查询 ----------
+
+# pipeline 是画布工作流配置，不是生成素材，不进广场
+PLAZA_EXCLUDED_TYPES = ("pipeline",)
+
+
+def _to_plaza_item(p: PromptPreset, is_favorite: bool, author: str) -> dict:
+    """PromptPreset → 广场卡片统一 dict"""
+    return {
+        "id": p.id,
+        "user_id": p.user_id,
+        "name": p.name,
+        "description": p.description,
+        "type": p.type,
+        "category": p.category,
+        "tags": p.tags or [],
+        "prompt_text": p.prompt_text or "",
+        "camera_params": p.camera_params,
+        "style_params": p.style_params,
+        "prompt_config": p.prompt_config,
+        "cover_image": p.cover_image,
+        "cover_video": p.cover_video,
+        "script_text": p.script_text,
+        "is_public": p.is_public,
+        "is_approved": p.is_approved,
+        "is_official": p.is_official,
+        "usage_count": p.usage_count,
+        "author_nickname": author,
+        "is_favorite": is_favorite,
+        "created_at": p.created_at.isoformat() if p.created_at else None,
+        "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+    }
+
+
+async def list_plaza(
     db: AsyncSession,
-    user_id: Optional[int] = None,
-    preset_type: Optional[str] = None,
+    user_id: int,
+    tab: str = "plaza",
+    preset_types: Optional[list[str]] = None,
     category: Optional[str] = None,
-    tags: Optional[list[str]] = None,
-    search: Optional[str] = None,
+    q: Optional[str] = None,
     sort: str = "new",
-    limit: int = 100,
-    offset: int = 0,
-) -> tuple[list[PromptPreset], int]:
+    page: int = 1,
+    page_size: int = 24,
+) -> tuple[list[dict], int]:
     """
-    列出提示词预设。
+    统一预设广场查询。
 
-    规则:
-    - 若指定 user_id，返回该用户的所有预设 + 所有公开审核通过的预设
-    - 若未指定 user_id，仅返回公开且审核通过的预设
-    - 支持 type / category / tags / search 过滤
-    - 支持 sort: new（最新）/ hot（使用量）/ usage（使用量，同 hot）
+    - tab=plaza: 自己的 + 公开审核通过的（含官方种子），sort=new/hot/name
+    - tab=favorites: 当前用户收藏的，按收藏时间倒序
+    - tab=recent: 当前用户最近使用的，按最后使用时间倒序
+    - tab=mine: 当前用户的全部预设（含 pipeline，管理视图用）
+
+    广场各 tab 均排除 pipeline 类型（mine 除外）；返回统一 dict，附 is_favorite / author_nickname。
     """
+    offset = (page - 1) * page_size
     conditions = []
+    if tab != "mine":
+        conditions.append(PromptPreset.type.notin_(PLAZA_EXCLUDED_TYPES))
 
-    # 可见性过滤
-    if user_id is not None:
+    if tab == "favorites":
+        conditions.append(PresetFavorite.user_id == user_id)
+    elif tab == "recent":
+        conditions.append(PresetRecentUse.user_id == user_id)
+    elif tab == "mine":
+        conditions.append(PromptPreset.user_id == user_id)
+    else:
+        # plaza：自己的或公开审核通过的
         conditions.append(
             or_(
                 PromptPreset.user_id == user_id,
                 and_(
-                    PromptPreset.is_public == True,
-                    PromptPreset.is_approved == True,
+                    PromptPreset.is_public == True,  # noqa: E712
+                    PromptPreset.is_approved == True,  # noqa: E712
                 ),
             )
         )
-    else:
-        conditions.append(
-            and_(
-                PromptPreset.is_public == True,
-                PromptPreset.is_approved == True,
-            )
-        )
 
-    # 类型过滤
-    if preset_type:
-        conditions.append(PromptPreset.type == preset_type)
-
-    # 分类过滤
+    if preset_types:
+        conditions.append(PromptPreset.type.in_(preset_types))
     if category:
         conditions.append(PromptPreset.category == category)
-
-    # 名称/描述搜索
-    if search:
-        search_pattern = f"%{search}%"
+    if q:
+        pattern = f"%{q}%"
         conditions.append(
             or_(
-                PromptPreset.name.like(search_pattern),
-                PromptPreset.description.like(search_pattern),
+                PromptPreset.name.like(pattern),
+                PromptPreset.description.like(pattern),
+                # tags 为 JSON 数组，SQLite 中以 TEXT 存储按片段模糊匹配
+                PromptPreset.tags.cast(String).like(pattern),
+                User.nickname.like(pattern),
+                User.username.like(pattern),
             )
         )
 
+    stmt = select(PromptPreset)
+    if tab == "favorites":
+        stmt = stmt.join(
+            PresetFavorite,
+            and_(PresetFavorite.preset_id == PromptPreset.id, PresetFavorite.user_id == user_id),
+        )
+    elif tab == "recent":
+        stmt = stmt.join(
+            PresetRecentUse,
+            and_(PresetRecentUse.preset_id == PromptPreset.id, PresetRecentUse.user_id == user_id),
+        )
+    stmt = stmt.outerjoin(User, User.id == PromptPreset.user_id)
+
     where = and_(*conditions)
+    base_query = stmt.filter(where)
 
-    # 排序
-    if sort in ("hot", "usage"):
-        order_by = PromptPreset.usage_count.desc()
+    count_stmt = select(func.count()).select_from(base_query.subquery())
+    total = (await db.execute(count_stmt)).scalar_one()
+
+    # 排序：收藏/最近使用 tab 固定按时间倒序；plaza 按 sort 参数
+    if tab == "favorites":
+        order_by = (PresetFavorite.created_at.desc(),)
+    elif tab == "recent":
+        order_by = (PresetRecentUse.last_used_at.desc(),)
+    elif sort == "hot":
+        order_by = (PromptPreset.is_official.desc(), PromptPreset.usage_count.desc())
+    elif sort == "name":
+        order_by = (PromptPreset.name.asc(),)
     else:
-        order_by = PromptPreset.updated_at.desc()
+        order_by = (PromptPreset.created_at.desc(), PromptPreset.id.desc())
 
-    # 查询
-    base_query = select(PromptPreset).filter(where)
+    rows = (
+        await db.execute(base_query.order_by(*order_by).offset(offset).limit(page_size))
+    ).scalars().all()
 
-    # 总数
-    count_result = await db.execute(base_query)
-    total = len(count_result.scalars().all())
+    # 批量取当前用户收藏状态 + 作者昵称
+    fav_ids: set = set()
+    if rows:
+        fav_stmt = select(PresetFavorite.preset_id).filter(
+            PresetFavorite.user_id == user_id,
+            PresetFavorite.preset_id.in_([p.id for p in rows]),
+        )
+        fav_ids = {r[0] for r in (await db.execute(fav_stmt)).all()}
 
-    # 分页
+    author_map: dict = {}
+    uids = {p.user_id for p in rows if p.user_id}
+    if uids:
+        u_stmt = select(User).filter(User.id.in_(list(uids)))
+        for u in (await db.execute(u_stmt)).scalars().all():
+            author_map[u.id] = u.nickname or u.username
+
+    items = [
+        _to_plaza_item(p, is_favorite=p.id in fav_ids, author=author_map.get(p.user_id, ""))
+        for p in rows
+    ]
+    return items, total
+
+
+async def toggle_favorite(db: AsyncSession, user_id: int, preset_id: int) -> bool:
+    """收藏/取消收藏 toggle，返回操作后的收藏状态"""
+    preset = await get_preset(db, preset_id)
+    if not preset:
+        raise HTTPException(status_code=404, detail="预设不存在")
+
     result = await db.execute(
-        base_query.order_by(order_by).offset(offset).limit(limit)
+        select(PresetFavorite).filter(
+            and_(PresetFavorite.user_id == user_id, PresetFavorite.preset_id == preset_id)
+        )
     )
-    presets = result.scalars().all()
+    entry = result.scalar_one_or_none()
+    if entry:
+        await db.delete(entry)
+        await db.commit()
+        return False
+    db.add(PresetFavorite(user_id=user_id, preset_id=preset_id))
+    await db.commit()
+    return True
 
-    return list(presets), total
+
+async def record_use(db: AsyncSession, user_id: int, preset_id: int) -> None:
+    """记录一次使用：upsert 最近使用记录 + 预设 usage_count+1"""
+    preset = await get_preset(db, preset_id)
+    if not preset:
+        raise HTTPException(status_code=404, detail="预设不存在")
+
+    result = await db.execute(
+        select(PresetRecentUse).filter(
+            and_(PresetRecentUse.user_id == user_id, PresetRecentUse.preset_id == preset_id)
+        )
+    )
+    entry = result.scalar_one_or_none()
+    if entry:
+        entry.use_count = (entry.use_count or 0) + 1
+        entry.last_used_at = datetime.utcnow()
+    else:
+        db.add(PresetRecentUse(user_id=user_id, preset_id=preset_id))
+    preset.usage_count = (preset.usage_count or 0) + 1
+    await db.commit()
 
 
 async def update_preset(

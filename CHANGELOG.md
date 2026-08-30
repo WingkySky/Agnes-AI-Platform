@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+### 功能
+- 图片参考图按模型差异化截断：仅对上游契约确有限制的模型生效（`agnes-image-2.1-flash` 上游最多 6 张，超出会被 400 拒绝），前端 `IMAGE_MODEL_REF_LIMITS`（`createGenerationTask` 请求构建处，保留前 N 张，锚点/底图 > 角色 > 场景优先级）+ 后端 `_IMAGE_REF_LIMITS`（`agnes_client.create_image` 兜底截断）双层防护，其余模型原样透传不截断；修复画布分镜图批量生成因参考图 7-8 张全量被上游拒绝的问题
+- Seedream 生图按模型/Provider 差异化优化（`AGNSDKClientWrapper.create_image`，无像素级预处理）：①「AI生成」显式标识水印按方舟官方 `watermark` 参数关闭——覆盖 volcengine_cv Provider 全量与 openai 协议兼容端点（火山 agent plan）的 seedream 系模型，经 aibridge `image_generate(**kwargs)` → `extra` → 请求体顶层透传；②分辨率归一化——把 volcengine_cv 适配器的 Seedream 尺寸规范移植到封装层（合法总像素 ∈ [2K 档, 4K 档]，不合法按最接近宽高比映射官方 2K 推荐档，合法原样透传），修复 openai 兼容端点 size 原样透传导致前端默认 1024x1024 低于 Seedream 最小档的问题（已实测 plan 端点 1024→2048 归一化生效且无水印）；发布内容时按平台规则声明 AI 生成的义务由使用方承担
+- 统一预设广场重构：预设中心改造为对标风格/特效广场的卡片画廊（广场/我的收藏/最近使用三 tab + 类型/分类导航 + 搜索 + 排序），生图页"风格库"、生视频页"特效库"弹窗即选即用
+- 预设挂载式应用：风格/特效/运镜卡片一键"使用"即挂载到生成模块（标签可移除，风格与运镜单选、特效可叠加），提交生成时系统自动拼接提示词片段与负面词，提示词输入框保持纯用户内容；脚本类复制到剪贴板、提示词类追加输入框
+- 官方封面维护：管理员可在预设详情一键 AI 生成封面（`POST /api/presets/{id}/generate-cover`），effect/camera 类型自动走视频 API 生成 4s 动态封面（`cover_video`，卡片悬停循环播放），其余生成静态图（`cover_image`）；或运行 `backend/generate_plaza_covers.py` 批量补齐；用户自建卡支持上传图片或从生成记录选图
+- 画风不再硬编码：生图/生视频页 13 个硬编码风格与 style_presets 12 个内置风格收编为官方种子（`backend/seed_plaza_presets.py`，共 37 条官方卡），新增 12 个视频特效模板
+- 预设五类统一（style/effect/camera/prompt/script）：`prompt_presets` 新增 `cover_image` / `cover_video` / `prompt_config` / `is_official` 字段，camera 类型不再分流 camera_presets 表
+- 新增收藏与最近使用（`preset_favorites` / `preset_recent_uses` 表，favorite toggle + use 上报接口）、通用图片上传接口（`POST /api/uploads/image`）
+- `/presets` 管理页重构：画廊 + 我的预设管理（编辑/删除/投稿/导入导出），投稿审核沿用现有 admin_review 流
+
 ### 安全
 - 移除 `jwt_secret` 不安全默认值，启动时强制校验非空、非默认占位值、长度≥32 字节
 - 移除 `encryption_key` 默认空兜底，启动时强制校验非空；`security._derive_key` 不再使用内置默认密钥

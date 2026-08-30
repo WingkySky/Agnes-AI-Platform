@@ -647,3 +647,49 @@ A luminous floating city above a misty canyon at sunrise, cinematic realism, wid
 ```
 Transform the scene into a rain-soaked cyberpunk night with neon reflections while preserving the original composition and main subject layout
 ```
+
+---
+
+## 11. 预设（统一预设广场）
+
+五类预设（style / effect / camera / prompt / script）统一存于 `prompt_presets` 表，pipeline 类型不进广场。广场卡片支持封面图、收藏、最近使用与官方标记；投稿公开沿用审核流（submit + admin_review）。
+
+### GET /api/presets — 预设列表（需登录）
+
+| 参数 | 说明 |
+| --- | --- |
+| `tab` | `plaza`（默认，自己的 + 公开审核通过的）/ `favorites`（我的收藏）/ `recent`（最近使用）/ `mine`（我的全部预设，含 pipeline） |
+| `type` | 预设类型，逗号分隔多类型，如 `style,effect` |
+| `category` | 分类筛选 |
+| `q` | 搜索名称 / 描述 / 标签 / 作者昵称 |
+| `sort` | `new`（默认）/ `hot`（官方优先 + 使用量）/ `name` |
+| `page` / `page_size` | 分页，默认 1 / 24 |
+
+响应：`{ items: [...], total }`，item 含 `cover_image`、`prompt_config`、`is_official`、`author_nickname`、`is_favorite`。
+
+### POST /api/presets/{id}/favorite — 收藏 / 取消收藏
+
+返回 `{ is_favorite: boolean }`（toggle 后状态）。
+
+### POST /api/presets/{id}/use — 记录使用
+
+应用预设时调用：upsert 最近使用记录 + `usage_count` +1。返回 `{ message }`。
+
+### POST /api/uploads/image — 上传图片（预设封面等）
+
+multipart 上传，支持 jpeg/png/webp，≤5MB，存 `uploads/preset-covers/`。返回 `{ url }`。
+
+### 数据模型变更
+
+- `prompt_presets` 新增：`cover_image`（封面 URL）、`prompt_config`（JSON：`{prefix, suffix, negative_prompt}`，style/effect 使用）、`is_official`（官方卡标记，管理员创建自动置 1）
+- 新表：`preset_favorites`（收藏，user_id+preset_id 唯一）、`preset_recent_uses`（最近使用，含 `last_used_at` / `use_count`）
+- 种子脚本：`backend/seed_plaza_presets.py`（幂等，写入官方风格 / 特效卡）
+
+### POST /api/presets/{id}/generate-cover — AI 生成预设封面（管理员）
+
+按预设类型分流（已生成则覆盖）：
+
+- **effect / camera 类型 → 动态封面**：视频 API（agnes-video-2.5-flash，4s、3:4）以「运动主体 + 特效/运镜提示词片段」生成示例片段，轮询至完成（约 1-3 分钟）后写回 `cover_video`，响应 `{cover_video}`；
+- **其他类型 → 静态封面**：生图 API（agnes-image-2.1-flash，512x512）写回 `cover_image`，响应 `{cover_image}`。
+
+仅管理员可用；用户自建卡通过上传或「从生成记录选图」设置封面。批量补齐：`backend/generate_plaza_covers.py`（只为缺封面的官方卡生成，effect/camera 补动态封面、其余补静态图，幂等）。

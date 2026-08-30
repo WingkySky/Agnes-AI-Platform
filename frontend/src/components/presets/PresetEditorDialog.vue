@@ -26,6 +26,7 @@
           <el-option :label="t('presets.editor.typePrompt')" value="prompt" />
           <el-option :label="t('presets.editor.typeCamera')" value="camera" />
           <el-option :label="t('presets.editor.typeStyle')" value="style" />
+          <el-option :label="t('presets.plaza.typeEffect')" value="effect" />
           <el-option :label="t('presets.editor.typeScript')" value="script" />
           <el-option :label="t('presets.editor.typePipeline')" value="pipeline" />
         </el-select>
@@ -57,13 +58,12 @@
           <el-form-item :label="t('presets.editor.categoryLabel')">
             <div style="display: flex; gap: 6px; width: 100%">
               <el-select v-model="form.category" style="flex: 1">
-                <el-option :label="t('presets.editor.catGeneral')" value="通用" />
-                <el-option :label="t('presets.editor.catPortrait')" value="人像" />
-                <el-option :label="t('presets.editor.catScene')" value="场景" />
-                <el-option :label="t('presets.editor.catComposition')" value="构图" />
-                <el-option :label="t('presets.editor.catAction')" value="动作" />
-                <el-option :label="t('presets.editor.catLighting')" value="光影" />
-                <el-option :label="t('presets.editor.catStyle')" value="风格" />
+                <el-option
+                  v-for="cat in categoryOptions"
+                  :key="cat"
+                  :label="cat"
+                  :value="cat"
+                />
               </el-select>
               <el-tooltip :content="t('presets.editor.aiCategoryTip')" placement="top">
                 <el-button
@@ -100,8 +100,39 @@
         />
       </el-form-item>
 
-      <!-- ====== 提示词文本（prompt / style / script / camera 共用） ====== -->
-      <el-form-item v-if="form.type !== 'pipeline'" :label="t('presets.editor.promptLabel')">
+      <!-- ====== 封面图（广场卡片展示）：上传 或 从生成记录选图 ====== -->
+      <el-form-item :label="t('presets.editor.coverLabel')">
+        <div class="cover-uploader">
+          <el-upload
+            :show-file-list="false"
+            accept="image/jpeg,image/png,image/webp"
+            :http-request="handleCoverUpload"
+          >
+            <img v-if="form.cover_image" :src="form.cover_image" class="cover-preview" />
+            <el-button v-else size="small" :loading="uploading">
+              {{ t('presets.editor.uploadCover') }}
+            </el-button>
+          </el-upload>
+          <el-button size="small" @click="openHistoryPicker">
+            {{ t('presets.editor.pickFromHistory') }}
+          </el-button>
+          <el-button
+            v-if="form.cover_image"
+            link
+            size="small"
+            type="danger"
+            @click="form.cover_image = ''"
+          >
+            {{ t('presets.editor.removeCover') }}
+          </el-button>
+        </div>
+      </el-form-item>
+
+      <!-- ====== 提示词文本（prompt / camera / pipeline 共用） ====== -->
+      <el-form-item
+        v-if="form.type !== 'pipeline' && form.type !== 'style' && form.type !== 'effect'"
+        :label="t('presets.editor.promptLabel')"
+      >
         <el-input
           v-model="form.prompt_text"
           type="textarea"
@@ -109,6 +140,24 @@
           :placeholder="promptTextPlaceholder"
         />
       </el-form-item>
+
+      <!-- ====== 风格 / 特效专属：提示词配置 ====== -->
+      <template v-if="form.type === 'style' || form.type === 'effect'">
+        <el-form-item :label="t('presets.editor.suffixLabel')">
+          <el-input
+            v-model="form.suffix"
+            type="textarea"
+            :rows="3"
+            :placeholder="t('presets.editor.suffixPlaceholder')"
+          />
+        </el-form-item>
+        <el-form-item :label="t('presets.editor.negativeLabel')">
+          <el-input
+            v-model="form.negativePrompt"
+            :placeholder="t('presets.editor.negativePlaceholder')"
+          />
+        </el-form-item>
+      </template>
 
       <!-- ====== Camera 专属：摄像机参数面板 ====== -->
       <template v-if="form.type === 'camera'">
@@ -263,6 +312,31 @@
       </el-button>
     </template>
   </el-dialog>
+
+  <!-- 从生成记录选封面：展示最近成功的图片生成（仅 http/uploads 直链） -->
+  <el-dialog
+    v-model="historyPickerVisible"
+    :title="t('presets.editor.pickFromHistory')"
+    width="720px"
+    append-to-body
+    destroy-on-close
+  >
+    <div class="history-grid" v-loading="historyLoading">
+      <div
+        v-for="item in historyItems"
+        :key="item.id"
+        class="history-thumb"
+        @click="pickHistoryCover(item)"
+      >
+        <img :src="item.result_url" loading="lazy" />
+      </div>
+      <el-empty
+        v-if="!historyLoading && historyItems.length === 0"
+        :description="t('presets.editor.historyEmpty')"
+        class="history-empty"
+      />
+    </div>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
@@ -274,7 +348,9 @@ import { ref, reactive, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { MagicStick } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
-import type { PromptPreset, PresetCreate, PresetUpdate, PresetType } from '@/types/preset'
+import { uploadImage } from '@/api/uploads'
+import { getHistoryList } from '@/api/history'
+import type { PromptPreset, PresetCreate, PresetType } from '@/types/preset'
 
 const { t } = useI18n()
 
@@ -285,7 +361,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:modelValue': [value: boolean]
-  'submit': [data: PresetCreate | PresetUpdate]
+  'submit': [data: PresetCreate]
 }>()
 
 const visible = computed({
@@ -296,7 +372,19 @@ const visible = computed({
 const isEdit = computed(() => !!props.preset)
 const submitting = ref(false)
 const aiClassifying = ref(false)
+const uploading = ref(false)
 const formRef = ref()
+
+// 分类候选（按类型切换，与广场分类 chips 一致）
+const CATEGORY_POOL: Record<string, string[]> = {
+  style: ['摄影写真', '动漫游戏', '风格插画', '国风水墨', '通用'],
+  effect: ['运镜', '氛围', '转场', '通用'],
+  camera: ['通用'],
+  prompt: ['通用'],
+  script: ['通用'],
+  pipeline: ['通用'],
+}
+const categoryOptions = computed(() => CATEGORY_POOL[form.type] || ['通用'])
 
 // 摄像机参数子表单
 const cameraParams = reactive({
@@ -324,6 +412,9 @@ interface FormData {
   prompt_text: string
   script_text: string
   is_public: boolean
+  cover_image: string
+  suffix: string
+  negativePrompt: string
 }
 
 const form = reactive<FormData>({
@@ -335,6 +426,9 @@ const form = reactive<FormData>({
   prompt_text: '',
   script_text: '',
   is_public: false,
+  cover_image: '',
+  suffix: '',
+  negativePrompt: '',
 })
 
 // 提示词文本占位符（按类型走 i18n）
@@ -356,6 +450,8 @@ function onTypeChange() {
     params[k] = ''
   })
   pipelineConfigStr.value = '{}'
+  // 分类回退到该类型的默认候选
+  form.category = CATEGORY_POOL[form.type]?.[0] || '通用'
 }
 
 function resetForm() {
@@ -367,7 +463,49 @@ function resetForm() {
   form.prompt_text = ''
   form.script_text = ''
   form.is_public = false
+  form.cover_image = ''
+  form.suffix = ''
+  form.negativePrompt = ''
   onTypeChange()
+}
+
+/** 上传封面图 */
+async function handleCoverUpload(options: { file: File }) {
+  uploading.value = true
+  try {
+    const result = await uploadImage(options.file)
+    form.cover_image = result.url
+  } catch {
+    /* 错误已由拦截器提示 */
+  } finally {
+    uploading.value = false
+  }
+}
+
+/* ====== 从生成记录选封面 ====== */
+const historyPickerVisible = ref(false)
+const historyLoading = ref(false)
+const historyItems = ref<{ id: number; result_url: string }[]>([])
+
+async function openHistoryPicker() {
+  historyPickerVisible.value = true
+  historyLoading.value = true
+  try {
+    const res = await getHistoryList({ type: 'image', source: 'all', page_size: 24 })
+    // 封面需可公开访问的 URL：仅取 http(s) 直链或 /uploads 路径（base64 过长不入库）
+    historyItems.value = (res.items || [])
+      .map((it) => ({ id: it.id, result_url: it.result_url || '' }))
+      .filter((it) => it.result_url.startsWith('http') || it.result_url.startsWith('/uploads'))
+  } catch {
+    historyItems.value = []
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+function pickHistoryCover(item: { result_url: string }) {
+  form.cover_image = item.result_url
+  historyPickerVisible.value = false
 }
 
 // 编辑模式：加载已有预设数据
@@ -382,6 +520,9 @@ function loadPreset() {
   form.prompt_text = p.prompt_text || ''
   form.script_text = p.script_text || ''
   form.is_public = p.is_public
+  form.cover_image = p.cover_image || ''
+  form.suffix = p.prompt_config?.suffix || ''
+  form.negativePrompt = p.prompt_config?.negative_prompt || ''
 
   // 加载摄像机参数
   if (p.camera_params && typeof p.camera_params === 'object') {
@@ -453,6 +594,15 @@ async function handleSubmit() {
       tags: form.tags.length ? [...form.tags] : undefined,
       prompt_text: form.prompt_text,
       is_public: form.is_public,
+      cover_image: form.cover_image || undefined,
+    }
+
+    // 风格 / 特效：提示词配置
+    if (form.type === 'style' || form.type === 'effect') {
+      const cfg: { suffix?: string; negative_prompt?: string } = {}
+      if (form.suffix.trim()) cfg.suffix = form.suffix.trim()
+      if (form.negativePrompt.trim()) cfg.negative_prompt = form.negativePrompt.trim()
+      data.prompt_config = Object.keys(cfg).length ? cfg : undefined
     }
 
     // 按类型附加专属字段
@@ -492,5 +642,51 @@ async function handleSubmit() {
   font-weight: 600;
   font-size: 14px;
   color: var(--agnes-text-primary);
+}
+
+.cover-uploader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cover-preview {
+  width: 96px;
+  height: 128px;
+  object-fit: cover;
+  border-radius: 8px;
+  display: block;
+}
+
+/* 生成记录选图网格 */
+.history-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+  min-height: 160px;
+}
+
+.history-thumb {
+  aspect-ratio: 1;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: border-color 0.15s;
+}
+
+.history-thumb:hover {
+  border-color: var(--el-color-primary);
+}
+
+.history-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.history-empty {
+  grid-column: 1 / -1;
 }
 </style>

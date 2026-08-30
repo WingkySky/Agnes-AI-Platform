@@ -23,6 +23,7 @@ class ModelDefinition(Base):
     - type: 模型类型（image / video / chat）
     - provider_name: 供应商名称（如 Agnes / OpenAI）
     - capabilities: 能力标签数组（JSON）
+    - gen_params: 生成能力配置（JSON，ModelGenParams 结构；NULL 时按注册表自动画像推断）
     - is_active: 是否激活（同步管理：API 中存在的模型为 True，下线模型为 False）
     - is_disabled: 用户手动停用（同步永不修改；停用后不出现在生成页模型列表）
     - is_custom: 是否用户手动新增（true 时刷新模型列表不被覆盖）
@@ -40,6 +41,7 @@ class ModelDefinition(Base):
     type = Column(String(20), nullable=False, default="chat", comment="模型类型: image/video/chat")
     provider_name = Column(String(100), nullable=True, comment="供应商名称")
     capabilities = Column(JSON, nullable=True, comment="能力标签数组")
+    gen_params = Column(JSON, nullable=True, comment="生成能力配置（参考图上限/水印/尺寸规则等，None=按模型名自动画像）")
     is_active = Column(Boolean, default=True, nullable=False, comment="是否激活")
     is_disabled = Column(Boolean, default=False, nullable=False, comment="用户手动停用（同步不修改，停用后不进入生成页模型列表）")
     is_custom = Column(Boolean, default=False, nullable=False, comment="是否用户自定义")
@@ -59,6 +61,7 @@ class ModelDefinition(Base):
             "type": self.type,
             "provider": self.provider_name or "Unknown",
             "capabilities": self.capabilities or [],
+            "gen_params": self.gen_params,
             "is_active": self.is_active,
             "is_disabled": self.is_disabled,
             "is_custom": self.is_custom,

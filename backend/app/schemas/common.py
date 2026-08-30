@@ -13,18 +13,6 @@ class HealthResponse(BaseModel):
     service: str
 
 
-class ModelInfo(BaseModel):
-    """单个模型信息"""
-    id: str = Field(description="模型标识，如 agnes-image-2.1-flash")
-    name: str = Field(description="模型显示名称，如 Agnes Image 2.1 Flash")
-    type: str = Field(description="模型类型：image / video / chat")
-    provider: str = Field(default="Unknown", description="模型供应商，如 Agnes / 字节跳动 / OpenAI")
-    capabilities: List[str] = Field(
-        default_factory=list,
-        description="模型能力标签，如 text2image, image2image, text2video, image2video, keyframes",
-    )
-
-
 class ImageSizeOption(BaseModel):
     """图片尺寸选项（含比例信息，供前端绘制比例图标）"""
     value: str = Field(description="传给 API 的尺寸值，如 1024x768")
@@ -35,6 +23,51 @@ class ImageSizeOption(BaseModel):
     tier: str = Field(default="sd", description="清晰度等级：sd=标清 / hd=超清 / 4k=4K")
     # 实际输出像素数（用于 UI 展示，如 1024x1024 → 1048576）
     pixels: int = Field(default=0, description="实际输出像素数（用于 UI 展示）")
+
+
+class ModelGenParams(BaseModel):
+    """
+    模型生成能力配置（model_definitions.gen_params，按模型差异化的约束/规则）
+
+    已知键在此定义为唯一出处；新增键 = 扩展本 schema + 对应规则实现。
+    NULL/缺省表示无特例，注册表按模型名自动画像兜底。
+    """
+    max_ref_images: Optional[int] = Field(
+        default=None,
+        description="单次生成参考图/参考帧上限（超出由后端截断、前端提前截断）；None=不限制",
+    )
+    watermark_param_off: bool = Field(
+        default=False,
+        description="请求是否携带厂商官方 watermark=false（关闭「AI生成」显式标识水印）",
+    )
+    size_rule: Optional[str] = Field(
+        default=None,
+        description="尺寸归一化规则名，如 seedream（合法总像素 [2K,4K]，越界按宽高比映射 2K 推荐档）；None=原样透传",
+    )
+    image_sizes: Optional[List[ImageSizeOption]] = Field(
+        default=None,
+        description="覆盖该模型的尺寸选项（结构化同全局 IMAGE_SIZE_OPTIONS）；None=用全局",
+    )
+    default_size: Optional[str] = Field(
+        default=None,
+        description="覆盖该模型的默认尺寸；None=用全局默认",
+    )
+
+
+class ModelInfo(BaseModel):
+    """单个模型信息"""
+    id: str = Field(description="模型标识，如 agnes-image-2.1-flash")
+    name: str = Field(description="模型显示名称，如 Agnes Image 2.1 Flash")
+    type: str = Field(description="模型类型：image / video / chat")
+    provider: str = Field(default="Unknown", description="模型供应商，如 Agnes / 字节跳动 / OpenAI")
+    capabilities: List[str] = Field(
+        default_factory=list,
+        description="模型能力标签，如 text2image, image2image, text2video, image2video, keyframes",
+    )
+    gen_params: Optional[ModelGenParams] = Field(
+        default=None,
+        description="生成能力配置（None=无特例，按模型名自动画像）",
+    )
 
 
 class VideoAspectRatioOption(BaseModel):

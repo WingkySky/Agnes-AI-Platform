@@ -198,6 +198,38 @@ class AGNSDKClientWrapper:
             )
         return result
 
+    # ── 方舟 Seedream 尺寸规范（与 aibridge volcengine_cv 适配器 normalize_image_size 同源）──
+    # 合法总像素区间 [3.6864MP(2K), 16.77MP(4K)]，宽高比 ∈ [1/16, 16]；
+    # 超出区间时按最接近宽高比映射到官方 2K 推荐档（最小合法档）。
+    _SEEDREAM_MIN_PIXELS = 3_686_400
+    _SEEDREAM_MAX_PIXELS = 16_777_216
+    _SEEDREAM_2K_PRESETS = [
+        (9 / 16, 1600, 2848),
+        (2 / 3, 1664, 2496),
+        (3 / 4, 1728, 2304),
+        (1.0, 2048, 2048),
+        (4 / 3, 2304, 1728),
+        (3 / 2, 2496, 1664),
+        (16 / 9, 2848, 1600),
+        (21 / 9, 3136, 1344),
+    ]
+
+    @classmethod
+    def _normalize_seedream_size(cls, size: str) -> str:
+        """Seedream 系模型尺寸归一化：合法原样透传，不合法按宽高比落到 2K 推荐档。"""
+        try:
+            w_str, h_str = (size or "").strip().lower().replace("*", "x").split("x", 1)
+            w, h = int(w_str), int(h_str)
+        except ValueError:
+            return "2048x2048"
+        if w <= 0 or h <= 0:
+            return "2048x2048"
+        total, ratio = w * h, w / h
+        if cls._SEEDREAM_MIN_PIXELS <= total <= cls._SEEDREAM_MAX_PIXELS and 1 / 16 <= ratio <= 16:
+            return f"{w}x{h}"
+        best = min(cls._SEEDREAM_2K_PRESETS, key=lambda p: abs(ratio - p[0]))
+        return f"{best[1]}x{best[2]}"
+
     async def create_image(
         self,
         prompt: str,
@@ -230,8 +262,20 @@ class AGNSDKClientWrapper:
         if not ref_images and image_url and image_url.strip():
             ref_images.append(image_url)
 
-        # size 归一化由 aibridge 各 adapter 自行处理（协议层职责）
-        # 例如 volcengine_cv adapter 会把 1024x1024 归一化到方舟规范的 2K 推荐尺寸
+        # ── Seedream 系模型分辨率归一化（与 aibridge volcengine_cv 适配器同规则）──
+        # 方舟 Seedream 合法总像素 ∈ [3.6864MP(2K 档), 16.77MP(4K 档)]。volcengine_cv
+        # 适配器自带归一化；openai 协议兼容端点（如火山 agent plan）size 原样透传，
+        # 前端全局默认 1024x1024 低于 Seedream 最小档，需按宽高比映射到官方 2K 推荐档。
+        if "seedream" in (model or "").lower():
+            size = self._normalize_seedream_size(size)
+
+        # ── 厂商特有参数经 image_generate **kwargs → adapter extra → 请求体顶层透传 ──
+        # Seedream 系生图默认在画面加「AI生成」显式标识水印（标识办法合规要求），
+        # 按方舟官方 watermark 参数关闭（volcengine_cv 全量 + openai 兼容端点的 seedream 模型）；
+        # 发布内容时按平台规则声明 AI 生成的义务由使用方承担。
+        sdk_kwargs = {}
+        if self.provider_type == "volcengine_cv" or "seedream" in (model or "").lower():
+            sdk_kwargs["watermark"] = False
         try:
             result = await client.image_generate(
                 model=model,
@@ -241,6 +285,7 @@ class AGNSDKClientWrapper:
                 response_format=response_format,
                 reference_images=ref_images if ref_images else None,
                 mask=mask,
+                **sdk_kwargs,
             )
         except Exception as e:
             raise _build_translated_error(e, action="图片生成") from e

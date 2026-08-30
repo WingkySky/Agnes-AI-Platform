@@ -71,31 +71,29 @@
               </div>
             </el-form-item>
 
-            <!-- 预设风格 -->
-            <PromptTemplates
-              :templates="imageTemplates"
-              @select="appendStylePrompt"
-            />
-
-            <!-- 统一预设快捷面板（Popover 触发，选中后填充 prompt） -->
-            <el-popover
-              placement="bottom-start"
-              :width="340"
-              trigger="click"
-              :teleported="true"
+            <!-- 风格库：统一预设广场弹窗，选中即用 -->
+            <el-button
+              :icon="MagicStick"
+              size="small"
+              plain
+              style="margin-top: 6px; margin-right: 8px"
+              @click="plazaVisible = true"
             >
-              <template #reference>
-                <el-button
-                  :icon="Folder"
-                  size="small"
-                  plain
-                  style="margin-top: 6px"
-                >
-                  {{ t('presets.usePresetBtn') }}
-                </el-button>
-              </template>
-              <PresetQuickPanel @select="onPresetSelect" />
-            </el-popover>
+              {{ t('presets.plaza.styleLibrary') }}
+            </el-button>
+
+            <!-- 已挂载预设（生图模块独立，风格单选/特效叠加，提交时自动拼接） -->
+            <div v-if="presetStore.mountedFor('image').length" class="mounted-row">
+              <el-tag
+                v-for="mp in presetStore.mountedFor('image')"
+                :key="mp.id"
+                closable
+                size="small"
+                @close="presetStore.unmountPreset('image', mp.id)"
+              >
+                {{ mountTagLabel(mp) }}
+              </el-tag>
+            </div>
 
             <!-- 3D 场景快捷面板：从导演台选择场景，追加镜头语言到 prompt -->
             <el-popover
@@ -307,6 +305,9 @@
           :url="viewerUrl"
           :download-url="viewerDownloadUrl"
         />
+
+        <!-- 统一预设广场弹窗（风格库） -->
+        <PresetPlazaDialog v-model="plazaVisible" context="image" @apply="onPresetApply" />
       </el-col>
     </el-row>
   </div>
@@ -316,10 +317,9 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  MagicStick, Download, Link, PictureFilled, Edit, Loading, CircleCloseFilled, VideoPlay, Share, InfoFilled, Folder, Aim
+  MagicStick, Download, Link, PictureFilled, Edit, Loading, CircleCloseFilled, VideoPlay, Share, InfoFilled, Aim
 } from '@element-plus/icons-vue'
-import PromptTemplates from '@/components/PromptTemplates.vue'
-import PresetQuickPanel from '@/components/presets/PresetQuickPanel.vue'
+import PresetPlazaDialog from '@/components/presets/PresetPlazaDialog.vue'
 import ImageUploader from '@/components/ImageUploader.vue'
 import ImageViewer from '@/components/ImageViewer.vue'
 import ImageWithWatermark from '@/components/ImageWithWatermark.vue'
@@ -329,6 +329,10 @@ import { useModelsStore } from '@/stores/models'
 import { useUserStore } from '@/stores/user'
 import { usePreferencesStore } from '@/stores/preferences'
 import { useAssetStore } from '@/stores/asset'
+import { usePresetStore } from '@/stores/presets'
+import { appendPromptText, composeMounted } from '@/utils/presetApply'
+import { useCopyText } from '@/composables/useCopyText'
+import type { PromptPreset } from '@/types/preset'
 import { useAsset } from '@/api/pipeline'
 import { useI18n } from '@/i18n'
 import { useCreditEstimate } from '@/composables/useCreditEstimate'
@@ -360,17 +364,37 @@ function openViewerWithUrl(url: string) {
   viewerVisible.value = true
 }
 
-// 预设风格：不同语言下显示不同的 label（prompt 本身保持原样，不随语言变化）
-// 注意：这里用 computed 动态读取当前语言下的显示名，避免语言切换后不同步
-const imageTemplates = computed(() => ([
-  { label: t('presets.surrealism'), prompt: '，超现实主义风格，梦幻，高细节' },
-  { label: t('presets.cinematic'), prompt: '，电影感，戏剧性光照，宽银幕' },
-  { label: t('presets.anime'), prompt: '，日式动漫风格，鲜艳色彩，细腻线条' },
-  { label: t('presets.oilPainting'), prompt: '，古典油画风格，厚重笔触，文艺复兴质感' },
-  { label: t('presets.realisticPhoto'), prompt: '，专业摄影，8K 超高清，自然光照' },
-  { label: t('presets.cyberpunk'), prompt: '，赛博朋克，霓虹光，未来都市感' },
-  { label: t('presets.inkStyle'), prompt: '，中国水墨风格，留白艺术，意境悠远' },
-]))
+// ---------- 统一预设广场（风格库） ----------
+const plazaVisible = ref(false)
+const presetStore = usePresetStore()
+
+/** 广场应用回调：风格/特效挂载（一键使用，提交时自动拼接）；脚本复制；提示词追加 */
+async function onPresetApply(preset: PromptPreset) {
+  if (['style', 'effect', 'camera'].includes(preset.type)) {
+    const mountedNow = await presetStore.mountPreset(preset, 'image')
+    ElMessage.success(mountedNow ? t('presets.plaza.mounted') : t('presets.plaza.unmounted'))
+    return
+  }
+  const payload = await presetStore.applyPreset(preset)
+  if (payload.scriptText) {
+    const { copyText } = useCopyText()
+    await copyText(payload.scriptText)
+    return
+  }
+  prompt.value = appendPromptText(prompt.value, payload.appendText)
+  ElMessage.success(t('presets.applied'))
+}
+
+/** 挂载标签文案：类型 · 名称 */
+function mountTagLabel(p: PromptPreset): string {
+  const keyMap: Record<string, string> = {
+    style: 'presets.plaza.typeStyle',
+    effect: 'presets.plaza.typeEffect',
+    camera: 'presets.plaza.typeCamera',
+  }
+  const label = keyMap[p.type] ? t(keyMap[p.type]) : p.type
+  return `${label} · ${p.name}`
+}
 
 // 模型列表：从后端 API 动态获取
 const modelsStore = useModelsStore()
@@ -501,20 +525,6 @@ const canSubmit = computed(() => {
   return true
 })
 
-function appendStylePrompt(tpl: string) {
-  if (!prompt.value.trim().endsWith(tpl)) {
-    prompt.value = prompt.value.trim() + tpl
-  }
-}
-
-/** 预设快捷面板应用回调：将预设的 prompt_text 覆盖填入提示词输入框 */
-function onPresetSelect(preset: any) {
-  if (preset.prompt_text) {
-    prompt.value = preset.prompt_text
-    ElMessage.success(t('presets.applied'))
-  }
-}
-
 // ---------- 3D 场景快捷应用：从导演台选择场景，将镜头语言追加到 prompt ----------
 const scenePopoverVisible = ref(false)
 const sceneList = ref<Scene3D[]>([])
@@ -623,12 +633,14 @@ async function handleGenerate() {
   }
 
   const params: Record<string, any> = {
-    prompt: prompt.value.trim(),
     model: model.value,
     size: size.value,
     mode: mode.value,
     is_public: shareToPlaza.value,
   }
+  // 已挂载预设（风格/特效）在提交时自动拼接，提示词输入框保持纯用户内容
+  const composition = composeMounted(presetStore.mountedFor('image'))
+  params.prompt = appendPromptText(prompt.value.trim(), composition.promptSuffix)
   // 【多图】图生图时：区分为 base64_images 与 image_urls
   if (mode.value === 'image2image' && referenceFileList.value.length > 0) {
     const b64Imgs = referenceFileList.value
@@ -836,6 +848,14 @@ function copyImageUrl() {
 }
 .prompt-length-hint.level-too-long {
   color: var(--agnes-error);
+}
+
+/* 已挂载预设标签行 */
+.mounted-row {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 /* 统一表单标签：更醒目、更有视觉层级 */

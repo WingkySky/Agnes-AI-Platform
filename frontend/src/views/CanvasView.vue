@@ -241,6 +241,8 @@
           @view-large="handleHoverViewLarge"
           @derive-video="handleHoverDeriveVideo"
           @derive-tail="handleHoverDeriveTail"
+          @derive-prev="handleHoverDerivePrev"
+          @derive-chain="handleHoverDeriveChain"
           @reshoot="handleHoverReshoot"
           @run-node="handleHoverRunNode"
         />
@@ -510,7 +512,7 @@ import {
 // 画布生成：上游节点查找（用于配置节点 prompt 为空时检查上游文本）+ 生成归档上下文
 import { getUpstreamNodes, buildCanvasContext, resumeLoadingCanvasNodes, type CanvasGenerationStore } from '@/lib/canvas-generation'
 // 分镜派生：单镜头图生视频（LibTV P0）
-import { deriveVideoForShot, deriveTailFrameFromImageNode, readLineage, getShotLineageInfo } from '@/lib/canvas-storyboard'
+import { deriveVideoForShot, deriveTailFrameFromImageNode, derivePrevFrameFromImageNode, deriveChainVideosFromImageNode, readLineage, getShotLineageInfo } from '@/lib/canvas-storyboard'
 // 画布三节点执行（spec M3：配音/字幕/成片合成）
 import { generateCanvasTts, generateCanvasSubtitles, composeCanvasVideos, type CanvasSubtitleSegment } from '@/api/canvas'
 import { parseSrt } from '@/lib/canvas-media'
@@ -2791,6 +2793,28 @@ async function handleHoverDeriveTail() {
   if (!panel) return
   try {
     await deriveTailFrameFromImageNode(panel)
+  } catch (err) {
+    ElMessage.error(`${t('canvas.messages.generateFailed')}: ${getErrorMessage(err) || err}`)
+  }
+}
+
+// 分镜图节点一键推演前段画面（画面时间推演，向前延展）
+async function handleHoverDerivePrev() {
+  const panel = hoveredPanel.value
+  if (!panel) return
+  try {
+    await derivePrevFrameFromImageNode(panel)
+  } catch (err) {
+    ElMessage.error(`${t('canvas.messages.generateFailed')}: ${getErrorMessage(err) || err}`)
+  }
+}
+
+// 分镜图节点一键生成分段视频（画面链长视频：补帧 + 分段 + compose）
+async function handleHoverDeriveChain() {
+  const panel = hoveredPanel.value
+  if (!panel) return
+  try {
+    await deriveChainVideosFromImageNode(panel)
   } catch (err) {
     ElMessage.error(`${t('canvas.messages.generateFailed')}: ${getErrorMessage(err) || err}`)
   }

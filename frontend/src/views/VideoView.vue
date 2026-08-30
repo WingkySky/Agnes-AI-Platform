@@ -113,27 +113,29 @@
                 :placeholder="t('params.negativePromptPlaceholder')" />
             </el-form-item>
 
-            <PromptTemplates :templates="videoTemplates" @select="appendStylePrompt" />
-
-            <!-- 统一预设快捷面板（Popover 触发，选中后填充 prompt） -->
-            <el-popover
-              placement="bottom-start"
-              :width="340"
-              trigger="click"
-              :teleported="true"
+            <!-- 特效库：统一预设广场弹窗，选中即用 -->
+            <el-button
+              :icon="MagicStick"
+              size="small"
+              plain
+              style="margin-top: 6px; margin-right: 8px"
+              @click="plazaVisible = true"
             >
-              <template #reference>
-                <el-button
-                  :icon="Folder"
-                  size="small"
-                  plain
-                  style="margin-top: 6px"
-                >
-                  {{ t('presets.usePresetBtn') }}
-                </el-button>
-              </template>
-              <PresetQuickPanel @select="onPresetSelect" />
-            </el-popover>
+              {{ t('presets.plaza.effectLibrary') }}
+            </el-button>
+
+            <!-- 已挂载预设（生视频模块独立，风格单选/特效与运镜叠加，提交时自动拼接） -->
+            <div v-if="presetStore.mountedFor('video').length" class="mounted-row">
+              <el-tag
+                v-for="mp in presetStore.mountedFor('video')"
+                :key="mp.id"
+                closable
+                size="small"
+                @close="presetStore.unmountPreset('video', mp.id)"
+              >
+                {{ mountTagLabel(mp) }}
+              </el-tag>
+            </div>
 
             <!-- 紧凑参数选择：比例 + 分辨率 + 时长 + 帧率 + 模型，一行标签搞定 -->
             <el-form-item :label="t('params.aspectRatio')">
@@ -321,6 +323,9 @@
             <li>{{ t('tips.historyKeep') }}</li>
           </ul>
         </div>
+
+        <!-- 统一预设广场弹窗（特效库） -->
+        <PresetPlazaDialog v-model="plazaVisible" context="video" @apply="onPresetApply" />
       </el-col>
     </el-row>
   </div>
@@ -331,35 +336,30 @@ import { ref, computed, nextTick, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   VideoPlay, Download, CopyDocument, CircleCloseFilled, VideoCameraFilled, Loading, MagicStick,
-  Edit, Film, PictureFilled, Picture, ArrowDownBold, Share, InfoFilled, Folder
+  Edit, Film, PictureFilled, Picture, ArrowDownBold, Share, InfoFilled
 } from '@element-plus/icons-vue'
-import PromptTemplates from '@/components/PromptTemplates.vue'
-import PresetQuickPanel from '@/components/presets/PresetQuickPanel.vue'
+import PresetPlazaDialog from '@/components/presets/PresetPlazaDialog.vue'
 import ImageUploader from '@/components/ImageUploader.vue'
 import ParamSelector from '@/components/ParamSelector.vue'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useAssetStore } from '@/stores/asset'
+import { usePresetStore } from '@/stores/presets'
+import { appendPromptText, composeMounted } from '@/utils/presetApply'
+import type { PromptPreset } from '@/types/preset'
 import { useAsset } from '@/api/pipeline'
 import { useModelsStore } from '@/stores/models'
 import { useUserStore } from '@/stores/user'
 import { useI18n } from '@/i18n'
 import { useCreditEstimate } from '@/composables/useCreditEstimate'
 import { useDownload } from '@/composables/useDownload'
+import { useCopyText } from '@/composables/useCopyText'
+const { copyText } = useCopyText()
 import { matchVideoAspectRatio, getVideoAspectRatioLabel, autoMatchImageSize } from '@/config/model-params'
 import type { FileInfo } from '@/types'
 
 const { t } = useI18n()
 const userStore = useUserStore()
 const { downloadViaProxy } = useDownload()
-
-const videoTemplates = computed(() => ([
-  { label: t('presets.cinematicShot'), prompt: '，电影镜头感，缓慢平移，平滑 dolly-in，戏剧性光影' },
-  { label: t('presets.slowMotion'), prompt: '，慢动作，细腻细节，优雅节奏' },
-  { label: t('presets.handheldFollow'), prompt: '，手持跟拍，真实感，纪实' },
-  { label: t('presets.neonNight'), prompt: '，霓虹夜景，水面反光，都市感' },
-  { label: t('presets.aerialShot'), prompt: '，航拍大远景，缓慢扫镜，史诗感' },
-  { label: t('presets.smoothTransition'), prompt: '，丝滑电影感过渡，电影级调色' }
-]))
 
 // ---------- 模型列表 ----------
 const modelsStore = useModelsStore()
@@ -556,18 +556,35 @@ const canSubmit = computed(() => {
   return true
 })
 
-function appendStylePrompt(tpl: string) {
-  if (!prompt.value.trim().endsWith(tpl)) {
-    prompt.value = prompt.value.trim() + tpl
+// ---------- 统一预设广场（特效库） ----------
+const plazaVisible = ref(false)
+const presetStore = usePresetStore()
+
+/** 广场应用回调：风格/特效/运镜挂载（一键使用，提交时自动拼接）；脚本复制；提示词追加 */
+async function onPresetApply(preset: PromptPreset) {
+  if (['style', 'effect', 'camera'].includes(preset.type)) {
+    const mountedNow = await presetStore.mountPreset(preset, 'video')
+    ElMessage.success(mountedNow ? t('presets.plaza.mounted') : t('presets.plaza.unmounted'))
+    return
   }
+  const payload = await presetStore.applyPreset(preset)
+  if (payload.scriptText) {
+    await copyText(payload.scriptText)
+    return
+  }
+  prompt.value = appendPromptText(prompt.value, payload.appendText)
+  ElMessage.success(t('presets.applied'))
 }
 
-/** 预设快捷面板应用回调：将预设的 prompt_text 覆盖填入提示词输入框 */
-function onPresetSelect(preset: any) {
-  if (preset.prompt_text) {
-    prompt.value = preset.prompt_text
-    ElMessage.success(t('presets.applied'))
+/** 挂载标签文案：类型 · 名称 */
+function mountTagLabel(p: PromptPreset): string {
+  const keyMap: Record<string, string> = {
+    style: 'presets.plaza.typeStyle',
+    effect: 'presets.plaza.typeEffect',
+    camera: 'presets.plaza.typeCamera',
   }
+  const label = keyMap[p.type] ? t(keyMap[p.type]) : p.type
+  return `${label} · ${p.name}`
 }
 
 // ---------- 图片管理（图生视频统一处理：单张/多张/关键帧）----------
@@ -666,8 +683,6 @@ async function startGenerate() {
   }
 
   const params: Record<string, any> = {
-    prompt: prompt.value.trim(),
-    negative_prompt: negativePrompt.value.trim() || undefined,
     model: videoModel.value,
     aspect_ratio: aspectRatio.value,
     width: videoWidth,
@@ -677,6 +692,18 @@ async function startGenerate() {
     mode: actualMode,
     seed: seed.value ? Number(seed.value) : undefined,
     is_public: shareToPlaza.value,
+  }
+  // 已挂载预设（风格/特效/运镜）在提交时自动拼接，提示词输入框保持纯用户内容
+  const composition = composeMounted(presetStore.mountedFor('video'))
+  params.prompt = appendPromptText(prompt.value.trim(), composition.promptSuffix)
+  // 负面词：用户输入 + 挂载预设的负面词合并
+  const mergedNegative = [negativePrompt.value.trim(), composition.negativePrompt]
+    .filter(Boolean)
+    .join('，')
+  params.negative_prompt = mergedNegative || undefined
+  // 运镜参数随请求提交，后端 build_camera_prompt_suffix 拼接运镜后缀
+  if (composition.cameraParams) {
+    params.camera_params = { enabled: true, ...composition.cameraParams }
   }
   if (mode.value === 'image2video') {
     // 图生视频（单张/多张）或关键帧模式：统一用 images 数组
@@ -983,6 +1010,14 @@ function handleVideoError(e: Event) {
   margin-top: 8px;
   border-radius: 12px !important;
 }
+/* 已挂载预设标签行 */
+.mounted-row {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 /* 分享到广场开关：低调显示在生成按钮下方 */
 .share-toggle {
   display: flex;

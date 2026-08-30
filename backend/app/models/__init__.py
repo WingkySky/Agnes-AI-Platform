@@ -25,7 +25,7 @@ from app.models.style_element import StyleElement
 from app.models.asset import Asset
 from app.models.asset_like import AssetLike
 from app.models.camera_preset import CameraPreset
-from app.models.prompt_preset import PromptPreset, PresetIndex
+from app.models.prompt_preset import PromptPreset, PresetIndex, PresetFavorite, PresetRecentUse
 from app.models.scene3d import Scene3D
 from app.models.project import (
     Project,

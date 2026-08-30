@@ -106,6 +106,7 @@ function typeLabel(type: string): string {
     camera: 'presets.quickPanel.typeCamera',
     prompt: 'presets.quickPanel.typePrompt',
     style: 'presets.quickPanel.typeStyle',
+    effect: 'presets.plaza.typeEffect',
     script: 'presets.quickPanel.typeScript',
     pipeline: 'presets.quickPanel.typePipeline',
   }
@@ -124,7 +125,7 @@ function onSearch() {
   searchTimer = setTimeout(async () => {
     searchLoading.value = true
     try {
-      const result = await getPresets({ search: query, limit: 10, sort: 'usage' })
+      const result = await getPresets({ tab: 'plaza', q: query, page_size: 10, sort: 'hot' })
       searchResults.value = result.items
     } catch {
       searchResults.value = []
@@ -136,7 +137,7 @@ function onSearch() {
 
 async function loadRecentPresets() {
   try {
-    const result = await getPresets({ sort: 'usage', limit: 5 })
+    const result = await getPresets({ tab: 'recent', page_size: 5 })
     recentPresets.value = result.items
   } catch {
     recentPresets.value = []

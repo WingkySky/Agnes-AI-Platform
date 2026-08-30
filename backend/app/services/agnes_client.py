@@ -478,6 +478,12 @@ class AgnesAIClient:
     # =====================================================
 
     # ---------- 图片生成 ----------
+    # 图片模型参考图张数上限：仅记录上游契约明确限制的模型，其余模型不限制不截断。
+    # agnes-image-2.1-flash 上游最多接受 6 张参考图，超出直接 400（too many input images）。
+    _IMAGE_REF_LIMITS = {
+        "agnes-image-2.1-flash": 6,
+    }
+
     async def create_image(
         self,
         prompt: str,
@@ -523,6 +529,16 @@ class AgnesAIClient:
             ref_images.append(base64_image)
         if not ref_images and image_url and image_url.strip():
             ref_images.append(image_url)
+
+        # ── 按模型契约截断参考图：仅命中已知上限的模型（超限会被上游 400 拒绝），其余模型原样透传；
+        #    保留前 N 张，调用方已按「锚点/底图 > 角色 > 场景」优先级排序 ──
+        _ref_limit = self._IMAGE_REF_LIMITS.get((model or "").strip().lower())
+        if _ref_limit and len(ref_images) > _ref_limit:
+            logger.warning(
+                "[图片生成] 模型 %s 参考图最多 %d 张，已按序截断（原 %d 张，保留前 %d 张）",
+                model, _ref_limit, len(ref_images), _ref_limit,
+            )
+            ref_images = ref_images[:_ref_limit]
 
         # 【核心修复】严格按 Agnes Image 2.0/2.1 Flash 文档构建请求体
         #   - model、prompt、size → 顶层必填参数
