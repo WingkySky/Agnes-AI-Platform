@@ -317,7 +317,6 @@ async def moderate_image_with_ai(
     }
     """
     from app.services.agnes_client import agnes_client
-    from app.services.model_registry import get_models_by_type
 
     # 下载图片为 base64
     image_b64 = await _download_image_as_base64(image_url)
@@ -326,10 +325,10 @@ async def moderate_image_with_ai(
         logger.warning("[AI审核] 图片下载失败，降级为通过: url=%s", image_url[:80])
         return {"success": False, "is_violation": False, "categories": [], "reason": "", "confidence": 0.0}
 
-    # 获取聊天模型
+    # 审核为系统级任务：管理员配置 model.moderation_chat > 系统默认对话模型
     try:
-        chat_models = await get_models_by_type("chat")
-        model = chat_models[0].id if chat_models else ""
+        from app.services.model_registry import resolve_system_chat_model_id, SYSTEM_CHAT_MODEL_KEYS
+        model = await resolve_system_chat_model_id(None, SYSTEM_CHAT_MODEL_KEYS["moderation"])
     except Exception:
         model = ""
     if not model:
@@ -394,12 +393,11 @@ async def moderate_video_with_ai(
         return {"success": False, "is_violation": False, "categories": [], "reason": "", "confidence": 0.0}
 
     from app.services.agnes_client import agnes_client
-    from app.services.model_registry import get_models_by_type
 
-    # 获取聊天模型
+    # 审核为系统级任务：管理员配置 model.moderation_chat > 系统默认对话模型
     try:
-        chat_models = await get_models_by_type("chat")
-        model = chat_models[0].id if chat_models else ""
+        from app.services.model_registry import resolve_system_chat_model_id, SYSTEM_CHAT_MODEL_KEYS
+        model = await resolve_system_chat_model_id(None, SYSTEM_CHAT_MODEL_KEYS["moderation"])
     except Exception:
         model = ""
     if not model:

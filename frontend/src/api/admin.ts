@@ -203,3 +203,26 @@ export function updateSmtpConfig(data: Partial<SmtpConfig>): Promise<{ message: 
 export function testSmtpConfig(testEmail: string): Promise<{ message: string }> {
   return client.post('/api/admin/system-config/smtp/test', { test_email: testEmail })
 }
+
+// ---------- 系统级模型配置 ----------
+
+export interface ModelServiceConfig {
+  configs: {
+    'model.chat_default': string
+    'model.moderation_chat': string
+    'model.title_summary_chat': string
+  }
+  options: { id: string; name: string }[]
+}
+
+/** 获取系统级模型配置（含可选 chat 模型列表） */
+export function getModelServiceConfig(): Promise<ModelServiceConfig> {
+  return client.get('/api/admin/system-config/models')
+}
+
+/** 更新系统级模型配置 */
+export function updateModelServiceConfig(
+  configs: ModelServiceConfig['configs'],
+): Promise<{ status: string; message: string; configs: ModelServiceConfig['configs'] }> {
+  return client.put('/api/admin/system-config/models', { configs })
+}

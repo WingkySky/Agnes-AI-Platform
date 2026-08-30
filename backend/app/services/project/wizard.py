@@ -23,6 +23,7 @@ from typing import Dict, Any, List, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.model_registry import resolve_user_chat_model_id
 from app.models.project import (
     Project,
     ProjectScript,
@@ -77,10 +78,30 @@ def parse_json_loose(text: str) -> Any:
     return {}
 
 
-async def _call_llm(prompt: str, model: str = "", temperature: float = 0.7) -> str:
-    """调用 LLM 返回文本（通过 AgnesAIClient._post 走 chat/completions）"""
+async def _call_llm(
+    prompt: str,
+    model: str = "",
+    temperature: float = 0.7,
+    fallback_model: str = "",
+) -> str:
+    """
+    调用 LLM 返回文本（通过 AgnesAIClient._post 走 chat/completions）。
+    模型优先级：step_config 显式 model > fallback_model（项目所有者偏好）> 系统默认（管理员配置）。
+    """
+    body_model = ""
+    if model:
+        from app.services.model_registry import get_models_by_type
+        if model in {m.id for m in await get_models_by_type("chat")}:
+            body_model = model
+    if not body_model:
+        body_model = fallback_model
+    if not body_model:
+        from app.services.model_registry import resolve_system_chat_model_id, SYSTEM_CHAT_MODEL_KEYS
+        body_model = await resolve_system_chat_model_id(None, SYSTEM_CHAT_MODEL_KEYS["chat_default"])
+    if not body_model:
+        raise RuntimeError("未配置可用的对话模型，请先在配置页同步或添加对话模型")
     body = {
-        "model": model or "agnes-2.0-flash",
+        "model": body_model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": temperature,
     }
@@ -103,7 +124,8 @@ async def _step_script_generation(
     """步骤 1: 剧本生成"""
     prompt = step_config["prompt_template"].format(**inputs)
     content = await _call_llm(
-        prompt, step_config.get("model"), step_config.get("temperature", 0.8)
+        prompt, step_config.get("model"), step_config.get("temperature", 0.8),
+        fallback_model=await resolve_user_chat_model_id(db, project.user_id),
     )
 
     script = ProjectScript(
@@ -130,7 +152,8 @@ async def _step_entity_extraction(
     script_id = script_ctx.get("script_id")
     prompt = step_config["prompt_template"].format(script=script_content)
     result_text = await _call_llm(
-        prompt, step_config.get("model"), step_config.get("temperature", 0.5)
+        prompt, step_config.get("model"), step_config.get("temperature", 0.5),
+        fallback_model=await resolve_user_chat_model_id(db, project.user_id),
     )
     parsed = parse_json_loose(result_text)
 
@@ -226,7 +249,8 @@ async def _step_storyboard_split(
         props=prop_info,
     )
     result_text = await _call_llm(
-        prompt, step_config.get("model"), step_config.get("temperature", 0.6)
+        prompt, step_config.get("model"), step_config.get("temperature", 0.6),
+        fallback_model=await resolve_user_chat_model_id(db, project.user_id),
     )
     parsed = parse_json_loose(result_text)
 
@@ -314,7 +338,8 @@ async def _step_frame_prompt_extract(
 
     prompt = step_config["prompt_template"].format(shots=shots_summary)
     result_text = await _call_llm(
-        prompt, step_config.get("model"), step_config.get("temperature", 0.5)
+        prompt, step_config.get("model"), step_config.get("temperature", 0.5),
+        fallback_model=await resolve_user_chat_model_id(db, project.user_id),
     )
     parsed = parse_json_loose(result_text)
 

@@ -14,6 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.project import Project, ProjectScript
 from app.schemas.project import ScriptCreate, ScriptUpdate
 from app.services.agnes_client import agnes_client
+from app.services.model_registry import resolve_project_chat_model_id
+from app.services.model_registry import resolve_user_chat_model_id
 
 logger = logging.getLogger("agnes_platform.project.script")
 
@@ -113,8 +115,13 @@ async def regenerate_script(
     format_args = inputs or {}
     prompt = template.format(**format_args)
 
+    body_model = await resolve_user_chat_model_id(
+        db, 0, explicit=model or script.model
+    ) if (model or script.model) else await resolve_project_chat_model_id(db, script.project_id)
+    if not body_model:
+        raise HTTPException(400, "未配置可用的对话模型，请先在配置页同步或添加对话模型")
     body = {
-        "model": model or script.model or "agnes-2.0-flash",
+        "model": body_model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.8,
     }

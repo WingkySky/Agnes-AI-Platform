@@ -23,7 +23,8 @@ class ModelDefinition(Base):
     - type: 模型类型（image / video / chat）
     - provider_name: 供应商名称（如 Agnes / OpenAI）
     - capabilities: 能力标签数组（JSON）
-    - is_active: 是否启用
+    - is_active: 是否激活（同步管理：API 中存在的模型为 True，下线模型为 False）
+    - is_disabled: 用户手动停用（同步永不修改；停用后不出现在生成页模型列表）
     - is_custom: 是否用户手动新增（true 时刷新模型列表不被覆盖）
     - sort_order: 排序权重
     - asset_storage_mode: 资源存储策略（auto/keep/migrate）
@@ -39,7 +40,8 @@ class ModelDefinition(Base):
     type = Column(String(20), nullable=False, default="chat", comment="模型类型: image/video/chat")
     provider_name = Column(String(100), nullable=True, comment="供应商名称")
     capabilities = Column(JSON, nullable=True, comment="能力标签数组")
-    is_active = Column(Boolean, default=True, nullable=False, comment="是否启用")
+    is_active = Column(Boolean, default=True, nullable=False, comment="是否激活")
+    is_disabled = Column(Boolean, default=False, nullable=False, comment="用户手动停用（同步不修改，停用后不进入生成页模型列表）")
     is_custom = Column(Boolean, default=False, nullable=False, comment="是否用户自定义")
     sort_order = Column(Integer, default=0, nullable=False, comment="排序权重")
     asset_storage_mode = Column(String(20), default="auto", nullable=False, comment="资源存储策略: auto(按provider_type自动判断) / keep(保留原URL) / migrate(强制转存对象存储)")
@@ -58,6 +60,7 @@ class ModelDefinition(Base):
             "provider": self.provider_name or "Unknown",
             "capabilities": self.capabilities or [],
             "is_active": self.is_active,
+            "is_disabled": self.is_disabled,
             "is_custom": self.is_custom,
             "sort_order": self.sort_order,
             "asset_storage_mode": self.asset_storage_mode,
@@ -70,3 +73,4 @@ class ModelDefinition(Base):
 # 由于项目使用 SQLAlchemy create_all 自动建表，SQLite 不会自动给已存在的表加新列。
 # 升级时需手动执行以下 SQL：
 #   ALTER TABLE model_definitions ADD COLUMN asset_storage_mode VARCHAR(20) NOT NULL DEFAULT 'auto';
+#   ALTER TABLE model_definitions ADD COLUMN is_disabled BOOLEAN NOT NULL DEFAULT 0;

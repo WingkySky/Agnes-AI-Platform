@@ -232,6 +232,23 @@
         </el-select>
       </div>
 
+      <!-- 默认对话模型 -->
+      <div class="pref-row">
+        <div class="pref-info">
+          <span class="pref-label">{{ t('prefs.generation.defaultChatModel') }}</span>
+          <span class="pref-hint">{{ t('prefs.generation.defaultChatModelHint') }}</span>
+        </div>
+        <el-select
+          v-model="form.generation.default_chat_model_id"
+          size="small"
+          style="width: 220px"
+          clearable
+          placeholder=" "
+          @change="markDirty">
+          <el-option v-for="m in modelsStore.chatModels" :key="m.id" :label="m.name || m.id" :value="m.id" />
+        </el-select>
+      </div>
+
       <!-- 默认比例 -->
       <div class="pref-row">
         <div class="pref-info">
@@ -449,6 +466,7 @@ const form = reactive({
   generation: {
     default_image_model_id: '',
     default_video_model_id: '',
+    default_chat_model_id: '',
     default_aspect_ratio: '1:1',
     auto_copy_prompt: true,
     default_image_count: 1,
@@ -594,6 +612,7 @@ function syncFormFromStore() {
   const g = prefsStore.generation
   form.generation.default_image_model_id = g.default_image_model_id
   form.generation.default_video_model_id = g.default_video_model_id
+  form.generation.default_chat_model_id = g.default_chat_model_id || ''
   form.generation.default_aspect_ratio = g.default_aspect_ratio
   form.generation.auto_copy_prompt = g.auto_copy_prompt
   form.generation.default_image_count = g.default_image_count

@@ -2,7 +2,7 @@
 # Chat Service — 聊天服务层
 #
 # 核心功能：
-#   1. 调用 Agnes AI Chat API（agnes-2.0-flash）进行对话
+#   1. 调用 Agnes AI Chat API（对话模型按解析链选择）进行对话
 #   2. 通过工具调用（Tool Calling）检测用户生图/生视频意图
 #   3. 自动触发图片/视频生成任务
 #   4. 支持流式响应（SSE），逐 token 返回给前端
@@ -247,13 +247,18 @@ class ChatService:
         """动态获取聊天 API 地址（从 agnes_client 读取最新的 base_url）"""
         return f"{agnes_client.base_url}/chat/completions"
 
-    async def _get_default_chat_model(self) -> str:
-        """获取默认聊天模型（从 model_registry 动态获取）"""
-        if not self._default_chat_model:
-            from app.services.model_registry import get_models_by_type
-            chat_models = await get_models_by_type("chat")
-            self._default_chat_model = chat_models[0].id if chat_models else ""
-        return self._default_chat_model
+    async def _get_default_chat_model(self, user_id: Optional[int] = None) -> str:
+        """
+        解析对话模型：用户偏好 default_chat_model_id > 系统默认（管理员配置 model.chat_default）> 注册表第一个 chat 模型。
+        user_id 为空时跳过用户偏好层。
+        """
+        from app.core.database import new_async_session
+        from app.services.model_registry import resolve_user_chat_model_id
+        async with new_async_session() as db:
+            model = await resolve_user_chat_model_id(db, user_id or 0)
+        if not model:
+            raise RuntimeError("未配置可用的对话模型，请先在配置页同步或添加对话模型")
+        return model
 
     # =====================================================
     # 【会话标题总结】—— 根据对话内容自动生成有意义的标题
@@ -301,8 +306,11 @@ class ChatService:
             user_prompt += f"{role_label}: {item['content']}\n"
         user_prompt += "\n标题："
 
+        # 标题总结为系统级任务：管理员配置 model.title_summary_chat > 系统默认
+        from app.services.model_registry import resolve_system_chat_model_id, SYSTEM_CHAT_MODEL_KEYS
+        title_model = await resolve_system_chat_model_id(None, SYSTEM_CHAT_MODEL_KEYS["title_summary"])
         body = {
-            "model": await self._get_default_chat_model(),
+            "model": title_model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -592,7 +600,7 @@ class ChatService:
                     break
 
         body = {
-            "model": await self._get_default_chat_model(),
+            "model": await self._get_default_chat_model(user_id),
             "messages": request_messages,
             "tools": CHAT_TOOLS,
             "stream": True,
@@ -914,7 +922,7 @@ class ChatService:
             second_messages = request_messages + [assistant_msg] + tool_results
 
             second_body = {
-                "model": await self._get_default_chat_model(),
+                "model": await self._get_default_chat_model(user_id),
                 "messages": second_messages,
             }
 

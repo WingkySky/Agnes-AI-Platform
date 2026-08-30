@@ -106,3 +106,55 @@ async def test_smtp(
 
     logger.info("[系统配置] %s 测试 SMTP 邮件发送到 %s 成功", admin.username, req.test_email)
     return {"message": "测试邮件发送成功"}
+
+
+# =====================================================
+# 系统级模型配置（对话模型解析链的管理员层）
+# - model.chat_default        系统默认对话模型（用户偏好未设置时的兜底）
+# - model.moderation_chat     内容审核模型（系统级任务，不跟随用户偏好）
+# - model.title_summary_chat  会话标题总结模型（系统级任务）
+# 留空 = 跟随兜底链（系统默认 > 注册表第一个 chat 模型）
+# =====================================================
+
+from app.services.system_config_service import get_config_value, set_config_value
+from app.services.model_registry import get_models_by_type, SYSTEM_CHAT_MODEL_KEYS
+
+_MODEL_CONFIG_KEYS = list(SYSTEM_CHAT_MODEL_KEYS.values())
+
+
+class ModelConfigsUpdate(BaseModel):
+    """系统级模型配置更新请求"""
+    configs: dict[str, str]
+
+
+@router.get("/models", summary="[管理员] 获取系统级模型配置")
+async def get_model_configs(
+    db: AsyncSession = Depends(get_async_db),
+    _admin: User = Depends(get_current_admin_user),
+):
+    """返回三个系统级模型配置项当前值 + 可选 chat 模型列表（供下拉选择）"""
+    configs = {key: await get_config_value(db, key, "") for key in _MODEL_CONFIG_KEYS}
+    chat_models = await get_models_by_type("chat")
+    return {
+        "configs": configs,
+        "options": [{"id": m.id, "name": m.name} for m in chat_models],
+    }
+
+
+@router.put("/models", summary="[管理员] 更新系统级模型配置")
+async def update_model_configs(
+    req: ModelConfigsUpdate,
+    db: AsyncSession = Depends(get_async_db),
+    _admin: User = Depends(get_current_admin_user),
+):
+    """批量更新系统级模型配置；值必须为空或命中注册表中的 chat 模型"""
+    chat_ids = {m.id for m in await get_models_by_type("chat")}
+    for key, value in req.configs.items():
+        if key not in _MODEL_CONFIG_KEYS:
+            raise HTTPException(status_code=400, detail=f"未知的模型配置项: {key}")
+        value = (value or "").strip()
+        if value and value not in chat_ids:
+            raise HTTPException(status_code=400, detail=f"模型 {value} 不在聊天模型注册表中")
+        await set_config_value(db, key, value)
+    configs = {key: await get_config_value(db, key, "") for key in _MODEL_CONFIG_KEYS}
+    return {"status": "success", "message": "系统级模型配置已更新", "configs": configs}

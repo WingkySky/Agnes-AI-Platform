@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.project import ProjectShot, ProjectShotAudio, ProjectTimelineClip
 from app.services.project.sse_manager import project_sse_manager
+from app.services.model_registry import resolve_project_chat_model_id
 from app.services.project.wizard import parse_json_loose, _call_llm
 
 logger = logging.getLogger("agnes_platform.project.subtitle")
@@ -191,7 +192,10 @@ async def _generate_subtitles_llm(
 
 严格输出 JSON，不要多余文字。"""
 
-    result_text = await _call_llm(prompt, temperature=0.3)
+    result_text = await _call_llm(
+        prompt, temperature=0.3,
+        fallback_model=await resolve_project_chat_model_id(db, project_id),
+    )
     parsed = parse_json_loose(result_text)
 
     clips_created: List[dict] = []
@@ -427,7 +431,10 @@ async def _generate_subtitles_llm_fallback(
 
 严格输出 JSON，不要多余文字。"""
 
-    result_text = await _call_llm(prompt, temperature=0.3)
+    result_text = await _call_llm(
+        prompt, temperature=0.3,
+        fallback_model=await resolve_project_chat_model_id(db, project_id),
+    )
     parsed = parse_json_loose(result_text)
 
     clips_created: List[dict] = []

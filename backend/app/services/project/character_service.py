@@ -32,6 +32,7 @@ from app.services.project._async_gen import submit_image_task, claim_generation
 from app.services.project._generation_history import record_manual_upload
 from app.services.project.sse_manager import project_sse_manager
 from app.services.project.wizard import parse_json_loose
+from app.services.model_registry import resolve_project_chat_model_id
 
 logger = logging.getLogger("agnes_platform.project.character")
 
@@ -418,8 +419,11 @@ async def extract_characters_from_script(
         '"appearance_desc": "外观描述", "role_type": "main|supporting|minor"}]}\n\n'
         f"剧本：\n{script.content}"
     )
+    model = await resolve_project_chat_model_id(db, project_id)
+    if not model:
+        raise HTTPException(400, "未配置可用的对话模型，请先在配置页同步或添加对话模型")
     body = {
-        "model": "agnes-2.0-flash",
+        "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.5,
     }

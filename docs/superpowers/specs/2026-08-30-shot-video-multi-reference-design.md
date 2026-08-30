@@ -72,7 +72,7 @@ v1 不做"从本镜头首帧 image2image 派生尾帧"的链式生成（依赖�
 
 ## 七、跨镜头衔接（生图阶段）
 
-**开关：** 分镜表编辑步骤（向导步骤 2）每镜头行新增"衔接上一镜"开关，写回 `CanvasShot.linkPrev`；第 1 个镜头开关禁用。
+**开关：** 分镜表编辑步骤（向导步骤 1）每镜头行新增"衔接上一镜"开关，写回 `CanvasShot.linkPrev`；第 1 个镜头开关禁用。
 
 **语义：** 开启后，该镜头的首帧图不再从文本直接生成，而是以上一镜头尾帧图为首张参考图的 image2image 续接生成：
 
@@ -118,7 +118,7 @@ else                        → referenceImages = [首帧URL]
 
 ## 十、UI 变更
 
-1. `ScriptWizardDialog.vue` 向导步骤 2（分镜表编辑）每镜头行新增"衔接上一镜"开关（第 1 镜头禁用，写回 `linkPrev`）。
+1. `ScriptWizardDialog.vue` 向导步骤 1（分镜表编辑）每镜头行新增"衔接上一镜"开关（第 1 镜头禁用，写回 `linkPrev`）。
 2. `ScriptWizardDialog.vue` 第 3 步 `genRows` 改为 role 感知：
    - 主缩略图取 role=first 节点（现状逻辑需过滤掉尾帧节点，否则首帧槽位会被尾帧抢占）；
    - 每行新增尾帧缩略图槽（loading/error 样式与首帧一致）+ "生成尾帧 / 重拍尾帧"按钮 + 定位跳转；

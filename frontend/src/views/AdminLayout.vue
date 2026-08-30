@@ -87,6 +87,12 @@
             </el-menu-item>
             <el-menu-item
               v-if="userStore.isAdmin"
+              index="/admin/system-models">
+              <el-icon><Opportunity /></el-icon>
+              <span>{{ t('admin.modelService.title') }}</span>
+            </el-menu-item>
+            <el-menu-item
+              v-if="userStore.isAdmin"
               index="/admin/email">
               <el-icon><Message /></el-icon>
               <span>{{ t('admin.smtp.title') }}</span>
@@ -118,7 +124,7 @@ import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Setting, Warning, UserFilled, User,
-  Picture, Coin, Cpu, Message, Menu, Checked,
+  Picture, Coin, Cpu, Message, Menu, Checked, Opportunity,
 } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { useUserStore } from '@/stores/user'

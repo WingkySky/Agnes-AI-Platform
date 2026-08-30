@@ -26,7 +26,7 @@ def _build_wizard_chain(
     entity_prompt: str,
     storyboard_prompt: str,
     frame_prompt: str,
-    model: str = "agnes-2.0-flash",
+    model: str = "",  # 空=运行时走解析链（项目所有者偏好 > 系统默认）
 ) -> List[Dict[str, Any]]:
     """构建 4 步 wizard_chain"""
     return [

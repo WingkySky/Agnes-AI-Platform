@@ -458,6 +458,8 @@ export interface ChatMessageListResponse {
 export interface GenerationPreferences {
   default_image_model_id: string
   default_video_model_id: string
+  /** 默认对话模型（创作类 LLM 环节：分镜/聊天/向导/镜头/角色/道具） */
+  default_chat_model_id: string
   default_aspect_ratio: string
   auto_copy_prompt: boolean
   default_image_count: number
@@ -654,6 +656,8 @@ export interface ModelDefinition {
   provider_name: string
   capabilities: string[]
   is_active: boolean
+  /** 用户手动停用（停用后不出现在生成页模型列表，同步不会自动恢复） */
+  is_disabled: boolean
   is_custom: boolean
   sort_order: number
   /** 资源存储策略：auto(按 provider_type 自动判断) / keep(保留原始 URL) / migrate(强制转存对象存储) */
@@ -686,9 +690,22 @@ export interface ModelUpdateRequest {
   provider_name?: string
   capabilities?: string[] | null
   is_active?: boolean
+  /** 用户手动停用（停用后不出现在生成页模型列表，同步不会自动恢复） */
+  is_disabled?: boolean
   sort_order?: number
   /** 资源存储策略：auto / keep / migrate */
   asset_storage_mode?: string
+}
+
+/** 批量停用/启用模型请求 — 对齐 ModelBatchUpdateRequest */
+export interface ModelBatchUpdateRequest {
+  model_ids: string[]
+  is_disabled: boolean
+}
+
+/** 批量删除模型请求 — 对齐 ModelBatchDeleteRequest */
+export interface ModelBatchDeleteRequest {
+  model_ids: string[]
 }
 
 /** 模型同步结果 — 对齐 SyncModelsResponse */

@@ -96,13 +96,18 @@ def _parse_result(content: str) -> StoryboardResult:
     return StoryboardResult(shots=shots, assets=assets)
 
 
-async def generate_storyboard(req: StoryboardRequest) -> StoryboardResult:
-    """生成分镜脚本 + 全剧资产清单：调用 LLM，解析失败重试一次"""
+async def generate_storyboard(req: StoryboardRequest, fallback_model: str = "") -> StoryboardResult:
+    """生成分镜脚本 + 全剧资产清单：调用 LLM，解析失败重试一次
+
+    fallback_model: 路由层按用户偏好解析的兜底模型（req.model 未指定时使用）
+    """
     chat_models = await get_models_by_type("chat")
     if not chat_models:
         raise ValueError("未配置聊天模型")
-    # 指定模型需命中聊天模型注册表，未传或未命中时回退第一个聊天模型
+    # 指定模型需命中聊天模型注册表，未传或未命中时回退兜底链（用户偏好 > 第一个聊天模型）
     model = chat_models[0].id
+    if fallback_model and fallback_model in [m.id for m in chat_models]:
+        model = fallback_model
     if req.model:
         matched = next((m.id for m in chat_models if m.id == req.model), None)
         if matched:

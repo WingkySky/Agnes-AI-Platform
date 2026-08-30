@@ -29,6 +29,7 @@ from app.schemas.project import ShotCreate, ShotUpdate
 from app.services.agnes_client import agnes_client
 from app.services.project.sse_manager import project_sse_manager
 from app.services.project.wizard import parse_json_loose
+from app.services.model_registry import resolve_project_chat_model_id
 
 logger = logging.getLogger("agnes_platform.project.shot")
 
@@ -551,8 +552,11 @@ async def generate_frame_prompt(
         f"关联角色：{char_info}\n"
         f"台词：{shot.dialogue or ''}\n"
     )
+    model = await resolve_project_chat_model_id(db, shot.project_id)
+    if not model:
+        raise HTTPException(400, "未配置可用的对话模型，请先在配置页同步或添加对话模型")
     body = {
-        "model": "agnes-2.0-flash",
+        "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.5,
     }
@@ -645,8 +649,11 @@ async def split_shots_from_script(
         f"可选场景清单：{scene_info}\n"
         f"可选道具清单：{prop_info}\n"
     )
+    model = await resolve_project_chat_model_id(db, project_id)
+    if not model:
+        raise HTTPException(400, "未配置可用的对话模型，请先在配置页同步或添加对话模型")
     body = {
-        "model": "agnes-2.0-flash",
+        "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.6,
     }

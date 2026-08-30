@@ -32,6 +32,8 @@ export interface CanvasShot {
   characters: string[]
   /** 场景名（资产卡按名命中） */
   location: string
+  /** 跨镜头衔接：本镜头首帧以上一镜尾帧为底图续接生成（第 1 镜无效） */
+  linkPrev: boolean
 }
 
 /** 资产卡（角色/场景参考，存于 script 节点 content.assets，画布本地） */
@@ -54,6 +56,8 @@ export interface ShotLineage {
   scriptPanelId: string
   shotId: string
   shotNo: number
+  /** 帧角色（仅 image lineage）：first=首帧（缺省），last=尾帧（keyframes 结束帧 + 跨镜头衔接底图） */
+  role?: 'first' | 'last'
 }
 
 /* ---------- 常量 ---------- */
@@ -95,7 +99,8 @@ export function readLineage(panel: { content?: Record<string, unknown> }): ShotL
   const kind = v.kind
   if (kind !== 'image' && kind !== 'video') return null
   if (typeof v.scriptPanelId !== 'string' || typeof v.shotId !== 'string' || typeof v.shotNo !== 'number') return null
-  return { kind, scriptPanelId: v.scriptPanelId, shotId: v.shotId, shotNo: v.shotNo }
+  const role = v.role === 'first' || v.role === 'last' ? v.role : undefined
+  return { kind, scriptPanelId: v.scriptPanelId, shotId: v.shotId, shotNo: v.shotNo, role }
 }
 
 /** 读取 script 节点的分镜列表（结构异常的条目跳过，序号/时长缺失按顺序补齐） */
@@ -118,6 +123,7 @@ export function readShots(panel: { content?: Record<string, unknown> }): CanvasS
         ? item.characters.filter((c): c is string => typeof c === 'string')
         : [],
       location: typeof item.location === 'string' ? item.location : '',
+      linkPrev: item.linkPrev === true,
     })
   }
   return shots
@@ -257,6 +263,13 @@ export function buildShotVideoPrompt(shot: CanvasShot): string {
   return lines.join('\n')
 }
 
+/** 尾帧图 prompt 附加行：动作结束瞬间的收尾状态 */
+const TAIL_PROMPT_LINE = '此图为该镜头动作的结束瞬间：与首帧同场景、同人物、同机位，人物动作处于收尾状态'
+/** 衔接首帧 prompt 附加行：承接上一镜尾帧 */
+const LINK_PROMPT_LINE = '画面承接首张参考图的场景、人物与状态，为本镜头的开始瞬间'
+/** 视频多图参考上限（Agnes Video 2.5 Flash 契约） */
+const VIDEO_REF_MAX = 5
+
 /* ---------- 派生节点查找 ---------- */
 
 /**
@@ -285,10 +298,22 @@ export function hasDerivedConfigs(scriptPanelId: string, kind: 'image' | 'video'
   return findDerivedPanels(scriptPanelId, kind).length > 0
 }
 
-/** 某脚本节点各镜头的派生状态（shotId -> 是否已派生分镜图/视频，供面板状态点显示） */
+/** 某镜头的首帧图节点（lineage.role 缺省视为 first；无则 null） */
+export function findFirstFramePanel(scriptPanelId: string, shotId: string): CanvasPanel | null {
+  const hit = findDerivedPanels(scriptPanelId, 'image').find((d) => d.lineage.shotId === shotId && d.lineage.role !== 'last')
+  return hit?.panel || null
+}
+
+/** 某镜头的尾帧图节点（无则 null） */
+export function findTailFramePanel(scriptPanelId: string, shotId: string): CanvasPanel | null {
+  const hit = findDerivedPanels(scriptPanelId, 'image').find((d) => d.lineage.shotId === shotId && d.lineage.role === 'last')
+  return hit?.panel || null
+}
+
+/** 某脚本节点各镜头的派生状态（shotId -> 是否已派生首帧/视频，供面板状态点显示） */
 export function getDerivedShotIds(scriptPanelId: string): { image: Set<string>; video: Set<string> } {
   return {
-    image: new Set(findDerivedPanels(scriptPanelId, 'image').map((d) => d.lineage.shotId)),
+    image: new Set(findDerivedPanels(scriptPanelId, 'image').filter((d) => d.lineage.role !== 'last').map((d) => d.lineage.shotId)),
     video: new Set(findDerivedPanels(scriptPanelId, 'video').map((d) => d.lineage.shotId)),
   }
 }
@@ -345,14 +370,27 @@ function defaultImageSize(): string {
   return matched?.value || '1024x1024'
 }
 
-/** 批量生成前积分预估确认（汇总 count 个任务的总消耗） */
-async function confirmBatchCost(params: { type: 'image' | 'video'; mode?: string; size?: string; seconds?: number }, count: number): Promise<boolean> {
+/** 批量生成前积分预估确认（多组模式混合时分别估后汇总，一次确认） */
+async function confirmGroupedCost(
+  groups: Array<{ type: 'image' | 'video'; mode?: string; size?: string; seconds?: number; count: number }>,
+): Promise<boolean> {
   const { t } = useI18n()
-  const est = await estimateCanvasCost(params)
-  if (!est) return true // 预估失败不阻塞，让生成接口自行处理
-  const total = est.cost * count
-  if (est.balance < total) {
-    ElMessage.error(t('canvas.messages.batchInsufficient', { cost: total, balance: est.balance }))
+  let total = 0
+  let balance = Number.POSITIVE_INFINITY
+  let count = 0
+  let estimated = false
+  for (const group of groups) {
+    if (group.count <= 0) continue
+    count += group.count
+    const est = await estimateCanvasCost(group)
+    if (!est) continue // 单组预估失败不阻塞，让生成接口自行处理
+    estimated = true
+    total += est.cost * group.count
+    balance = Math.min(balance, est.balance)
+  }
+  if (!estimated) return true
+  if (balance < total) {
+    ElMessage.error(t('canvas.messages.batchInsufficient', { cost: total, balance }))
     return false
   }
   try {
@@ -365,6 +403,11 @@ async function confirmBatchCost(params: { type: 'image' | 'video'; mode?: string
   } catch {
     return false
   }
+}
+
+/** 批量生成前积分预估确认（单组便捷封装） */
+async function confirmBatchCost(params: { type: 'image' | 'video'; mode?: string; size?: string; seconds?: number }, count: number): Promise<boolean> {
+  return confirmGroupedCost([{ ...params, count }])
 }
 
 /** 脚本节点的分镜步骤组（StepGroup）：复用已有组，id 记录在节点 content.stepId */
@@ -383,10 +426,22 @@ function ensureShotStep(scriptPanel: CanvasPanel): string {
   return newId
 }
 
-/* ---------- 批量派生分镜图 ---------- */
+/* ---------- 批量派生分镜图 / 尾帧图 ---------- */
 
-/** 派生指定镜头的分镜图（批量/单镜头共用）：上游收集 -> 积分确认 -> 创建直出 image 节点并入队 */
-async function deriveImagesInternal(scriptPanel: CanvasPanel, pending: CanvasShot[]): Promise<void> {
+/** 单项派生任务：镜头 + 帧角色 + 跨镜头衔接信息 */
+interface PendingFrame {
+  shot: CanvasShot
+  role: 'first' | 'last'
+  /** 衔接底图：上一镜尾帧已成功时直接取 URL */
+  linkUrl?: string
+  /** 衔接底图本批自动补生成：指向上一镜尾帧的派生项（任务内等待其完成拿 URL） */
+  tailFrom?: PendingFrame
+  /** 本项完成句柄（生成完成后 resolve 为结果 URL 或 null，供衔接首帧 await） */
+  done?: Promise<string | null>
+}
+
+/** 派生分镜图/尾帧图（批量/单镜头共用）：上游收集 -> 积分确认 -> 创建直出 image 节点并入队 */
+async function deriveImagesInternal(scriptPanel: CanvasPanel, items: PendingFrame[]): Promise<void> {
   const { t } = useI18n()
   const store = useCanvasStore()
   const allShots = readShots(scriptPanel)
@@ -403,44 +458,117 @@ async function deriveImagesInternal(scriptPanel: CanvasPanel, pending: CanvasSho
     .map((p) => readString(p.content, 'content'))
     .filter(Boolean)
 
-  // 积分预估：任一素材来源存在即按 image2image 估算（部分镜头可能命中为空，轻微高估可接受）
+  // 积分预估：任一素材来源或衔接底图存在即按 image2image 估算（部分镜头可能命中为空，轻微高估可接受）
   const mayReference = upstreamRefImages.length > 0 ||
-    [...assets.characters, ...assets.scenes].some((a) => a.imageUrl)
+    [...assets.characters, ...assets.scenes].some((a) => a.imageUrl) ||
+    items.some((item) => item.linkUrl || item.tailFrom)
   // 尺寸默认沿用偏好比例，向导参数栏显式选择后以选择为准
   const imageParams = readPanelGenParams(scriptPanel, 'image', SHOT_IMAGE_PARAMS_KEY, { size: defaultImageSize() })
-  const ok = await confirmBatchCost({ type: 'image', mode: mayReference ? 'image2image' : 'text2image', size: imageParams.size }, pending.length)
+  const ok = await confirmBatchCost({ type: 'image', mode: mayReference ? 'image2image' : 'text2image', size: imageParams.size }, items.length)
   if (!ok) return
 
   store.pushSnapshot()
   const stepId = ensureShotStep(scriptPanel)
   const baseX = scriptPanel.x + scriptPanel.width + 80
+  // 尾帧图排在分镜网格下方独立行带（与其首帧同列），不与首帧节点重叠
+  const tailBaseY = scriptPanel.y + Math.ceil(allShots.length / GRID_COLS) * IMG_PITCH_Y + 60
   const tasks: Array<() => Promise<void>> = []
   let failedCount = 0
+  let linkSkipped = 0
 
-  for (const shot of pending) {
+  for (const item of items) {
+    const shot = item.shot
     // 用全量镜头序号布局，保持网格位置稳定
     const idx = allShots.findIndex((s) => s.id === shot.id)
     const contexts = buildShotContexts(shot, assets, upstreamTexts)
-    // 参考图必须在 addPanel 时一次性写入：updatePanel 的 deepMerge 会把数组转成索引对象
-    const referenceImages = [...upstreamRefImages, ...contexts.characterImages, ...contexts.sceneImages].filter(Boolean)
-    // 直出分镜图：节点自身同时承载配置与结果，lineage 记录出处，不再建 script -> image 连线（连线校验也不允许）
+    const baseRefs = [...upstreamRefImages, ...contexts.characterImages, ...contexts.sceneImages].filter(Boolean)
+    const promptLines = [buildShotImagePrompt(scriptPanel, shot, contexts)]
+    if (item.role === 'last') promptLines.push(TAIL_PROMPT_LINE)
+    if (item.role === 'first' && (item.linkUrl || item.tailFrom)) promptLines.push(LINK_PROMPT_LINE)
+    const x = baseX + (idx % GRID_COLS) * IMG_PITCH_X
+    const y = item.role === 'last'
+      ? tailBaseY + Math.floor(idx / GRID_COLS) * IMG_PITCH_Y
+      : scriptPanel.y + Math.floor(idx / GRID_COLS) * IMG_PITCH_Y
+    const name = item.role === 'last'
+      ? `#${shot.no} ${t('canvas.script.tailSuffix')}`
+      : `#${shot.no} ${scriptPanel.name || ''}`.trim()
+    const lineage = { kind: 'image', scriptPanelId: scriptPanel.id, shotId: shot.id, shotNo: shot.no, role: item.role }
+
+    // 衔接底图本批补生成：等上一镜尾帧成功后再建节点（参考图必须在 addPanel 时一次性写入，deepMerge 数组约束）
+    if (item.tailFrom) {
+      const tailFrom = item.tailFrom
+      tasks.push(async () => {
+        const base = (await tailFrom.done) || ''
+        if (!base) {
+          linkSkipped++
+          return
+        }
+        // 参考图必须在 addPanel 时一次性写入：updatePanel 的 deepMerge 会把数组转成索引对象
+        const referenceImages = [base, ...baseRefs]
+        const panelId = store.addPanel({
+          type: 'image',
+          name,
+          x,
+          y,
+          width: IMG_CONFIG_W,
+          height: IMG_CONFIG_H,
+          content: {
+            status: 'pending',
+            model: imageParams.model,
+            size: imageParams.size,
+            prompt: promptLines.join('\n'),
+            referenceImages,
+            lineage,
+          },
+        })
+        store.addPanelToStep(stepId, panelId)
+        const target = store.panels.find((p) => p.id === panelId)
+        if (!target) return
+        const generatedId = await executeInNodeGeneration(target, store, { waitFor: true })
+        if (!generatedId) failedCount++
+      })
+      continue
+    }
+
+    // 常规（首帧 / 已就绪底图的衔接首帧 / 尾帧）：底图排参考图首位，节点立即创建
+    const referenceImages = item.linkUrl ? [item.linkUrl, ...baseRefs] : baseRefs
     const panelId = store.addPanel({
       type: 'image',
-      name: `#${shot.no} ${scriptPanel.name || ''}`.trim(),
-      x: baseX + (idx % GRID_COLS) * IMG_PITCH_X,
-      y: scriptPanel.y + Math.floor(idx / GRID_COLS) * IMG_PITCH_Y,
+      name,
+      x,
+      y,
       width: IMG_CONFIG_W,
       height: IMG_CONFIG_H,
       content: {
         status: 'pending',
         model: imageParams.model,
         size: imageParams.size,
-        prompt: buildShotImagePrompt(scriptPanel, shot, contexts),
+        prompt: promptLines.join('\n'),
         referenceImages,
-        lineage: { kind: 'image', scriptPanelId: scriptPanel.id, shotId: shot.id, shotNo: shot.no },
+        lineage,
       },
     })
     store.addPanelToStep(stepId, panelId)
+    if (item.role === 'last') {
+      // 完成句柄：供下游衔接首帧 await 拿底图 URL
+      let settle: (url: string | null) => void = () => {}
+      item.done = new Promise<string | null>((resolve) => { settle = resolve })
+      tasks.push(async () => {
+        const target = store.panels.find((p) => p.id === panelId)
+        if (!target) {
+          settle(null)
+          return
+        }
+        const generatedId = await executeInNodeGeneration(target, store, { waitFor: true })
+        if (!generatedId) {
+          failedCount++
+          settle(null)
+          return
+        }
+        settle(readString(target.content, 'content') || null)
+      })
+      continue
+    }
     tasks.push(async () => {
       const target = store.panels.find((p) => p.id === panelId)
       if (!target) return
@@ -449,14 +577,16 @@ async function deriveImagesInternal(scriptPanel: CanvasPanel, pending: CanvasSho
     })
   }
 
-  ElMessage.success(`${t('canvas.messages.batchImagesQueued')} (${pending.length})`)
+  const tailOnly = items.length > 0 && items.every((item) => item.role === 'last')
+  ElMessage.success(`${t(tailOnly ? 'canvas.messages.batchTailsQueued' : 'canvas.messages.batchImagesQueued')} (${items.length})`)
   // 后台并发池执行，不阻塞交互；异常在 waitFor 内部已转节点 error 态，这里补一条汇总提示
   void runPool(tasks, IMAGE_CONCURRENCY).then(() => {
-    if (failedCount > 0) ElMessage.warning(t('canvas.messages.batchImagesFailed', { n: failedCount }))
+    if (failedCount > 0) ElMessage.warning(t(tailOnly ? 'canvas.messages.batchTailsFailed' : 'canvas.messages.batchImagesFailed', { n: failedCount }))
+    if (linkSkipped > 0) ElMessage.warning(t('canvas.messages.linkSkipped', { n: linkSkipped }))
   })
 }
 
-/** 批量派生分镜图（幂等：跳过已派生镜头，重做单个镜头用单镜头入口） */
+/** 批量派生分镜图（幂等：跳过已有首帧的镜头；衔接镜头按需自动补上一镜尾帧作底图） */
 export async function deriveStoryboardImages(scriptPanel: CanvasPanel): Promise<void> {
   const { t } = useI18n()
   const shots = readShots(scriptPanel).slice(0, MAX_SHOTS)
@@ -464,23 +594,64 @@ export async function deriveStoryboardImages(scriptPanel: CanvasPanel): Promise<
     ElMessage.warning(t('canvas.messages.shotsEmpty'))
     return
   }
-  const derivedShotIds = new Set(findDerivedPanels(scriptPanel.id, 'image').map((d) => d.lineage.shotId))
-  const pending = shots.filter((s) => !derivedShotIds.has(s.id))
-  if (pending.length === 0) {
+  const items: PendingFrame[] = []
+  const tailItems = new Map<string, PendingFrame>()
+  let linkBlocked = 0
+  for (const shot of shots) {
+    if (findFirstFramePanel(scriptPanel.id, shot.id)) continue
+    // 跨镜头衔接：以上一镜尾帧为底图续接（上一镜按镜号定位，第 1 镜无衔接）
+    const prev = shot.linkPrev && shot.no > 1 ? shots.find((s) => s.no === shot.no - 1) : undefined
+    if (!prev) {
+      items.push({ shot, role: 'first' })
+      continue
+    }
+    const tail = findTailFramePanel(scriptPanel.id, prev.id)
+    const tailUrl = tail && tail.content?.status === 'success' ? readString(tail.content, 'content') : ''
+    if (tailUrl) {
+      items.push({ shot, role: 'first', linkUrl: tailUrl })
+      continue
+    }
+    if (tail) {
+      // 上一镜尾帧存在但未成功：跳过该镜头，不静默降级为纯文本生成
+      linkBlocked++
+      continue
+    }
+    // 上一镜尾帧缺失：本批自动补生成，衔接首帧在其完成后建节点
+    let tailItem = tailItems.get(prev.id)
+    if (!tailItem) {
+      tailItem = { shot: prev, role: 'last' }
+      tailItems.set(prev.id, tailItem)
+      items.push(tailItem)
+    }
+    items.push({ shot, role: 'first', tailFrom: tailItem })
+  }
+  if (items.length === 0 && linkBlocked === 0) {
     ElMessage.info(t('canvas.messages.batchAllDerived'))
     return
   }
-  await deriveImagesInternal(scriptPanel, pending)
+  await deriveImagesInternal(scriptPanel, items)
+  if (linkBlocked > 0) ElMessage.info(t('canvas.messages.linkSkipped', { n: linkBlocked }))
 }
 
-/** 单镜头派生分镜图（脚本面板内逐镜头生成，已派生时提示跳过） */
+/** 单镜头派生分镜图（已派生时提示跳过；衔接镜头需上一镜尾帧已就绪） */
 export async function deriveImageForShot(scriptPanel: CanvasPanel, shot: CanvasShot): Promise<void> {
   const { t } = useI18n()
-  if (findDerivedPanels(scriptPanel.id, 'image').some((d) => d.lineage.shotId === shot.id)) {
+  if (findFirstFramePanel(scriptPanel.id, shot.id)) {
     ElMessage.info(t('canvas.messages.batchAllDerived'))
     return
   }
-  await deriveImagesInternal(scriptPanel, [shot])
+  const prev = shot.linkPrev && shot.no > 1 ? readShots(scriptPanel).find((s) => s.no === shot.no - 1) : undefined
+  if (prev) {
+    const tail = findTailFramePanel(scriptPanel.id, prev.id)
+    const tailUrl = tail && tail.content?.status === 'success' ? readString(tail.content, 'content') : ''
+    if (!tailUrl) {
+      ElMessage.warning(t('canvas.messages.linkNeedsTail'))
+      return
+    }
+    await deriveImagesInternal(scriptPanel, [{ shot, role: 'first', linkUrl: tailUrl }])
+    return
+  }
+  await deriveImagesInternal(scriptPanel, [{ shot, role: 'first' }])
 }
 
 /** 单镜头重拍：分镜图节点就地重新生成（保留节点上的模型/尺寸/参考图，供向导与工具栏复用） */
@@ -499,7 +670,98 @@ export async function reshootImagePanel(target: CanvasPanel): Promise<void> {
   await executeInNodeGeneration(target, useCanvasStore())
 }
 
-/* ---------- 批量派生视频（图生视频） ---------- */
+/* ---------- 尾帧图派生（keyframes 结束帧 + 跨镜头衔接底图） ---------- */
+
+/** 批量补尾帧：只处理"首帧已成功且尚无尾帧"的镜头 */
+export async function deriveTailFrames(scriptPanel: CanvasPanel): Promise<void> {
+  const { t } = useI18n()
+  const shots = readShots(scriptPanel).slice(0, MAX_SHOTS)
+  if (shots.length === 0) {
+    ElMessage.warning(t('canvas.messages.shotsEmpty'))
+    return
+  }
+  const items: PendingFrame[] = []
+  let notReady = 0
+  for (const shot of shots) {
+    if (findTailFramePanel(scriptPanel.id, shot.id)) continue
+    const first = findFirstFramePanel(scriptPanel.id, shot.id)
+    if (!first || first.content?.status !== 'success') {
+      notReady++
+      continue
+    }
+    items.push({ shot, role: 'last' })
+  }
+  if (items.length === 0) {
+    ElMessage.warning(notReady > 0 ? t('canvas.messages.imagesNotReady') : t('canvas.messages.batchAllDerived'))
+    return
+  }
+  await deriveImagesInternal(scriptPanel, items)
+}
+
+/** 单镜头生成尾帧（首帧已成功且尚无尾帧；向导行内入口） */
+export async function deriveTailFrameForShot(scriptPanel: CanvasPanel, shot: CanvasShot): Promise<void> {
+  const { t } = useI18n()
+  const first = findFirstFramePanel(scriptPanel.id, shot.id)
+  if (!first || first.content?.status !== 'success') {
+    ElMessage.info(t('canvas.messages.imagesNotReady'))
+    return
+  }
+  if (findTailFramePanel(scriptPanel.id, shot.id)) {
+    ElMessage.info(t('canvas.messages.batchAllDerived'))
+    return
+  }
+  await deriveImagesInternal(scriptPanel, [{ shot, role: 'last' }])
+}
+
+/** 分镜图节点一键生成尾帧（悬浮工具栏入口：仅首帧节点有效） */
+export async function deriveTailFrameFromImageNode(imageResultPanel: CanvasPanel): Promise<void> {
+  const { t } = useI18n()
+  const store = useCanvasStore()
+  const info = getShotLineageInfo(imageResultPanel)
+  if (!info || info.lineage.kind !== 'image' || info.lineage.role === 'last') return
+  if (imageResultPanel.content?.status !== 'success') {
+    ElMessage.info(t('canvas.messages.imagesNotReady'))
+    return
+  }
+  const scriptPanel = store.panels.find((p) => p.id === info.lineage.scriptPanelId)
+  const shot = scriptPanel ? readShots(scriptPanel).find((s) => s.id === info.lineage.shotId) : undefined
+  if (!scriptPanel || !shot) return
+  if (findTailFramePanel(scriptPanel.id, shot.id)) {
+    ElMessage.info(t('canvas.messages.batchAllDerived'))
+    return
+  }
+  await deriveImagesInternal(scriptPanel, [{ shot, role: 'last' }])
+}
+
+/* ---------- 批量派生视频（图生视频 / 首尾帧） ---------- */
+
+/** script 节点视频参数里的 refAssets 开关（默认开：未显式关闭即并入资产参考图） */
+export function readRefAssets(scriptPanel: CanvasPanel): boolean {
+  const scoped = scriptPanel.content?.[SHOT_VIDEO_PARAMS_KEY]
+  return !(isRecord(scoped) && scoped.refAssets === false)
+}
+
+/**
+ * 镜头视频取图（keyframe 与 reference 两 mode 互斥，按是否有尾帧自动二选一）：
+ * - 尾帧存在且成功 → keyframes：[首帧, 尾帧]
+ * - 无尾帧 → 多图参考：首帧在前，refAssets 开启时并入命中资产图（≤5 张）
+ * - 尾帧存在但未成功 → null（未就绪，调用方跳过，不静默降级单图）
+ */
+function collectShotVideoRefs(scriptPanel: CanvasPanel, shot: CanvasShot, firstUrl: string): { images: string[]; useKeyframes: boolean } | null {
+  const tail = findTailFramePanel(scriptPanel.id, shot.id)
+  if (tail) {
+    if (tail.content?.status !== 'success') return null
+    return { images: [firstUrl, readString(tail.content, 'content')].filter(Boolean), useKeyframes: true }
+  }
+  const images = [firstUrl]
+  if (readRefAssets(scriptPanel)) {
+    const contexts = buildShotContexts(shot, readAssets(scriptPanel))
+    for (const url of [...contexts.characterImages, ...contexts.sceneImages]) {
+      if (url && !images.includes(url)) images.push(url)
+    }
+  }
+  return { images: images.slice(0, VIDEO_REF_MAX), useKeyframes: false }
+}
 
 export async function deriveStoryboardVideos(scriptPanel: CanvasPanel): Promise<void> {
   const { t } = useI18n()
@@ -513,12 +775,12 @@ export async function deriveStoryboardVideos(scriptPanel: CanvasPanel): Promise<
   const videoShotIds = new Set(findDerivedPanels(scriptPanel.id, 'video').map((d) => d.lineage.shotId))
   const derivedImages = findDerivedPanels(scriptPanel.id, 'image')
 
-  // 只处理"已有成功分镜图"且未派生过视频的镜头
-  const items: Array<{ shot: CanvasShot; imgConfig: CanvasPanel; imageNodeId: string; imageUrl: string }> = []
+  // 只处理"已有成功首帧"且未派生过视频的镜头；尾帧未就绪同样跳过
+  const items: Array<{ shot: CanvasShot; imgConfig: CanvasPanel; imageNodeId: string; images: string[]; useKeyframes: boolean }> = []
   let notReady = 0
   for (const shot of shots) {
     if (videoShotIds.has(shot.id)) continue
-    const entry = derivedImages.find((d) => d.lineage.shotId === shot.id)
+    const entry = derivedImages.find((d) => d.lineage.shotId === shot.id && d.lineage.role !== 'last')
     // 直出节点：源图即节点自身（结果写在自己的 content.content）；存量/手搭 config：反查其结果节点
     const resultNode = entry
       ? (entry.panel.type === 'image'
@@ -530,7 +792,12 @@ export async function deriveStoryboardVideos(scriptPanel: CanvasPanel): Promise<
       notReady++
       continue
     }
-    items.push({ shot, imgConfig: entry.panel, imageNodeId: resultNode.id, imageUrl })
+    const refs = collectShotVideoRefs(scriptPanel, shot, imageUrl)
+    if (!refs) {
+      notReady++
+      continue
+    }
+    items.push({ shot, imgConfig: entry.panel, imageNodeId: resultNode.id, images: refs.images, useKeyframes: refs.useKeyframes })
   }
 
   if (items.length === 0) {
@@ -539,7 +806,12 @@ export async function deriveStoryboardVideos(scriptPanel: CanvasPanel): Promise<
   }
 
   const videoParams = readPanelGenParams(scriptPanel, 'video', SHOT_VIDEO_PARAMS_KEY)
-  const ok = await confirmBatchCost({ type: 'video', mode: 'image2video', seconds: videoParams.seconds }, items.length)
+  // 积分预估：keyframes 组与 image2video 组分别估后汇总（批量内两种模式可能混合）
+  const keyframeCount = items.filter((i) => i.useKeyframes).length
+  const ok = await confirmGroupedCost([
+    { type: 'video', mode: 'keyframes', seconds: videoParams.seconds, count: keyframeCount },
+    { type: 'video', mode: 'image2video', seconds: videoParams.seconds, count: items.length - keyframeCount },
+  ])
   if (!ok) return
 
   store.pushSnapshot()
@@ -573,7 +845,9 @@ export async function deriveStoryboardVideos(scriptPanel: CanvasPanel): Promise<
         frame_rate: params.frame_rate,
         seconds: params.seconds,
         // 参考图必须在 addPanel 时一次性写入：updatePanel 的 deepMerge 会把数组转成索引对象
-        referenceImages: [item.imageUrl],
+        referenceImages: item.images,
+        // 首尾帧模式（有尾帧）：执行器据此路由 keyframes，Agnes 契约 keyframe/reference 互斥
+        ...(item.useKeyframes ? { use_keyframes: true } : {}),
         lineage: { kind: 'video', scriptPanelId: scriptPanel.id, shotId: item.shot.id, shotNo: item.shot.no },
       },
     })
@@ -596,7 +870,7 @@ export async function deriveStoryboardVideos(scriptPanel: CanvasPanel): Promise<
   })
 }
 
-/* ---------- 单镜头派生视频（分镜图节点一键图生视频） ---------- */
+/* ---------- 单镜头派生视频（分镜图节点一键图生视频 / 首尾帧） ---------- */
 
 export async function deriveVideoForShot(imageResultPanel: CanvasPanel): Promise<void> {
   const { t } = useI18n()
@@ -608,14 +882,24 @@ export async function deriveVideoForShot(imageResultPanel: CanvasPanel): Promise
   const shot = scriptPanel ? readShots(scriptPanel).find((s) => s.id === info.lineage.shotId) : undefined
   if (!scriptPanel || !shot) return
 
-  const imageUrl = readString(imageResultPanel.content, 'content')
-  if (!imageUrl) return
+  // 源图：优先取该镜头首帧（从尾帧节点入口触发时也回到首帧作源图）
+  const firstPanel = findFirstFramePanel(scriptPanel.id, shot.id)
+  const firstUrl = firstPanel && firstPanel.content?.status === 'success'
+    ? readString(firstPanel.content, 'content')
+    : readString(imageResultPanel.content, 'content')
+  if (!firstUrl) return
+
+  const refs = collectShotVideoRefs(scriptPanel, shot, firstUrl)
+  if (!refs) {
+    ElMessage.info(t('canvas.messages.tailNotReady'))
+    return
+  }
 
   // 与批量派生同源：脚本节点上的视频参数，时长未选择时沿用镜头时长
   const params = readPanelGenParams(scriptPanel, 'video', SHOT_VIDEO_PARAMS_KEY, {
     seconds: shot.duration || 5,
   })
-  const canGenerate = await checkCreditsBeforeGenerate({ type: 'video', mode: 'image2video', seconds: params.seconds })
+  const canGenerate = await checkCreditsBeforeGenerate({ type: 'video', mode: refs.useKeyframes ? 'keyframes' : 'image2video', seconds: params.seconds })
   if (!canGenerate) return
 
   store.pushSnapshot()
@@ -636,11 +920,15 @@ export async function deriveVideoForShot(imageResultPanel: CanvasPanel): Promise
       resolution: params.resolution,
       frame_rate: params.frame_rate,
       seconds: params.seconds,
-      referenceImages: [imageUrl],
+      // 参考图必须在 addPanel 时一次性写入：updatePanel 的 deepMerge 会把数组转成索引对象
+      referenceImages: refs.images,
+      // 首尾帧模式（有尾帧）：执行器据此路由 keyframes
+      ...(refs.useKeyframes ? { use_keyframes: true } : {}),
       lineage: { kind: 'video', scriptPanelId: scriptPanel.id, shotId: shot.id, shotNo: shot.no },
     },
   })
-  store.addConnection({ source_panel_id: imageResultPanel.id, target_panel_id: panelId, type: 'auto' })
+  const sourceNode = firstPanel || imageResultPanel
+  store.addConnection({ source_panel_id: sourceNode.id, target_panel_id: panelId, type: 'auto' })
   store.addPanelToStep(stepId, panelId)
   const target = store.panels.find((p) => p.id === panelId)
   if (target) await executeInNodeVideoGeneration(target, store)

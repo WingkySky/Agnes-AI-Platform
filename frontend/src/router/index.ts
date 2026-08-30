@@ -169,6 +169,12 @@ const routes: RouteRecordRaw[] = [
         meta: { titleKey: 'admin.modelConfig', requiresAdmin: true }
       },
       {
+        path: 'system-models',
+        name: 'admin-system-models',
+        component: () => import('@/views/admin/ModelServiceConfigView.vue'),
+        meta: { titleKey: 'admin.modelService.title', requiresAdmin: true }
+      },
+      {
         path: 'email',
         name: 'admin-email',
         component: () => import('@/views/EmailConfigView.vue'),

@@ -902,12 +902,18 @@ export async function executeInNodeVideoGeneration(
     inputSummary: { textCount: 0, imageCount: referenceImages.length, videoCount: 0, total: referenceImages.length },
   }
   const params = readPanelGenParams(panel, 'video')
+  // 首尾帧模式（分镜直出写入 use_keyframes）：参考图限首尾 2 张，路由到 keyframes
+  const useKeyframes = panel.content?.use_keyframes === true
+  if (useKeyframes && referenceImages.length > 2) {
+    throw new Error('关键帧模式最多只能使用 2 张参考图（首帧 + 尾帧）')
+  }
   const config: GenerationConfig = {
     model: params.model,
     seconds: params.seconds,
     aspect_ratio: params.aspect_ratio,
     resolution: params.resolution,
     frame_rate: params.frame_rate,
+    use_keyframes: useKeyframes,
   }
 
   // 置 loading：此处只写状态字段，不传 referenceImages 数组（deepMerge 会把数组转成索引对象）

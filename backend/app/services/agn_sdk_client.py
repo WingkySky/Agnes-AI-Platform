@@ -169,13 +169,15 @@ class AGNSDKClientWrapper:
 
         返回值结构与 AgnesAIClient.list_models 兼容：
         OpenAI 风格的 [{"id": "model-id", "name": "...", "type": "...", ...}, ...]
+
+        失败时抛出中文 RuntimeError（认证失败 / 路径不存在等），
+        由模型同步链路透出给前端，避免"同步成功但 0 个"的静默失败。
         """
         client = self._get_client()
         try:
             models = await client.list_models()
         except Exception as e:
-            logger.warning("[AGNSDKClient] 获取模型列表失败: %s", e)
-            return []
+            raise _build_translated_error(e, action="获取模型列表") from e
 
         # 转成 OpenAI 风格的 dict 列表（与 AgnesAIClient.list_models 返回结构对齐）
         result: List[Dict[str, Any]] = []

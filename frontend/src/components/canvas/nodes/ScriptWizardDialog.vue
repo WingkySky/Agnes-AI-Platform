@@ -42,6 +42,7 @@
               <th class="col-camera">{{ t('canvas.script.wizard.colCamera') }}</th>
               <th class="col-scene">{{ t('canvas.script.wizard.colScene') }}</th>
               <th class="col-characters">{{ t('canvas.script.wizard.colCharacters') }}</th>
+              <th class="col-link" :title="t('canvas.script.wizard.linkTip')">{{ t('canvas.script.wizard.colLink') }}</th>
               <th>{{ t('canvas.script.wizard.colDesc') }}</th>
               <th>{{ t('canvas.script.wizard.colDialogue') }}</th>
               <th class="col-action"></th>
@@ -71,6 +72,9 @@
               </td>
               <td class="col-characters">
                 <input :value="shot.characters.join('，')" class="wiz-input" :style="inputStyle" :placeholder="t('canvas.script.wizard.charactersPlaceholder')" @input="onCharactersInput(shot, $event)">
+              </td>
+              <td class="col-link">
+                <input v-model="shot.linkPrev" type="checkbox" :disabled="idx === 0" :title="t('canvas.script.wizard.linkTip')" @change="persistShots">
               </td>
               <td>
                 <textarea v-model="shot.description" rows="2" class="wiz-input" :style="inputStyle" :placeholder="t('canvas.script.descPlaceholder')" @input="persistShots"></textarea>
@@ -159,6 +163,7 @@
                 <span class="gen-status" :class="{ ready: shotStatus.image.has(row.shot.id) }">
                   {{ shotStatus.image.has(row.shot.id) ? t('canvas.script.wizard.shotReady') : t('canvas.script.wizard.shotPending') }}
                 </span>
+                <span v-if="row.shot.linkPrev" class="gen-edited">{{ t('canvas.script.wizard.linkBadge') }}</span>
                 <span v-if="row.promptEdited" class="gen-edited">{{ t('canvas.script.wizard.promptEdited') }}</span>
                 <span class="gen-duration" :style="mutedStyle">{{ row.shot.duration }}s</span>
               </div>
@@ -185,6 +190,30 @@
                 </div>
               </div>
               <span v-else class="gen-none" :style="mutedStyle">{{ t('canvas.script.wizard.noImage') }}</span>
+              <div class="gen-thumb" :title="t('canvas.script.wizard.tailLabel')">
+                <template v-if="row.tailPanel">
+                  <img v-if="row.tailUrl" :src="row.tailUrl" :alt="`#${row.shot.no} ${t('canvas.script.wizard.tailLabel')}`" @click="openGenViewer(row.tailUrl)">
+                  <span v-else class="gen-thumb-empty" :style="mutedStyle">
+                    {{ row.tailFailed ? t('canvas.node.generateFailed') : t('canvas.node.generating') }}
+                  </span>
+                  <div class="gen-thumb-actions">
+                    <button type="button" class="gen-act" @click="locateShotPanel(row.tailPanel)">
+                      {{ t('canvas.script.wizard.locateNode') }}
+                    </button>
+                    <button type="button" class="gen-act" :disabled="row.tailGenerating" @click="reshootShotImage(row.tailPanel)">
+                      {{ t('canvas.script.wizard.reshootTail') }}
+                    </button>
+                  </div>
+                </template>
+                <template v-else>
+                  <span class="gen-thumb-empty" :style="mutedStyle">{{ t('canvas.script.wizard.noTail') }}</span>
+                  <div class="gen-thumb-actions">
+                    <button type="button" class="gen-act" :disabled="!row.imagePanel || row.generating" @click="genTailFrame(row.shot)">
+                      {{ t('canvas.script.wizard.genTail') }}
+                    </button>
+                  </div>
+                </template>
+              </div>
             </div>
           </div>
         </div>
@@ -221,9 +250,16 @@
               <ComposerParamBar v-if="panel" :panel="panel" mode="image" :content-key="SHOT_IMAGE_PARAMS_KEY" />
               <span class="gen-params-label" :style="accentStyle">{{ t('canvas.script.wizard.videoParams') }}</span>
               <ComposerParamBar v-if="panel" :panel="panel" mode="video" :content-key="SHOT_VIDEO_PARAMS_KEY" />
+              <label class="wiz-check" :style="mutedStyle" :title="t('canvas.script.wizard.refAssetsTip')">
+                <input v-model="refAssets" type="checkbox">
+                {{ t('canvas.script.wizard.refAssets') }}
+              </label>
             </div>
             <button type="button" class="wiz-btn primary" :style="primaryBtnStyle" @click="onBatchImages">
               {{ t('canvas.script.wizard.batchImages') }}
+            </button>
+            <button type="button" class="wiz-btn" :style="btnStyle" @click="onBatchTails">
+              {{ t('canvas.script.wizard.batchTails') }}
             </button>
             <button type="button" class="wiz-btn" :style="btnStyle" @click="onBatchVideos">
               {{ t('canvas.script.wizard.batchVideos') }}
@@ -251,8 +287,11 @@ import ImageViewer from '@/components/ImageViewer.vue'
 import {
   deriveStoryboardImages,
   deriveStoryboardVideos,
+  deriveTailFrames,
+  deriveTailFrameForShot,
   findDerivedPanels,
   getDerivedShotIds,
+  readRefAssets,
   ASSET_IMAGE_PARAMS_KEY,
   SHOT_IMAGE_PARAMS_KEY,
   SHOT_VIDEO_PARAMS_KEY,
@@ -370,6 +409,7 @@ function addShot() {
     dialogue: '',
     characters: [],
     location: '',
+    linkPrev: false,
   })
   persistShots()
 }
@@ -505,13 +545,18 @@ const shotPrompts = computed(() => {
 
 /* ---------- 步骤3：分镜图结果关联（缩略图 / 定位 / 重拍） ---------- */
 
-/** 每行渲染数据：镜头 + 最终提示词 + 已派生的分镜图节点（直出 image 节点，取首个） */
+/** 每行渲染数据：镜头 + 最终提示词 + 已派生的首帧/尾帧节点（直出 image 节点，按 lineage.role 分槽） */
 const genRows = computed(() => {
   if (!panel.value) return []
   const imagePanels = new Map<string, CanvasPanel>()
+  const tailPanels = new Map<string, CanvasPanel>()
   for (const d of findDerivedPanels(panel.value.id, 'image')) {
-    if (d.panel.type !== 'image' || imagePanels.has(d.lineage.shotId)) continue
-    imagePanels.set(d.lineage.shotId, d.panel)
+    if (d.panel.type !== 'image') continue
+    if (d.lineage.role === 'last') {
+      if (!tailPanels.has(d.lineage.shotId)) tailPanels.set(d.lineage.shotId, d.panel)
+      continue
+    }
+    if (!imagePanels.has(d.lineage.shotId)) imagePanels.set(d.lineage.shotId, d.panel)
   }
   return shots.value.map((shot) => {
     const p = imagePanels.get(shot.id) || null
@@ -521,6 +566,9 @@ const genRows = computed(() => {
     const nodePromptRaw = p?.content?.prompt
     const nodePrompt = typeof nodePromptRaw === 'string' && nodePromptRaw.trim() ? nodePromptRaw : ''
     const assembled = shotPrompts.value.get(shot.id) || '—'
+    const tp = tailPanels.get(shot.id) || null
+    const tailRawUrl = tp?.content?.content
+    const tailStatus = tp?.content?.status
     return {
       shot,
       prompt: nodePrompt || assembled,
@@ -529,6 +577,10 @@ const genRows = computed(() => {
       thumbUrl: typeof rawUrl === 'string' ? rawUrl : '',
       generating: status === 'loading' || status === 'pending',
       thumbFailed: status === 'error',
+      tailPanel: tp,
+      tailUrl: typeof tailRawUrl === 'string' ? tailRawUrl : '',
+      tailGenerating: tailStatus === 'loading' || tailStatus === 'pending',
+      tailFailed: tailStatus === 'error',
     }
   })
 })
@@ -541,11 +593,24 @@ function locateShotPanel(target: CanvasPanel | null) {
   store.centerOnPanel(target.id)
 }
 
-/** 单镜头重拍（就地重新生成，保留模型/参数/参考图） */
+/** 单镜头重拍（就地重新生成，保留模型/参数/参考图；首帧/尾帧节点通用） */
 function reshootShotImage(target: CanvasPanel | null) {
   if (!target) return
   void reshootImagePanel(target)
 }
+
+/** 单镜头生成尾帧（尚无尾帧时可用） */
+function genTailFrame(shot: CanvasShot) {
+  if (panel.value) void deriveTailFrameForShot(panel.value, shot)
+}
+
+/** 视频参考并入资产图开关（存 shot_video_params.refAssets，默认开） */
+const refAssets = computed({
+  get: () => (panel.value ? readRefAssets(panel.value) : true),
+  set: (v: boolean) => {
+    if (panel.value) store.updatePanel(panel.value.id, { content: { [SHOT_VIDEO_PARAMS_KEY]: { refAssets: v } } })
+  },
+})
 
 /** 放大查看分镜图结果 */
 function openGenViewer(url: string) {
@@ -556,6 +621,10 @@ function openGenViewer(url: string) {
 
 function onBatchImages() {
   if (panel.value) void deriveStoryboardImages(panel.value)
+}
+
+function onBatchTails() {
+  if (panel.value) void deriveTailFrames(panel.value)
 }
 
 function onBatchVideos() {
@@ -746,6 +815,18 @@ function stepTitleStyle(s: { no: number }) {
 .wiz-file {
   display: none;
 }
+.wiz-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+.wiz-check input {
+  cursor: pointer;
+}
 
 /* 步骤1：镜头表格 */
 .shot-table {
@@ -784,6 +865,10 @@ function stepTitleStyle(s: { no: number }) {
 }
 .shot-table .col-characters {
   width: 140px;
+}
+.shot-table .col-link {
+  width: 72px;
+  text-align: center;
 }
 .shot-table .col-action {
   width: 36px;
@@ -955,8 +1040,13 @@ function stepTitleStyle(s: { no: number }) {
 }
 .gen-media {
   flex: none;
-  width: 220px;
+  width: 400px;
   display: flex;
+  gap: 8px;
+}
+.gen-media .gen-thumb {
+  flex: 1;
+  min-width: 0;
 }
 .gen-thumb {
   position: relative;

@@ -15,6 +15,8 @@ from app.schemas.providers import (
     ProviderListResponse,
     CustomModelCreateRequest,
     ModelUpdateRequest,
+    ModelBatchUpdateRequest,
+    ModelBatchDeleteRequest,
     ModelDefinitionResponse,
     ModelListResponse,
     SyncModelsResponse,
@@ -165,10 +167,30 @@ async def add_custom_model(req: CustomModelCreateRequest):
         provider_name=defn.provider_name or "",
         capabilities=defn.capabilities or [],
         is_active=defn.is_active,
+        is_disabled=defn.is_disabled,
         is_custom=defn.is_custom,
         sort_order=defn.sort_order,
         asset_storage_mode=defn.asset_storage_mode or "auto",
     )
+
+
+@router.put("/models/batch", summary="批量停用/启用模型")
+async def batch_update_models(req: ModelBatchUpdateRequest):
+    """批量设置 is_disabled（不触碰同步管理的 is_active），须声明在 /models/{model_id} 之前"""
+    if not req.model_ids:
+        raise HTTPException(status_code=400, detail="model_ids 不能为空")
+    updated = await provider_registry.batch_update_models(req.model_ids, req.is_disabled)
+    action = "停用" if req.is_disabled else "启用"
+    return {"status": "success", "message": f"已{action} {updated} 个模型", "updated": updated}
+
+
+@router.post("/models/batch-delete", summary="批量删除模型")
+async def batch_delete_models(req: ModelBatchDeleteRequest):
+    """批量删除模型定义，须声明在 /models/{model_id} 之前"""
+    if not req.model_ids:
+        raise HTTPException(status_code=400, detail="model_ids 不能为空")
+    deleted = await provider_registry.batch_delete_models(req.model_ids)
+    return {"status": "success", "message": f"已删除 {deleted} 个模型", "deleted": deleted}
 
 
 @router.put("/models/{model_id}", response_model=ModelDefinitionResponse, summary="更新模型定义")
@@ -181,6 +203,7 @@ async def update_model(model_id: str, req: ModelUpdateRequest):
         provider_name=req.provider_name,
         capabilities=req.capabilities,
         is_active=req.is_active,
+        is_disabled=req.is_disabled,
         sort_order=req.sort_order,
         asset_storage_mode=req.asset_storage_mode,
     )
@@ -196,6 +219,7 @@ async def update_model(model_id: str, req: ModelUpdateRequest):
         provider_name=defn.provider_name or "",
         capabilities=defn.capabilities or [],
         is_active=defn.is_active,
+        is_disabled=defn.is_disabled,
         is_custom=defn.is_custom,
         sort_order=defn.sort_order,
         asset_storage_mode=defn.asset_storage_mode or "auto",
@@ -231,7 +255,8 @@ async def sync_provider_models(provider_id: int):
         result = await provider_registry.sync_provider_models(provider_id)
         return SyncModelsResponse(provider_id=provider_id, **result)
     except RuntimeError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        # Provider 不存在或上游调用失败（认证失败 / 路径 404 等），消息透出给前端
+        raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"同步失败: {e}")
 

@@ -14,6 +14,8 @@ import {
   addCustomModel,
   updateModel,
   deleteModel,
+  batchUpdateModels,
+  batchDeleteModels,
   syncProviderModels,
   syncAllProvidersModels,
 } from '@/api/providers'
@@ -108,6 +110,20 @@ export const useProvidersStore = defineStore('providers', () => {
     await fetchModelDefinitions()
   }
 
+  /** 批量停用/启用模型（单次请求，返回实际更新数量） */
+  async function batchSetModelsDisabled(modelIds: string[], isDisabled: boolean) {
+    const resp = await batchUpdateModels({ model_ids: modelIds, is_disabled: isDisabled })
+    await fetchModelDefinitions()
+    return resp.updated
+  }
+
+  /** 批量删除模型（单次请求，返回实际删除数量） */
+  async function batchRemoveModels(modelIds: string[]) {
+    const resp = await batchDeleteModels({ model_ids: modelIds })
+    await fetchModelDefinitions()
+    return resp.deleted
+  }
+
   /** 同步指定 Provider 的模型列表 */
   async function syncProvider(providerId: number): Promise<SyncModelsResponse> {
     syncing.value = true
@@ -146,6 +162,8 @@ export const useProvidersStore = defineStore('providers', () => {
     addModel,
     editModel,
     removeModel,
+    batchSetModelsDisabled,
+    batchRemoveModels,
     syncProvider,
     syncAll,
   }

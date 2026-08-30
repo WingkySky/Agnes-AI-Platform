@@ -455,6 +455,7 @@ class ProviderRegistry:
             result = await session.execute(
                 select(ModelDefinition)
                 .where(ModelDefinition.is_active == True)
+                .where(ModelDefinition.is_disabled == False)  # 用户手动停用的模型不进入生成页模型列表
                 .order_by(ModelDefinition.sort_order, ModelDefinition.id)
             )
             definitions = list(result.scalars().all())
@@ -542,6 +543,7 @@ class ProviderRegistry:
         - 新增的模型自动添加（is_custom=False）
         - 已存在的 API 模型保持不变（用户可能修改过 display_name 等）
         - 用户自定义模型（is_custom=True）不会被覆盖或删除
+        - 用户手动停用（is_disabled=True）的模型保持停用，不会被同步重新激活
         - API 中已不存在的非自定义模型会被标记为 is_active=False（软删除）
 
         返回: {"added": N, "updated": N, "deactivated": N, "total": N}
@@ -894,6 +896,7 @@ class ProviderRegistry:
         provider_name: Optional[str] = None,
         capabilities: Optional[List[str]] = None,
         is_active: Optional[bool] = None,
+        is_disabled: Optional[bool] = None,
         sort_order: Optional[int] = None,
         asset_storage_mode: Optional[str] = None,
     ) -> Optional[ModelDefinition]:
@@ -916,6 +919,8 @@ class ProviderRegistry:
                 defn.capabilities = capabilities
             if is_active is not None:
                 defn.is_active = is_active
+            if is_disabled is not None:
+                defn.is_disabled = is_disabled
             if sort_order is not None:
                 defn.sort_order = sort_order
             if asset_storage_mode is not None:
@@ -942,6 +947,42 @@ class ProviderRegistry:
             logger.info("[ProviderRegistry] 模型已删除: model_id=%s", model_id)
         return deleted
 
+    async def batch_update_models(self, model_ids: List[str], is_disabled: bool) -> int:
+        """
+        批量停用/启用模型（一次 UPDATE，一次缓存刷新）。
+        只修改 is_disabled（用户手动停用标记），不触碰同步管理的 is_active。
+        返回实际更新的行数。
+        """
+        if not model_ids:
+            return 0
+        async with new_async_session() as session:
+            result = await session.execute(
+                update(ModelDefinition)
+                .where(ModelDefinition.model_id.in_(model_ids))
+                .values(is_disabled=is_disabled)
+            )
+            await session.commit()
+            updated = result.rowcount
+
+        await self.refresh_models_cache()
+        logger.info("[ProviderRegistry] 批量%s模型: %d 个", "停用" if is_disabled else "启用", updated)
+        return updated
+
+    async def batch_delete_models(self, model_ids: List[str]) -> int:
+        """批量删除模型定义（一次 DELETE，一次缓存刷新），返回实际删除的行数"""
+        if not model_ids:
+            return 0
+        async with new_async_session() as session:
+            result = await session.execute(
+                delete(ModelDefinition).where(ModelDefinition.model_id.in_(model_ids))
+            )
+            await session.commit()
+            deleted = result.rowcount
+
+        await self.refresh_models_cache()
+        logger.info("[ProviderRegistry] 批量删除模型: %d 个", deleted)
+        return deleted
+
     async def list_models(self, provider_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         列出模型定义（可按 Provider 过滤）。
@@ -964,6 +1005,7 @@ class ProviderRegistry:
                 "provider_name": d.provider_name or "",
                 "capabilities": d.capabilities or [],
                 "is_active": d.is_active,
+                "is_disabled": d.is_disabled,
                 "is_custom": d.is_custom,
                 "sort_order": d.sort_order,
                 "asset_storage_mode": d.asset_storage_mode or "auto",

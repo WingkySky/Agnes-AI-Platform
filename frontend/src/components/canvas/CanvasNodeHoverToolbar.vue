@@ -52,12 +52,12 @@
 import { computed } from 'vue'
 import {
   Info, Trash2, RefreshCw, FolderPlus, Download, MessageSquare,
-  Image as ImageIcon, Minus, Plus, Upload, Video, Music2, Play,
+  Image as ImageIcon, ImagePlus, Minus, Plus, Upload, Video, Music2, Play,
   Copy, FileText, Lock, LockOpen, Brush, Scissors, Grid2x2,
   ZoomIn, Sparkles, Camera, Maximize2,
 } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
-import { getShotLineageInfo } from '@/lib/canvas-storyboard'
+import { findTailFramePanel, getShotLineageInfo } from '@/lib/canvas-storyboard'
 
 const { t } = useI18n()
 
@@ -74,7 +74,7 @@ const emit = defineEmits([
   'upload-image', 'upload-video', 'upload-audio',
   'copy-prompt', 'describe', 'replace-image', 'toggle-ratio',
   'mask-edit', 'crop', 'split', 'upscale', 'super-resolution', 'angle', 'view-large',
-  'derive-video', 'reshoot', 'run-node',
+  'derive-video', 'derive-tail', 'reshoot', 'run-node',
 ])
 
 /* ---------- 节点元数据计算 ---------- */
@@ -145,7 +145,7 @@ const tools = computed(() => {
     })
   }
 
-  // 2.5 分镜派生结果节点（LibTV P0）：图生视频 / 重拍此镜头
+  // 2.5 分镜派生结果节点（LibTV P0）：图生视频 / 生成尾帧 / 重拍此镜头
   const lineageInfo = getShotLineageInfo(props.panel)
   if (lineageInfo && hasContent.value) {
     if (lineageInfo.lineage.kind === 'image' && isImage.value) {
@@ -155,6 +155,18 @@ const tools = computed(() => {
         icon: Video,
         onClick: () => emit('derive-video', props.panel),
       })
+      // 首帧节点且尚无尾帧：生成尾帧图（keyframes 结束帧 + 跨镜头衔接底图）
+      if (
+        lineageInfo.lineage.role !== 'last' &&
+        !findTailFramePanel(lineageInfo.lineage.scriptPanelId, lineageInfo.lineage.shotId)
+      ) {
+        list.push({
+          id: 'derive-tail',
+          title: t('canvas.hoverToolbar.deriveTail'),
+          icon: ImagePlus,
+          onClick: () => emit('derive-tail', props.panel),
+        })
+      }
     }
     list.push({
       id: 'reshoot',

@@ -88,6 +88,10 @@ class ModelUpdateRequest(BaseModel):
     provider_name: Optional[str] = Field(default=None, description="供应商名称")
     capabilities: Optional[List[str]] = Field(default=None, description="能力标签列表")
     is_active: Optional[bool] = Field(default=None, description="是否激活")
+    is_disabled: Optional[bool] = Field(
+        default=None,
+        description="是否用户手动停用（停用后不出现在生成页模型列表，同步不会自动恢复）",
+    )
     sort_order: Optional[int] = Field(default=None, description="排序权重")
     asset_storage_mode: Optional[str] = Field(default=None, description="资源存储策略: auto/keep/migrate")
 
@@ -102,6 +106,7 @@ class ModelDefinitionResponse(BaseModel):
     provider_name: str = ""
     capabilities: List[str] = Field(default_factory=list)
     is_active: bool
+    is_disabled: bool = False
     is_custom: bool
     sort_order: int
     asset_storage_mode: str = Field(default="auto", description="资源存储策略: auto/keep/migrate")
@@ -114,6 +119,17 @@ class ModelListResponse(BaseModel):
     """模型定义列表响应"""
     total: int
     items: List[ModelDefinitionResponse]
+
+
+class ModelBatchUpdateRequest(BaseModel):
+    """批量更新模型请求体（当前仅支持停用/启用）"""
+    model_ids: List[str] = Field(..., description="模型 ID 列表")
+    is_disabled: bool = Field(..., description="是否停用")
+
+
+class ModelBatchDeleteRequest(BaseModel):
+    """批量删除模型请求体"""
+    model_ids: List[str] = Field(..., description="模型 ID 列表")
 
 
 # =====================================================

@@ -11,7 +11,7 @@ from app.core.database import Base
 
 
 # 默认系统配置（首次启动时初始化）
-# 分类：smtp / site / security
+# 分类：smtp / site / security / model
 DEFAULT_SYSTEM_CONFIGS = {
     # ---------- SMTP 邮件配置 ----------
     "smtp_host": {"value": "", "category": "smtp", "description": "SMTP 服务器地址"},
@@ -21,6 +21,10 @@ DEFAULT_SYSTEM_CONFIGS = {
     "smtp_from_email": {"value": "", "category": "smtp", "description": "发件人邮箱地址"},
     "smtp_from_name": {"value": "Agnes AI Platform", "category": "smtp", "description": "发件人显示名称"},
     "smtp_use_tls": {"value": "true", "category": "smtp", "description": "是否使用 TLS 加密"},
+    # ---------- 系统级模型配置（管理员后台） ----------
+    "model.chat_default": {"value": "", "category": "model", "description": "系统默认对话模型（用户未设置偏好时的兜底，留空用注册表第一个 chat 模型）"},
+    "model.moderation_chat": {"value": "", "category": "model", "description": "内容审核对话模型（留空跟随系统默认对话模型）"},
+    "model.title_summary_chat": {"value": "", "category": "model", "description": "会话标题总结模型（留空跟随系统默认对话模型）"},
 }
 
 

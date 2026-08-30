@@ -58,13 +58,15 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column :label="t('settings.colDefault')" width="90" align="center">
+        <el-table-column :label="t('settings.colDefault')" width="100" align="center">
           <template #default="{ row }">
             <el-tag v-if="row.is_default" type="warning" size="small">{{ t('settings.isDefault') }}</el-tag>
-            <span v-else>—</span>
+            <el-button v-else link type="primary" size="small" @click="handleSetDefault(row)">
+              {{ t('settings.setDefault') }}
+            </el-button>
           </template>
         </el-table-column>
-        <el-table-column :label="t('settings.colActions')" width="280" fixed="right">
+        <el-table-column :label="t('settings.colActions')" width="380" fixed="right">
           <template #default="{ row }">
             <el-button
               size="small"
@@ -74,16 +76,13 @@
               @click="handleSyncProvider(row)">
               {{ t('settings.syncModels') }}
             </el-button>
-            <el-button
-              v-if="!row.is_default"
-              size="small"
-              @click="handleSetDefault(row)">
-              {{ t('settings.setDefault') }}
+            <el-button size="small" :icon="Plus" @click="openModelDialog(undefined, row.id)">
+              {{ t('settings.addModelShort') }}
             </el-button>
             <el-button size="small" :icon="Edit" @click="openProviderDialog(row)">
               {{ t('common.edit') }}
             </el-button>
-            <el-button size="small" type="danger" :icon="Delete" @click="handleDeleteProvider(row)">
+            <el-button size="small" type="danger" plain :icon="Delete" @click="handleDeleteProvider(row)">
               {{ t('common.delete') }}
             </el-button>
           </template>
@@ -99,6 +98,20 @@
           <p class="section-desc">{{ t('settings.modelDesc') }}</p>
         </div>
         <div class="section-actions">
+          <el-select
+            v-model="filterModelType"
+            size="small"
+            style="width: 110px"
+            :placeholder="t('settings.filterAllTypes')">
+            <el-option :label="t('settings.filterAllTypes')" value="" />
+            <el-option :label="t('settings.typeImage')" value="image" />
+            <el-option :label="t('settings.typeVideo')" value="video" />
+            <el-option :label="t('settings.typeChat')" value="chat" />
+          </el-select>
+          <div class="show-disabled-toggle">
+            <el-switch v-model="showDisabled" size="small" />
+            <span>{{ t('settings.showDisabled') }}</span>
+          </div>
           <el-button type="primary" :icon="Plus" @click="openModelDialog()">
             {{ t('settings.addModel') }}
           </el-button>
@@ -117,19 +130,43 @@
         </el-tabs>
       </div>
 
+      <!-- 批量操作条（选中行后显示） -->
+      <div v-if="selectedModels.length > 0" class="batch-bar">
+        <span class="batch-count">{{ t('settings.selectedCount').replace('{count}', String(selectedModels.length)) }}</span>
+        <el-button size="small" type="warning" plain @click="handleBatchDisabled(true)">
+          {{ t('settings.batchDisable') }}
+        </el-button>
+        <el-button size="small" type="success" plain @click="handleBatchDisabled(false)">
+          {{ t('settings.batchEnable') }}
+        </el-button>
+        <el-button size="small" type="danger" plain @click="handleBatchDelete">
+          {{ t('settings.batchDelete') }}
+        </el-button>
+      </div>
+
       <el-table
+        ref="modelTableRef"
         :data="filteredModelDefinitions"
         v-loading="providersStore.loading"
         stripe
+        row-key="model_id"
+        :row-class-name="modelRowClassName"
+        @selection-change="handleSelectionChange"
         class="settings-table">
-        <el-table-column :label="t('settings.colModelId')" prop="model_id" min-width="200" show-overflow-tooltip />
-        <el-table-column :label="t('settings.colDisplayName')" prop="display_name" min-width="180" />
-        <el-table-column :label="t('settings.colType')" width="90" align="center">
+        <el-table-column type="selection" width="42" />
+        <el-table-column :label="t('settings.colModelId')" prop="model_id" min-width="200" show-overflow-tooltip sortable />
+        <el-table-column :label="t('settings.colDisplayName')" prop="display_name" min-width="180" sortable />
+        <el-table-column :label="t('settings.colType')" prop="type" width="100" align="center" sortable>
           <template #default="{ row }">
             <el-tag :type="typeTagType(row.type)" size="small">{{ typeLabel(row.type) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column :label="t('settings.colProvider')" prop="provider_name" min-width="120" />
+        <el-table-column :label="t('settings.colOwner')" prop="provider_id" min-width="150" sortable>
+          <template #default="{ row }">
+            {{ providerNameById.get(row.provider_id) || `#${row.provider_id}` }}
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('settings.colProvider')" prop="provider_name" min-width="120" sortable />
         <el-table-column :label="t('settings.colCustom')" width="100" align="center">
           <template #default="{ row }">
             <el-tag :type="row.is_custom ? 'warning' : 'info'" size="small">
@@ -139,9 +176,7 @@
         </el-table-column>
         <el-table-column :label="t('settings.colStatus')" width="90" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.is_active ? 'success' : 'info'" size="small">
-              {{ row.is_active ? t('settings.active') : t('settings.inactive') }}
-            </el-tag>
+            <el-tag :type="modelStatusTagType(row)" size="small">{{ modelStatusLabel(row) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column :label="t('settings.colCapabilities')" min-width="200">
@@ -156,12 +191,24 @@
             <span v-if="!row.capabilities || row.capabilities.length === 0">—</span>
           </template>
         </el-table-column>
-        <el-table-column :label="t('settings.colActions')" width="180" fixed="right">
+        <el-table-column :label="t('settings.colActions')" width="280" fixed="right">
           <template #default="{ row }">
+            <el-button
+              v-if="!row.is_disabled"
+              size="small"
+              type="warning"
+              plain
+              :icon="TurnOff"
+              @click="handleToggleModel(row)">
+              {{ t('settings.disableModel') }}
+            </el-button>
+            <el-button v-else size="small" type="success" plain :icon="Open" @click="handleToggleModel(row)">
+              {{ t('settings.enableModel') }}
+            </el-button>
             <el-button size="small" :icon="Edit" @click="openModelDialog(row)">
               {{ t('common.edit') }}
             </el-button>
-            <el-button size="small" type="danger" :icon="Delete" @click="handleDeleteModel(row)">
+            <el-button size="small" type="danger" plain :icon="Delete" @click="handleDeleteModel(row)">
               {{ t('common.delete') }}
             </el-button>
           </template>
@@ -186,11 +233,16 @@
             filterable
             allow-create
             default-first-option>
-            <el-option
-              v-for="opt in PROVIDER_TYPE_OPTIONS"
-              :key="opt.value"
-              :label="opt.label"
-              :value="opt.value" />
+            <el-option-group
+              v-for="group in PROVIDER_TYPE_GROUPS"
+              :key="group.label"
+              :label="group.label">
+              <el-option
+                v-for="opt in group.options"
+                :key="opt.value"
+                :label="opt.label"
+                :value="opt.value" />
+            </el-option-group>
           </el-select>
           <div class="form-item-hint">{{ t('settings.formProviderTypeHint') }}</div>
         </el-form-item>
@@ -203,6 +255,9 @@
             type="password"
             show-password
             :placeholder="editingProvider ? t('settings.formApiKeyHint') : t('settings.formApiKeyPlaceholder')" />
+          <div v-if="editingProvider?.api_key" class="form-item-hint">
+            {{ t('settings.formApiKeySaved').replace('{key}', editingProvider.api_key) }}
+          </div>
         </el-form-item>
         <el-form-item :label="t('settings.formPollUrl')">
           <el-input v-model="providerForm.poll_url" :placeholder="t('settings.formPollUrlPlaceholder')" />
@@ -266,8 +321,9 @@
             <el-option label="text" value="text" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="editingModel" :label="t('settings.formIsActive')">
-          <el-switch v-model="modelForm.is_active" />
+        <el-form-item v-if="editingModel" :label="t('settings.formModelEnabled')">
+          <el-switch v-model="modelEnabled" />
+          <div class="form-item-hint">{{ t('settings.formModelEnabledHint') }}</div>
         </el-form-item>
         <!-- 资源存储方式：决定生成结果（图片/视频）的转存策略 -->
         <el-form-item :label="t('settings.formAssetStorageMode')">
@@ -289,8 +345,8 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { Plus, Edit, Delete, Refresh, Setting } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules, type TableInstance } from 'element-plus'
+import { Plus, Edit, Delete, Refresh, Setting, Open, TurnOff } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { useProvidersStore } from '@/stores/providers'
 import { useModelsStore } from '@/stores/models'
@@ -306,6 +362,13 @@ const submitting = ref(false)
 
 // ---------- 模型按 Provider 分组 ----------
 const selectedModelProvider = ref('')
+// 是否在列表中显示已手动停用的模型（默认隐藏，保持列表干净）
+const showDisabled = ref(false)
+// 模型类型筛选（'' = 全部类型）
+const filterModelType = ref('')
+// 表格多选状态（批量操作用）
+const selectedModels = ref<ModelDefinition[]>([])
+const modelTableRef = ref<TableInstance>()
 
 // 按 provider_name 分组的模型列表
 const modelProviderGroups = computed(() => {
@@ -321,12 +384,19 @@ const modelProviderGroups = computed(() => {
   return groups
 })
 
-// 根据选中的 Provider 过滤模型
+// 按类型 + Provider 过滤模型（默认隐藏手动停用的模型）
 const filteredModelDefinitions = computed(() => {
-  if (!selectedModelProvider.value) {
-    return providersStore.modelDefinitions
+  let list = providersStore.modelDefinitions
+  if (!showDisabled.value) {
+    list = list.filter((m) => !m.is_disabled)
   }
-  return providersStore.modelDefinitions.filter(m => m.provider_name === selectedModelProvider.value)
+  if (filterModelType.value) {
+    list = list.filter((m) => m.type === filterModelType.value)
+  }
+  if (!selectedModelProvider.value) {
+    return list
+  }
+  return list.filter((m) => m.provider_name === selectedModelProvider.value)
 })
 
 function handleModelProviderChange(tab: { name: string }) {
@@ -334,29 +404,40 @@ function handleModelProviderChange(tab: { name: string }) {
 }
 
 // ---------- Provider Type 选项（对齐 aibridge 已注册的 adapter） ----------
-// 仅展示常见的视频/图像/对话类 Provider，其他可通过 allow-create 自由输入
-const PROVIDER_TYPE_OPTIONS: { value: string; label: string }[] = [
-  { value: 'agnes', label: 'Agnes AI（默认）' },
-  { value: 'volcengine_cv', label: '火山引擎（Seedance / Seedream）' },
-  { value: 'seedance', label: 'Seedance（火山引擎视频）' },
-  { value: 'seedream', label: 'Seedream（火山引擎图像）' },
-  { value: 'doubao', label: '豆包（字节跳动）' },
-  { value: 'kling', label: '可灵 AI（Kling）' },
-  { value: 'runway', label: 'Runway' },
-  { value: 'pika', label: 'Pika' },
-  { value: 'luma', label: 'Luma AI' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'azure', label: 'Azure OpenAI' },
-  { value: 'gemini', label: 'Google Gemini' },
-  { value: 'anthropic', label: 'Anthropic Claude' },
-  { value: 'deepseek', label: 'DeepSeek' },
-  { value: 'qwen', label: '阿里云通义千问' },
-  { value: 'glm', label: '智谱 GLM' },
-  { value: 'hunyuan', label: '腾讯混元' },
-  { value: 'ernie', label: '百度文心一言' },
-  { value: 'minimax', label: 'MiniMax' },
-  { value: 'stability', label: 'Stability AI' },
-  { value: 'ideogram', label: 'Ideogram' },
+// 分两组：协议兼容接入（任意 OpenAI / Anthropic 协议的中转端点）+ 厂商适配器；
+// 其他 adapter 可通过 allow-create 自由输入
+const PROVIDER_TYPE_GROUPS: { label: string; options: { value: string; label: string }[] }[] = [
+  {
+    label: t('settings.protocolGroup'),
+    options: [
+      { value: 'openai', label: t('settings.providerTypeOpenaiCompat') },
+      { value: 'anthropic', label: t('settings.providerTypeAnthropicCompat') },
+    ],
+  },
+  {
+    label: t('settings.vendorGroup'),
+    options: [
+      { value: 'agnes', label: 'Agnes AI（默认）' },
+      { value: 'volcengine_cv', label: '火山引擎（Seedance / Seedream）' },
+      { value: 'seedance', label: 'Seedance（火山引擎视频）' },
+      { value: 'seedream', label: 'Seedream（火山引擎图像）' },
+      { value: 'doubao', label: '豆包（字节跳动）' },
+      { value: 'kling', label: '可灵 AI（Kling）' },
+      { value: 'runway', label: 'Runway' },
+      { value: 'pika', label: 'Pika' },
+      { value: 'luma', label: 'Luma AI' },
+      { value: 'azure', label: 'Azure OpenAI' },
+      { value: 'gemini', label: 'Google Gemini' },
+      { value: 'deepseek', label: 'DeepSeek' },
+      { value: 'qwen', label: '阿里云通义千问' },
+      { value: 'glm', label: '智谱 GLM' },
+      { value: 'hunyuan', label: '腾讯混元' },
+      { value: 'ernie', label: '百度文心一言' },
+      { value: 'minimax', label: 'MiniMax' },
+      { value: 'stability', label: 'Stability AI' },
+      { value: 'ideogram', label: 'Ideogram' },
+    ],
+  },
 ]
 
 // ---------- Provider 弹窗 ----------
@@ -390,9 +471,18 @@ const modelForm = reactive({
   model_type: '',
   provider_name: '',
   capabilities: [] as string[],
-  is_active: true,
+  // 用户手动停用标记（同步永不修改；与同步管理的 is_active 区分）
+  is_disabled: false,
   // 资源存储策略：auto(按 provider_type 自动判断) / keep(保留原始 URL) / migrate(强制转存对象存储)
   asset_storage_mode: 'auto',
+})
+
+// 弹窗中的"启用"开关（与 is_disabled 互为取反）
+const modelEnabled = computed({
+  get: () => !modelForm.is_disabled,
+  set: (v: boolean) => {
+    modelForm.is_disabled = !v
+  },
 })
 const modelRules: FormRules = {
   provider_id: [{ required: true, message: t('settings.formModelProvider'), trigger: 'change' }],
@@ -449,15 +539,18 @@ function openProviderDialog(provider?: ApiProvider) {
   providerDialogVisible.value = true
 }
 
-/** Adapter 类型表格标签文案：优先匹配预置选项，未匹配则原样返回 */
+/** Adapter 类型表格标签文案：优先匹配预置选项（含协议分组），未匹配则原样返回 */
 function providerTypeLabel(type: string): string {
-  const opt = PROVIDER_TYPE_OPTIONS.find((o) => o.value === type)
-  return opt ? opt.label : type
+  for (const group of PROVIDER_TYPE_GROUPS) {
+    const opt = group.options.find((o) => o.value === type)
+    if (opt) return opt.label
+  }
+  return type
 }
 
-/** Adapter 类型表格标签颜色：agnes=primary，国内主流=success，视频类=warning，其他=info */
+/** Adapter 类型表格标签颜色：agnes/协议兼容=primary，国内主流=success，视频类=warning，其他=info */
 function providerTypeTagType(type: string): 'primary' | 'success' | 'warning' | 'info' {
-  if (type === 'agnes') return 'primary'
+  if (type === 'agnes' || type === 'openai' || type === 'anthropic') return 'primary'
   if (['kling', 'doubao', 'qwen', 'glm', 'hunyuan', 'ernie', 'minimax', 'seedance', 'seedream', 'volcengine_cv'].includes(type)) return 'success'
   if (['runway', 'pika', 'luma', 'stability', 'ideogram'].includes(type)) return 'warning'
   return 'info'
@@ -571,7 +664,13 @@ async function handleSyncAll() {
 }
 
 // ---------- 模型操作 ----------
-function openModelDialog(model?: ModelDefinition) {
+
+// 模型归属的 Provider 名称反查表（provider_id → 配置的 Provider 名称）
+const providerNameById = computed(() => {
+  return new Map(providersStore.providers.map((p) => [p.id, p.name]))
+})
+
+function openModelDialog(model?: ModelDefinition, presetProviderId?: number) {
   editingModel.value = model || null
   if (model) {
     Object.assign(modelForm, {
@@ -581,23 +680,90 @@ function openModelDialog(model?: ModelDefinition) {
       model_type: model.type,
       provider_name: model.provider_name,
       capabilities: [...(model.capabilities || [])],
-      is_active: model.is_active,
+      is_disabled: !!model.is_disabled,
       // 回填资源存储策略，旧数据缺字段时回退到默认 auto
       asset_storage_mode: model.asset_storage_mode || 'auto',
     })
   } else {
     Object.assign(modelForm, {
-      provider_id: providersStore.providers[0]?.id || 0,
+      // 从 Provider 行「添加模型」进入时预选该 Provider
+      provider_id: presetProviderId || providersStore.providers[0]?.id || 0,
       model_id: '',
       display_name: '',
       model_type: '',
       provider_name: '',
       capabilities: [],
-      is_active: true,
+      is_disabled: false,
       asset_storage_mode: 'auto',
     })
   }
   modelDialogVisible.value = true
+}
+
+/** 模型状态三态：已停用（用户手动停用）/ 未激活（同步标记 API 已下线）/ 已激活 */
+function modelStatusLabel(model: ModelDefinition): string {
+  if (model.is_disabled) return t('settings.disabled')
+  if (!model.is_active) return t('settings.modelInactive')
+  return t('settings.active')
+}
+
+function modelStatusTagType(model: ModelDefinition): 'success' | 'info' | 'warning' {
+  if (model.is_disabled) return 'info'
+  if (!model.is_active) return 'warning'
+  return 'success'
+}
+
+/** 已停用模型整行弱化显示 */
+function modelRowClassName({ row }: { row: ModelDefinition }): string {
+  return row.is_disabled ? 'model-row-disabled' : ''
+}
+
+/** 停用 / 启用模型（不删除，停用后不出现在生成页模型列表，同步也不会自动恢复） */
+async function handleToggleModel(model: ModelDefinition) {
+  const nextDisabled = !model.is_disabled
+  await providersStore.editModel(model.model_id, { is_disabled: nextDisabled })
+  ElMessage.success(nextDisabled ? t('settings.modelDisabled') : t('settings.modelEnabled'))
+  modelsStore.loaded = false
+  await modelsStore.fetchConfig()
+}
+
+// ---------- 模型批量操作 ----------
+function handleSelectionChange(rows: ModelDefinition[]) {
+  selectedModels.value = rows
+}
+
+/** 批量操作后清空多选（fetchModelDefinitions 换了数据，需手动清） */
+function clearModelSelection() {
+  selectedModels.value = []
+  modelTableRef.value?.clearSelection()
+}
+
+async function handleBatchDisabled(disabled: boolean) {
+  const ids = selectedModels.value.map((m) => m.model_id)
+  const count = await providersStore.batchSetModelsDisabled(ids, disabled)
+  ElMessage.success(t(disabled ? 'settings.batchDisabled' : 'settings.batchEnabled').replace('{count}', String(count)))
+  clearModelSelection()
+  modelsStore.loaded = false
+  await modelsStore.fetchConfig()
+}
+
+async function handleBatchDelete() {
+  const ids = selectedModels.value.map((m) => m.model_id)
+  try {
+    await ElMessageBox.confirm(
+      t('settings.confirmBatchDelete').replace('{count}', String(ids.length)),
+      t('common.delete'),
+      { type: 'warning' }
+    )
+  } catch {
+    // 用户取消
+    return
+  }
+  const count = await providersStore.batchRemoveModels(ids)
+  ElMessage.success(t('settings.batchDeleted').replace('{count}', String(count)))
+  clearModelSelection()
+  modelsStore.loaded = false
+  await modelsStore.fetchConfig()
 }
 
 async function submitModel() {
@@ -612,7 +778,7 @@ async function submitModel() {
           model_type: modelForm.model_type,
           provider_name: modelForm.provider_name,
           capabilities: modelForm.capabilities,
-          is_active: modelForm.is_active,
+          is_disabled: modelForm.is_disabled,
           asset_storage_mode: modelForm.asset_storage_mode,
         })
         ElMessage.success(t('settings.modelUpdated'))
@@ -719,6 +885,38 @@ async function handleDeleteModel(model: ModelDefinition) {
   width: 100%;
 }
 
+/* 显示已停用模型开关 */
+.show-disabled-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--agnes-text-muted);
+}
+
+/* 批量操作条 */
+.batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  background: var(--agnes-bg-hover);
+  border: 1px solid var(--agnes-border-faint);
+  border-radius: 8px;
+}
+
+.batch-count {
+  font-size: 13px;
+  color: var(--agnes-text-primary);
+  margin-right: 4px;
+}
+
+/* 已停用模型整行弱化显示 */
+:deep(.el-table .model-row-disabled) {
+  opacity: 0.55;
+}
+
 /* 表单项提示文案：adapter 类型说明等 */
 .form-item-hint {
   margin-top: 4px;
@@ -776,6 +974,33 @@ async function handleDeleteModel(model: ModelDefinition) {
   --el-table-header-text-color: var(--agnes-text-secondary);
   --el-table-text-color: var(--agnes-text-primary);
   --el-table-row-hover-bg-color: var(--agnes-primary-border-faint);
+}
+
+/* 固定列不透明化：主题表格底色均为半透明色，sticky 固定列会透出滚动到其下方的内容。
+   用「半透明主题色叠层 + 实色底 --agnes-bg-base」在固定列上合成与普通单元格一致的观感 */
+:deep(.el-table .el-table-fixed-column--left.el-table__cell),
+:deep(.el-table .el-table-fixed-column--right.el-table__cell) {
+  background-color: var(--agnes-bg-base);
+  background-image: linear-gradient(var(--agnes-bg-input), var(--agnes-bg-input));
+}
+
+:deep(.el-table th.el-table-fixed-column--left.el-table__cell),
+:deep(.el-table th.el-table-fixed-column--right.el-table__cell) {
+  background-color: var(--agnes-bg-base) !important;
+  background-image: linear-gradient(var(--agnes-bg-hover), var(--agnes-bg-hover)),
+    linear-gradient(var(--agnes-bg-input), var(--agnes-bg-input)) !important;
+}
+
+:deep(.el-table--striped .el-table__body tr.el-table__row--striped .el-table-fixed-column--left.el-table__cell),
+:deep(.el-table--striped .el-table__body tr.el-table__row--striped .el-table-fixed-column--right.el-table__cell) {
+  background-image: linear-gradient(var(--agnes-bg-hover), var(--agnes-bg-hover)),
+    linear-gradient(var(--agnes-bg-input), var(--agnes-bg-input));
+}
+
+:deep(.el-table__body tr.hover-row > td.el-table-fixed-column--left.el-table__cell),
+:deep(.el-table__body tr.hover-row > td.el-table-fixed-column--right.el-table__cell) {
+  background-image: linear-gradient(var(--el-table-row-hover-bg-color), var(--el-table-row-hover-bg-color)),
+    linear-gradient(var(--agnes-bg-input), var(--agnes-bg-input));
 }
 
 :deep(.el-table th.el-table__cell) {

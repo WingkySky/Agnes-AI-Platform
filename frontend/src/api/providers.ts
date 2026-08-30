@@ -13,6 +13,8 @@ import type {
   ModelListResponse,
   CustomModelCreateRequest,
   ModelUpdateRequest,
+  ModelBatchUpdateRequest,
+  ModelBatchDeleteRequest,
   SyncModelsResponse,
   SyncAllResponse,
 } from '@/types'
@@ -68,6 +70,16 @@ export function updateModel(modelId: string, data: ModelUpdateRequest): Promise<
 /** 删除模型定义 */
 export function deleteModel(modelId: string): Promise<{ status: string; message: string }> {
   return client.delete(`/api/models/${modelId}`)
+}
+
+/** 批量停用/启用模型 */
+export function batchUpdateModels(data: ModelBatchUpdateRequest): Promise<{ status: string; message: string; updated: number }> {
+  return client.put('/api/models/batch', data)
+}
+
+/** 批量删除模型 */
+export function batchDeleteModels(data: ModelBatchDeleteRequest): Promise<{ status: string; message: string; deleted: number }> {
+  return client.post('/api/models/batch-delete', data)
 }
 
 // =====================================================
