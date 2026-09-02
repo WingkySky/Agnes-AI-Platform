@@ -321,6 +321,25 @@
             <el-option label="text" value="text" />
           </el-select>
         </el-form-item>
+        <!-- 生成能力配置：按模型差异化的约束（留空=自动，按模型名识别同族特例） -->
+        <el-form-item :label="t('settings.formMaxRefImages')">
+          <el-input-number v-model="modelForm.max_ref_images" :min="1" :max="99" :placeholder="t('settings.genParamsAuto')" controls-position="right" style="width: 100%" />
+          <div class="form-item-hint">{{ t('settings.formMaxRefImagesHint') }}</div>
+        </el-form-item>
+        <el-form-item :label="t('settings.formWatermarkOff')">
+          <el-select v-model="modelForm.watermark_param_off" clearable :placeholder="t('settings.genParamsAuto')">
+            <el-option :label="t('settings.genWatermarkOff')" :value="true" />
+            <el-option :label="t('settings.genWatermarkKeep')" :value="false" />
+          </el-select>
+        </el-form-item>
+        <el-form-item :label="t('settings.formSizeRule')">
+          <el-select v-model="modelForm.size_rule" clearable :placeholder="t('settings.genParamsAuto')">
+            <el-option label="Seedream" value="seedream" />
+          </el-select>
+        </el-form-item>
+        <el-form-item :label="t('settings.formDefaultSize')">
+          <el-input v-model="modelForm.default_size" clearable :placeholder="t('settings.genParamsAuto')" />
+        </el-form-item>
         <el-form-item v-if="editingModel" :label="t('settings.formModelEnabled')">
           <el-switch v-model="modelEnabled" />
           <div class="form-item-hint">{{ t('settings.formModelEnabledHint') }}</div>
@@ -475,6 +494,11 @@ const modelForm = reactive({
   is_disabled: false,
   // 资源存储策略：auto(按 provider_type 自动判断) / keep(保留原始 URL) / migrate(强制转存对象存储)
   asset_storage_mode: 'auto',
+  // ── 生成能力配置（gen_params；空值=自动，按模型名画像判断）──
+  max_ref_images: null as number | null,
+  watermark_param_off: null as boolean | null,
+  size_rule: '',
+  default_size: '',
 })
 
 // 弹窗中的"启用"开关（与 is_disabled 互为取反）
@@ -487,6 +511,16 @@ const modelEnabled = computed({
 const modelRules: FormRules = {
   provider_id: [{ required: true, message: t('settings.formModelProvider'), trigger: 'change' }],
   model_id: [{ required: true, message: t('settings.formModelId'), trigger: 'blur' }],
+}
+
+/** 从表单收集生成能力配置（空值不下发=null=自动；全部为空时下发空对象=清空显式配置回退自动画像） */
+function collectGenParams(): Record<string, unknown> {
+  const gp: Record<string, unknown> = {}
+  if (modelForm.max_ref_images != null) gp.max_ref_images = modelForm.max_ref_images
+  if (modelForm.watermark_param_off != null) gp.watermark_param_off = modelForm.watermark_param_off
+  if (modelForm.size_rule) gp.size_rule = modelForm.size_rule
+  if (modelForm.default_size) gp.default_size = modelForm.default_size
+  return gp
 }
 
 // ---------- 初始化 ----------
@@ -683,6 +717,11 @@ function openModelDialog(model?: ModelDefinition, presetProviderId?: number) {
       is_disabled: !!model.is_disabled,
       // 回填资源存储策略，旧数据缺字段时回退到默认 auto
       asset_storage_mode: model.asset_storage_mode || 'auto',
+      // 回填生成能力配置（gen_params；缺省=自动）
+      max_ref_images: model.gen_params?.max_ref_images ?? null,
+      watermark_param_off: model.gen_params?.watermark_param_off ?? null,
+      size_rule: model.gen_params?.size_rule ?? '',
+      default_size: model.gen_params?.default_size ?? '',
     })
   } else {
     Object.assign(modelForm, {
@@ -695,6 +734,10 @@ function openModelDialog(model?: ModelDefinition, presetProviderId?: number) {
       capabilities: [],
       is_disabled: false,
       asset_storage_mode: 'auto',
+      max_ref_images: null,
+      watermark_param_off: null,
+      size_rule: '',
+      default_size: '',
     })
   }
   modelDialogVisible.value = true
@@ -780,6 +823,7 @@ async function submitModel() {
           capabilities: modelForm.capabilities,
           is_disabled: modelForm.is_disabled,
           asset_storage_mode: modelForm.asset_storage_mode,
+          gen_params: collectGenParams(),
         })
         ElMessage.success(t('settings.modelUpdated'))
       } else {
@@ -791,6 +835,7 @@ async function submitModel() {
           provider_name: modelForm.provider_name,
           capabilities: modelForm.capabilities,
           asset_storage_mode: modelForm.asset_storage_mode,
+          gen_params: collectGenParams(),
         })
         ElMessage.success(t('settings.modelCreated'))
       }

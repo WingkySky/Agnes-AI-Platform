@@ -262,19 +262,20 @@ class AGNSDKClientWrapper:
         if not ref_images and image_url and image_url.strip():
             ref_images.append(image_url)
 
-        # ── Seedream 系模型分辨率归一化（与 aibridge volcengine_cv 适配器同规则）──
-        # 方舟 Seedream 合法总像素 ∈ [3.6864MP(2K 档), 16.77MP(4K 档)]。volcengine_cv
-        # 适配器自带归一化；openai 协议兼容端点（如火山 agent plan）size 原样透传，
-        # 前端全局默认 1024x1024 低于 Seedream 最小档，需按宽高比映射到官方 2K 推荐档。
-        if "seedream" in (model or "").lower():
+        # ── 按模型生成能力配置应用特例（model_definitions.gen_params / 自动画像）──
+        # size_rule="seedream"：方舟 Seedream 合法总像素 ∈ [3.6864MP(2K 档), 16.77MP(4K 档)]，
+        # volcengine_cv 适配器自带同规则归一化（幂等）；openai 协议兼容端点（如火山 agent
+        # plan）size 原样透传，前端全局默认 1024x1024 低于 Seedream 最小档，需映射到 2K 推荐档。
+        # watermark_param_off：Seedream 系生图默认带「AI生成」显式标识水印，按方舟官方
+        # watermark 参数关闭（发布内容时按平台规则声明 AI 生成的义务由使用方承担）。
+        from app.services.provider_registry import provider_registry
+        gen = await provider_registry.get_model_gen_params(model)
+        if gen.size_rule == "seedream":
             size = self._normalize_seedream_size(size)
 
         # ── 厂商特有参数经 image_generate **kwargs → adapter extra → 请求体顶层透传 ──
-        # Seedream 系生图默认在画面加「AI生成」显式标识水印（标识办法合规要求），
-        # 按方舟官方 watermark 参数关闭（volcengine_cv 全量 + openai 兼容端点的 seedream 模型）；
-        # 发布内容时按平台规则声明 AI 生成的义务由使用方承担。
         sdk_kwargs = {}
-        if self.provider_type == "volcengine_cv" or "seedream" in (model or "").lower():
+        if self.provider_type == "volcengine_cv" or gen.watermark_param_off:
             sdk_kwargs["watermark"] = False
         try:
             result = await client.image_generate(

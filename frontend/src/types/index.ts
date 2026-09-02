@@ -33,12 +33,27 @@ export interface HealthResponse {
 }
 
 /** 模型信息 — 对齐 ModelInfo */
+/** 模型生成能力配置（按模型差异化的约束/规则；缺省=后端按模型名自动画像） */
+export interface ModelGenParams {
+  /** 单次生成参考图/参考帧上限（超出由后端截断、前端提前截断）；null=不限制 */
+  max_ref_images?: number | null
+  /** 请求是否携带厂商官方 watermark=false（关闭「AI生成」显式水印）；null=按自动画像 */
+  watermark_param_off?: boolean | null
+  /** 尺寸归一化规则名，如 seedream；null=原样透传 */
+  size_rule?: string | null
+  /** 覆盖该模型的尺寸选项；null=用全局 */
+  image_sizes?: ImageSizeOption[] | null
+  /** 覆盖该模型的默认尺寸；null=用全局默认 */
+  default_size?: string | null
+}
+
 export interface ModelInfo {
   id: string          // 模型标识，如 agnes-image-2.1-flash
   name: string        // 显示名称，如 Agnes Image 2.1 Flash
   type: string        // 模型类型：image / video / chat
   provider: string    // 模型供应商，如 Agnes / 字节跳动 / OpenAI
   capabilities: string[]  // 能力标签，如 text2image, image2image, keyframes
+  gen_params?: ModelGenParams | null  // 生成能力配置（null=无特例）
 }
 
 /** 图片尺寸选项（含比例信息，供前端绘制比例图标） */
@@ -662,6 +677,8 @@ export interface ModelDefinition {
   sort_order: number
   /** 资源存储策略：auto(按 provider_type 自动判断) / keep(保留原始 URL) / migrate(强制转存对象存储) */
   asset_storage_mode: string
+  /** 生成能力配置（null=按模型名自动画像） */
+  gen_params?: ModelGenParams | null
 }
 
 /** 模型定义列表响应 — 对齐 ModelListResponse */
@@ -678,6 +695,8 @@ export interface CustomModelCreateRequest {
   model_type?: string
   provider_name?: string
   capabilities?: string[] | null
+  /** 生成能力配置（null=按模型名自动画像） */
+  gen_params?: ModelGenParams | null
   sort_order?: number
   /** 资源存储策略：auto / keep / migrate，默认 auto */
   asset_storage_mode?: string
@@ -695,6 +714,8 @@ export interface ModelUpdateRequest {
   sort_order?: number
   /** 资源存储策略：auto / keep / migrate */
   asset_storage_mode?: string
+  /** 生成能力配置（空对象=清空显式配置回退自动画像；null=不修改） */
+  gen_params?: ModelGenParams | null
 }
 
 /** 批量停用/启用模型请求 — 对齐 ModelBatchUpdateRequest */

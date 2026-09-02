@@ -157,6 +157,7 @@ async def add_custom_model(req: CustomModelCreateRequest):
         capabilities=req.capabilities,
         sort_order=req.sort_order,
         asset_storage_mode=req.asset_storage_mode,
+        gen_params=req.gen_params.model_dump() if req.gen_params is not None else None,
     )
     return ModelDefinitionResponse(
         id=defn.id,
@@ -166,6 +167,7 @@ async def add_custom_model(req: CustomModelCreateRequest):
         type=defn.type,
         provider_name=defn.provider_name or "",
         capabilities=defn.capabilities or [],
+        gen_params=defn.gen_params,
         is_active=defn.is_active,
         is_disabled=defn.is_disabled,
         is_custom=defn.is_custom,
@@ -206,6 +208,7 @@ async def update_model(model_id: str, req: ModelUpdateRequest):
         is_disabled=req.is_disabled,
         sort_order=req.sort_order,
         asset_storage_mode=req.asset_storage_mode,
+        gen_params=req.gen_params.model_dump() if req.gen_params is not None else None,
     )
     if defn is None:
         raise HTTPException(status_code=404, detail=f"模型 {model_id} 不存在")
@@ -218,6 +221,7 @@ async def update_model(model_id: str, req: ModelUpdateRequest):
         type=defn.type,
         provider_name=defn.provider_name or "",
         capabilities=defn.capabilities or [],
+        gen_params=defn.gen_params,
         is_active=defn.is_active,
         is_disabled=defn.is_disabled,
         is_custom=defn.is_custom,

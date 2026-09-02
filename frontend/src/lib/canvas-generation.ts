@@ -482,14 +482,6 @@ function buildComposerContext(
 /** 轮询连续失败容忍次数（网络抖动/后端重启时不因单次查询失败就判死任务） */
 const MAX_POLL_ERRORS = 6
 
-/** 参考图张数上限：仅 agnes-video-2.5-flash 的独立契约限制（2.5 非 Flash 与 2.0 无此硬限制） */
-const VIDEO_FLASH_REF_MAX = 5
-
-/** 图片模型参考图张数上限：仅上游契约明确限制的模型，其余模型不截断（超出上限上游会 400 拒绝） */
-const IMAGE_MODEL_REF_LIMITS: Record<string, number> = {
-  'agnes-image-2.1-flash': 6,
-}
-
 /**
  * 将图片 URL 转为 base64 data URI
  * - blob URL / 本地 URL：fetch 后转 data URI
@@ -550,10 +542,11 @@ export async function createGenerationTask(
   context?: GenerationContextPayload,
 ): Promise<{ task_id: string }> {
   const { prompt, referenceImages } = ctx
-  const model = config.model || useModelsStore().defaultImageModel
-  // 参考图按所选模型的契约上限截断：仅命中已知限制的模型（如 2.1 Flash 上游最多 6 张），其余模型原样透传；
+  const modelsStore = useModelsStore()
+  const model = config.model || modelsStore.defaultImageModel
+  // 参考图按所选模型生成能力配置截断（gen_params.max_ref_images，后端仍兜底），无配置不截断；
   // 参考图数组已按「锚点/底图 > 角色 > 场景」优先级排序，截断保留前 N 张
-  const imageRefLimit = IMAGE_MODEL_REF_LIMITS[model]
+  const imageRefLimit = modelsStore.getModelGenParams(model)?.max_ref_images ?? undefined
   const effectiveRefs = imageRefLimit && referenceImages && referenceImages.length > imageRefLimit
     ? referenceImages.slice(0, imageRefLimit)
     : referenceImages
@@ -916,9 +909,10 @@ export async function executeInNodeVideoGeneration(
   if (useKeyframes && referenceImages.length > 2) {
     throw new Error('关键帧模式最多只能使用 2 张参考图（首帧 + 尾帧）')
   }
-  // 参考图按所选视频模型截断：仅 2.5 Flash 限 5 张（多图参考场景前端拦截，避免发超限请求），其余模型不截断
-  const effectiveRefImages = params.model === 'agnes-video-2.5-flash' && referenceImages.length > VIDEO_FLASH_REF_MAX
-    ? referenceImages.slice(0, VIDEO_FLASH_REF_MAX)
+  // 参考图按所选视频模型的生成能力配置截断（gen_params.max_ref_images，后端仍兜底），无配置不截断
+  const videoRefMax = useModelsStore().getModelGenParams(params.model)?.max_ref_images ?? undefined
+  const effectiveRefImages = videoRefMax && referenceImages.length > videoRefMax
+    ? referenceImages.slice(0, videoRefMax)
     : referenceImages
   const ctx: GenerationContext = {
     prompt,

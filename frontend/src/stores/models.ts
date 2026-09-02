@@ -8,7 +8,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getPlatformConfig } from '@/api/history'
 import { usePreferencesStore } from '@/stores/preferences'
-import type { ModelInfo, ConfigResponse, ImageSizeOption, VideoAspectRatioOption, VideoResolutionOption, WatermarkConfigPublic } from '@/types'
+import type { ModelInfo, ConfigResponse, ImageSizeOption, VideoAspectRatioOption, VideoResolutionOption, WatermarkConfigPublic, ModelGenParams } from '@/types'
 import {
   getModelParams as getLocalModelParams,
   type ModelParams,
@@ -102,6 +102,12 @@ export const useModelsStore = defineStore('models', () => {
     return models.value.find((m) => m.id === id)
   }
 
+  /** 获取模型生成能力配置（参考图上限/水印/尺寸规则等；无特例返回 null） */
+  function getModelGenParams(modelId?: string): ModelGenParams | null {
+    if (!modelId) return null
+    return models.value.find((m) => m.id === modelId)?.gen_params ?? null
+  }
+
   /** 根据模式获取对应的模型列表 */
   function getModelsByMode(mode: string): ModelInfo[] {
     if (mode.includes('video')) return videoModels.value
@@ -162,6 +168,7 @@ export const useModelsStore = defineStore('models', () => {
     getDefaultModel,
     fetchConfig,
     getModelById,
+    getModelGenParams,
     getModelsByMode,
     getDefaultModelByMode,
     getModelParamsConfig,

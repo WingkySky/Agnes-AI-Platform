@@ -36,9 +36,9 @@ class ModelGenParams(BaseModel):
         default=None,
         description="单次生成参考图/参考帧上限（超出由后端截断、前端提前截断）；None=不限制",
     )
-    watermark_param_off: bool = Field(
-        default=False,
-        description="请求是否携带厂商官方 watermark=false（关闭「AI生成」显式标识水印）",
+    watermark_param_off: Optional[bool] = Field(
+        default=None,
+        description="请求是否携带厂商官方 watermark=false（关闭「AI生成」显式标识水印）；None=按自动画像",
     )
     size_rule: Optional[str] = Field(
         default=None,

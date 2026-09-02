@@ -2792,6 +2792,15 @@ const zhCN = {
     assetStorageModeKeep: '保留原始 URL',
     assetStorageModeMigrate: '转存到对象存储',
     assetStorageModeTip: '跟随默认：Agnes 模型保留原 URL，其他模型转存到对象存储；保留原始 URL：不转存；转存到对象存储：强制转存（需在后端配置对象存储）',
+    // 生成能力配置（按模型差异化的约束，留空=按模型名自动识别）
+    formMaxRefImages: '参考图上限',
+    formMaxRefImagesHint: '单次生成最多携带的参考图数量，超出自动截断；留空按模型族自动识别',
+    formWatermarkOff: '「AI生成」水印',
+    genWatermarkOff: '关闭水印',
+    genWatermarkKeep: '保留水印',
+    genParamsAuto: '自动',
+    formSizeRule: '尺寸归一化',
+    formDefaultSize: '默认尺寸',
     // 同步结果
     syncResultTitle: '同步结果',
     syncSuccess: '同步成功：新增 {added} 个，更新 {updated} 个，停用 {deactivated} 个，API 返回 {total} 个',

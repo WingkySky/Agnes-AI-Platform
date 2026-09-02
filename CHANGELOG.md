@@ -5,8 +5,7 @@
 ## [Unreleased]
 
 ### 功能
-- 图片参考图按模型差异化截断：仅对上游契约确有限制的模型生效（`agnes-image-2.1-flash` 上游最多 6 张，超出会被 400 拒绝），前端 `IMAGE_MODEL_REF_LIMITS`（`createGenerationTask` 请求构建处，保留前 N 张，锚点/底图 > 角色 > 场景优先级）+ 后端 `_IMAGE_REF_LIMITS`（`agnes_client.create_image` 兜底截断）双层防护，其余模型原样透传不截断；修复画布分镜图批量生成因参考图 7-8 张全量被上游拒绝的问题
-- Seedream 生图按模型/Provider 差异化优化（`AGNSDKClientWrapper.create_image`，无像素级预处理）：①「AI生成」显式标识水印按方舟官方 `watermark` 参数关闭——覆盖 volcengine_cv Provider 全量与 openai 协议兼容端点（火山 agent plan）的 seedream 系模型，经 aibridge `image_generate(**kwargs)` → `extra` → 请求体顶层透传；②分辨率归一化——把 volcengine_cv 适配器的 Seedream 尺寸规范移植到封装层（合法总像素 ∈ [2K 档, 4K 档]，不合法按最接近宽高比映射官方 2K 推荐档，合法原样透传），修复 openai 兼容端点 size 原样透传导致前端默认 1024x1024 低于 Seedream 最小档的问题（已实测 plan 端点 1024→2048 归一化生效且无水印）；发布内容时按平台规则声明 AI 生成的义务由使用方承担
+- 模型生成能力统一配置（gen_params）：`model_definitions` 新增 `gen_params` JSON 列（启动自动迁移），解析链 = DB 显式配置逐键覆盖 > 按模型名自动画像（seedream 系=关闭「AI生成」显式水印 + 尺寸归一化到方舟 2K/4K 合法档；agnes-image-2.1 家族=参考图≤6）> 无特例默认，已知键由 Pydantic `ModelGenParams` 唯一定义（max_ref_images / watermark_param_off / size_rule / image_sizes / default_size）；`agnes_client` / `agn_sdk_client` 原硬编码特例全部改读配置，`/api/config` 模型项携带解析后的 gen_params，前端参考图截断（图片/视频链路）与 ParamSelector 尺寸选项/默认尺寸改读所选模型配置（缺省回退全局），设置页模型编辑弹窗新增参考图上限/「AI生成」水印/尺寸归一化/默认尺寸四字段（i18n 两语言），模型增改接口透传校验；未来同族新模型同步即自动获得配置、特例在弹窗一配即生效，不再改生成代码。覆盖修复：画布分镜图批量生成参考图 7-8 张被上游 400 拒绝、openai 兼容端点（火山 agent plan）seedream 尺寸原样透传低于最小档且带水印（已实测 plan 端点 1024→2048 归一化生效且无水印；发布内容时按平台规则声明 AI 生成的义务由使用方承担）
 - 统一预设广场重构：预设中心改造为对标风格/特效广场的卡片画廊（广场/我的收藏/最近使用三 tab + 类型/分类导航 + 搜索 + 排序），生图页"风格库"、生视频页"特效库"弹窗即选即用
 - 预设挂载式应用：风格/特效/运镜卡片一键"使用"即挂载到生成模块（标签可移除，风格与运镜单选、特效可叠加），提交生成时系统自动拼接提示词片段与负面词，提示词输入框保持纯用户内容；脚本类复制到剪贴板、提示词类追加输入框
 - 官方封面维护：管理员可在预设详情一键 AI 生成封面（`POST /api/presets/{id}/generate-cover`），effect/camera 类型自动走视频 API 生成 4s 动态封面（`cover_video`，卡片悬停循环播放），其余生成静态图（`cover_image`）；或运行 `backend/generate_plaza_covers.py` 批量补齐；用户自建卡支持上传图片或从生成记录选图

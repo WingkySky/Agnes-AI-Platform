@@ -7,6 +7,8 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from pydantic import BaseModel, Field
 
+from app.schemas.common import ModelGenParams
+
 
 # =====================================================
 # Provider 相关 Schema
@@ -77,6 +79,10 @@ class CustomModelCreateRequest(BaseModel):
     model_type: str = Field(default="", description="模型类型：image / video / chat（留空自动推断）")
     provider_name: str = Field(default="", description="供应商名称（留空自动推断）")
     capabilities: Optional[List[str]] = Field(default=None, description="能力标签列表")
+    gen_params: Optional[ModelGenParams] = Field(
+        default=None,
+        description="生成能力配置（参考图上限/水印/尺寸规则/默认尺寸等）；None=按模型名自动画像",
+    )
     sort_order: int = Field(default=0, description="排序权重")
     asset_storage_mode: str = Field(default="auto", description="资源存储策略: auto/keep/migrate")
 
@@ -87,6 +93,10 @@ class ModelUpdateRequest(BaseModel):
     model_type: Optional[str] = Field(default=None, description="模型类型")
     provider_name: Optional[str] = Field(default=None, description="供应商名称")
     capabilities: Optional[List[str]] = Field(default=None, description="能力标签列表")
+    gen_params: Optional[ModelGenParams] = Field(
+        default=None,
+        description="生成能力配置（全默认值=清空显式配置回退自动画像）；None=不修改",
+    )
     is_active: Optional[bool] = Field(default=None, description="是否激活")
     is_disabled: Optional[bool] = Field(
         default=None,
@@ -105,6 +115,7 @@ class ModelDefinitionResponse(BaseModel):
     type: str
     provider_name: str = ""
     capabilities: List[str] = Field(default_factory=list)
+    gen_params: Optional[ModelGenParams] = None
     is_active: bool
     is_disabled: bool = False
     is_custom: bool

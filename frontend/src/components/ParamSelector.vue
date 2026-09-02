@@ -364,8 +364,17 @@ function applyCustomResolution() {
   currentResolution.value = alignedVideoHeight.value
 }
 
-// 选项列表
-const config = computed(() => modelsStore.getModelParamsConfig())
+// 选项列表：当前模型 gen_params 覆盖尺寸选项/默认尺寸（如 Seedream 只出合法档），缺省用全局配置
+const config = computed(() => {
+  const base = modelsStore.getModelParamsConfig()
+  const gp = modelsStore.getModelGenParams(props.model)
+  if (!gp || (!gp.image_sizes?.length && !gp.default_size)) return base
+  return {
+    ...base,
+    imageSizes: gp.image_sizes?.length ? gp.image_sizes : base.imageSizes,
+    defaultImageSize: gp.default_size || base.defaultImageSize,
+  }
+})
 
 // 视频时长（秒）：按 Agnes 官方 Q&A 限制随帧率联动
 //   24 FPS → 最多 15s；30 FPS → 最多 10s；60 FPS → 最多 5s

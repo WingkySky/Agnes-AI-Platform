@@ -882,7 +882,7 @@ export function readChainSegments(scriptPanel: CanvasPanel): number {
  * - 关键帧参考（默认）：时间锚点语义——有尾帧取 [首帧, 尾帧]、无尾帧取 [首帧] 单图直出，
  *   use_keyframes=true（2.5 契约 first_frame 必填、last_frame 可选），不注入资产图（资产一致性由生图阶段保障）
  * - 全能参考：多图内容参考——并入全部已生成锚点帧（分镜图/尾帧/链帧，按 lineage 时间序），
- *   refAssets 开启时并入命中资产图，use_keyframes=false；张数由执行链路按所选模型截断（仅 2.5 Flash ≤5）
+ *   refAssets 开启时并入命中资产图，use_keyframes=false；张数由执行链路按所选模型 gen_params 截断
  * - 尾帧存在但未成功（关键帧模式）→ null（未就绪，调用方跳过，不静默降级单图）
  */
 function collectShotVideoRefs(scriptPanel: CanvasPanel, shot: CanvasShot, firstUrl: string): { images: string[]; useKeyframes: boolean } | null {

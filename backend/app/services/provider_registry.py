@@ -113,13 +113,22 @@ def _detect_gen_params(model_id: str) -> Optional[ModelGenParams]:
 
 
 def _resolve_gen_params(model_id: str, explicit: Optional[dict]) -> Optional[ModelGenParams]:
-    """合并生成能力配置：DB 显式配置（gen_params 列）优先，缺省按模型名自动画像"""
-    if explicit:
-        try:
-            return ModelGenParams(**explicit)
-        except Exception as e:
-            logger.warning("[ProviderRegistry] 模型 %s 的 gen_params 配置无效，已忽略: %s", model_id, e)
-    return _detect_gen_params(model_id)
+    """
+    合并生成能力配置：DB 显式配置（gen_params 列）逐键覆盖自动画像，未设置的键（None）沿用画像；
+    显式配置非法时整体忽略（回退画像）。
+    """
+    profile = _detect_gen_params(model_id)
+    if not explicit:
+        return profile
+    try:
+        explicit_params = ModelGenParams(**explicit)
+    except Exception as e:
+        logger.warning("[ProviderRegistry] 模型 %s 的 gen_params 配置无效，已忽略: %s", model_id, e)
+        return profile
+    if profile is None:
+        return explicit_params
+    merged = {**profile.model_dump(), **explicit_params.model_dump(exclude_none=True)}
+    return ModelGenParams(**merged)
 
 
 def _generate_display_name(model_id: str, provider: str, model_type: str) -> str:
@@ -477,7 +486,7 @@ class ProviderRegistry:
             return ModelGenParams()
 
         # 1) 模型缓存（refresh_models_cache 时已按"显式配置 > 自动画像"解析）
-        for m in self._models_cache:
+        for m in (self._models_cache or []):
             if m.id == model_id and m.gen_params is not None:
                 return m.gen_params
 
@@ -1058,6 +1067,7 @@ class ProviderRegistry:
                 "type": d.type,
                 "provider_name": d.provider_name or "",
                 "capabilities": d.capabilities or [],
+                "gen_params": d.gen_params,
                 "is_active": d.is_active,
                 "is_disabled": d.is_disabled,
                 "is_custom": d.is_custom,
