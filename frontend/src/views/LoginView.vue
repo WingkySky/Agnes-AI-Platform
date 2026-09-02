@@ -30,23 +30,13 @@ const submitting = computed(() => userStore.loading)
 const loginCaptcha = ref({ captcha_id: '', image_base64: '' })
 const registerCaptcha = ref({ captcha_id: '', image_base64: '' })
 
-/** 加载登录页验证码 */
-async function loadLoginCaptcha() {
+/** 加载验证码到指定目标（登录 / 注册共用；模板 @click 传参会被解包，故用 key 而非 Ref） */
+async function loadCaptcha(target: 'login' | 'register') {
+  const captcha = target === 'login' ? loginCaptcha : registerCaptcha
   try {
-    const res = await getCaptcha()
-    loginCaptcha.value = res
+    captcha.value = await getCaptcha()
   } catch (e) {
-    console.error('加载登录验证码失败', e)
-  }
-}
-
-/** 加载注册页验证码 */
-async function loadRegisterCaptcha() {
-  try {
-    const res = await getCaptcha()
-    registerCaptcha.value = res
-  } catch (e) {
-    console.error('加载注册验证码失败', e)
+    console.error('加载验证码失败', e)
   }
 }
 
@@ -90,7 +80,7 @@ async function handleLogin() {
     router.push(redirect)
   } catch (e: any) {
     // 登录失败，刷新验证码
-    loadLoginCaptcha()
+    loadCaptcha('login')
     loginForm.value.captcha_code = ''
     // 错误已在 client.ts 拦截器中提示（401 用户名/密码错误、403 账号停用等），
     // 此处仅作为兜底：对未被拦截器处理的未知错误给一个通用提示
@@ -159,7 +149,7 @@ async function handleRegister() {
     router.push('/images')
   } catch (_e) {
     // 注册失败，刷新验证码
-    loadRegisterCaptcha()
+    loadCaptcha('register')
     registerForm.value.captcha_code = ''
     // 错误已通过拦截器提示
   }
@@ -293,17 +283,17 @@ async function handleResetPassword() {
 
 // ========= 初始化 =========
 onMounted(() => {
-  loadLoginCaptcha()
-  loadRegisterCaptcha()
+  loadCaptcha('login')
+  loadCaptcha('register')
 })
 
 // 切换 tab 时刷新对应验证码
 watch(activeTab, (newTab) => {
   if (newTab === 'login') {
-    loadLoginCaptcha()
+    loadCaptcha('login')
     loginForm.value.captcha_code = ''
   } else {
-    loadRegisterCaptcha()
+    loadCaptcha('register')
     registerForm.value.captcha_code = ''
   }
 })
@@ -380,7 +370,7 @@ watch(activeTab, (newTab) => {
                   />
                   <div
                     class="captcha-image"
-                    @click="loadLoginCaptcha"
+                    @click="loadCaptcha('login')"
                     :title="t('login.refreshCaptcha')"
                   >
                     <img
@@ -473,7 +463,7 @@ watch(activeTab, (newTab) => {
                   />
                   <div
                     class="captcha-image"
-                    @click="loadRegisterCaptcha"
+                    @click="loadCaptcha('register')"
                     :title="t('login.refreshCaptcha')"
                   >
                     <img

@@ -9,12 +9,13 @@ import { useI18n } from '@/i18n'
 export function useCopyText() {
   const { t } = useI18n()
 
-  /** 复制文本，成功返回 true 并提示；失败走降级方案 */
-  async function copyText(text: string): Promise<boolean> {
+  /** 复制文本，成功返回 true 并提示（successMsg 缺省用广场预设文案）；失败走降级方案，由调用方根据返回值处理 */
+  async function copyText(text: string, successMsg?: string): Promise<boolean> {
     if (!text) return false
+    const msg = successMsg ?? t('presets.plaza.copied')
     try {
       await navigator.clipboard.writeText(text)
-      ElMessage.success(t('presets.plaza.copied'))
+      ElMessage.success(msg)
       return true
     } catch {
       // clipboard API 不可用时降级为 execCommand
@@ -24,7 +25,7 @@ export function useCopyText() {
       ta.select()
       const ok = document.execCommand('copy')
       document.body.removeChild(ta)
-      if (ok) ElMessage.success(t('presets.plaza.copied'))
+      if (ok) ElMessage.success(msg)
       return ok
     }
   }

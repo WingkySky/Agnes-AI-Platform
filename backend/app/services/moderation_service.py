@@ -342,19 +342,10 @@ async def moderate_image_with_ai(
         },
     ]
 
-    body = {
-        "model": model,
-        "messages": messages,
-        "temperature": 0.1,
-        "max_tokens": 500,
-    }
-
     try:
-        chat_url = f"{agnes_client.base_url}/chat/completions"
-        result = await agnes_client._post(chat_url, body)
-        choice = result.get("choices", [{}])[0]
-        message = choice.get("message", {})
-        content = message.get("content", "") or ""
+        content = await agnes_client.chat_text(
+            model, messages, temperature=0.1, max_tokens=500,
+        )
 
         parsed = _parse_moderation_result(content)
         parsed["success"] = True
@@ -409,19 +400,10 @@ async def moderate_video_with_ai(
         },
     ]
 
-    body = {
-        "model": model,
-        "messages": messages,
-        "temperature": 0.1,
-        "max_tokens": 500,
-    }
-
     try:
-        chat_url = f"{agnes_client.base_url}/chat/completions"
-        result = await agnes_client._post(chat_url, body)
-        choice = result.get("choices", [{}])[0]
-        message = choice.get("message", {})
-        content = message.get("content", "") or ""
+        content = await agnes_client.chat_text(
+            model, messages, temperature=0.1, max_tokens=500,
+        )
 
         parsed = _parse_moderation_result(content)
         parsed["success"] = True

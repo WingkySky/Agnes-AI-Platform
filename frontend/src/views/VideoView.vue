@@ -353,6 +353,7 @@ import { useI18n } from '@/i18n'
 import { useCreditEstimate } from '@/composables/useCreditEstimate'
 import { useDownload } from '@/composables/useDownload'
 import { useCopyText } from '@/composables/useCopyText'
+import { usePromptLength } from '@/composables/usePromptLength'
 const { copyText } = useCopyText()
 import { matchVideoAspectRatio, getVideoAspectRatioLabel, autoMatchImageSize } from '@/config/model-params'
 import type { FileInfo } from '@/types'
@@ -369,21 +370,8 @@ const mode = ref('text2video')
 const prompt = ref('')
 const negativePrompt = ref('')
 
-// ---------- 提示词长度分阶提示 ----------
-// 视频：0-2000 适中，2000-6000 较长，6000+ 过长
-const promptLengthLevel = computed(() => {
-  const len = prompt.value.length
-  if (len <= 2000) return 'level-good'
-  if (len <= 6000) return 'level-long'
-  return 'level-too-long'
-})
-const promptLengthText = computed(() => {
-  const len = prompt.value.length
-  if (len === 0) return ''
-  if (len <= 2000) return t('params.promptLengthGood')
-  if (len <= 6000) return t('params.promptLengthLong')
-  return t('params.promptLengthTooLong')
-})
+// ---------- 提示词长度分阶提示（视频：0-2000 适中，2000-6000 较长，6000+ 过长） ----------
+const { levelClass: promptLengthLevel, text: promptLengthText } = usePromptLength(prompt, 2000, 6000)
 
 // 分享到广场开关：是否将本次生成结果公开到广场
 const shareToPlaza = ref(false)
@@ -764,25 +752,14 @@ async function downloadVideo() {
   }
 }
 
-function copyVideoUrl() {
+async function copyVideoUrl() {
   const url = rawVideoUrl.value || videoUrl.value
   if (!url) {
     ElMessage.warning(t('preview.imageUrlEmpty'))
     return
   }
-  if (navigator.clipboard && window.isSecureContext) {
-    navigator.clipboard.writeText(url)
-      .then(() => ElMessage.success(t('preview.copySuccess')))
-      .catch(() => ElMessage.error(t('preview.copyFailed')))
-  } else {
-    const ta = document.createElement('textarea')
-    ta.value = url
-    document.body.appendChild(ta)
-    ta.select()
-    document.execCommand('copy')
-    document.body.removeChild(ta)
-    ElMessage.success(t('preview.copySuccess'))
-  }
+  const ok = await copyText(url, t('preview.copySuccess'))
+  if (!ok) ElMessage.error(t('preview.copyFailed'))
 }
 
 function openInNewTab() {

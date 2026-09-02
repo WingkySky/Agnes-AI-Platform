@@ -383,18 +383,9 @@ async def extract_scenes_from_script(
     model = await resolve_project_chat_model_id(db, project_id)
     if not model:
         raise HTTPException(400, "未配置可用的对话模型，请先在配置页同步或添加对话模型")
-    body = {
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.5,
-    }
-    result = await agnes_client._post(
-        f"{agnes_client.base_url}/chat/completions", body
+    text = await agnes_client.chat_text(
+        model, [{"role": "user", "content": prompt}], temperature=0.5,
     )
-    choices = result.get("choices", [])
-    if not choices:
-        return {"added": 0}
-    text = choices[0].get("message", {}).get("content", "") or ""
     parsed = parse_json_loose(text)
 
     # 现有场景名集合（仅限该集，避免重复）

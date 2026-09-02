@@ -196,6 +196,48 @@ class AgnesAIClient:
     # =====================================================
     # 【第一层：基础 HTTP 工具】
     # =====================================================
+    async def _request_with_retry(self, method: str, url: str, **kwargs) -> Dict[str, Any]:
+        """
+        发送 HTTP 请求到 Agnes AI API（使用连接池），带指数退避自动重试。
+        对网络异常与 5xx 网关类错误做有限次重试，其余异常直接翻译为中文错误。
+        """
+        last_exc: Optional[BaseException] = None
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                response = await self.client.request(method, url, headers=self._headers, **kwargs)
+            except RETRYABLE_EXCEPTIONS as e:
+                last_exc = e
+                if attempt >= MAX_RETRIES:
+                    raise RuntimeError(self._human_readable_error(e)) from e
+                wait = RETRY_INITIAL_BACKOFF * (2 ** (attempt - 1))
+                logger.warning(
+                    "[AgnesAIClient] %s 第 %s/%s 次网络异常: %s, %ss 后重试",
+                    method, attempt, MAX_RETRIES, self._human_readable_error(e), wait,
+                )
+                await asyncio.sleep(wait)
+                continue
+            except Exception as e:  # 其他异常（如参数错误、鉴权失败）不重试
+                raise RuntimeError(self._human_readable_error(e)) from e
+
+            # 对 5xx 网关类错误也做有限次重试（上游抖动常见）
+            if response.status_code in RETRYABLE_STATUS_CODES and attempt < MAX_RETRIES:
+                wait = RETRY_INITIAL_BACKOFF * (2 ** (attempt - 1))
+                preview = (response.text or "")[:120].strip().replace("\n", " ")
+                logger.warning(
+                    "[AgnesAIClient] %s 第 %s/%s 次返回 HTTP %s，%ss 后重试 (resp=%s)",
+                    method, attempt, MAX_RETRIES, response.status_code, wait, preview,
+                )
+                await asyncio.sleep(wait)
+                continue
+
+            # 到这里就是最终响应（不管成功还是失败的业务错误码）
+            return self._parse_response(response)
+
+        # 理论上到不了这里（最后一次要么抛要么返回）
+        if last_exc is not None:
+            raise RuntimeError(self._human_readable_error(last_exc)) from last_exc
+        raise RuntimeError("调用 Agnes AI 失败：未知错误")
+
     async def _post(self, url: str, body: Dict[str, Any]) -> Dict[str, Any]:
         """
         发送 POST 请求到 Agnes AI API（使用连接池）。
@@ -231,85 +273,14 @@ class AgnesAIClient:
 
         logger.info("[AgnesAIClient] POST %s body=%s", url, safe_body)
 
-        # ---------- 自动重试循环（指数退避）----------
-        last_exc: Optional[BaseException] = None
-        for attempt in range(1, MAX_RETRIES + 1):
-            try:
-                response = await self.client.post(url, json=body, headers=self._headers)
-            except RETRYABLE_EXCEPTIONS as e:
-                last_exc = e
-                if attempt >= MAX_RETRIES:
-                    raise RuntimeError(self._human_readable_error(e)) from e
-                wait = RETRY_INITIAL_BACKOFF * (2 ** (attempt - 1))
-                logger.warning(
-                    "[AgnesAIClient] POST 第 %s/%s 次网络异常: %s, %ss 后重试",
-                    attempt, MAX_RETRIES, self._human_readable_error(e), wait,
-                )
-                import asyncio
-                await asyncio.sleep(wait)
-                continue
-            except Exception as e:  # 其他异常（如参数错误、鉴权失败）不重试
-                raise RuntimeError(self._human_readable_error(e)) from e
-
-            # 对 5xx 网关类错误也做有限次重试（上游抖动常见）
-            if response.status_code in RETRYABLE_STATUS_CODES and attempt < MAX_RETRIES:
-                wait = RETRY_INITIAL_BACKOFF * (2 ** (attempt - 1))
-                preview = (response.text or "")[:120].strip().replace("\n", " ")
-                logger.warning(
-                    "[AgnesAIClient] POST 第 %s/%s 次返回 HTTP %s，%ss 后重试 (resp=%s)",
-                    attempt, MAX_RETRIES, response.status_code, wait, preview,
-                )
-                import asyncio
-                await asyncio.sleep(wait)
-                continue
-
-            # 到这里就是最终响应（不管成功还是失败的业务错误码）
-            return self._parse_response(response)
-
-        # 理论上到不了这里（最后一次要么抛要么返回）
-        if last_exc is not None:
-            raise RuntimeError(self._human_readable_error(last_exc)) from last_exc
-        raise RuntimeError("调用 Agnes AI 失败：未知错误")
+        return await self._request_with_retry("POST", url, json=body)
 
     async def _get(self, url: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         发送 GET 请求到 Agnes AI API（使用连接池）。
         与 POST 一样做自动重试 + 中文错误信息。
         """
-        last_exc: Optional[BaseException] = None
-        for attempt in range(1, MAX_RETRIES + 1):
-            try:
-                response = await self.client.get(url, params=params or {}, headers=self._headers)
-            except RETRYABLE_EXCEPTIONS as e:
-                last_exc = e
-                if attempt >= MAX_RETRIES:
-                    raise RuntimeError(self._human_readable_error(e)) from e
-                wait = RETRY_INITIAL_BACKOFF * (2 ** (attempt - 1))
-                logger.warning(
-                    "[AgnesAIClient] GET 第 %s/%s 次网络异常: %s, %ss 后重试",
-                    attempt, MAX_RETRIES, self._human_readable_error(e), wait,
-                )
-                import asyncio
-                await asyncio.sleep(wait)
-                continue
-            except Exception as e:
-                raise RuntimeError(self._human_readable_error(e)) from e
-
-            if response.status_code in RETRYABLE_STATUS_CODES and attempt < MAX_RETRIES:
-                wait = RETRY_INITIAL_BACKOFF * (2 ** (attempt - 1))
-                logger.warning(
-                    "[AgnesAIClient] GET 第 %s/%s 次返回 HTTP %s，%ss 后重试",
-                    attempt, MAX_RETRIES, response.status_code, wait,
-                )
-                import asyncio
-                await asyncio.sleep(wait)
-                continue
-
-            return self._parse_response(response)
-
-        if last_exc is not None:
-            raise RuntimeError(self._human_readable_error(last_exc)) from last_exc
-        raise RuntimeError("调用 Agnes AI 失败：未知错误")
+        return await self._request_with_retry("GET", url, params=params or {})
 
     def _parse_response(self, response: httpx.Response) -> Dict[str, Any]:
         """
@@ -476,6 +447,29 @@ class AgnesAIClient:
     # =====================================================
     # 【第二层：API 方法】
     # =====================================================
+
+    # ---------- 对话补全（返回纯文本） ----------
+    async def chat_text(
+        self,
+        model: str,
+        messages: list[dict],
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> str:
+        """
+        调用 chat/completions 并返回首条回复文本。
+        choices 为空时抛出 RuntimeError（与 script_service 原有最严格处理一致）。
+        """
+        body: Dict[str, Any] = {"model": model, "messages": messages}
+        if temperature is not None:
+            body["temperature"] = temperature
+        if max_tokens is not None:
+            body["max_tokens"] = max_tokens
+        result = await self._post(f"{self.base_url}/chat/completions", body)
+        choices = result.get("choices", [])
+        if not choices:
+            raise RuntimeError("LLM 返回为空")
+        return choices[0].get("message", {}).get("content", "") or ""
 
     # ---------- 图片生成 ----------
     async def create_image(

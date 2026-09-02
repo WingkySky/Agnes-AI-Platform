@@ -470,7 +470,9 @@
  * ===================================================== */
 
 import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { useConfirm } from '@/composables/useConfirm'
+import { useCopyText } from '@/composables/useCopyText'
 import { Download, Pencil, Plus, LayoutGrid } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
 import { useDownload } from '@/composables/useDownload'
@@ -548,6 +550,8 @@ function contentString(value: unknown): string {
 }
 
 const { t } = useI18n()
+const { confirm } = useConfirm()
+const { copyText } = useCopyText()
 const { downloadViaProxy, downloadWatermarkedImage } = useDownload()
 
 const store = useCanvasStore()
@@ -685,18 +689,13 @@ function handleStepEditSave(data: { id: string; name: string; color: string; des
   ElMessage.success(t('canvas.messages.stepUpdated'))
 }
 
-function handleStepDelete(stepId: string) {
-  ElMessageBox.confirm(
-    t('canvas.messages.confirmDeleteStep'),
-    t('common.confirm'),
-    { confirmButtonText: t('common.delete'), cancelButtonText: t('common.cancel'), type: 'warning' }
-  ).then(() => {
-    store.removeStep(stepId)
-    if (selectedStepId.value === stepId) {
-      selectedStepId.value = null
-    }
-    ElMessage.success(t('canvas.messages.stepDeleted'))
-  }).catch(() => {})
+async function handleStepDelete(stepId: string) {
+  await confirm(t('canvas.messages.confirmDeleteStep'), t('common.confirm'), { confirmButtonText: t('common.delete') })
+  store.removeStep(stepId)
+  if (selectedStepId.value === stepId) {
+    selectedStepId.value = null
+  }
+  ElMessage.success(t('canvas.messages.stepDeleted'))
 }
 
 // ==================== 背景点击处理 ====================
@@ -2046,9 +2045,8 @@ const nodeInfoStatusText = computed(() => {
 
 async function handleInfoCopyPrompt() {
   if (!nodeInfoPrompt.value) return
-  const ok = await copyTextWithFallback(nodeInfoPrompt.value)
-  if (ok) ElMessage.success(t('canvas.messages.promptCopied'))
-  else ElMessage.warning(t('canvas.messages.copyFailed'))
+  const ok = await copyText(nodeInfoPrompt.value, t('canvas.messages.promptCopied'))
+  if (!ok) ElMessage.warning(t('canvas.messages.copyFailed'))
 }
 
 function handleHoverDelete() {
@@ -2213,39 +2211,13 @@ function handleHoverUploadAudio() {
   triggerFileUpload(hoveredPanelId.value, 'audio/*')
 }
 
-/** 复制文本到剪贴板：优先 Clipboard API，失败回退 textarea + execCommand（非安全上下文兜底） */
-async function copyTextWithFallback(text: string): Promise<boolean> {
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text)
-      return true
-    } catch (_) {
-      // Clipboard API 失败（如非安全上下文），继续走兜底方案
-    }
-  }
-  try {
-    const textarea = document.createElement('textarea')
-    textarea.value = text
-    textarea.style.position = 'fixed'
-    textarea.style.opacity = '0'
-    document.body.appendChild(textarea)
-    textarea.select()
-    const ok = document.execCommand('copy')
-    document.body.removeChild(textarea)
-    return ok
-  } catch (_) {
-    return false
-  }
-}
-
 function handleHoverCopyPrompt() {
   if (!hoveredPanelId.value) return
   const p = store.panels.find((pp) => pp.id === hoveredPanelId.value)
   const prompt = (p?.content?.prompt ?? '') as string
 
-  void copyTextWithFallback(prompt).then((ok) => {
-    if (ok) ElMessage.success(t('canvas.messages.promptCopied'))
-    else ElMessage.warning(t('canvas.messages.copyFailed'))
+  void copyText(prompt, t('canvas.messages.promptCopied')).then((ok) => {
+    if (!ok) ElMessage.warning(t('canvas.messages.copyFailed'))
   })
 }
 
@@ -2979,15 +2951,12 @@ function handleDeleteSelected() {
 }
 
 // 清空画布
-function handleClearCanvas() {
+async function handleClearCanvas() {
   if (store.panels.length === 0) return
-  ElMessageBox.confirm(t('canvas.messages.canvasCleared'), { type: 'warning' })
-    .then(() => {
-      store.pushSnapshot()
-      store.clearAllPanels()
-      ElMessage.success(t('canvas.messages.canvasCleared'))
-    })
-    .catch(() => {})
+  await confirm(t('canvas.messages.canvasCleared'))
+  store.pushSnapshot()
+  store.clearAllPanels()
+  ElMessage.success(t('canvas.messages.canvasCleared'))
 }
 
 // 切换图片信息显示

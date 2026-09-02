@@ -236,6 +236,18 @@ async def get_current_admin_user(
     return current_user
 
 
+async def get_current_reviewer(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """
+    仅允许管理员/审核员访问（统一审核后台接口）。
+    is_admin 为 True，或 role 为 admin / moderator 时放行。
+    """
+    if not current_user.is_admin and current_user.role not in ("admin", "moderator"):
+        raise HTTPException(status_code=403, detail="仅管理员/审核员可访问")
+    return current_user
+
+
 def require_permission(perm: str):
     """
     生成一个 FastAPI 依赖：检查当前用户是否拥有指定权限。

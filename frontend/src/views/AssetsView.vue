@@ -223,7 +223,8 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from '@/i18n'
-import { ElMessage, ElMessageBox, ElImage } from 'element-plus'
+import { ElMessage, ElImage } from 'element-plus'
+import { useConfirm } from '@/composables/useConfirm'
 import {
   Search, FolderOpened, Plus, Picture, ArrowLeft, View, Delete, MagicStick,
 } from '@element-plus/icons-vue'
@@ -240,6 +241,7 @@ import {
 } from '@/api/pipeline'
 
 const { t } = useI18n()
+const { confirm } = useConfirm()
 const assetStore = useAssetStore()
 const route = useRoute()
 const router = useRouter()
@@ -436,15 +438,7 @@ async function toggleShare(a: Asset, val: boolean) {
 
 async function removeAsset(a: Asset) {
   const isArchive = !!a.container_type
-  try {
-    await ElMessageBox.confirm(
-      isArchive ? t('assets.deleteArchiveConfirm') : t('assets.deleteConfirm'),
-      t('common.confirm'),
-      { type: 'warning' },
-    )
-  } catch {
-    return
-  }
+  await confirm(isArchive ? t('assets.deleteArchiveConfirm') : t('assets.deleteConfirm'), t('common.confirm'))
   try {
     await deleteAsset(a.id)
     ElMessage.success(t('assets.deleteSuccess'))

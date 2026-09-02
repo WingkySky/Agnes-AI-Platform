@@ -50,7 +50,7 @@
         <!-- 更新时间 -->
         <el-table-column :label="t('creditRules.colUpdated')" width="200" align="center">
           <template #default="{ row }">
-            <span class="muted">{{ formatTime(row.updated_at) || '—' }}</span>
+            <span class="muted">{{ formatTime(row.updated_at, { emptyText: '' }) || '—' }}</span>
           </template>
         </el-table-column>
 
@@ -67,13 +67,16 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { useConfirm } from '@/composables/useConfirm'
 import { RefreshLeft } from '@element-plus/icons-vue'
 import { listCreditRules, updateCreditRule, resetCreditRules } from '@/api/auth'
 import type { CreditRuleResponse } from '@/types'
 import { useI18n } from '@/i18n'
+import { formatTime } from '@/lib/format'
 
 const { t } = useI18n()
+const { confirm } = useConfirm()
 
 /** 本地扩展字段：_saving（是否正在保存） */
 interface LocalRuleRow extends CreditRuleResponse {
@@ -105,16 +108,6 @@ function getRuleDescription(row: LocalRuleRow): string {
     return translated
   }
   return row.description || ''
-}
-
-/** 格式化时间 */
-function formatTime(val?: string | null) {
-  if (!val) return ''
-  try {
-    return new Date(val).toLocaleString()
-  } catch {
-    return val
-  }
 }
 
 /** 拉取积分规则 */
@@ -150,15 +143,7 @@ async function onSave(row: LocalRuleRow) {
 
 /** 恢复默认值 */
 async function onReset() {
-  try {
-    await ElMessageBox.confirm(
-      t('creditRules.confirmRestore'),
-      t('creditRules.restoreDefaults'),
-      { confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel'), type: 'warning' }
-    )
-  } catch {
-    return
-  }
+  await confirm(t('creditRules.confirmRestore'), t('creditRules.restoreDefaults'))
   try {
     await resetCreditRules()
     ElMessage.success(t('creditRules.restored'))

@@ -242,7 +242,7 @@ import { useI18n } from '@/i18n'
 import { X, Trash2, Music2, Inbox, Loader2, History, FolderOpen, Upload, Play, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import { useAssetStore } from '@/stores/canvasAsset'
 import { getHistoryList } from '@/api/history'
-import client from '@/api/client'
+import { fetchBlobAsUrl } from '@/lib/blob'
 
 const { t } = useI18n()
 
@@ -499,17 +499,6 @@ const previewLoading = reactive<Record<string, boolean>>({}) // { [id]: boolean 
 const videoThumbnails = reactive<Record<string, string>>({}) // { [id]: blobUrl } 视频静态缩略图
 const thumbnailFailed = reactive<Record<string, boolean>>({}) // { [id]: boolean } 缩略图加载失败
 
-/**
- * 通过 axios 下载二进制资源并生成 blob URL
- * 解决 <img src="url"> 无法携带 JWT 的用户隔离问题
- */
-async function fetchBlobAsUrl(url: string): Promise<string> {
-  const blob = await client.get(url, {
-    responseType: 'blob',
-    silent: true,
-  }) as Blob
-  return URL.createObjectURL(blob)
-}
 
 function clearVideoBlobUrls() {
   Object.values(videoThumbnails).forEach(url => {

@@ -206,13 +206,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import {
   Picture, VideoPlay, Clock, ChatDotRound, Grid, Setting,
   User, UserFilled, Coin, CaretBottom, SwitchButton, Sunny, Moon, StarFilled, Histogram,
   MagicStick, Fold, Expand, ArrowDown, Message, EditPen, Connection,
   Menu, More,
 } from '@element-plus/icons-vue'
+import { getIconByName as getIcon } from '@/lib/icons'
 import TaskQueuePanel from './components/TaskQueuePanel.vue'
 import LanguageSwitcher from './components/LanguageSwitcher.vue'
 import { useI18n, getElementPlusLocale } from '@/i18n'
@@ -238,35 +238,6 @@ const menuStore = useMenuStore()
 // 侧边栏展开状态
 const sidebarOpen = ref(false)
 
-// =====================================================
-// 图标组件映射（字符串 → 组件）
-// =====================================================
-const iconMap: Record<string, any> = {
-  ChatDotRound,
-  Picture,
-  VideoPlay,
-  Clock,
-  Grid,
-  Setting,
-  Coin,
-  Histogram,
-  User,
-  UserFilled,
-  StarFilled,
-  Message,
-  EditPen,
-  Connection,
-  Menu,
-  More,
-}
-
-/** 根据图标名称获取组件 */
-function getIcon(iconName: string | null | undefined) {
-  if (!iconName) return null
-  // 优先使用本地映射，找不到则从全部图标中取
-  const key = iconName as keyof typeof ElementPlusIconsVue
-  return iconMap[iconName] || ElementPlusIconsVue[key] || null
-}
 
 // 应用启动时加载模型配置和菜单
 onMounted(async () => {

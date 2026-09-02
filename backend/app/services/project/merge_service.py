@@ -514,7 +514,7 @@ async def execute_merge_advanced(
                 output_path=composite_audio_path,
                 with_bgm=with_bgm,
                 bgm_id=bgm_id,
-                total_duration=_estimate_total_duration(video_clips),
+                total_duration=_timeline_total_duration(video_clips),
             )
             logger.info("[合成] project_id=%s 音频混合完成: %s", project_id, composite_audio_path)
 
@@ -602,10 +602,7 @@ async def execute_merge_advanced(
         final_url = f"/api/projects/{project_id}/final-video?v={int(_time.time())}"
 
         # 计算总时长（取所有视频片段 end_time 的最大值）
-        total_duration = max(
-            (c.start_time + c.duration for c in video_clips),
-            default=0.0,
-        )
+        total_duration = _timeline_total_duration(video_clips)
 
         project.final_video_url = final_url
         project.total_duration = total_duration
@@ -635,13 +632,6 @@ async def execute_merge_advanced(
     finally:
         import shutil
         shutil.rmtree(tmp_dir, ignore_errors=True)
-
-
-def _estimate_total_duration(video_clips: List) -> float:
-    """估算视频总时长（取所有片段 end_time 的最大值）"""
-    if not video_clips:
-        return 0.0
-    return max((c.start_time + c.duration for c in video_clips), default=0.0)
 
 
 # =====================================================

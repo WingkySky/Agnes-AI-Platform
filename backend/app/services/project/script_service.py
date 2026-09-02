@@ -120,18 +120,9 @@ async def regenerate_script(
     ) if (model or script.model) else await resolve_project_chat_model_id(db, script.project_id)
     if not body_model:
         raise HTTPException(400, "未配置可用的对话模型，请先在配置页同步或添加对话模型")
-    body = {
-        "model": body_model,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.8,
-    }
-    result = await agnes_client._post(
-        f"{agnes_client.base_url}/chat/completions", body
+    content = await agnes_client.chat_text(
+        body_model, [{"role": "user", "content": prompt}], temperature=0.8,
     )
-    choices = result.get("choices", [])
-    if not choices:
-        raise RuntimeError("LLM 返回为空")
-    content = choices[0].get("message", {}).get("content", "") or ""
 
     script.content = content
     if prompt_template:

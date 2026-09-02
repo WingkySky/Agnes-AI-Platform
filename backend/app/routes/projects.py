@@ -202,6 +202,17 @@ async def _get_project_or_404(db: AsyncSession, project_id: int) -> Project:
     return project
 
 
+async def get_owned_project(
+    project_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+) -> Project:
+    """依赖：取项目 + 404 + 归属校验（非本人且非管理员返回 403）"""
+    project = await _get_project_or_404(db, project_id)
+    _check_project_owner(project, current_user)
+    return project
+
+
 # =====================================================
 # 1. 项目 CRUD
 # =====================================================
@@ -232,12 +243,8 @@ async def list_projects_api(
 
 @router.get("/{project_id}", response_model=ProjectResponse, summary="获取项目详情")
 async def get_project_api(
-    project_id: int,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     return project
 
 
@@ -246,10 +253,8 @@ async def update_project_api(
     project_id: int,
     data: ProjectUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     updated = await update_project(db, project_id, data)
     return updated
 
@@ -258,10 +263,8 @@ async def update_project_api(
 async def delete_project_api(
     project_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     ok = await delete_project(db, project_id)
     return {"success": ok}
 
@@ -270,10 +273,8 @@ async def delete_project_api(
 async def archive_project_api(
     project_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     return await archive_project(db, project_id)
 
 
@@ -282,10 +283,8 @@ async def update_active_view_api(
     project_id: int,
     data: ActiveViewUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     return await update_active_view(db, project_id, data.view)
 
 
@@ -293,11 +292,9 @@ async def update_active_view_api(
 async def rebuild_cover_api(
     project_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
     """从分镜帧图中自动选取封面（按分镜顺序取第一个激活帧图）"""
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     updated = await rebuild_project_cover(db, project_id)
     if not updated:
         raise HTTPException(status_code=404, detail="项目不存在")
@@ -309,11 +306,9 @@ async def set_cover_api(
     project_id: int,
     data: dict,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
     """将指定帧图设为项目封面"""
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     frame_image_id = data.get("frame_image_id")
     if not frame_image_id:
         raise HTTPException(status_code=400, detail="缺少 frame_image_id 参数")
@@ -445,13 +440,9 @@ async def _run_wizard_async(
 
 @router.post("/{project_id}/wizard/resume", response_model=ProjectResponse, summary="恢复中断的向导")
 async def resume_wizard_api(
-    project_id: int,
     data: WizardResumeRequest,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
 
     if project.status != PROJECT_STATUS_CREATING:
         raise HTTPException(status_code=400, detail="项目不在向导中，无需恢复")
@@ -543,10 +534,8 @@ async def project_sse_events(
 async def list_scripts_api(
     project_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     return await list_scripts(db, project_id)
 
 
@@ -555,10 +544,8 @@ async def create_script_api(
     project_id: int,
     data: ScriptCreate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     return await create_script(db, project_id, data)
 
 
@@ -567,10 +554,8 @@ async def get_script_api(
     project_id: int,
     script_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     script = await get_script(db, script_id)
     if not script or script.project_id != project_id:
         raise HTTPException(status_code=404, detail="剧本不存在")
@@ -579,14 +564,11 @@ async def get_script_api(
 
 @router.patch("/{project_id}/scripts/{script_id}", response_model=ScriptResponse, summary="编辑剧本")
 async def update_script_api(
-    project_id: int,
     script_id: int,
     data: ScriptUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     script = await update_script(db, script_id, data)
     if not script:
         raise HTTPException(status_code=404, detail="剧本不存在")
@@ -595,27 +577,21 @@ async def update_script_api(
 
 @router.delete("/{project_id}/scripts/{script_id}", summary="删除剧本")
 async def delete_script_api(
-    project_id: int,
     script_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     ok = await delete_script(db, script_id)
     return {"success": ok}
 
 
 @router.post("/{project_id}/scripts/{script_id}/regenerate", response_model=ScriptResponse, summary="重新生成剧本")
 async def regenerate_script_api(
-    project_id: int,
     script_id: int,
     data: ScriptRegenerateRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     try:
         script = await regenerate_script(
             db, script_id, data.prompt_template, data.model,
@@ -707,10 +683,8 @@ def _build_entity_routes(prefix: str, entity_type: str):
         project_id: int,
         script_id: Optional[int] = Query(None, description="按集过滤"),
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user),
+        project: Project = Depends(get_owned_project),
     ):
-        project = await _get_project_or_404(db, project_id)
-        _check_project_owner(project, current_user)
         return await list_fn(db, project_id, script_id)
 
     @router.post(
@@ -722,10 +696,8 @@ def _build_entity_routes(prefix: str, entity_type: str):
         project_id: int,
         data: create_schema,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user),
+        project: Project = Depends(get_owned_project),
     ):
-        project = await _get_project_or_404(db, project_id)
-        _check_project_owner(project, current_user)
         return await create_fn(db, project_id, data)
 
     @router.get(
@@ -737,10 +709,8 @@ def _build_entity_routes(prefix: str, entity_type: str):
         project_id: int,
         entity_id: int,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user),
+        project: Project = Depends(get_owned_project),
     ):
-        project = await _get_project_or_404(db, project_id)
-        _check_project_owner(project, current_user)
         entity = await get_fn(db, entity_id)
         if not entity or entity.project_id != project_id:
             raise HTTPException(status_code=404, detail=f"{entity_label}不存在")
@@ -752,14 +722,11 @@ def _build_entity_routes(prefix: str, entity_type: str):
         summary=f"编辑{entity_label}",
     )
     async def update_api(
-        project_id: int,
         entity_id: int,
         data: update_schema,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user),
+        project: Project = Depends(get_owned_project),
     ):
-        project = await _get_project_or_404(db, project_id)
-        _check_project_owner(project, current_user)
         entity = await update_fn(db, entity_id, data)
         if not entity:
             raise HTTPException(status_code=404, detail=f"{entity_label}不存在")
@@ -770,13 +737,10 @@ def _build_entity_routes(prefix: str, entity_type: str):
         summary=f"删除{entity_label}",
     )
     async def delete_api(
-        project_id: int,
         entity_id: int,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user),
+        project: Project = Depends(get_owned_project),
     ):
-        project = await _get_project_or_404(db, project_id)
-        _check_project_owner(project, current_user)
         ok = await delete_fn(db, entity_id)
         return {"success": ok}
 
@@ -788,10 +752,8 @@ def _build_entity_routes(prefix: str, entity_type: str):
         project_id: int,
         data: ReorderRequest,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user),
+        project: Project = Depends(get_owned_project),
     ):
-        project = await _get_project_or_404(db, project_id)
-        _check_project_owner(project, current_user)
         await reorder_fn(db, project_id, data.ids)
         return {"success": True}
 
@@ -800,14 +762,12 @@ def _build_entity_routes(prefix: str, entity_type: str):
         summary=f"生成{entity_label}形象图（异步）",
     )
     async def generate_image_api(
-        project_id: int,
         entity_id: int,
         data: GenerateImageRequest,
         db: AsyncSession = Depends(get_async_db),
         current_user: User = Depends(get_current_user),
+        project: Project = Depends(get_owned_project),
     ):
-        project = await _get_project_or_404(db, project_id)
-        _check_project_owner(project, current_user)
         try:
             return await gen_image_fn(
                 db, entity_id, current_user.id,
@@ -822,15 +782,12 @@ def _build_entity_routes(prefix: str, entity_type: str):
         summary=f"认领{entity_label}生成结果",
     )
     async def claim_image_api(
-        project_id: int,
         entity_id: int,
         task_id: str = Query(..., description="图片任务 ID"),
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user),
+        project: Project = Depends(get_owned_project),
     ):
         """任务完成后认领结果：从 Generation 拿 result_url，创建实体形象图新版本"""
-        project = await _get_project_or_404(db, project_id)
-        _check_project_owner(project, current_user)
         try:
             entity = await claim_fn(db, entity_id, task_id)
         except (ValueError, RuntimeError) as e:
@@ -844,13 +801,11 @@ def _build_entity_routes(prefix: str, entity_type: str):
         summary=f"批量生成{entity_label}形象图",
     )
     async def batch_generate_api(
-        project_id: int,
         data: BatchGenerateRequest,
         db: AsyncSession = Depends(get_async_db),
         current_user: User = Depends(get_current_user),
+        project: Project = Depends(get_owned_project),
     ):
-        project = await _get_project_or_404(db, project_id)
-        _check_project_owner(project, current_user)
         results = await batch_gen_fn(
             db, data.ids, current_user.id,
             data.style_config, data.model, data.size or "1024x1024",
@@ -868,9 +823,8 @@ def _build_entity_routes(prefix: str, entity_type: str):
         file: UploadFile = File(...),
         db: AsyncSession = Depends(get_async_db),
         current_user: User = Depends(get_current_user),
+        project: Project = Depends(get_owned_project),
     ):
-        project = await _get_project_or_404(db, project_id)
-        _check_project_owner(project, current_user)
         # 简化处理：将文件保存到本地临时目录（实际生产应上传到对象存储）
         from app.services.upload_service import save_upload_file
         file_url = await save_upload_file(file, folder=f"projects/{project_id}/{prefix}")
@@ -882,13 +836,10 @@ def _build_entity_routes(prefix: str, entity_type: str):
         summary=f"列出{entity_label}形象图版本",
     )
     async def list_versions_api(
-        project_id: int,
         entity_id: int,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user),
+        project: Project = Depends(get_owned_project),
     ):
-        project = await _get_project_or_404(db, project_id)
-        _check_project_owner(project, current_user)
         return await list_v_fn(db, entity_id)
 
     @router.post(
@@ -897,14 +848,11 @@ def _build_entity_routes(prefix: str, entity_type: str):
         summary=f"设为采用版",
     )
     async def set_active_api(
-        project_id: int,
         entity_id: int,
         data: SetActiveVersionRequest,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user),
+        project: Project = Depends(get_owned_project),
     ):
-        project = await _get_project_or_404(db, project_id)
-        _check_project_owner(project, current_user)
         asset = await set_v_fn(db, entity_id, data.version_id)
         if not asset:
             raise HTTPException(status_code=400, detail="版本不存在或不属于该实体")
@@ -915,14 +863,11 @@ def _build_entity_routes(prefix: str, entity_type: str):
         summary=f"删除{entity_label}形象图版本",
     )
     async def delete_version_api(
-        project_id: int,
         entity_id: int,
         version_id: int,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user),
+        project: Project = Depends(get_owned_project),
     ):
-        project = await _get_project_or_404(db, project_id)
-        _check_project_owner(project, current_user)
         ok = await del_v_fn(db, entity_id, version_id)
         if not ok:
             raise HTTPException(status_code=400, detail="无法删除（激活版不允许删除或版本不存在）")
@@ -936,11 +881,9 @@ def _build_entity_routes(prefix: str, entity_type: str):
         project_id: int,
         req: ExtractFromScriptRequest,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user),
+        project: Project = Depends(get_owned_project),
     ):
         """从指定 script_id 的剧本提取实体"""
-        project = await _get_project_or_404(db, project_id)
-        _check_project_owner(project, current_user)
         try:
             return await extract_fn(db, project_id, req.script_id)
         except ValueError as e:
@@ -956,11 +899,9 @@ def _build_entity_routes(prefix: str, entity_type: str):
         entity_id: int,
         req: CopyToScriptRequest,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user),
+        project: Project = Depends(get_owned_project),
     ):
         """将{entity_label}复制到 target_script_id 指定的目标集"""
-        project = await _get_project_or_404(db, project_id)
-        _check_project_owner(project, current_user)
         try:
             return await copy_to_fn(db, project_id, entity_id, req.target_script_id)
         except ValueError as e:
@@ -982,11 +923,9 @@ async def list_shots_api(
     project_id: int,
     script_id: Optional[int] = Query(None, description="按集过滤"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
     """列出项目分镜（可选 ?script_id=N 按集过滤）"""
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     shots = await list_shots(db, project_id, script_id)
     # 将关联实体附加到响应
     result = []
@@ -1009,10 +948,8 @@ async def create_shot_api(
     project_id: int,
     data: ShotCreate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     return await create_shot(db, project_id, data)
 
 
@@ -1021,11 +958,9 @@ async def split_shots_api(
     project_id: int,
     req: ExtractFromScriptRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
     """从剧本拆分分镜（按 script_id 指定的集）"""
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     try:
         return await split_shots_from_script(db, project_id, req.script_id)
     except ValueError as e:
@@ -1037,10 +972,8 @@ async def get_shot_api(
     project_id: int,
     shot_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     shot = await get_shot(db, shot_id)
     if not shot or shot.project_id != project_id:
         raise HTTPException(status_code=404, detail="分镜不存在")
@@ -1058,14 +991,11 @@ async def get_shot_api(
 
 @router.patch("/{project_id}/shots/{shot_id}", response_model=ShotResponse, summary="编辑分镜")
 async def update_shot_api(
-    project_id: int,
     shot_id: int,
     data: ShotUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     shot = await update_shot(db, shot_id, data)
     if not shot:
         raise HTTPException(status_code=404, detail="分镜不存在")
@@ -1074,13 +1004,10 @@ async def update_shot_api(
 
 @router.delete("/{project_id}/shots/{shot_id}", summary="删除分镜")
 async def delete_shot_api(
-    project_id: int,
     shot_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     ok = await delete_shot(db, shot_id)
     return {"success": ok}
 
@@ -1090,66 +1017,52 @@ async def reorder_shots_api(
     project_id: int,
     data: ReorderRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     await reorder_shots(db, project_id, data.ids)
     return {"success": True}
 
 
 @router.post("/{project_id}/shots/{shot_id}/bind-character", summary="绑定角色")
 async def bind_character_api(
-    project_id: int,
     shot_id: int,
     data: BindEntityRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     await bind_character(db, shot_id, data.entity_id)
     return {"success": True}
 
 
 @router.post("/{project_id}/shots/{shot_id}/unbind-character", summary="解绑角色")
 async def unbind_character_api(
-    project_id: int,
     shot_id: int,
     data: BindEntityRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     await unbind_character(db, shot_id, data.entity_id)
     return {"success": True}
 
 
 @router.post("/{project_id}/shots/{shot_id}/bind-prop", summary="绑定道具")
 async def bind_prop_api(
-    project_id: int,
     shot_id: int,
     data: BindEntityRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     await bind_prop(db, shot_id, data.entity_id)
     return {"success": True}
 
 
 @router.post("/{project_id}/shots/{shot_id}/unbind-prop", summary="解绑道具")
 async def unbind_prop_api(
-    project_id: int,
     shot_id: int,
     data: BindEntityRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     await unbind_prop(db, shot_id, data.entity_id)
     return {"success": True}
 
@@ -1160,13 +1073,10 @@ async def unbind_prop_api(
     summary="生成帧 prompt",
 )
 async def generate_frame_prompt_api(
-    project_id: int,
     shot_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     shot = await generate_frame_prompt(db, shot_id)
     if not shot:
         raise HTTPException(status_code=404, detail="分镜不存在")
@@ -1183,13 +1093,10 @@ async def generate_frame_prompt_api(
     summary="列出帧图版本",
 )
 async def list_frame_images_api(
-    project_id: int,
     shot_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     return await list_frame_images(db, shot_id)
 
 
@@ -1198,14 +1105,12 @@ async def list_frame_images_api(
     summary="生成帧图（异步）",
 )
 async def generate_frame_image_api(
-    project_id: int,
     shot_id: int,
     data: GenerateImageRequest,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     try:
         return await generate_frame_image(
             db, shot_id, current_user.id,
@@ -1221,15 +1126,12 @@ async def generate_frame_image_api(
     summary="认领帧图生成结果",
 )
 async def claim_frame_image_api(
-    project_id: int,
     shot_id: int,
     task_id: str = Query(..., description="图片任务 ID"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
     """任务完成后认领结果：从 Generation 拿 result_url，创建帧图新版本"""
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     try:
         fi = await claim_frame_image(db, shot_id, task_id)
     except (ValueError, RuntimeError) as e:
@@ -1244,13 +1146,11 @@ async def claim_frame_image_api(
     summary="批量生成帧图",
 )
 async def batch_generate_frame_images_api(
-    project_id: int,
     data: BatchGenerateRequest,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     results = await batch_generate_frame_images(
         db, data.ids, current_user.id,
         data.style_config, data.model, data.size or "1024x1024",
@@ -1269,9 +1169,8 @@ async def upload_frame_image_api(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     from app.services.upload_service import save_upload_file
     file_url = await save_upload_file(file, folder=f"projects/{project_id}/shots/{shot_id}/frames")
     fi = await upload_frame_image(db, shot_id, current_user.id, file_url)
@@ -1286,14 +1185,11 @@ async def upload_frame_image_api(
     summary="设为采用版",
 )
 async def set_active_frame_image_api(
-    project_id: int,
     shot_id: int,
     version_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     fi = await set_active_frame_image(db, shot_id, version_id)
     if not fi:
         raise HTTPException(status_code=400, detail="版本不存在或不属于该分镜")
@@ -1305,14 +1201,11 @@ async def set_active_frame_image_api(
     summary="删除帧图版本",
 )
 async def delete_frame_image_api(
-    project_id: int,
     shot_id: int,
     version_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     ok = await delete_frame_image(db, shot_id, version_id)
     if not ok:
         raise HTTPException(status_code=400, detail="无法删除（激活版不允许删除或版本不存在）")
@@ -1329,13 +1222,10 @@ async def delete_frame_image_api(
     summary="列出视频版本",
 )
 async def list_videos_api(
-    project_id: int,
     shot_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     return await list_videos(db, shot_id)
 
 
@@ -1344,14 +1234,12 @@ async def list_videos_api(
     summary="生成视频（异步）",
 )
 async def generate_video_api(
-    project_id: int,
     shot_id: int,
     data: GenerateVideoRequest,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     try:
         return await generate_video(
             db, shot_id, current_user.id,
@@ -1367,16 +1255,13 @@ async def generate_video_api(
     summary="认领视频生成结果",
 )
 async def claim_video_api(
-    project_id: int,
     shot_id: int,
     task_id: str = Query(..., description="视频任务 ID"),
     frame_image_id: Optional[int] = Query(None, description="来源帧图 ID"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
     """任务完成后认领结果：从 Generation 拿 result_url，创建视频新版本"""
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     try:
         video = await claim_video(db, shot_id, task_id, frame_image_id)
     except (ValueError, RuntimeError) as e:
@@ -1397,9 +1282,8 @@ async def upload_video_api(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     from app.services.upload_service import save_upload_file
     file_url = await save_upload_file(file, folder=f"projects/{project_id}/shots/{shot_id}/videos")
     video = await upload_video(db, shot_id, current_user.id, file_url)
@@ -1414,14 +1298,11 @@ async def upload_video_api(
     summary="设为采用版",
 )
 async def set_active_video_api(
-    project_id: int,
     shot_id: int,
     version_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     video = await set_active_video(db, shot_id, version_id)
     if not video:
         raise HTTPException(status_code=400, detail="版本不存在或不属于该分镜")
@@ -1433,14 +1314,11 @@ async def set_active_video_api(
     summary="删除视频版本",
 )
 async def delete_video_api(
-    project_id: int,
     shot_id: int,
     version_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     ok = await delete_video(db, shot_id, version_id)
     if not ok:
         raise HTTPException(status_code=400, detail="无法删除（激活版不允许删除或版本不存在）")
@@ -1461,9 +1339,8 @@ async def import_asset_api(
     data: ImportAssetRequest,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     try:
         entity = await import_asset_to_project(
             db, data.asset_id, project_id, entity_type, current_user.id
@@ -1478,14 +1355,12 @@ async def import_asset_api(
     summary="沉淀到资产库",
 )
 async def promote_asset_api(
-    project_id: int,
     entity_type: str,
     entity_id: int,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     try:
         asset = await promote_entity_to_asset(
             db, entity_type, entity_id, current_user.id
@@ -1507,10 +1382,8 @@ async def promote_asset_api(
 async def get_canvas_api(
     project_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     canvas_data = await get_canvas_data(db, project_id)
     return CanvasLayoutResponse(canvas_data=canvas_data)
 
@@ -1523,10 +1396,8 @@ async def get_canvas_api(
 async def init_canvas_api(
     project_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     canvas_data = await init_canvas_layout(db, project_id)
     return CanvasLayoutResponse(canvas_data=canvas_data)
 
@@ -1540,10 +1411,8 @@ async def save_canvas_api(
     project_id: int,
     data: CanvasDataUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     await save_canvas_data(db, project_id, data.canvas_data)
     return CanvasLayoutResponse(canvas_data=data.canvas_data)
 
@@ -1558,10 +1427,9 @@ async def merge_project_api(
     data: MergeRequest,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
     """简单合成：按分镜顺序 concat 拼接视频（无音频/字幕/转场）"""
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     try:
         await merge_project(db, project_id, current_user.id, use_timeline=False)
     except ValueError as e:
@@ -1579,6 +1447,7 @@ async def merge_project_advanced_api(
     data: MergeAdvancedRequest,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
     """
     高级合成（Phase 2）:
@@ -1587,8 +1456,6 @@ async def merge_project_advanced_api(
     - 字幕轨: ASS 烧录
     - BGM: 内置库选择（with_bgm=True 时需指定 bgm_id）
     """
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     try:
         await merge_project(
             db, project_id, current_user.id,
@@ -1607,10 +1474,8 @@ async def merge_project_advanced_api(
 async def get_merge_status_api(
     project_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     return MergeStatusResponse(**await get_merge_status(db, project_id))
 
 
@@ -1698,15 +1563,13 @@ async def get_final_video_api(
     summary="生成 TTS 配音（异步）",
 )
 async def generate_audio_api(
-    project_id: int,
     shot_id: int,
     data: GenerateTTSRequest,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
     """生成分镜 TTS 配音（同角色同声音自动分配音色）"""
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     try:
         return await generate_audio(
             db, shot_id, current_user.id,
@@ -1725,14 +1588,12 @@ async def generate_audio_api(
     summary="批量生成 TTS 配音",
 )
 async def batch_generate_audios_api(
-    project_id: int,
     data: BatchGenerateTTSRequest,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
     """批量 TTS 生成（并行），返回成功生成的 audio_id 列表"""
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     audio_ids = await batch_generate_audios(
         db, data.shot_ids, current_user.id, voice_id=data.voice_id,
     )
@@ -1750,10 +1611,9 @@ async def upload_audio_api(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
     """用户上传音频替代 TTS（is_manual=True）"""
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     from app.services.upload_service import save_upload_file
     file_url = await save_upload_file(file, folder=f"projects/{project_id}/shots/{shot_id}/audios")
     audio = await upload_audio(db, shot_id, current_user.id, file_url)
@@ -1768,13 +1628,10 @@ async def upload_audio_api(
     summary="列出音频版本",
 )
 async def list_audios_api(
-    project_id: int,
     shot_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     return await list_audios(db, shot_id)
 
 
@@ -1784,14 +1641,11 @@ async def list_audios_api(
     summary="设为采用版音频",
 )
 async def set_active_audio_api(
-    project_id: int,
     shot_id: int,
     version_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     try:
         return await set_active_audio(db, shot_id, version_id)
     except ValueError as e:
@@ -1803,14 +1657,11 @@ async def set_active_audio_api(
     summary="删除音频版本",
 )
 async def delete_audio_api(
-    project_id: int,
     shot_id: int,
     version_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     ok = await delete_audio(db, shot_id, version_id)
     if not ok:
         raise HTTPException(
@@ -1835,13 +1686,9 @@ async def delete_audio_api(
     summary="内置音色清单",
 )
 async def list_builtin_voices_api(
-    project_id: int,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
     """返回内置音色清单（供前端音色选择器）"""
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     voices = list_builtin_voice_options()
     return [
         VoiceOption(
@@ -1862,10 +1709,8 @@ async def list_builtin_voices_api(
 async def list_character_voices_api(
     project_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     return await list_character_voices(db, project_id)
 
 
@@ -1879,11 +1724,9 @@ async def assign_character_voice_api(
     character_id: int,
     data: AssignCharacterVoiceRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
     """为角色分配音色（同角色同声音，upsert）"""
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     return await assign_character_voice(
         db, project_id, character_id,
         voice_id=data.voice_id, voice_name=data.voice_name,
@@ -1910,11 +1753,9 @@ async def generate_subtitles_api(
     project_id: int,
     data: GenerateSubtitleRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
     """LLM 模式：分镜对白拆分为短字幕，按权重分配时长"""
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     clips = await generate_subtitles(
         db, project_id,
         shot_ids=data.shot_ids, mode="llm",
@@ -1930,15 +1771,13 @@ async def generate_subtitles_whisper_api(
     project_id: int,
     data: GenerateSubtitleAdvancedRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
     """
     whisper 模式：基于 TTS 音频做 forced alignment，时间戳精确到毫秒。
 
     未安装 faster-whisper 时自动回退 LLM 模式。
     """
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     clips = await generate_subtitles_with_whisper(
         db, project_id,
         shot_ids=data.shot_ids,
@@ -1960,10 +1799,8 @@ async def generate_subtitles_whisper_api(
 async def list_subtitle_clips_api(
     project_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     clips = await get_subtitle_clips(db, project_id)
     return [TimelineClipResponse.model_validate(c) for c in clips]
 
@@ -1976,10 +1813,8 @@ async def list_subtitle_clips_api(
 async def get_subtitle_style_api(
     project_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     style = await get_subtitle_style(db, project_id)
     return SubtitleStyle(**style)
 
@@ -1993,10 +1828,8 @@ async def update_subtitle_style_api(
     project_id: int,
     data: SubtitleStyle,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     await update_subtitle_style(db, project_id, data.model_dump())
     return data
 
@@ -2006,13 +1839,9 @@ async def update_subtitle_style_api(
     summary="检查 whisper 是否可用",
 )
 async def check_whisper_available_api(
-    project_id: int,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
     """前端用于决定是否展示 whisper 模式选项"""
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     return {"available": is_whisper_available()}
 
 
@@ -2037,11 +1866,9 @@ async def check_whisper_available_api(
 async def init_timeline_api(
     project_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
     """从分镜数据自动初始化时间线（视频轨 + 音频轨）"""
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     try:
         await init_timeline(db, project_id)
     except ValueError as e:
@@ -2059,10 +1886,8 @@ async def list_timeline_clips_api(
     project_id: int,
     track_type: Optional[str] = Query(None, description="按轨道过滤: video/audio/subtitle"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     clips = await list_timeline_clips(db, project_id, track_type=track_type)
     return [TimelineClipResponse.model_validate(c) for c in clips]
 
@@ -2076,10 +1901,8 @@ async def create_timeline_clip_api(
     project_id: int,
     data: TimelineClipCreate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     clip = await create_timeline_clip(db, project_id, data.model_dump(exclude_none=True))
     return clip
 
@@ -2094,10 +1917,8 @@ async def update_timeline_clip_api(
     clip_id: int,
     data: TimelineClipUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     clip = await update_timeline_clip(
         db, project_id, clip_id, data.model_dump(exclude_none=True)
     )
@@ -2114,10 +1935,8 @@ async def delete_timeline_clip_api(
     project_id: int,
     clip_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     ok = await delete_timeline_clip(db, project_id, clip_id)
     if not ok:
         raise HTTPException(status_code=404, detail="时间线片段不存在")
@@ -2133,15 +1952,13 @@ async def split_timeline_clip_api(
     clip_id: int,
     split_time: float = Query(..., description="分割点（项目时间线上的绝对时间，秒）"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
     """
     在指定时间点分割时间线片段（Ctrl+K）
 
     原片段保留 [start_time, split_time]，新片段承担 [split_time, end_time]。
     """
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     result = await split_timeline_clip(db, project_id, clip_id, split_time)
     if not result:
         raise HTTPException(status_code=400, detail="分割点不在片段范围内")
@@ -2156,15 +1973,13 @@ async def ripple_delete_timeline_clip_api(
     project_id: int,
     clip_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
     """
     波纹删除：删除片段后，同轨后续片段自动前移填补空隙
 
     普通删除留空隙，波纹删除自动收紧。
     """
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     result = await ripple_delete_timeline_clip(db, project_id, clip_id)
     if not result:
         raise HTTPException(status_code=404, detail="时间线片段不存在")
@@ -2179,10 +1994,8 @@ async def ripple_delete_timeline_clip_api(
 async def get_timeline_data_api(
     project_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     data = await get_timeline_data(db, project_id)
     return TimelineDataResponse(**data)
 
@@ -2196,11 +2009,9 @@ async def save_timeline_data_api(
     project_id: int,
     data: TimelineDataUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
     """保存时间线草稿（字幕样式、轨道折叠状态等）"""
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     await save_timeline_data(
         db, project_id,
         subtitle_style=data.subtitle_style,
@@ -2223,14 +2034,10 @@ async def save_timeline_data_api(
     summary="BGM 内置库列表",
 )
 async def list_bgms_api(
-    project_id: int,
     mood: Optional[str] = Query(None, description="按情绪过滤: calm/corporate/dramatic/uplifting/sad"),
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
     """BGM 内置库列表（available 字段标识文件是否就绪）"""
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     return list_bgm_library(mood=mood)
 
 
@@ -2239,12 +2046,8 @@ async def list_bgms_api(
     summary="BGM 情绪分类列表",
 )
 async def list_bgm_moods_api(
-    project_id: int,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     return {"moods": list_bgm_moods()}
 
 
@@ -2269,16 +2072,12 @@ async def get_bgm_file_api(
     summary="上传自定义 BGM（mp3，用户自备音源）",
 )
 async def upload_bgm_api(
-    project_id: int,
     file: UploadFile = File(...),
     name: str = Form(""),
     mood: str = Form("calm"),
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
     """上传 mp3 作为自定义 BGM，登记后与内置曲目合并展示、可直接用于高级合成"""
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     if not (file.filename or "").lower().endswith(".mp3"):
         raise HTTPException(status_code=400, detail="仅支持 .mp3 格式")
     content = await file.read()
@@ -2303,11 +2102,9 @@ async def upload_bgm_api(
 async def get_media_library_api(
     project_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
     """聚合项目下所有可拖拽到时间线的素材（视频/音频/帧图/BGM）"""
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     return await get_media_library(db, project_id)
 
 
@@ -2328,10 +2125,8 @@ async def get_media_library_api(
 async def list_markers_api(
     project_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     return await list_project_markers(db, project_id)
 
 
@@ -2345,10 +2140,8 @@ async def create_marker_api(
     project_id: int,
     data: MarkerCreate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     return await create_project_marker(
         db, project_id,
         time=data.time, name=data.name, color=data.color,
@@ -2363,10 +2156,8 @@ async def delete_marker_api(
     project_id: int,
     marker_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_owned_project),
 ):
-    project = await _get_project_or_404(db, project_id)
-    _check_project_owner(project, current_user)
     ok = await delete_project_marker(db, project_id, marker_id)
     if not ok:
         raise HTTPException(status_code=404, detail="标记不存在")

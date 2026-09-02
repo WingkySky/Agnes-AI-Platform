@@ -146,7 +146,8 @@
  * 管理场景 CRUD，并通过 3D 编辑器实时预览翻译后的 prompt。
  */
 import { computed, onMounted, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { useConfirm } from '@/composables/useConfirm'
 import { useI18n } from '@/i18n'
 import { useUserStore } from '@/stores/user'
 import Scene3DEditor from '@/components/scene/Scene3DEditor.vue'
@@ -160,6 +161,7 @@ import {
 import type { Scene3D, SceneData } from '@/types/scene'
 
 const { t } = useI18n()
+const { confirm } = useConfirm()
 const userStore = useUserStore()
 
 // ---------- 默认场景数据 ----------
@@ -303,13 +305,7 @@ async function onSave() {
 
 async function onDelete() {
   if (!currentId.value) return
-  try {
-    await ElMessageBox.confirm(t('scene3d.deleteConfirm'), t('common.confirm'), {
-      type: 'warning',
-    })
-  } catch {
-    return
-  }
+  await confirm(t('scene3d.deleteConfirm'), t('common.confirm'))
   deleting.value = true
   try {
     await deleteScene(currentId.value)

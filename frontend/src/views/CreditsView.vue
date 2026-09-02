@@ -80,7 +80,7 @@
         <!-- 时间 -->
         <el-table-column :label="t('credits.timeLabel')" min-width="170">
           <template #default="{ row }">
-            <span class="muted">{{ formatTime(row.created_at) }}</span>
+            <span class="muted">{{ formatTime(row.created_at, { emptyText: '—' }) }}</span>
           </template>
         </el-table-column>
 
@@ -164,6 +164,7 @@ import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Refresh, Coin, Picture, VideoCamera, Link } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
+import { formatTime } from '@/lib/format'
 import { useUserStore } from '@/stores/user'
 import {
   listMyTransactions,
@@ -186,18 +187,6 @@ const pageSize = ref(20)
 const filterType = ref<string>('')         // 类型筛选（空字符串=全部）
 const adminMode = ref(false)               // 管理员视图开关
 const filterUserId = ref<number | undefined>(undefined) // 管理员视图：按用户 ID 筛选
-
-// ================ 工具函数 ================
-
-/** 格式化时间 */
-function formatTime(val?: string | null) {
-  if (!val) return '—'
-  try {
-    return new Date(val).toLocaleString()
-  } catch {
-    return val
-  }
-}
 
 /** 关联任务的图标（按 ref_type 区分图片/视频），返回 Element Plus 图标组件 */
 function refTypeIcon(refType?: string | null) {

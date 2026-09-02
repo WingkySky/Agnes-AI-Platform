@@ -18,7 +18,7 @@
         <!-- 最后更新时间 -->
         <span v-if="lastUpdated" class="last-updated">
           <el-icon size="12"><Clock /></el-icon>
-          {{ t('admin.review.lastUpdated') }}: {{ formatTime(lastUpdated) }}
+          {{ t('admin.review.lastUpdated') }}: {{ formatTime(lastUpdated, { mode: 'datetime-padded' }) }}
         </span>
         <!-- 自动刷新开关 -->
         <el-tooltip :content="t('admin.review.autoRefreshTip')" placement="top">
@@ -396,7 +396,7 @@
         <!-- 提交时间 -->
         <el-table-column :label="t('admin.review.colSubmitTime')" width="170">
           <template #default="{ row }">
-            <span class="muted">{{ formatTime(row.created_at || row.submitted_at) }}</span>
+            <span class="muted">{{ formatTime(row.created_at || row.submitted_at, { mode: 'datetime-padded' }) }}</span>
           </template>
         </el-table-column>
         <!-- 操作 -->
@@ -420,7 +420,7 @@
               size="small"
               link
               type="danger"
-              @click="handleReject(row)">
+              @click="openRejectDialog(row)">
               {{ t('admin.review.reject') }}
             </el-button>
           </template>
@@ -530,7 +530,7 @@
             {{ currentItem.category || currentItem.preset_type || '-' }}
           </el-descriptions-item>
           <el-descriptions-item :label="t('admin.review.colSubmitTime')">
-            {{ formatTime(currentItem.created_at || currentItem.submitted_at) }}
+            {{ formatTime(currentItem.created_at || currentItem.submitted_at, { mode: 'datetime-padded' }) }}
           </el-descriptions-item>
           <el-descriptions-item v-if="currentItem.review_type === 'work' && currentItem.prompt" :label="t('admin.review.colPrompt')" :span="2">
             <div class="desc-text">{{ currentItem.prompt }}</div>
@@ -603,9 +603,12 @@ import { ref, reactive, onMounted, onBeforeUnmount, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, Search, Check, Close, Warning, VideoPlay, Clock, MagicStick } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
+import { useConfirm } from '@/composables/useConfirm'
+import { formatTime } from '@/lib/format'
 import client from '@/api/client'
 
 const { t } = useI18n()
+const { confirm } = useConfirm()
 
 interface ReviewItem {
   id: string | number
@@ -854,16 +857,6 @@ function getAiStatusTagType(status: string): 'success' | 'warning' | 'danger' | 
   return map[status] || 'info'
 }
 
-function formatTime(isoStr?: string | null): string {
-  if (!isoStr) return '-'
-  try {
-    const d = new Date(isoStr)
-    const pad = (n: number) => String(n).padStart(2, '0')
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
-  } catch {
-    return isoStr
-  }
-}
 
 function truncatePrompt(prompt?: string): string {
   if (!prompt) return ''
@@ -876,23 +869,22 @@ function handleView(row: ReviewItem) {
   detailVisible.value = true
 }
 
-async function handleApprove(row: ReviewItem) {
+/** 审核动作通用流水线：POST → 成功提示 → 刷新列表与统计；失败统一报错，返回是否成功 */
+async function reviewAction(url: string, body: unknown, successMsg: string): Promise<boolean> {
   try {
-    await ElMessageBox.confirm(
-      t('admin.review.approveConfirm', { name: row.name || `#${row.item_id}` }),
-      t('admin.review.approve'),
-      { type: 'warning' }
-    )
-  } catch {
-    return
-  }
-  try {
-    await client.post(`/api/admin/review/${row.review_type}/${row.item_id}/approve`)
-    ElMessage.success(t('admin.review.approveSuccess'))
+    await client.post(url, body)
+    ElMessage.success(successMsg)
     await Promise.all([loadList(), loadStats()])
+    return true
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.message || t('admin.review.operateFailed'))
+    return false
   }
+}
+
+async function handleApprove(row: ReviewItem) {
+  await confirm(t('admin.review.approveConfirm', { name: row.name || `#${row.item_id}` }), t('admin.review.approve'))
+  await reviewAction(`/api/admin/review/${row.review_type}/${row.item_id}/approve`, undefined, t('admin.review.approveSuccess'))
 }
 
 function openRejectDialog(row: ReviewItem) {
@@ -901,55 +893,32 @@ function openRejectDialog(row: ReviewItem) {
   rejectVisible.value = true
 }
 
-async function handleReject(row: ReviewItem) {
-  openRejectDialog(row)
-}
-
 async function confirmReject() {
   if (!rejectItem.value) return
   rejectLoading.value = true
-  try {
-    await client.post(`/api/admin/review/${rejectItem.value.review_type}/${rejectItem.value.item_id}/reject`, {
-      reason: rejectForm.reason,
-    })
-    ElMessage.success(t('admin.review.rejectSuccess'))
-    rejectVisible.value = false
-    await Promise.all([loadList(), loadStats()])
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.message || t('admin.review.operateFailed'))
-  } finally {
-    rejectLoading.value = false
-  }
+  const ok = await reviewAction(
+    `/api/admin/review/${rejectItem.value.review_type}/${rejectItem.value.item_id}/reject`,
+    { reason: rejectForm.reason },
+    t('admin.review.rejectSuccess')
+  )
+  if (ok) rejectVisible.value = false
+  rejectLoading.value = false
 }
 
 async function handleBatchApprove() {
   if (selectedIds.value.length === 0) return
-  try {
-    await ElMessageBox.confirm(
-      t('admin.review.batchApproveConfirm', { count: selectedIds.value.length }),
-      t('admin.review.batchApprove'),
-      { type: 'warning' }
-    )
-  } catch {
-    return
-  }
+  await confirm(t('admin.review.batchApproveConfirm', { count: selectedIds.value.length }), t('admin.review.batchApprove'))
   batchLoading.value = true
-  try {
-    const items = selectedIds.value.map((r) => ({ review_type: r.review_type, item_id: r.item_id }))
-    await client.post('/api/admin/review/batch-approve', { items })
-    ElMessage.success(t('admin.review.batchSuccess'))
-    await Promise.all([loadList(), loadStats()])
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.message || t('admin.review.operateFailed'))
-  } finally {
-    batchLoading.value = false
-  }
+  const items = selectedIds.value.map((r) => ({ review_type: r.review_type, item_id: r.item_id }))
+  await reviewAction('/api/admin/review/batch-approve', { items }, t('admin.review.batchSuccess'))
+  batchLoading.value = false
 }
 
 async function handleBatchReject() {
   if (selectedIds.value.length === 0) return
+  let value = ''
   try {
-    const { value } = await ElMessageBox.prompt(
+    ({ value } = await ElMessageBox.prompt(
       t('admin.review.batchRejectConfirm', { count: selectedIds.value.length }),
       t('admin.review.batchReject'),
       {
@@ -959,22 +928,14 @@ async function handleBatchReject() {
         inputType: 'textarea',
         type: 'warning',
       }
-    )
-    batchLoading.value = true
-    const items = selectedIds.value.map((r) => ({ review_type: r.review_type, item_id: r.item_id }))
-    await client.post('/api/admin/review/batch-reject', {
-      items,
-      reason: (value || '').trim(),
-    })
-    ElMessage.success(t('admin.review.batchSuccess'))
-    await Promise.all([loadList(), loadStats()])
-  } catch (e: any) {
-    if (e !== 'cancel') {
-      ElMessage.error(e?.response?.data?.message || t('admin.review.operateFailed'))
-    }
-  } finally {
-    batchLoading.value = false
+    ))
+  } catch {
+    return
   }
+  batchLoading.value = true
+  const items = selectedIds.value.map((r) => ({ review_type: r.review_type, item_id: r.item_id }))
+  await reviewAction('/api/admin/review/batch-reject', { items, reason: (value || '').trim() }, t('admin.review.batchSuccess'))
+  batchLoading.value = false
 }
 
 // ---- 一键审核（拉取当前筛选条件下所有 pending，再批量操作）----
@@ -1007,15 +968,7 @@ async function fetchAllPendingItems(): Promise<ReviewItem[]> {
 }
 
 async function onQuickApproveAll() {
-  try {
-    await ElMessageBox.confirm(
-      t('admin.review.quickApproveConfirm', { count: total.value }),
-      t('admin.review.quickApprove'),
-      { type: 'success' }
-    )
-  } catch {
-    return
-  }
+  await confirm(t('admin.review.quickApproveConfirm', { count: total.value }), t('admin.review.quickApprove'), { type: 'success' })
   quickLoading.value = true
   try {
     const items = await fetchAllPendingItems()

@@ -108,12 +108,12 @@
         </el-table-column>
         <el-table-column prop="created_at" :label="t('users.colCreated')" width="190" align="center">
           <template #default="{ row }">
-            <span class="muted">{{ formatTime(row.created_at) }}</span>
+            <span class="muted">{{ formatTime(row.created_at, { emptyText: '' }) }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="last_login_at" :label="t('users.colLastLogin')" width="190" align="center">
           <template #default="{ row }">
-            <span class="muted">{{ formatTime(row.last_login_at) || t('users.neverLogin') }}</span>
+            <span class="muted">{{ formatTime(row.last_login_at, { emptyText: '' }) || t('users.neverLogin') }}</span>
           </template>
         </el-table-column>
       </el-table>
@@ -123,15 +123,18 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { Refresh, UserFilled, ArrowDown } from '@element-plus/icons-vue'
 import { listUsers, updateUserCredits, updateUserActive } from '@/api/auth'
 import { updateUserRole, updateUserWatermark, updateUserContentSafety } from '@/api/admin'
 import { useUserStore } from '@/stores/user'
 import type { UserAdminRow } from '@/types'
 import { useI18n } from '@/i18n'
+import { formatTime } from '@/lib/format'
+import { useConfirm } from '@/composables/useConfirm'
 
 const { t } = useI18n()
+const { confirm } = useConfirm()
 const userStore = useUserStore()
 const users = ref<UserAdminRow[]>([])
 const loading = ref(false)
@@ -157,15 +160,6 @@ function avatarFullUrl(rawUrl: string | null | undefined): string {
   return rawUrl
 }
 
-/** 格式化时间（返回空字符串或格式化后的时间字符串） */
-function formatTime(val?: string | null) {
-  if (!val) return ''
-  try {
-    return new Date(val).toLocaleString()
-  } catch {
-    return val
-  }
-}
 
 /** 角色显示名称 */
 function roleDisplayName(role: string) {
@@ -212,15 +206,10 @@ async function fetchUsers() {
 async function onRoleChange(row: UserAdminRow, newRole: string) {
   if (isSelf(row)) return
   if (row.role === newRole) return
-  try {
-    await ElMessageBox.confirm(
-      t('admin.users.confirmChangeRole', { username: row.username, role: roleDisplayName(newRole) }),
-      t('admin.users.changeRole'),
-      { confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel'), type: 'warning' }
-    )
-  } catch {
-    return
-  }
+  await confirm(
+    t('admin.users.confirmChangeRole', { username: row.username, role: roleDisplayName(newRole) }),
+    t('admin.users.changeRole')
+  )
   try {
     await updateUserRole(row.id, newRole)
     row.role = newRole

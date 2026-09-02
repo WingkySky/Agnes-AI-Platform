@@ -114,16 +114,10 @@ async def generate_storyboard(req: StoryboardRequest, fallback_model: str = "") 
             model = matched
         else:
             logger.warning("[storyboard] 指定模型 %s 不在聊天模型注册表中，回退 %s", req.model, model)
-    body = {
-        "model": model,
-        "messages": [{"role": "user", "content": _build_prompt(req)}],
-        "temperature": 0.7,
-    }
+    messages = [{"role": "user", "content": _build_prompt(req)}]
     last_error: Optional[Exception] = None
     for attempt in range(_MAX_ATTEMPTS):
-        result = await agnes_client._post(f"{agnes_client.base_url}/chat/completions", body)
-        choices = result.get("choices", [])
-        content = (choices[0].get("message", {}).get("content", "") if choices else "") or ""
+        content = await agnes_client.chat_text(model, messages, temperature=0.7)
         try:
             return _parse_result(content)
         except Exception as e:

@@ -364,7 +364,8 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance, type FormRules, type TableInstance } from 'element-plus'
+import { ElMessage, type FormInstance, type FormRules, type TableInstance } from 'element-plus'
+import { useConfirm } from '@/composables/useConfirm'
 import { Plus, Edit, Delete, Refresh, Setting, Open, TurnOff } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { useProvidersStore } from '@/stores/providers'
@@ -372,6 +373,7 @@ import { useModelsStore } from '@/stores/models'
 import type { ApiProvider, ModelDefinition } from '@/types'
 
 const { t } = useI18n()
+const { confirm } = useConfirm()
 const providersStore = useProvidersStore()
 const modelsStore = useModelsStore()
 
@@ -642,11 +644,7 @@ async function submitProvider() {
 
 async function handleDeleteProvider(provider: ApiProvider) {
   try {
-    await ElMessageBox.confirm(
-      t('settings.confirmDeleteProvider').replace('{name}', provider.name),
-      t('common.delete'),
-      { type: 'warning' }
-    )
+    await confirm(t('settings.confirmDeleteProvider').replace('{name}', provider.name), t('common.delete'))
     await providersStore.removeProvider(provider.id)
     ElMessage.success(t('settings.providerDeleted'))
     modelsStore.loaded = false
@@ -680,11 +678,7 @@ async function handleSyncProvider(provider: ApiProvider) {
 }
 
 async function handleSyncAll() {
-  try {
-    await ElMessageBox.confirm(t('settings.confirmSyncAll'), t('settings.syncAll'), { type: 'warning' })
-  } catch {
-    return
-  }
+  await confirm(t('settings.confirmSyncAll'), t('settings.syncAll'))
   ElMessage.info(t('settings.syncStarted'))
   const results = await providersStore.syncAll()
   const totalAdded = results.reduce((s, r) => s + (r.added || 0), 0)
@@ -792,16 +786,7 @@ async function handleBatchDisabled(disabled: boolean) {
 
 async function handleBatchDelete() {
   const ids = selectedModels.value.map((m) => m.model_id)
-  try {
-    await ElMessageBox.confirm(
-      t('settings.confirmBatchDelete').replace('{count}', String(ids.length)),
-      t('common.delete'),
-      { type: 'warning' }
-    )
-  } catch {
-    // 用户取消
-    return
-  }
+  await confirm(t('settings.confirmBatchDelete').replace('{count}', String(ids.length)), t('common.delete'))
   const count = await providersStore.batchRemoveModels(ids)
   ElMessage.success(t('settings.batchDeleted').replace('{count}', String(count)))
   clearModelSelection()
@@ -850,11 +835,7 @@ async function submitModel() {
 
 async function handleDeleteModel(model: ModelDefinition) {
   try {
-    await ElMessageBox.confirm(
-      t('settings.confirmDeleteModel').replace('{modelId}', model.model_id),
-      t('common.delete'),
-      { type: 'warning' }
-    )
+    await confirm(t('settings.confirmDeleteModel').replace('{modelId}', model.model_id), t('common.delete'))
     await providersStore.removeModel(model.model_id)
     ElMessage.success(t('settings.modelDeleted'))
     modelsStore.loaded = false

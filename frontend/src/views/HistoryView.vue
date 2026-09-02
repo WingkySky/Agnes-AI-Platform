@@ -254,7 +254,7 @@
               <el-icon size="11"><Document /></el-icon>
               {{ t('history.idLabel') }}: {{ item.id }}
             </span>
-            <span class="card-time">{{ formatTime(item.created_at ?? '') }}</span>
+            <span class="card-time">{{ formatTime(item.created_at, { emptyText: '' }) }}</span>
           </div>
         </div>
       </div>
@@ -471,14 +471,17 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { Refresh, Loading, Document, Delete, VideoPlay, CircleCloseFilled, VideoCamera, Edit, Close, Download, ZoomIn, Share, Warning, CopyDocument, MagicStick, Scissor, Collection } from '@element-plus/icons-vue'
 import ImageViewer from '@/components/ImageViewer.vue'
 import { getHistoryList, deleteHistoryRecord, batchDeleteHistory } from '@/api/history'
 import { saveAssetFromGeneration } from '@/api/pipeline'
 import { updateShareStatus, batchUpdateShareStatus } from '@/api/plaza'
-import client from '@/api/client'
 import { useDownload } from '@/composables/useDownload'
+import { useCopyText } from '@/composables/useCopyText'
+import { useConfirm } from '@/composables/useConfirm'
+import { fetchBlobAsUrl } from '@/lib/blob'
+import { formatTime } from '@/lib/format'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useI18n } from '@/i18n'
 import { formatPixels, getTierBySize, IMAGE_TIER_CONFIG } from '@/config/model-params'
@@ -487,6 +490,8 @@ import ImageWithWatermark from '@/components/ImageWithWatermark.vue'
 import PostProcessDialog from '@/components/PostProcessDialog.vue'
 
 const { t } = useI18n()
+const { copyText } = useCopyText()
+const { confirm } = useConfirm()
 const route = useRoute()
 const router = useRouter()
 
@@ -589,19 +594,6 @@ function getVideoStreamUrl(item: GenerationRecord) {
   return item.result_url
 }
 
-/**
- * 通过 axios 下载二进制资源并生成 blob URL
- * 这样请求会经过 axios 请求拦截器，自动携带 JWT token
- * 解决 <img src="url"> 或 new Image().src 无法携带 JWT 的问题
- */
-async function fetchBlobAsUrl(url: string): Promise<string> {
-  const resp = await client.get<Blob>(url, {
-    responseType: 'blob',
-    silent: true,
-  })
-  const blob = resp.data ?? resp
-  return URL.createObjectURL(blob as Blob)
-}
 
 async function loadVideoThumbnail(item: GenerationRecord) {
   if (videoThumbnails[item.id] || thumbnailLoading[item.id] || thumbnailFailed[item.id]) return
@@ -885,12 +877,9 @@ async function doBatchDelete() {
 }
 
 /** 复制记录 ID 到剪贴板 */
-function copyRecordId(id: number) {
-  navigator.clipboard.writeText(String(id)).then(() => {
-    ElMessage.success(t('history.idCopied', { id }))
-  }).catch(() => {
-    ElMessage.info(`${t('history.idLabel')}: ${id}`)
-  })
+async function copyRecordId(id: number) {
+  const ok = await copyText(String(id), t('history.idCopied', { id }))
+  if (!ok) ElMessage.info(`${t('history.idLabel')}: ${id}`)
 }
 
 // ---------- 广场分享状态管理：单条切换 / 批量设为公开 / 批量设为私有 ----------
@@ -972,18 +961,10 @@ async function confirmBatchSetPublic() {
     ElMessage.warning(t('history.allSelectedRejected'))
     return
   }
-  try {
-    const confirmText = rejectedCount > 0
-      ? t('history.confirmBatchPublicWithRejected', { valid: validIds.length, rejected: rejectedCount })
-      : t('plaza.confirmBatchPublic', { n: selectedIds.value.length })
-    await ElMessageBox.confirm(
-      confirmText,
-      t('plaza.batchSetPublic'),
-      { type: 'warning', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') }
-    )
-  } catch {
-    return  // 用户取消
-  }
+  const confirmText = rejectedCount > 0
+    ? t('history.confirmBatchPublicWithRejected', { valid: validIds.length, rejected: rejectedCount })
+    : t('plaza.confirmBatchPublic', { n: selectedIds.value.length })
+  await confirm(confirmText, t('plaza.batchSetPublic'))
   batchSettingPublic.value = true
   try {
     const res = await batchUpdateShareStatus(validIds, true)
@@ -1003,15 +984,7 @@ async function confirmBatchSetPrivate() {
     ElMessage.warning(t('history.pleaseSelectOne'))
     return
   }
-  try {
-    await ElMessageBox.confirm(
-      t('plaza.confirmBatchPrivate', { n: selectedIds.value.length }),
-      t('plaza.batchSetPrivate'),
-      { type: 'warning', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') }
-    )
-  } catch {
-    return  // 用户取消
-  }
+  await confirm(t('plaza.confirmBatchPrivate', { n: selectedIds.value.length }), t('plaza.batchSetPrivate'))
   batchSettingPrivate.value = true
   try {
     const res = await batchUpdateShareStatus(selectedIds.value, false)
@@ -1025,40 +998,20 @@ async function confirmBatchSetPrivate() {
   }
 }
 
-function copyToClipboard(text: string) {
-  if (!text) return Promise.resolve()
-  if (navigator.clipboard && window.isSecureContext) {
-    return navigator.clipboard.writeText(text)
-  }
-  const ta = document.createElement('textarea')
-  ta.value = text
-  ta.style.position = 'fixed'
-  ta.style.left = '-9999px'
-  ta.style.top = '0'
-  document.body.appendChild(ta)
-  ta.select()
-  let ok = false
-  try { ok = document.execCommand('copy') } catch (e) { ok = false }
-  document.body.removeChild(ta)
-  return ok ? Promise.resolve() : Promise.reject(new Error('copy failed'))
-}
-
-function copyLink(url: string) {
+async function copyLink(url: string) {
   if (!url) {
     ElMessage.warning(t('history.noValidLink'))
     return
   }
-  copyToClipboard(url)
-    .then(() => ElMessage.success(t('history.linkCopied')))
-    .catch(() => ElMessage.error(t('history.copyLinkFailed')))
+  const ok = await copyText(url, t('history.linkCopied'))
+  if (!ok) ElMessage.error(t('history.copyLinkFailed'))
 }
 
 /** 卡片快捷复制提示词：复用通用剪贴板复制模块 */
-function copyPrompt(item: GenerationRecord) {
+async function copyPrompt(item: GenerationRecord) {
   if (!item.prompt) return
-  copyToClipboard(item.prompt)
-    .then(() => ElMessage.success(t('history.promptCopied')))
-    .catch(() => ElMessage.error(t('history.copyLinkFailed')))
+  const ok = await copyText(item.prompt, t('history.promptCopied'))
+  if (!ok) ElMessage.error(t('history.copyLinkFailed'))
 }
 
 /** 卡片快捷下载（列表中直接点击下载图标） */
@@ -1222,12 +1175,6 @@ function getVideoCardParams(item: GenerationRecord): string {
     parts.push(`${Number(fps)}FPS`)
   }
   return parts.join(' · ')
-}
-function formatTime(t: string) {
-  if (!t) return ''
-  const d = new Date(t)
-  if (isNaN(d.getTime())) return String(t).slice(0, 19)
-  return d.toLocaleString()
 }
 
 // 【历史自动刷新】每当有新任务完成/失败/取消时，自动刷新历史列表

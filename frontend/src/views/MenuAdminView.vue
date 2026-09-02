@@ -306,16 +306,16 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from '@/i18n'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { useConfirm } from '@/composables/useConfirm'
 import {
   RefreshRight, Check, ArrowDown, Menu, Grid,
   EditPen, User, Connection, Setting, Picture, VideoPlay,
   ChatDotRound, Clock, Coin, StarFilled, Histogram, Message,
   UserFilled, MoreFilled,
 } from '@element-plus/icons-vue'
-import * as ElementPlusIcons from '@element-plus/icons-vue'
-import type { Component } from 'vue'
 import { useMenuStore } from '@/stores/menu'
+import { getIconByName as getIcon } from '@/lib/icons'
 import {
   resolveMenus,
   type MenuItemConfig,
@@ -324,6 +324,7 @@ import {
 } from '@/config/menus'
 
 const { t, locale } = useI18n()
+const { confirm } = useConfirm()
 const menuStore = useMenuStore()
 
 const saving = ref(false)
@@ -364,13 +365,6 @@ const configMap = reactive<Record<string, MenuItemConfig>>({})
 
 const currentLang = computed(() => locale.value.startsWith('zh') ? 'zh' : 'en')
 
-// 图标组件映射（正确类型，无需 as any）
-const iconMap: Record<string, Component> = ElementPlusIcons as Record<string, Component>
-
-function getIcon(iconName: string | null | undefined): Component | null {
-  if (!iconName) return null
-  return iconMap[iconName] || null
-}
 
 /** 获取分组显示名称（考虑自定义名称） */
 function getGroupDisplayName(group: EditableGroupConfig | AdminMenuGroup): string {
@@ -450,21 +444,14 @@ function buildGroupConfigs(): MenuGroupConfig[] {
 
 // 保存配置
 async function handleSave() {
+  await confirm(t('menuAdmin.confirmSave'), t('common.tip'), { type: 'info' })
+  saving.value = true
   try {
-    await ElMessageBox.confirm(
-      t('menuAdmin.confirmSave'),
-      t('common.tip'),
-      { type: 'info' }
-    )
-
-    saving.value = true
     const itemConfigs = Object.values(configMap)
     const groupConfigs = buildGroupConfigs()
     await menuStore.saveConfigs(itemConfigs, groupConfigs)
   } catch (e: any) {
-    if (e !== 'cancel') {
-      ElMessage.error(e.message || t('menuAdmin.saveFailed'))
-    }
+    ElMessage.error(e.message || t('menuAdmin.saveFailed'))
   } finally {
     saving.value = false
   }
@@ -472,19 +459,13 @@ async function handleSave() {
 
 // 重置为默认
 async function handleReset() {
+  await confirm(t('menuAdmin.confirmReset'), t('common.tip'))
   try {
-    await ElMessageBox.confirm(
-      t('menuAdmin.confirmReset'),
-      t('common.tip'),
-      { type: 'warning' }
-    )
     await menuStore.resetToDefault()
     initConfigMap()
     initGroupConfigs()
   } catch (e: any) {
-    if (e !== 'cancel') {
-      ElMessage.error(e.message || t('menuAdmin.resetFailed'))
-    }
+    ElMessage.error(e.message || t('menuAdmin.resetFailed'))
   }
 }
 

@@ -24,7 +24,7 @@ from datetime import datetime
 from typing import Optional, List
 
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
-from fastapi.responses import StreamingResponse, Response as FastAPIResponse, FileResponse
+from fastapi.responses import Response as FastAPIResponse, FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import desc, func
@@ -33,6 +33,7 @@ from app.core.database import get_async_db
 from app.core.security import get_current_user_optional, get_current_user
 from app.models.generation import Generation
 from app.models.user import User
+from app.routes._media_proxy import proxy_video_stream
 from app.schemas.common import (
     HistoryListResponse,
     GenerationRecord,
@@ -49,6 +50,13 @@ from app.schemas.plaza import (
 
 logger = logging.getLogger("agnes_platform")
 router = APIRouter()
+
+
+def _user_scope(col, current_user):
+    """用户隔离过滤条件：已登录限定本人记录，未登录仅可见无主记录。"""
+    if current_user:
+        return col == current_user.id
+    return col.is_(None)
 
 
 @router.get("/history", response_model=HistoryListResponse, summary="获取生成历史列表")
@@ -73,10 +81,7 @@ async def get_history(
     stmt = select(Generation)
 
     # --- 用户隔离：只返回当前用户的记录 ---
-    if current_user:
-        stmt = stmt.filter(Generation.user_id == current_user.id)
-    else:
-        stmt = stmt.filter(Generation.user_id.is_(None))
+    stmt = stmt.filter(_user_scope(Generation.user_id, current_user))
 
     if type and type.lower() in ("image", "video"):
         stmt = stmt.filter(Generation.type == type.lower())
@@ -96,12 +101,8 @@ async def get_history(
     # 各类型全局计数（按用户隔离，不受 type 筛选条件影响）
     img_count_stmt = select(func.count()).filter(Generation.type == "image")
     vid_count_stmt = select(func.count()).filter(Generation.type == "video")
-    if current_user:
-        img_count_stmt = img_count_stmt.filter(Generation.user_id == current_user.id)
-        vid_count_stmt = vid_count_stmt.filter(Generation.user_id == current_user.id)
-    else:
-        img_count_stmt = img_count_stmt.filter(Generation.user_id.is_(None))
-        vid_count_stmt = vid_count_stmt.filter(Generation.user_id.is_(None))
+    img_count_stmt = img_count_stmt.filter(_user_scope(Generation.user_id, current_user))
+    vid_count_stmt = vid_count_stmt.filter(_user_scope(Generation.user_id, current_user))
     img_count_result = await db.execute(img_count_stmt)
     vid_count_result = await db.execute(vid_count_stmt)
     total_image_count = img_count_result.scalar_one() or 0
@@ -161,10 +162,7 @@ async def delete_history_record(
     根据 ID 删除一条生成历史记录（按用户隔离，异步操作，不阻塞事件循环）。
     """
     stmt = select(Generation).filter(Generation.id == record_id)
-    if current_user:
-        stmt = stmt.filter(Generation.user_id == current_user.id)
-    else:
-        stmt = stmt.filter(Generation.user_id.is_(None))
+    stmt = stmt.filter(_user_scope(Generation.user_id, current_user))
     result = await db.execute(stmt)
     record = result.scalar_one_or_none()
 
@@ -203,10 +201,7 @@ async def batch_delete_history(
     try:
         # 查询所有待删除记录（按用户隔离）
         stmt = select(Generation).filter(Generation.id.in_(unique_ids))
-        if current_user:
-            stmt = stmt.filter(Generation.user_id == current_user.id)
-        else:
-            stmt = stmt.filter(Generation.user_id.is_(None))
+        stmt = stmt.filter(_user_scope(Generation.user_id, current_user))
         result = await db.execute(stmt)
         records = result.scalars().all()
 
@@ -278,10 +273,7 @@ async def batch_download_files(
 
     # 查询所有选中记录（按用户隔离）
     stmt = select(Generation).filter(Generation.id.in_(id_list))
-    if current_user:
-        stmt = stmt.filter(Generation.user_id == current_user.id)
-    else:
-        stmt = stmt.filter(Generation.user_id.is_(None))
+    stmt = stmt.filter(_user_scope(Generation.user_id, current_user))
     result = await db.execute(stmt)
     records = result.scalars().all()
 
@@ -400,10 +392,7 @@ async def download_file(
     """
     # 查询记录（按用户隔离）
     stmt = select(Generation).filter(Generation.id == record_id)
-    if current_user:
-        stmt = stmt.filter(Generation.user_id == current_user.id)
-    else:
-        stmt = stmt.filter(Generation.user_id.is_(None))
+    stmt = stmt.filter(_user_scope(Generation.user_id, current_user))
     result = await db.execute(stmt)
     record = result.scalar_one_or_none()
 
@@ -638,10 +627,7 @@ async def stream_video(
     """
     # 查询视频记录（按用户隔离）
     stmt = select(Generation).filter(Generation.id == record_id)
-    if current_user:
-        stmt = stmt.filter(Generation.user_id == current_user.id)
-    else:
-        stmt = stmt.filter(Generation.user_id.is_(None))
+    stmt = stmt.filter(_user_scope(Generation.user_id, current_user))
     result = await db.execute(stmt)
     record = result.scalar_one_or_none()
 
@@ -655,111 +641,7 @@ async def stream_video(
         raise HTTPException(status_code=404, detail="视频资源链接不存在")
 
     video_url = record.result_url
-    range_header = request.headers.get("range", None)
-
-    # 先通过 HEAD 请求获取视频元信息（总大小、内容类型）
-    # 如果 HEAD 失败（某些存储服务不支持 HEAD），则回退为直接流式转发完整视频
-    content_type = "video/mp4"
-    total_size = 0
-    head_ok = False
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            head_resp = await client.head(video_url, follow_redirects=True)
-            if head_resp.status_code < 400:
-                head_ok = True
-                content_type = head_resp.headers.get("content-type", "video/mp4")
-                # 从 Content-Length 或 Content-Range 获取文件总大小
-                content_length_hdr = head_resp.headers.get("content-length")
-                content_range_hdr = head_resp.headers.get("content-range")
-                if content_length_hdr:
-                    total_size = int(content_length_hdr)
-                elif content_range_hdr:
-                    # Content-Range: bytes 0-1023/10240 → 取 / 后面的总大小
-                    parts = content_range_hdr.split("/")
-                    if len(parts) == 2 and parts[1] != "*":
-                        total_size = int(parts[1])
-    except Exception:
-        pass  # HEAD 失败，回退为完整流转发
-
-    # HEAD 请求失败时：直接流式转发完整视频，不处理 Range
-    if not head_ok or total_size == 0:
-        async def fallback_stream():
-            """HEAD 失败时的回退：直接流式转发完整视频"""
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                async with client.stream("GET", video_url, headers={"User-Agent": "Agnes-Platform-VideoProxy"}, follow_redirects=True) as response:
-                    async for chunk in response.aiter_bytes():
-                        yield chunk
-
-        return StreamingResponse(
-            fallback_stream(),
-            media_type=content_type,
-            headers={
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
-                "Accept-Ranges": "bytes",
-                "Content-Type": content_type,
-                "Cache-Control": "no-cache",
-            },
-            status_code=200,
-        )
-
-    # 解析 Range 请求，计算起止字节位置
-    start = 0
-    end = total_size - 1
-
-    if range_header:
-        # Range: bytes=0-1023 或 bytes=0-
-        try:
-            range_spec = range_header.replace("bytes=", "").strip()
-            range_parts = range_spec.split("-")
-            start = int(range_parts[0]) if range_parts[0] else 0
-            end = int(range_parts[1]) if len(range_parts) > 1 and range_parts[1] else total_size - 1
-            # 边界保护
-            start = max(0, min(start, total_size - 1))
-            end = max(start, min(end, total_size - 1))
-        except (ValueError, IndexError):
-            start = 0
-            end = total_size - 1
-
-    # 构造转发给上游的 Range 请求头
-    req_headers = {"User-Agent": "Agnes-Platform-VideoProxy"}
-    if range_header:
-        req_headers["Range"] = f"bytes={start}-{end}"
-
-    # 本次响应的内容长度
-    resp_content_length = end - start + 1
-
-    # 创建异步流生成器
-    async def video_stream():
-        """异步生成器：流式转发视频数据"""
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            async with client.stream("GET", video_url, headers=req_headers, follow_redirects=True) as response:
-                async for chunk in response.aiter_bytes():
-                    yield chunk
-
-    # 响应头设置
-    response_headers = {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
-        "Accept-Ranges": "bytes",
-        "Content-Type": content_type,
-    }
-
-    # 根据 Range 请求返回 206 或 200，并设置对应的 Content-Length / Content-Range
-    if range_header:
-        response_headers["Content-Length"] = str(resp_content_length)
-        response_headers["Content-Range"] = f"bytes {start}-{end}/{total_size}"
-        status_code = 206
-    else:
-        response_headers["Content-Length"] = str(total_size)
-        status_code = 200
-
-    return StreamingResponse(
-        video_stream(),
-        media_type=content_type,
-        headers=response_headers,
-        status_code=status_code,
-    )
+    return await proxy_video_stream(video_url, request.headers.get("range"))
 
 
 # =====================================================

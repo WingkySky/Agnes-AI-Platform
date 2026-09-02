@@ -69,7 +69,8 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { useConfirm } from '@/composables/useConfirm'
 import { Plus } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import PresetGallery from '@/components/presets/PresetGallery.vue'
@@ -80,6 +81,7 @@ import { usePresetStore } from '@/stores/presets'
 import type { PromptPreset, PresetCreate } from '@/types/preset'
 
 const { t } = useI18n()
+const { confirm } = useConfirm()
 const store = usePresetStore()
 
 /* ====== 我的预设列表（独立请求，与画廊 store 互不干扰） ====== */
@@ -148,13 +150,7 @@ async function handleEditorSubmit(data: PresetCreate) {
 /* ====== 投稿 / 删除 ====== */
 
 async function handleSubmitReview(preset: PromptPreset) {
-  try {
-    await ElMessageBox.confirm(t('presets.center.submitConfirmMsg'), t('common.confirm'), {
-      type: 'warning',
-    })
-  } catch {
-    return
-  }
+  await confirm(t('presets.center.submitConfirmMsg'), t('common.confirm'))
   try {
     await submitPreset(preset.id)
     ElMessage.success(t('presets.center.submitSuccess'))
@@ -165,15 +161,7 @@ async function handleSubmitReview(preset: PromptPreset) {
 }
 
 async function handleDelete(preset: PromptPreset) {
-  try {
-    await ElMessageBox.confirm(
-      t('presets.center.deleteConfirmMsg').replace('{name}', preset.name),
-      t('presets.center.deleteConfirmTitle'),
-      { type: 'warning' }
-    )
-  } catch {
-    return
-  }
+  await confirm(t('presets.center.deleteConfirmMsg').replace('{name}', preset.name), t('presets.center.deleteConfirmTitle'))
   try {
     await store.deletePreset(preset.id)
     ElMessage.success(t('presets.center.deleteSuccess'))

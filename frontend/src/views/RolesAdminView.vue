@@ -44,7 +44,7 @@
         </el-table-column>
         <el-table-column prop="created_at" :label="t('admin.roles.colCreatedAt')" width="190" align="center">
           <template #default="{ row }">
-            <span class="muted">{{ formatTime(row.created_at) }}</span>
+            <span class="muted">{{ formatTime(row.created_at, { emptyText: '' }) }}</span>
           </template>
         </el-table-column>
         <el-table-column :label="t('admin.roles.colActions')" width="180" align="center" fixed="right">
@@ -139,12 +139,15 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from '@/i18n'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { formatTime } from '@/lib/format'
+import { useConfirm } from '@/composables/useConfirm'
+import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { getRoles, createRole, updateRole, deleteRole } from '@/api/admin'
 import type { RoleItem } from '@/api/admin'
 
 const { t } = useI18n()
+const { confirm } = useConfirm()
 
 const loading = ref(false)
 const saving = ref(false)
@@ -198,14 +201,6 @@ const permissionGroups = computed<PermissionGroup[]>(() => {
   return Object.values(groups)
 })
 
-function formatTime(val?: string | null) {
-  if (!val) return ''
-  try {
-    return new Date(val).toLocaleString()
-  } catch {
-    return val
-  }
-}
 
 async function fetchRoles() {
   loading.value = true
@@ -333,19 +328,10 @@ async function onSubmit() {
 /** 删除角色 */
 async function onDelete(row: RoleItem) {
   if (row.is_system) return
-  try {
-    await ElMessageBox.confirm(
-      t('admin.roles.deleteConfirmMessage', { name: row.display_name }),
-      t('admin.roles.deleteConfirmTitle'),
-      {
-        confirmButtonText: t('admin.roles.confirmDelete'),
-        cancelButtonText: t('admin.roles.cancel'),
-        type: 'warning'
-      }
-    )
-  } catch {
-    return
-  }
+  await confirm(t('admin.roles.deleteConfirmMessage', { name: row.display_name }), t('admin.roles.deleteConfirmTitle'), {
+    confirmButtonText: t('admin.roles.confirmDelete'),
+    cancelButtonText: t('admin.roles.cancel'),
+  })
   try {
     await deleteRole(row.name)
     ElMessage.success(t('admin.roles.roleDeleteSuccess'))

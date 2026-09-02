@@ -89,12 +89,12 @@
 
           <!-- 注册时间（只读） -->
           <el-form-item :label="t('profile.createdAt')">
-            <span class="readonly-text">{{ formatTime(userStore.user?.created_at) }}</span>
+            <span class="readonly-text">{{ formatTime(userStore.user?.created_at, { emptyText: t('profile.notSet'), invalidText: t('profile.notSet') }) }}</span>
           </el-form-item>
 
           <!-- 最近登录（只读） -->
           <el-form-item :label="t('profile.lastLoginAt')">
-            <span class="readonly-text">{{ formatTime(userStore.user?.last_login_at) }}</span>
+            <span class="readonly-text">{{ formatTime(userStore.user?.last_login_at, { emptyText: t('profile.notSet'), invalidText: t('profile.notSet') }) }}</span>
           </el-form-item>
 
           <!-- 保存按钮 -->
@@ -122,6 +122,7 @@ import {
   UserFilled, User, Message, Camera, Loading, Check,
 } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
+import { formatTime } from '@/lib/format'
 import { useUserStore } from '@/stores/user'
 
 const { t } = useI18n()
@@ -206,17 +207,6 @@ async function handleSaveProfile() {
   }
 }
 
-// ============ 工具函数 ============
-function formatTime(iso?: string | null): string {
-  if (!iso) return t('profile.notSet')
-  try {
-    const d = new Date(iso)
-    if (isNaN(d.getTime())) return t('profile.notSet')
-    return d.toLocaleString()
-  } catch {
-    return t('profile.notSet')
-  }
-}
 </script>
 
 <style scoped>

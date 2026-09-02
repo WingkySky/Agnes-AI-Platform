@@ -70,7 +70,7 @@
             <div class="card-title" :title="project.title">{{ project.title }}</div>
             <div class="card-desc">{{ project.description || '暂无描述' }}</div>
             <div class="card-meta">
-              <span><el-icon><Clock /></el-icon> {{ formatDate(project.created_at) }}</span>
+              <span><el-icon><Clock /></el-icon> {{ formatTime(project.created_at, { mode: 'date', emptyText: '' }) }}</span>
               <span><el-icon><Picture /></el-icon> {{ project.shots?.length || 0 }} 镜</span>
             </div>
           </div>
@@ -110,7 +110,8 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { ElMessageBox, ElMessage } from 'element-plus'
+import { useConfirm } from '@/composables/useConfirm'
+import { formatTime } from '@/lib/format'
 import {
   Plus, Search, Refresh, Film, Clock, Picture, FolderOpened, MoreFilled,
 } from '@element-plus/icons-vue'
@@ -120,6 +121,7 @@ import type { Project, ProjectStatus } from '@/types/project'
 
 const router = useRouter()
 const route = useRoute()
+const { confirm } = useConfirm()
 const projectStore = useProjectStore()
 
 const launchDialogVisible = ref(false)
@@ -175,15 +177,15 @@ async function onCardAction(cmd: string, project: Project) {
     await projectStore.archiveProject(project.id)
     await fetchList()
   } else if (cmd === 'delete') {
+    await confirm(
+      `确定要删除项目「${project.title}」吗？此操作不可撤销。`,
+      '删除确认',
+      { confirmButtonText: '删除', cancelButtonText: '取消' },
+    )
     try {
-      await ElMessageBox.confirm(
-        `确定要删除项目「${project.title}」吗？此操作不可撤销。`,
-        '删除确认',
-        { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
-      )
       await projectStore.deleteProject(project.id)
       await fetchList()
-    } catch (_) { /* 取消 */ }
+    } catch (_) { /* 静默 */ }
   }
 }
 
@@ -211,11 +213,6 @@ function statusTagType(status: ProjectStatus): 'primary' | 'success' | 'info' | 
   }
 }
 
-function formatDate(s: string): string {
-  if (!s) return ''
-  const d = new Date(s)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
 </script>
 
 <style scoped>

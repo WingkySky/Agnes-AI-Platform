@@ -346,7 +346,7 @@
           </div>
           <div class="info-row" v-if="detail.public_shared_at">
             <el-icon class="row-icon"><Clock /></el-icon>
-            <span class="info-value">{{ formatTime(detail.public_shared_at) }}</span>
+            <span class="info-value">{{ formatTime(detail.public_shared_at, { emptyText: '' }) }}</span>
           </div>
 
           <!-- 参数（折叠展示原始 JSON） -->
@@ -430,7 +430,7 @@
           </div>
           <div class="info-row" v-if="creationDetail.public_shared_at">
             <el-icon class="row-icon"><Clock /></el-icon>
-            <span class="info-value">{{ formatTime(creationDetail.public_shared_at) }}</span>
+            <span class="info-value">{{ formatTime(creationDetail.public_shared_at, { emptyText: '' }) }}</span>
           </div>
           <div class="stats-row">
             <el-button
@@ -465,12 +465,16 @@ import {
 import client from '@/api/client'
 import { useUserStore } from '@/stores/user'
 import { useI18n } from '@/i18n'
+import { useCopyText } from '@/composables/useCopyText'
+import { fetchBlobAsUrl } from '@/lib/blob'
+import { formatTime } from '@/lib/format'
 import ImageWithWatermark from '@/components/ImageWithWatermark.vue'
 
 // keep-alive 缓存匹配依赖组件名
 defineOptions({ name: 'PlazaView' })
 
 const { t } = useI18n()
+const { copyText: copyWithFallback } = useCopyText()
 const userStore = useUserStore()
 
 // ---------- 列表状态 ----------
@@ -703,12 +707,6 @@ function openDetail(work: PlazaWork) {
 }
 
 // ---------- 视频悬停 GIF 预览 ----------
-async function fetchBlobAsUrl(url: string): Promise<string> {
-  const res = await fetch(url, { credentials: 'include' })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  const blob = await res.blob()
-  return URL.createObjectURL(blob)
-}
 
 async function loadVideoPreview(work: PlazaWork) {
   if (videoPreviews[work.id] || previewLoading[work.id]) return
@@ -759,25 +757,11 @@ async function toggleLike(work: PlazaWork) {
 }
 
 // ---------- 复制到剪贴板 ----------
-/** 通用复制：优先 navigator.clipboard，降级 execCommand */
-function copyText(text: string, successMsg: string) {
+/** 通用复制：成功提示 successMsg，失败提示 copyFailed */
+async function copyText(text: string, successMsg: string) {
   if (!text) return
-  const done = () => ElMessage.success(successMsg)
-  const fail = () => ElMessage.error(t('preview.copyFailed'))
-  if (navigator.clipboard && window.isSecureContext) {
-    navigator.clipboard.writeText(text).then(done).catch(fail)
-    return
-  }
-  const ta = document.createElement('textarea')
-  ta.value = text
-  ta.style.position = 'fixed'
-  ta.style.left = '-9999px'
-  document.body.appendChild(ta)
-  ta.select()
-  let ok = false
-  try { ok = document.execCommand('copy') } catch (_) { ok = false }
-  document.body.removeChild(ta)
-  ok ? done() : fail()
+  const ok = await copyWithFallback(text, successMsg)
+  if (!ok) ElMessage.error(t('preview.copyFailed'))
 }
 
 /** 格式化参数对象为可读 JSON 字符串 */
@@ -788,14 +772,6 @@ function formatParams(params: Record<string, any> | undefined): string {
   } catch (_) {
     return String(params)
   }
-}
-
-/** 格式化时间字符串为本地可读形式 */
-function formatTime(ts: string): string {
-  if (!ts) return ''
-  const d = new Date(ts)
-  if (isNaN(d.getTime())) return ts
-  return d.toLocaleString()
 }
 
 /**

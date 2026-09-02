@@ -332,6 +332,7 @@ import { useAssetStore } from '@/stores/asset'
 import { usePresetStore } from '@/stores/presets'
 import { appendPromptText, composeMounted } from '@/utils/presetApply'
 import { useCopyText } from '@/composables/useCopyText'
+import { usePromptLength } from '@/composables/usePromptLength'
 import type { PromptPreset } from '@/types/preset'
 import { useAsset } from '@/api/pipeline'
 import { useI18n } from '@/i18n'
@@ -343,6 +344,7 @@ import type { FileInfo } from '@/types'
 import type { Scene3D, SceneData } from '@/types/scene'
 
 const { t } = useI18n()
+const { copyText } = useCopyText()
 const userStore = useUserStore()
 const prefsStore = usePreferencesStore()
 const { downloadViaProxy } = useDownload()
@@ -377,7 +379,6 @@ async function onPresetApply(preset: PromptPreset) {
   }
   const payload = await presetStore.applyPreset(preset)
   if (payload.scriptText) {
-    const { copyText } = useCopyText()
     await copyText(payload.scriptText)
     return
   }
@@ -403,21 +404,8 @@ const modelsStore = useModelsStore()
 const mode = ref('text2image')
 const prompt = ref('')
 
-// ---------- 提示词长度分阶提示 ----------
-// 图片：0-3000 适中，3000-8000 较长，8000+ 过长
-const promptLengthLevel = computed(() => {
-  const len = prompt.value.length
-  if (len <= 3000) return 'level-good'
-  if (len <= 8000) return 'level-long'
-  return 'level-too-long'
-})
-const promptLengthText = computed(() => {
-  const len = prompt.value.length
-  if (len === 0) return ''
-  if (len <= 3000) return t('params.promptLengthGood')
-  if (len <= 8000) return t('params.promptLengthLong')
-  return t('params.promptLengthTooLong')
-})
+// ---------- 提示词长度分阶提示（图片：0-3000 适中，3000-8000 较长，8000+ 过长） ----------
+const { levelClass: promptLengthLevel, text: promptLengthText } = usePromptLength(prompt, 3000, 8000)
 
 // 分享到广场开关：是否将本次生成结果公开到广场
 const shareToPlaza = ref(false)
@@ -709,24 +697,13 @@ async function downloadImage() {
   }
 }
 
-function copyImageUrl() {
+async function copyImageUrl() {
   if (!resultUrl.value) {
     ElMessage.warning(t('preview.imageEmpty'))
     return
   }
-  if (navigator.clipboard && window.isSecureContext) {
-    navigator.clipboard.writeText(resultUrl.value)
-      .then(() => ElMessage.success(t('preview.copySuccess')))
-      .catch(() => ElMessage.error(t('preview.copyFailed')))
-  } else {
-    const ta = document.createElement('textarea')
-    ta.value = resultUrl.value
-    document.body.appendChild(ta)
-    ta.select()
-    document.execCommand('copy')
-    document.body.removeChild(ta)
-    ElMessage.success(t('preview.copySuccess'))
-  }
+  const ok = await copyText(resultUrl.value, t('preview.copySuccess'))
+  if (!ok) ElMessage.error(t('preview.copyFailed'))
 }
 </script>
 

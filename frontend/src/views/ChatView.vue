@@ -374,9 +374,11 @@ import {
 import { useI18n } from '@/i18n'
 import { useChatStore } from '@/stores/chat'
 import { getPreset } from '@/api/presets'
-import { ElMessageBox, ElMessage } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { useConfirm } from '@/composables/useConfirm'
 
 const { t } = useI18n()
+const { confirm } = useConfirm()
 const route = useRoute()
 const chatStore = useChatStore()
 
@@ -495,9 +497,7 @@ async function handleSwitchSession(sessionId: number) {
 /** 删除会话 */
 async function handleDeleteSession(sessionId: number) {
   try {
-    await ElMessageBox.confirm(t('chat.confirmDelete'), t('common.confirm'), {
-      type: 'warning',
-    })
+    await confirm(t('chat.confirmDelete'), t('common.confirm'))
     await chatStore.removeSession(sessionId)
     ElMessage.success(t('chat.deleted'))
   } catch (_) {

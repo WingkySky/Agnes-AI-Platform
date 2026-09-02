@@ -22,16 +22,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.database import get_async_db
-from app.core.security import get_current_user
+from app.core.security import get_current_reviewer
 from app.models.user import User
 from app.models.asset import Asset
 from app.models.generation import Generation
 from app.models.prompt_preset import PresetIndex
-
-# =====================================================
-# 作品审核：仅展示公开到广场的作品，与旧 ModerationView 行为保持一致
-# =====================================================
-WORK_REVIEW_ONLY_PUBLIC = True
 
 logger = logging.getLogger("agnes_platform")
 router = APIRouter(prefix="/admin/review", tags=["管理员-统一审核"])
@@ -61,7 +56,7 @@ async def list_review_items(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_reviewer),
 ):
     """
     获取统一审核列表，聚合作品、预设、模板三种类型。
@@ -72,9 +67,6 @@ async def list_review_items(
       total, page, page_size
     }
     """
-    if not current_user.is_admin and not current_user.role in ("admin", "moderator"):
-        raise HTTPException(status_code=403, detail="仅管理员/审核员可访问")
-
     if review_type != "all" and review_type not in REVIEW_TYPES:
         raise HTTPException(status_code=400, detail=f"review_type 必须是 {', '.join(REVIEW_TYPES + ('all',))} 之一")
     if status not in REVIEW_STATUSES:
@@ -139,12 +131,9 @@ async def list_review_items(
 @router.get("/stats", summary="各类型待审核统计")
 async def get_review_stats(
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_reviewer),
 ):
     """获取各类型待审核数量统计，含 AI 预审结果分布"""
-    if not current_user.is_admin and not current_user.role in ("admin", "moderator"):
-        raise HTTPException(status_code=403, detail="仅管理员/审核员可访问")
-
     # 作品待审核数
     work_pending = 0
     try:
@@ -262,7 +251,7 @@ async def approve_item(
     review_type: str,
     item_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_reviewer),
 ):
     """
     审核通过一个条目。
@@ -270,9 +259,6 @@ async def approve_item(
     review_type: work / preset / template
     item_id: 对应类型的 ID
     """
-    if not current_user.is_admin and not current_user.role in ("admin", "moderator"):
-        raise HTTPException(status_code=403, detail="仅管理员/审核员可操作")
-
     if review_type not in REVIEW_TYPES:
         raise HTTPException(status_code=400, detail=f"review_type 必须是 {', '.join(REVIEW_TYPES)} 之一")
 
@@ -338,7 +324,7 @@ async def reject_item(
     item_id: int,
     payload: Dict[str, Any] = Body(default_factory=dict),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_reviewer),
 ):
     """
     驳回一个条目。
@@ -347,9 +333,6 @@ async def reject_item(
     item_id: 对应类型的 ID
     payload.reason: 驳回理由（可选）
     """
-    if not current_user.is_admin and not current_user.role in ("admin", "moderator"):
-        raise HTTPException(status_code=403, detail="仅管理员/审核员可操作")
-
     if review_type not in REVIEW_TYPES:
         raise HTTPException(status_code=400, detail=f"review_type 必须是 {', '.join(REVIEW_TYPES)} 之一")
 
@@ -416,16 +399,13 @@ async def reject_item(
 async def batch_approve(
     payload: Dict[str, Any],
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_reviewer),
 ):
     """
     批量审核通过。
 
     请求体：{ items: [{ review_type, item_id }, ...] }
     """
-    if not current_user.is_admin and not current_user.role in ("admin", "moderator"):
-        raise HTTPException(status_code=403, detail="仅管理员/审核员可操作")
-
     items = payload.get("items") or []
     success = 0
     failed = 0
@@ -453,16 +433,13 @@ async def batch_approve(
 async def batch_reject(
     payload: Dict[str, Any],
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_reviewer),
 ):
     """
     批量驳回。
 
     请求体：{ items: [{ review_type, item_id }, ...], reason: "驳回理由" }
     """
-    if not current_user.is_admin and not current_user.role in ("admin", "moderator"):
-        raise HTTPException(status_code=403, detail="仅管理员/审核员可操作")
-
     items = payload.get("items") or []
     reason = payload.get("reason") or ""
     success = 0
@@ -488,6 +465,15 @@ async def batch_reject(
 # 内部辅助函数：分类型查询审核列表
 # =====================================================
 
+async def _load_authors_map(db: AsyncSession, user_ids) -> dict:
+    """批量查询作者信息，返回 {user_id: User}（忽略 None）。"""
+    ids = {u for u in user_ids if u is not None}
+    if not ids:
+        return {}
+    result = await db.execute(select(User).filter(User.id.in_(list(ids))))
+    return {u.id: u for u in result.scalars().all()}
+
+
 async def _query_work_reviews(
     db: AsyncSession,
     status: str,
@@ -502,8 +488,7 @@ async def _query_work_reviews(
     query = select(Generation)
 
     # 仅展示公开到广场的作品
-    if WORK_REVIEW_ONLY_PUBLIC:
-        query = query.filter(Generation.is_public == True)  # noqa: E712
+    query = query.filter(Generation.is_public == True)  # noqa: E712
 
     # 状态筛选
     if status != "all":
@@ -550,13 +535,7 @@ async def _query_work_reviews(
     items = result.scalars().all()
 
     # 批量查询作者信息（用户名/昵称）
-    user_ids_set = {g.user_id for g in items if g.user_id is not None}
-    authors_map: dict = {}
-    if user_ids_set:
-        user_stmt = select(User).filter(User.id.in_(list(user_ids_set)))
-        user_result = await db.execute(user_stmt)
-        for u in user_result.scalars().all():
-            authors_map[u.id] = u
+    authors_map = await _load_authors_map(db, (g.user_id for g in items))
 
     return [
         {
@@ -642,13 +621,7 @@ async def _query_preset_reviews(
     entries = result.scalars().all()
 
     # 批量查询作者信息
-    user_ids_set = {e.user_id for e in entries if e.user_id is not None}
-    authors_map: dict = {}
-    if user_ids_set:
-        user_stmt = select(User).filter(User.id.in_(list(user_ids_set)))
-        user_result = await db.execute(user_stmt)
-        for u in user_result.scalars().all():
-            authors_map[u.id] = u
+    authors_map = await _load_authors_map(db, (e.user_id for e in entries))
 
     # 计算状态
     def _preset_status(entry) -> str:
@@ -730,13 +703,7 @@ async def _query_asset_reviews(
     items = result.scalars().all()
 
     # 批量查询作者信息
-    user_ids_set = {a.user_id for a in items if a.user_id is not None}
-    authors_map: dict = {}
-    if user_ids_set:
-        user_stmt = select(User).filter(User.id.in_(list(user_ids_set)))
-        user_result = await db.execute(user_stmt)
-        for u in user_result.scalars().all():
-            authors_map[u.id] = u
+    authors_map = await _load_authors_map(db, (a.user_id for a in items))
 
     return [
         {

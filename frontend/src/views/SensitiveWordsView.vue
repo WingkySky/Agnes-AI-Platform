@@ -84,7 +84,7 @@
         </el-table-column>
         <el-table-column prop="created_at" :label="t('admin.sensitiveWords.createTime')" width="170" align="center">
           <template #default="{ row }">
-            <span class="muted">{{ formatTime(row.created_at) }}</span>
+            <span class="muted">{{ formatTime(row.created_at, { emptyText: '' }) }}</span>
           </template>
         </el-table-column>
         <el-table-column :label="t('admin.sensitiveWords.actions')" width="150" align="center" fixed="right">
@@ -208,9 +208,11 @@
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Plus, Search, Refresh, Upload } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
+import { formatTime } from '@/lib/format'
+import { useConfirm } from '@/composables/useConfirm'
 import {
   getSensitiveWords,
   createSensitiveWord,
@@ -221,6 +223,7 @@ import {
 import type { SensitiveWordItem } from '@/api/admin'
 
 const { t } = useI18n()
+const { confirm } = useConfirm()
 
 const loading = ref(false)
 const list = ref<SensitiveWordItem[]>([])
@@ -257,14 +260,6 @@ const formRules = computed<FormRules>(() => ({
   ]
 }))
 
-function formatTime(val?: string | null) {
-  if (!val) return ''
-  try {
-    return new Date(val).toLocaleString()
-  } catch {
-    return val
-  }
-}
 
 async function fetchList() {
   loading.value = true
@@ -377,15 +372,11 @@ async function onSubmit() {
 }
 
 async function onDelete(row: SensitiveWordItem) {
-  try {
-    await ElMessageBox.confirm(
-      t('admin.sensitiveWords.deleteConfirmMessage', { word: row.word }),
-      t('admin.sensitiveWords.deleteConfirmTitle'),
-      { confirmButtonText: t('admin.sensitiveWords.confirmDelete'), cancelButtonText: t('common.cancel'), type: 'warning' }
-    )
-  } catch {
-    return
-  }
+  await confirm(
+    t('admin.sensitiveWords.deleteConfirmMessage', { word: row.word }),
+    t('admin.sensitiveWords.deleteConfirmTitle'),
+    { confirmButtonText: t('admin.sensitiveWords.confirmDelete') }
+  )
   try {
     await deleteSensitiveWord(row.id)
     ElMessage.success(t('admin.sensitiveWords.deleteSuccess'))
