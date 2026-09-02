@@ -25,6 +25,7 @@ import {
   mediaCallback,
 } from '@/api/chat'
 import { useTaskQueueStore } from '@/stores/taskQueue'
+import { isMediaSuccess, isMediaFailed } from '@/lib/media-status'
 import type {
   ChatSession,
   ChatMessage,
@@ -590,8 +591,8 @@ export const useChatStore = defineStore('chat', {
             if (!item) return
 
             const rawStatus = String(data.status || '').toLowerCase()
-            const isSuccess = ['success', 'completed', 'done', 'succeeded', 'finished'].includes(rawStatus)
-            const isFailed = ['failed', 'error', 'timeout'].includes(rawStatus)
+            const isSuccess = isMediaSuccess(rawStatus)
+            const isFailed = isMediaFailed(rawStatus)
             const isUnknown = rawStatus === 'unknown'
 
             if (isSuccess) {

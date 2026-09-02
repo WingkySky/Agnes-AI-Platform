@@ -19,7 +19,6 @@
 # =====================================================
 
 import logging
-import json
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
@@ -42,6 +41,43 @@ from app.services.video_poller import poller_manager as video_poller_manager
 
 logger = logging.getLogger("agnes_platform")
 router = APIRouter()
+
+
+# =====================================================
+# 公共依赖
+# =====================================================
+
+def _ownership_filter(current_user: Optional[User]):
+    """会话归属过滤条件：登录用户只看自己的会话，未登录用户只看匿名会话。"""
+    if current_user:
+        return ChatSession.user_id == current_user.id
+    return ChatSession.user_id.is_(None)
+
+
+async def get_owned_session(
+    session_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+) -> ChatSession:
+    """会话归属校验依赖：登录用户匹配 user_id，匿名匹配 user_id IS NULL，否则 404。"""
+    stmt = select(ChatSession).filter(
+        ChatSession.id == session_id,
+        _ownership_filter(current_user),
+    )
+    result = await db.execute(stmt)
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return session
+
+
+async def require_agnes_api_key() -> None:
+    """API Key 检查（从 agnes_client 读取当前配置，Provider 可能在前端配置页修改）"""
+    if not agnes_client.api_key or agnes_client.api_key.startswith("sk-your"):
+        raise HTTPException(
+            status_code=401,
+            detail="Agnes AI API Key 未配置，请在前端「配置管理」页面添加 Provider",
+        )
 
 
 # =====================================================
@@ -88,80 +124,6 @@ class MediaCallbackRequest(BaseModel):
     status: str = Field(default="success", description="状态：success / failed")
 
 
-async def _refresh_message_media_items(messages: List[ChatMessage], db: AsyncSession) -> None:
-    """
-    将消息里的 pending/processing 媒体项刷新为最新状态。
-
-    发送下一轮聊天前也必须做这件事，否则用户虽然已经在前端看到图片完成，
-    但后端构建上下文时仍可能只看到 pending，导致无法把上一张图作为 image2image 参考图。
-    """
-    for msg in messages:
-        if not msg.media_items:
-            continue
-
-        updated = False
-        refreshed_items = []
-        for original_item in msg.media_items:
-            item = dict(original_item)
-            if item.get("status") not in ("pending", "processing") or not item.get("task_id"):
-                refreshed_items.append(item)
-                continue
-
-            task_id = item["task_id"]
-            result_url = None
-            new_status = None
-
-            img_task = await image_poller_manager.get_status(task_id)
-            if img_task:
-                d = img_task.to_dict()
-                if d.get("status") in ("success", "completed", "done"):
-                    result_url = d.get("result_url") or d.get("url")
-                    new_status = "success"
-                elif d.get("status") in ("failed", "error"):
-                    new_status = "failed"
-
-            if not result_url and not new_status:
-                vid_task = await video_poller_manager.get_status(task_id=task_id)
-                if not vid_task:
-                    vid_task = await video_poller_manager.get_status(video_id=task_id)
-                if vid_task:
-                    d = vid_task.to_dict()
-                    if d.get("status") in ("success", "completed", "done"):
-                        result_url = d.get("video_url") or d.get("url")
-                        new_status = "success"
-                    elif d.get("status") in ("failed", "error"):
-                        new_status = "failed"
-
-            if not result_url and not new_status:
-                try:
-                    from app.models.generation import Generation
-                    gen_result = await db.execute(
-                        select(Generation).filter(Generation.task_id == task_id)
-                    )
-                    gen_record = gen_result.scalar_one_or_none()
-                    if gen_record:
-                        if gen_record.status == "success":
-                            result_url = gen_record.result_url
-                            new_status = "success"
-                        elif gen_record.status == "failed":
-                            new_status = "failed"
-                except Exception:
-                    pass
-
-            if result_url or new_status:
-                if result_url:
-                    item["url"] = result_url
-                if new_status:
-                    item["status"] = new_status
-                updated = True
-            refreshed_items.append(item)
-
-        if updated:
-            msg.media_items = refreshed_items
-
-    await db.commit()
-
-
 # =====================================================
 # 会话管理接口
 # =====================================================
@@ -193,14 +155,9 @@ async def list_sessions(
 ):
     """获取会话列表（按用户隔离）：未登录用户只能看到未绑定任何用户的匿名会话"""
     # 构造过滤条件：登录用户只看自己；未登录用户看 user_id 为 NULL 的记录
-    stmt = select(ChatSession)
-    count_stmt = select(func.count()).select_from(ChatSession)
-    if current_user:
-        stmt = stmt.filter(ChatSession.user_id == current_user.id)
-        count_stmt = count_stmt.filter(ChatSession.user_id == current_user.id)
-    else:
-        stmt = stmt.filter(ChatSession.user_id.is_(None))
-        count_stmt = count_stmt.filter(ChatSession.user_id.is_(None))
+    owned = _ownership_filter(current_user)
+    stmt = select(ChatSession).filter(owned)
+    count_stmt = select(func.count()).select_from(ChatSession).filter(owned)
 
     # 总数
     count_result = await db.execute(count_stmt)
@@ -226,72 +183,37 @@ async def list_sessions(
 
 @router.get("/chat/sessions/{session_id}", summary="获取会话详情（含消息）")
 async def get_session(
-    session_id: int,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    session: ChatSession = Depends(get_owned_session),
 ):
     """获取会话详情，包含所有消息（按用户隔离）"""
-    stmt = select(ChatSession).filter(ChatSession.id == session_id)
-    if current_user:
-        stmt = stmt.filter(ChatSession.user_id == current_user.id)
-    else:
-        stmt = stmt.filter(ChatSession.user_id.is_(None))
-    result = await db.execute(stmt)
-    session = result.scalar_one_or_none()
-    if not session:
-        raise HTTPException(status_code=404, detail="会话不存在")
-
     return session.to_dict(include_messages=True)
 
 
 @router.put("/chat/sessions/{session_id}", summary="修改会话标题")
 async def update_session(
-    session_id: int,
     req: UpdateSessionRequest,
+    session: ChatSession = Depends(get_owned_session),
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """修改会话的标题（按用户隔离）"""
-    stmt = select(ChatSession).filter(ChatSession.id == session_id)
-    if current_user:
-        stmt = stmt.filter(ChatSession.user_id == current_user.id)
-    else:
-        stmt = stmt.filter(ChatSession.user_id.is_(None))
-    result = await db.execute(stmt)
-    session = result.scalar_one_or_none()
-    if not session:
-        raise HTTPException(status_code=404, detail="会话不存在")
-
     session.title = req.title[:200]
     session.updated_at = datetime.utcnow()
     await db.commit()
     await db.refresh(session)
-    logger.info("[Chat] 修改会话标题: id=%s, title=%s", session_id, session.title)
+    logger.info("[Chat] 修改会话标题: id=%s, title=%s", session.id, session.title)
     return session.to_dict()
 
 
 @router.post("/chat/sessions/{session_id}/summarize", summary="AI 自动总结会话主题")
 async def summarize_session(
-    session_id: int,
+    session: ChatSession = Depends(get_owned_session),
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """使用 AI 分析对话内容，自动生成一个有意义的会话标题（按用户隔离）"""
-    # 检查会话是否存在并且属于当前用户
-    stmt = select(ChatSession).filter(ChatSession.id == session_id)
-    if current_user:
-        stmt = stmt.filter(ChatSession.user_id == current_user.id)
-    else:
-        stmt = stmt.filter(ChatSession.user_id.is_(None))
-    result = await db.execute(stmt)
-    session = result.scalar_one_or_none()
-    if not session:
-        raise HTTPException(status_code=404, detail="会话不存在")
-
     # 获取会话的前几条消息（用于总结主题）
     result = await db.execute(
         select(ChatMessage)
-        .filter(ChatMessage.session_id == session_id)
+        .filter(ChatMessage.session_id == session.id)
         .order_by(ChatMessage.id)
         .limit(10)
     )
@@ -314,31 +236,20 @@ async def summarize_session(
     session.updated_at = datetime.utcnow()
     await db.commit()
     await db.refresh(session)
-    logger.info("[Chat] 自动总结会话标题: id=%s, title=%s", session_id, session.title)
+    logger.info("[Chat] 自动总结会话标题: id=%s, title=%s", session.id, session.title)
     return session.to_dict()
 
 
 @router.delete("/chat/sessions/{session_id}", summary="删除会话")
 async def delete_session(
-    session_id: int,
+    session: ChatSession = Depends(get_owned_session),
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """删除会话及其所有消息（按用户隔离）"""
-    stmt = select(ChatSession).filter(ChatSession.id == session_id)
-    if current_user:
-        stmt = stmt.filter(ChatSession.user_id == current_user.id)
-    else:
-        stmt = stmt.filter(ChatSession.user_id.is_(None))
-    result = await db.execute(stmt)
-    session = result.scalar_one_or_none()
-    if not session:
-        raise HTTPException(status_code=404, detail="会话不存在")
-
     await db.delete(session)
     await db.commit()
-    logger.info("[Chat] 删除会话: id=%s", session_id)
-    return {"success": True, "message": f"会话 {session_id} 已删除"}
+    logger.info("[Chat] 删除会话: id=%s", session.id)
+    return {"success": True, "message": f"会话 {session.id} 已删除"}
 
 
 # =====================================================
@@ -347,39 +258,28 @@ async def delete_session(
 
 @router.get("/chat/sessions/{session_id}/messages", summary="获取会话消息列表")
 async def get_messages(
-    session_id: int,
+    session: ChatSession = Depends(get_owned_session),
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """获取指定会话的所有消息（按用户隔离）"""
-    # 检查会话是否存在且属于当前用户
-    stmt = select(ChatSession).filter(ChatSession.id == session_id)
-    if current_user:
-        stmt = stmt.filter(ChatSession.user_id == current_user.id)
-    else:
-        stmt = stmt.filter(ChatSession.user_id.is_(None))
-    result = await db.execute(stmt)
-    session = result.scalar_one_or_none()
-    if not session:
-        raise HTTPException(status_code=404, detail="会话不存在")
-
     # 查询消息
     result = await db.execute(
         select(ChatMessage)
-        .filter(ChatMessage.session_id == session_id)
+        .filter(ChatMessage.session_id == session.id)
         .order_by(ChatMessage.id)
     )
     messages = result.scalars().all()
 
-    await _refresh_message_media_items(messages, db)
+    await chat_service.refresh_message_media_items(messages, db)
 
     return {"items": [m.to_dict() for m in messages]}
 
 
 @router.post("/chat/sessions/{session_id}/messages", summary="发送消息（SSE 流式响应）")
 async def send_message(
-    session_id: int,
     req: SendMessageRequest,
+    _api_key: None = Depends(require_agnes_api_key),
+    session: ChatSession = Depends(get_owned_session),
     db: AsyncSession = Depends(get_async_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
@@ -394,347 +294,23 @@ async def send_message(
     - {"type": "assistant_message", "message": {...}} — AI 消息已保存
     - {"type": "done"} — 结束
     """
-    # API Key 检查（从 agnes_client 读取当前配置，Provider 可能在前端配置页修改）
-    if not agnes_client.api_key or agnes_client.api_key.startswith("sk-your"):
-        raise HTTPException(
-            status_code=401,
-            detail="Agnes AI API Key 未配置，请在前端「配置管理」页面添加 Provider",
-        )
-
-    # 检查会话是否存在且属于当前用户
-    stmt = select(ChatSession).filter(ChatSession.id == session_id)
-    if current_user:
-        stmt = stmt.filter(ChatSession.user_id == current_user.id)
-    else:
-        stmt = stmt.filter(ChatSession.user_id.is_(None))
-    result = await db.execute(stmt)
-    session = result.scalar_one_or_none()
-    if not session:
-        raise HTTPException(status_code=404, detail="会话不存在")
-
-    # ── 附件校验与清洗（Task 2） ──
-    # 如果用户提供了 attachments，进行大小/数量/格式校验
-    MAX_ATTACHMENTS = 10
-    MAX_SIZE_PER_FILE = 5 * 1024 * 1024  # 5MB
-
-    validated_attachments = []
-    if req.attachments:
-        if len(req.attachments) > MAX_ATTACHMENTS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"最多上传 {MAX_ATTACHMENTS} 张参考图，当前 {len(req.attachments)} 张"
-            )
-        for att in req.attachments:
-            try:
-                size = int(att.get("size", 0))
-            except (TypeError, ValueError):
-                size = 0
-            if size > MAX_SIZE_PER_FILE:
-                raise HTTPException(
-                    status_code=413,
-                    detail=f"单张参考图大小超过 5MB 限制: {att.get('name', 'unknown')}"
-                )
-
-            # =====================================================
-            # 支持四种附件格式：
-            #   1. base64 data URI     → base64_image
-            #   2. 图片 URL 链接        → image_url（传给 AI 多模态）
-            #   3. 视频 URL 链接        → video_url（仅展示，AI 当前不看视频）
-            #   4. 文档 URL 链接        → doc_url（仅展示，AI 当前不读文档）
-            # =====================================================
-            base64_image = att.get("base64_image", "")
-            image_url = att.get("image_url", "")
-            video_url = att.get("video_url", "")
-            doc_url = att.get("doc_url", "")
-            link_type = att.get("_link_type", "")
-
-            if base64_image and isinstance(base64_image, str) and base64_image.startswith("data:image/"):
-                # base64 上传图片
-                validated_attachments.append({
-                    "name": att.get("name", "image.png"),
-                    "base64_image": base64_image,
-                    "size": size,
-                    "mime_type": att.get("mime_type", "image/png"),
-                })
-            elif image_url and isinstance(image_url, str) and (image_url.startswith("http://") or image_url.startswith("https://")):
-                # 图片 URL 链接
-                validated_attachments.append({
-                    "name": att.get("name", "url_image"),
-                    "base64_image": "",
-                    "image_url": image_url,
-                    "size": 0,
-                    "mime_type": "image/url",
-                    "source": "url",
-                    "_link_type": link_type or "image",
-                })
-            elif video_url and isinstance(video_url, str) and (video_url.startswith("http://") or video_url.startswith("https://")):
-                # 视频 URL 链接（前端自动识别的视频链接）
-                validated_attachments.append({
-                    "name": att.get("name", "video.mp4"),
-                    "video_url": video_url,
-                    "size": 0,
-                    "mime_type": "video/url",
-                    "source": "url",
-                    "_link_type": "video",
-                })
-            elif doc_url and isinstance(doc_url, str) and (doc_url.startswith("http://") or doc_url.startswith("https://")):
-                # 文档 URL 链接（前端自动识别的文档链接）
-                validated_attachments.append({
-                    "name": att.get("name", "document"),
-                    "doc_url": doc_url,
-                    "size": 0,
-                    "mime_type": "application/url",
-                    "source": "url",
-                    "_link_type": "document",
-                })
-            else:
-                # 非法格式 —— 跳过并记录警告，不阻塞整个请求
-                logger.warning("[Chat] 忽略非法的附件: name=%s mime=%s",
-                               att.get("name"), att.get("mime_type"))
-                continue
+    # 附件校验与清洗（大小/数量/格式，非法格式跳过并告警）
+    validated_attachments = chat_service.validate_attachments(req.attachments)
 
     # 允许 content 为空但有附件（用户可以"只甩一张图说画图"）
     if not req.content.strip() and not validated_attachments:
         raise HTTPException(status_code=400, detail="消息内容不能为空")
 
-    # 保存用户消息（同时保存 attachments）
-    user_msg = ChatMessage(
-        session_id=session_id,
-        role="user",
-        content=req.content,
-        attachments=validated_attachments if validated_attachments else [],
-    )
-    db.add(user_msg)
-
-    # 注意：不再简单截断用户消息作为标题
-    # 改为在 AI 回复完成后，由 AI 自动总结对话主题生成有意义的标题
-    # 更新会话时间
-    session.updated_at = datetime.utcnow()
-    await db.commit()
-    await db.refresh(user_msg)
-
-    # 获取历史消息（用于构建上下文）
-    result = await db.execute(
-        select(ChatMessage)
-        .filter(ChatMessage.session_id == session_id)
-        .order_by(ChatMessage.id)
-    )
-    all_messages = result.scalars().all()
-    await _refresh_message_media_items(all_messages, db)
-
-    # 构建对话历史（包含附件上下文标注，帮助 AI 区分不同轮次的参考图/视频/文档）
-    chat_history = []
-    for msg in all_messages:
-        if msg.role in ("user", "assistant"):
-            content = msg.content or ""
-            # 如果用户消息有附件，在内容中标注（帮助 AI 区分不同轮次的参考图/视频/文档）
-            if msg.role == "user" and msg.attachments and len(msg.attachments) > 0:
-                att_count = len(msg.attachments)
-                # =====================================================
-                # 按类型统计附件：
-                #   - image 类：base64_image 或 image_url（AI 可以看图）
-                #   - video 类：video_url（AI 当前不看视频，仅文字告知）
-                #   - document 类：doc_url（AI 当前不读文档，仅文字告知）
-                # =====================================================
-                image_count = sum(
-                    1 for a in msg.attachments
-                    if a.get("base64_image") or a.get("image_url")
-                )
-                video_count = sum(1 for a in msg.attachments if a.get("video_url"))
-                doc_count = sum(1 for a in msg.attachments if a.get("doc_url"))
-
-                note_parts = []
-                if image_count > 0:
-                    has_base64 = any(a.get("base64_image") and a["base64_image"].startswith("data:image/") for a in msg.attachments if a.get("base64_image"))
-                    if has_base64 and image_count > 1:
-                        note_parts.append(f"{image_count} 张参考图片")
-                    elif has_base64:
-                        note_parts.append(f"{image_count} 张上传的参考图片")
-                    else:
-                        note_parts.append(f"{image_count} 张链接图片")
-                if video_count > 0:
-                    note_parts.append(f"{video_count} 个视频链接（AI 当前无法观看视频内容，请以用户描述为准）")
-                if doc_count > 0:
-                    note_parts.append(f"{doc_count} 个文档链接（AI 当前无法读取文档内容，请以用户描述为准）")
-
-                if note_parts:
-                    att_note = f"\n[用户在本轮提供了: {', '.join(note_parts)}]"
-                    content = (content + att_note) if content else att_note.strip()
-                else:
-                    att_note = f"\n[用户在本轮提供了 {att_count} 个参考附件]"
-                    content = (content + att_note) if content else att_note.strip()
-            # 如果 assistant 消息包含已生成的媒体项，传结构化 media_items 到消息对象
-            # 【核心改动】不再在 content 中注入文本格式的媒体 URL（防止 AI 引用后输出链接给用户）
-            # 而是把 media_items 作为消息对象的字段，供 chat_service 在工具执行时自动识别
-            media_items_for_history = msg.media_items if (msg.role == "assistant" and msg.media_items and len(msg.media_items) > 0) else None
-            chat_history.append({"role": msg.role, "content": content, "media_items": media_items_for_history})
-
-    # SSE 流式生成器
-    async def event_generator():
-        """
-        SSE 事件生成器。
-
-        关键设计（参考 AgnesAI-main 的可靠性模式）：
-          - 流式开始前就创建 assistant 消息（占位）并写入数据库，
-            这样即使客户端中途断开/切换页面，已生成的内容也不会丢失。
-          - 每收到一个 text / tool_result 事件就增量更新数据库，
-            保证切换页面后从数据库能恢复最新状态。
-          - 使用 async_session() 创建独立的数据库连接，
-            避免与外层请求 db 的事务边界冲突。
-        """
-        # 先发送用户消息确认
-        yield f"data: {json.dumps({'type': 'user_message', 'message': user_msg.to_dict()}, ensure_ascii=False)}\n\n"
-
-        # 收集 AI 回复内容
-        assistant_content = ""
-        # 收集所有媒体项（支持多个）
-        media_items = []
-        tool_calls_info = []
-
-        # ── 流式开始前：先在数据库里创建一条 assistant 消息（占位） ──
-        #    这样即使客户端中途断开，已经推送给用户的内容也能被恢复。
-        assistant_msg_id = None
-        try:
-            async with async_session() as db_write:
-                assistant_msg = ChatMessage(
-                    session_id=session_id,
-                    role="assistant",
-                    content="",
-                    media_items=[],
-                    tool_calls=None,
-                )
-                db_write.add(assistant_msg)
-                # 同时更新会话时间
-                session_result_w = await db_write.execute(
-                    select(ChatSession).filter(ChatSession.id == session_id)
-                )
-                session_obj_w = session_result_w.scalar_one_or_none()
-                if session_obj_w:
-                    session_obj_w.updated_at = datetime.utcnow()
-                await db_write.commit()
-                await db_write.refresh(assistant_msg)
-                assistant_msg_id = assistant_msg.id
-        except Exception as e:
-            logger.error("[Chat] 创建 assistant 占位消息失败: %s", e)
-
-        # 发送刚创建的 assistant_message_created（含真实 DB ID）
-        # 这样前端一上来就拿到真实 message_id，media_callback 随时可以回写
-        if assistant_msg_id:
-            try:
-                async with async_session() as db_read:
-                    first_msg = await db_read.get(ChatMessage, assistant_msg_id)
-                    if first_msg:
-                        yield f"data: {json.dumps({'type': 'assistant_message_created', 'message': first_msg.to_dict()}, ensure_ascii=False)}\n\n"
-            except Exception as e:
-                logger.warning("[Chat] 读取刚创建的 assistant 消息失败: %s", e)
-
-        # ── 流式生成主循环 ──
-        try:
-            async for chunk in chat_service.chat_stream(
-                chat_history,
-                session_id,
-                attachments=validated_attachments if validated_attachments else None,
-                user_id=current_user.id if current_user else None,
-                camera_params=req.camera_params,
-                preset_ref=req.preset_ref,
-            ):
-                yield f"data: {chunk}\n\n"
-
-                # 解析事件，收集信息并增量写入数据库
-                try:
-                    event = json.loads(chunk)
-                    changed = False
-                    if event.get("type") == "text":
-                        assistant_content += event.get("content", "")
-                        changed = True
-                    elif event.get("type") == "tool_result":
-                        result_data = event.get("result", {})
-                        tool_name = event.get("tool", "")
-                        if result_data.get("media_type") and result_data.get("status") != "error":
-                            media_item = {
-                                "type": result_data.get("media_type"),
-                                "url": result_data.get("url", ""),
-                                "task_id": result_data.get("task_id") or result_data.get("video_id", ""),
-                                "status": result_data.get("status", "pending"),
-                            }
-                            # 避免重复添加同一个 task_id
-                            if not any(m.get("task_id") == media_item["task_id"] for m in media_items):
-                                media_items.append(media_item)
-                        tool_calls_info.append({
-                            "tool": tool_name,
-                            "result": result_data,
-                        })
-                        changed = True
-
-                    # 增量更新数据库（只有当有变化且 assistant_msg_id 存在时才更新）
-                    if changed and assistant_msg_id:
-                        try:
-                            async with async_session() as db_upd:
-                                msg_upd = await db_upd.get(ChatMessage, assistant_msg_id)
-                                if msg_upd:
-                                    msg_upd.content = assistant_content
-                                    msg_upd.media_items = list(media_items) if media_items else []
-                                    msg_upd.tool_calls = tool_calls_info if tool_calls_info else None
-                                    session_result_upd = await db_upd.execute(
-                                        select(ChatSession).filter(ChatSession.id == session_id)
-                                    )
-                                    session_obj_upd = session_result_upd.scalar_one_or_none()
-                                    if session_obj_upd:
-                                        session_obj_upd.updated_at = datetime.utcnow()
-                                    await db_upd.commit()
-                        except Exception as inner_e:
-                            logger.warning("[Chat] 增量更新消息失败: %s", inner_e)
-                except (json.JSONDecodeError, KeyError):
-                    pass
-
-        except Exception as e:
-            logger.error("[Chat] SSE 生成异常: %s", e)
-            yield f"data: {json.dumps({'type': 'error', 'content': str(e)}, ensure_ascii=False)}\n\n"
-
-        # ── 流结束：发送最终的 assistant_message 事件（供前端更新最终状态） ──
-        if assistant_msg_id:
-            try:
-                async with async_session() as db_final:
-                    final_msg = await db_final.get(ChatMessage, assistant_msg_id)
-                    if final_msg:
-                        yield f"data: {json.dumps({'type': 'assistant_message', 'message': final_msg.to_dict()}, ensure_ascii=False)}\n\n"
-            except Exception as e:
-                logger.error("[Chat] 读取最终 AI 消息失败: %s", e)
-
-        # ── 自动总结会话标题（如果是新对话的第一轮） ──
-        #    参考 ChatGPT/Claude 的行为：对话完成后，AI 自动生成一个有意义的标题
-        #    这个过程在后台进行，不阻塞用户的对话体验
-        try:
-            async with async_session() as db_title:
-                session_for_title = await db_title.get(ChatSession, session_id)
-                if session_for_title and session_for_title.title == "新对话":
-                    # 收集会话的前几条消息（用户 + AI 的回复）用于总结
-                    msgs_for_title_result = await db_title.execute(
-                        select(ChatMessage)
-                        .filter(ChatMessage.session_id == session_id)
-                        .order_by(ChatMessage.id)
-                        .limit(6)
-                    )
-                    msgs_for_title = msgs_for_title_result.scalars().all()
-
-                    if msgs_for_title:
-                        # 调用 AI 生成标题
-                        auto_title = await chat_service.summarize_session_title(msgs_for_title)
-                        if auto_title and auto_title != "新对话":
-                            session_for_title.title = auto_title[:200]
-                            session_for_title.updated_at = datetime.utcnow()
-                            await db_title.commit()
-                            logger.info("[Chat] 自动总结会话标题: id=%s, title=%s", session_id, auto_title)
-                            # 通过 SSE 发送标题更新事件，通知前端刷新
-                            yield f"data: {json.dumps({'type': 'title_updated', 'title': auto_title}, ensure_ascii=False)}\n\n"
-        except Exception as e:
-            # 自动总结失败不影响主流程，只记录日志
-            logger.warning("[Chat] 自动总结会话标题失败: %s", e)
-
-        yield "data: [DONE]\n\n"
-
     return StreamingResponse(
-        event_generator(),
+        await chat_service.stream_reply(
+            db,
+            session,
+            content=req.content,
+            attachments=validated_attachments,
+            user_id=current_user.id if current_user else None,
+            camera_params=req.camera_params,
+            preset_ref=req.preset_ref,
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

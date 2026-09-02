@@ -12,6 +12,7 @@ import { canvasThemes } from '@/lib/canvas-theme'
 import { loadCanvas, saveCanvas, switchCanvasUser, cancelSaveCanvas } from '@/lib/canvas-storage'
 import { useThemeStore } from './theme'
 import { analyzeFlow } from '@/lib/canvas-flow-analyzer'
+import { getUpstreamNodesWithIndex } from '@/lib/canvas-generation'
 
 // ---------- 连线类型校验（spec 5.4.2） ----------
 
@@ -399,49 +400,12 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /**
-     * 获取接入某个目标节点的源节点列表（带序号，按连接创建顺序排序）
-     * 返回 Map：sourcePanelId -> index (1-based)
+     * 获取接入某个目标节点的源资源节点数组（带序号，按连接创建顺序排序，去重）
+     * - 委托 lib/canvas-generation 的唯一实现（getUpstreamNodesWithIndex）
+     * - 仅保留 image/text/video/audio 资源节点，序号与生成时 @[图片N]/@[文本N] 标签编号一致
      */
-    getInputNodeIndices: (state) => (targetPanelId: string): Map<string, number> => {
-      const result = new Map<string, number>()
-      const incomingConns = state.connections
-        .filter(c => c.target_panel_id === targetPanelId)
-        .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-      let idx = 1
-      for (const conn of incomingConns) {
-        if (!result.has(conn.source_panel_id)) {
-          result.set(conn.source_panel_id, idx++)
-        }
-      }
-      return result
-    },
-
-    /**
-     * 获取接入某个目标节点的源节点数组（按序号排序，含序号信息）
-     */
-    getInputNodesWithIndex: (state) => (targetPanelId: string): Array<{ panel: CanvasPanel; index: number }> => {
-      const indexMap = new Map<string, number>()
-      const incomingConns = state.connections
-        .filter(c => c.target_panel_id === targetPanelId)
-        .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-      let idx = 1
-      const orderedIds: string[] = []
-      for (const conn of incomingConns) {
-        if (!indexMap.has(conn.source_panel_id)) {
-          indexMap.set(conn.source_panel_id, idx++)
-          orderedIds.push(conn.source_panel_id)
-        }
-      }
-      const result: Array<{ panel: CanvasPanel; index: number }> = []
-      for (const sourceId of orderedIds) {
-        const panel = state.panels.find(p => p.id === sourceId)
-        const index = indexMap.get(sourceId)
-        if (panel && index) {
-          result.push({ panel, index })
-        }
-      }
-      return result
-    },
+    getInputNodesWithIndex: (state) => (targetPanelId: string) =>
+      getUpstreamNodesWithIndex(targetPanelId, state.panels, state.connections),
 
     // ==================== 流程模式 ====================
 

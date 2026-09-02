@@ -5,16 +5,20 @@
 # - 自动预审：命中后自动标记为待审核或直接拒绝
 # =====================================================
 
+import asyncio
 import base64
 import logging
 import os
 import tempfile
 import time
+from datetime import datetime
 from typing import List, Tuple, Optional, Dict, Any
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from app.core.database import async_session
+from app.models.generation import Generation
 from app.models.sensitive_word import SensitiveWord, DEFAULT_SENSITIVE_WORDS
 
 logger = logging.getLogger("agnes_platform")
@@ -287,89 +291,15 @@ def _parse_moderation_result(content: str) -> Dict[str, Any]:
     }
 
 
-async def moderate_image_with_ai(
-    image_url: str,
-    prompt: Optional[str] = None,
-) -> Dict[str, Any]:
+async def _moderate_frame_with_ai(frame_b64: str, user_text: str, scene: str = "") -> Dict[str, Any]:
     """
-    使用 AI 多模态模型审核图片内容。
+    用多模态聊天模型审核单帧图片内容
+    （模型解析、messages 构造、chat_text 调用、结果解析与异常降级）。
 
-    返回：
-    {
-        "success": bool,          # 审核是否成功（失败时降级为通过）
-        "is_violation": bool,     # 是否违规
-        "categories": [...],      # 违规类别列表（中文）
-        "reason": str,            # 违规原因
-        "confidence": float,      # 置信度
-    }
-    """
-    from app.services.agnes_client import agnes_client
-
-    # 下载图片为 base64
-    image_b64 = await _download_image_as_base64(image_url)
-    if not image_b64:
-        # 下载失败，降级为通过（不误伤）
-        logger.warning("[AI审核] 图片下载失败，降级为通过: url=%s", image_url[:80])
-        return {"success": False, "is_violation": False, "categories": [], "reason": "", "confidence": 0.0}
-
-    # 审核为系统级任务：管理员配置 model.moderation_chat > 系统默认对话模型
-    try:
-        from app.services.model_registry import resolve_system_chat_model_id, SYSTEM_CHAT_MODEL_KEYS
-        model = await resolve_system_chat_model_id(None, SYSTEM_CHAT_MODEL_KEYS["moderation"])
-    except Exception:
-        model = ""
-    if not model:
-        logger.warning("[AI审核] 无可用聊天模型，降级为通过")
-        return {"success": False, "is_violation": False, "categories": [], "reason": "", "confidence": 0.0}
-
-    # 构造用户提示词（附带上原始 prompt 作为参考）
-    user_text = "请审核以下图片内容是否违规。"
-    if prompt:
-        user_text += f"\n\n图片的生成提示词（供参考）：{prompt[:500]}"
-
-    # 构造多模态消息（OpenAI 兼容格式）
-    messages = [
-        {"role": "system", "content": _MODERATION_SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": user_text},
-                {
-                    "type": "image_url",
-                    "image_url": {"url": image_b64},
-                },
-            ],
-        },
-    ]
-
-    try:
-        content = await agnes_client.chat_text(
-            model, messages, temperature=0.1, max_tokens=500,
-        )
-
-        parsed = _parse_moderation_result(content)
-        parsed["success"] = True
-        return parsed
-    except Exception as e:
-        logger.warning("[AI审核] 调用 AI 审核失败: %s", e)
-        return {"success": False, "is_violation": False, "categories": [], "reason": "", "confidence": 0.0}
-
-
-async def moderate_video_with_ai(
-    video_url: str,
-    prompt: Optional[str] = None,
-) -> Dict[str, Any]:
-    """
-    使用 AI 审核视频内容（提取首帧进行审核）。
+    scene 用于日志区分审核对象（如"视频"首帧审核）。
 
     返回格式同 moderate_image_with_ai。
     """
-    # 提取视频首帧
-    frame_b64 = await _extract_video_first_frame(video_url)
-    if not frame_b64:
-        logger.warning("[AI审核] 视频首帧提取失败，降级为通过: url=%s", video_url[:80])
-        return {"success": False, "is_violation": False, "categories": [], "reason": "", "confidence": 0.0}
-
     from app.services.agnes_client import agnes_client
 
     # 审核为系统级任务：管理员配置 model.moderation_chat > 系统默认对话模型
@@ -382,10 +312,7 @@ async def moderate_video_with_ai(
         logger.warning("[AI审核] 无可用聊天模型，降级为通过")
         return {"success": False, "is_violation": False, "categories": [], "reason": "", "confidence": 0.0}
 
-    user_text = "请审核以下视频的首帧图片内容是否违规。注意：这只是首帧，可能无法代表完整视频内容，请谨慎判断。"
-    if prompt:
-        user_text += f"\n\n视频的生成提示词（供参考）：{prompt[:500]}"
-
+    # 构造多模态消息（OpenAI 兼容格式）
     messages = [
         {"role": "system", "content": _MODERATION_SYSTEM_PROMPT},
         {
@@ -409,8 +336,61 @@ async def moderate_video_with_ai(
         parsed["success"] = True
         return parsed
     except Exception as e:
-        logger.warning("[AI审核] 调用 AI 视频审核失败: %s", e)
+        logger.warning(f"[AI审核] 调用 AI {scene}审核失败: %s", e)
         return {"success": False, "is_violation": False, "categories": [], "reason": "", "confidence": 0.0}
+
+
+async def moderate_image_with_ai(
+    image_url: str,
+    prompt: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    使用 AI 多模态模型审核图片内容。
+
+    返回：
+    {
+        "success": bool,          # 审核是否成功（失败时降级为通过）
+        "is_violation": bool,     # 是否违规
+        "categories": [...],      # 违规类别列表（中文）
+        "reason": str,            # 违规原因
+        "confidence": float,      # 置信度
+    }
+    """
+    # 下载图片为 base64
+    image_b64 = await _download_image_as_base64(image_url)
+    if not image_b64:
+        # 下载失败，降级为通过（不误伤）
+        logger.warning("[AI审核] 图片下载失败，降级为通过: url=%s", image_url[:80])
+        return {"success": False, "is_violation": False, "categories": [], "reason": "", "confidence": 0.0}
+
+    # 构造用户提示词（附带上原始 prompt 作为参考）
+    user_text = "请审核以下图片内容是否违规。"
+    if prompt:
+        user_text += f"\n\n图片的生成提示词（供参考）：{prompt[:500]}"
+
+    return await _moderate_frame_with_ai(image_b64, user_text)
+
+
+async def moderate_video_with_ai(
+    video_url: str,
+    prompt: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    使用 AI 审核视频内容（提取首帧进行审核）。
+
+    返回格式同 moderate_image_with_ai。
+    """
+    # 提取视频首帧
+    frame_b64 = await _extract_video_first_frame(video_url)
+    if not frame_b64:
+        logger.warning("[AI审核] 视频首帧提取失败，降级为通过: url=%s", video_url[:80])
+        return {"success": False, "is_violation": False, "categories": [], "reason": "", "confidence": 0.0}
+
+    user_text = "请审核以下视频的首帧图片内容是否违规。注意：这只是首帧，可能无法代表完整视频内容，请谨慎判断。"
+    if prompt:
+        user_text += f"\n\n视频的生成提示词（供参考）：{prompt[:500]}"
+
+    return await _moderate_frame_with_ai(frame_b64, user_text, scene="视频")
 
 
 async def moderate_generation_with_ai(
@@ -492,3 +472,126 @@ async def run_async_asset_moderation(
 
     except Exception as e:
         logger.exception("[AI审核] 资产后台任务异常 id=%d: %s", asset_id, e)
+
+
+# =====================================================
+# 生成记录（generations）后台审核
+# 分享置公开时的统一入口：置 pending + 敏感词筛查 + 异步 AI 审核
+# =====================================================
+
+
+async def mark_pending_with_keyword_check(record: Generation, db: AsyncSession) -> None:
+    """
+    分享置公开时：记录进入待审核状态，并做敏感词快速筛查（结果写入 flags/reason）。
+    """
+    # 默认待审核
+    record.moderation_status = "pending"
+    record.moderation_flags = None
+    record.moderation_reason = "审核中：等待系统预审"
+    # AI 预审状态：进入 pending，等异步任务跑完更新
+    record.ai_moderation_status = "pending"
+
+    # 敏感词快速筛查（作为 flags 记录下来，供管理员参考）
+    try:
+        hit, hit_words = await check_sensitive_text(db, record.prompt or "")
+        if hit:
+            record.moderation_flags = hit_words
+            record.moderation_reason = f"审核中：提示词命中敏感词（{', '.join(hit_words[:3])}），等待图像审核"
+    except Exception as mod_err:
+        logger.warning("[广场] 分享时敏感词检测失败: %s", mod_err)
+
+
+def queue_ai_moderation(record: Generation) -> None:
+    """
+    异步触发 AI 图像/视频内容审核后台任务（不阻塞调用方响应）。
+    """
+    try:
+        asyncio.create_task(run_async_generation_moderation(
+            record.id, record.type, record.result_url, record.prompt,
+        ))
+    except Exception as task_err:
+        logger.warning("[广场] 启动 AI 异步审核失败 id=%d: %s", record.id, task_err)
+
+
+async def run_async_generation_moderation(
+    record_id: int,
+    gen_type: str,
+    result_url: Optional[str],
+    prompt: Optional[str],
+) -> None:
+    """
+    后台异步任务：调用 AI 多模态模型审核图片/视频内容。
+    审核完成后更新记录的 moderation_status 与 ai_moderation_status：
+    - 违规 → moderation_status=rejected, ai_moderation_status=violated
+    - 不违规 → moderation_status=pending, ai_moderation_status=passed（等人工复审）
+    - 审核失败 → moderation_status=pending, ai_moderation_status=failed（人工兜底）
+    """
+    try:
+        result = await moderate_generation_with_ai(gen_type, result_url, prompt)
+
+        async with async_session() as db:
+            stmt = select(Generation).filter(Generation.id == record_id)
+            res = await db.execute(stmt)
+            record = res.scalar_one_or_none()
+            if not record:
+                return
+
+            if not result.get("success"):
+                # 审核失败，保持 pending，等人工审核
+                record.moderation_reason = "系统预审失败，等待人工审核"
+                record.ai_moderation_status = "failed"
+                await db.commit()
+                logger.info("[AI审核] 记录 %d 审核失败，保持待审核", record_id)
+                return
+
+            if result.get("is_violation"):
+                # AI 判定违规 → 直接设为 rejected
+                categories = result.get("categories", []) or []
+                reason = result.get("reason", "") or ""
+                confidence = result.get("confidence", 0)
+                record.moderation_status = "rejected"
+                record.ai_moderation_status = "violated"
+                # 把 AI 审核结果追加到 flags 里
+                existing_flags = record.moderation_flags or []
+                if isinstance(existing_flags, list):
+                    new_flags = list(existing_flags)
+                else:
+                    new_flags = []
+                for cat in categories:
+                    if cat not in new_flags:
+                        new_flags.append(cat)
+                record.moderation_flags = new_flags
+                reason_text = f"AI 预审不通过：{reason}"
+                if categories:
+                    reason_text += f"（{', '.join(categories[:3])}）"
+                reason_text += f"，置信度 {int(confidence * 100)}%"
+                record.moderation_reason = reason_text
+                record.moderated_at = datetime.utcnow()
+                await db.commit()
+                logger.info("[AI审核] 记录 %d 判定违规: %s", record_id, reason_text)
+            else:
+                # AI 判定没问题 → 保持 pending，等人工复审
+                record.ai_moderation_status = "passed"
+                reason = "AI 预审通过，等待人工复审"
+                flags = record.moderation_flags or []
+                if not flags:
+                    record.moderation_reason = reason
+                else:
+                    record.moderation_reason = f"{reason}（提示词含敏感词，需人工确认）"
+                await db.commit()
+                logger.info("[AI审核] 记录 %d AI 预审通过，等待人工复审", record_id)
+
+    except Exception as e:
+        # 异常时也标记为 failed，方便管理员识别
+        try:
+            async with async_session() as db:
+                stmt = select(Generation).filter(Generation.id == record_id)
+                res = await db.execute(stmt)
+                record = res.scalar_one_or_none()
+                if record:
+                    record.ai_moderation_status = "failed"
+                    record.moderation_reason = "AI 审核任务异常，等待人工审核"
+                    await db.commit()
+        except Exception:
+            pass
+        logger.exception("[AI审核] 后台任务异常 id=%d: %s", record_id, e)

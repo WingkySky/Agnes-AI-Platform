@@ -577,9 +577,9 @@ const inputBadges = computed(() => {
     // 只对 config 等需要接收多输入的节点显示标记
     if (!targetPanel || targetPanel.type !== 'config') continue
 
-    // 获取该目标节点的所有输入序号映射
-    const indexMap = store.getInputNodeIndices(conn.target_panel_id)
-    const idx = indexMap.get(props.panel.id)
+    // 获取该目标节点的输入序号（与生成时 @[图片N] 标签编号同源，来自 lib 的统一实现）
+    const idx = store.getInputNodesWithIndex(conn.target_panel_id)
+      .find((upstream) => upstream.panel.id === props.panel.id)?.index
     if (idx) {
       const targetName = targetPanel.name || getNodeTypeName(targetPanel.type)
       badges.push({

@@ -21,7 +21,8 @@ import glob as glob_module
 import zipfile
 import io
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Tuple
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from fastapi.responses import Response as FastAPIResponse, FileResponse
@@ -34,6 +35,7 @@ from app.core.security import get_current_user_optional, get_current_user
 from app.models.generation import Generation
 from app.models.user import User
 from app.routes._media_proxy import proxy_video_stream
+from app.services.moderation_service import mark_pending_with_keyword_check, queue_ai_moderation
 from app.schemas.common import (
     HistoryListResponse,
     GenerationRecord,
@@ -57,6 +59,81 @@ def _user_scope(col, current_user):
     if current_user:
         return col == current_user.id
     return col.is_(None)
+
+
+# =====================================================
+# 下载代理公共工具（批量下载 / 单文件下载 / URL 下载共用）
+# =====================================================
+
+# URL 路径后缀 → (扩展名, MIME 类型) 探测规则（顺序即匹配优先级）
+_URL_EXT_RULES = (
+    (".jpg", ".jpg", "image/jpeg"),
+    (".jpeg", ".jpg", "image/jpeg"),
+    (".webp", ".webp", "image/webp"),
+    (".gif", ".gif", "image/gif"),
+    (".mp4", ".mp4", "video/mp4"),
+)
+
+
+def _sniff_url_ext(url: str) -> Optional[Tuple[str, str]]:
+    """从 URL 路径中尝试提取更准确的扩展名与 MIME 类型，未命中返回 None。"""
+    url_path = urlparse(url).path.lower()
+    for suffix, ext, content_type in _URL_EXT_RULES:
+        if url_path.endswith(suffix):
+            return ext, content_type
+    return None
+
+
+def _is_html_content_type(ct: str) -> bool:
+    """源站返回 HTML（通常是错误页/鉴权页）时视为无效内容。"""
+    return bool(ct) and ("text/html" in ct or "application/xhtml" in ct)
+
+
+async def _proxy_attachment(url: str) -> httpx.Response:
+    """代理下载远程文件。非 200 或源站返回 HTML 时抛 502 HTTPException。"""
+    async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+        response = await client.get(url, headers={"User-Agent": "Agnes-Platform-Download"})
+
+    if response.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"下载源文件失败 (HTTP {response.status_code})")
+
+    if _is_html_content_type(response.headers.get("content-type", "")):
+        raise HTTPException(
+            status_code=502,
+            detail="源文件返回了 HTML 页面（可能链接已失效或被拦截），无法下载",
+        )
+    return response
+
+
+async def _apply_watermark_if_needed(
+    db: AsyncSession,
+    current_user: Optional[User],
+    file_type: str,
+    file_content: bytes,
+) -> Tuple[bytes, bool]:
+    """
+    图片类型：按水印配置动态应用水印（不保存到磁盘）。
+    返回 (文件内容, 是否已加水印)；非图片、未启用或处理失败时返回原图。
+    """
+    if file_type != "image":
+        return file_content, False
+    try:
+        from app.services.watermark_service import get_watermark_config, should_apply_watermark, apply_image_watermark
+        wm_config = await get_watermark_config(db)
+        if should_apply_watermark(wm_config, current_user):
+            return apply_image_watermark(file_content, wm_config), True
+    except Exception as e:
+        logger.warning("[下载代理] 水印处理失败，返回原图: %s", e)
+    return file_content, False
+
+
+def _download_response_headers(filename: str) -> dict:
+    """下载代理统一响应头：强制浏览器保存文件并允许 CORS 读取文件名。"""
+    return {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Expose-Headers": "Content-Disposition",
+    }
 
 
 @router.get("/history", response_model=HistoryListResponse, summary="获取生成历史列表")
@@ -114,33 +191,7 @@ async def get_history(
     items = result.scalars().all()
 
     # 转换为响应对象
-    records = []
-    for item in items:
-        # 向后兼容：新字段 mode 可能为空（老记录），从 params.mode 回退获取
-        mode = item.mode
-        if not mode and isinstance(item.params, dict):
-            mode = item.params.get("mode") if isinstance(item.params, dict) else None
-        records.append(GenerationRecord(
-            id=item.id,
-            type=item.type,
-            prompt=item.prompt,
-            model=item.model,
-            params=item.params,
-            mode=mode,
-            result_url=item.result_url,
-            status=item.status,
-            task_id=item.task_id,
-            credits_consumed=getattr(item, "credits_consumed", 0) or 0,
-            is_public=getattr(item, "is_public", False) or False,
-            likes_count=getattr(item, "likes_count", 0) or 0,
-            created_at=item.created_at,
-            moderation_status=getattr(item, "moderation_status", "approved"),
-            moderation_reason=getattr(item, "moderation_reason", None),
-            moderation_flags=getattr(item, "moderation_flags", None),
-            source=getattr(item, "source", "independent") or "independent",
-            container_type=getattr(item, "container_type", None),
-            container_id=getattr(item, "container_id", None),
-        ))
+    records = [GenerationRecord.model_validate(item) for item in items]
 
     return HistoryListResponse(
         total=total,
@@ -299,25 +350,9 @@ async def batch_download_files(
                 if not record.result_url:
                     continue
 
-                # 确定文件扩展名
-                if record.type == "video":
-                    ext = ".mp4"
-                else:
-                    ext = ".png"
-
-                # 从 URL 路径中尝试提取更准确的扩展名
-                from urllib.parse import urlparse
-                parsed = urlparse(record.result_url)
-                url_path = parsed.path.lower()
-                if url_path.endswith(".jpg") or url_path.endswith(".jpeg"):
-                    ext = ".jpg"
-                elif url_path.endswith(".webp"):
-                    ext = ".webp"
-                elif url_path.endswith(".gif"):
-                    ext = ".gif"
-                elif url_path.endswith(".mp4"):
-                    ext = ".mp4"
-
+                # 确定文件扩展名：按类型取默认值，再从 URL 路径中尝试提取更准确的扩展名
+                sniffed = _sniff_url_ext(record.result_url)
+                ext = sniffed[0] if sniffed else (".mp4" if record.type == "video" else ".png")
                 filename = f"agnes-{record.type}-{record.id}{ext}"
 
                 try:
@@ -327,8 +362,7 @@ async def batch_download_files(
                     )
                     if response.status_code == 200:
                         # 跳过源站返回的 HTML 错误页，避免把 HTML 当图片打包进 zip
-                        ct = response.headers.get("content-type", "")
-                        if ct and ("text/html" in ct or "application/xhtml" in ct):
+                        if _is_html_content_type(response.headers.get("content-type", "")):
                             logger.warning("[批量下载] 跳过返回 HTML 的文件: id=%s", record.id)
                             continue
 
@@ -357,11 +391,7 @@ async def batch_download_files(
     return FastAPIResponse(
         content=zip_buffer.read(),
         media_type="application/zip",
-        headers={
-            "Content-Disposition": f'attachment; filename="{zip_filename}"',
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Expose-Headers": "Content-Disposition",
-        },
+        headers=_download_response_headers(zip_filename),
     )
 
 
@@ -406,74 +436,42 @@ async def download_file(
     file_type = record.type  # "image" 或 "video"
 
     # 根据类型确定文件扩展名和 MIME 类型
-    if file_type == "video":
-        ext = ".mp4"
-        content_type = "video/mp4"
-    else:
-        ext = ".png"
-        content_type = "image/png"
+    ext, content_type = (".mp4", "video/mp4") if file_type == "video" else (".png", "image/png")
 
     # 生成文件名
     filename = f"agnes-{file_type}-{record_id}{ext}"
 
     try:
-        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
-            response = await client.get(file_url, headers={"User-Agent": "Agnes-Platform-Download"})
+        response = await _proxy_attachment(file_url)
 
-            if response.status_code != 200:
-                raise HTTPException(status_code=502, detail=f"下载源文件失败 (HTTP {response.status_code})")
+        # 从响应中获取实际 Content-Type（如果有的话）
+        actual_ct = response.headers.get("content-type", "")
+        if actual_ct and actual_ct != "application/octet-stream":
+            content_type = actual_ct
 
-            # 从响应中获取实际 Content-Type（如果有的话）
-            actual_ct = response.headers.get("content-type", "")
-            # 源站返回 HTML（通常是错误页/鉴权页）时拒绝，避免把 HTML 当图片下载
-            if actual_ct and ("text/html" in actual_ct or "application/xhtml" in actual_ct):
-                raise HTTPException(
-                    status_code=502,
-                    detail="源文件返回了 HTML 页面（可能链接已失效或被拦截），无法下载",
-                )
-            if actual_ct and actual_ct != "application/octet-stream":
-                content_type = actual_ct
+        # 从 URL 路径中尝试提取更准确的扩展名（与原逻辑一致：仅识别 jpg/webp 后缀）
+        sniffed = _sniff_url_ext(file_url)
+        if sniffed and sniffed[0] in (".jpg", ".webp"):
+            ext = sniffed[0]
+            filename = f"agnes-{file_type}-{record_id}{ext}"
+            if file_type != "video":
+                content_type = sniffed[1]
 
-            # 从 URL 路径中尝试提取更准确的扩展名
-            from urllib.parse import urlparse
-            parsed = urlparse(file_url)
-            url_path = parsed.path.lower()
-            if url_path.endswith(".jpg") or url_path.endswith(".jpeg"):
-                ext = ".jpg"
-                filename = f"agnes-{file_type}-{record_id}{ext}"
-                if file_type != "video":
-                    content_type = "image/jpeg"
-            elif url_path.endswith(".webp"):
-                ext = ".webp"
-                filename = f"agnes-{file_type}-{record_id}{ext}"
-                if file_type != "video":
-                    content_type = "image/webp"
+        file_content = response.content
 
-            file_content = response.content
+        # 图片类型：动态应用水印（不保存到磁盘）
+        file_content, watermarked = await _apply_watermark_if_needed(db, current_user, file_type, file_content)
+        if watermarked:
+            # 水印处理后统一为 PNG，更新扩展名和 MIME
+            ext = ".png"
+            filename = f"agnes-{file_type}-{record_id}{ext}"
+            content_type = "image/png"
 
-            # 图片类型：动态应用水印（不保存到磁盘）
-            if file_type == "image":
-                try:
-                    from app.services.watermark_service import get_watermark_config, should_apply_watermark, apply_image_watermark
-                    wm_config = await get_watermark_config(db)
-                    if should_apply_watermark(wm_config, current_user):
-                        file_content = apply_image_watermark(file_content, wm_config)
-                        # 水印处理后统一为 PNG，更新扩展名和 MIME
-                        ext = ".png"
-                        filename = f"agnes-{file_type}-{record_id}{ext}"
-                        content_type = "image/png"
-                except Exception as e:
-                    logger.warning("[历史记录下载] 水印处理失败，返回原图: %s", e)
-
-            return FastAPIResponse(
-                content=file_content,
-                media_type=content_type,
-                headers={
-                    "Content-Disposition": f'attachment; filename="{filename}"',
-                    "Access-Control-Allow-Origin": "*",
-                    "Access-Control-Expose-Headers": "Content-Disposition",
-                },
-            )
+        return FastAPIResponse(
+            content=file_content,
+            media_type=content_type,
+            headers=_download_response_headers(filename),
+        )
     except httpx.TimeoutException:
         raise HTTPException(status_code=504, detail="下载源文件超时")
     except HTTPException:
@@ -509,29 +507,12 @@ async def download_by_url(
         raise HTTPException(status_code=400, detail="url 必须是 HTTP/HTTPS 链接")
 
     # 根据类型确定默认扩展名和 MIME 类型
-    if type == "video":
-        ext = ".mp4"
-        content_type = "video/mp4"
-    else:
-        ext = ".png"
-        content_type = "image/png"
+    ext, content_type = (".mp4", "video/mp4") if type == "video" else (".png", "image/png")
 
     # 从 URL 路径中尝试提取更准确的扩展名
-    from urllib.parse import urlparse
-    parsed = urlparse(url)
-    url_path = parsed.path.lower()
-    if url_path.endswith(".jpg") or url_path.endswith(".jpeg"):
-        ext = ".jpg"
-        content_type = "image/jpeg"
-    elif url_path.endswith(".webp"):
-        ext = ".webp"
-        content_type = "image/webp"
-    elif url_path.endswith(".gif"):
-        ext = ".gif"
-        content_type = "image/gif"
-    elif url_path.endswith(".mp4"):
-        ext = ".mp4"
-        content_type = "video/mp4"
+    sniffed = _sniff_url_ext(url)
+    if sniffed:
+        ext, content_type = sniffed
 
     # 优先使用前端传入的自定义文件名，否则自动生成
     if filename:
@@ -542,54 +523,29 @@ async def download_by_url(
         filename = f"agnes-{type}-{int(asyncio.get_event_loop().time())}{ext}"
 
     try:
-        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
-            response = await client.get(url, headers={"User-Agent": "Agnes-Platform-Download"})
+        response = await _proxy_attachment(url)
 
-            if response.status_code != 200:
-                raise HTTPException(status_code=502, detail=f"下载源文件失败 (HTTP {response.status_code})")
+        # 从响应中获取实际 Content-Type
+        actual_ct = response.headers.get("content-type", "")
+        if actual_ct and actual_ct != "application/octet-stream":
+            content_type = actual_ct
 
-            # 从响应中获取实际 Content-Type
-            actual_ct = response.headers.get("content-type", "")
-            # 源站返回 HTML（通常是错误页/鉴权页）时拒绝，避免把 HTML 当图片下载
-            if actual_ct and ("text/html" in actual_ct or "application/xhtml" in actual_ct):
-                raise HTTPException(
-                    status_code=502,
-                    detail="源文件返回了 HTML 页面（可能链接已失效或被拦截），无法下载",
-                )
-            if actual_ct and actual_ct != "application/octet-stream":
-                content_type = actual_ct
+        file_content = response.content
 
-            file_content = response.content
+        # 图片类型：动态应用水印
+        file_content, watermarked = await _apply_watermark_if_needed(db, current_user, type, file_content)
+        if watermarked:
+            # 水印后统一为 PNG，替换文件名扩展名
+            ext = ".png"
+            content_type = "image/png"
+            base = filename.rsplit('.', 1)[0] if '.' in filename else filename
+            filename = base + ext
 
-            # 图片类型：动态应用水印
-            if type == "image":
-                try:
-                    from app.services.watermark_service import get_watermark_config, should_apply_watermark, apply_image_watermark
-                    wm_config = await get_watermark_config(db)
-                    if should_apply_watermark(wm_config, current_user):
-                        file_content = apply_image_watermark(file_content, wm_config)
-                        # 水印后统一为 PNG
-                        ext = ".png"
-                        content_type = "image/png"
-                        if filename:
-                            # 替换扩展名
-                            from urllib.parse import urlparse
-                            base = filename.rsplit('.', 1)[0] if '.' in filename else filename
-                            filename = base + ext
-                        else:
-                            filename = f"agnes-{type}-{int(asyncio.get_event_loop().time())}{ext}"
-                except Exception as e:
-                    logger.warning("[下载代理] 水印处理失败，返回原图: %s", e)
-
-            return FastAPIResponse(
-                content=file_content,
-                media_type=content_type,
-                headers={
-                    "Content-Disposition": f'attachment; filename="{filename}"',
-                    "Access-Control-Allow-Origin": "*",
-                    "Access-Control-Expose-Headers": "Content-Disposition",
-                },
-            )
+        return FastAPIResponse(
+            content=file_content,
+            media_type=content_type,
+            headers=_download_response_headers(filename),
+        )
     except httpx.TimeoutException:
         raise HTTPException(status_code=504, detail="下载源文件超时")
     except HTTPException:
@@ -995,29 +951,9 @@ async def update_share_status(
 
     # ===== 设为公开时：进入待审核状态，先做敏感词快速筛查，再异步触发 AI 图像审核 =====
     if body.is_public and not was_public:
-        # 默认待审核
-        record.moderation_status = "pending"
-        record.moderation_flags = None
-        record.moderation_reason = "审核中：等待系统预审"
-        # AI 预审状态：进入 pending，等异步任务跑完更新
-        record.ai_moderation_status = "pending"
-
-        # 敏感词快速筛查（作为 flags 记录下来，供管理员参考）
-        try:
-            from app.services.moderation_service import check_sensitive_text
-            hit, hit_words = await check_sensitive_text(db, record.prompt or "")
-            if hit:
-                record.moderation_flags = hit_words
-                record.moderation_reason = f"审核中：提示词命中敏感词（{', '.join(hit_words[:3])}），等待图像审核"
-        except Exception as mod_err:
-            logger.warning("[广场] 分享时敏感词检测失败: %s", mod_err)
-
+        await mark_pending_with_keyword_check(record, db)
         # 异步触发 AI 图像/视频内容审核（不阻塞接口响应）
-        try:
-            import asyncio
-            asyncio.create_task(_async_ai_moderate(record.id, record.type, record.result_url, record.prompt))
-        except Exception as task_err:
-            logger.warning("[广场] 启动 AI 异步审核失败 id=%d: %s", record.id, task_err)
+        queue_ai_moderation(record)
 
     await db.commit()
     await db.refresh(record)
@@ -1078,19 +1014,7 @@ async def batch_update_share_status(
 
         # ===== 设为公开时：进入待审核状态，敏感词快速筛查 =====
         if body.is_public and not was_public:
-            record.moderation_status = "pending"
-            record.moderation_flags = None
-            record.moderation_reason = "审核中：等待系统预审"
-            # AI 预审状态：进入 pending，等异步任务跑完更新
-            record.ai_moderation_status = "pending"
-            try:
-                from app.services.moderation_service import check_sensitive_text
-                hit, hit_words = await check_sensitive_text(db, record.prompt or "")
-                if hit:
-                    record.moderation_flags = hit_words
-                    record.moderation_reason = f"审核中：提示词命中敏感词（{', '.join(hit_words[:3])}），等待图像审核"
-            except Exception as mod_err:
-                logger.warning("[广场] 批量分享时敏感词检测失败 id=%d: %s", record.id, mod_err)
+            await mark_pending_with_keyword_check(record, db)
             newly_public_records.append(record)
 
         updated_ids.append(record.id)
@@ -1098,13 +1022,8 @@ async def batch_update_share_status(
     await db.commit()
 
     # 批量触发异步 AI 审核
-    if newly_public_records:
-        try:
-            import asyncio
-            for rec in newly_public_records:
-                asyncio.create_task(_async_ai_moderate(rec.id, rec.type, rec.result_url, rec.prompt))
-        except Exception as task_err:
-            logger.warning("[广场] 批量启动 AI 异步审核失败: %s", task_err)
+    for rec in newly_public_records:
+        queue_ai_moderation(rec)
 
     failed_ids = [rid for rid in unique_ids if rid not in updated_ids]
     if body.is_public:
@@ -1119,95 +1038,3 @@ async def batch_update_share_status(
         failed_ids=failed_ids,
         message=msg,
     )
-
-
-# =====================================================
-# 异步 AI 内容审核后台任务
-# =====================================================
-
-
-async def _async_ai_moderate(
-    record_id: int,
-    gen_type: str,
-    result_url: Optional[str],
-    prompt: Optional[str],
-):
-    """
-    后台异步任务：调用 AI 多模态模型审核图片/视频内容。
-    审核完成后更新记录的 moderation_status 与 ai_moderation_status：
-    - 违规 → moderation_status=rejected, ai_moderation_status=violated
-    - 不违规 → moderation_status=pending, ai_moderation_status=passed（等人工复审）
-    - 审核失败 → moderation_status=pending, ai_moderation_status=failed（人工兜底）
-    """
-    from app.core.database import async_session
-    from app.services.moderation_service import moderate_generation_with_ai
-
-    try:
-        result = await moderate_generation_with_ai(gen_type, result_url, prompt)
-
-        async with async_session() as db:
-            stmt = select(Generation).filter(Generation.id == record_id)
-            res = await db.execute(stmt)
-            record = res.scalar_one_or_none()
-            if not record:
-                return
-
-            if not result.get("success"):
-                # 审核失败，保持 pending，等人工审核
-                record.moderation_reason = "系统预审失败，等待人工审核"
-                record.ai_moderation_status = "failed"
-                await db.commit()
-                logger.info("[AI审核] 记录 %d 审核失败，保持待审核", record_id)
-                return
-
-            if result.get("is_violation"):
-                # AI 判定违规 → 直接设为 rejected
-                categories = result.get("categories", []) or []
-                reason = result.get("reason", "") or ""
-                confidence = result.get("confidence", 0)
-                record.moderation_status = "rejected"
-                record.ai_moderation_status = "violated"
-                # 把 AI 审核结果追加到 flags 里
-                existing_flags = record.moderation_flags or []
-                if isinstance(existing_flags, list):
-                    new_flags = list(existing_flags)
-                else:
-                    new_flags = []
-                for cat in categories:
-                    if cat not in new_flags:
-                        new_flags.append(cat)
-                record.moderation_flags = new_flags
-                reason_text = f"AI 预审不通过：{reason}"
-                if categories:
-                    reason_text += f"（{', '.join(categories[:3])}）"
-                reason_text += f"，置信度 {int(confidence * 100)}%"
-                record.moderation_reason = reason_text
-                record.moderated_at = datetime.utcnow()
-                await db.commit()
-                logger.info("[AI审核] 记录 %d 判定违规: %s", record_id, reason_text)
-            else:
-                # AI 判定没问题 → 保持 pending，等人工复审
-                record.ai_moderation_status = "passed"
-                reason = "AI 预审通过，等待人工复审"
-                flags = record.moderation_flags or []
-                if not flags:
-                    record.moderation_reason = reason
-                else:
-                    record.moderation_reason = f"{reason}（提示词含敏感词，需人工确认）"
-                await db.commit()
-                logger.info("[AI审核] 记录 %d AI 预审通过，等待人工复审", record_id)
-
-    except Exception as e:
-        # 异常时也标记为 failed，方便管理员识别
-        try:
-            async with async_session() as db:
-                stmt = select(Generation).filter(Generation.id == record_id)
-                res = await db.execute(stmt)
-                record = res.scalar_one_or_none()
-                if record:
-                    record.ai_moderation_status = "failed"
-                    record.moderation_reason = "AI 审核任务异常，等待人工审核"
-                    await db.commit()
-        except Exception:
-            pass
-        logger.exception("[AI审核] 后台任务异常 id=%d: %s", record_id, e)

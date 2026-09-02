@@ -11,6 +11,7 @@
 import { defineStore } from 'pinia'
 import { useUserStore } from '@/stores/user'
 import { usePreferencesStore } from '@/stores/preferences'
+import { isMediaSuccess, isMediaFailed } from '@/lib/media-status'
 import {
   createVideoTask,
   getVideoStatus,
@@ -72,13 +73,8 @@ const RETRY_MAX_ATTEMPTS = 3       // 最大重试次数（image/video 启用，
 function isRetryableError(error: unknown, _taskType: TaskType): boolean {
   if (!error) return false
 
-  // 兼容字符串错误（无 status / code，保守不重试）
-  if (typeof error === 'string') {
-    // 字符串中若含审核拒绝关键词，明确不可重试
-    const lower = error.toLowerCase()
-    if (MODERATION_KEYWORDS.some((kw) => lower.includes(kw.toLowerCase()))) return false
-    return false
-  }
+  // 字符串错误无 status / code，无法归类为网络/服务端错误，保守不重试
+  if (typeof error === 'string') return false
 
   const err = error as {
     code?: string
@@ -285,17 +281,26 @@ export const useTaskQueueStore = defineStore('taskQueue', {
     // 【提交任务】
     // =====================================================
 
-    // ------ 图片生成任务
+    // ------ 图片/视频生成任务（统一入口，按 kind 区分并发上限/轮询间隔/创建接口/后端任务 ID 字段）
     submitImageTask(params: Record<string, unknown>): string {
-      if (this.runningImageCount >= MAX_CONCURRENT) {
+      return this._submitMediaTask('image', params)
+    },
+
+    submitVideoTask(params: Record<string, unknown>): string {
+      return this._submitMediaTask('video', params)
+    },
+
+    _submitMediaTask(kind: TaskType, params: Record<string, unknown>): string {
+      const runningCount = kind === 'video' ? this.runningVideoCount : this.runningImageCount
+      if (runningCount >= MAX_CONCURRENT) {
         throw new Error(
-          `Maximum ${MAX_CONCURRENT} concurrent image tasks — please wait for some tasks to complete`,
+          `Maximum ${MAX_CONCURRENT} concurrent ${kind} tasks — please wait for some tasks to complete`,
         )
       }
       const taskId = uid()
       const task: QueueTask = {
         taskId,
-        type: 'image',
+        type: kind,
         status: 'queued',
         prompt: params.prompt as string || '',
         params: { ...params },
@@ -305,10 +310,10 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         errorMessage: '',
         createdAt: Date.now(),
         updatedAt: Date.now(),
-        pollIntervalMs: IMAGE_POLL_INTERVAL,
+        pollIntervalMs: kind === 'video' ? VIDEO_POLL_INTERVAL : IMAGE_POLL_INTERVAL,
         rawResponse: null,
         backendTaskId: null,
-        // 自动重试：image 类型启用，最多 3 次
+        // 自动重试：image/video 类型启用，最多 3 次
         retryCount: 0,
         maxRetries: RETRY_MAX_ATTEMPTS,
         retryScheduledAt: null,
@@ -318,23 +323,22 @@ export const useTaskQueueStore = defineStore('taskQueue', {
       this.setActiveTask(taskId)
 
       // 异步创建任务（不 await，立即返回 taskId）
-      this._createImageTaskInBackground(taskId, params)
+      this._createMediaTaskInBackground(taskId, params, kind)
       return taskId
     },
 
-    async _createImageTaskInBackground(taskId: string, params: Record<string, unknown>): Promise<void> {
+    async _createMediaTaskInBackground(taskId: string, params: Record<string, unknown>, kind: TaskType): Promise<void> {
       const task = this.tasks[taskId]
       if (!task) return
       try {
         task.status = 'pending'
         this._notifyTaskUpdate(taskId)
-        const resp = await createImageTask(params as unknown as ImageGenerationRequest)
+        const resp = kind === 'video'
+          ? await createVideoTask(params as unknown as VideoGenerationRequest)
+          : await createImageTask(params as unknown as ImageGenerationRequest)
         const respRecord = resp as unknown as Record<string, unknown>
-        task.backendTaskId =
-          (respRecord.task_id as string | undefined) ||
-          (respRecord.id as string | undefined) ||
-          (respRecord.image_task_id as string | undefined) ||
-          taskId
+        // 后端任务 ID 兼容字段（保持原优先级）：video: task_id > video_id > id；image: task_id > id > image_task_id
+        task.backendTaskId = this._pickBackendTaskId(respRecord, kind, taskId)
         task.rawResponse = respRecord
         task.status = 'processing'
         this._notifyTaskUpdate(taskId)
@@ -347,99 +351,25 @@ export const useTaskQueueStore = defineStore('taskQueue', {
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : 'Failed to create task'
         // 【自动重试】检查是否可重试（autoRetry 开关 + 可重试错误 + 未达上限）
-        if (this._scheduleRetry(taskId, err)) {
-          // 已调度重试：保留错误信息供 UI 展示，status 暂保持为 'failed'，
-          // TaskCard 通过 retryScheduledAt 字段判断显示"重试中 (n/3)"
-          task.status = 'failed'
-          task.errorMessage = message
-          task.updatedAt = Date.now()
-          this._notifyTaskUpdate(taskId)
-          this._saveToStorage()
-          return
-        }
+        // 已调度重试：保留错误信息供 UI 展示，status 暂保持为 'failed'，
+        // TaskCard 通过 retryScheduledAt 字段判断显示"重试中 (n/3)"
         task.status = 'failed'
         task.errorMessage = message
         task.updatedAt = Date.now()
         this._notifyTaskUpdate(taskId)
         this._saveToStorage()
+        if (this._scheduleRetry(taskId, err)) return
       }
     },
 
-    // ------ 视频生成任务
-    submitVideoTask(params: Record<string, unknown>): string {
-      if (this.runningVideoCount >= MAX_CONCURRENT) {
-        throw new Error(
-          `Maximum ${MAX_CONCURRENT} concurrent video tasks — please wait for some tasks to complete`,
-        )
+    /** 按类型优先级从创建响应中提取后端任务 ID（video: task_id/video_id/id；image: task_id/id/image_task_id） */
+    _pickBackendTaskId(respRecord: Record<string, unknown>, kind: TaskType, fallback: string): string {
+      const keys = kind === 'video' ? ['task_id', 'video_id', 'id'] : ['task_id', 'id', 'image_task_id']
+      for (const key of keys) {
+        const value = respRecord[key]
+        if (typeof value === 'string' && value) return value
       }
-      const taskId = uid()
-      const task: QueueTask = {
-        taskId,
-        type: 'video',
-        status: 'queued',
-        prompt: params.prompt as string || '',
-        params: { ...params },
-        resultUrl: null,
-        posterUrl: null,
-        progress: 0,
-        errorMessage: '',
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        pollIntervalMs: VIDEO_POLL_INTERVAL,
-        rawResponse: null,
-        backendTaskId: null,
-        // 自动重试：video 类型启用，最多 3 次
-        retryCount: 0,
-        maxRetries: RETRY_MAX_ATTEMPTS,
-        retryScheduledAt: null,
-      }
-      this.tasks[taskId] = task
-      // 自动选中为活跃任务（便于立即在预览区展示）
-      this.setActiveTask(taskId)
-
-      this._createVideoTaskInBackground(taskId, params)
-      return taskId
-    },
-
-    async _createVideoTaskInBackground(taskId: string, params: Record<string, unknown>): Promise<void> {
-      const task = this.tasks[taskId]
-      if (!task) return
-      try {
-        task.status = 'pending'
-        this._notifyTaskUpdate(taskId)
-        const resp = await createVideoTask(params as unknown as VideoGenerationRequest)
-        const respRecord = resp as unknown as Record<string, unknown>
-        task.backendTaskId =
-          (respRecord.task_id as string | undefined) ||
-          (respRecord.video_id as string | undefined) ||
-          (respRecord.id as string | undefined) ||
-          taskId
-        task.rawResponse = respRecord
-        task.status = 'processing'
-        this._notifyTaskUpdate(taskId)
-        this._startPolling(taskId)
-        // 【积分刷新】后端创建任务时已扣积分，立即刷新前端积分显示
-        try {
-          const userStore = useUserStore()
-          if (userStore.isAuthenticated) userStore.fetchCredits()
-        } catch (_) { /* 忽略 */ }
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : 'Failed to create task'
-        // 【自动重试】检查是否可重试（autoRetry 开关 + 可重试错误 + 未达上限）
-        if (this._scheduleRetry(taskId, err)) {
-          task.status = 'failed'
-          task.errorMessage = message
-          task.updatedAt = Date.now()
-          this._notifyTaskUpdate(taskId)
-          this._saveToStorage()
-          return
-        }
-        task.status = 'failed'
-        task.errorMessage = message
-        task.updatedAt = Date.now()
-        this._notifyTaskUpdate(taskId)
-        this._saveToStorage()
-      }
+      return fallback
     },
 
     // =====================================================
@@ -494,8 +424,8 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         const rawStatus = String(
           data.status || 'processing',
         ).toLowerCase()
-        const isSuccess = ['success', 'completed', 'done', 'succeeded', 'finished'].includes(rawStatus)
-        const isFailed = ['failed', 'error', 'timeout'].includes(rawStatus)
+        const isSuccess = isMediaSuccess(rawStatus)
+        const isFailed = isMediaFailed(rawStatus)
         const isCancelled = rawStatus === 'cancelled'
 
         if (isSuccess) {
@@ -633,66 +563,24 @@ export const useTaskQueueStore = defineStore('taskQueue', {
     },
 
     // =====================================================
-    // 【聊天任务集成】— 供 chat store 调用，注册/更新聊天生成的媒体任务
+    // 【聊天/画布任务集成】— 供 chat store 与画布调用，注册/更新聊天与画布生成的媒体任务
     // =====================================================
 
     /** 注册聊天生成的媒体任务到队列（仅展示，不启动 taskQueue 自己的轮询） */
-    registerChatTask({ taskId, type, prompt, resultUrl, backendTaskId }: RegisterChatTaskParams): void {
-      if (!taskId) return
-      // 避免重复注册
-      if (this.tasks[taskId]) return
-
-      const taskType: TaskType = type === 'video' ? 'video' : 'image'
-      this.tasks[taskId] = {
-        taskId,
-        type: taskType,
-        status: 'processing',
-        prompt: prompt || '',
-        params: {},
-        resultUrl: resultUrl || null,
-        posterUrl: null,
-        progress: 0,
-        errorMessage: '',
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        pollIntervalMs: taskType === 'video' ? VIDEO_POLL_INTERVAL : IMAGE_POLL_INTERVAL,
-        rawResponse: null,
-        backendTaskId: backendTaskId || taskId,
-        // 标记来源为聊天 — taskQueue 恢复时跳过此类任务的轮询
-        source: 'chat',
-      }
-      this._saveToStorage()
+    registerChatTask(params: RegisterChatTaskParams): void {
+      this._registerSourceTask('chat', params)
     },
-
-    /** 更新聊天任务的状态（由 chat store 的媒体轮询回调） */
-    updateChatTask(taskId: string, { status, resultUrl, progress }: UpdateChatTaskParams): void {
-      const task = this.tasks[taskId]
-      if (!task) return
-      if (status) task.status = status
-      if (resultUrl) task.resultUrl = resultUrl
-      if (typeof progress === 'number') task.progress = progress
-      task.updatedAt = Date.now()
-      if (status === 'success') {
-        task.progress = 100
-        try { useUserStore().fetchCredits() } catch (_) { /* 忽略 */ }
-        // 【用户偏好】自动下载 + 完成通知
-        try {
-          const prefsStore = usePreferencesStore()
-          if (task.resultUrl) {
-            prefsStore.autoDownload(task.resultUrl, task.type === 'video' ? 'video' : 'image', { modelId: task.params?.model as string | undefined })
-          }
-          prefsStore.notifyComplete(task.type === 'video' ? 'video' : 'image', { prompt: task.prompt })
-        } catch (_) { /* 忽略 */ }
-      }
-      this._saveToStorage()
-    },
-
-    // =====================================================
-    // 【画布任务集成】— 供画布调用，注册画布生成的媒体任务
-    // =====================================================
 
     /** 注册画布生成的媒体任务到队列（仅展示，不启动 taskQueue 自己的轮询） */
-    registerCanvasTask({ taskId, type, prompt, resultUrl, backendTaskId, panelId }: RegisterCanvasTaskParams): void {
+    registerCanvasTask(params: RegisterCanvasTaskParams): void {
+      this._registerSourceTask('canvas', params)
+    },
+
+    /**
+     * 注册聊天/画布来源的媒体任务到队列（仅展示，不启动 taskQueue 自己的轮询）
+     * - canvas：额外记录 panelId（用于结果回填定位节点），并在注册时刷新积分
+     */
+    _registerSourceTask(source: 'chat' | 'canvas', { taskId, type, prompt, resultUrl, backendTaskId, panelId }: RegisterCanvasTaskParams): void {
       if (!taskId) return
       // 避免重复注册
       if (this.tasks[taskId]) return
@@ -713,22 +601,38 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         pollIntervalMs: taskType === 'video' ? VIDEO_POLL_INTERVAL : IMAGE_POLL_INTERVAL,
         rawResponse: null,
         backendTaskId: backendTaskId || taskId,
-        // 标记来源为画布 — taskQueue 恢复时跳过此类任务的轮询
-        source: 'canvas',
+        // 标记来源 — taskQueue 恢复时跳过此类任务的轮询
+        source,
         panelId: panelId || null,
       }
       this._saveToStorage()
 
       // 【积分刷新】画布任务创建时后端已预扣积分，立即刷新前端积分显示
       // 与常规 submitImageTask/submitVideoTask 保持一致（避免积分显示滞后，需刷新页面才更新）
-      try {
-        const userStore = useUserStore()
-        if (userStore.isAuthenticated) userStore.fetchCredits()
-      } catch (_) { /* 忽略 */ }
+      if (source === 'canvas') {
+        try {
+          const userStore = useUserStore()
+          if (userStore.isAuthenticated) userStore.fetchCredits()
+        } catch (_) { /* 忽略 */ }
+      }
+    },
+
+    /** 更新聊天任务的状态（由 chat store 的媒体轮询回调） */
+    updateChatTask(taskId: string, params: UpdateChatTaskParams): void {
+      this._updateSourceTask('chat', taskId, params)
     },
 
     /** 更新画布任务的状态（由画布的轮询回调） */
-    updateCanvasTask(taskId: string, { status, resultUrl, progress }: UpdateChatTaskParams): void {
+    updateCanvasTask(taskId: string, params: UpdateChatTaskParams): void {
+      this._updateSourceTask('canvas', taskId, params)
+    },
+
+    /**
+     * 更新聊天/画布来源任务的状态（由各自 store 的媒体轮询回调）
+     * - 两者成功时都刷新积分
+     * - 仅 chat 在成功时触发自动下载 + 完成通知（画布任务由 canvas-generation 的生成流程负责）
+     */
+    _updateSourceTask(source: 'chat' | 'canvas', taskId: string, { status, resultUrl, progress }: UpdateChatTaskParams): void {
       const task = this.tasks[taskId]
       if (!task) return
       if (status) task.status = status
@@ -738,6 +642,16 @@ export const useTaskQueueStore = defineStore('taskQueue', {
       if (status === 'success') {
         task.progress = 100
         try { useUserStore().fetchCredits() } catch (_) { /* 忽略 */ }
+        if (source === 'chat') {
+          // 【用户偏好】自动下载 + 完成通知
+          try {
+            const prefsStore = usePreferencesStore()
+            if (task.resultUrl) {
+              prefsStore.autoDownload(task.resultUrl, task.type === 'video' ? 'video' : 'image', { modelId: task.params?.model as string | undefined })
+            }
+            prefsStore.notifyComplete(task.type === 'video' ? 'video' : 'image', { prompt: task.prompt })
+          } catch (_) { /* 忽略 */ }
+        }
       }
       this._saveToStorage()
     },
@@ -793,8 +707,9 @@ export const useTaskQueueStore = defineStore('taskQueue', {
       this._saveToStorage()
       this.setActiveTask(taskId)
 
-      // 启动轮询（复用 taskQueue 的轮询机制，走 /api/images/tasks/{id} 或 /api/videos/{id}）
-      this._startProjectPolling(taskId)
+      // 启动轮询（复用 taskQueue 的统一轮询机制，走 /api/images/tasks/{id} 或 /api/videos/{id}；
+      // _doPoll 已处理 source='project' 的认领逻辑）
+      this._startPolling(taskId)
 
       // 积分刷新
       try {
@@ -867,8 +782,8 @@ export const useTaskQueueStore = defineStore('taskQueue', {
       task.updatedAt = Date.now()
       this._notifyTaskUpdate(taskId)
       this._saveToStorage()
-      // 启动轮询
-      this._startProjectPolling(taskId)
+      // 启动轮询（同 registerProjectTask，走统一 _doPoll 流程）
+      this._startPolling(taskId)
       // 积分刷新
       try {
         const userStore = useUserStore()
@@ -892,64 +807,6 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         const userStore = useUserStore()
         if (userStore.isAuthenticated) userStore.fetchCredits()
       } catch (_) { /* 忽略 */ }
-    },
-
-    /**
-     * 项目任务的轮询（走 /api/images/tasks/{id} 或 /api/videos/{id}）
-     */
-    _startProjectPolling(taskId: string): void {
-      const task = this.tasks[taskId]
-      if (!task) return
-
-      const pollFn = async () => {
-        if (!this.tasks[taskId]) return
-        try {
-          let data: any
-          if (task.type === 'image') {
-            data = await getImageTaskStatus(task.backendTaskId!)
-          } else {
-            data = await getVideoStatus(task.backendTaskId!)
-          }
-          // 复用现有的状态解析逻辑
-          const rawStatus = String(data?.status || 'processing').toLowerCase()
-          const isSuccess = ['success', 'completed', 'done', 'succeeded', 'finished'].includes(rawStatus)
-          const isFailed = ['failed', 'error', 'timeout'].includes(rawStatus)
-
-          if (isSuccess) {
-            task.status = 'success'
-            task.resultUrl = data?.result_url || data?.url || data?.video_url || data?.image_url || null
-            task.progress = 100
-            task.updatedAt = Date.now()
-            this._stopPolling(taskId)
-            this._notifyTaskComplete(task)
-            this._saveToStorage()
-            try { useUserStore().fetchCredits() } catch (_) {}
-            // 认领结果到项目实体
-            if (task.projectContext) {
-              this._claimProjectResult(taskId).catch(() => {})
-            }
-          } else if (isFailed) {
-            task.status = 'failed'
-            task.errorMessage = data?.error_message || data?.message || '生成失败'
-            task.updatedAt = Date.now()
-            this._stopPolling(taskId)
-            this._saveToStorage()
-            try { useUserStore().fetchCredits() } catch (_) {}
-          } else {
-            // 处理中
-            task.status = 'processing'
-            task.progress = typeof data?.progress === 'number' ? data.progress : task.progress
-            task.updatedAt = Date.now()
-            this._notifyTaskUpdate(taskId)
-          }
-        } catch (err: any) {
-          // 轮询失败，不中断，下次重试
-          console.warn('[TaskQueue] 项目任务轮询失败:', taskId, err?.message)
-        }
-      }
-
-      pollFn() // 立即执行一次
-      this.pollTimers[taskId] = setInterval(pollFn, task.pollIntervalMs)
     },
 
     /**
@@ -1095,11 +952,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
       this._saveToStorage()
 
       // 根据任务类型重新提交后端任务
-      if (task.type === 'video') {
-        this._createVideoTaskInBackground(taskId, task.params)
-      } else {
-        this._createImageTaskInBackground(taskId, task.params)
-      }
+      this._createMediaTaskInBackground(taskId, task.params, task.type)
     },
 
     /**
