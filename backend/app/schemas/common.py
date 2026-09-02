@@ -7,11 +7,6 @@ from datetime import datetime
 from pydantic import BaseModel, Field, field_validator
 
 
-class HealthResponse(BaseModel):
-    """健康检查响应"""
-    status: str
-    service: str
-
 
 class ImageSizeOption(BaseModel):
     """图片尺寸选项（含比例信息，供前端绘制比例图标）"""

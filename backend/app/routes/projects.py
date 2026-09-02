@@ -83,7 +83,7 @@ from app.schemas.project import (
     GenerateTTSRequest, BatchGenerateTTSRequest, SetActiveAudioRequest,
     CharacterVoiceResponse, AssignCharacterVoiceRequest, VoiceOption,
     GenerateSubtitleRequest, GenerateSubtitleAdvancedRequest,
-    SubtitleStyle, SubtitleClip,
+    SubtitleStyle,
     TimelineClipResponse, TimelineClipCreate, TimelineClipUpdate,
     TimelineDataUpdate, TimelineDataResponse,
     # Phase 2 增强 — 素材库 / 标记

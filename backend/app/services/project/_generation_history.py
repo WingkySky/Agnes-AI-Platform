@@ -188,52 +188,6 @@ async def pre_charge_video_and_record(
     return record, cost, ref_id
 
 
-async def finalize_video_success(
-    db: AsyncSession,
-    generation_id: int,
-    user_id: int,
-    ref_id: str,
-    result_url: str,
-) -> None:
-    """视频生成成功：更新 Generation.result_url/status + confirm 积分"""
-    await db.execute(
-        update(Generation)
-        .where(Generation.id == generation_id)
-        .values(result_url=result_url, status="success")
-    )
-    await db.commit()
-
-    try:
-        await confirm_credits(db, user_id, ref_id)
-    except Exception as e:
-        logger.warning(f"[项目历史] confirm 视频积分失败 ref_id={ref_id}: {e}")
-
-    logger.info(f"[项目历史] 视频生成成功: generation_id={generation_id} url={result_url}")
-
-
-async def finalize_video_failure(
-    db: AsyncSession,
-    generation_id: int,
-    user_id: int,
-    ref_id: str,
-    error: str,
-) -> None:
-    """视频生成失败：更新 status=failed + refund 积分"""
-    await db.execute(
-        update(Generation)
-        .where(Generation.id == generation_id)
-        .values(status="failed")
-    )
-    await db.commit()
-
-    try:
-        await refund_credits(db, user_id, ref_id, reason=f"视频生成失败: {error}")
-    except Exception as e:
-        logger.error(f"[项目历史] 退还视频积分失败 ref_id={ref_id}: {e}")
-
-    logger.info(f"[项目历史] 视频生成失败: generation_id={generation_id} error={error}")
-
-
 # =====================================================
 # 用户手动上传（不调 AI，不计费）
 # =====================================================

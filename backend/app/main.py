@@ -40,7 +40,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
-from app.core.database import Base, engine, async_engine
+from app.core.database import Base, async_engine
 from app.core.logging import setup_logging
 from app.middleware.request_id import RequestIdMiddleware
 from app.routes import images, videos, history as history_route, config as config_route, chat as chat_route, auth as auth_route
@@ -85,93 +85,6 @@ logger = setup_logging(
 
 
 # =====================================================
-# 数据库初始化（同步 + 异步表创建 + 自动迁移缺失列）
-# =====================================================
-# 使用同步 metadata 先创建表（SQLite 不支持 DDL 并发）
-Base.metadata.create_all(bind=engine)
-logger.info("✓ 数据库表已初始化")
-
-# 自动迁移：检查模型定义的列是否都存在于数据库表中，缺失则自动添加
-# 解决 SQLite 的 create_all 只创建不存在的表、不添加新列的问题
-def _auto_migrate_missing_columns():
-    """
-    自动检测并添加模型中定义但数据库表中缺失的列。
-    仅支持 ALTER TABLE ADD COLUMN（新增列），不支持修改列类型或删除列。
-    """
-    import json as _json
-    from sqlalchemy import inspect as sa_inspect, text
-    from sqlalchemy import Boolean, Integer, JSON as SA_JSON
-
-    def _format_default(col, col_type_str: str) -> str:
-        """根据列类型和默认值生成正确的 SQL DEFAULT 子句"""
-        default_arg = None
-        is_callable = False
-
-        if col.default is not None:
-            default_arg = col.default.arg
-            is_callable = col.default.is_callable
-        elif col.server_default is not None:
-            return f" DEFAULT {col.server_default.arg}"
-
-        if default_arg is None:
-            return ""
-
-        # 处理可调用默认值（list, dict 等工厂函数）
-        if is_callable:
-            if default_arg is list:
-                return " DEFAULT '[]'"
-            elif default_arg is dict:
-                return " DEFAULT '{}'"
-            else:
-                # 其他可调用对象：尝试调用获取默认值
-                try:
-                    default_arg = default_arg()
-                except Exception:
-                    return ""
-
-        # 根据类型格式化常量默认值
-        type_upper = col_type_str.upper()
-        if isinstance(col.type, Boolean) or "BOOLEAN" in type_upper:
-            return f" DEFAULT {1 if default_arg else 0}"
-        elif isinstance(col.type, Integer) or "INT" in type_upper:
-            return f" DEFAULT {int(default_arg)}"
-        elif isinstance(col.type, SA_JSON) or "JSON" in type_upper:
-            return f" DEFAULT '{_json.dumps(default_arg)}'"
-        elif isinstance(default_arg, str):
-            # 字符串需要转义单引号
-            escaped = default_arg.replace("'", "''")
-            return f" DEFAULT '{escaped}'"
-        else:
-            return f" DEFAULT {default_arg}"
-
-    insp = sa_inspect(engine)
-    for table_name, table_obj in Base.metadata.tables.items():
-        if not insp.has_table(table_name):
-            continue  # 新表已由 create_all 创建
-        # 获取数据库中已有的列名
-        db_columns = {col['name'] for col in insp.get_columns(table_name)}
-        # 获取模型中定义的列名
-        model_columns = {col.name for col in table_obj.columns}
-        # 找出缺失的列
-        missing = model_columns - db_columns
-        for col_name in missing:
-            col_obj = table_obj.columns[col_name]
-            col_type = col_obj.type.compile(dialect=engine.dialect)
-            default_val = _format_default(col_obj, col_type)
-            # SQLite 中新增列时，如果有默认值且表不为空，需要确保默认值可以正确应用
-            sql = f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type}{default_val}"
-            try:
-                with engine.connect() as conn:
-                    conn.execute(text(sql))
-                    conn.commit()
-                logger.info("✓ 自动迁移: 已添加列 %s.%s", table_name, col_name)
-            except Exception as e:
-                logger.warning("⚠️ 自动迁移失败: %s.%s - %s", table_name, col_name, e)
-
-_auto_migrate_missing_columns()
-
-
-# =====================================================
 # Lifespan 上下文管理器（替代 deprecated startup/shutdown）
 # =====================================================
 @asynccontextmanager
@@ -182,6 +95,11 @@ async def lifespan(app: FastAPI):
     - 关闭：优雅释放所有异步资源
     """
     # ---------- 【启动阶段】----------
+    # 数据库建表（异步执行；SQLite 下 create_all 只创建缺失的表）
+    async with async_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("✓ 数据库表已初始化")
+
     if not settings.agnes_api_key or settings.agnes_api_key.startswith("sk-your"):
         logger.warning("⚠️ AGNES_API_KEY 未配置！请在前端配置页添加 Provider，或编辑 backend/.env 填入引导配置后重启服务。")
     else:

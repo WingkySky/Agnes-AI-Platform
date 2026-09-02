@@ -116,16 +116,6 @@ async def get_image_cost_async(
     return max(5, int(base_cost * ratio))
 
 
-def get_image_cost(mode: Optional[str] = "text2image", size: Optional[str] = None) -> int:
-    """
-    同步版本：仅使用默认积分规则计算（保留向后兼容；
-    有数据库上下文时，请调用 get_image_cost_async 以读取数据库中的规则）。
-    """
-    base_cost = 15 if mode and mode.lower() in ("image2image", "img2img") else 10
-    ratio = max(0.5, _parse_size_to_px(size) / (1024.0 * 1024.0))
-    return max(5, int(base_cost * ratio))
-
-
 # ---------- 视频：计算一次任务的成本 ----------
 async def get_video_cost_async(
     db: AsyncSession,
@@ -163,24 +153,6 @@ async def get_video_cost_async(
     duration_factor = max(1.0, (seconds or 5) / 5.0)
     frame_factor = max(0.8, (num_frames or 33) / 33.0) if num_frames else 1.0
     return max(10, int(max(1, per_second) * duration_factor * frame_factor * mode_factor))
-
-
-def get_video_cost(
-    mode: Optional[str] = "text2video",
-    seconds: int = 5,
-    num_frames: Optional[int] = None,
-) -> int:
-    """同步版本：使用默认值（仅保留向后兼容）"""
-    per_second = 5
-    duration_factor = max(1.0, (seconds or 5) / 5.0)
-    frame_factor = max(0.8, (num_frames or 33) / 33.0) if num_frames else 1.0
-    if mode and mode.lower() in ("image2video", "keyframes"):
-        mode_factor = 1.2
-    elif mode and mode.lower() == "video2video":
-        mode_factor = 1.5
-    else:
-        mode_factor = 1.0
-    return max(10, int(per_second * duration_factor * frame_factor * mode_factor))
 
 
 # ---------- 预扣积分（生成任务创建时调用）----------

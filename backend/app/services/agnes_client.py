@@ -1183,34 +1183,6 @@ class AgnesAIClient:
 
         raise RuntimeError("缺少 video_id 和 task_id，无法轮询视频状态")
 
-    @staticmethod
-    def _aspect_ratio(width: int, height: int) -> str:
-        """
-        将前端宽高转换为 Agnes Video 文档要求的 aspect_ratio 字符串。
-        常见比例保持为标准写法，其他比例用最大公约数约分。
-        """
-        import math
-
-        if width <= 0 or height <= 0:
-            return "16:9"
-
-        ratio = width / height
-        common = {
-            "16:9": 16 / 9,
-            "9:16": 9 / 16,
-            "1:1": 1,
-            "4:3": 4 / 3,
-            "3:4": 3 / 4,
-            "3:2": 3 / 2,
-            "2:3": 2 / 3,
-        }
-        closest, value = min(common.items(), key=lambda item: abs(item[1] - ratio))
-        if abs(value - ratio) < 0.03:
-            return closest
-
-        divisor = math.gcd(width, height)
-        return f"{width // divisor}:{height // divisor}"
-
     # ---------- 标准化视频状态 ----------
     def _normalize_video_status(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -1351,24 +1323,6 @@ class AgnesAIClient:
         }
 
     # ---------- TTS 配音生成（Phase 2） ----------
-    async def create_tts_task(
-        self,
-        text: str,
-        voice_id: str,
-        model: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """
-        调用 Agnes TTS API 生成音频
-
-        返回: {"url": str, "duration_ms": int, "file_size": int}
-
-        TODO: Agnes AI 是否提供 TTS 端点待确认。
-              若不支持，通过 provider_registry 路由到第三方 TTS provider
-              （阿里云 / 字节火山 / Edge TTS 等）。
-        """
-        raise NotImplementedError(
-            "Agnes TTS API 尚未实现，请通过 provider_registry 路由到第三方 TTS"
-        )
 
 
 # 全局单例客户端实例

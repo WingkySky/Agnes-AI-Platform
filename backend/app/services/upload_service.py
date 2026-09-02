@@ -130,17 +130,3 @@ async def save_audio_bytes(
     url = f"/uploads/{folder}/{filename}"
     logger.info(f"[音频落盘] 保存到 {filepath}, url={url}")
     return url
-
-
-async def save_image_upload(file: UploadFile, folder: str = "projects") -> str:
-    """仅允许图片的上传快捷函数"""
-    return await save_upload_file(
-        file, folder, allowed_types=ALLOWED_IMAGE_TYPES, max_size=20 * 1024 * 1024
-    )
-
-
-async def save_video_upload(file: UploadFile, folder: str = "projects") -> str:
-    """仅允许视频的上传快捷函数"""
-    return await save_upload_file(
-        file, folder, allowed_types=ALLOWED_VIDEO_TYPES, max_size=MAX_FILE_BYTES
-    )

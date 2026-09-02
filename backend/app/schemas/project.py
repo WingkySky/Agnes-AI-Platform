@@ -90,13 +90,6 @@ class WizardResumeRequest(BaseModel):
     resume_from: Optional[str] = Field("", description="从指定 step key 恢复")
 
 
-class WizardStepEvent(BaseModel):
-    """向导步骤事件"""
-    step: str
-    name: Optional[str] = None
-    stats: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
-
 
 # =====================================================
 # 剧本 Schema
@@ -596,12 +589,6 @@ class SubtitleStyle(BaseModel):
     position: str = "bottom"  # bottom/top/center
     margin_vertical: int = 60
 
-
-class SubtitleClip(BaseModel):
-    """单条字幕"""
-    start_time: float
-    end_time: float
-    text: str
 
 
 # ---------- 时间线 ----------

@@ -18,13 +18,6 @@ logger = logging.getLogger("agnes_platform")
 _config_cache: dict[str, tuple[str, float]] = {}
 
 
-async def get_all_configs(db: AsyncSession) -> dict[str, str]:
-    """获取所有系统配置（键值对字典）"""
-    result = await db.execute(select(SystemConfig))
-    configs = result.scalars().all()
-    return {c.config_key: c.config_value for c in configs}
-
-
 async def get_config_by_category(db: AsyncSession, category: str) -> dict[str, str]:
     """按分类获取系统配置"""
     result = await db.execute(

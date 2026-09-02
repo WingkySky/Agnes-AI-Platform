@@ -401,14 +401,6 @@ class ProviderRegistry:
             raise RuntimeError(f"Provider {provider_id} 不存在或未激活")
         return client
 
-    def get_default_client(self) -> Union[AgnesAIClient, AGNSDKClientWrapper]:
-        """获取默认 Provider 的 client（即全局 agnes_client 单例）"""
-        return agnes_client
-
-    def list_provider_ids(self) -> List[int]:
-        """列出所有已激活 Provider 的 ID"""
-        return list(self._clients.keys())
-
     # ---------- 模型→Provider 自动路由 ----------
 
     # 模型 ID → Provider ID 的内存缓存（避免每次生图都查库）
@@ -557,24 +549,6 @@ class ProviderRegistry:
                 select(ModelDefinition).where(ModelDefinition.model_id == model_id)
             )
             return result.scalars().first()
-
-    async def find_provider_for_model(self, model_id: str) -> Optional[ApiProvider]:
-        """根据 model_id 查找其所属 Provider（用于路由请求到正确的 client）"""
-        async with new_async_session() as session:
-            result = await session.execute(
-                select(ModelDefinition)
-                .where(and_(ModelDefinition.model_id == model_id, ModelDefinition.is_active == True))
-                .limit(1)
-            )
-            defn = result.scalars().first()
-            if defn is None:
-                return None
-            result2 = await session.execute(
-                select(ApiProvider).where(
-                    and_(ApiProvider.id == defn.provider_id, ApiProvider.is_active == True)
-                )
-            )
-            return result2.scalars().first()
 
     async def get_provider_type(self, model_id: str) -> str:
         """

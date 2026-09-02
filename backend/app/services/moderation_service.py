@@ -95,19 +95,6 @@ async def check_sensitive_text(
 
 
 # ---------- 为 Generation 记录应用审核结果 ----------
-def apply_moderation_result(record, hit_words: List[str], reason: Optional[str] = None):
-    """
-    将敏感词检测结果应用到 Generation 记录。
-    命中后设置 moderation_status = 'pending'，并记录命中的关键词。
-    """
-    if hit_words:
-        record.moderation_status = "pending"
-        record.moderation_flags = hit_words
-        record.moderation_reason = reason or f"命中敏感词: {', '.join(hit_words[:5])}"
-    else:
-        record.moderation_status = "approved"
-        record.moderation_flags = None
-        record.moderation_reason = None
 
 
 # =====================================================

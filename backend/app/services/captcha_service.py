@@ -283,14 +283,3 @@ def verify_email_code(email: str, code: str, purpose: str = "reset_password", re
         del _email_code_store[email]
 
     return True, ""
-
-
-def cleanup_expired_email_codes() -> None:
-    """清理过期的邮箱验证码"""
-    now = time.time()
-    expired_keys = [
-        k for k, v in _email_code_store.items()
-        if now > v["expire_at"]
-    ]
-    for k in expired_keys:
-        del _email_code_store[k]

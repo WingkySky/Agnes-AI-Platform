@@ -191,14 +191,6 @@ async def delete_element(db: AsyncSession, element_id: int) -> bool:
     return True
 
 
-async def increment_element_use_count(db: AsyncSession, element_id: int) -> None:
-    """增加使用次数"""
-    element = await get_element_by_id(db, element_id)
-    if element:
-        element.use_count = (element.use_count or 0) + 1
-        await db.commit()
-
-
 # =====================================================
 # 分层组合逻辑
 # =====================================================
@@ -307,66 +299,6 @@ def build_negative_prompt_suffix_from_elements(
     if not negative:
         return ""
     return f"avoid: {negative}"
-
-
-def build_video_prompt_with_elements(
-    base_prompt: str,
-    resolved_elements: List[ResolvedStyleElement],
-) -> Tuple[str, str]:
-    """
-    用分层风格元素组合构建视频 prompt（路径 B，视频专用）。
-
-    与 build_prompt_with_elements 的差异：
-    1. 不使用 (keyword:weight) SD 加权语法 —— 视频模型对权重的理解弱于图片模型，
-       带括号权重的 prompt 容易触发 HTTP 400 "Unable to generate this content"
-    2. 直接按层拼接 content（权重<1 的元素也直接拼接，不加权标记）
-    3. negative_prompt 做精简：只保留画质类负面（low quality/blurry 等），
-       去掉与画面风格冲突的负面（如"color"会与彩色 positive 矛盾）
-
-    Args:
-        base_prompt: 用户原始 prompt
-        resolved_elements: 已解析的风格元素+权重列表
-
-    Returns:
-        (positive_prompt, negative_prompt)
-    """
-    # 按 layer 分组
-    layers: Dict[str, List[ResolvedStyleElement]] = defaultdict(list)
-    for rse in resolved_elements:
-        layers[rse.element.layer].append(rse)
-
-    parts: List[str] = [base_prompt] if base_prompt else []
-    # 视频只收集画质类负面（避免风格类负面与 positive 矛盾导致 API 拒绝）
-    quality_negative_keywords = {
-        "low quality", "worst quality", "blurry", "simple", "low detail",
-        "low resolution", "amateur", "low budget",
-    }
-    negative_parts: List[str] = []
-
-    for layer_name in ALL_LAYERS:
-        elements = layers.get(layer_name, [])
-        if not elements:
-            continue
-        # 视频不加权，直接拼接 content
-        contents = []
-        for rse in elements:
-            content = (rse.element.content or "").strip()
-            if not content:
-                continue
-            contents.append(content)
-            # 只收集画质类负面（避免风格冲突）
-            neg = (rse.element.negative_content or "").strip()
-            if neg:
-                for n in neg.split(","):
-                    n = n.strip().lower()
-                    if n and n in quality_negative_keywords and n not in negative_parts:
-                        negative_parts.append(n)
-        if contents:
-            parts.append(", ".join(contents))
-
-    positive = ", ".join(parts)
-    negative = ", ".join(negative_parts)
-    return positive, negative
 
 
 def preview_prompt(

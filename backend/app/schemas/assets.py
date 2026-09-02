@@ -28,27 +28,6 @@ class StylePresetBase(BaseModel):
     preview_image: Optional[str] = Field(None, max_length=500, description="预览图 URL")
 
 
-class StylePresetCreate(StylePresetBase):
-    """创建风格预设请求"""
-    is_public: bool = Field(False, description="是否公开")
-
-
-class StylePresetUpdate(BaseModel):
-    """更新风格预设请求"""
-    name: Optional[str] = Field(None, max_length=200)
-    description: Optional[str] = None
-    category: Optional[str] = None
-    visual_prefix: Optional[str] = None
-    lighting: Optional[str] = None
-    color_palette: Optional[str] = None
-    quality_suffix: Optional[str] = None
-    negative_prompt: Optional[str] = None
-    camera_language: Optional[str] = None
-    mood_keywords: Optional[str] = None
-    preview_image: Optional[str] = None
-    is_public: Optional[bool] = None
-
-
 class StylePresetResponse(StylePresetBase):
     """风格预设响应"""
     id: int
@@ -62,14 +41,6 @@ class StylePresetResponse(StylePresetBase):
 
     class Config:
         from_attributes = True
-
-
-class StylePresetListResponse(BaseModel):
-    """风格预设列表响应"""
-    total: int
-    page: int
-    page_size: int
-    items: List[StylePresetResponse]
 
 
 # =====================================================
@@ -90,25 +61,6 @@ class ScriptTemplateBase(BaseModel):
     default_scene_duration: int = Field(5, ge=1, description="默认单镜时长（秒）")
 
 
-class ScriptTemplateCreate(ScriptTemplateBase):
-    """创建剧本模板请求"""
-    is_public: bool = Field(False, description="是否公开")
-
-
-class ScriptTemplateUpdate(BaseModel):
-    """更新剧本模板请求"""
-    name: Optional[str] = None
-    description: Optional[str] = None
-    category: Optional[str] = None
-    structure: Optional[str] = None
-    prompt_template: Optional[str] = None
-    output_schema: Optional[Dict[str, Any]] = None
-    scenes_min: Optional[int] = None
-    scenes_max: Optional[int] = None
-    default_scene_duration: Optional[int] = None
-    is_public: Optional[bool] = None
-
-
 class ScriptTemplateResponse(ScriptTemplateBase):
     """剧本模板响应"""
     id: int
@@ -125,14 +77,6 @@ class ScriptTemplateResponse(ScriptTemplateBase):
         from_attributes = True
 
 
-class ScriptTemplateListResponse(BaseModel):
-    """剧本模板列表响应"""
-    total: int
-    page: int
-    page_size: int
-    items: List[ScriptTemplateResponse]
-
-
 # =====================================================
 # 资产 Schema
 # =====================================================
@@ -146,22 +90,6 @@ class AssetBase(BaseModel):
     reference_images: List[str] = Field(default_factory=list, description="参考图 URL 数组")
     style_id: Optional[int] = Field(None, description="关联的风格预设 ID")
     tags: List[str] = Field(default_factory=list, description="标签数组")
-
-
-class AssetCreate(AssetBase):
-    """创建资产请求"""
-    is_public: bool = Field(False, description="是否公开")
-
-
-class AssetUpdate(BaseModel):
-    """更新资产请求（创建新版本）"""
-    name: Optional[str] = None
-    description: Optional[str] = None
-    visual_description: Optional[str] = None
-    reference_images: Optional[List[str]] = None
-    style_id: Optional[int] = None
-    tags: Optional[List[str]] = None
-    is_public: Optional[bool] = None
 
 
 class AssetResponse(AssetBase):
@@ -219,19 +147,6 @@ class AssetContainerDetailResponse(BaseModel):
     container_name: Optional[str] = None
     type_label: str = ""
     items: List[AssetResponse] = Field(default_factory=list)
-
-
-class AssetListResponse(BaseModel):
-    """资产列表响应"""
-    total: int
-    page: int
-    page_size: int
-    items: List[AssetResponse]
-
-
-class AssetVersionResponse(AssetResponse):
-    """资产版本信息"""
-    pass
 
 
 class AssetSaveFromGenerationRequest(BaseModel):
