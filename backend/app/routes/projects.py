@@ -10,12 +10,12 @@
 #   6. 角色/场景/道具:      /projects/{id}/characters|scenes|props[/{eid}]
 #                           + 子路由 generate-image / batch-generate / versions / set-active / upload / extract
 #   7. 分镜:                /projects/{id}/shots[/{sid}][/reorder][/bind-character|bind-prop]
-#   8. 帧图:                /projects/{id}/shots/{sid}/frame-images[/{vid}][/generate][/upload]
-#   9. 视频:                /projects/{id}/shots/{sid}/videos[/{vid}][/generate][/upload]
+#   8. 帧图/视频/音频:      /projects/{id}/shots/{sid}/frame-images|videos|audios
+#                           （版本路由由 _build_media_routes 工厂统一注册）
 #  10. 资产桥接:            /projects/{id}/entities/{etype}/{eid}/import-asset, /promote-asset
 #  11. 画布:                /projects/{id}/canvas[/init]
 #  12. 合成:                /projects/{id}/merge[/status][/advanced]
-#  13. 配音（Phase 2）:     /projects/{id}/shots/{sid}/audios[/{vid}][/generate][/batch][/upload][/set-active]
+#  13. 配音（Phase 2）:     /projects/{id}/shots/{sid}/audios（由 _build_media_routes 统一注册）
 #  14. 音色（Phase 2）:     /projects/{id}/voices/builtin, /projects/{id}/character-voices[/{cid}]
 #  15. 字幕（Phase 2）:     /projects/{id}/subtitles[/generate][/generate-whisper][/clips][/style]
 #  16. 时间线（Phase 2）:   /projects/{id}/timeline[/init][/clips[/{cid}]][/data]
@@ -60,10 +60,8 @@ from app.schemas.project import (
     WizardCreateRequest, WizardResumeRequest,
     # 剧本
     ScriptCreate, ScriptUpdate, ScriptResponse, ScriptRegenerateRequest,
-    # 角色/场景/道具
-    CharacterCreate, CharacterUpdate, CharacterResponse,
-    SceneCreate, SceneUpdate, SceneResponse,
-    PropCreate, PropUpdate, PropResponse,
+    # 角色/场景/道具（三类统一）
+    EntityCreate, EntityUpdate, EntityResponse,
     # 实体素材
     EntityAssetResponse, SetActiveVersionRequest,
     # 分镜 / 跨集请求体
@@ -612,6 +610,11 @@ async def regenerate_script_api(
 def _build_entity_routes(prefix: str, entity_type: str):
     """生成角色/场景/道具的统一路由"""
 
+    # 三类实体共用统一 schema（字段并集）
+    create_schema = EntityCreate
+    update_schema = EntityUpdate
+    response_schema = EntityResponse
+
     # 按类型选择对应的服务函数
     if entity_type == "character":
         list_fn = list_characters
@@ -629,9 +632,6 @@ def _build_entity_routes(prefix: str, entity_type: str):
         extract_fn = extract_characters_from_script
         claim_fn = claim_character_image
         copy_to_fn = copy_character_to_script
-        create_schema = CharacterCreate
-        update_schema = CharacterUpdate
-        response_schema = CharacterResponse
         entity_label = "角色"
     elif entity_type == "scene":
         list_fn = list_scenes
@@ -649,9 +649,6 @@ def _build_entity_routes(prefix: str, entity_type: str):
         extract_fn = extract_scenes_from_script
         claim_fn = claim_scene_image
         copy_to_fn = copy_scene_to_script
-        create_schema = SceneCreate
-        update_schema = SceneUpdate
-        response_schema = SceneResponse
         entity_label = "场景"
     else:  # prop
         list_fn = list_props
@@ -669,9 +666,6 @@ def _build_entity_routes(prefix: str, entity_type: str):
         extract_fn = extract_props_from_script
         claim_fn = claim_prop_image
         copy_to_fn = copy_prop_to_script
-        create_schema = PropCreate
-        update_schema = PropUpdate
-        response_schema = PropResponse
         entity_label = "道具"
 
     @router.get(
@@ -932,11 +926,11 @@ async def list_shots_api(
     for shot in shots:
         item = ShotResponse.model_validate(shot)
         item.characters = [
-            CharacterResponse.model_validate(c)
+            EntityResponse.model_validate(c)
             for c in getattr(shot, "_characters", [])
         ]
         item.props = [
-            PropResponse.model_validate(p)
+            EntityResponse.model_validate(p)
             for p in getattr(shot, "_props", [])
         ]
         result.append(item)
@@ -979,11 +973,11 @@ async def get_shot_api(
         raise HTTPException(status_code=404, detail="分镜不存在")
     item = ShotResponse.model_validate(shot)
     item.characters = [
-        CharacterResponse.model_validate(c)
+        EntityResponse.model_validate(c)
         for c in getattr(shot, "_characters", [])
     ]
     item.props = [
-        PropResponse.model_validate(p)
+        EntityResponse.model_validate(p)
         for p in getattr(shot, "_props", [])
     ]
     return item
@@ -1084,245 +1078,323 @@ async def generate_frame_prompt_api(
 
 
 # =====================================================
-# 7. 帧图
+# 7. 帧图 / 视频 / 音频（统一媒体版本路由工厂）
+# -------------------------------------------------
+# 路由形状（media ∈ frame-images / videos / audios）:
+#   GET    /projects/{id}/shots/{sid}/{media}                  列出版本
+#   POST   /projects/{id}/shots/{sid}/{media}/generate         生成（异步）
+#   POST   /projects/{id}/shots/{sid}/{media}/claim            认领生成结果（帧图/视频）
+#   POST   /projects/{id}/shots/{media}/batch-generate         批量生成（帧图/音频）
+#   POST   /projects/{id}/shots/{sid}/{media}/upload           上传
+#   POST   /projects/{id}/shots/{sid}/{media}/{vid}/set-active 设为采用版
+#   DELETE /projects/{id}/shots/{sid}/{media}/{vid}            删除版本
 # =====================================================
 
-@router.get(
-    "/{project_id}/shots/{shot_id}/frame-images",
-    response_model=List[FrameImageResponse],
-    summary="列出帧图版本",
-)
-async def list_frame_images_api(
-    shot_id: int,
-    db: AsyncSession = Depends(get_async_db),
-    project: Project = Depends(get_owned_project),
+# 媒体版本路由工厂（避免 帧图/视频/音频 三组几乎相同的代码）
+def _build_media_routes(
+    *,
+    label: str,                             # "帧图"/"视频"/"音频"（用于 summary）
+    url_segment: str,                       # URL 段: frame-images / videos / audios
+    response_schema: type,
+    list_fn,                                # (db, shot_id) -> list
+    generate_schema: type,
+    generate_call,                          # async (db, shot_id, user_id, data) -> result
+    generate_summary: str,
+    generate_doc: Optional[str] = None,
+    generate_response_model: Optional[type] = None,  # 仅音频 generate 声明响应模型
+    claim_fn=None,                          # async (db, shot_id, task_id[, frame_image_id]) -> result | None
+    claim_task_desc: str = "图片任务 ID",
+    claim_doc: Optional[str] = None,
+    claim_with_frame_image: bool = False,   # 视频 claim 额外携带 frame_image_id query 参数
+    batch_call=None,                        # async (db, data, user_id) -> dict（含响应结构）
+    batch_schema: type = None,
+    batch_summary: str = "",
+    batch_doc: Optional[str] = None,
+    upload_fn=None,                         # async (db, shot_id, user_id, file_url) -> result | None
+    upload_suffix: str = "",                # folder 后缀: frames / videos / audios
+    upload_summary: str = "",
+    upload_doc: Optional[str] = None,
+    set_active_fn=None,                     # async (db, shot_id, version_id) -> result | None
+    set_active_summary: str = "",
+    set_active_error: Optional[str] = None,  # None 表示 service 层抛 ValueError（音频）
+    delete_fn=None,                         # async (db, shot_id, version_id) -> bool
+    delete_summary: str = "",
+    delete_error: str = "",
 ):
-    return await list_frame_images(db, shot_id)
+    """生成 shot 级媒体版本的 list/generate/claim/batch/upload/set-active/delete 路由"""
 
+    @router.get(
+        f"/{{project_id}}/shots/{{shot_id}}/{url_segment}",
+        response_model=List[response_schema],
+        summary=f"列出{label}版本",
+    )
+    async def list_media_api(
+        shot_id: int,
+        db: AsyncSession = Depends(get_async_db),
+        project: Project = Depends(get_owned_project),
+    ):
+        return await list_fn(db, shot_id)
 
-@router.post(
-    "/{project_id}/shots/{shot_id}/frame-images/generate",
-    summary="生成帧图（异步）",
-)
-async def generate_frame_image_api(
-    shot_id: int,
-    data: GenerateImageRequest,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-    project: Project = Depends(get_owned_project),
-):
-    try:
-        return await generate_frame_image(
-            db, shot_id, current_user.id,
-            data.style_config, data.model, data.size or "1024x1024",
+    @router.post(
+        f"/{{project_id}}/shots/{{shot_id}}/{url_segment}/generate",
+        response_model=generate_response_model,
+        summary=generate_summary,
+    )
+    async def generate_media_api(
+        shot_id: int,
+        data: generate_schema,
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user),
+        project: Project = Depends(get_owned_project),
+    ):
+        try:
+            return await generate_call(db, shot_id, current_user.id, data)
+        except (ValueError, RuntimeError) as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    generate_media_api.__doc__ = generate_doc
+
+    if claim_fn is not None:
+        if claim_with_frame_image:
+            @router.post(
+                f"/{{project_id}}/shots/{{shot_id}}/{url_segment}/claim",
+                response_model=response_schema,
+                summary=f"认领{label}生成结果",
+            )
+            async def claim_media_api(
+                shot_id: int,
+                task_id: str = Query(..., description=claim_task_desc),
+                frame_image_id: Optional[int] = Query(None, description="来源帧图 ID"),
+                db: AsyncSession = Depends(get_async_db),
+                project: Project = Depends(get_owned_project),
+            ):
+                try:
+                    result = await claim_fn(db, shot_id, task_id, frame_image_id)
+                except (ValueError, RuntimeError) as e:
+                    raise HTTPException(status_code=400, detail=str(e))
+                if not result:
+                    raise HTTPException(status_code=404, detail="分镜不存在或任务结果未就绪")
+                return result
+        else:
+            @router.post(
+                f"/{{project_id}}/shots/{{shot_id}}/{url_segment}/claim",
+                response_model=response_schema,
+                summary=f"认领{label}生成结果",
+            )
+            async def claim_media_api(
+                shot_id: int,
+                task_id: str = Query(..., description=claim_task_desc),
+                db: AsyncSession = Depends(get_async_db),
+                project: Project = Depends(get_owned_project),
+            ):
+                try:
+                    result = await claim_fn(db, shot_id, task_id)
+                except (ValueError, RuntimeError) as e:
+                    raise HTTPException(status_code=400, detail=str(e))
+                if not result:
+                    raise HTTPException(status_code=404, detail="分镜不存在或任务结果未就绪")
+                return result
+
+        claim_media_api.__doc__ = claim_doc
+
+    if batch_call is not None:
+        @router.post(
+            f"/{{project_id}}/shots/{url_segment}/batch-generate",
+            summary=batch_summary,
         )
-    except (ValueError, RuntimeError) as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        async def batch_generate_media_api(
+            data: batch_schema,
+            db: AsyncSession = Depends(get_async_db),
+            current_user: User = Depends(get_current_user),
+            project: Project = Depends(get_owned_project),
+        ):
+            return await batch_call(db, data, current_user.id)
+
+        batch_generate_media_api.__doc__ = batch_doc
+
+    @router.post(
+        f"/{{project_id}}/shots/{{shot_id}}/{url_segment}/upload",
+        response_model=response_schema,
+        summary=upload_summary,
+    )
+    async def upload_media_api(
+        project_id: int,
+        shot_id: int,
+        file: UploadFile = File(...),
+        db: AsyncSession = Depends(get_async_db),
+        current_user: User = Depends(get_current_user),
+        project: Project = Depends(get_owned_project),
+    ):
+        from app.services.upload_service import save_upload_file
+        file_url = await save_upload_file(file, folder=f"projects/{project_id}/shots/{shot_id}/{upload_suffix}")
+        result = await upload_fn(db, shot_id, current_user.id, file_url)
+        if not result:
+            raise HTTPException(status_code=404, detail="分镜不存在")
+        return result
+
+    upload_media_api.__doc__ = upload_doc
+
+    @router.post(
+        f"/{{project_id}}/shots/{{shot_id}}/{url_segment}/{{version_id}}/set-active",
+        response_model=response_schema,
+        summary=set_active_summary,
+    )
+    async def set_active_media_api(
+        shot_id: int,
+        version_id: int,
+        db: AsyncSession = Depends(get_async_db),
+        project: Project = Depends(get_owned_project),
+    ):
+        if set_active_error is None:
+            # 音频：service 层以 ValueError 表达业务错误
+            try:
+                return await set_active_fn(db, shot_id, version_id)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+        result = await set_active_fn(db, shot_id, version_id)
+        if not result:
+            raise HTTPException(status_code=400, detail=set_active_error)
+        return result
+
+    @router.delete(
+        f"/{{project_id}}/shots/{{shot_id}}/{url_segment}/{{version_id}}",
+        summary=delete_summary,
+    )
+    async def delete_media_api(
+        shot_id: int,
+        version_id: int,
+        db: AsyncSession = Depends(get_async_db),
+        project: Project = Depends(get_owned_project),
+    ):
+        ok = await delete_fn(db, shot_id, version_id)
+        if not ok:
+            raise HTTPException(status_code=400, detail=delete_error)
+        return {"success": ok}
 
 
-@router.post(
-    "/{project_id}/shots/{shot_id}/frame-images/claim",
-    response_model=FrameImageResponse,
-    summary="认领帧图生成结果",
-)
-async def claim_frame_image_api(
-    shot_id: int,
-    task_id: str = Query(..., description="图片任务 ID"),
-    db: AsyncSession = Depends(get_async_db),
-    project: Project = Depends(get_owned_project),
-):
-    """任务完成后认领结果：从 Generation 拿 result_url，创建帧图新版本"""
-    try:
-        fi = await claim_frame_image(db, shot_id, task_id)
-    except (ValueError, RuntimeError) as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    if not fi:
-        raise HTTPException(status_code=404, detail="分镜不存在或任务结果未就绪")
-    return fi
+# ---- 帧图 ----
+async def _frame_generate_call(db, shot_id, user_id, data):
+    return await generate_frame_image(
+        db, shot_id, user_id,
+        data.style_config, data.model, data.size or "1024x1024",
+    )
 
 
-@router.post(
-    "/{project_id}/shots/frame-images/batch-generate",
-    summary="批量生成帧图",
-)
-async def batch_generate_frame_images_api(
-    data: BatchGenerateRequest,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-    project: Project = Depends(get_owned_project),
-):
+async def _frame_claim_call(db, shot_id, task_id, frame_image_id=None):
+    return await claim_frame_image(db, shot_id, task_id)
+
+
+async def _frame_batch_call(db, data, user_id):
     results = await batch_generate_frame_images(
-        db, data.ids, current_user.id,
+        db, data.ids, user_id,
         data.style_config, data.model, data.size or "1024x1024",
     )
     return {"results": results}
 
 
-@router.post(
-    "/{project_id}/shots/{shot_id}/frame-images/upload",
-    response_model=FrameImageResponse,
-    summary="上传帧图",
+_build_media_routes(
+    label="帧图",
+    url_segment="frame-images",
+    response_schema=FrameImageResponse,
+    list_fn=list_frame_images,
+    generate_schema=GenerateImageRequest,
+    generate_call=_frame_generate_call,
+    generate_summary="生成帧图（异步）",
+    claim_fn=_frame_claim_call,
+    claim_task_desc="图片任务 ID",
+    claim_doc="任务完成后认领结果：从 Generation 拿 result_url，创建帧图新版本",
+    batch_call=_frame_batch_call,
+    batch_schema=BatchGenerateRequest,
+    batch_summary="批量生成帧图",
+    upload_fn=upload_frame_image,
+    upload_suffix="frames",
+    upload_summary="上传帧图",
+    set_active_fn=set_active_frame_image,
+    set_active_summary="设为采用版",
+    set_active_error="版本不存在或不属于该分镜",
+    delete_fn=delete_frame_image,
+    delete_summary="删除帧图版本",
+    delete_error="无法删除（激活版不允许删除或版本不存在）",
 )
-async def upload_frame_image_api(
-    project_id: int,
-    shot_id: int,
-    file: UploadFile = File(...),
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-    project: Project = Depends(get_owned_project),
-):
-    from app.services.upload_service import save_upload_file
-    file_url = await save_upload_file(file, folder=f"projects/{project_id}/shots/{shot_id}/frames")
-    fi = await upload_frame_image(db, shot_id, current_user.id, file_url)
-    if not fi:
-        raise HTTPException(status_code=404, detail="分镜不存在")
-    return fi
 
 
-@router.post(
-    "/{project_id}/shots/{shot_id}/frame-images/{version_id}/set-active",
-    response_model=FrameImageResponse,
-    summary="设为采用版",
+# ---- 视频 ----
+async def _video_generate_call(db, shot_id, user_id, data):
+    return await generate_video(
+        db, shot_id, user_id,
+        data.frame_image_id, data.model, data.duration_ms,
+    )
+
+
+async def _video_claim_call(db, shot_id, task_id, frame_image_id=None):
+    return await claim_video(db, shot_id, task_id, frame_image_id)
+
+
+_build_media_routes(
+    label="视频",
+    url_segment="videos",
+    response_schema=VideoResponse,
+    list_fn=list_videos,
+    generate_schema=GenerateVideoRequest,
+    generate_call=_video_generate_call,
+    generate_summary="生成视频（异步）",
+    claim_fn=_video_claim_call,
+    claim_task_desc="视频任务 ID",
+    claim_doc="任务完成后认领结果：从 Generation 拿 result_url，创建视频新版本",
+    claim_with_frame_image=True,
+    upload_fn=upload_video,
+    upload_suffix="videos",
+    upload_summary="上传视频",
+    set_active_fn=set_active_video,
+    set_active_summary="设为采用版",
+    set_active_error="版本不存在或不属于该分镜",
+    delete_fn=delete_video,
+    delete_summary="删除视频版本",
+    delete_error="无法删除（激活版不允许删除或版本不存在）",
 )
-async def set_active_frame_image_api(
-    shot_id: int,
-    version_id: int,
-    db: AsyncSession = Depends(get_async_db),
-    project: Project = Depends(get_owned_project),
-):
-    fi = await set_active_frame_image(db, shot_id, version_id)
-    if not fi:
-        raise HTTPException(status_code=400, detail="版本不存在或不属于该分镜")
-    return fi
 
 
-@router.delete(
-    "/{project_id}/shots/{shot_id}/frame-images/{version_id}",
-    summary="删除帧图版本",
+# ---- 音频（配音） ----
+async def _audio_generate_call(db, shot_id, user_id, data):
+    return await generate_audio(
+        db, shot_id, user_id,
+        voice_id=data.voice_id, character_id=data.character_id,
+        text=data.text, model=data.model, provider=data.provider,
+    )
+
+
+async def _audio_batch_call(db, data, user_id):
+    audio_ids = await batch_generate_audios(
+        db, data.shot_ids, user_id, voice_id=data.voice_id,
+    )
+    return {"audio_ids": audio_ids, "success_count": len(audio_ids)}
+
+
+_build_media_routes(
+    label="音频",
+    url_segment="audios",
+    response_schema=ProjectShotAudioResponse,
+    list_fn=list_audios,
+    generate_schema=GenerateTTSRequest,
+    generate_call=_audio_generate_call,
+    generate_summary="生成 TTS 配音（异步）",
+    generate_doc="生成分镜 TTS 配音（同角色同声音自动分配音色）",
+    generate_response_model=ProjectShotAudioResponse,
+    batch_call=_audio_batch_call,
+    batch_schema=BatchGenerateTTSRequest,
+    batch_summary="批量生成 TTS 配音",
+    batch_doc="批量 TTS 生成（并行），返回成功生成的 audio_id 列表",
+    upload_fn=upload_audio,
+    upload_suffix="audios",
+    upload_summary="上传音频（替代 TTS）",
+    upload_doc="用户上传音频替代 TTS（is_manual=True）",
+    set_active_fn=set_active_audio,
+    set_active_summary="设为采用版音频",
+    set_active_error=None,  # 音频 service 抛 ValueError -> 400 str(e)
+    delete_fn=delete_audio,
+    delete_summary="删除音频版本",
+    delete_error="无法删除（采用版不允许删除或版本不存在）",
 )
-async def delete_frame_image_api(
-    shot_id: int,
-    version_id: int,
-    db: AsyncSession = Depends(get_async_db),
-    project: Project = Depends(get_owned_project),
-):
-    ok = await delete_frame_image(db, shot_id, version_id)
-    if not ok:
-        raise HTTPException(status_code=400, detail="无法删除（激活版不允许删除或版本不存在）")
-    return {"success": ok}
-
-
-# =====================================================
-# 8. 视频
-# =====================================================
-
-@router.get(
-    "/{project_id}/shots/{shot_id}/videos",
-    response_model=List[VideoResponse],
-    summary="列出视频版本",
-)
-async def list_videos_api(
-    shot_id: int,
-    db: AsyncSession = Depends(get_async_db),
-    project: Project = Depends(get_owned_project),
-):
-    return await list_videos(db, shot_id)
-
-
-@router.post(
-    "/{project_id}/shots/{shot_id}/videos/generate",
-    summary="生成视频（异步）",
-)
-async def generate_video_api(
-    shot_id: int,
-    data: GenerateVideoRequest,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-    project: Project = Depends(get_owned_project),
-):
-    try:
-        return await generate_video(
-            db, shot_id, current_user.id,
-            data.frame_image_id, data.model, data.duration_ms,
-        )
-    except (ValueError, RuntimeError) as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.post(
-    "/{project_id}/shots/{shot_id}/videos/claim",
-    response_model=VideoResponse,
-    summary="认领视频生成结果",
-)
-async def claim_video_api(
-    shot_id: int,
-    task_id: str = Query(..., description="视频任务 ID"),
-    frame_image_id: Optional[int] = Query(None, description="来源帧图 ID"),
-    db: AsyncSession = Depends(get_async_db),
-    project: Project = Depends(get_owned_project),
-):
-    """任务完成后认领结果：从 Generation 拿 result_url，创建视频新版本"""
-    try:
-        video = await claim_video(db, shot_id, task_id, frame_image_id)
-    except (ValueError, RuntimeError) as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    if not video:
-        raise HTTPException(status_code=404, detail="分镜不存在或任务结果未就绪")
-    return video
-
-
-@router.post(
-    "/{project_id}/shots/{shot_id}/videos/upload",
-    response_model=VideoResponse,
-    summary="上传视频",
-)
-async def upload_video_api(
-    project_id: int,
-    shot_id: int,
-    file: UploadFile = File(...),
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-    project: Project = Depends(get_owned_project),
-):
-    from app.services.upload_service import save_upload_file
-    file_url = await save_upload_file(file, folder=f"projects/{project_id}/shots/{shot_id}/videos")
-    video = await upload_video(db, shot_id, current_user.id, file_url)
-    if not video:
-        raise HTTPException(status_code=404, detail="分镜不存在")
-    return video
-
-
-@router.post(
-    "/{project_id}/shots/{shot_id}/videos/{version_id}/set-active",
-    response_model=VideoResponse,
-    summary="设为采用版",
-)
-async def set_active_video_api(
-    shot_id: int,
-    version_id: int,
-    db: AsyncSession = Depends(get_async_db),
-    project: Project = Depends(get_owned_project),
-):
-    video = await set_active_video(db, shot_id, version_id)
-    if not video:
-        raise HTTPException(status_code=400, detail="版本不存在或不属于该分镜")
-    return video
-
-
-@router.delete(
-    "/{project_id}/shots/{shot_id}/videos/{version_id}",
-    summary="删除视频版本",
-)
-async def delete_video_api(
-    shot_id: int,
-    version_id: int,
-    db: AsyncSession = Depends(get_async_db),
-    project: Project = Depends(get_owned_project),
-):
-    ok = await delete_video(db, shot_id, version_id)
-    if not ok:
-        raise HTTPException(status_code=400, detail="无法删除（激活版不允许删除或版本不存在）")
-    return {"success": ok}
 
 
 # =====================================================
@@ -1548,127 +1620,9 @@ async def get_final_video_api(
 # =====================================================
 # 13. 配音（Phase 2）— TTS 生成 / 多版本管理
 # -------------------------------------------------
-# 路由:
-#   POST   /projects/{id}/shots/{sid}/audios/generate         生成 TTS（异步）
-#   POST   /projects/{id}/shots/audios/batch-generate         批量 TTS
-#   POST   /projects/{id}/shots/{sid}/audios/upload           上传音频
-#   GET    /projects/{id}/shots/{sid}/audios                  列出音频版本
-#   POST   /projects/{id}/shots/{sid}/audios/{vid}/set-active 设为采用版
-#   DELETE /projects/{id}/shots/{sid}/audios/{vid}            删除音频版本
+# 音频版本路由（generate / batch-generate / upload / list /
+# set-active / delete）已并入上方 _build_media_routes 工厂统一注册。
 # =====================================================
-
-@router.post(
-    "/{project_id}/shots/{shot_id}/audios/generate",
-    response_model=ProjectShotAudioResponse,
-    summary="生成 TTS 配音（异步）",
-)
-async def generate_audio_api(
-    shot_id: int,
-    data: GenerateTTSRequest,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-    project: Project = Depends(get_owned_project),
-):
-    """生成分镜 TTS 配音（同角色同声音自动分配音色）"""
-    try:
-        return await generate_audio(
-            db, shot_id, current_user.id,
-            voice_id=data.voice_id,
-            character_id=data.character_id,
-            text=data.text,
-            model=data.model,
-            provider=data.provider,
-        )
-    except (ValueError, RuntimeError) as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.post(
-    "/{project_id}/shots/audios/batch-generate",
-    summary="批量生成 TTS 配音",
-)
-async def batch_generate_audios_api(
-    data: BatchGenerateTTSRequest,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-    project: Project = Depends(get_owned_project),
-):
-    """批量 TTS 生成（并行），返回成功生成的 audio_id 列表"""
-    audio_ids = await batch_generate_audios(
-        db, data.shot_ids, current_user.id, voice_id=data.voice_id,
-    )
-    return {"audio_ids": audio_ids, "success_count": len(audio_ids)}
-
-
-@router.post(
-    "/{project_id}/shots/{shot_id}/audios/upload",
-    response_model=ProjectShotAudioResponse,
-    summary="上传音频（替代 TTS）",
-)
-async def upload_audio_api(
-    project_id: int,
-    shot_id: int,
-    file: UploadFile = File(...),
-    db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
-    project: Project = Depends(get_owned_project),
-):
-    """用户上传音频替代 TTS（is_manual=True）"""
-    from app.services.upload_service import save_upload_file
-    file_url = await save_upload_file(file, folder=f"projects/{project_id}/shots/{shot_id}/audios")
-    audio = await upload_audio(db, shot_id, current_user.id, file_url)
-    if not audio:
-        raise HTTPException(status_code=404, detail="分镜不存在")
-    return audio
-
-
-@router.get(
-    "/{project_id}/shots/{shot_id}/audios",
-    response_model=List[ProjectShotAudioResponse],
-    summary="列出音频版本",
-)
-async def list_audios_api(
-    shot_id: int,
-    db: AsyncSession = Depends(get_async_db),
-    project: Project = Depends(get_owned_project),
-):
-    return await list_audios(db, shot_id)
-
-
-@router.post(
-    "/{project_id}/shots/{shot_id}/audios/{version_id}/set-active",
-    response_model=ProjectShotAudioResponse,
-    summary="设为采用版音频",
-)
-async def set_active_audio_api(
-    shot_id: int,
-    version_id: int,
-    db: AsyncSession = Depends(get_async_db),
-    project: Project = Depends(get_owned_project),
-):
-    try:
-        return await set_active_audio(db, shot_id, version_id)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.delete(
-    "/{project_id}/shots/{shot_id}/audios/{version_id}",
-    summary="删除音频版本",
-)
-async def delete_audio_api(
-    shot_id: int,
-    version_id: int,
-    db: AsyncSession = Depends(get_async_db),
-    project: Project = Depends(get_owned_project),
-):
-    ok = await delete_audio(db, shot_id, version_id)
-    if not ok:
-        raise HTTPException(
-            status_code=400,
-            detail="无法删除（采用版不允许删除或版本不存在）",
-        )
-    return {"success": ok}
 
 
 # =====================================================

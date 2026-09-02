@@ -16,30 +16,21 @@
 import asyncio
 import logging
 import time
-from datetime import datetime
-from typing import Dict, Optional, List
-
-from sqlalchemy import select
+from typing import Dict, Optional
 
 from app.services.agnes_client import agnes_client
 from app.services.provider_registry import provider_registry
-from app.services import asset_storage
-from app.models.generation import Generation
-from app.models.model_definition import ModelDefinition
-from app.core.database import new_async_session
-from app.services.credits_service import confirm_credits, refund_credits
-from app.services import asset_archive
+from app.services._generation_persist import (
+    CLEANUP_INTERVAL_SEC,
+    cleanup_expired_tasks,
+    confirm_generation_credits,
+    persist_generation,
+    refund_generation_credits,
+)
 
 logger = logging.getLogger("agnes_platform")
 
-# ---------- 清理参数 ----------
-CLEANUP_INTERVAL_SEC = 300   # 每 5 分钟扫描一次过期缓存
-CLEANUP_TTL_SEC = 3600        # 已完成任务保留 1 小时后清除
-
-
-def _as_container_id(value) -> Optional[str]:
-    """容器 ID 统一存字符串（项目 ID 是数字，剧本面板 ID 是字符串）"""
-    return None if value is None or value == "" else str(value)
+LOG_PREFIX = "[视频轮询器]"
 
 
 # =====================================================
@@ -285,188 +276,40 @@ class VideoPollerManager:
 
     async def _confirm_if_needed(self, task: VideoTask):
         """生成成功后，把对应的预扣流水状态改为 confirmed（积分不变）"""
-        if not task.user_id or not task.credits_consumed:
-            return
-        ref_id = task.task_id or task.video_id
-        if not ref_id:
-            return
-        try:
-            async with new_async_session() as session:
-                await confirm_credits(session, task.user_id, ref_id)
-        except Exception as e:
-            logger.warning("[视频轮询器] 确认积分失败: ref_id=%s error=%s", ref_id, e)
+        await confirm_generation_credits(task, task.task_id or task.video_id, LOG_PREFIX)
 
     async def _refund_if_needed(self, task: VideoTask):
         """生成失败/取消/超时后，退还预扣的积分"""
-        if not task.user_id or not task.credits_consumed:
-            return
-        ref_id = task.task_id or task.video_id
-        if not ref_id:
-            return
-        try:
-            async with new_async_session() as session:
-                await refund_credits(
-                    session, task.user_id, ref_id,
-                    reason=f"视频生成失败：{task.error_message or '未知错误'}",
-                )
-        except Exception as e:
-            logger.error("[视频轮询器] 退还积分失败: ref_id=%s error=%s", ref_id, e)
+        await refund_generation_credits(task, task.task_id or task.video_id, "视频", LOG_PREFIX)
 
     # ---------- 异步写入数据库 ----------
     async def _persist_result(self, task: VideoTask):
         """
         视频任务完成后，异步写入数据库。
         仅在成功状态下写入，失败任务不进历史。
-        使用 AsyncSession，完全异步 I/O，不阻塞事件循环。
         """
         if task.status != "success":
             logger.info(
-                "[视频轮询器] 跳过写入历史: task_id=%s status=%s",
-                task.task_id,
-                task.status,
+                "%s 跳过写入历史: task_id=%s status=%s",
+                LOG_PREFIX, task.task_id, task.status,
             )
             return
-        try:
-            async with new_async_session() as session:
-                # 从 params 提取广场分享标记
-                is_public = task.params.get("is_public", False)
-
-                # ===== 自动预审：敏感词检测（针对公开作品）=====
-                moderation_status = "approved"
-                moderation_flags = None
-                moderation_reason = None
-                if is_public and task.prompt:
-                    try:
-                        from app.services.moderation_service import check_sensitive_text
-                        hit, hit_words = await check_sensitive_text(session, task.prompt)
-                        if hit:
-                            moderation_status = "pending"
-                            moderation_flags = hit_words
-                            moderation_reason = f"命中敏感词: {', '.join(hit_words[:5])}"
-                    except Exception as mod_err:
-                        logger.warning("[视频轮询器] 自动预审失败: %s", mod_err)
-
-                record = Generation(
-                    type="video",
-                    user_id=task.user_id,
-                    prompt=task.prompt,
-                    model=task.params.get("model", ""),
-                    params=task.params,
-                    mode=task.params.get("mode"),
-                    result_url=task.video_url,  # 先用原始 URL，转存成功后再更新
-                    status=task.status,
-                    credits_consumed=task.credits_consumed,
-                    task_id=task.task_id or task.video_id,
-                    is_public=is_public,
-                    public_shared_at=datetime.utcnow() if is_public else None,
-                    moderation_status=moderation_status,
-                    moderation_flags=moderation_flags,
-                    moderation_reason=moderation_reason,
-                    preset_id=task.preset_id,
-                    # 创作归属：画布/项目生成打标，历史页据此默认过滤
-                    source=(task.context or {}).get("source") or "independent",
-                    container_type=(task.context or {}).get("container_type"),
-                    container_id=_as_container_id((task.context or {}).get("container_id")),
-                )
-                session.add(record)
-                await session.commit()  # 先提交拿到 record.id
-
-                # ===== 资源转存：把上游视频 URL 转存到对象存储（视频文件较大，注意超时） =====
-                # 仅对 HTTP/HTTPS URL 做转存；转存失败不影响主流程（记录已写入）
-                if task.video_url and task.video_url.startswith(("http://", "https://")):
-                    try:
-                        model_id = task.params.get("model", "")
-
-                        # 查询模型的 asset_storage_mode（决定是否转存）
-                        asset_storage_mode = "auto"  # 默认值
-                        try:
-                            stmt = select(ModelDefinition.asset_storage_mode).where(
-                                ModelDefinition.model_id == model_id
-                            )
-                            mode_result = await session.execute(stmt)
-                            mode_row = mode_result.first()
-                            if mode_row:
-                                asset_storage_mode = mode_row[0]
-                        except Exception as e:
-                            logger.warning("[视频轮询器] 查询 asset_storage_mode 失败，用默认 auto: %s", e)
-
-                        # 查询 provider_type（auto 模式下用于判断是否需要转存）
-                        provider_type = ""
-                        try:
-                            provider_type = await provider_registry.get_provider_type(model_id)
-                        except Exception as e:
-                            logger.warning("[视频轮询器] 查询 provider_type 失败: %s", e)
-
-                        # 执行转存（视频超时由 storage_video_upload_timeout_sec 控制，默认 120s）
-                        logger.info(
-                            "[视频轮询器] 资源转存开始: task_id=%s model=%s mode=%s provider_type=%s",
-                            task.task_id, model_id, asset_storage_mode, provider_type,
-                        )
-                        new_result_url, original_url, migrate_status = await asset_storage.migrate_if_needed(
-                            upstream_url=task.video_url,
-                            record_id=record.id,
-                            type="video",
-                            created_at=record.created_at,
-                            model_id=model_id,
-                            asset_storage_mode=asset_storage_mode,
-                            provider_type=provider_type,
-                        )
-                        # 更新记录字段
-                        record.result_url = new_result_url
-                        record.original_url = original_url
-                        record.migrate_status = migrate_status
-                        await session.commit()
-                        logger.info(
-                            "[视频轮询器] 资源转存完成: task_id=%s migrate_status=%s",
-                            task.task_id, migrate_status,
-                        )
-                    except Exception as migrate_err:
-                        # 转存失败不影响主流程，记录已写入，migrate_status 保持 NULL
-                        logger.error(
-                            "[视频轮询器] 资源转存异常: task_id=%s error=%s",
-                            task.task_id, migrate_err, exc_info=True,
-                        )
-                # ===== 资产自动归档：画布/项目生成自动进资产库，失败不影响主流程 =====
-                try:
-                    await asset_archive.archive_to_asset(
-                        session, record, task.context or {},
-                    )
-                except Exception as archive_err:
-                    logger.error(
-                        "[视频轮询器] 资产归档异常: task_id=%s error=%s",
-                        task.task_id, archive_err, exc_info=True,
-                    )
-            logger.info("[视频轮询器] 记录已异步写入数据库: status=%s moderation=%s", task.status, moderation_status)
-        except Exception as e:
-            logger.error("[视频轮询器] 数据库写入失败: %s", e)
+        await persist_generation(
+            task,
+            kind="video",
+            result_url=task.video_url,
+            record_params=task.params,
+            record_task_id=task.task_id or task.video_id,
+            log_prefix=LOG_PREFIX,
+        )
 
     # ---------- 后台清理协程 ----------
     async def _cleanup_loop(self):
-        """
-        定期清理已完成/失败/取消且超过 TTL 的任务，防止内存泄漏。
-        清理操作不阻塞事件循环。
-        """
-        while True:
-            await asyncio.sleep(CLEANUP_INTERVAL_SEC)
-            try:
-                now = time.time()
-                removed: List[str] = []
-                async with self._lock:
-                    for key, t in list(self._tasks.items()):
-                        # 仅清理已完成且超过 TTL 的任务
-                        if t.status in ("success", "failed", "cancelled") and (
-                            now - t.last_updated > CLEANUP_TTL_SEC
-                        ):
-                            removed.append(key)
-                            if t.video_id and t.video_id in self._tasks_by_video_id:
-                                del self._tasks_by_video_id[t.video_id]
-                    for key in removed:
-                        del self._tasks[key]
-
-                if removed:
-                    logger.info("[视频轮询器] 已清理 %s 个过期任务缓存", len(removed))
-            except Exception as e:
-                logger.error("[视频轮询器] 清理协程异常: %s", e)
+        """定期清理过期任务缓存（含 video_id 反查索引），不阻塞事件循环。"""
+        await cleanup_expired_tasks(
+            self._tasks, self._lock, LOG_PREFIX,
+            on_remove=lambda key, t: self._tasks_by_video_id.pop(t.video_id, None) if t.video_id else None,
+        )
 
     # ---------- 优雅关闭 ----------
     async def shutdown(self):

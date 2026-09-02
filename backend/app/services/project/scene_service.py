@@ -13,8 +13,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.project import ProjectScene, ProjectScript
-from app.schemas.project import SceneCreate, SceneUpdate
-from app.services.agnes_client import agnes_client
+from app.schemas.project import EntityCreate, EntityUpdate
 from app.services.project._entity_versions import (
     create_version,
     list_versions,
@@ -26,8 +25,7 @@ from app.services.project._entity_versions import (
 from app.services.project._async_gen import submit_image_task, claim_generation
 from app.services.project._generation_history import record_manual_upload
 from app.services.project.sse_manager import project_sse_manager
-from app.services.project.wizard import parse_json_loose
-from app.services.model_registry import resolve_project_chat_model_id
+from app.services.project.extract_entities import extract_entities_from_script
 
 logger = logging.getLogger("agnes_platform.project.scene")
 
@@ -83,7 +81,7 @@ async def get_scene(db: AsyncSession, scene_id: int) -> Optional[ProjectScene]:
 
 
 async def create_scene(
-    db: AsyncSession, project_id: int, data: SceneCreate
+    db: AsyncSession, project_id: int, data: EntityCreate
 ) -> ProjectScene:
     """添加场景"""
     # 校验 script_id 属于该项目
@@ -119,7 +117,7 @@ async def create_scene(
 
 
 async def update_scene(
-    db: AsyncSession, scene_id: int, data: SceneUpdate
+    db: AsyncSession, scene_id: int, data: EntityUpdate
 ) -> Optional[ProjectScene]:
     """编辑场景"""
     scene = await get_scene(db, scene_id)
@@ -356,80 +354,32 @@ async def delete_scene_version(
 # 从剧本重新提取场景
 # =====================================================
 
+# 提取指令 + JSON 输出形状说明（共享函数在其后拼接"剧本：\n{content}"）
+SCENE_EXTRACT_PROMPT_HEAD = (
+    "请从以下剧本中提取所有场景信息，返回 JSON 格式：\n"
+    '{"scenes": [{"name": "场景名", "description": "简介", '
+    '"location": "地点", "time_of_day": "时间段", "atmosphere": "氛围"}]}\n\n'
+)
+
 async def extract_scenes_from_script(
     db: AsyncSession, project_id: int, script_id: int
 ) -> dict:
     """从指定集剧本内容重新提取场景清单（追加到该集，不覆盖）"""
-    # 精确查指定集剧本
-    script = (
-        await db.execute(
-            select(ProjectScript).where(
-                ProjectScript.id == script_id,
-                ProjectScript.project_id == project_id,
-            )
-        )
-    ).scalars().first()
-    if not script:
-        raise HTTPException(404, "剧本不存在或不属于该项目")
-    if not script.content:
-        raise HTTPException(400, "剧本内容为空，无法提取场景")
-
-    prompt = (
-        "请从以下剧本中提取所有场景信息，返回 JSON 格式：\n"
-        '{"scenes": [{"name": "场景名", "description": "简介", '
-        '"location": "地点", "time_of_day": "时间段", "atmosphere": "氛围"}]}\n\n'
-        f"剧本：\n{script.content}"
+    return await extract_entities_from_script(
+        db,
+        project_id=project_id,
+        script_id=script_id,
+        entity_label="场景",
+        model_cls=ProjectScene,
+        prompt_head=SCENE_EXTRACT_PROMPT_HEAD,
+        list_key="scenes",
+        field_map={
+            "description": ("description", ""),
+            "location": ("location", ""),
+            "time_of_day": ("time_of_day", ""),
+            "atmosphere": ("atmosphere", ""),
+        },
     )
-    model = await resolve_project_chat_model_id(db, project_id)
-    if not model:
-        raise HTTPException(400, "未配置可用的对话模型，请先在配置页同步或添加对话模型")
-    text = await agnes_client.chat_text(
-        model, [{"role": "user", "content": prompt}], temperature=0.5,
-    )
-    parsed = parse_json_loose(text)
-
-    # 现有场景名集合（仅限该集，避免重复）
-    existing = {
-        s.name
-        for s in (
-            await db.execute(
-                select(ProjectScene).where(
-                    ProjectScene.script_id == script_id
-                )
-            )
-        ).scalars().all()
-    }
-    max_order = (
-        await db.execute(
-            select(func.max(ProjectScene.sort_order)).where(
-                ProjectScene.script_id == script_id
-            )
-        )
-    ).scalar() or 0
-
-    added = 0
-    for item in parsed.get("scenes", []):
-        name = item.get("name", "").strip()
-        if not name or name in existing:
-            continue
-        max_order += 1
-        db.add(
-            ProjectScene(
-                project_id=project_id,
-                script_id=script_id,
-                name=name,
-                description=item.get("description", ""),
-                location=item.get("location", ""),
-                time_of_day=item.get("time_of_day", ""),
-                atmosphere=item.get("atmosphere", ""),
-                sort_order=max_order,
-            )
-        )
-        existing.add(name)
-        added += 1
-
-    await db.commit()
-    return {"added": added}
 
 
 # =====================================================

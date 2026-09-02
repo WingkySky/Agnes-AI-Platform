@@ -18,8 +18,7 @@ from app.models.project import (
     ProjectCharacter,
     ProjectScript,
 )
-from app.schemas.project import CharacterCreate, CharacterUpdate
-from app.services.agnes_client import agnes_client
+from app.schemas.project import EntityCreate, EntityUpdate
 from app.services.project._entity_versions import (
     create_version,
     list_versions,
@@ -31,8 +30,7 @@ from app.services.project._entity_versions import (
 from app.services.project._async_gen import submit_image_task, claim_generation
 from app.services.project._generation_history import record_manual_upload
 from app.services.project.sse_manager import project_sse_manager
-from app.services.project.wizard import parse_json_loose
-from app.services.model_registry import resolve_project_chat_model_id
+from app.services.project.extract_entities import extract_entities_from_script
 
 logger = logging.getLogger("agnes_platform.project.character")
 
@@ -90,7 +88,7 @@ async def get_character(
 
 
 async def create_character(
-    db: AsyncSession, project_id: int, data: CharacterCreate
+    db: AsyncSession, project_id: int, data: EntityCreate
 ) -> ProjectCharacter:
     """添加角色"""
     # 校验 script_id 属于该项目
@@ -125,7 +123,7 @@ async def create_character(
 
 
 async def update_character(
-    db: AsyncSession, character_id: int, data: CharacterUpdate
+    db: AsyncSession, character_id: int, data: EntityUpdate
 ) -> Optional[ProjectCharacter]:
     """编辑角色"""
     character = await get_character(db, character_id)
@@ -390,6 +388,13 @@ async def delete_character_version(
 # 从剧本重新提取角色（追加，不覆盖现有）
 # =====================================================
 
+# 提取指令 + JSON 输出形状说明（共享函数在其后拼接"剧本：\n{content}"）
+CHARACTER_EXTRACT_PROMPT_HEAD = (
+    "请从以下剧本中提取所有角色信息，返回 JSON 格式：\n"
+    '{"characters": [{"name": "角色名", "description": "简介", '
+    '"appearance_desc": "外观描述", "role_type": "main|supporting|minor"}]}\n\n'
+)
+
 async def extract_characters_from_script(
     db: AsyncSession, project_id: int, script_id: int
 ) -> dict:
@@ -399,76 +404,20 @@ async def extract_characters_from_script(
     Returns:
         {"added": N}
     """
-    # 精确查指定集剧本
-    script = (
-        await db.execute(
-            select(ProjectScript).where(
-                ProjectScript.id == script_id,
-                ProjectScript.project_id == project_id,
-            )
-        )
-    ).scalars().first()
-    if not script:
-        raise HTTPException(404, "剧本不存在或不属于该项目")
-    if not script.content:
-        raise HTTPException(400, "剧本内容为空，无法提取角色")
-
-    prompt = (
-        "请从以下剧本中提取所有角色信息，返回 JSON 格式：\n"
-        '{"characters": [{"name": "角色名", "description": "简介", '
-        '"appearance_desc": "外观描述", "role_type": "main|supporting|minor"}]}\n\n'
-        f"剧本：\n{script.content}"
+    return await extract_entities_from_script(
+        db,
+        project_id=project_id,
+        script_id=script_id,
+        entity_label="角色",
+        model_cls=ProjectCharacter,
+        prompt_head=CHARACTER_EXTRACT_PROMPT_HEAD,
+        list_key="characters",
+        field_map={
+            "description": ("description", ""),
+            "appearance_desc": ("appearance_desc", ""),
+            "role_type": ("role_type", "supporting"),
+        },
     )
-    model = await resolve_project_chat_model_id(db, project_id)
-    if not model:
-        raise HTTPException(400, "未配置可用的对话模型，请先在配置页同步或添加对话模型")
-    text = await agnes_client.chat_text(
-        model, [{"role": "user", "content": prompt}], temperature=0.5,
-    )
-    parsed = parse_json_loose(text)
-
-    # 现有角色名集合（仅限该集，避免重复）
-    existing = {
-        c.name
-        for c in (
-            await db.execute(
-                select(ProjectCharacter).where(
-                    ProjectCharacter.script_id == script_id
-                )
-            )
-        ).scalars().all()
-    }
-
-    max_order = (
-        await db.execute(
-            select(func.max(ProjectCharacter.sort_order)).where(
-                ProjectCharacter.script_id == script_id
-            )
-        )
-    ).scalar() or 0
-
-    added = 0
-    for item in parsed.get("characters", []):
-        name = item.get("name", "").strip()
-        if not name or name in existing:
-            continue
-        max_order += 1
-        db.add(
-            ProjectCharacter(
-                project_id=project_id,
-                script_id=script_id,
-                name=name,
-                description=item.get("description", ""),
-                appearance_desc=item.get("appearance_desc", ""),
-                role_type=item.get("role_type", "supporting"),
-                sort_order=max_order,
-            )
-        )
-        existing.add(name)
-        added += 1
-
-    await db.commit()
-    return {"added": added}
 
 
 # =====================================================

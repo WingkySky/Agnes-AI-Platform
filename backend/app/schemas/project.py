@@ -140,29 +140,54 @@ class ScriptRegenerateRequest(BaseModel):
 
 
 # =====================================================
-# 角色/场景/道具 Schema（统一模式）
+# 角色/场景/道具 Schema（三类统一，字段取并集）
+# -------------------------------------------------
+# 各实体实际使用的键（其余键留空即可）：
+#   角色 Character: appearance_desc, role_type（main/supporting/minor）
+#   场景 Scene:     location, time_of_day, atmosphere
+#   道具 Prop:      visual_desc
+# Response 中非本实体的键序列化为 null（前端类型中相应字段均为可选）。
 # =====================================================
 
-class CharacterCreate(BaseModel):
-    """添加角色"""
+class EntityCreate(BaseModel):
+    """添加角色/场景/道具（字段并集，按实体选用）"""
     script_id: int = Field(..., description="所属集剧本ID")
     name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = None
+    # 仅角色
     appearance_desc: Optional[str] = None
-    role_type: Optional[str] = Field("supporting", description="main/supporting/minor")
+    role_type: Optional[str] = Field("supporting", description="仅角色：main/supporting/minor")
+    # 仅场景
+    location: Optional[str] = None
+    time_of_day: Optional[str] = None
+    atmosphere: Optional[str] = None
+    # 仅道具
+    visual_desc: Optional[str] = None
     asset_id: Optional[int] = None
 
 
-class CharacterUpdate(BaseModel):
-    """编辑角色"""
+class EntityUpdate(BaseModel):
+    """编辑角色/场景/道具（字段并集，service 层按 exclude_unset 消费）"""
     name: Optional[str] = None
     description: Optional[str] = None
+    # 仅角色
     appearance_desc: Optional[str] = None
     role_type: Optional[str] = None
+    # 仅场景
+    location: Optional[str] = None
+    time_of_day: Optional[str] = None
+    atmosphere: Optional[str] = None
+    # 仅道具
+    visual_desc: Optional[str] = None
 
 
-class CharacterResponse(BaseModel):
-    """角色响应"""
+class EntityResponse(BaseModel):
+    """角色/场景/道具响应（字段并集，非本实体的键为 null）
+
+    - 角色使用: appearance_desc / role_type（ORM 列默认 supporting，恒非空）
+    - 场景使用: location / time_of_day / atmosphere
+    - 道具使用: visual_desc
+    """
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -171,92 +196,21 @@ class CharacterResponse(BaseModel):
     episode_no: int | None = None  # 来自 join ProjectScript，便于前端直接展示"第N集"
     name: str
     description: Optional[str] = None
+    # 仅角色
     appearance_desc: Optional[str] = None
-    role_type: str
+    role_type: Optional[str] = None
+    # 仅场景
+    location: Optional[str] = None
+    time_of_day: Optional[str] = None
+    atmosphere: Optional[str] = None
+    # 仅道具
+    visual_desc: Optional[str] = None
     asset_id: Optional[int] = None
     active_image_id: Optional[int] = None
     sort_order: int = 0
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     # service 层注入：当前激活版本详情（前端展示图像用）
-    active_image: Optional["EntityAssetResponse"] = None
-
-
-class SceneCreate(BaseModel):
-    """添加场景"""
-    script_id: int = Field(..., description="所属集剧本ID")
-    name: str = Field(..., min_length=1, max_length=100)
-    description: Optional[str] = None
-    location: Optional[str] = None
-    time_of_day: Optional[str] = None
-    atmosphere: Optional[str] = None
-    asset_id: Optional[int] = None
-
-
-class SceneUpdate(BaseModel):
-    """编辑场景"""
-    name: Optional[str] = None
-    description: Optional[str] = None
-    location: Optional[str] = None
-    time_of_day: Optional[str] = None
-    atmosphere: Optional[str] = None
-
-
-class SceneResponse(BaseModel):
-    """场景响应"""
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    project_id: int
-    script_id: int
-    episode_no: int | None = None  # 来自 join ProjectScript，便于前端直接展示"第N集"
-    name: str
-    description: Optional[str] = None
-    location: Optional[str] = None
-    time_of_day: Optional[str] = None
-    atmosphere: Optional[str] = None
-    asset_id: Optional[int] = None
-    active_image_id: Optional[int] = None
-    sort_order: int = 0
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    # service 层注入：当前激活版本详情
-    active_image: Optional["EntityAssetResponse"] = None
-
-
-class PropCreate(BaseModel):
-    """添加道具"""
-    script_id: int = Field(..., description="所属集剧本ID")
-    name: str = Field(..., min_length=1, max_length=100)
-    description: Optional[str] = None
-    visual_desc: Optional[str] = None
-    asset_id: Optional[int] = None
-
-
-class PropUpdate(BaseModel):
-    """编辑道具"""
-    name: Optional[str] = None
-    description: Optional[str] = None
-    visual_desc: Optional[str] = None
-
-
-class PropResponse(BaseModel):
-    """道具响应"""
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    project_id: int
-    script_id: int
-    episode_no: int | None = None  # 来自 join ProjectScript，便于前端直接展示"第N集"
-    name: str
-    description: Optional[str] = None
-    visual_desc: Optional[str] = None
-    asset_id: Optional[int] = None
-    active_image_id: Optional[int] = None
-    sort_order: int = 0
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    # service 层注入：当前激活版本详情
     active_image: Optional["EntityAssetResponse"] = None
 
 
@@ -358,8 +312,8 @@ class ShotResponse(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     # 关联实体（可选展开）
-    characters: Optional[List["CharacterResponse"]] = None
-    props: Optional[List["PropResponse"]] = None
+    characters: Optional[List[EntityResponse]] = None
+    props: Optional[List[EntityResponse]] = None
     frame_images: Optional[List["FrameImageResponse"]] = None
     videos: Optional[List["VideoResponse"]] = None
     audios: Optional[List["ProjectShotAudioResponse"]] = None  # Phase 2
@@ -748,10 +702,8 @@ class CopyToScriptRequest(BaseModel):
 
 
 # =====================================================
-# 解决前向引用：CharacterResponse/SceneResponse/PropResponse/ShotResponse
+# 解决前向引用：EntityResponse/ShotResponse
 # 在定义时引用了尚未定义的 EntityAssetResponse / ProjectShotAudioResponse
 # =====================================================
-CharacterResponse.model_rebuild()
-SceneResponse.model_rebuild()
-PropResponse.model_rebuild()
+EntityResponse.model_rebuild()
 ShotResponse.model_rebuild()
