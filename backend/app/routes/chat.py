@@ -752,6 +752,7 @@ async def send_message(
 async def media_callback(
     req: MediaCallbackRequest,
     db: AsyncSession = Depends(get_async_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """
     前端检测到媒体生成完成后，调用此接口更新消息中的 media_items。
@@ -763,6 +764,14 @@ async def media_callback(
     msg = result.scalar_one_or_none()
     if not msg:
         raise HTTPException(status_code=404, detail="消息不存在")
+
+    # 鉴权：消息所属会话须属于当前登录用户（匿名用户仅可回调匿名会话的消息）
+    session_result = await db.execute(
+        select(ChatSession.user_id).filter(ChatSession.id == msg.session_id)
+    )
+    owner_id = session_result.scalar_one_or_none()
+    if (current_user.id if current_user else None) != owner_id:
+        raise HTTPException(status_code=403, detail="无权操作此消息")
 
     # 更新 media_items 中对应 task_id 的项
     if msg.media_items:

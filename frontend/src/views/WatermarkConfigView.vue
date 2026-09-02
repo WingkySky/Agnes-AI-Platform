@@ -166,14 +166,17 @@ import { useI18n } from '@/i18n'
 import { ElMessage } from 'element-plus'
 import { Upload, Picture } from '@element-plus/icons-vue'
 import { getWatermarkConfig, updateWatermarkConfig } from '@/api/admin'
+import { useUserStore } from '@/stores/user'
 import type { WatermarkConfig } from '@/api/admin'
 
 const { t } = useI18n()
+const userStore = useUserStore()
 
 const uploadUrl = '/api/admin/upload'
-const uploadHeaders = {
-  Authorization: `Bearer ${localStorage.getItem('access_token') || ''}`
-}
+// el-upload 自带 XHR 不走 axios 拦截器，header 需实时取登录态 token
+const uploadHeaders = computed(() => ({
+  Authorization: `Bearer ${userStore.token || ''}`
+}))
 
 const saving = ref(false)
 

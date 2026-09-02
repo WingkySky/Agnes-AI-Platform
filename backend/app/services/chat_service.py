@@ -750,7 +750,7 @@ class ChatService:
             second_messages = request_messages + [assistant_msg] + tool_results
 
             second_body = {
-                "model": await self._get_default_chat_model(),
+                "model": await self._get_default_chat_model(user_id),
                 "messages": second_messages,
                 "stream": True,
             }
