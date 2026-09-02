@@ -321,7 +321,7 @@ const PRESET_TEMPLATES: CanvasTemplate[] = [
 // ---------- 用户模板 CRUD ----------
 
 /** 加载当前用户的所有自定义模板 */
-export async function loadUserTemplates(): Promise<CanvasTemplate[]> {
+async function loadUserTemplates(): Promise<CanvasTemplate[]> {
   try {
     await templateStore.ready()
     const data = await templateStore.getItem<CanvasTemplate[]>(storageKey())
@@ -501,12 +501,3 @@ export function createWorkspaceFromTemplate(template: CanvasTemplate): {
 }
 
 // ---------- 切换用户时清理缓存 ----------
-
-/**
- * 切换用户时调用（由 CanvasView 的 login/logout 事件触发）
- * - localforage 的 key 是动态计算的，无需额外操作
- * - 这里保留接口便于未来扩展（如内存缓存清理）
- */
-export function onTemplateUserSwitch(): void {
-  // localforage key 基于 getUserKey() 动态计算，无需额外处理
-}

@@ -25,14 +25,6 @@ export interface RoleItem {
   updated_at: string
 }
 
-/** 权限项 */
-export interface PermissionItem {
-  key: string
-  name: string
-  description: string
-  group: string
-}
-
 /** 敏感词项 */
 export interface SensitiveWordItem {
   id: number
@@ -76,11 +68,6 @@ export interface WatermarkConfig {
 /** 获取角色列表 */
 export function getRoles(): Promise<RoleItem[]> {
   return client.get('/api/admin/roles')
-}
-
-/** 获取权限列表 */
-export function getPermissions(): Promise<PermissionItem[]> {
-  return client.get('/api/admin/roles/permissions')
 }
 
 /** 创建角色 */

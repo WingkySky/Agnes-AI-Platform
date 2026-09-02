@@ -29,10 +29,6 @@ export function getScenes(params: SceneListParams = {}): Promise<SceneListRespon
 }
 
 /** 获取单个场景详情 */
-export function getScene(id: number): Promise<Scene3D> {
-  return client.get(`/api/scenes/${id}`)
-}
-
 /** 创建场景 */
 export function createScene(data: CreateSceneRequest): Promise<Scene3D> {
   return client.post('/api/scenes', data)

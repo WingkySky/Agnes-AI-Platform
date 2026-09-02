@@ -205,15 +205,6 @@ export const useAssetStore = defineStore('asset', {
       return true
     },
 
-    /** 更新已存在的资源（部分字段，保留未更新字段） */
-    async updateAsset(id: string, changes: Partial<AssetItem>): Promise<AssetItem | null> {
-      const asset = this.assets.find((a) => a.id === id)
-      if (!asset) return null
-      Object.assign(asset, changes, { updatedAt: new Date().toISOString() })
-      await this._persist()
-      return asset
-    },
-
     /** 清空所有资源 */
     async clearAll(): Promise<void> {
       // 释放所有 object URL 并删除 Blob 数据
@@ -256,41 +247,6 @@ export const useAssetStore = defineStore('asset', {
         // 持久化加载失败时保持空数组
       }
       this._storageReady = true
-    },
-
-    /**
-     * 从流水线结果导入素材到画布
-     * @param data - 导出数据 { video: string, scenes: string[] }
-     * @returns 创建的资产列表
-     */
-    async importFromPipeline(data: { video: string; scenes: string[] }): Promise<AssetItem[]> {
-      const created: AssetItem[] = []
-
-      // 导入视频
-      if (data.video) {
-        const asset = await this.registerAsset({
-          type: 'video',
-          url: data.video,
-          name: '流水线生成视频',
-          sourceNodeId: null,
-        })
-        if (asset) created.push(asset)
-      }
-
-      // 导入分镜图片
-      for (let i = 0; i < data.scenes.length; i++) {
-        const url = data.scenes[i]
-        if (!url) continue
-        const asset = await this.registerAsset({
-          type: 'image',
-          url,
-          name: `分镜 ${i + 1}`,
-          sourceNodeId: null,
-        })
-        if (asset) created.push(asset)
-      }
-
-      return created
     },
 
     /** 写回 localforage（内部方法；外部增删改都会调用） */

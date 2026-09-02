@@ -48,10 +48,6 @@ export function deleteProvider(providerId: number): Promise<{ status: string; me
 // =====================================================
 
 /** 列出指定 Provider 的模型 */
-export function listProviderModels(providerId: number): Promise<ModelListResponse> {
-  return client.get(`/api/providers/${providerId}/models`)
-}
-
 /** 列出所有模型定义（管理视图） */
 export function listAllModels(): Promise<ModelListResponse> {
   return client.get('/api/models')

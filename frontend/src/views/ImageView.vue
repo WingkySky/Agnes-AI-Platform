@@ -398,7 +398,6 @@ function mountTagLabel(p: PromptPreset): string {
 
 // 模型列表：从后端 API 动态获取
 const modelsStore = useModelsStore()
-const IMAGE_MODELS = computed(() => modelsStore.imageModels)
 
 // ---------- 表单参数 ----------
 const mode = ref('text2image')

@@ -290,6 +290,7 @@
             :img-class="'detail-image'"
             fit="contain"
             style="cursor: zoom-in"
+            @load="onDetailImageLoad"
             @click="openImageViewer(detailItem)"
           />
           <div v-else class="detail-video-wrap">

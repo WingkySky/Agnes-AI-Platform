@@ -11,7 +11,7 @@ import { defineStore } from 'pinia'
 import { canvasThemes } from '@/lib/canvas-theme'
 import { loadCanvas, saveCanvas, switchCanvasUser, cancelSaveCanvas } from '@/lib/canvas-storage'
 import { useThemeStore } from './theme'
-import { analyzeFlow, analyzeExecutionOrder } from '@/lib/canvas-flow-analyzer'
+import { analyzeFlow } from '@/lib/canvas-flow-analyzer'
 
 // ---------- 连线类型校验（spec 5.4.2） ----------
 
@@ -131,12 +131,6 @@ interface CanvasRect {
   top: number
 }
 
-/** 对齐参考线 */
-interface AlignmentGuides {
-  vertical: number[]
-  horizontal: number[]
-}
-
 /** 历史快照 */
 interface HistorySnapshot {
   viewport: Viewport
@@ -161,12 +155,6 @@ interface ConnectingState {
 }
 
 /** 待创建连线载荷 */
-interface PendingConnectionCreate {
-  sourceId: string
-  worldX: number
-  worldY: number
-}
-
 /** 主题 token 类型（对齐 canvas-theme.ts 的 CanvasTheme 结构） */
 interface ThemeTokens {
   canvas: { background: string; dot: string; line: string; selectionStroke: string; selectionFill: string }
@@ -284,9 +272,6 @@ interface CanvasState {
   _isSpacePressed: boolean
   _isDraggingPanel: boolean
 
-  // ---------- 待创建连线 ----------
-  pendingConnectionCreate: PendingConnectionCreate | null
-
   // ---------- 连线拖拽（临时连线状态）----------
   connecting: ConnectingState | null
 
@@ -295,20 +280,6 @@ interface CanvasState {
 
   // ---------- 搜索与筛选 ----------
   searchQuery: string
-  searchMatchedIds: string[]
-
-  // ---------- 网格 ----------
-  showGrid: boolean
-  gridSize: number
-
-  // ---------- 对齐参考线 ----------
-  alignmentGuides: AlignmentGuides
-
-  // ---------- 隐藏 ----------
-  hiddenIds: string[]
-
-  // ---------- 剪贴板 ----------
-  clipboard: CanvasPanel[]
 
   // ---------- 流程模式 ----------
   isFlowMode: boolean
@@ -367,9 +338,6 @@ export const useCanvasStore = defineStore('canvas', {
     _isSpacePressed: false,
     _isDraggingPanel: false,
 
-    // ---------- 待创建连线 ----------
-    pendingConnectionCreate: null,
-
     // ---------- 连线拖拽（临时连线状态）----------
     connecting: null,
 
@@ -378,20 +346,6 @@ export const useCanvasStore = defineStore('canvas', {
 
     // ---------- 搜索与筛选 ----------
     searchQuery: '',
-    searchMatchedIds: [],
-
-    // ---------- 网格 ----------
-    showGrid: true,
-    gridSize: 24,
-
-    // ---------- 对齐参考线 ----------
-    alignmentGuides: { vertical: [], horizontal: [] },
-
-    // ---------- 隐藏 ----------
-    hiddenIds: [],
-
-    // ---------- 剪贴板 ----------
-    clipboard: [],
 
     // ---------- 流程模式 ----------
     isFlowMode: false,
@@ -444,143 +398,6 @@ export const useCanvasStore = defineStore('canvas', {
       })
     },
 
-    /** 按 searchQuery 匹配面板列表（匹配 name / content.text / type） */
-    matchedPanels(state): CanvasPanel[] {
-      const q = (state.searchQuery || '').trim().toLowerCase()
-      if (!q) return []
-      return state.panels.filter((p) => {
-        if ((p.name || '').toLowerCase().includes(q)) return true
-        if (p.type && p.type.toLowerCase().includes(q)) return true
-        const text = p.content?.text
-        if (typeof text === 'string' && text.toLowerCase().includes(q)) return true
-        return false
-      })
-    },
-
-    /**
-     * 对齐参考线计算
-     * - targetBounds: { x, y, width, height }
-     * - otherIds: 参与对齐的其他 panel id 列表
-     * - threshold: 对齐阈值（默认 4 像素）
-     * - 返回 { x, y, guides: { vertical, horizontal } }
-     */
-    computeAlignment: (state) => (targetBounds: { x: number; y: number; width: number; height: number }, otherIds: string[], threshold = 4): { x: number; y: number; guides: AlignmentGuides } => {
-      const { x, y, width, height } = targetBounds
-      const tx = [x, x + width / 2, x + width]
-      const ty = [y, y + height / 2, y + height]
-      let dx = 0
-      let dy = 0
-      const vertical: number[] = []
-      const horizontal: number[] = []
-      const otherSet = new Set(otherIds)
-
-      for (const other of state.panels) {
-        if (!otherSet.has(other.id)) continue
-        const ox = [other.x, other.x + other.width / 2, other.x + other.width]
-        const oy = [other.y, other.y + other.height / 2, other.y + other.height]
-
-        let snappedX = false
-        for (let i = 0; i < 3 && !snappedX; i++) {
-          for (let j = 0; j < 3; j++) {
-            const diff = ox[j] - tx[i]
-            if (Math.abs(diff) <= threshold) {
-              dx = diff
-              vertical.push(ox[j])
-              snappedX = true
-              break
-            }
-          }
-        }
-
-        let snappedY = false
-        for (let i = 0; i < 3 && !snappedY; i++) {
-          for (let j = 0; j < 3; j++) {
-            const diff = oy[j] - ty[i]
-            if (Math.abs(diff) <= threshold) {
-              dy = diff
-              horizontal.push(oy[j])
-              snappedY = true
-              break
-            }
-          }
-        }
-      }
-
-      return {
-        x: x + dx,
-        y: y + dy,
-        guides: {
-          vertical: [...new Set(vertical)],
-          horizontal: [...new Set(horizontal)],
-        },
-      }
-    },
-
-    /**
-     * 返回上游节点的 output 数组
-     * - 规则：source_panel_id → target_panel_id 即"上游 → 下游"
-     * - 每项：{ panel, output }
-     */
-    getUpstreamOutput: (state) => (panelId: string): { panel: CanvasPanel; output: Record<string, unknown> }[] => {
-      const upstreamIds = state.connections
-        .filter((c) => c.target_panel_id === panelId)
-        .map((c) => c.source_panel_id)
-        .filter(Boolean)
-
-      return upstreamIds
-        .map((pid) => {
-          const panel = state.panels.find((p) => p.id === pid)
-          if (!panel) return null
-          const content = panel.content ?? {}
-          let output: Record<string, unknown>
-          switch (panel.type) {
-            case 'image':
-              output = {
-                resultUrl: content.resultUrl,
-                prompt: content.prompt,
-                model: content.model,
-                size: content.size,
-                imageUrl: content.imageUrl,
-              }
-              break
-            case 'video':
-              output = {
-                resultUrl: content.resultUrl,
-                prompt: content.prompt,
-                imageUrl: content.imageUrl,
-              }
-              break
-            case 'audio':
-              output = {
-                resultUrl: content.resultUrl,
-                prompt: content.prompt,
-              }
-              break
-            case 'text':
-              output = { text: content.text, prompt: content.prompt }
-              break
-            case 'chat':
-              output = {
-                lastReply: content.lastReply,
-                messages: content.messages ?? [],
-              }
-              break
-            case 'config':
-              output = {
-                model: content.model,
-                size: content.size,
-                count: content.count,
-                composerContent: content.composerContent,
-              }
-              break
-            default:
-              output = { ...content }
-          }
-          return { panel, output }
-        })
-        .filter((x): x is NonNullable<typeof x> => x != null)
-    },
-
     /**
      * 获取接入某个目标节点的源节点列表（带序号，按连接创建顺序排序）
      * 返回 Map：sourcePanelId -> index (1-based)
@@ -626,36 +443,6 @@ export const useCanvasStore = defineStore('canvas', {
       return result
     },
 
-    /**
-     * 把上游节点的核心字段合并成一个 { prompt, model, size, imageUrl, resultUrl } 对象
-     */
-    resolveInputs: (state) => (panelId: string): Record<string, unknown> | null => {
-      const panel = state.panels.find((p) => p.id === panelId)
-      if (!panel) return null
-      const upstreamIds = state.connections
-        .filter((c) => c.target_panel_id === panelId)
-        .map((c) => c.source_panel_id)
-        .filter(Boolean)
-
-      const merged: Record<string, unknown> = JSON.parse(JSON.stringify(panel.content ?? {}))
-      for (const pid of upstreamIds) {
-        const up = state.panels.find((p) => p.id === pid)
-        if (!up) continue
-        const content = up.content ?? {}
-        const output: Record<string, unknown> = {}
-        if (content.resultUrl !== undefined) output.resultUrl = content.resultUrl
-        if (content.imageUrl !== undefined) output.imageUrl = content.imageUrl
-        if (content.prompt !== undefined) output.prompt = content.prompt
-        if (content.model !== undefined) output.model = content.model
-        if (content.size !== undefined) output.size = content.size
-        if (content.text !== undefined) output.text = content.text
-        if (content.lastReply !== undefined) output.lastReply = content.lastReply
-        if (content.count !== undefined) output.count = content.count
-        Object.assign(merged, output)
-      }
-      return merged
-    },
-
     // ==================== 流程模式 ====================
 
     /**
@@ -668,24 +455,6 @@ export const useCanvasStore = defineStore('canvas', {
       
       // 使用静态导入的函数
       return analyzeFlow(state.panels, state.connections)
-    },
-
-    /**
-     * 获取执行顺序（拓扑排序）
-     * - 返回按执行顺序排列的节点 ID 列表
-     */
-    executionOrder(state): string[] {
-      if (state.panels.length === 0) return []
-      
-      // 使用静态导入的函数
-      return analyzeExecutionOrder(state.panels, state.connections)
-    },
-
-    /**
-     * 检查是否启用了流程模式且有步骤
-     */
-    hasFlowSteps(state): boolean {
-      return state.isFlowMode && state.steps.length > 0
     },
   },
 
@@ -1131,13 +900,6 @@ export const useCanvasStore = defineStore('canvas', {
       this.selectedPanelId = this.selectedPanelIds[0] ?? null
     },
 
-    /** 将面板置顶 */
-    movePanelToFront(id: string): void {
-      const panel = this.panels.find((p) => p.id === id)
-      if (!panel) return
-      panel.zIndex = Math.max(...this.panels.map((p) => p.zIndex || 0), 0) + 1
-    },
-
     // ==================== 连线 ====================
 
     /** 添加连线 */
@@ -1244,55 +1006,6 @@ export const useCanvasStore = defineStore('canvas', {
 
     // ==================== 待创建连线 ====================
 
-    /** 设置待创建连线状态 */
-    setPendingConnectionCreate(payload: PendingConnectionCreate | null): void {
-      this.pendingConnectionCreate = payload ?? null
-    },
-
-    /** 清空待创建连线状态 */
-    clearPendingConnectionCreate(): void {
-      this.pendingConnectionCreate = null
-    },
-
-    /** 从待创建连线状态生成一个新节点，并建立连线 */
-    createConnectedNode(type: string, pending: PendingConnectionCreate): CanvasPanel | undefined {
-      if (!pending) return
-      const { sourceId, worldX, worldY } = pending
-      const width = 260
-      const height = type === 'image' ? 260 : 220
-      const panel: CanvasPanel = {
-        id: uid(),
-        workspace_id: this.activeWorkspaceId!,
-        type,
-        name: `新${type === 'image' ? '图片' : type === 'text' ? '文本' : '笔记'}节点`,
-        x: worldX - width / 2,
-        y: worldY - height / 2,
-        width,
-        height,
-        zIndex: (this.panels.reduce((m, p) => Math.max(m, p.zIndex || 0), 0)) + 1,
-        content: {},
-        meta: {},
-        is_locked: false,
-        is_hidden: false,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }
-      this.panels.push(panel)
-      if (sourceId) {
-        this.addConnection({
-          source_panel_id: sourceId,
-          target_panel_id: panel.id,
-          type: 'flow',
-        })
-      }
-      this.selectedPanelIds = [panel.id]
-      this.selectedPanelId = panel.id
-      this.pendingConnectionCreate = null
-      this.pushSnapshot()
-      this._save()
-      return panel
-    },
-
     // ==================== 历史（撤销/重做） ====================
 
     /** 压入历史快照（最多 80 条；清空 future） */
@@ -1330,19 +1043,6 @@ export const useCanvasStore = defineStore('canvas', {
     /** 设置搜索关键字 */
     setSearchQuery(q: string): void {
       this.searchQuery = typeof q === 'string' ? q : ''
-      if (!this.searchQuery) {
-        this.searchMatchedIds = []
-      }
-    },
-
-    /** 执行搜索并定位首个匹配项 */
-    searchAndLocate(q: string): void {
-      this.setSearchQuery(q)
-      const matched = this.matchedPanels
-      this.searchMatchedIds = matched.map((p) => p.id)
-      if (matched.length > 0) {
-        this.centerOnPanel(matched[0].id)
-      }
     },
 
     /** 将指定面板置于视口中心（不缩放） */
@@ -1360,165 +1060,17 @@ export const useCanvasStore = defineStore('canvas', {
 
     // ==================== 隐藏 ====================
 
-    /** 设置面板隐藏状态 */
-    setPanelHidden(id: string, hidden: boolean): void {
-      if (!id) return
-      const idx = this.hiddenIds.indexOf(id)
-      if (hidden) {
-        if (idx === -1) this.hiddenIds.push(id)
-      } else {
-        if (idx >= 0) this.hiddenIds.splice(idx, 1)
-      }
-    },
-
     // ==================== 网格 ====================
-
-    /** 切换是否启用网格 */
-    toggleGrid(): void {
-      this.showGrid = !this.showGrid
-    },
-
-    /** 设置网格大小（限幅 4~128） */
-    setGridSize(size: number): void {
-      const n = Number(size)
-      if (!isFinite(n) || n <= 0) return
-      this.gridSize = Math.min(128, Math.max(4, n))
-    },
-
-    /** 网格吸附（返回吸附后的坐标） */
-    snapToGrid(x: number, y: number): { x: number; y: number } {
-      if (!this.showGrid) return { x, y }
-      const g = this.gridSize
-      return {
-        x: Math.round(x / g) * g,
-        y: Math.round(y / g) * g,
-      }
-    },
 
     // ==================== 对齐参考线 ====================
 
-    /** 设置当前对齐参考线 */
-    setAlignmentGuides(guides: AlignmentGuides): void {
-      this.alignmentGuides = guides ?? { vertical: [], horizontal: [] }
-    },
-
-    /** 清空对齐参考线 */
-    clearAlignmentGuides(): void {
-      this.alignmentGuides = { vertical: [], horizontal: [] }
-    },
-
     // ==================== 锁定 ====================
-
-    /** 切换锁定状态 */
-    toggleLock(id: string): void {
-      const panel = this.panels.find((p) => p.id === id)
-      if (!panel) return
-      const current = !!panel.content?.locked
-      this._updatePanelDirect(id, {
-        content: { ...(panel.content ?? {}), locked: !current },
-      })
-    },
-
-    /** 锁定面板 */
-    lockPanel(id: string): void {
-      const panel = this.panels.find((p) => p.id === id)
-      if (!panel) return
-      this._updatePanelDirect(id, {
-        content: { ...(panel.content ?? {}), locked: true },
-      })
-    },
-
-    /** 解锁面板 */
-    unlockPanel(id: string): void {
-      const panel = this.panels.find((p) => p.id === id)
-      if (!panel) return
-      this._updatePanelDirect(id, {
-        content: { ...(panel.content ?? {}), locked: false },
-      })
-    },
 
     // ==================== 图片节点拆分 ====================
 
-    /** 将图片节点分割成 n 个小节点（位置错开） */
-    splitImagePanel(id: string, n = 4): string[] {
-      const orig = this.panels.find((p) => p.id === id)
-      if (!orig) return []
-      const count = Math.max(1, Number(n) || 4)
-      const maxZ = Math.max(...this.panels.map((p) => p.zIndex || 0), 0)
-      const now = new Date().toISOString()
-      const newIds: string[] = []
-      for (let i = 0; i < count; i++) {
-        const newPanel: CanvasPanel = {
-          ...orig,
-          id: uid(),
-          x: orig.x + 30 + i * 20,
-          y: orig.y + 30 + i * 20,
-          zIndex: maxZ + i + 1,
-          content: JSON.parse(JSON.stringify(orig.content ?? {})),
-          created_at: now,
-          updated_at: now,
-        }
-        this.panels.push(newPanel)
-        newIds.push(newPanel.id)
-      }
-      this._save()
-      return newIds
-    },
-
     // ==================== 旋转 ====================
 
-    /** 设置面板旋转角度（0/90/180/270） */
-    setPanelRotation(id: string, degrees: number): void {
-      const allowed = [0, 90, 180, 270]
-      const r = Number(degrees)
-      if (!allowed.includes(r)) return
-      const panel = this.panels.find((p) => p.id === id)
-      if (!panel) return
-      this._updatePanelDirect(id, {
-        content: { ...(panel.content ?? {}), rotation: r },
-      })
-    },
-
     // ==================== 复制粘贴 ====================
-
-    /** 复制面板到剪贴板（不传 id 则复制选中） */
-    copyToClipboard(id?: string): void {
-      const ids = id ? [id] : [...this.selectedPanelIds]
-      if (ids.length === 0) return
-      this.clipboard = this.panels
-        .filter((p) => ids.includes(p.id))
-        .map((p) => JSON.parse(JSON.stringify(p)))
-    },
-
-    /** 粘贴剪贴板到指定屏幕坐标（以首个面板左上角为锚点） */
-    pastePanel(screenX: number, screenY: number): void {
-      if (!Array.isArray(this.clipboard) || this.clipboard.length === 0) return
-      const world = this.screenToWorld(screenX, screenY)
-      const anchor = this.clipboard[0]
-      const offsetX = world.x - (anchor.x || 0)
-      const offsetY = world.y - (anchor.y || 0)
-      const maxZ = Math.max(...this.panels.map((p) => p.zIndex || 0), 0)
-      const now = new Date().toISOString()
-      const newIds: string[] = []
-      for (let i = 0; i < this.clipboard.length; i++) {
-        const item = this.clipboard[i]
-        const copy: CanvasPanel = {
-          ...JSON.parse(JSON.stringify(item)),
-          id: uid(),
-          x: (item.x || 0) + offsetX,
-          y: (item.y || 0) + offsetY,
-          workspace_id: this.activeWorkspaceId!,
-          zIndex: maxZ + i + 1,
-          created_at: now,
-          updated_at: now,
-        }
-        this.panels.push(copy)
-        newIds.push(copy.id)
-      }
-      this.selectedPanelIds = newIds
-      this.selectedPanelId = newIds[0] ?? null
-      this._save()
-    },
 
     // ==================== 导入导出 ====================
 
@@ -1669,19 +1221,6 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /**
-     * 设置流程模式
-     */
-    setFlowMode(enabled: boolean): void {
-      if (this.isFlowMode !== enabled) {
-        this.isFlowMode = enabled
-        if (this.isFlowMode) {
-          this.analyzeCurrentFlow()
-        }
-        this._save()
-      }
-    },
-
-    /**
      * 分析当前画布的流程，自动生成步骤分组
      */
     analyzeCurrentFlow(): void {
@@ -1776,35 +1315,6 @@ export const useCanvasStore = defineStore('canvas', {
         step.updated_at = new Date().toISOString()
         this._save()
       }
-    },
-
-    /**
-     * 从步骤移除节点
-     */
-    removePanelFromStep(stepId: string, panelId: string): void {
-      const step = this.steps.find(s => s.id === stepId)
-      if (!step) return
-
-      const index = step.panel_ids.indexOf(panelId)
-      if (index !== -1) {
-        step.panel_ids.splice(index, 1)
-        step.updated_at = new Date().toISOString()
-        this._save()
-      }
-    },
-
-    /**
-     * 从选中节点创建步骤
-     */
-    createStepFromSelection(): string | null {
-      if (this.selectedPanelIds.length === 0) return null
-
-      const stepId = this.addStep({
-        panel_ids: [...this.selectedPanelIds],
-        name: `步骤 ${this.steps.length + 1}`,
-      })
-
-      return stepId
     },
   },
 })

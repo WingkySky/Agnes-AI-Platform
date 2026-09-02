@@ -85,21 +85,3 @@ export function submitPreset(id: number): Promise<PromptPreset> {
   return client.post(`/api/presets/${id}/submit`)
 }
 
-/**
- * 导出当前用户预设
- */
-export function exportPresets(): Promise<unknown[]> {
-  return client.get('/api/presets/export')
-}
-
-/**
- * 批量导入预设
- */
-export function importPresets(items: unknown[]): Promise<{
-  imported: number
-  skipped: number
-  renamed: number
-  items: PromptPreset[]
-}> {
-  return client.post('/api/presets/import', items)
-}

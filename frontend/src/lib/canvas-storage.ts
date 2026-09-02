@@ -65,11 +65,6 @@ export function switchCanvasUser(userId: number | string | null): string {
   return _currentUserKey
 }
 
-/** 返回当前绑定的 user key（用于调试） */
-export function currentCanvasUserKey(): string {
-  return _currentUserKey
-}
-
 /** 按当前用户计算存储 key */
 function storageKey(): string {
   return BASE_STORAGE_KEY + '_' + getUserKey()
@@ -186,9 +181,4 @@ export async function migrateFromV1(): Promise<boolean> {
   } catch {
     return false
   }
-}
-
-/** localforage 是否就绪（用于 store 状态指示） */
-export function isStorageReady(): boolean {
-  return ready
 }

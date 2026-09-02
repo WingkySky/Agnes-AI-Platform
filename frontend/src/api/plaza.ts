@@ -40,10 +40,6 @@ export interface LikeActionResponse {
   likes_count: number
 }
 
-export interface LikeStatusResponse {
-  liked_ids: number[]
-}
-
 // ---------- 广场「创作」Tab（来自 assets 表） ----------
 export interface PlazaCreation {
   id: number
@@ -113,13 +109,6 @@ export function unlikePlazaWork(id: number): Promise<LikeActionResponse> {
   return client.delete(`/api/plaza/works/${id}/like`)
 }
 
-/** 批量查询点赞状态 */
-export function getLikeStatus(ids: number[]): Promise<LikeStatusResponse> {
-  return client.get('/api/plaza/likes/status', {
-    params: { ids: ids.join(',') },
-  })
-}
-
 // ---------- 广场「创作」Tab API ----------
 
 /** 获取广场公开创作资产列表 */
@@ -146,13 +135,6 @@ export function likePlazaCreation(id: number): Promise<LikeActionResponse> {
 /** 取消点赞创作 */
 export function unlikePlazaCreation(id: number): Promise<LikeActionResponse> {
   return client.delete(`/api/plaza/creations/${id}/like`)
-}
-
-/** 批量查询创作点赞状态 */
-export function getCreationLikeStatus(ids: number[]): Promise<LikeStatusResponse> {
-  return client.get('/api/plaza/creations/likes/status', {
-    params: { ids: ids.join(',') },
-  })
 }
 
 /** 单条切换分享状态 */

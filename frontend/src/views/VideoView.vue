@@ -363,7 +363,6 @@ const { downloadViaProxy } = useDownload()
 
 // ---------- 模型列表 ----------
 const modelsStore = useModelsStore()
-const VIDEO_MODELS = computed(() => modelsStore.videoModels)
 
 // ---------- 表单参数 ----------
 const mode = ref('text2video')
@@ -425,17 +424,6 @@ const { cost, loading: costLoading, insufficient: costInsufficient } = useCredit
     num_frames: seconds.value * frameRate.value,
   })
 )
-
-// 视频时长选项从 store 配置获取
-// 默认全量候选项；按当前帧率过滤后的可选列表在 ParamSelector 内部实现
-const DURATION_OPTIONS = computed(() => modelsStore.videoDurations.length > 0
-  ? modelsStore.videoDurations
-  : [3, 5, 7, 10, 15])
-
-// 视频帧率选项从 store 配置获取
-const FRAME_RATE_OPTIONS = computed(() => modelsStore.videoFrameRates.length > 0
-  ? modelsStore.videoFrameRates
-  : [24, 30])
 
 // store 加载完成后自动设置默认模型和参数
 watch(() => modelsStore.defaultVideoModel, (v) => {

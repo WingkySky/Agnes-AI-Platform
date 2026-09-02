@@ -166,7 +166,7 @@ function assetText(a: ShotAsset): string {
 }
 
 /** 资产集合 -> prompt 设定文本上下文（派生与向导预览共用） */
-export function buildAssetContexts(assets: ScriptAssets): { characters: string[]; scenes: string[] } {
+function buildAssetContexts(assets: ScriptAssets): { characters: string[]; scenes: string[] } {
   return {
     characters: assets.characters.map(assetText).filter(Boolean),
     scenes: assets.scenes.map(assetText).filter(Boolean),
@@ -303,11 +303,6 @@ export function findDerivedPanels(scriptPanelId: string, kind: 'image' | 'video'
     }
   }
   return result
-}
-
-/** 某脚本节点是否已有指定 kind 的派生节点 */
-export function hasDerivedConfigs(scriptPanelId: string, kind: 'image' | 'video'): boolean {
-  return findDerivedPanels(scriptPanelId, kind).length > 0
 }
 
 /** 某镜头的首帧图节点（role 为 first/缺省；前段帧/尾帧/链帧不算，无则 null） */

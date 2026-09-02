@@ -40,13 +40,6 @@ export function getStylePresets(params: PipelineListParams & { is_builtin?: bool
   return client.get('/api/pipeline/styles', { params })
 }
 
-/**
- * 获取风格预设详情
- */
-export function getStylePresetDetail(id: number): Promise<StylePreset> {
-  return client.get(`/api/pipeline/styles/${id}`)
-}
-
 // =====================================================
 // 剧本模板 API
 // =====================================================
@@ -56,13 +49,6 @@ export function getStylePresetDetail(id: number): Promise<StylePreset> {
  */
 export function getScriptTemplates(params: PipelineListParams = {}): Promise<ListResult<ScriptTemplate>> {
   return client.get('/api/pipeline/script-templates', { params })
-}
-
-/**
- * 获取剧本模板详情
- */
-export function getScriptTemplateDetail(id: number): Promise<ScriptTemplate> {
-  return client.get(`/api/pipeline/script-templates/${id}`)
 }
 
 // =====================================================

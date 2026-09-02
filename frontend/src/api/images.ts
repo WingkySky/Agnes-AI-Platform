@@ -12,9 +12,7 @@ import type {
   ImageGenerationRequest,
   ImageTaskCreatedResponse,
   ImageTaskStatusResponse,
-  ImageTaskCancelResponse,
-  ImageGenerationResponse,
-  ImageRecordResponse
+  ImageTaskCancelResponse
 } from '@/types'
 
 /**
@@ -38,18 +36,3 @@ export function cancelImageTask(taskId: string): Promise<ImageTaskCancelResponse
   return client.delete(`/api/images/tasks/${taskId}`)
 }
 
-/* ============ 以下为兼容旧代码的接口（同步模式） ============ */
-
-/**
- * 同步生成图片（阻塞式，不推荐新代码使用）
- */
-export function createImage(params: ImageGenerationRequest): Promise<ImageGenerationResponse> {
-  return client.post('/api/images/generations', params)
-}
-
-/**
- * 获取单张图片生成记录
- */
-export function getImageRecord(id: number): Promise<ImageRecordResponse> {
-  return client.get(`/api/images/${id}`)
-}

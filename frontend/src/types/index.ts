@@ -26,12 +26,6 @@ export interface FileInfo {
   url?: string
 }
 
-/** 健康检查响应 — 对齐 HealthResponse */
-export interface HealthResponse {
-  status: string
-  service: string
-}
-
 /** 模型信息 — 对齐 ModelInfo */
 /** 模型生成能力配置（按模型差异化的约束/规则；缺省=后端按模型名自动画像） */
 export interface ModelGenParams {
@@ -172,10 +166,6 @@ export interface DeleteResponse {
 }
 
 /** 批量删除请求 — 对齐 BatchDeleteRequest */
-export interface BatchDeleteRequest {
-  ids: number[]
-}
-
 /** 批量删除响应 — 对齐 BatchDeleteResponse */
 export interface BatchDeleteResponse {
   success: boolean
@@ -220,31 +210,6 @@ export interface GenerationContextPayload {
   asset_name?: string | null
 }
 
-/** 图片生成响应 — 对齐 ImageGenerationResponse */
-export interface ImageGenerationResponse {
-  id?: number | null
-  status: string
-  url?: string | null
-  b64_json?: string | null
-  model: string
-  prompt: string
-  size: string
-  created_at?: string | null
-  message?: string | null
-}
-
-/** 视频生成状态响应 — 对齐 VideoStatusResponse */
-export interface VideoStatusResponse {
-  id?: number | null
-  status: string
-  url?: string | null
-  poster_url?: string | null
-  model: string
-  prompt: string
-  created_at?: string | null
-  message?: string | null
-}
-
 /** 图片异步任务创建响应（内联 dict） */
 export interface ImageTaskCreatedResponse {
   task_id: string
@@ -274,18 +239,6 @@ export interface ImageTaskCancelResponse {
   task_id: string
   status: string
   message: string
-}
-
-/** 单张图片记录响应 — 对齐 ImageRecordResponse */
-export interface ImageRecordResponse {
-  id: number
-  type: 'image'
-  prompt: string
-  model?: string | null
-  params?: Record<string, unknown> | null
-  result_url?: string | null
-  status: string
-  created_at?: string | null
 }
 
 // =====================================================
@@ -394,15 +347,7 @@ export interface MessageAttachment {
 }
 
 /** 创建会话请求 — 对齐 CreateSessionRequest */
-export interface CreateSessionRequest {
-  title?: string
-}
-
 /** 更新会话标题请求 — 对齐 UpdateSessionRequest */
-export interface UpdateSessionRequest {
-  title: string
-}
-
 /** 发送消息请求 — 对齐 SendMessageRequest */
 export interface SendMessageRequest {
   content: string
@@ -601,12 +546,6 @@ export interface RegisterCanvasTaskParams {
 }
 
 /** 任务创建响应（后端提交生成任务后返回 task_id + status） */
-export interface TaskCreationResponse {
-  task_id: string
-  status: string
-  message?: string | null
-}
-
 // =====================================================
 // Provider 与模型管理类型
 // =====================================================

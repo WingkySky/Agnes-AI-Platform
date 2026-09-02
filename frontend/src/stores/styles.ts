@@ -5,17 +5,14 @@
  * ===================================================== */
 
 import { defineStore } from 'pinia'
-import { getStylePresets, getScriptTemplates } from '@/api/pipeline'
-import type { StylePreset, ScriptTemplate, PipelineListParams, ListResult } from '@/types'
+import { getStylePresets } from '@/api/pipeline'
+import type { StylePreset, PipelineListParams, ListResult } from '@/types'
 
 interface StylesState {
   stylePresets: StylePreset[]
   stylePresetsLoading: boolean
   stylePresetsLoaded: boolean
 
-  scriptTemplates: ScriptTemplate[]
-  scriptTemplatesLoading: boolean
-  scriptTemplatesLoaded: boolean
 }
 
 export const useStylesStore = defineStore('pipelineStyles', {
@@ -24,20 +21,9 @@ export const useStylesStore = defineStore('pipelineStyles', {
     stylePresetsLoading: false,
     stylePresetsLoaded: false,
 
-    scriptTemplates: [],
-    scriptTemplatesLoading: false,
-    scriptTemplatesLoaded: false,
   }),
 
   getters: {
-    /** 内置风格预设 */
-    builtinStyles(state): StylePreset[] {
-      return state.stylePresets.filter(s => s.is_builtin)
-    },
-    /** 用户自定义风格 */
-    userStyles(state): StylePreset[] {
-      return state.stylePresets.filter(s => !s.is_builtin)
-    },
   },
 
   actions: {
@@ -64,29 +50,10 @@ export const useStylesStore = defineStore('pipelineStyles', {
       }
     },
 
-    /** 加载剧本模板列表 */
-    async loadScriptTemplates() {
-      if (this.scriptTemplatesLoading) return
-      this.scriptTemplatesLoading = true
-      try {
-        const result: ListResult<ScriptTemplate> = await getScriptTemplates({ page: 1, page_size: 50 })
-        this.scriptTemplates = result.items
-        this.scriptTemplatesLoaded = true
-      } catch (e) {
-        console.error('加载剧本模板失败:', e)
-        throw e
-      } finally {
-        this.scriptTemplatesLoading = false
-      }
-    },
-
     clearAll() {
       this.stylePresets = []
       this.stylePresetsLoading = false
       this.stylePresetsLoaded = false
-      this.scriptTemplates = []
-      this.scriptTemplatesLoading = false
-      this.scriptTemplatesLoaded = false
     },
   },
 })

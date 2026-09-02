@@ -912,11 +912,6 @@ export const useProjectStore = defineStore('project', {
       }
     },
 
-    async fetchMergeStatus() {
-      if (!this.currentProjectId) return
-      this.mergeStatus = await apiGetMergeStatus(this.currentProjectId)
-    },
-
     // ================ Phase 2: 配音（TTS） ================
     async listAudios(shotId: number) {
       if (!this.currentProjectId) return []
@@ -994,16 +989,6 @@ export const useProjectStore = defineStore('project', {
       return await apiGenerateSubtitlesWithWhisper(this.currentProjectId, data)
     },
 
-    async fetchSubtitleClips() {
-      if (!this.currentProjectId) return []
-      return await apiListSubtitleClips(this.currentProjectId)
-    },
-
-    async fetchSubtitleStyle() {
-      if (!this.currentProjectId) return
-      this.subtitleStyle = await apiGetSubtitleStyle(this.currentProjectId)
-    },
-
     async updateSubtitleStyle(data: SubtitleStyle) {
       if (!this.currentProjectId) throw new Error('未选择项目')
       this.subtitleStyle = await apiUpdateSubtitleStyle(this.currentProjectId, data)
@@ -1042,11 +1027,6 @@ export const useProjectStore = defineStore('project', {
       } finally {
         this.timelineLoading = false
       }
-    },
-
-    async fetchTimelineClips(trackType?: TimelineTrackType) {
-      if (!this.currentProjectId) return []
-      return await apiListTimelineClips(this.currentProjectId, trackType)
     },
 
     async createTimelineClip(data: TimelineClipCreateRequest) {

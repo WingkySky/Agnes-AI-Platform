@@ -1309,22 +1309,13 @@ const enUS = {
     backgroundGrid: 'Grid',
     backgroundBlank: 'Blank',
     // Snap to grid
-    toggleGrid: 'Snap to grid',
-    gridSize: 'Grid size',
     // Context menu
-    copyPanel: 'Copy Panel',
     deletePanel: 'Delete Panel',
-    selectPanel: 'Select Panel',
-    lockPanel: 'Lock Panel',
     deleteConnection: 'Delete Connection',
     disconnect: 'Disconnect',
     selectAll: 'Select All Panels',
     paste: 'Paste',
-    centerView: 'Center View',
-    clearCanvas: 'Clear Canvas',
     // Interaction hints
-    interactionHint: 'Hold Space + drag to pan, scroll to zoom; drag panel edge anchor to connect',
-    spacePanningHint: 'Temporary pan mode — release Space to exit',
     // Right properties panel
     properties: 'Properties',
     propertiesTitle: 'Panel Properties',
@@ -1353,7 +1344,6 @@ const enUS = {
     exportSuccess: 'Canvas exported to JSON file',
     importSuccess: 'Canvas imported ({n} panels, {m} connections)',
     importFailed: 'Canvas import failed: {msg}',
-    clearCanvasConfirm: 'Clear the current canvas? You can undo with Ctrl+Z.',
     // Flow mode
     flowModeEnabled: 'Flow mode enabled, execution order auto-detected',
     flowModeDisabled: 'Flow mode disabled',

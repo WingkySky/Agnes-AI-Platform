@@ -1291,23 +1291,13 @@ const zhCN = {
     backgroundDot: '点阵',
     backgroundGrid: '网格',
     backgroundBlank: '空白',
-    // 网格吸附
-    toggleGrid: '网格吸附',
-    gridSize: '网格大小',
     // 右键菜单
-    copyPanel: '复制面板',
     deletePanel: '删除面板',
-    selectPanel: '选中面板',
-    lockPanel: '锁定面板',
     deleteConnection: '删除连线',
     disconnect: '断开连接',
     selectAll: '全选面板',
     paste: '粘贴',
-    centerView: '居中视图',
-    clearCanvas: '清空画布',
     // 交互提示
-    interactionHint: '按住 Space + 拖动可平移画布，滚轮缩放；拖动面板边缘锚点可连线',
-    spacePanningHint: '已临时进入平移模式，松开 Space 退出',
     // 右侧属性面板
     properties: '属性',
     propertiesTitle: '面板属性',
@@ -1336,7 +1326,6 @@ const zhCN = {
     exportSuccess: '已导出画布到 JSON 文件',
     importSuccess: '画布导入成功（{n} 个面板，{m} 条连线）',
     importFailed: '画布导入失败：{msg}',
-    clearCanvasConfirm: '确定要清空当前画布吗？此操作可通过 Ctrl+Z 撤销。',
     // 流程模式
     flowModeEnabled: '流程模式已启用，自动识别执行顺序',
     flowModeDisabled: '流程模式已禁用',

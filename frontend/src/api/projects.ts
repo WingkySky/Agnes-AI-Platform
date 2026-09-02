@@ -157,10 +157,6 @@ export function listScripts(projectId: number): Promise<ProjectScript[]> {
   return client.get(`/api/projects/${projectId}/scripts`)
 }
 
-export function getScript(projectId: number, scriptId: number): Promise<ProjectScript> {
-  return client.get(`/api/projects/${projectId}/scripts/${scriptId}`)
-}
-
 export function createScript(projectId: number, data: ScriptCreateRequest): Promise<ProjectScript> {
   return client.post(`/api/projects/${projectId}/scripts`, data)
 }
@@ -334,10 +330,6 @@ export function unbindPropFromShot(projectId: number, shotId: number, propId: nu
 // 帧图 API
 // =====================================================
 
-export function listFrameImages(projectId: number, shotId: number): Promise<ProjectFrameImage[]> {
-  return client.get(`/api/projects/${projectId}/shots/${shotId}/frame-images`)
-}
-
 export function generateFrameImage(projectId: number, shotId: number, data: GenerateFrameImageRequest): Promise<ProjectFrameImage> {
   return client.post(`/api/projects/${projectId}/shots/${shotId}/frame-images/generate`, data)
 }
@@ -365,10 +357,6 @@ export function deleteFrameImage(projectId: number, shotId: number, frameImageId
 // =====================================================
 // 视频 API
 // =====================================================
-
-export function listVideos(projectId: number, shotId: number): Promise<ProjectVideo[]> {
-  return client.get(`/api/projects/${projectId}/shots/${shotId}/videos`)
-}
 
 export function generateVideo(projectId: number, shotId: number, data: GenerateVideoRequest): Promise<ProjectVideo> {
   return client.post(`/api/projects/${projectId}/shots/${shotId}/videos/generate`, data)
