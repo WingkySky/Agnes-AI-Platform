@@ -18,6 +18,7 @@ from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException, Query
 
 from app.core.config import settings
+from app.core.response import ok
 
 logger = __import__("logging").getLogger("agnes_platform")
 router = APIRouter()
@@ -199,7 +200,7 @@ async def query_logs(
     log_dir = settings.log_dir
 
     if not os.path.exists(log_dir):
-        return {"logs": [], "total": 0, "message": "日志目录不存在，可能尚未生成日志文件"}
+        return ok(data={"logs": [], "total": 0}, message="日志目录不存在，可能尚未生成日志文件")
 
     if format == "json":
         logs = _read_jsonl_logs(
@@ -218,7 +219,7 @@ async def query_logs(
             limit=limit,
         )
 
-    return {
+    return ok(data={
         "logs": logs,
         "total": len(logs),
         "query": {
@@ -230,7 +231,7 @@ async def query_logs(
             "limit": limit,
             "format": format,
         },
-    }
+    })
 
 
 @router.get("/logs/errors", summary="快速获取最近错误日志")
@@ -249,7 +250,7 @@ async def get_recent_errors(
     log_dir = settings.log_dir
 
     if not os.path.exists(log_dir):
-        return {"errors": [], "total": 0, "message": "日志目录不存在"}
+        return ok(data={"errors": [], "total": 0}, message="日志目录不存在")
 
     # 先查 ERROR 级别
     errors = _read_jsonl_logs(
@@ -272,10 +273,10 @@ async def get_recent_errors(
     # 按时间倒序排列
     errors.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
 
-    return {
+    return ok(data={
         "errors": errors[:limit],
         "total": len(errors[:limit]),
-    }
+    })
 
 
 @router.get("/logs/stats", summary="日志统计信息")
@@ -286,7 +287,7 @@ async def get_log_stats():
     log_dir = settings.log_dir
 
     if not os.path.exists(log_dir):
-        return {"exists": False, "message": "日志目录不存在"}
+        return ok(data={"exists": False}, message="日志目录不存在")
 
     stats: Dict[str, Any] = {"exists": True, "files": {}}
 
@@ -316,4 +317,4 @@ async def get_log_stats():
 
         stats["files"][filename] = file_info
 
-    return stats
+    return ok(data=stats)

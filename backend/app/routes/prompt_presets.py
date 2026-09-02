@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.database import get_async_db
+from app.core.response import ok
 from app.core.security import get_current_user, get_current_user_optional
 from app.models.generation import Generation
 from app.models.plaza_like import PlazaLike
@@ -101,7 +102,7 @@ class PresetListResponse(BaseModel):
 
 # ---------- 列表查询 ----------
 
-@router.get("", response_model=PresetListResponse, summary="统一预设广场列表")
+@router.get("", summary="统一预设广场列表")
 async def list_presets(
     tab: str = Query("plaza", description="plaza（广场）/ favorites（我的收藏）/ recent（最近使用）/ mine（我的预设）"),
     type: Optional[str] = Query(None, description="预设类型，逗号分隔多类型（style,effect,camera,prompt,script）"),
@@ -126,15 +127,15 @@ async def list_presets(
         page=page,
         page_size=page_size,
     )
-    return PresetListResponse(
+    return ok(data=PresetListResponse(
         items=[PresetResponse.model_validate(item) for item in items],
         total=total,
-    )
+    ))
 
 
 # ---------- 创建 / 更新 / 删除 ----------
 
-@router.post("", response_model=PresetResponse, summary="创建提示词预设")
+@router.post("", summary="创建提示词预设")
 async def create_preset(
     payload: PresetCreate,
     db: AsyncSession = Depends(get_async_db),
@@ -159,7 +160,7 @@ async def create_preset(
         pipeline_config=payload.pipeline_config,
         is_public=payload.is_public,
     )
-    return PresetResponse.model_validate(preset)
+    return ok(data=PresetResponse.model_validate(preset))
 
 
 @router.get("/export", summary="导出当前用户预设为 JSON")
@@ -173,7 +174,7 @@ async def export_presets(
         .filter(PromptPreset.user_id == current_user.id)
         .order_by(PromptPreset.created_at.desc())
     )
-    return [
+    return ok(data=[
         {
             "name": p.name,
             "prompt_text": p.prompt_text or "",
@@ -189,7 +190,7 @@ async def export_presets(
             "pipeline_config": p.pipeline_config,
         }
         for p in result.scalars().all()
-    ]
+    ])
 
 
 @router.post("/import", summary="批量导入预设")
@@ -247,15 +248,15 @@ async def import_presets(
         except Exception:
             skipped.append(name)
 
-    return {
+    return ok(data={
         "imported": len(imported),
         "skipped": len(skipped),
         "renamed": len(renamed),
         "items": [item.model_dump() for item in imported],
-    }
+    })
 
 
-@router.get("/{preset_id}", response_model=PresetResponse, summary="获取提示词预设详情")
+@router.get("/{preset_id}", summary="获取提示词预设详情")
 async def get_preset(
     preset_id: int,
     db: AsyncSession = Depends(get_async_db),
@@ -268,10 +269,10 @@ async def get_preset(
     # 权限：自己的或公开审核通过的
     if preset.user_id != current_user.id and not (preset.is_public and preset.is_approved):
         raise HTTPException(status_code=403, detail="无权查看")
-    return PresetResponse.model_validate(preset)
+    return ok(data=PresetResponse.model_validate(preset))
 
 
-@router.put("/{preset_id}", response_model=PresetResponse, summary="更新提示词预设")
+@router.put("/{preset_id}", summary="更新提示词预设")
 async def update_preset(
     preset_id: int,
     payload: PresetUpdate,
@@ -308,7 +309,7 @@ async def update_preset(
         )
 
     updated = await svc.update_preset(db, preset_id, **update_data)
-    return PresetResponse.model_validate(updated)
+    return ok(data=PresetResponse.model_validate(updated))
 
 
 @router.delete("/{preset_id}", summary="删除提示词预设")
@@ -324,10 +325,10 @@ async def delete_preset(
     if preset.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="无权删除")
 
-    ok = await svc.delete_preset(db, preset_id)
-    if not ok:
+    deleted = await svc.delete_preset(db, preset_id)
+    if not deleted:
         raise HTTPException(status_code=400, detail="删除失败")
-    return {"message": "已删除"}
+    return ok(message="已删除")
 
 
 # ---------- 收藏 / 使用记录 ----------
@@ -340,7 +341,7 @@ async def favorite_preset(
 ):
     """toggle 收藏状态，返回操作后的 is_favorite"""
     is_favorite = await svc.toggle_favorite(db, current_user.id, preset_id)
-    return {"is_favorite": is_favorite}
+    return ok(data={"is_favorite": is_favorite})
 
 
 @router.post("/{preset_id}/use", summary="记录预设使用")
@@ -351,7 +352,7 @@ async def use_preset(
 ):
     """应用预设时调用：upsert 最近使用记录 + usage_count+1"""
     await svc.record_use(db, current_user.id, preset_id)
-    return {"message": "ok"}
+    return ok(message="ok")
 
 
 # ---------- Fork（复制预设） ----------
@@ -406,7 +407,7 @@ async def fork_preset(
         pipeline_config=preset.pipeline_config,
         is_public=False,
     )
-    return PresetResponse.model_validate(new_preset)
+    return ok(data=PresetResponse.model_validate(new_preset))
 
 
 # ---------- 预设关联作品查询（展示形态） ----------
@@ -482,12 +483,12 @@ async def get_preset_works(
         for item in items
     ]
 
-    return {
+    return ok(data={
         "total": total,
         "page": page,
         "page_size": page_size,
         "items": works,
-    }
+    })
 
 
 # ---------- 封面生成 ----------
@@ -515,10 +516,10 @@ async def generate_preset_cover(
         if preset.type in cover_svc.VIDEO_COVER_TYPES:
             url = await cover_svc.generate_cover_video(preset)
             await svc.update_preset(db, preset_id, cover_video=url)
-            return {"cover_video": url}
+            return ok(data={"cover_video": url})
         url = await cover_svc.generate_cover_image(preset)
         await svc.update_preset(db, preset_id, cover_image=url)
-        return {"cover_image": url}
+        return ok(data={"cover_image": url})
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -555,4 +556,4 @@ async def submit_for_review(
     updated = await svc.update_preset(
         db, preset_id, is_public=True, is_approved=False
     )
-    return PresetResponse.model_validate(updated)
+    return ok(data=PresetResponse.model_validate(updated))

@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.database import get_async_db
+from app.core.response import ok
 from app.core.security import get_current_user, get_current_user_optional
 from app.models.generation import Generation
 from app.models.user import User
@@ -145,18 +146,20 @@ async def create_image_task_async(
 
     logger.info("[图片生成] 异步任务已创建: task_id=%s user=%s cost=%d", task.task_id, current_user.username, cost)
 
-    return {
-        "task_id": task.task_id,
-        "id": task.task_id,
-        "status": "pending",
-        "prompt": prompt,
-        "model": req.model,
-        "size": size,
-        "credits_consumed": cost,
-        "remaining_credits": current_user.credits,
-        "created_at": datetime.utcnow().isoformat(),
-        "message": "任务已创建，请使用 GET /api/images/tasks/{task_id} 轮询状态",
-    }
+    return ok(
+        data={
+            "task_id": task.task_id,
+            "id": task.task_id,
+            "status": "pending",
+            "prompt": prompt,
+            "model": req.model,
+            "size": size,
+            "credits_consumed": cost,
+            "remaining_credits": current_user.credits,
+            "created_at": datetime.utcnow().isoformat(),
+        },
+        message="任务已创建，请使用 GET /api/images/tasks/{task_id} 轮询状态",
+    )
 
 
 @router.get("/images/tasks/{task_id}", summary="查询图片异步任务状态")
@@ -189,7 +192,7 @@ async def get_image_task_status(
             result = await db.execute(stmt)
             record = result.scalar_one_or_none()
             if record:
-                return {
+                return ok(data={
                     "task_id": task_id,
                     "status": record.status,
                     "progress": 100 if record.status == "success" else 0,
@@ -197,7 +200,7 @@ async def get_image_task_status(
                     "url": record.result_url,
                     "credits_consumed": record.credits_consumed,
                     "elapsed_sec": 0,
-                }
+                })
         except Exception as e:
             logger.warning("[图片生成] 数据库查询失败: %s", e)
 
@@ -206,7 +209,7 @@ async def get_image_task_status(
             detail=f"未找到任务（ID: {task_id}），可能已过期或不存在",
         )
 
-    return task.to_dict()
+    return ok(data=task.to_dict())
 
 
 @router.delete("/images/tasks/{task_id}", summary="取消图片异步任务")
@@ -223,18 +226,16 @@ async def cancel_image_task(
             raise HTTPException(status_code=404, detail="任务不存在或无权操作")
 
     await image_poller_manager.cancel(task_id)
-    return {
-        "success": True,
-        "task_id": task_id,
-        "status": "cancelled",
-        "message": f"已尝试取消任务 {task_id}",
-    }
+    return ok(
+        data={"task_id": task_id, "status": "cancelled"},
+        message=f"已尝试取消任务 {task_id}",
+    )
 
 
 # =====================================================
 # 【同步模式】—— 向后兼容
 # =====================================================
-@router.post("/images/generations", response_model=ImageGenerationResponse, summary="同步生成图片（向后兼容）")
+@router.post("/images/generations", summary="同步生成图片（向后兼容）")
 async def create_image_generation(
     req: ImageGenerationRequest,
     db: AsyncSession = Depends(get_async_db),
@@ -354,7 +355,7 @@ async def create_image_generation(
     except Exception as e:
         logger.warning("[图片生成] 写入历史失败: %s", e)
 
-    return ImageGenerationResponse(
+    return ok(data=ImageGenerationResponse(
         id=record.id if record else 0,
         status="success",
         url=output_url,
@@ -365,10 +366,10 @@ async def create_image_generation(
         created_at=datetime.utcnow().isoformat(),
         credits_consumed=cost,
         remaining_credits=current_user.credits,
-    )
+    ))
 
 
-@router.get("/images/{image_id}", response_model=ImageRecordResponse, summary="获取单张图片记录")
+@router.get("/images/{image_id}", summary="获取单张图片记录")
 async def get_image_record(
     image_id: int,
     db: AsyncSession = Depends(get_async_db),
@@ -389,7 +390,7 @@ async def get_image_record(
     if not record:
         raise HTTPException(status_code=404, detail="未找到对应图片记录")
 
-    return ImageRecordResponse(
+    return ok(data=ImageRecordResponse(
         id=record.id,
         type="image",
         prompt=record.prompt,
@@ -399,7 +400,7 @@ async def get_image_record(
         status=record.status,
         credits_consumed=record.credits_consumed,
         created_at=record.created_at.isoformat() if record.created_at else None,
-    )
+    ))
 
 
 # =====================================================

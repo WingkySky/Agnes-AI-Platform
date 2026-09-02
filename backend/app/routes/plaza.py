@@ -22,6 +22,7 @@ from sqlalchemy.future import select
 from sqlalchemy import desc, func, or_
 
 from app.core.database import get_async_db
+from app.core.response import ok
 from app.core.security import get_current_user, get_current_user_optional
 from app.models.generation import Generation
 from app.models.plaza_like import PlazaLike
@@ -98,7 +99,7 @@ def _build_plaza_work(
 # =====================================================
 # 广场列表接口
 # =====================================================
-@router.get("/plaza/works", response_model=PlazaListResponse, summary="获取广场公开作品列表")
+@router.get("/plaza/works", summary="获取广场公开作品列表")
 async def get_plaza_works(
     type: str = Query("all", description="筛选类型: all / image / video"),
     sort: str = Query("latest", description="排序: latest（最新）/ popular（最热门）"),
@@ -177,18 +178,18 @@ async def get_plaza_works(
         for item in items
     ]
 
-    return PlazaListResponse(
+    return ok(data=PlazaListResponse(
         total=total,
         page=page,
         page_size=page_size,
         items=works,
-    )
+    ))
 
 
 # =====================================================
 # 广场作品详情接口
 # =====================================================
-@router.get("/plaza/works/{work_id}", response_model=PlazaWork, summary="获取广场作品详情")
+@router.get("/plaza/works/{work_id}", summary="获取广场作品详情")
 async def get_plaza_work_detail(
     work_id: int,
     db: AsyncSession = Depends(get_async_db),
@@ -232,17 +233,17 @@ async def get_plaza_work_detail(
         )
         liked_ids = {row[0] for row in like_result.all()}
 
-    return _build_plaza_work(
+    return ok(data=_build_plaza_work(
         record, author,
         current_user.id if current_user else None,
         liked_ids,
-    )
+    ))
 
 
 # =====================================================
 # 点赞接口
 # =====================================================
-@router.post("/plaza/works/{work_id}/like", response_model=LikeActionResponse, summary="点赞作品")
+@router.post("/plaza/works/{work_id}/like", summary="点赞作品")
 async def like_plaza_work(
     work_id: int,
     db: AsyncSession = Depends(get_async_db),
@@ -271,7 +272,7 @@ async def like_plaza_work(
     )
     if existing.scalar_one_or_none():
         # 已点赞，直接返回当前状态
-        return LikeActionResponse(liked=True, likes_count=record.likes_count or 0)
+        return ok(data=LikeActionResponse(liked=True, likes_count=record.likes_count or 0))
 
     # 创建点赞记录
     like = PlazaLike(
@@ -283,10 +284,10 @@ async def like_plaza_work(
     await db.commit()
     await db.refresh(record)
 
-    return LikeActionResponse(liked=True, likes_count=record.likes_count)
+    return ok(data=LikeActionResponse(liked=True, likes_count=record.likes_count))
 
 
-@router.delete("/plaza/works/{work_id}/like", response_model=LikeActionResponse, summary="取消点赞")
+@router.delete("/plaza/works/{work_id}/like", summary="取消点赞")
 async def unlike_plaza_work(
     work_id: int,
     db: AsyncSession = Depends(get_async_db),
@@ -309,7 +310,7 @@ async def unlike_plaza_work(
             select(Generation).filter(Generation.id == work_id)
         )
         record = gen_result.scalar_one_or_none()
-        return LikeActionResponse(liked=False, likes_count=(record.likes_count if record else 0))
+        return ok(data=LikeActionResponse(liked=False, likes_count=(record.likes_count if record else 0)))
 
     # 删除点赞记录
     await db.delete(like)
@@ -326,13 +327,13 @@ async def unlike_plaza_work(
     if record:
         await db.refresh(record)
 
-    return LikeActionResponse(liked=False, likes_count=(record.likes_count if record else 0))
+    return ok(data=LikeActionResponse(liked=False, likes_count=(record.likes_count if record else 0)))
 
 
 # =====================================================
 # 批量查询点赞状态
 # =====================================================
-@router.get("/plaza/likes/status", response_model=LikeStatusResponse, summary="批量查询点赞状态")
+@router.get("/plaza/likes/status", summary="批量查询点赞状态")
 async def get_like_status(
     ids: str = Query(..., description="作品 ID 列表，逗号分隔"),
     db: AsyncSession = Depends(get_async_db),
@@ -348,7 +349,7 @@ async def get_like_status(
         raise HTTPException(status_code=400, detail="ids 格式错误，应为逗号分隔的数字")
 
     if not id_list:
-        return LikeStatusResponse(liked_ids=[])
+        return ok(data=LikeStatusResponse(liked_ids=[]))
 
     stmt = select(PlazaLike.generation_id).filter(
         PlazaLike.user_id == current_user.id,
@@ -357,7 +358,7 @@ async def get_like_status(
     result = await db.execute(stmt)
     liked_ids = [row[0] for row in result.all()]
 
-    return LikeStatusResponse(liked_ids=liked_ids)
+    return ok(data=LikeStatusResponse(liked_ids=liked_ids))
 
 
 # =====================================================
@@ -393,7 +394,7 @@ def _build_plaza_creation(
     )
 
 
-@router.get("/plaza/creations", response_model=PlazaCreationListResponse, summary="获取广场公开创作资产列表")
+@router.get("/plaza/creations", summary="获取广场公开创作资产列表")
 async def get_plaza_creations(
     asset_type: str = Query("all", description="筛选类型: all / character / scene / material / clip / final / prop / brand"),
     kind: str = Query("all", description="媒体类型: all / image / video"),
@@ -462,15 +463,15 @@ async def get_plaza_creations(
         for item in items
     ]
 
-    return PlazaCreationListResponse(
+    return ok(data=PlazaCreationListResponse(
         total=total,
         page=page,
         page_size=page_size,
         items=creations,
-    )
+    ))
 
 
-@router.get("/plaza/creations/likes/status", response_model=LikeStatusResponse, summary="批量查询创作点赞状态")
+@router.get("/plaza/creations/likes/status", summary="批量查询创作点赞状态")
 async def get_creation_like_status(
     ids: str = Query(..., description="创作 ID 列表，逗号分隔"),
     db: AsyncSession = Depends(get_async_db),
@@ -483,7 +484,7 @@ async def get_creation_like_status(
         raise HTTPException(status_code=400, detail="ids 格式错误，应为逗号分隔的数字")
 
     if not id_list:
-        return LikeStatusResponse(liked_ids=[])
+        return ok(data=LikeStatusResponse(liked_ids=[]))
 
     stmt = select(AssetLike.asset_id).filter(
         AssetLike.user_id == current_user.id,
@@ -492,10 +493,10 @@ async def get_creation_like_status(
     result = await db.execute(stmt)
     liked_ids = [row[0] for row in result.all()]
 
-    return LikeStatusResponse(liked_ids=liked_ids)
+    return ok(data=LikeStatusResponse(liked_ids=liked_ids))
 
 
-@router.get("/plaza/creations/{creation_id}", response_model=PlazaCreation, summary="获取广场创作资产详情")
+@router.get("/plaza/creations/{creation_id}", summary="获取广场创作资产详情")
 async def get_plaza_creation_detail(
     creation_id: int,
     db: AsyncSession = Depends(get_async_db),
@@ -535,14 +536,14 @@ async def get_plaza_creation_detail(
         )
         liked_ids = {row[0] for row in like_result.all()}
 
-    return _build_plaza_creation(
+    return ok(data=_build_plaza_creation(
         asset, author,
         current_user.id if current_user else None,
         liked_ids,
-    )
+    ))
 
 
-@router.post("/plaza/creations/{creation_id}/like", response_model=LikeActionResponse, summary="点赞创作")
+@router.post("/plaza/creations/{creation_id}/like", summary="点赞创作")
 async def like_plaza_creation(
     creation_id: int,
     db: AsyncSession = Depends(get_async_db),
@@ -566,7 +567,7 @@ async def like_plaza_creation(
         )
     )
     if existing.scalar_one_or_none():
-        return LikeActionResponse(liked=True, likes_count=asset.likes_count or 0)
+        return ok(data=LikeActionResponse(liked=True, likes_count=asset.likes_count or 0))
 
     like = AssetLike(user_id=current_user.id, asset_id=creation_id)
     db.add(like)
@@ -574,10 +575,10 @@ async def like_plaza_creation(
     await db.commit()
     await db.refresh(asset)
 
-    return LikeActionResponse(liked=True, likes_count=asset.likes_count)
+    return ok(data=LikeActionResponse(liked=True, likes_count=asset.likes_count))
 
 
-@router.delete("/plaza/creations/{creation_id}/like", response_model=LikeActionResponse, summary="取消点赞创作")
+@router.delete("/plaza/creations/{creation_id}/like", summary="取消点赞创作")
 async def unlike_plaza_creation(
     creation_id: int,
     db: AsyncSession = Depends(get_async_db),
@@ -594,7 +595,7 @@ async def unlike_plaza_creation(
     if not like:
         asset_result = await db.execute(select(Asset).filter(Asset.id == creation_id))
         asset = asset_result.scalar_one_or_none()
-        return LikeActionResponse(liked=False, likes_count=(asset.likes_count if asset else 0))
+        return ok(data=LikeActionResponse(liked=False, likes_count=(asset.likes_count if asset else 0)))
 
     await db.delete(like)
     asset_result = await db.execute(select(Asset).filter(Asset.id == creation_id))
@@ -605,4 +606,4 @@ async def unlike_plaza_creation(
     if asset:
         await db.refresh(asset)
 
-    return LikeActionResponse(liked=False, likes_count=(asset.likes_count if asset else 0))
+    return ok(data=LikeActionResponse(liked=False, likes_count=(asset.likes_count if asset else 0)))

@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.database import get_async_db
+from app.core.response import ok
 from app.core.security import require_permission
 from app.models.user import User
 from app.models.role import Role, DEFAULT_ROLES
@@ -71,31 +72,31 @@ async def ensure_default_roles(db: AsyncSession) -> None:
 
 
 # ---------- 角色列表 ----------
-@router.get("", response_model=list[RoleResponse], summary="[管理员] 角色列表")
+@router.get("", summary="[管理员] 角色列表")
 async def list_roles(
     db: AsyncSession = Depends(get_async_db),
     _admin: User = Depends(require_permission("role:manage")),
 ):
     result = await db.execute(select(Role).order_by(Role.id.asc()))
     roles = result.scalars().all()
-    return [RoleResponse(
+    return ok(data=[RoleResponse(
         id=r.id, name=r.name, display_name=r.display_name,
         description=r.description, permissions=r.permissions or [],
         is_system=bool(r.is_system),
         created_at=r.created_at, updated_at=r.updated_at,
-    ) for r in roles]
+    ) for r in roles])
 
 
 # ---------- 权限点定义列表 ----------
-@router.get("/permissions", response_model=list[PermissionItem], summary="[管理员] 获取所有权限点定义")
+@router.get("/permissions", summary="[管理员] 获取所有权限点定义")
 async def list_permissions(
     _admin: User = Depends(require_permission("role:manage")),
 ):
-    return [PermissionItem(**p) for p in PERMISSION_DEFS]
+    return ok(data=[PermissionItem(**p) for p in PERMISSION_DEFS])
 
 
 # ---------- 新建角色 ----------
-@router.post("", response_model=RoleResponse, summary="[管理员] 新建角色")
+@router.post("", summary="[管理员] 新建角色")
 async def create_role(
     req: RoleCreateRequest,
     db: AsyncSession = Depends(get_async_db),
@@ -118,16 +119,16 @@ async def create_role(
     await db.refresh(role)
 
     logger.info("[角色管理] %s 创建角色 %s", admin.username, role.name)
-    return RoleResponse(
+    return ok(data=RoleResponse(
         id=role.id, name=role.name, display_name=role.display_name,
         description=role.description, permissions=role.permissions or [],
         is_system=bool(role.is_system),
         created_at=role.created_at, updated_at=role.updated_at,
-    )
+    ))
 
 
 # ---------- 修改角色 ----------
-@router.put("/{role_name}", response_model=RoleResponse, summary="[管理员] 修改角色")
+@router.put("/{role_name}", summary="[管理员] 修改角色")
 async def update_role(
     role_name: str,
     req: RoleUpdateRequest,
@@ -152,12 +153,12 @@ async def update_role(
     await db.refresh(role)
 
     logger.info("[角色管理] %s 修改角色 %s", admin.username, role.name)
-    return RoleResponse(
+    return ok(data=RoleResponse(
         id=role.id, name=role.name, display_name=role.display_name,
         description=role.description, permissions=role.permissions or [],
         is_system=bool(role.is_system),
         created_at=role.created_at, updated_at=role.updated_at,
-    )
+    ))
 
 
 # ---------- 删除角色 ----------
@@ -184,4 +185,4 @@ async def delete_role(
     await db.commit()
 
     logger.info("[角色管理] %s 删除角色 %s", admin.username, role_name)
-    return {"success": True, "message": "角色已删除"}
+    return ok(message="角色已删除")

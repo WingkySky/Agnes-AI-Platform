@@ -23,6 +23,7 @@ from sqlalchemy.future import select
 
 from app.core.config import settings
 from app.core.database import get_async_db, new_async_session
+from app.core.response import ok
 from app.core.security import get_current_user, get_current_user_optional
 from app.models.generation import Generation
 from app.models.user import User
@@ -74,7 +75,7 @@ def _validate_image_size(raw: str, label: str) -> None:
         )
 
 
-@router.post("/videos", response_model=VideoTaskCreatedResponse, summary="创建视频生成任务")
+@router.post("/videos", summary="创建视频生成任务")
 async def create_video_task(
     req: VideoGenerationRequest,
     db: AsyncSession = Depends(get_async_db),
@@ -286,26 +287,28 @@ async def create_video_task(
         context=req.context.model_dump() if req.context else None,
     )
 
-    return VideoTaskCreatedResponse(
-        task_id=task_id,
-        video_id=video_id,
-        status="pending",
-        prompt=prompt,
-        model=req.model,
-        num_frames=req.num_frames,
-        frame_rate=req.frame_rate,
-        width=req.width,
-        height=req.height,
-        aspect_ratio=req.aspect_ratio,
-        seconds=req.seconds,
-        mode=req.mode,
-        credits_consumed=cost,
-        remaining_credits=current_user.credits,
+    return ok(
+        data=VideoTaskCreatedResponse(
+            task_id=task_id,
+            video_id=video_id,
+            status="pending",
+            prompt=prompt,
+            model=req.model,
+            num_frames=req.num_frames,
+            frame_rate=req.frame_rate,
+            width=req.width,
+            height=req.height,
+            aspect_ratio=req.aspect_ratio,
+            seconds=req.seconds,
+            mode=req.mode,
+            credits_consumed=cost,
+            remaining_credits=current_user.credits,
+        ),
         message="任务已创建，请轮询 GET /api/videos/{task_id} 获取最新状态",
     )
 
 
-@router.get("/videos/{task_id}", response_model=VideoStatusResponse, summary="查询视频任务状态")
+@router.get("/videos/{task_id}", summary="查询视频任务状态")
 async def get_video_status(
     task_id: str,
     db: AsyncSession = Depends(get_async_db),
@@ -328,7 +331,7 @@ async def get_video_status(
             cached_task = None
 
     if cached_task:
-        return VideoStatusResponse(
+        return ok(data=VideoStatusResponse(
             task_id=cached_task.task_id,
             video_id=cached_task.video_id,
             status=cached_task.status,
@@ -336,7 +339,7 @@ async def get_video_status(
             video_url=cached_task.video_url,
             message=cached_task.error_message,
             elapsed_sec=cached_task.to_dict()["elapsed_sec"],
-        )
+        ))
 
     # 方式 2：从数据库查询已完成的记录（按用户隔离）
     stmt = select(Generation).filter(
@@ -350,14 +353,14 @@ async def get_video_status(
     record = result.scalar_one_or_none()
 
     if record:
-        return VideoStatusResponse(
+        return ok(data=VideoStatusResponse(
             task_id=record.task_id,
             status=record.status,
             progress=100 if record.status == "success" else 0,
             video_url=record.result_url,
             message=None if record.status == "success" else "任务已完成",
             elapsed_sec=0,
-        )
+        ))
 
     raise HTTPException(
         status_code=404,
@@ -382,7 +385,7 @@ async def cancel_video_task(
             raise HTTPException(status_code=404, detail="任务不存在或无权操作")
 
     await poller_manager.cancel(task_id=task_id)
-    return {"success": True, "message": f"已尝试中止任务 {task_id}"}
+    return ok(message=f"已尝试中止任务 {task_id}")
 
 
 # =====================================================

@@ -63,7 +63,7 @@ export function getChatSession(sessionId: number): Promise<ChatSession> {
 /**
  * 删除会话
  */
-export function deleteChatSession(sessionId: number): Promise<{ success: boolean; message: string }> {
+export function deleteChatSession(sessionId: number): Promise<null> {
   return client.delete(`/api/chat/sessions/${sessionId}`)
 }
 
@@ -246,7 +246,7 @@ export function getMediaStatus(taskId: string): Promise<MediaStatusResponse> {
  */
 export function mediaCallback(
   { message_id, task_id, media_url, status = 'success' }: MediaCallbackRequest & { status?: string }
-): Promise<{ success: boolean; message: string }> {
+): Promise<null> {
   return client.post('/api/chat/media-callback',
     { message_id, task_id, media_url, status },
     { silent: true }  // 静默模式：即使后端返回错误也不弹窗（由上层处理）

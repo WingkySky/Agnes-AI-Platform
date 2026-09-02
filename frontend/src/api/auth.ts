@@ -48,12 +48,12 @@ export function getCaptcha(): Promise<CaptchaResponse> {
 }
 
 /** 发送邮箱验证码（重置密码用） */
-export function sendEmailCode(params: SendEmailCodeRequest): Promise<{ ok: boolean; message: string }> {
+export function sendEmailCode(params: SendEmailCodeRequest): Promise<null> {
   return client.post('/api/auth/send-email-code', params)
 }
 
 /** 重置密码 */
-export function resetPassword(params: ResetPasswordRequest): Promise<{ ok: boolean; message: string }> {
+export function resetPassword(params: ResetPasswordRequest): Promise<null> {
   return client.post('/api/auth/reset-password', params)
 }
 
@@ -89,17 +89,17 @@ export function listUsers(): Promise<UserListResponse> {
 }
 
 /** 修改用户角色（仅管理员） */
-export function updateUserRole(userId: number, params: UpdateRoleRequest): Promise<{ id: number; role: string; is_admin: boolean; ok: boolean }> {
+export function updateUserRole(userId: number, params: UpdateRoleRequest): Promise<{ id: number; role: string; is_admin: boolean }> {
   return client.put(`/api/auth/users/${userId}/role`, params)
 }
 
 /** 修改用户积分余额（仅管理员） */
-export function updateUserCredits(userId: number, params: UpdateCreditsRequest): Promise<{ id: number; credits: number; ok: boolean }> {
+export function updateUserCredits(userId: number, params: UpdateCreditsRequest): Promise<{ id: number; credits: number }> {
   return client.put(`/api/auth/users/${userId}/credits`, params)
 }
 
 /** 启用/禁用用户（仅管理员） */
-export function updateUserActive(userId: number, params: UpdateActiveRequest): Promise<{ id: number; is_active: boolean; ok: boolean }> {
+export function updateUserActive(userId: number, params: UpdateActiveRequest): Promise<{ id: number; is_active: boolean }> {
   return client.put(`/api/auth/users/${userId}/active`, params)
 }
 

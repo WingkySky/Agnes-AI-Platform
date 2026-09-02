@@ -893,10 +893,10 @@ async function toggleShare(item: GenerationRecord) {
   }
   const newStatus = !item.is_public
   try {
-    const res = await updateShareStatus(item.id, newStatus)
+    await updateShareStatus(item.id, newStatus)
     // 更新本地记录的公开状态
     item.is_public = newStatus
-    ElMessage.success(res?.message || (newStatus ? t('plaza.setPublicSuccess') : t('plaza.setPrivateSuccess')))
+    ElMessage.success(newStatus ? t('plaza.setPublicSuccess') : t('plaza.setPrivateSuccess'))
   } catch (e) {
     // 错误已在拦截器弹出
   }
@@ -967,8 +967,8 @@ async function confirmBatchSetPublic() {
   await confirm(confirmText, t('plaza.batchSetPublic'))
   batchSettingPublic.value = true
   try {
-    const res = await batchUpdateShareStatus(validIds, true)
-    ElMessage.success(res?.message || t('plaza.batchSuccess'))
+    await batchUpdateShareStatus(validIds, true)
+    ElMessage.success(t('plaza.batchSuccess'))
     selectedIds.value = []
     loadList()
   } catch (e) {
@@ -987,8 +987,8 @@ async function confirmBatchSetPrivate() {
   await confirm(t('plaza.confirmBatchPrivate', { n: selectedIds.value.length }), t('plaza.batchSetPrivate'))
   batchSettingPrivate.value = true
   try {
-    const res = await batchUpdateShareStatus(selectedIds.value, false)
-    ElMessage.success(res?.message || t('plaza.batchSuccess'))
+    await batchUpdateShareStatus(selectedIds.value, false)
+    ElMessage.success(t('plaza.batchSuccess'))
     selectedIds.value = []
     loadList()
   } catch (e) {

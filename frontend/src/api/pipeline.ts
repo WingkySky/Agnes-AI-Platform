@@ -104,13 +104,13 @@ export function getContainerAssets(containerType: string, containerId: string): 
 /**
  * 切换资产分享状态（复用审核管道）
  */
-export function updateAssetShare(assetId: number, isPublic: boolean): Promise<{ success: boolean; id: number; is_public: boolean; message: string }> {
+export function updateAssetShare(assetId: number, isPublic: boolean): Promise<{ id: number; is_public: boolean }> {
   return client.patch(`/api/pipeline/assets/${assetId}/share`, { is_public: isPublic })
 }
 
 /**
  * 删除资产（含归档影子记录）
  */
-export function deleteAsset(assetId: number): Promise<{ success: boolean; id: number; message: string }> {
+export function deleteAsset(assetId: number): Promise<{ id: number }> {
   return client.delete(`/api/pipeline/assets/${assetId}`)
 }

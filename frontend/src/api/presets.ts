@@ -45,7 +45,7 @@ export function updatePreset(id: number, data: PresetUpdate): Promise<PromptPres
 /**
  * 删除预设
  */
-export function deletePreset(id: number): Promise<{ message: string }> {
+export function deletePreset(id: number): Promise<null> {
   return client.delete(`/api/presets/${id}`)
 }
 
@@ -59,7 +59,7 @@ export function toggleFavorite(id: number): Promise<{ is_favorite: boolean }> {
 /**
  * 记录一次使用（最近使用 + 热度）
  */
-export function recordPresetUse(id: number): Promise<{ message: string }> {
+export function recordPresetUse(id: number): Promise<null> {
   return client.post(`/api/presets/${id}/use`)
 }
 

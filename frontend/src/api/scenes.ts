@@ -40,7 +40,7 @@ export function updateScene(id: number, data: UpdateSceneRequest): Promise<Scene
 }
 
 /** 删除场景 */
-export function deleteScene(id: number): Promise<{ message: string }> {
+export function deleteScene(id: number): Promise<null> {
   return client.delete(`/api/scenes/${id}`)
 }
 

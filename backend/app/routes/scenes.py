@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_db
+from app.core.response import ok
 from app.core.security import get_current_user
 from app.models.user import User
 from app.schemas.scene import (
@@ -31,7 +32,7 @@ from app.services.scene_service import scene_to_prompt_suffix
 router = APIRouter(prefix="/scenes", tags=["3D 场景（导演台）"])
 
 
-@router.get("", response_model=SceneListResponse, summary="列出 3D 场景")
+@router.get("", summary="列出 3D 场景")
 async def list_scenes(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -47,13 +48,13 @@ async def list_scenes(
         db, user_id=current_user.id, limit=limit, offset=offset,
         search=search, is_public=is_public,
     )
-    return SceneListResponse(
+    return ok(data=SceneListResponse(
         items=[SceneResponse.from_model(s) for s in scenes],
         total=total,
-    )
+    ))
 
 
-@router.post("", response_model=SceneResponse, summary="创建 3D 场景")
+@router.post("", summary="创建 3D 场景")
 async def create_scene(
     payload: SceneCreate,
     db: AsyncSession = Depends(get_async_db),
@@ -65,11 +66,11 @@ async def create_scene(
         description=payload.description, scene_data=payload.scene_data,
         is_public=payload.is_public,
     )
-    return SceneResponse.from_model(scene)
+    return ok(data=SceneResponse.from_model(scene))
 
 
 # 注意：/preview-prompt 必须放在 /{scene_id} 之前，否则会被当作 scene_id 匹配
-@router.post("/preview-prompt", response_model=ScenePromptPreviewResponse, summary="预览场景翻译后的 prompt")
+@router.post("/preview-prompt", summary="预览场景翻译后的 prompt")
 async def preview_prompt(
     payload: ScenePromptPreviewRequest,
     current_user: User = Depends(get_current_user),
@@ -79,10 +80,10 @@ async def preview_prompt(
     不需要持久化，纯计算接口。
     """
     suffix, details = scene_to_prompt_suffix(payload.scene_data)
-    return ScenePromptPreviewResponse(prompt_suffix=suffix, details=details)
+    return ok(data=ScenePromptPreviewResponse(prompt_suffix=suffix, details=details))
 
 
-@router.get("/{scene_id}", response_model=SceneResponse, summary="获取场景详情")
+@router.get("/{scene_id}", summary="获取场景详情")
 async def get_scene(
     scene_id: int,
     db: AsyncSession = Depends(get_async_db),
@@ -94,10 +95,10 @@ async def get_scene(
         raise HTTPException(status_code=404, detail="场景不存在")
     if scene.user_id != current_user.id and not scene.is_public:
         raise HTTPException(status_code=403, detail="无权查看")
-    return SceneResponse.from_model(scene)
+    return ok(data=SceneResponse.from_model(scene))
 
 
-@router.put("/{scene_id}", response_model=SceneResponse, summary="更新 3D 场景")
+@router.put("/{scene_id}", summary="更新 3D 场景")
 async def update_scene(
     scene_id: int,
     payload: SceneUpdate,
@@ -112,7 +113,7 @@ async def update_scene(
         raise HTTPException(status_code=403, detail="无权修改")
     update_data = payload.model_dump(exclude_unset=True)
     updated = await svc.update_scene(db, scene_id, **update_data)
-    return SceneResponse.from_model(updated)
+    return ok(data=SceneResponse.from_model(updated))
 
 
 @router.delete("/{scene_id}", summary="删除 3D 场景")
@@ -128,4 +129,4 @@ async def delete_scene(
     if scene.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="无权删除")
     await svc.delete_scene(db, scene_id)
-    return {"message": "已删除"}
+    return ok(message="已删除")

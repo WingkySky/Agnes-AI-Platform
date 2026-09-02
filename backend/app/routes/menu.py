@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_db
+from app.core.response import ok
 from app.core.security import get_current_admin_user, get_current_user_optional
 from app.models.user import User
 from app.services import menu_service
@@ -53,15 +54,9 @@ class SaveMenuConfigsRequest(BaseModel):
     groups: Optional[List[MenuGroupConfigItem]] = Field(default_factory=list, description="分组自定义配置")
 
 
-class GetMenuConfigsResponse(BaseModel):
-    """获取菜单配置响应"""
-    configs: List[MenuItemConfigItem]
-    groups: List[MenuGroupConfigItem]
-
-
 # ---------- 公开接口（所有用户可访问，用于获取菜单配置） ----------
 
-@router.get("/menu-configs", response_model=GetMenuConfigsResponse, summary="获取当前菜单配置")
+@router.get("/menu-configs", summary="获取当前菜单配置")
 async def get_menu_configs(
     db: AsyncSession = Depends(get_async_db),
     _user: Optional[User] = Depends(get_current_user_optional),
@@ -74,12 +69,12 @@ async def get_menu_configs(
     # 兼容旧版格式：旧版只有 items 数组，新版有 items 和 groups
     if isinstance(data, list):
         # 旧版格式
-        return {"configs": data, "groups": []}
+        return ok(data={"configs": data, "groups": []})
     # 新版格式
-    return {
+    return ok(data={
         "configs": data.get("items", []),
         "groups": data.get("groups", []),
-    }
+    })
 
 
 # ---------- 管理员接口 ----------
@@ -105,7 +100,7 @@ async def save_menu_configs(
         "[菜单配置] %s 保存了菜单配置，共 %d 个菜单项，%d 个分组自定义",
         admin.username, len(config_data["items"]), len(config_data["groups"])
     )
-    return {"message": "菜单配置已保存", "item_count": len(config_data["items"])}
+    return ok(data={"item_count": len(config_data["items"])}, message="菜单配置已保存")
 
 
 @router.post("/admin/menu-configs/reset", summary="[管理员] 重置菜单为默认配置")
@@ -116,4 +111,4 @@ async def reset_menu_configs(
     """重置菜单为系统默认配置（清除自定义配置）"""
     await menu_service.reset_menu_configs(db)
     logger.info("[菜单配置] %s 重置了菜单配置", admin.username)
-    return {"message": "菜单配置已重置为默认"}
+    return ok(message="菜单配置已重置为默认")

@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_db
+from app.core.response import ok
 from app.core.security import get_current_user
 from app.models.user import User
 from app.services import camera_preset_service as svc
@@ -94,7 +95,7 @@ class CameraPresetListResponse(BaseModel):
 
 # ---------- API 路由 ----------
 
-@router.get("", response_model=CameraPresetListResponse, summary="列出摄像机预设")
+@router.get("", summary="列出摄像机预设")
 async def list_camera_presets(
     page: int = Query(1, ge=1, description="页码（1-based）"),
     page_size: int = Query(20, ge=1, le=500, description="每页数量"),
@@ -129,13 +130,13 @@ async def list_camera_presets(
         category=category,
         is_public=is_public,
     )
-    return CameraPresetListResponse(
+    return ok(data=CameraPresetListResponse(
         items=[CameraPresetResponse.model_validate(p) for p in presets],
         total=total,
-    )
+    ))
 
 
-@router.post("", response_model=CameraPresetResponse, summary="创建摄像机预设")
+@router.post("", summary="创建摄像机预设")
 async def create_camera_preset(
     payload: CameraPresetCreate,
     db: AsyncSession = Depends(get_async_db),
@@ -161,10 +162,10 @@ async def create_camera_preset(
         visual_style=payload.visual_style,
         is_public=payload.is_public,
     )
-    return CameraPresetResponse.model_validate(preset)
+    return ok(data=CameraPresetResponse.model_validate(preset))
 
 
-@router.get("/{preset_id}", response_model=CameraPresetResponse, summary="获取摄像机预设详情")
+@router.get("/{preset_id}", summary="获取摄像机预设详情")
 async def get_camera_preset(
     preset_id: int,
     db: AsyncSession = Depends(get_async_db),
@@ -177,10 +178,10 @@ async def get_camera_preset(
     # 权限：自己的或公开审核通过的
     if preset.user_id != current_user.id and not (preset.is_public and preset.is_approved):
         raise HTTPException(status_code=403, detail="无权查看")
-    return CameraPresetResponse.model_validate(preset)
+    return ok(data=CameraPresetResponse.model_validate(preset))
 
 
-@router.put("/{preset_id}", response_model=CameraPresetResponse, summary="更新摄像机预设")
+@router.put("/{preset_id}", summary="更新摄像机预设")
 async def update_camera_preset(
     preset_id: int,
     payload: CameraPresetUpdate,
@@ -196,7 +197,7 @@ async def update_camera_preset(
 
     update_data = payload.model_dump(exclude_unset=True)
     updated = await svc.update_preset(db, preset_id, **update_data)
-    return CameraPresetResponse.model_validate(updated)
+    return ok(data=CameraPresetResponse.model_validate(updated))
 
 
 @router.delete("/{preset_id}", summary="删除摄像机预设")
@@ -212,7 +213,7 @@ async def delete_camera_preset(
     if preset.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="无权删除")
 
-    ok = await svc.delete_preset(db, preset_id)
-    if not ok:
+    deleted = await svc.delete_preset(db, preset_id)
+    if not deleted:
         raise HTTPException(status_code=400, detail="删除失败")
-    return {"message": "已删除"}
+    return ok(message="已删除")

@@ -29,6 +29,7 @@ from sqlalchemy import select, func, or_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_db
+from app.core.response import ok
 from app.core.security import get_current_user, get_current_user_optional
 from app.models.user import User
 from app.models.pipeline import StylePreset, ScriptTemplate
@@ -44,7 +45,7 @@ from app.schemas.assets import (
     AssetContainerDetailResponse,
     AssetSaveFromGenerationRequest,
 )
-from app.schemas.plaza import UpdateShareStatusRequest, UpdateShareStatusResponse
+from app.schemas.plaza import UpdateShareStatusRequest
 from app.services import style_service
 from app.services import script_template_service
 from app.services import asset_library
@@ -96,12 +97,12 @@ async def get_style_presets(
     result = await db.execute(query)
     items = list(result.scalars().all())
 
-    return {
+    return ok(data={
         "items": [StylePresetOut.model_validate(item) for item in items],
         "total": total,
         "page": page,
         "page_size": page_size,
-    }
+    })
 
 
 @router.get("/pipeline/styles/{style_id}", summary="获取风格预设详情")
@@ -115,7 +116,7 @@ async def get_style_preset_detail(
     if not style:
         raise HTTPException(status_code=404, detail="风格预设不存在")
 
-    return StylePresetOut.model_validate(style)
+    return ok(data=StylePresetOut.model_validate(style))
 
 
 # =====================================================
@@ -160,12 +161,12 @@ async def get_script_templates(
     result = await db.execute(query)
     items = list(result.scalars().all())
 
-    return {
+    return ok(data={
         "items": [ScriptTemplateOut.model_validate(item) for item in items],
         "total": total,
         "page": page,
         "page_size": page_size,
-    }
+    })
 
 
 @router.get("/pipeline/script-templates/{tpl_id}", summary="获取剧本模板详情")
@@ -179,7 +180,7 @@ async def get_script_template_detail(
     if not tpl:
         raise HTTPException(status_code=404, detail="剧本模板不存在")
 
-    return ScriptTemplateOut.model_validate(tpl)
+    return ok(data=ScriptTemplateOut.model_validate(tpl))
 
 
 # =====================================================
@@ -239,12 +240,12 @@ async def get_assets(
     result = await db.execute(query)
     items = list(result.scalars().all())
 
-    return {
+    return ok(data={
         "items": [AssetOut.model_validate(item) for item in items],
         "total": total,
         "page": page,
         "page_size": page_size,
-    }
+    })
 
 
 # =====================================================
@@ -260,7 +261,7 @@ _CONTAINER_TYPE_LABELS = {
 }
 
 
-@router.get("/pipeline/assets/containers", response_model=AssetContainersResponse, summary="我的创作单元分组列表")
+@router.get("/pipeline/assets/containers", summary="我的创作单元分组列表")
 async def get_my_containers(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
@@ -321,12 +322,11 @@ async def get_my_containers(
     sc_res = await db.execute(sc_stmt)
     standalone_total = sc_res.scalar_one() or 0
 
-    return AssetContainersResponse(containers=containers, standalone_total=standalone_total)
+    return ok(data=AssetContainersResponse(containers=containers, standalone_total=standalone_total))
 
 
 @router.get(
     "/pipeline/assets/container/{container_type}/{container_id}",
-    response_model=AssetContainerDetailResponse,
     summary="单元内资产列表",
 )
 async def get_container_assets(
@@ -348,13 +348,13 @@ async def get_container_assets(
     result = await db.execute(stmt)
     items = result.scalars().all()
     container_name = items[0].container_name if items else None
-    return AssetContainerDetailResponse(
+    return ok(data=AssetContainerDetailResponse(
         container_type=container_type,
         container_id=container_id,
         container_name=container_name,
         type_label=_CONTAINER_TYPE_LABELS.get(container_type, container_type),
         items=[AssetResponse.model_validate(it) for it in items],
-    )
+    ))
 
 
 @router.get("/pipeline/assets/{asset_id}", summary="获取资产详情")
@@ -368,7 +368,7 @@ async def get_asset_detail(
     if not asset:
         raise HTTPException(status_code=404, detail="资产不存在")
 
-    return AssetOut.model_validate(asset)
+    return ok(data=AssetOut.model_validate(asset))
 
 
 @router.post("/pipeline/assets/save-from-generation", summary="从生成记录保存为资产")
@@ -381,7 +381,7 @@ async def save_asset_from_generation(
     asset = await asset_library.save_asset_from_generation(
         db, req, user_id=current_user.id
     )
-    return AssetOut.model_validate(asset)
+    return ok(data=AssetOut.model_validate(asset))
 
 
 # =====================================================
@@ -390,7 +390,7 @@ async def save_asset_from_generation(
 # DELETE /api/pipeline/assets/{id}        - 删除资产（含归档影子记录）
 # =====================================================
 
-@router.patch("/pipeline/assets/{asset_id}/share", response_model=UpdateShareStatusResponse, summary="切换资产分享状态")
+@router.patch("/pipeline/assets/{asset_id}/share", summary="切换资产分享状态")
 async def update_asset_share_status(
     asset_id: int,
     body: UpdateShareStatusRequest,
@@ -466,10 +466,8 @@ async def update_asset_share_status(
     )
     logger.info("[广场] 用户 %s 切换资产 %s 分享状态: %s", current_user.id, asset_id, body.is_public)
 
-    return UpdateShareStatusResponse(
-        success=True,
-        id=asset_id,
-        is_public=body.is_public,
+    return ok(
+        data={"id": asset_id, "is_public": body.is_public},
         message=msg,
     )
 
@@ -499,7 +497,7 @@ async def delete_asset_endpoint(
         "[资产] 用户 %s 删除资产 %s（归档影子记录=%s）",
         current_user.id, asset_id, is_archive,
     )
-    return {"success": True, "id": asset_id, "message": "已删除"}
+    return ok(data={"id": asset_id}, message="已删除")
 
 
 @router.post("/pipeline/assets/{asset_id}/use", summary="记录资产使用（用于生成），递增 use_count")
@@ -520,5 +518,5 @@ async def use_asset_endpoint(
 
     await asset_library.increment_use_count(db, asset_id)
     logger.info("[资产] 资产 %s 被使用，use_count=%s", asset_id, asset.use_count)
-    return {"id": asset_id, "use_count": asset.use_count}
+    return ok(data={"id": asset_id, "use_count": asset.use_count})
 

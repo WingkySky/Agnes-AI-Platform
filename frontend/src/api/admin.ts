@@ -81,7 +81,7 @@ export function updateRole(name: string, data: Partial<RoleItem>): Promise<RoleI
 }
 
 /** 删除角色 */
-export function deleteRole(name: string): Promise<{ success: boolean }> {
+export function deleteRole(name: string): Promise<null> {
   return client.delete(`/api/admin/roles/${name}`)
 }
 
@@ -148,17 +148,17 @@ export function updateWatermarkConfig(data: Partial<WatermarkConfig>): Promise<W
 // ---------- 用户扩展 ----------
 
 /** 更新用户水印开关 */
-export function updateUserWatermark(userId: number, enabled: boolean): Promise<{ success: boolean }> {
+export function updateUserWatermark(userId: number, enabled: boolean): Promise<{ id: number; watermark_enabled: boolean }> {
   return client.put(`/api/auth/users/${userId}/watermark`, { enabled })
 }
 
 /** 更新用户内容安全开关 */
-export function updateUserContentSafety(userId: number, enabled: boolean): Promise<{ success: boolean }> {
+export function updateUserContentSafety(userId: number, enabled: boolean): Promise<{ id: number; content_safety_strict: boolean }> {
   return client.put(`/api/auth/users/${userId}/content-safety`, { enabled })
 }
 
 /** 更新用户角色 */
-export function updateUserRole(userId: number, role: string): Promise<{ success: boolean }> {
+export function updateUserRole(userId: number, role: string): Promise<{ id: number; role: string; is_admin: boolean }> {
   return client.put(`/api/auth/users/${userId}/role`, { role })
 }
 
@@ -182,12 +182,12 @@ export function getSmtpConfig(): Promise<SmtpConfig> {
 }
 
 /** 更新 SMTP 配置 */
-export function updateSmtpConfig(data: Partial<SmtpConfig>): Promise<{ message: string }> {
+export function updateSmtpConfig(data: Partial<SmtpConfig>): Promise<null> {
   return client.put('/api/admin/system-config/smtp', data)
 }
 
 /** 测试 SMTP 邮件发送 */
-export function testSmtpConfig(testEmail: string): Promise<{ message: string }> {
+export function testSmtpConfig(testEmail: string): Promise<null> {
   return client.post('/api/admin/system-config/smtp/test', { test_email: testEmail })
 }
 
@@ -210,6 +210,6 @@ export function getModelServiceConfig(): Promise<ModelServiceConfig> {
 /** 更新系统级模型配置 */
 export function updateModelServiceConfig(
   configs: ModelServiceConfig['configs'],
-): Promise<{ status: string; message: string; configs: ModelServiceConfig['configs'] }> {
+): Promise<{ configs: ModelServiceConfig['configs'] }> {
   return client.put('/api/admin/system-config/models', { configs })
 }

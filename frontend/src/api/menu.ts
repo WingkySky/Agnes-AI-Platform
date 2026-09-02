@@ -49,11 +49,11 @@ export async function getMenuConfigs(): Promise<GetMenuConfigsResponse> {
 }
 
 /** 保存菜单配置 */
-export function saveMenuConfigs(data: SaveMenuConfigsRequest) {
+export function saveMenuConfigs(data: SaveMenuConfigsRequest): Promise<{ item_count: number }> {
   return client.post('/api/admin/menu-configs', data)
 }
 
 /** 重置菜单为默认配置 */
-export function resetMenuConfigs() {
-  return client.post<{ message: string }>('/api/admin/menu-configs/reset')
+export function resetMenuConfigs(): Promise<null> {
+  return client.post('/api/admin/menu-configs/reset')
 }

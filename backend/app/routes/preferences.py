@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.core.database import get_async_db
+from app.core.response import ok
 from app.core.security import get_current_user
 from app.models.user import User
 from app.models.user_preference import UserPreference, DEFAULT_PREFERENCES
@@ -74,7 +75,7 @@ async def _get_or_create_preference(db, user_id: int) -> UserPreference:
 # 接口实现
 # =====================================================
 
-@router.get("", response_model=PreferencesResponse, summary="获取偏好设置")
+@router.get("", summary="获取偏好设置")
 async def get_preferences(
     current_user: User = Depends(get_current_user),
     db=Depends(get_async_db),
@@ -84,14 +85,14 @@ async def get_preferences(
     若用户从未设置过偏好（数据库无记录），自动创建一条默认记录。
     """
     pref = await _get_or_create_preference(db, current_user.id)
-    return PreferencesResponse(
+    return ok(data=PreferencesResponse(
         user_id=pref.user_id,
         preferences=pref.preferences,
         updated_at=pref.updated_at.isoformat() if pref.updated_at else None,
-    )
+    ))
 
 
-@router.put("", response_model=PreferencesResponse, summary="全量更新偏好设置")
+@router.put("", summary="全量更新偏好设置")
 async def update_preferences(
     req: PreferencesUpdateRequest,
     current_user: User = Depends(get_current_user),
@@ -106,14 +107,14 @@ async def update_preferences(
     await db.commit()
     await db.refresh(pref)
     logger.info("[偏好设置] 用户 %s 全量更新偏好", current_user.username)
-    return PreferencesResponse(
+    return ok(data=PreferencesResponse(
         user_id=pref.user_id,
         preferences=pref.preferences,
         updated_at=pref.updated_at.isoformat() if pref.updated_at else None,
-    )
+    ))
 
 
-@router.patch("", response_model=PreferencesResponse, summary="部分更新偏好设置")
+@router.patch("", summary="部分更新偏好设置")
 async def patch_preferences(
     req: PreferencesPatchRequest,
     current_user: User = Depends(get_current_user),
@@ -143,14 +144,14 @@ async def patch_preferences(
     await db.commit()
     await db.refresh(pref)
     logger.info("[偏好设置] 用户 %s 部分更新偏好", current_user.username)
-    return PreferencesResponse(
+    return ok(data=PreferencesResponse(
         user_id=pref.user_id,
         preferences=pref.preferences,
         updated_at=pref.updated_at.isoformat() if pref.updated_at else None,
-    )
+    ))
 
 
-@router.delete("", response_model=PreferencesResponse, summary="重置为默认偏好")
+@router.delete("", summary="重置为默认偏好")
 async def reset_preferences(
     current_user: User = Depends(get_current_user),
     db=Depends(get_async_db),
@@ -163,8 +164,8 @@ async def reset_preferences(
     await db.commit()
     await db.refresh(pref)
     logger.info("[偏好设置] 用户 %s 重置为默认偏好", current_user.username)
-    return PreferencesResponse(
+    return ok(data=PreferencesResponse(
         user_id=pref.user_id,
         preferences=pref.preferences,
         updated_at=pref.updated_at.isoformat() if pref.updated_at else None,
-    )
+    ))

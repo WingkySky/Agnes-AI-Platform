@@ -8,6 +8,8 @@
 
 from fastapi import APIRouter, HTTPException
 
+from app.core.response import ok
+
 from app.schemas.providers import (
     ProviderCreateRequest,
     ProviderUpdateRequest,
@@ -31,14 +33,14 @@ router = APIRouter()
 # Provider 管理接口
 # =====================================================
 
-@router.get("/providers", response_model=ProviderListResponse, summary="列出所有 Provider")
+@router.get("/providers", summary="列出所有 Provider")
 async def list_providers():
     """列出所有 Provider（API Key 脱敏显示）"""
     items = await provider_registry.list_providers(include_key=False)
-    return ProviderListResponse(total=len(items), items=items)
+    return ok(data=ProviderListResponse(total=len(items), items=items))
 
 
-@router.post("/providers", response_model=ProviderResponse, summary="创建 Provider")
+@router.post("/providers", summary="创建 Provider")
 async def create_provider(req: ProviderCreateRequest):
     """创建新的 API Provider"""
     if not req.name.strip():
@@ -61,7 +63,7 @@ async def create_provider(req: ProviderCreateRequest):
     # 返回脱敏后的 Provider 信息
     from app.core.security import mask_api_key, decrypt_api_key
     decrypted = decrypt_api_key(provider.api_key_encrypted or "")
-    return ProviderResponse(
+    return ok(data=ProviderResponse(
         id=provider.id,
         name=provider.name,
         provider_type=provider.provider_type or "agnes",
@@ -73,10 +75,10 @@ async def create_provider(req: ProviderCreateRequest):
         sort_order=provider.sort_order,
         created_at=provider.created_at,
         updated_at=provider.updated_at,
-    )
+    ))
 
 
-@router.put("/providers/{provider_id}", response_model=ProviderResponse, summary="更新 Provider")
+@router.put("/providers/{provider_id}", summary="更新 Provider")
 async def update_provider(provider_id: int, req: ProviderUpdateRequest):
     """更新 Provider 配置（api_key 留空表示不修改）"""
     provider = await provider_registry.update_provider(
@@ -95,7 +97,7 @@ async def update_provider(provider_id: int, req: ProviderUpdateRequest):
 
     from app.core.security import mask_api_key, decrypt_api_key
     decrypted = decrypt_api_key(provider.api_key_encrypted or "")
-    return ProviderResponse(
+    return ok(data=ProviderResponse(
         id=provider.id,
         name=provider.name,
         provider_type=provider.provider_type or "agnes",
@@ -107,7 +109,7 @@ async def update_provider(provider_id: int, req: ProviderUpdateRequest):
         sort_order=provider.sort_order,
         created_at=provider.created_at,
         updated_at=provider.updated_at,
-    )
+    ))
 
 
 @router.delete("/providers/{provider_id}", summary="删除 Provider")
@@ -116,28 +118,28 @@ async def delete_provider(provider_id: int):
     success = await provider_registry.delete_provider(provider_id)
     if not success:
         raise HTTPException(status_code=404, detail=f"Provider {provider_id} 不存在")
-    return {"status": "success", "message": f"Provider {provider_id} 已删除"}
+    return ok(message=f"Provider {provider_id} 已删除")
 
 
 # =====================================================
 # 模型定义管理接口
 # =====================================================
 
-@router.get("/providers/{provider_id}/models", response_model=ModelListResponse, summary="列出指定 Provider 的模型")
+@router.get("/providers/{provider_id}/models", summary="列出指定 Provider 的模型")
 async def list_provider_models(provider_id: int):
     """列出指定 Provider 下的所有模型定义（包括未激活和自定义）"""
     items = await provider_registry.list_models(provider_id=provider_id)
-    return ModelListResponse(total=len(items), items=items)
+    return ok(data=ModelListResponse(total=len(items), items=items))
 
 
-@router.get("/models", response_model=ModelListResponse, summary="列出所有模型定义")
+@router.get("/models", summary="列出所有模型定义")
 async def list_all_models_admin():
     """列出所有 Provider 的所有模型定义（管理视图，包括未激活和自定义）"""
     items = await provider_registry.list_models(provider_id=None)
-    return ModelListResponse(total=len(items), items=items)
+    return ok(data=ModelListResponse(total=len(items), items=items))
 
 
-@router.post("/models", response_model=ModelDefinitionResponse, summary="添加自定义模型")
+@router.post("/models", summary="添加自定义模型")
 async def add_custom_model(req: CustomModelCreateRequest):
     """添加用户自定义模型（is_custom=True，同步时不会被覆盖）"""
     if not req.model_id.strip():
@@ -159,7 +161,7 @@ async def add_custom_model(req: CustomModelCreateRequest):
         asset_storage_mode=req.asset_storage_mode,
         gen_params=req.gen_params.model_dump() if req.gen_params is not None else None,
     )
-    return ModelDefinitionResponse(
+    return ok(data=ModelDefinitionResponse(
         id=defn.id,
         provider_id=defn.provider_id,
         model_id=defn.model_id,
@@ -173,7 +175,7 @@ async def add_custom_model(req: CustomModelCreateRequest):
         is_custom=defn.is_custom,
         sort_order=defn.sort_order,
         asset_storage_mode=defn.asset_storage_mode or "auto",
-    )
+    ))
 
 
 @router.put("/models/batch", summary="批量停用/启用模型")
@@ -183,7 +185,7 @@ async def batch_update_models(req: ModelBatchUpdateRequest):
         raise HTTPException(status_code=400, detail="model_ids 不能为空")
     updated = await provider_registry.batch_update_models(req.model_ids, req.is_disabled)
     action = "停用" if req.is_disabled else "启用"
-    return {"status": "success", "message": f"已{action} {updated} 个模型", "updated": updated}
+    return ok(data={"updated": updated}, message=f"已{action} {updated} 个模型")
 
 
 @router.post("/models/batch-delete", summary="批量删除模型")
@@ -192,10 +194,10 @@ async def batch_delete_models(req: ModelBatchDeleteRequest):
     if not req.model_ids:
         raise HTTPException(status_code=400, detail="model_ids 不能为空")
     deleted = await provider_registry.batch_delete_models(req.model_ids)
-    return {"status": "success", "message": f"已删除 {deleted} 个模型", "deleted": deleted}
+    return ok(data={"deleted": deleted}, message=f"已删除 {deleted} 个模型")
 
 
-@router.put("/models/{model_id}", response_model=ModelDefinitionResponse, summary="更新模型定义")
+@router.put("/models/{model_id}", summary="更新模型定义")
 async def update_model(model_id: str, req: ModelUpdateRequest):
     """更新模型定义的展示信息或激活状态"""
     defn = await provider_registry.update_model(
@@ -213,7 +215,7 @@ async def update_model(model_id: str, req: ModelUpdateRequest):
     if defn is None:
         raise HTTPException(status_code=404, detail=f"模型 {model_id} 不存在")
 
-    return ModelDefinitionResponse(
+    return ok(data=ModelDefinitionResponse(
         id=defn.id,
         provider_id=defn.provider_id,
         model_id=defn.model_id,
@@ -227,7 +229,7 @@ async def update_model(model_id: str, req: ModelUpdateRequest):
         is_custom=defn.is_custom,
         sort_order=defn.sort_order,
         asset_storage_mode=defn.asset_storage_mode or "auto",
-    )
+    ))
 
 
 @router.delete("/models/{model_id}", summary="删除模型定义")
@@ -236,7 +238,7 @@ async def delete_model(model_id: str):
     success = await provider_registry.delete_model(model_id)
     if not success:
         raise HTTPException(status_code=404, detail=f"模型 {model_id} 不存在")
-    return {"status": "success", "message": f"模型 {model_id} 已删除"}
+    return ok(message=f"模型 {model_id} 已删除")
 
 
 # =====================================================
@@ -245,7 +247,6 @@ async def delete_model(model_id: str):
 
 @router.post(
     "/providers/{provider_id}/sync-models",
-    response_model=SyncModelsResponse,
     summary="同步指定 Provider 的模型列表",
 )
 async def sync_provider_models(provider_id: int):
@@ -257,7 +258,7 @@ async def sync_provider_models(provider_id: int):
     """
     try:
         result = await provider_registry.sync_provider_models(provider_id)
-        return SyncModelsResponse(provider_id=provider_id, **result)
+        return ok(data=SyncModelsResponse(provider_id=provider_id, **result))
     except RuntimeError as e:
         # Provider 不存在或上游调用失败（认证失败 / 路径 404 等），消息透出给前端
         raise HTTPException(status_code=502, detail=str(e))
@@ -267,10 +268,9 @@ async def sync_provider_models(provider_id: int):
 
 @router.post(
     "/providers/sync-all-models",
-    response_model=SyncAllResponse,
     summary="同步所有 Provider 的模型列表",
 )
 async def sync_all_providers_models():
     """同步所有已激活 Provider 的模型列表"""
     results = await provider_registry.sync_all_providers()
-    return SyncAllResponse(results=[SyncModelsResponse(**r) for r in results])
+    return ok(data=SyncAllResponse(results=[SyncModelsResponse(**r) for r in results]))

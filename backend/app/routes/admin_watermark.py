@@ -17,6 +17,7 @@ from app.core.database import get_async_db
 from app.core.security import require_permission
 from app.models.user import User
 from app.models.watermark import WatermarkConfig
+from app.core.response import ok
 from app.services.watermark_service import get_watermark_config
 
 logger = logging.getLogger("agnes_platform")
@@ -29,7 +30,7 @@ async def get_config(
     _admin: User = Depends(require_permission("watermark:manage")),
 ):
     config = await get_watermark_config(db)
-    return config.to_dict()
+    return ok(data=config.to_dict())
 
 
 @router.put("/config", summary="[管理员] 更新水印配置")
@@ -55,4 +56,4 @@ async def update_config(
     await db.refresh(config)
 
     logger.info("[水印配置] %s 更新水印配置", admin.username)
-    return config.to_dict()
+    return ok(data=config.to_dict())

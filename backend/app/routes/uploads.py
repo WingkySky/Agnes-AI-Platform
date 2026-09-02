@@ -7,6 +7,7 @@ import os
 import time
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from app.core.response import ok
 
 from app.core.security import get_current_user
 from app.models.user import User
@@ -44,4 +45,4 @@ async def upload_image(
     with open(filepath, "wb") as f:
         f.write(content)
 
-    return {"url": f"/uploads/preset-covers/{filename}"}
+    return ok(data={"url": f"/uploads/preset-covers/{filename}"})

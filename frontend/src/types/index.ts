@@ -159,17 +159,9 @@ export interface HistoryListResponse {
   total_video_count: number
 }
 
-/** 删除操作响应 — 对齐 DeleteResponse */
-export interface DeleteResponse {
-  success: boolean
-  message: string
-}
-
 /** 批量删除请求 — 对齐 BatchDeleteRequest */
-/** 批量删除响应 — 对齐 BatchDeleteResponse */
+/** 批量删除响应 — 对齐 BatchDeleteResponse（单条删除成功时 data 为 null） */
 export interface BatchDeleteResponse {
-  success: boolean
-  message: string
   deleted_count: number
   failed_ids: number[]
 }
@@ -219,7 +211,6 @@ export interface ImageTaskCreatedResponse {
   model?: string
   size?: string
   created_at?: string
-  message?: string
 }
 
 /** 图片异步任务状态响应（内联 dict） */
@@ -235,10 +226,8 @@ export interface ImageTaskStatusResponse {
 
 /** 图片任务取消响应 */
 export interface ImageTaskCancelResponse {
-  success: boolean
   task_id: string
   status: string
-  message: string
 }
 
 // =====================================================
@@ -280,7 +269,6 @@ export interface VideoTaskCreatedResponse {
   width: number
   height: number
   mode: string
-  message?: string | null
 }
 
 /** 视频任务状态响应 — 对齐 VideoStatusResponse */

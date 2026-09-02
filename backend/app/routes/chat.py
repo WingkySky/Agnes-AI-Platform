@@ -30,6 +30,7 @@ from sqlalchemy.future import select
 from sqlalchemy import desc, func
 
 from app.core.database import get_async_db, async_session
+from app.core.response import ok
 from app.core.config import settings
 from app.core.security import get_current_user_optional
 from app.models.chat import ChatSession, ChatMessage
@@ -143,7 +144,7 @@ async def create_session(
     await db.commit()
     await db.refresh(session)
     logger.info("[Chat] 创建会话: id=%s, title=%s, user_id=%s", session.id, session.title, session.user_id)
-    return session.to_dict()
+    return ok(data=session.to_dict())
 
 
 @router.get("/chat/sessions", summary="获取会话列表")
@@ -173,12 +174,12 @@ async def list_sessions(
     result = await db.execute(stmt)
     sessions = result.scalars().all()
 
-    return {
+    return ok(data={
         "total": total,
         "page": page,
         "page_size": page_size,
         "items": [s.to_dict() for s in sessions],
-    }
+    })
 
 
 @router.get("/chat/sessions/{session_id}", summary="获取会话详情（含消息）")
@@ -186,7 +187,7 @@ async def get_session(
     session: ChatSession = Depends(get_owned_session),
 ):
     """获取会话详情，包含所有消息（按用户隔离）"""
-    return session.to_dict(include_messages=True)
+    return ok(data=session.to_dict(include_messages=True))
 
 
 @router.put("/chat/sessions/{session_id}", summary="修改会话标题")
@@ -201,7 +202,7 @@ async def update_session(
     await db.commit()
     await db.refresh(session)
     logger.info("[Chat] 修改会话标题: id=%s, title=%s", session.id, session.title)
-    return session.to_dict()
+    return ok(data=session.to_dict())
 
 
 @router.post("/chat/sessions/{session_id}/summarize", summary="AI 自动总结会话主题")
@@ -237,7 +238,7 @@ async def summarize_session(
     await db.commit()
     await db.refresh(session)
     logger.info("[Chat] 自动总结会话标题: id=%s, title=%s", session.id, session.title)
-    return session.to_dict()
+    return ok(data=session.to_dict())
 
 
 @router.delete("/chat/sessions/{session_id}", summary="删除会话")
@@ -249,7 +250,7 @@ async def delete_session(
     await db.delete(session)
     await db.commit()
     logger.info("[Chat] 删除会话: id=%s", session.id)
-    return {"success": True, "message": f"会话 {session.id} 已删除"}
+    return ok(message=f"会话 {session.id} 已删除")
 
 
 # =====================================================
@@ -272,7 +273,7 @@ async def get_messages(
 
     await chat_service.refresh_message_media_items(messages, db)
 
-    return {"items": [m.to_dict() for m in messages]}
+    return ok(data={"items": [m.to_dict() for m in messages]})
 
 
 @router.post("/chat/sessions/{session_id}/messages", summary="发送消息（SSE 流式响应）")
@@ -365,9 +366,9 @@ async def media_callback(
             await db.commit()
             logger.info("[Chat] 媒体回调更新: message_id=%s, task_id=%s, status=%s",
                         req.message_id, req.task_id, req.status)
-            return {"success": True, "message": "媒体状态已更新"}
+            return ok(message="媒体状态已更新")
 
-    return {"success": False, "message": "未找到对应的媒体项"}
+    raise HTTPException(status_code=404, detail="未找到对应的媒体项")
 
 
 # =====================================================
@@ -383,14 +384,14 @@ async def get_media_status(task_id: str):
     # 先尝试图片任务
     image_task = await image_poller_manager.get_status(task_id)
     if image_task:
-        return image_task.to_dict()
+        return ok(data=image_task.to_dict())
 
     # 再尝试视频任务
     video_task = await video_poller_manager.get_status(task_id=task_id)
     if not video_task:
         video_task = await video_poller_manager.get_status(video_id=task_id)
     if video_task:
-        return video_task.to_dict()
+        return ok(data=video_task.to_dict())
 
     # 最后查数据库
     try:
@@ -401,19 +402,19 @@ async def get_media_status(task_id: str):
             )
             record = result.scalar_one_or_none()
             if record:
-                return {
+                return ok(data={
                     "task_id": task_id,
                     "status": record.status,
                     "result_url": record.result_url,
                     "type": record.type,
-                }
+                })
     except Exception as e:
         logger.warning("[Chat] 数据库查询媒体状态失败: %s", e)
 
     # 任务不在内存中也不在数据库中，返回 unknown 状态而非 404
     # 前端收到 unknown 后会停止轮询，避免无限 404 循环
-    return {
+    return ok(data={
         "task_id": task_id,
         "status": "unknown",
         "message": "任务已过期或不存在，请停止轮询",
-    }
+    })

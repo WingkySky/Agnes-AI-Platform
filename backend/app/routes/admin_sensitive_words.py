@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.database import get_async_db
+from app.core.response import ok
 from app.core.security import require_permission
 from app.models.user import User
 from app.models.sensitive_word import SensitiveWord, SENSITIVE_CATEGORIES
@@ -55,13 +56,13 @@ async def list_sensitive_words(
     # 分页
     paginated = all_items[(page - 1) * page_size: page * page_size]
 
-    return {
+    return ok(data={
         "items": [w.to_dict() for w in paginated],
         "total": total,
         "page": page,
         "page_size": page_size,
         "categories": SENSITIVE_CATEGORIES,
-    }
+    })
 
 
 @router.post("", summary="[审核员] 新增敏感词")
@@ -173,7 +174,7 @@ async def delete_sensitive_word(
     invalidate_sensitive_words_cache()
 
     logger.info("[敏感词管理] %s 删除敏感词: %s", moderator.username, sw.word)
-    return {"success": True, "message": "已删除"}
+    return ok(message="已删除")
 
 
 @router.post("/batch-import", summary="[审核员] 批量导入敏感词")
@@ -236,9 +237,8 @@ async def batch_import_sensitive_words(
         moderator.username, inserted_count, skipped_count,
     )
 
-    return {
-        "success": True,
+    return ok(data={
         "inserted_count": inserted_count,
         "skipped_count": skipped_count,
         "total_count": len(word_list),
-    }
+    })

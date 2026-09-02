@@ -8,6 +8,7 @@ import logging
 
 from fastapi import APIRouter, Depends
 from app.core.config import settings
+from app.core.response import ok
 from app.schemas.common import ConfigResponse, ImageSizeOption, VideoAspectRatioOption, VideoResolutionOption, WatermarkConfigPublic
 from app.services.model_registry import get_all_models
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -65,7 +66,7 @@ VIDEO_RESOLUTION_OPTIONS = [
 ]
 
 
-@router.get("/config", response_model=ConfigResponse, summary="获取前端配置")
+@router.get("/config", summary="获取前端配置")
 async def get_config(db: AsyncSession = Depends(get_async_db)):
     """
     返回前端需要的非敏感配置：
@@ -98,7 +99,7 @@ async def get_config(db: AsyncSession = Depends(get_async_db)):
     except Exception as e:
         logging.getLogger("agnes_platform").warning("[config] 获取水印配置失败: %s", e)
 
-    return ConfigResponse(
+    return ok(data=ConfigResponse(
         models=await get_all_models(),
         # 图片尺寸（兼容旧版 + 结构化新版）
         image_sizes=[opt.value for opt in IMAGE_SIZE_OPTIONS],
@@ -123,4 +124,4 @@ async def get_config(db: AsyncSession = Depends(get_async_db)):
         default_video_height=720,
         max_upload_size_mb=settings.max_upload_size_mb,
         watermark=watermark_config,
-    )
+    ))

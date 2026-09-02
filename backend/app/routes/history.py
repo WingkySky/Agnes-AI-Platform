@@ -31,6 +31,7 @@ from sqlalchemy.future import select
 from sqlalchemy import desc, func
 
 from app.core.database import get_async_db
+from app.core.response import ok
 from app.core.security import get_current_user_optional, get_current_user
 from app.models.generation import Generation
 from app.models.user import User
@@ -39,15 +40,11 @@ from app.services.moderation_service import mark_pending_with_keyword_check, que
 from app.schemas.common import (
     HistoryListResponse,
     GenerationRecord,
-    DeleteResponse,
     BatchDeleteRequest,
-    BatchDeleteResponse,
 )
 from app.schemas.plaza import (
     UpdateShareStatusRequest,
-    UpdateShareStatusResponse,
     BatchShareRequest,
-    BatchShareResponse,
 )
 
 logger = logging.getLogger("agnes_platform")
@@ -136,7 +133,7 @@ def _download_response_headers(filename: str) -> dict:
     }
 
 
-@router.get("/history", response_model=HistoryListResponse, summary="获取生成历史列表")
+@router.get("/history", summary="获取生成历史列表")
 async def get_history(
     type: Optional[str] = Query(None, description="筛选类型: image / video / all（默认）"),
     source: Optional[str] = Query("independent", description="来源筛选: independent（默认，独立生成）/ canvas / project / all"),
@@ -193,17 +190,17 @@ async def get_history(
     # 转换为响应对象
     records = [GenerationRecord.model_validate(item) for item in items]
 
-    return HistoryListResponse(
+    return ok(data=HistoryListResponse(
         total=total,
         page=page,
         page_size=page_size,
         items=records,
         total_image_count=total_image_count,
         total_video_count=total_video_count,
-    )
+    ))
 
 
-@router.delete("/history/{record_id}", response_model=DeleteResponse, summary="删除单条历史记录")
+@router.delete("/history/{record_id}", summary="删除单条历史记录")
 async def delete_history_record(
     record_id: int,
     db: AsyncSession = Depends(get_async_db),
@@ -226,13 +223,13 @@ async def delete_history_record(
         await db.delete(record)
         await db.commit()
         logger.info("[历史记录] 已异步删除: id=%s", record_id)
-        return DeleteResponse(success=True, message=f"已删除记录 ID={record_id}")
+        return ok(message=f"已删除记录 ID={record_id}")
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"删除失败: {e}")
 
 
-@router.post("/history/batch-delete", response_model=BatchDeleteResponse, summary="批量删除历史记录")
+@router.post("/history/batch-delete", summary="批量删除历史记录")
 async def batch_delete_history(
     body: BatchDeleteRequest,
     db: AsyncSession = Depends(get_async_db),
@@ -275,11 +272,12 @@ async def batch_delete_history(
             len(failed_ids),
         )
 
-        return BatchDeleteResponse(
-            success=True,
+        return ok(
+            data={
+                "deleted_count": len(deleted_ids),
+                "failed_ids": failed_ids,
+            },
             message=f"已删除 {len(deleted_ids)} 条记录",
-            deleted_count=len(deleted_ids),
-            failed_ids=failed_ids,
         )
     except Exception as e:
         await db.rollback()
@@ -912,7 +910,7 @@ async def get_video_preview(
 # =====================================================
 
 
-@router.patch("/history/{record_id}/share", response_model=UpdateShareStatusResponse, summary="单条切换分享状态")
+@router.patch("/history/{record_id}/share", summary="单条切换分享状态")
 async def update_share_status(
     record_id: int,
     body: UpdateShareStatusRequest,
@@ -964,15 +962,13 @@ async def update_share_status(
         msg = "已设为仅自己可见"
     logger.info("[广场] 用户 %s 切换记录 %s 分享状态: %s", current_user.id, record_id, body.is_public)
 
-    return UpdateShareStatusResponse(
-        success=True,
-        id=record_id,
-        is_public=body.is_public,
+    return ok(
+        data={"id": record_id, "is_public": body.is_public},
         message=msg,
     )
 
 
-@router.patch("/history/batch-share", response_model=BatchShareResponse, summary="批量设置分享状态")
+@router.patch("/history/batch-share", summary="批量设置分享状态")
 async def batch_update_share_status(
     body: BatchShareRequest,
     db: AsyncSession = Depends(get_async_db),
@@ -1032,9 +1028,10 @@ async def batch_update_share_status(
         msg = f"已将 {len(updated_ids)} 条记录设为仅自己可见"
     logger.info("[广场] 用户 %s 批量切换 %d 条记录分享状态: %s", current_user.id, len(updated_ids), body.is_public)
 
-    return BatchShareResponse(
-        success=True,
-        updated_count=len(updated_ids),
-        failed_ids=failed_ids,
+    return ok(
+        data={
+            "updated_count": len(updated_ids),
+            "failed_ids": failed_ids,
+        },
         message=msg,
     )

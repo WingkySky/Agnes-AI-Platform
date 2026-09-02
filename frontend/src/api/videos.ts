@@ -26,6 +26,6 @@ export function getVideoStatus(taskId: string): Promise<VideoStatusResponse> {
 /**
  * 中止视频任务
  */
-export function cancelVideoTask(taskId: string): Promise<{ success: boolean; task_id: string; status: string; message: string }> {
+export function cancelVideoTask(taskId: string): Promise<null> {
   return client.delete(`/api/videos/${taskId}`)
 }

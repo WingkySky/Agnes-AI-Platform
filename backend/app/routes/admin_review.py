@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.database import get_async_db
+from app.core.response import ok
 from app.core.security import get_current_reviewer
 from app.models.user import User
 from app.models.asset import Asset
@@ -116,12 +117,12 @@ async def list_review_items(
     end = start + page_size
     paged_items = all_items[start:end]
 
-    return {
+    return ok(data={
         "items": paged_items,
         "total": total,
         "page": page,
         "page_size": page_size,
-    }
+    })
 
 
 # =====================================================
@@ -226,7 +227,7 @@ async def get_review_stats(
     except Exception:
         logger.exception("统计 AI 预审结果分布失败")
 
-    return {
+    return ok(data={
         "work_pending": work_pending,
         "preset_pending": preset_pending,
         "asset_pending": asset_pending,
@@ -239,7 +240,7 @@ async def get_review_stats(
         "ai_violated": ai_violated,
         "ai_failed": ai_failed,
         "ai_pending": ai_pending,
-    }
+    })
 
 
 # =====================================================
@@ -278,7 +279,7 @@ async def approve_item(
         item.moderated_at = datetime.utcnow()
         await db.commit()
         logger.info("[统一审核] %s 审核通过作品 id=%d", current_user.username, item_id)
-        return {"message": "审核通过", "review_type": review_type, "item_id": item_id}
+        return ok(data={"review_type": review_type, "item_id": item_id}, message="审核通过")
 
     elif review_type == "preset":
         # 预设审核通过（item_id 是 preset_index 表的 id）
@@ -298,7 +299,7 @@ async def approve_item(
             await prompt_svc.update_preset(
                 db, entry.preset_id, is_approved=True, is_rejected=False
             )
-        return {"message": "审核通过", "review_type": review_type, "item_id": item_id}
+        return ok(data={"review_type": review_type, "item_id": item_id}, message="审核通过")
 
     elif review_type == "asset":
         # 资产审核通过（创作内容分享到广场后进入人工复审）
@@ -311,7 +312,7 @@ async def approve_item(
         item.moderation_reason = None
         await db.commit()
         logger.info("[统一审核] %s 审核通过资产 id=%d", current_user.username, item_id)
-        return {"message": "审核通过", "review_type": review_type, "item_id": item_id}
+        return ok(data={"review_type": review_type, "item_id": item_id}, message="审核通过")
 
 
 # =====================================================
@@ -354,7 +355,7 @@ async def reject_item(
         # 注意：不修改 is_public，以便用户在审核历史中看到驳回记录；广场查询时按 moderation_status 过滤即可
         await db.commit()
         logger.info("[统一审核] %s 驳回作品 id=%d reason=%s", current_user.username, item_id, reason)
-        return {"message": "已驳回", "review_type": review_type, "item_id": item_id}
+        return ok(data={"review_type": review_type, "item_id": item_id}, message="已驳回")
 
     elif review_type == "preset":
         # 预设驳回（item_id 是 preset_index 表的 id）
@@ -376,7 +377,7 @@ async def reject_item(
                 db, entry.preset_id,
                 is_public=False, is_approved=False, is_rejected=True,
             )
-        return {"message": "已驳回", "review_type": review_type, "item_id": item_id}
+        return ok(data={"review_type": review_type, "item_id": item_id}, message="已驳回")
 
     elif review_type == "asset":
         # 资产驳回（保留 is_public 供用户查看驳回记录，广场按 moderation_status 过滤不可见）
@@ -388,7 +389,7 @@ async def reject_item(
         item.moderation_reason = reason or "管理员审核不通过"
         await db.commit()
         logger.info("[统一审核] %s 驳回资产 id=%d reason=%s", current_user.username, item_id, reason)
-        return {"message": "已驳回", "review_type": review_type, "item_id": item_id}
+        return ok(data={"review_type": review_type, "item_id": item_id}, message="已驳回")
 
 
 # =====================================================
@@ -422,7 +423,10 @@ async def batch_approve(
         except Exception:
             failed += 1
 
-    return {"message": f"批量处理完成：成功 {success} 个，失败 {failed} 个", "success": success, "failed": failed}
+    return ok(
+        data={"success": success, "failed": failed},
+        message=f"批量处理完成：成功 {success} 个，失败 {failed} 个",
+    )
 
 
 # =====================================================
@@ -458,7 +462,10 @@ async def batch_reject(
         except Exception:
             failed += 1
 
-    return {"message": f"批量处理完成：成功 {success} 个，失败 {failed} 个", "success": success, "failed": failed}
+    return ok(
+        data={"success": success, "failed": failed},
+        message=f"批量处理完成：成功 {success} 个，失败 {failed} 个",
+    )
 
 
 # =====================================================

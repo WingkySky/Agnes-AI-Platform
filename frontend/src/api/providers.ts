@@ -39,7 +39,7 @@ export function updateProvider(providerId: number, data: ProviderUpdateRequest):
 }
 
 /** 删除 Provider */
-export function deleteProvider(providerId: number): Promise<{ status: string; message: string }> {
+export function deleteProvider(providerId: number): Promise<null> {
   return client.delete(`/api/providers/${providerId}`)
 }
 
@@ -64,17 +64,17 @@ export function updateModel(modelId: string, data: ModelUpdateRequest): Promise<
 }
 
 /** 删除模型定义 */
-export function deleteModel(modelId: string): Promise<{ status: string; message: string }> {
+export function deleteModel(modelId: string): Promise<null> {
   return client.delete(`/api/models/${modelId}`)
 }
 
 /** 批量停用/启用模型 */
-export function batchUpdateModels(data: ModelBatchUpdateRequest): Promise<{ status: string; message: string; updated: number }> {
+export function batchUpdateModels(data: ModelBatchUpdateRequest): Promise<{ updated: number }> {
   return client.put('/api/models/batch', data)
 }
 
 /** 批量删除模型 */
-export function batchDeleteModels(data: ModelBatchDeleteRequest): Promise<{ status: string; message: string; deleted: number }> {
+export function batchDeleteModels(data: ModelBatchDeleteRequest): Promise<{ deleted: number }> {
   return client.post('/api/models/batch-delete', data)
 }
 

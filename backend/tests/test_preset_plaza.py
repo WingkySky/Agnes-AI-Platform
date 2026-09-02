@@ -30,7 +30,7 @@ async def test_plaza_list_visibility(auth_client, db, seed_user):
 
     resp = await auth_client.get("/api/presets")
     assert resp.status_code == 200
-    names = [i["name"] for i in resp.json()["items"]]
+    names = [i["name"] for i in resp.json()["data"]["items"]]
     assert "我的私有风格" in names
     assert "他人私有风格" not in names
     assert "他人公开风格" in names
@@ -41,7 +41,7 @@ async def test_plaza_excludes_pipeline(auth_client, db, seed_user):
     """pipeline 类型不进广场"""
     await _make_preset(db, user_id=seed_user.id, name="流水线配置", type="pipeline")
     resp = await auth_client.get("/api/presets")
-    assert all(i["type"] != "pipeline" for i in resp.json()["items"])
+    assert all(i["type"] != "pipeline" for i in resp.json()["data"]["items"])
 
 
 @pytest.mark.asyncio
@@ -51,13 +51,13 @@ async def test_type_filter_and_search(auth_client, db, seed_user):
     await _make_preset(db, user_id=seed_user.id, name="穿云而入", type="effect")
 
     resp = await auth_client.get("/api/presets", params={"type": "effect"})
-    assert {i["name"] for i in resp.json()["items"]} == {"穿云而入"}
+    assert {i["name"] for i in resp.json()["data"]["items"]} == {"穿云而入"}
 
     resp = await auth_client.get("/api/presets", params={"type": "style,effect"})
-    assert len(resp.json()["items"]) == 2
+    assert len(resp.json()["data"]["items"]) == 2
 
     resp = await auth_client.get("/api/presets", params={"q": "水墨"})
-    assert {i["name"] for i in resp.json()["items"]} == {"水墨风格"}
+    assert {i["name"] for i in resp.json()["data"]["items"]} == {"水墨风格"}
 
 
 @pytest.mark.asyncio
@@ -66,20 +66,20 @@ async def test_favorite_toggle_and_favorites_tab(auth_client, db, seed_user):
     preset = await _make_preset(db, user_id=999, name="可收藏风格", is_public=True, is_approved=True)
 
     resp = await auth_client.post(f"/api/presets/{preset.id}/favorite")
-    assert resp.json() == {"is_favorite": True}
+    assert resp.json()["data"] == {"is_favorite": True}
     resp = await auth_client.post(f"/api/presets/{preset.id}/favorite")
-    assert resp.json() == {"is_favorite": False}
+    assert resp.json()["data"] == {"is_favorite": False}
 
     await auth_client.post(f"/api/presets/{preset.id}/favorite")
     resp = await auth_client.get("/api/presets", params={"tab": "favorites"})
-    items = resp.json()["items"]
+    items = resp.json()["data"]["items"]
     assert [i["name"] for i in items] == ["可收藏风格"]
     assert items[0]["is_favorite"] is True
 
     # 取消收藏后 favorites tab 为空
     await auth_client.post(f"/api/presets/{preset.id}/favorite")
     resp = await auth_client.get("/api/presets", params={"tab": "favorites"})
-    assert resp.json()["total"] == 0
+    assert resp.json()["data"]["total"] == 0
 
 
 @pytest.mark.asyncio
@@ -91,7 +91,7 @@ async def test_use_records_recent_and_usage(auth_client, db, seed_user):
     await auth_client.post(f"/api/presets/{preset.id}/use")
 
     resp = await auth_client.get("/api/presets", params={"tab": "recent"})
-    items = resp.json()["items"]
+    items = resp.json()["data"]["items"]
     assert len(items) == 1
     assert items[0]["name"] == "常用风格"
 
@@ -107,7 +107,7 @@ async def test_hot_sort_official_first(auth_client, db, seed_user):
     await _make_preset(db, user_id=999, name="普通热门", is_public=True, is_approved=True,
                        usage_count=100)
     resp = await auth_client.get("/api/presets", params={"sort": "hot"})
-    names = [i["name"] for i in resp.json()["items"]]
+    names = [i["name"] for i in resp.json()["data"]["items"]]
     assert names.index("官方热门") < names.index("普通热门")
 
 
@@ -120,7 +120,7 @@ async def test_fork_resets_flags(auth_client, db, seed_user):
 
     resp = await auth_client.post(f"/api/presets/{src.id}/fork")
     assert resp.status_code == 200
-    data = resp.json()
+    data = resp.json()["data"]
     assert data["is_official"] is False
     assert data["is_public"] is False
     assert data["usage_count"] == 0
@@ -156,7 +156,7 @@ async def test_generate_cover_admin_only(auth_client, db, seed_user, monkeypatch
     monkeypatch.setattr(preset_cover_service, "generate_cover_image", _fake_generate)
     resp = await auth_client.post(f"/api/presets/{preset.id}/generate-cover")
     assert resp.status_code == 200
-    assert resp.json()["cover_image"] == "/uploads/preset-covers/fake.png"
+    assert resp.json()["data"]["cover_image"] == "/uploads/preset-covers/fake.png"
 
     await db.refresh(preset)
     assert preset.cover_image == "/uploads/preset-covers/fake.png"
@@ -171,7 +171,7 @@ async def test_generate_cover_admin_only(auth_client, db, seed_user, monkeypatch
     monkeypatch.setattr(preset_cover_service, "generate_cover_video", _fake_video)
     resp = await auth_client.post(f"/api/presets/{effect.id}/generate-cover")
     assert resp.status_code == 200
-    assert resp.json() == {"cover_video": "/uploads/preset-videos/fake.mp4"}
+    assert resp.json()["data"] == {"cover_video": "/uploads/preset-videos/fake.mp4"}
 
     await db.refresh(effect)
     assert effect.cover_video == "/uploads/preset-videos/fake.mp4"

@@ -17,6 +17,7 @@ from sqlalchemy.future import select
 from sqlalchemy import func
 
 from app.core.database import get_async_db
+from app.core.response import ok
 from app.core.security import get_current_user, get_current_admin_user
 from app.models.user import User
 from app.models.credit_transaction import CreditTransaction
@@ -48,13 +49,13 @@ async def estimate_cost(
     else:
         raise HTTPException(status_code=400, detail="type 必须是 image 或 video")
 
-    return {
+    return ok(data={
         "type": type,
         "mode": mode,
         "cost": cost,
         "balance": current_user.credits,
         "sufficient": current_user.credits >= cost,
-    }
+    })
 
 
 @router.get("/credits/transactions", summary="查询当前用户的积分变动明细")
@@ -86,12 +87,12 @@ async def list_my_transactions(
     result = await db.execute(stmt)
     items = result.scalars().all()
 
-    return {
+    return ok(data={
         "items": [item.to_dict() for item in items],
         "total": total,
         "page": page,
         "page_size": page_size,
-    }
+    })
 
 
 @router.get("/credits/transactions/all", summary="[管理员] 查询所有用户的积分变动明细")
@@ -131,7 +132,7 @@ async def list_all_transactions(
         for uid, uname in user_result:
             user_map[uid] = uname
 
-    return {
+    return ok(data={
         "items": [
             {**item.to_dict(), "username": user_map.get(item.user_id, "")}
             for item in items
@@ -139,4 +140,4 @@ async def list_all_transactions(
         "total": total,
         "page": page,
         "page_size": page_size,
-    }
+    })

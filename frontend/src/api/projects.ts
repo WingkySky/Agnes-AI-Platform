@@ -98,7 +98,7 @@ export function updateProject(id: number, data: ProjectUpdateRequest): Promise<P
   return client.patch(`/api/projects/${id}`, data)
 }
 
-export function deleteProject(id: number): Promise<{ status: string; message: string }> {
+export function deleteProject(id: number): Promise<null> {
   return client.delete(`/api/projects/${id}`)
 }
 
@@ -145,7 +145,7 @@ export function createWizardProject(data: WizardCreateRequest): Promise<Project>
   return client.post('/api/projects/wizard', data)
 }
 
-export function resumeWizard(projectId: number, data: WizardResumeRequest): Promise<{ status: string; message: string }> {
+export function resumeWizard(projectId: number, data: WizardResumeRequest): Promise<Project> {
   return client.post(`/api/projects/${projectId}/wizard/resume`, data)
 }
 
@@ -165,7 +165,7 @@ export function updateScript(projectId: number, scriptId: number, data: ScriptUp
   return client.patch(`/api/projects/${projectId}/scripts/${scriptId}`, data)
 }
 
-export function deleteScript(projectId: number, scriptId: number): Promise<{ status: string; message: string }> {
+export function deleteScript(projectId: number, scriptId: number): Promise<null> {
   return client.delete(`/api/projects/${projectId}/scripts/${scriptId}`)
 }
 
@@ -182,14 +182,14 @@ interface EntityEndpoints {
   get: (projectId: number, id: number) => Promise<any>
   create: (projectId: number, data: any) => Promise<any>
   update: (projectId: number, id: number, data: any) => Promise<any>
-  delete: (projectId: number, id: number) => Promise<{ status: string; message: string }>
+  delete: (projectId: number, id: number) => Promise<null>
   reorder: (projectId: number, ids: number[]) => Promise<any>
   generateImage: (projectId: number, id: number, data: any) => Promise<any>
   batchGenerate: (projectId: number, data: any) => Promise<any>
   uploadImage: (projectId: number, id: number, file: File) => Promise<any>
   listVersions: (projectId: number, id: number) => Promise<ProjectEntityAsset[]>
   setActiveVersion: (projectId: number, id: number, data: SetActiveVersionRequest) => Promise<any>
-  deleteVersion: (projectId: number, id: number, versionId: number) => Promise<{ status: string; message: string }>
+  deleteVersion: (projectId: number, id: number, versionId: number) => Promise<null>
   extractFromScript: (projectId: number, scriptId: number) => Promise<any>
   /** 跨集复制：将实体复制到目标剧本（集） */
   copyTo: (projectId: number, entityId: number, targetScriptId: number) => Promise<any>
@@ -293,7 +293,7 @@ export function updateShot(projectId: number, shotId: number, data: ShotUpdateRe
   return client.patch(`/api/projects/${projectId}/shots/${shotId}`, data)
 }
 
-export function deleteShot(projectId: number, shotId: number): Promise<{ status: string; message: string }> {
+export function deleteShot(projectId: number, shotId: number): Promise<null> {
   return client.delete(`/api/projects/${projectId}/shots/${shotId}`)
 }
 
@@ -350,7 +350,7 @@ export function setActiveFrameImage(projectId: number, shotId: number, versionId
   return client.post(`/api/projects/${projectId}/shots/${shotId}/frame-images/${versionId}/set-active`)
 }
 
-export function deleteFrameImage(projectId: number, shotId: number, frameImageId: number): Promise<{ status: string; message: string }> {
+export function deleteFrameImage(projectId: number, shotId: number, frameImageId: number): Promise<null> {
   return client.delete(`/api/projects/${projectId}/shots/${shotId}/frame-images/${frameImageId}`)
 }
 
@@ -374,7 +374,7 @@ export function setActiveVideo(projectId: number, shotId: number, versionId: num
   return client.post(`/api/projects/${projectId}/shots/${shotId}/videos/${versionId}/set-active`)
 }
 
-export function deleteVideo(projectId: number, shotId: number, videoId: number): Promise<{ status: string; message: string }> {
+export function deleteVideo(projectId: number, shotId: number, videoId: number): Promise<null> {
   return client.delete(`/api/projects/${projectId}/shots/${shotId}/videos/${videoId}`)
 }
 
@@ -406,7 +406,7 @@ export function saveCanvasLayout(projectId: number, data: CanvasDataUpdate): Pro
 // 合成 API
 // =====================================================
 
-export function mergeProject(projectId: number): Promise<{ status: string; message: string }> {
+export function mergeProject(projectId: number): Promise<MergeStatusResponse> {
   return client.post(`/api/projects/${projectId}/merge`, {})
 }
 
@@ -479,7 +479,7 @@ export function deleteAudio(
   projectId: number,
   shotId: number,
   versionId: number,
-): Promise<{ success: boolean }> {
+): Promise<null> {
   return client.delete(`/api/projects/${projectId}/shots/${shotId}/audios/${versionId}`)
 }
 
@@ -573,7 +573,7 @@ export function updateTimelineClip(
 export function deleteTimelineClip(
   projectId: number,
   clipId: number,
-): Promise<{ success: boolean }> {
+): Promise<null> {
   return client.delete(`/api/projects/${projectId}/timeline/clips/${clipId}`)
 }
 
@@ -661,6 +661,6 @@ export function createMarker(projectId: number, data: MarkerCreateRequest): Prom
 }
 
 /** 删除标记 */
-export function deleteMarker(projectId: number, markerId: number): Promise<{ status: string; message: string }> {
+export function deleteMarker(projectId: number, markerId: number): Promise<null> {
   return client.delete(`/api/projects/${projectId}/markers/${markerId}`)
 }

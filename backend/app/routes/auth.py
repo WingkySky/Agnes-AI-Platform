@@ -26,6 +26,7 @@ from sqlalchemy.future import select
 
 from app.core.config import settings
 from app.core.database import get_async_db
+from app.core.response import ok
 from app.core.security import (
     create_access_token,
     get_current_user,
@@ -61,7 +62,7 @@ router = APIRouter(prefix="/auth", tags=["用户认证"])
 # 图片验证码
 # =====================================================
 
-@router.get("/captcha", response_model=CaptchaResponse, summary="获取图片验证码")
+@router.get("/captcha", summary="获取图片验证码")
 async def get_captcha():
     """
     获取图片验证码。
@@ -74,10 +75,10 @@ async def get_captcha():
     captcha_id, image_bytes = create_captcha()
     image_base64 = base64.b64encode(image_bytes).decode("utf-8")
 
-    return CaptchaResponse(
+    return ok(data=CaptchaResponse(
         captcha_id=captcha_id,
         image_base64=image_base64,
-    )
+    ))
 
 
 # =====================================================
@@ -126,7 +127,7 @@ async def send_email_code(req: SendEmailCodeRequest):
     if not user:
         # 邮箱未注册：不发送，但返回成功，防止枚举用户
         logger.info("[邮箱验证码] 邮箱未注册，不发送（安全考虑） email=%s", email)
-        return {"ok": True, "message": "验证码已发送，请查收邮箱"}
+        return ok(message="验证码已发送，请查收邮箱")
 
     # 生成并保存验证码
     code = generate_email_code()
@@ -146,7 +147,7 @@ async def send_email_code(req: SendEmailCodeRequest):
     if not success:
         raise HTTPException(status_code=500, detail="邮件发送失败，请稍后重试")
 
-    return {"ok": True, "message": "验证码已发送，请查收邮箱"}
+    return ok(message="验证码已发送，请查收邮箱")
 
 
 # =====================================================
@@ -182,14 +183,14 @@ async def reset_password(req: ResetPasswordRequest, db: AsyncSession = Depends(g
     await db.commit()
 
     logger.info("[重置密码] 成功 user=%s id=%d", user.username, user.id)
-    return {"ok": True, "message": "密码重置成功，请使用新密码登录"}
+    return ok(message="密码重置成功，请使用新密码登录")
 
 
 # =====================================================
 # 注册
 # =====================================================
 
-@router.post("/register", response_model=TokenResponse, summary="用户注册")
+@router.post("/register", summary="用户注册")
 async def register(req: RegisterRequest, db: AsyncSession = Depends(get_async_db)):
     """
     注册新用户：
@@ -265,19 +266,19 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_async_db
 
     # 4. 生成 JWT
     token = create_access_token(user.id)
-    return TokenResponse(
+    return ok(data=TokenResponse(
         access_token=token,
         token_type="bearer",
         expires_in=settings.jwt_access_token_expire_minutes * 60,
         must_change_password=bool(user.must_change_password),
-    )
+    ))
 
 
 # =====================================================
 # 登录
 # =====================================================
 
-@router.post("/login", response_model=TokenResponse, summary="用户登录")
+@router.post("/login", summary="用户登录")
 async def login(req: LoginRequest, db: AsyncSession = Depends(get_async_db)):
     """
     使用用户名 + 密码登录，返回 JWT token。
@@ -319,19 +320,19 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_async_db)):
     token = create_access_token(user.id)
     logger.info("[登录成功] user=%s id=%d role=%s", user.username, user.id, user.role)
 
-    return TokenResponse(
+    return ok(data=TokenResponse(
         access_token=token,
         token_type="bearer",
         expires_in=settings.jwt_access_token_expire_minutes * 60,
         must_change_password=bool(user.must_change_password),
-    )
+    ))
 
 
 # =====================================================
 # 获取当前用户信息
 # =====================================================
 
-@router.get("/me", response_model=UserInfoResponse, summary="获取当前登录用户信息")
+@router.get("/me", summary="获取当前登录用户信息")
 async def get_me(current_user: User = Depends(get_current_user)):
     """
     需要携带有效的 Authorization: Bearer <token>。
@@ -339,7 +340,7 @@ async def get_me(current_user: User = Depends(get_current_user)):
     """
     # 读取角色时保持一致性逻辑
     is_admin = current_user.role == ROLE_ADMIN or current_user.is_admin
-    return UserInfoResponse(
+    return ok(data=UserInfoResponse(
         id=current_user.id,
         username=current_user.username,
         nickname=current_user.nickname,
@@ -354,7 +355,7 @@ async def get_me(current_user: User = Depends(get_current_user)):
         must_change_password=bool(current_user.must_change_password),
         created_at=current_user.created_at,
         last_login_at=current_user.last_login_at,
-    )
+    ))
 
 
 # =====================================================
@@ -388,14 +389,14 @@ async def change_password(
     await db.commit()
 
     logger.info("[修改密码] 成功 user=%s id=%d", current_user.username, current_user.id)
-    return {"ok": True, "message": "密码修改成功"}
+    return ok(message="密码修改成功")
 
 
 # =====================================================
 # 更新个人资料（邮箱）
 # =====================================================
 
-@router.put("/me", response_model=UserInfoResponse, summary="更新当前用户个人资料")
+@router.put("/me", summary="更新当前用户个人资料")
 async def update_my_profile(
     req: UpdateProfileRequest,
     db: AsyncSession = Depends(get_async_db),
@@ -426,7 +427,7 @@ async def update_my_profile(
     logger.info("[个人资料更新] user=%s id=%d", current_user.username, current_user.id)
 
     is_admin = current_user.role == ROLE_ADMIN or current_user.is_admin
-    return UserInfoResponse(
+    return ok(data=UserInfoResponse(
         id=current_user.id,
         username=current_user.username,
         nickname=current_user.nickname,
@@ -440,7 +441,7 @@ async def update_my_profile(
         content_safety_strict=current_user.content_safety_strict or False,
         created_at=current_user.created_at,
         last_login_at=current_user.last_login_at,
-    )
+    ))
 
 
 # =====================================================
@@ -455,7 +456,7 @@ ALLOWED_AVATAR_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 MAX_AVATAR_BYTES = 2 * 1024 * 1024
 
 
-@router.post("/avatar", response_model=UserInfoResponse, summary="上传/更新当前用户头像")
+@router.post("/avatar", summary="上传/更新当前用户头像")
 async def upload_avatar(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_async_db),
@@ -515,7 +516,7 @@ async def upload_avatar(
     logger.info("[头像更新] user=%s id=%d avatar=%s", current_user.username, current_user.id, current_user.avatar_url)
 
     is_admin = current_user.role == ROLE_ADMIN or current_user.is_admin
-    return UserInfoResponse(
+    return ok(data=UserInfoResponse(
         id=current_user.id,
         username=current_user.username,
         nickname=current_user.nickname,
@@ -529,23 +530,23 @@ async def upload_avatar(
         content_safety_strict=current_user.content_safety_strict or False,
         created_at=current_user.created_at,
         last_login_at=current_user.last_login_at,
-    )
+    ))
 
 
 # =====================================================
 # 查询当前积分
 # =====================================================
 
-@router.get("/credits", response_model=UserCreditsResponse, summary="获取当前积分余额")
+@router.get("/credits", summary="获取当前积分余额")
 async def get_credits(current_user: User = Depends(get_current_user)):
-    return UserCreditsResponse(credits=current_user.credits)
+    return ok(data=UserCreditsResponse(credits=current_user.credits))
 
 
 # =====================================================
 # 管理员：列出所有用户
 # =====================================================
 
-@router.get("/users", response_model=UserListResponse, summary="[管理员] 列出所有用户")
+@router.get("/users", summary="[管理员] 列出所有用户")
 async def list_users(
     db: AsyncSession = Depends(get_async_db),
     _admin: User = Depends(get_current_admin_user),
@@ -563,7 +564,7 @@ async def list_users(
             content_safety_strict=u.content_safety_strict,
             created_at=u.created_at, last_login_at=u.last_login_at,
         ))
-    return UserListResponse(items=items, total=len(items))
+    return ok(data=UserListResponse(items=items, total=len(items)))
 
 
 # =====================================================
@@ -592,12 +593,11 @@ async def update_user_role(
 
     is_admin = user.role == ROLE_ADMIN or user.is_admin
     logger.info("[管理员操作] %s 修改用户 id=%d 角色为 %s", _admin.username, user.id, req.role)
-    return {
+    return ok(data={
         "id": user.id,
         "role": user.role,
         "is_admin": is_admin,
-        "ok": True,
-    }
+    })
 
 
 # =====================================================
@@ -621,7 +621,7 @@ async def update_user_watermark(
     await db.commit()
 
     logger.info("[管理员操作] %s 修改用户 id=%d 水印开关 -> %s", _admin.username, user.id, enabled)
-    return {"id": user.id, "watermark_enabled": enabled, "ok": True}
+    return ok(data={"id": user.id, "watermark_enabled": enabled})
 
 
 # =====================================================
@@ -645,7 +645,7 @@ async def update_user_content_safety(
     await db.commit()
 
     logger.info("[管理员操作] %s 修改用户 id=%d 内容安全严格模式 -> %s", _admin.username, user.id, enabled)
-    return {"id": user.id, "content_safety_strict": enabled, "ok": True}
+    return ok(data={"id": user.id, "content_safety_strict": enabled})
 
 
 # =====================================================
@@ -678,7 +678,7 @@ async def update_user_credits(
         "[管理员操作] %s 修改用户 id=%d 积分 %d -> %d",
         _admin.username, user.id, old_value, req.credits,
     )
-    return {"id": user.id, "credits": req.credits, "ok": True}
+    return ok(data={"id": user.id, "credits": req.credits})
 
 
 # =====================================================
@@ -706,4 +706,4 @@ async def update_user_active(
         "[管理员操作] %s 将用户 id=%d is_active 改为 %s",
         _admin.username, user.id, req.is_active,
     )
-    return {"id": user.id, "is_active": user.is_active, "ok": True}
+    return ok(data={"id": user.id, "is_active": user.is_active})

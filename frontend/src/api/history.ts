@@ -5,7 +5,6 @@
 import client from './client'
 import type {
   HistoryListResponse,
-  DeleteResponse,
   BatchDeleteResponse,
   ConfigResponse
 } from '@/types'
@@ -26,7 +25,7 @@ export function getHistoryList(
 /**
  * 删除单条历史记录
  */
-export function deleteHistoryRecord(id: number): Promise<DeleteResponse> {
+export function deleteHistoryRecord(id: number): Promise<null> {
   return client.delete(`/api/history/${id}`)
 }
 

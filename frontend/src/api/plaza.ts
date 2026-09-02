@@ -68,17 +68,13 @@ export interface PlazaCreationListResponse {
 }
 
 export interface ShareStatusResponse {
-  success: boolean
   id: number
   is_public: boolean
-  message: string
 }
 
 export interface BatchShareResponse {
-  success: boolean
   updated_count: number
   failed_ids: number[]
-  message: string
 }
 
 // ---------- API 函数 ----------

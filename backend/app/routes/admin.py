@@ -15,6 +15,7 @@ from sqlalchemy.future import select
 from sqlalchemy import update as sa_update
 
 from app.core.database import get_async_db
+from app.core.response import ok
 from app.core.security import get_current_admin_user
 from app.models.credit_rule import CreditRule, DEFAULT_CREDIT_RULES
 from app.models.user import User
@@ -44,11 +45,8 @@ async def load_credit_rules(db: AsyncSession) -> dict:
 
 
 # ---------- 列出所有积分规则 ----------
-@router.get("/credit-rules", response_model=list[CreditRuleResponse], summary="[管理员] 列出所有积分规则")
-async def list_credit_rules(
-    db: AsyncSession = Depends(get_async_db),
-    _admin: User = Depends(get_current_admin_user),
-):
+async def _build_credit_rule_items(db: AsyncSession) -> list[CreditRuleResponse]:
+    """合并默认值构建完整规则列表（GET 与 reset 共用）"""
     # 1. 读取数据库中的规则
     result = await db.execute(select(CreditRule).order_by(CreditRule.id.asc()))
     rows = result.scalars().all()
@@ -83,8 +81,16 @@ async def list_credit_rules(
     return items
 
 
+@router.get("/credit-rules", summary="[管理员] 列出所有积分规则")
+async def list_credit_rules(
+    db: AsyncSession = Depends(get_async_db),
+    _admin: User = Depends(get_current_admin_user),
+):
+    return ok(data=await _build_credit_rule_items(db))
+
+
 # ---------- 修改某条积分规则 ----------
-@router.put("/credit-rules/{rule_key:path}", response_model=CreditRuleResponse, summary="[管理员] 修改积分规则")
+@router.put("/credit-rules/{rule_key:path}", summary="[管理员] 修改积分规则")
 async def update_credit_rule(
     rule_key: str,
     req: CreditRuleUpdateRequest,
@@ -131,14 +137,14 @@ async def update_credit_rule(
     invalidate_credit_rules_cache()
 
     logger.info("[管理员操作] %s 修改积分规则 %s = %d", admin.username, rule_key, row.value)
-    return CreditRuleResponse(
+    return ok(data=CreditRuleResponse(
         id=row.id, rule_key=row.rule_key, name=row.name,
         value=row.value, description=row.description or "", updated_at=row.updated_at,
-    )
+    ))
 
 
 # ---------- 恢复默认积分规则 ----------
-@router.post("/credit-rules/reset", response_model=list[CreditRuleResponse], summary="[管理员] 恢复默认积分规则")
+@router.post("/credit-rules/reset", summary="[管理员] 恢复默认积分规则")
 async def reset_credit_rules(
     db: AsyncSession = Depends(get_async_db),
     admin: User = Depends(get_current_admin_user),
@@ -164,7 +170,7 @@ async def reset_credit_rules(
     invalidate_credit_rules_cache()
 
     logger.info("[管理员操作] %s 恢复默认积分规则", admin.username)
-    return await list_credit_rules(db, admin)
+    return ok(data=await _build_credit_rule_items(db))
 
 
 # =====================================================
@@ -179,4 +185,4 @@ async def rebuild_all_covers_api(
     """为所有缺少封面的项目自动回填封面（扫描所有帧图）"""
     result = await rebuild_all_project_covers(db)
     logger.info("[管理员操作] %s 执行批量封面回填: %s", admin.username, result)
-    return result
+    return ok(data=result)

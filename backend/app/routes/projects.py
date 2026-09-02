@@ -35,6 +35,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_db
+from app.core.response import ok
 from app.core.security import (
     get_current_user,
     decode_access_token,
@@ -216,7 +217,7 @@ async def get_owned_project(
 # 1. 项目 CRUD
 # =====================================================
 
-@router.post("", response_model=ProjectResponse, summary="创建项目（空白）")
+@router.post("", summary="创建项目（空白）")
 async def create_project_api(
     data: ProjectCreate,
     db: AsyncSession = Depends(get_async_db),
@@ -225,10 +226,10 @@ async def create_project_api(
     """创建空白项目（不通过向导）"""
     project = await create_project(db, current_user.id, data)
     project_sse_manager.init_snapshot(project.id, project.status)
-    return project
+    return ok(data=ProjectResponse.model_validate(project))
 
 
-@router.get("", response_model=ProjectListResponse, summary="列出项目")
+@router.get("", summary="列出项目")
 async def list_projects_api(
     status: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
@@ -237,17 +238,17 @@ async def list_projects_api(
     current_user: User = Depends(get_current_user),
 ):
     items, total = await list_projects(db, current_user.id, status, page, page_size)
-    return ProjectListResponse(items=items, total=total, page=page, page_size=page_size)
+    return ok(data=ProjectListResponse(items=items, total=total, page=page, page_size=page_size))
 
 
-@router.get("/{project_id}", response_model=ProjectResponse, summary="获取项目详情")
+@router.get("/{project_id}", summary="获取项目详情")
 async def get_project_api(
     project: Project = Depends(get_owned_project),
 ):
-    return project
+    return ok(data=ProjectResponse.model_validate(project))
 
 
-@router.patch("/{project_id}", response_model=ProjectResponse, summary="更新项目")
+@router.patch("/{project_id}", summary="更新项目")
 async def update_project_api(
     project_id: int,
     data: ProjectUpdate,
@@ -255,7 +256,7 @@ async def update_project_api(
     project: Project = Depends(get_owned_project),
 ):
     updated = await update_project(db, project_id, data)
-    return updated
+    return ok(data=ProjectResponse.model_validate(updated))
 
 
 @router.delete("/{project_id}", summary="删除项目")
@@ -264,30 +265,38 @@ async def delete_project_api(
     db: AsyncSession = Depends(get_async_db),
     project: Project = Depends(get_owned_project),
 ):
-    ok = await delete_project(db, project_id)
-    return {"success": ok}
+    deleted = await delete_project(db, project_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    return ok(message="项目已删除")
 
 
-@router.post("/{project_id}/archive", response_model=ProjectResponse, summary="归档项目")
+@router.post("/{project_id}/archive", summary="归档项目")
 async def archive_project_api(
     project_id: int,
     db: AsyncSession = Depends(get_async_db),
     project: Project = Depends(get_owned_project),
 ):
-    return await archive_project(db, project_id)
+    updated = await archive_project(db, project_id)
+    if not updated:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    return ok(data=ProjectResponse.model_validate(updated))
 
 
-@router.patch("/{project_id}/active-view", response_model=ProjectResponse, summary="切换活动视图")
+@router.patch("/{project_id}/active-view", summary="切换活动视图")
 async def update_active_view_api(
     project_id: int,
     data: ActiveViewUpdate,
     db: AsyncSession = Depends(get_async_db),
     project: Project = Depends(get_owned_project),
 ):
-    return await update_active_view(db, project_id, data.view)
+    updated = await update_active_view(db, project_id, data.view)
+    if not updated:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    return ok(data=ProjectResponse.model_validate(updated))
 
 
-@router.post("/{project_id}/rebuild-cover", response_model=ProjectResponse, summary="自动选取封面")
+@router.post("/{project_id}/rebuild-cover", summary="自动选取封面")
 async def rebuild_cover_api(
     project_id: int,
     db: AsyncSession = Depends(get_async_db),
@@ -297,10 +306,10 @@ async def rebuild_cover_api(
     updated = await rebuild_project_cover(db, project_id)
     if not updated:
         raise HTTPException(status_code=404, detail="项目不存在")
-    return updated
+    return ok(data=ProjectResponse.model_validate(updated))
 
 
-@router.post("/{project_id}/set-cover", response_model=ProjectResponse, summary="指定帧图设置封面")
+@router.post("/{project_id}/set-cover", summary="指定帧图设置封面")
 async def set_cover_api(
     project_id: int,
     req: SetCoverRequest,
@@ -313,7 +322,7 @@ async def set_cover_api(
     updated = await set_project_cover_from_frame(db, project_id, req.frame_image_id)
     if not updated:
         raise HTTPException(status_code=400, detail="帧图不存在或不属于该项目")
-    return updated
+    return ok(data=ProjectResponse.model_validate(updated))
 
 
 @router.post("/rebuild-missing-covers", summary="批量回填当前用户无封面的项目")
@@ -354,14 +363,14 @@ async def rebuild_missing_covers_api(
         else:
             skipped += 1
     await db.commit()
-    return {"total": len(projects), "updated": updated, "skipped": skipped}
+    return ok(data={"total": len(projects), "updated": updated, "skipped": skipped})
 
 
 # =====================================================
 # 2. 向导
 # =====================================================
 
-@router.post("/wizard", response_model=ProjectResponse, summary="通过模板向导创建项目")
+@router.post("/wizard", summary="通过模板向导创建项目")
 async def create_via_wizard_api(
     data: WizardCreateRequest,
     db: AsyncSession = Depends(get_async_db),
@@ -409,7 +418,7 @@ async def create_via_wizard_api(
 
     # 后台执行向导（独立 session）
     asyncio.create_task(_run_wizard_async(project.id, wizard_chain, merged_inputs))
-    return project
+    return ok(data=ProjectResponse.model_validate(project))
 
 
 async def _run_wizard_async(
@@ -436,7 +445,7 @@ async def _run_wizard_async(
         await db.close()
 
 
-@router.post("/{project_id}/wizard/resume", response_model=ProjectResponse, summary="恢复中断的向导")
+@router.post("/{project_id}/wizard/resume", summary="恢复中断的向导")
 async def resume_wizard_api(
     data: WizardResumeRequest,
     project: Project = Depends(get_owned_project),
@@ -461,7 +470,7 @@ async def resume_wizard_api(
     asyncio.create_task(
         _run_wizard_async(project.id, wizard_chain, inputs)
     )
-    return project
+    return ok(data=ProjectResponse.model_validate(project))
 
 
 # =====================================================
@@ -528,26 +537,28 @@ async def project_sse_events(
 # 4. 剧本
 # =====================================================
 
-@router.get("/{project_id}/scripts", response_model=List[ScriptResponse], summary="列出剧本")
+@router.get("/{project_id}/scripts", summary="列出剧本")
 async def list_scripts_api(
     project_id: int,
     db: AsyncSession = Depends(get_async_db),
     project: Project = Depends(get_owned_project),
 ):
-    return await list_scripts(db, project_id)
+    scripts = await list_scripts(db, project_id)
+    return ok(data=[ScriptResponse.model_validate(s) for s in scripts])
 
 
-@router.post("/{project_id}/scripts", response_model=ScriptResponse, summary="新增剧本")
+@router.post("/{project_id}/scripts", summary="新增剧本")
 async def create_script_api(
     project_id: int,
     data: ScriptCreate,
     db: AsyncSession = Depends(get_async_db),
     project: Project = Depends(get_owned_project),
 ):
-    return await create_script(db, project_id, data)
+    script = await create_script(db, project_id, data)
+    return ok(data=ScriptResponse.model_validate(script))
 
 
-@router.get("/{project_id}/scripts/{script_id}", response_model=ScriptResponse, summary="获取剧本")
+@router.get("/{project_id}/scripts/{script_id}", summary="获取剧本")
 async def get_script_api(
     project_id: int,
     script_id: int,
@@ -557,10 +568,10 @@ async def get_script_api(
     script = await get_script(db, script_id)
     if not script or script.project_id != project_id:
         raise HTTPException(status_code=404, detail="剧本不存在")
-    return script
+    return ok(data=ScriptResponse.model_validate(script))
 
 
-@router.patch("/{project_id}/scripts/{script_id}", response_model=ScriptResponse, summary="编辑剧本")
+@router.patch("/{project_id}/scripts/{script_id}", summary="编辑剧本")
 async def update_script_api(
     script_id: int,
     data: ScriptUpdate,
@@ -570,7 +581,7 @@ async def update_script_api(
     script = await update_script(db, script_id, data)
     if not script:
         raise HTTPException(status_code=404, detail="剧本不存在")
-    return script
+    return ok(data=ScriptResponse.model_validate(script))
 
 
 @router.delete("/{project_id}/scripts/{script_id}", summary="删除剧本")
@@ -579,11 +590,13 @@ async def delete_script_api(
     db: AsyncSession = Depends(get_async_db),
     project: Project = Depends(get_owned_project),
 ):
-    ok = await delete_script(db, script_id)
-    return {"success": ok}
+    deleted = await delete_script(db, script_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="剧本不存在")
+    return ok(message="已删除")
 
 
-@router.post("/{project_id}/scripts/{script_id}/regenerate", response_model=ScriptResponse, summary="重新生成剧本")
+@router.post("/{project_id}/scripts/{script_id}/regenerate", summary="重新生成剧本")
 async def regenerate_script_api(
     script_id: int,
     data: ScriptRegenerateRequest,
@@ -599,7 +612,7 @@ async def regenerate_script_api(
         raise HTTPException(status_code=400, detail=str(e))
     if not script:
         raise HTTPException(status_code=404, detail="剧本不存在")
-    return script
+    return ok(data=ScriptResponse.model_validate(script))
 
 
 # =====================================================
@@ -670,7 +683,6 @@ def _build_entity_routes(prefix: str, entity_type: str):
 
     @router.get(
         f"/{{project_id}}/{prefix}",
-        response_model=List[response_schema],
         summary=f"列出{entity_label}",
     )
     async def list_api(
@@ -679,11 +691,11 @@ def _build_entity_routes(prefix: str, entity_type: str):
         db: AsyncSession = Depends(get_async_db),
         project: Project = Depends(get_owned_project),
     ):
-        return await list_fn(db, project_id, script_id)
+        entities = await list_fn(db, project_id, script_id)
+        return ok(data=[response_schema.model_validate(e) for e in entities])
 
     @router.post(
         f"/{{project_id}}/{prefix}",
-        response_model=response_schema,
         summary=f"添加{entity_label}",
     )
     async def create_api(
@@ -692,11 +704,11 @@ def _build_entity_routes(prefix: str, entity_type: str):
         db: AsyncSession = Depends(get_async_db),
         project: Project = Depends(get_owned_project),
     ):
-        return await create_fn(db, project_id, data)
+        entity = await create_fn(db, project_id, data)
+        return ok(data=response_schema.model_validate(entity))
 
     @router.get(
         f"/{{project_id}}/{prefix}/{{entity_id}}",
-        response_model=response_schema,
         summary=f"获取{entity_label}",
     )
     async def get_api(
@@ -708,11 +720,10 @@ def _build_entity_routes(prefix: str, entity_type: str):
         entity = await get_fn(db, entity_id)
         if not entity or entity.project_id != project_id:
             raise HTTPException(status_code=404, detail=f"{entity_label}不存在")
-        return entity
+        return ok(data=response_schema.model_validate(entity))
 
     @router.patch(
         f"/{{project_id}}/{prefix}/{{entity_id}}",
-        response_model=response_schema,
         summary=f"编辑{entity_label}",
     )
     async def update_api(
@@ -724,7 +735,7 @@ def _build_entity_routes(prefix: str, entity_type: str):
         entity = await update_fn(db, entity_id, data)
         if not entity:
             raise HTTPException(status_code=404, detail=f"{entity_label}不存在")
-        return entity
+        return ok(data=response_schema.model_validate(entity))
 
     @router.delete(
         f"/{{project_id}}/{prefix}/{{entity_id}}",
@@ -735,8 +746,10 @@ def _build_entity_routes(prefix: str, entity_type: str):
         db: AsyncSession = Depends(get_async_db),
         project: Project = Depends(get_owned_project),
     ):
-        ok = await delete_fn(db, entity_id)
-        return {"success": ok}
+        deleted = await delete_fn(db, entity_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail=f"{entity_label}不存在")
+        return ok(message="已删除")
 
     @router.patch(
         f"/{{project_id}}/{prefix}/reorder",
@@ -749,7 +762,7 @@ def _build_entity_routes(prefix: str, entity_type: str):
         project: Project = Depends(get_owned_project),
     ):
         await reorder_fn(db, project_id, data.ids)
-        return {"success": True}
+        return ok(message="已重排")
 
     @router.post(
         f"/{{project_id}}/{prefix}/{{entity_id}}/generate-image",
@@ -763,16 +776,16 @@ def _build_entity_routes(prefix: str, entity_type: str):
         project: Project = Depends(get_owned_project),
     ):
         try:
-            return await gen_image_fn(
+            result = await gen_image_fn(
                 db, entity_id, current_user.id,
                 data.style_config, data.model, data.size or "1024x1024",
             )
+            return ok(data=result)
         except (ValueError, RuntimeError) as e:
             raise HTTPException(status_code=400, detail=str(e))
 
     @router.post(
         f"/{{project_id}}/{prefix}/{{entity_id}}/claim-image",
-        response_model=response_schema,
         summary=f"认领{entity_label}生成结果",
     )
     async def claim_image_api(
@@ -788,7 +801,7 @@ def _build_entity_routes(prefix: str, entity_type: str):
             raise HTTPException(status_code=400, detail=str(e))
         if not entity:
             raise HTTPException(status_code=404, detail="实体不存在或任务结果未就绪")
-        return entity
+        return ok(data=response_schema.model_validate(entity))
 
     @router.post(
         f"/{{project_id}}/{prefix}/batch-generate",
@@ -804,11 +817,10 @@ def _build_entity_routes(prefix: str, entity_type: str):
             db, data.ids, current_user.id,
             data.style_config, data.model, data.size or "1024x1024",
         )
-        return {"results": results}
+        return ok(data={"results": results})
 
     @router.post(
         f"/{{project_id}}/{prefix}/{{entity_id}}/upload-image",
-        response_model=response_schema,
         summary=f"上传{entity_label}形象图",
     )
     async def upload_image_api(
@@ -822,11 +834,11 @@ def _build_entity_routes(prefix: str, entity_type: str):
         # 简化处理：将文件保存到本地临时目录（实际生产应上传到对象存储）
         from app.services.upload_service import save_upload_file
         file_url = await save_upload_file(file, folder=f"projects/{project_id}/{prefix}")
-        return await upload_fn(db, entity_id, current_user.id, file_url)
+        entity = await upload_fn(db, entity_id, current_user.id, file_url)
+        return ok(data=response_schema.model_validate(entity))
 
     @router.get(
         f"/{{project_id}}/{prefix}/{{entity_id}}/versions",
-        response_model=List[EntityAssetResponse],
         summary=f"列出{entity_label}形象图版本",
     )
     async def list_versions_api(
@@ -834,11 +846,11 @@ def _build_entity_routes(prefix: str, entity_type: str):
         db: AsyncSession = Depends(get_async_db),
         project: Project = Depends(get_owned_project),
     ):
-        return await list_v_fn(db, entity_id)
+        assets = await list_v_fn(db, entity_id)
+        return ok(data=[EntityAssetResponse.model_validate(a) for a in assets])
 
     @router.post(
         f"/{{project_id}}/{prefix}/{{entity_id}}/set-active",
-        response_model=EntityAssetResponse,
         summary=f"设为采用版",
     )
     async def set_active_api(
@@ -850,7 +862,7 @@ def _build_entity_routes(prefix: str, entity_type: str):
         asset = await set_v_fn(db, entity_id, data.version_id)
         if not asset:
             raise HTTPException(status_code=400, detail="版本不存在或不属于该实体")
-        return asset
+        return ok(data=EntityAssetResponse.model_validate(asset))
 
     @router.delete(
         f"/{{project_id}}/{prefix}/{{entity_id}}/versions/{{version_id}}",
@@ -862,10 +874,10 @@ def _build_entity_routes(prefix: str, entity_type: str):
         db: AsyncSession = Depends(get_async_db),
         project: Project = Depends(get_owned_project),
     ):
-        ok = await del_v_fn(db, entity_id, version_id)
-        if not ok:
+        deleted = await del_v_fn(db, entity_id, version_id)
+        if not deleted:
             raise HTTPException(status_code=400, detail="无法删除（激活版不允许删除或版本不存在）")
-        return {"success": ok}
+        return ok(message="已删除")
 
     @router.post(
         f"/{{project_id}}/{prefix}/extract-from-script",
@@ -879,13 +891,13 @@ def _build_entity_routes(prefix: str, entity_type: str):
     ):
         """从指定 script_id 的剧本提取实体"""
         try:
-            return await extract_fn(db, project_id, req.script_id)
+            result = await extract_fn(db, project_id, req.script_id)
+            return ok(data=result)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
     @router.post(
         f"/{{project_id}}/{prefix}/{{entity_id}}/copy-to",
-        response_model=response_schema,
         summary=f"复制{entity_label}到其他集",
     )
     async def copy_to_api(
@@ -897,7 +909,8 @@ def _build_entity_routes(prefix: str, entity_type: str):
     ):
         """将{entity_label}复制到 target_script_id 指定的目标集"""
         try:
-            return await copy_to_fn(db, project_id, entity_id, req.target_script_id)
+            entity = await copy_to_fn(db, project_id, entity_id, req.target_script_id)
+            return ok(data=response_schema.model_validate(entity))
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
@@ -912,7 +925,7 @@ _build_entity_routes("props", "prop")
 # 6. 分镜
 # =====================================================
 
-@router.get("/{project_id}/shots", response_model=List[ShotResponse], summary="列出分镜")
+@router.get("/{project_id}/shots", summary="列出分镜")
 async def list_shots_api(
     project_id: int,
     script_id: Optional[int] = Query(None, description="按集过滤"),
@@ -934,17 +947,18 @@ async def list_shots_api(
             for p in getattr(shot, "_props", [])
         ]
         result.append(item)
-    return result
+    return ok(data=result)
 
 
-@router.post("/{project_id}/shots", response_model=ShotResponse, summary="添加分镜")
+@router.post("/{project_id}/shots", summary="添加分镜")
 async def create_shot_api(
     project_id: int,
     data: ShotCreate,
     db: AsyncSession = Depends(get_async_db),
     project: Project = Depends(get_owned_project),
 ):
-    return await create_shot(db, project_id, data)
+    shot = await create_shot(db, project_id, data)
+    return ok(data=ShotResponse.model_validate(shot))
 
 
 @router.post("/{project_id}/shots/split", summary="从剧本 AI 拆分分镜")
@@ -956,12 +970,13 @@ async def split_shots_api(
 ):
     """从剧本拆分分镜（按 script_id 指定的集）"""
     try:
-        return await split_shots_from_script(db, project_id, req.script_id)
+        result = await split_shots_from_script(db, project_id, req.script_id)
+        return ok(data=result)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/{project_id}/shots/{shot_id}", response_model=ShotResponse, summary="获取分镜")
+@router.get("/{project_id}/shots/{shot_id}", summary="获取分镜")
 async def get_shot_api(
     project_id: int,
     shot_id: int,
@@ -980,10 +995,10 @@ async def get_shot_api(
         EntityResponse.model_validate(p)
         for p in getattr(shot, "_props", [])
     ]
-    return item
+    return ok(data=item)
 
 
-@router.patch("/{project_id}/shots/{shot_id}", response_model=ShotResponse, summary="编辑分镜")
+@router.patch("/{project_id}/shots/{shot_id}", summary="编辑分镜")
 async def update_shot_api(
     shot_id: int,
     data: ShotUpdate,
@@ -993,7 +1008,7 @@ async def update_shot_api(
     shot = await update_shot(db, shot_id, data)
     if not shot:
         raise HTTPException(status_code=404, detail="分镜不存在")
-    return shot
+    return ok(data=ShotResponse.model_validate(shot))
 
 
 @router.delete("/{project_id}/shots/{shot_id}", summary="删除分镜")
@@ -1002,8 +1017,10 @@ async def delete_shot_api(
     db: AsyncSession = Depends(get_async_db),
     project: Project = Depends(get_owned_project),
 ):
-    ok = await delete_shot(db, shot_id)
-    return {"success": ok}
+    deleted = await delete_shot(db, shot_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="分镜不存在")
+    return ok(message="已删除")
 
 
 @router.patch("/{project_id}/shots/reorder", summary="重排分镜")
@@ -1014,7 +1031,7 @@ async def reorder_shots_api(
     project: Project = Depends(get_owned_project),
 ):
     await reorder_shots(db, project_id, data.ids)
-    return {"success": True}
+    return ok(message="已重排")
 
 
 @router.post("/{project_id}/shots/{shot_id}/bind-character", summary="绑定角色")
@@ -1025,7 +1042,7 @@ async def bind_character_api(
     project: Project = Depends(get_owned_project),
 ):
     await bind_character(db, shot_id, data.entity_id)
-    return {"success": True}
+    return ok(message="已绑定角色")
 
 
 @router.post("/{project_id}/shots/{shot_id}/unbind-character", summary="解绑角色")
@@ -1036,7 +1053,7 @@ async def unbind_character_api(
     project: Project = Depends(get_owned_project),
 ):
     await unbind_character(db, shot_id, data.entity_id)
-    return {"success": True}
+    return ok(message="已解绑角色")
 
 
 @router.post("/{project_id}/shots/{shot_id}/bind-prop", summary="绑定道具")
@@ -1047,7 +1064,7 @@ async def bind_prop_api(
     project: Project = Depends(get_owned_project),
 ):
     await bind_prop(db, shot_id, data.entity_id)
-    return {"success": True}
+    return ok(message="已绑定道具")
 
 
 @router.post("/{project_id}/shots/{shot_id}/unbind-prop", summary="解绑道具")
@@ -1058,12 +1075,11 @@ async def unbind_prop_api(
     project: Project = Depends(get_owned_project),
 ):
     await unbind_prop(db, shot_id, data.entity_id)
-    return {"success": True}
+    return ok(message="已解绑道具")
 
 
 @router.post(
     "/{project_id}/shots/{shot_id}/generate-frame-prompt",
-    response_model=ShotResponse,
     summary="生成帧 prompt",
 )
 async def generate_frame_prompt_api(
@@ -1074,7 +1090,7 @@ async def generate_frame_prompt_api(
     shot = await generate_frame_prompt(db, shot_id)
     if not shot:
         raise HTTPException(status_code=404, detail="分镜不存在")
-    return shot
+    return ok(data=ShotResponse.model_validate(shot))
 
 
 # =====================================================
@@ -1125,7 +1141,6 @@ def _build_media_routes(
 
     @router.get(
         f"/{{project_id}}/shots/{{shot_id}}/{url_segment}",
-        response_model=List[response_schema],
         summary=f"列出{label}版本",
     )
     async def list_media_api(
@@ -1133,11 +1148,11 @@ def _build_media_routes(
         db: AsyncSession = Depends(get_async_db),
         project: Project = Depends(get_owned_project),
     ):
-        return await list_fn(db, shot_id)
+        medias = await list_fn(db, shot_id)
+        return ok(data=[response_schema.model_validate(m) for m in medias])
 
     @router.post(
         f"/{{project_id}}/shots/{{shot_id}}/{url_segment}/generate",
-        response_model=generate_response_model,
         summary=generate_summary,
     )
     async def generate_media_api(
@@ -1148,7 +1163,10 @@ def _build_media_routes(
         project: Project = Depends(get_owned_project),
     ):
         try:
-            return await generate_call(db, shot_id, current_user.id, data)
+            result = await generate_call(db, shot_id, current_user.id, data)
+            if generate_response_model is not None:
+                return ok(data=generate_response_model.model_validate(result))
+            return ok(data=result)
         except (ValueError, RuntimeError) as e:
             raise HTTPException(status_code=400, detail=str(e))
 
@@ -1158,7 +1176,6 @@ def _build_media_routes(
         if claim_with_frame_image:
             @router.post(
                 f"/{{project_id}}/shots/{{shot_id}}/{url_segment}/claim",
-                response_model=response_schema,
                 summary=f"认领{label}生成结果",
             )
             async def claim_media_api(
@@ -1174,11 +1191,10 @@ def _build_media_routes(
                     raise HTTPException(status_code=400, detail=str(e))
                 if not result:
                     raise HTTPException(status_code=404, detail="分镜不存在或任务结果未就绪")
-                return result
+                return ok(data=response_schema.model_validate(result))
         else:
             @router.post(
                 f"/{{project_id}}/shots/{{shot_id}}/{url_segment}/claim",
-                response_model=response_schema,
                 summary=f"认领{label}生成结果",
             )
             async def claim_media_api(
@@ -1193,7 +1209,7 @@ def _build_media_routes(
                     raise HTTPException(status_code=400, detail=str(e))
                 if not result:
                     raise HTTPException(status_code=404, detail="分镜不存在或任务结果未就绪")
-                return result
+                return ok(data=response_schema.model_validate(result))
 
         claim_media_api.__doc__ = claim_doc
 
@@ -1208,13 +1224,12 @@ def _build_media_routes(
             current_user: User = Depends(get_current_user),
             project: Project = Depends(get_owned_project),
         ):
-            return await batch_call(db, data, current_user.id)
+            return ok(data=await batch_call(db, data, current_user.id))
 
         batch_generate_media_api.__doc__ = batch_doc
 
     @router.post(
         f"/{{project_id}}/shots/{{shot_id}}/{url_segment}/upload",
-        response_model=response_schema,
         summary=upload_summary,
     )
     async def upload_media_api(
@@ -1230,13 +1245,12 @@ def _build_media_routes(
         result = await upload_fn(db, shot_id, current_user.id, file_url)
         if not result:
             raise HTTPException(status_code=404, detail="分镜不存在")
-        return result
+        return ok(data=response_schema.model_validate(result))
 
     upload_media_api.__doc__ = upload_doc
 
     @router.post(
         f"/{{project_id}}/shots/{{shot_id}}/{url_segment}/{{version_id}}/set-active",
-        response_model=response_schema,
         summary=set_active_summary,
     )
     async def set_active_media_api(
@@ -1248,13 +1262,15 @@ def _build_media_routes(
         if set_active_error is None:
             # 音频：service 层以 ValueError 表达业务错误
             try:
-                return await set_active_fn(db, shot_id, version_id)
+                return ok(data=response_schema.model_validate(
+                    await set_active_fn(db, shot_id, version_id)
+                ))
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=str(e))
         result = await set_active_fn(db, shot_id, version_id)
         if not result:
             raise HTTPException(status_code=400, detail=set_active_error)
-        return result
+        return ok(data=response_schema.model_validate(result))
 
     @router.delete(
         f"/{{project_id}}/shots/{{shot_id}}/{url_segment}/{{version_id}}",
@@ -1266,10 +1282,10 @@ def _build_media_routes(
         db: AsyncSession = Depends(get_async_db),
         project: Project = Depends(get_owned_project),
     ):
-        ok = await delete_fn(db, shot_id, version_id)
-        if not ok:
+        deleted = await delete_fn(db, shot_id, version_id)
+        if not deleted:
             raise HTTPException(status_code=400, detail=delete_error)
-        return {"success": ok}
+        return ok(message="已删除")
 
 
 # ---- 帧图 ----
@@ -1419,7 +1435,7 @@ async def import_asset_api(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return {"success": True, "entity_id": entity.id}
+    return ok(data={"entity_id": entity.id}, message="已导入到项目")
 
 
 @router.post(
@@ -1439,7 +1455,7 @@ async def promote_asset_api(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return {"success": True, "asset_id": asset.id}
+    return ok(data={"asset_id": asset.id}, message="已沉淀到资产库")
 
 
 # =====================================================
@@ -1448,7 +1464,6 @@ async def promote_asset_api(
 
 @router.get(
     "/{project_id}/canvas",
-    response_model=CanvasLayoutResponse,
     summary="获取画布数据",
 )
 async def get_canvas_api(
@@ -1457,12 +1472,11 @@ async def get_canvas_api(
     project: Project = Depends(get_owned_project),
 ):
     canvas_data = await get_canvas_data(db, project_id)
-    return CanvasLayoutResponse(canvas_data=canvas_data)
+    return ok(data=CanvasLayoutResponse(canvas_data=canvas_data))
 
 
 @router.post(
     "/{project_id}/canvas/init",
-    response_model=CanvasLayoutResponse,
     summary="初始化画布布局",
 )
 async def init_canvas_api(
@@ -1471,12 +1485,11 @@ async def init_canvas_api(
     project: Project = Depends(get_owned_project),
 ):
     canvas_data = await init_canvas_layout(db, project_id)
-    return CanvasLayoutResponse(canvas_data=canvas_data)
+    return ok(data=CanvasLayoutResponse(canvas_data=canvas_data))
 
 
 @router.patch(
     "/{project_id}/canvas",
-    response_model=CanvasLayoutResponse,
     summary="保存画布布局",
 )
 async def save_canvas_api(
@@ -1486,14 +1499,14 @@ async def save_canvas_api(
     project: Project = Depends(get_owned_project),
 ):
     await save_canvas_data(db, project_id, data.canvas_data)
-    return CanvasLayoutResponse(canvas_data=data.canvas_data)
+    return ok(data=CanvasLayoutResponse(canvas_data=data.canvas_data))
 
 
 # =====================================================
 # 11. 合成
 # =====================================================
 
-@router.post("/{project_id}/merge", response_model=MergeStatusResponse, summary="触发合成（简单拼接）")
+@router.post("/{project_id}/merge", summary="触发合成（简单拼接）")
 async def merge_project_api(
     project_id: int,
     data: MergeRequest,
@@ -1506,12 +1519,11 @@ async def merge_project_api(
         await merge_project(db, project_id, current_user.id, use_timeline=False)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return MergeStatusResponse(status="started")
+    return ok(data=MergeStatusResponse(status="started"))
 
 
 @router.post(
     "/{project_id}/merge/advanced",
-    response_model=MergeStatusResponse,
     summary="触发高级合成（多轨 + 转场 + 音频 + 字幕 + BGM）",
 )
 async def merge_project_advanced_api(
@@ -1539,16 +1551,16 @@ async def merge_project_advanced_api(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return MergeStatusResponse(status="started")
+    return ok(data=MergeStatusResponse(status="started"))
 
 
-@router.get("/{project_id}/merge/status", response_model=MergeStatusResponse, summary="查询合成状态")
+@router.get("/{project_id}/merge/status", summary="查询合成状态")
 async def get_merge_status_api(
     project_id: int,
     db: AsyncSession = Depends(get_async_db),
     project: Project = Depends(get_owned_project),
 ):
-    return MergeStatusResponse(**await get_merge_status(db, project_id))
+    return ok(data=MergeStatusResponse(**await get_merge_status(db, project_id)))
 
 
 @router.get("/{project_id}/final-video", summary="下载/播放项目最终成片")
@@ -1634,7 +1646,6 @@ async def get_final_video_api(
 
 @router.get(
     "/{project_id}/voices/builtin",
-    response_model=List[VoiceOption],
     summary="内置音色清单",
 )
 async def list_builtin_voices_api(
@@ -1642,7 +1653,7 @@ async def list_builtin_voices_api(
 ):
     """返回内置音色清单（供前端音色选择器）"""
     voices = list_builtin_voice_options()
-    return [
+    return ok(data=[
         VoiceOption(
             voice_id=v.get("voice_id", ""),
             name=v.get("name", ""),
@@ -1650,12 +1661,11 @@ async def list_builtin_voices_api(
             suitable_for=v.get("suitable_for", ""),
         )
         for v in voices
-    ]
+    ])
 
 
 @router.get(
     "/{project_id}/character-voices",
-    response_model=List[CharacterVoiceResponse],
     summary="角色音色映射列表",
 )
 async def list_character_voices_api(
@@ -1663,12 +1673,12 @@ async def list_character_voices_api(
     db: AsyncSession = Depends(get_async_db),
     project: Project = Depends(get_owned_project),
 ):
-    return await list_character_voices(db, project_id)
+    voices = await list_character_voices(db, project_id)
+    return ok(data=[CharacterVoiceResponse.model_validate(v) for v in voices])
 
 
 @router.post(
     "/{project_id}/character-voices/{character_id}",
-    response_model=CharacterVoiceResponse,
     summary="为角色分配音色",
 )
 async def assign_character_voice_api(
@@ -1679,10 +1689,11 @@ async def assign_character_voice_api(
     project: Project = Depends(get_owned_project),
 ):
     """为角色分配音色（同角色同声音，upsert）"""
-    return await assign_character_voice(
+    voice = await assign_character_voice(
         db, project_id, character_id,
         voice_id=data.voice_id, voice_name=data.voice_name,
     )
+    return ok(data=CharacterVoiceResponse.model_validate(voice))
 
 
 # =====================================================
@@ -1712,7 +1723,7 @@ async def generate_subtitles_api(
         db, project_id,
         shot_ids=data.shot_ids, mode="llm",
     )
-    return {"clips": clips, "count": len(clips), "mode": "llm"}
+    return ok(data={"clips": clips, "count": len(clips), "mode": "llm"})
 
 
 @router.post(
@@ -1735,17 +1746,16 @@ async def generate_subtitles_whisper_api(
         shot_ids=data.shot_ids,
         whisper_model_size=data.whisper_model_size,
     )
-    return {
+    return ok(data={
         "clips": clips,
         "count": len(clips),
         "mode": "whisper" if is_whisper_available() else "llm",
         "whisper_available": is_whisper_available(),
-    }
+    })
 
 
 @router.get(
     "/{project_id}/subtitles/clips",
-    response_model=List[TimelineClipResponse],
     summary="字幕片段列表",
 )
 async def list_subtitle_clips_api(
@@ -1754,12 +1764,11 @@ async def list_subtitle_clips_api(
     project: Project = Depends(get_owned_project),
 ):
     clips = await get_subtitle_clips(db, project_id)
-    return [TimelineClipResponse.model_validate(c) for c in clips]
+    return ok(data=[TimelineClipResponse.model_validate(c) for c in clips])
 
 
 @router.get(
     "/{project_id}/subtitles/style",
-    response_model=SubtitleStyle,
     summary="获取字幕样式",
 )
 async def get_subtitle_style_api(
@@ -1768,12 +1777,11 @@ async def get_subtitle_style_api(
     project: Project = Depends(get_owned_project),
 ):
     style = await get_subtitle_style(db, project_id)
-    return SubtitleStyle(**style)
+    return ok(data=SubtitleStyle(**style))
 
 
 @router.patch(
     "/{project_id}/subtitles/style",
-    response_model=SubtitleStyle,
     summary="更新字幕样式",
 )
 async def update_subtitle_style_api(
@@ -1783,7 +1791,7 @@ async def update_subtitle_style_api(
     project: Project = Depends(get_owned_project),
 ):
     await update_subtitle_style(db, project_id, data.model_dump())
-    return data
+    return ok(data=data)
 
 
 @router.get(
@@ -1794,7 +1802,7 @@ async def check_whisper_available_api(
     project: Project = Depends(get_owned_project),
 ):
     """前端用于决定是否展示 whisper 模式选项"""
-    return {"available": is_whisper_available()}
+    return ok(data={"available": is_whisper_available()})
 
 
 # =====================================================
@@ -1812,7 +1820,6 @@ async def check_whisper_available_api(
 
 @router.post(
     "/{project_id}/timeline/init",
-    response_model=TimelineDataResponse,
     summary="初始化时间线（从分镜自动生成）",
 )
 async def init_timeline_api(
@@ -1826,12 +1833,11 @@ async def init_timeline_api(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     data = await get_timeline_data(db, project_id)
-    return TimelineDataResponse(**data)
+    return ok(data=TimelineDataResponse(**data))
 
 
 @router.get(
     "/{project_id}/timeline/clips",
-    response_model=List[TimelineClipResponse],
     summary="列出时间线片段",
 )
 async def list_timeline_clips_api(
@@ -1841,12 +1847,11 @@ async def list_timeline_clips_api(
     project: Project = Depends(get_owned_project),
 ):
     clips = await list_timeline_clips(db, project_id, track_type=track_type)
-    return [TimelineClipResponse.model_validate(c) for c in clips]
+    return ok(data=[TimelineClipResponse.model_validate(c) for c in clips])
 
 
 @router.post(
     "/{project_id}/timeline/clips",
-    response_model=TimelineClipResponse,
     summary="创建时间线片段",
 )
 async def create_timeline_clip_api(
@@ -1856,12 +1861,11 @@ async def create_timeline_clip_api(
     project: Project = Depends(get_owned_project),
 ):
     clip = await create_timeline_clip(db, project_id, data.model_dump(exclude_none=True))
-    return clip
+    return ok(data=TimelineClipResponse.model_validate(clip))
 
 
 @router.patch(
     "/{project_id}/timeline/clips/{clip_id}",
-    response_model=TimelineClipResponse,
     summary="更新时间线片段",
 )
 async def update_timeline_clip_api(
@@ -1876,7 +1880,7 @@ async def update_timeline_clip_api(
     )
     if not clip:
         raise HTTPException(status_code=404, detail="时间线片段不存在")
-    return clip
+    return ok(data=TimelineClipResponse.model_validate(clip))
 
 
 @router.delete(
@@ -1889,10 +1893,10 @@ async def delete_timeline_clip_api(
     db: AsyncSession = Depends(get_async_db),
     project: Project = Depends(get_owned_project),
 ):
-    ok = await delete_timeline_clip(db, project_id, clip_id)
-    if not ok:
+    deleted = await delete_timeline_clip(db, project_id, clip_id)
+    if not deleted:
         raise HTTPException(status_code=404, detail="时间线片段不存在")
-    return {"success": ok}
+    return ok(message="已删除")
 
 
 @router.post(
@@ -1914,7 +1918,7 @@ async def split_timeline_clip_api(
     result = await split_timeline_clip(db, project_id, clip_id, split_time)
     if not result:
         raise HTTPException(status_code=400, detail="分割点不在片段范围内")
-    return result
+    return ok(data=result)
 
 
 @router.delete(
@@ -1935,12 +1939,11 @@ async def ripple_delete_timeline_clip_api(
     result = await ripple_delete_timeline_clip(db, project_id, clip_id)
     if not result:
         raise HTTPException(status_code=404, detail="时间线片段不存在")
-    return result
+    return ok(data=result)
 
 
 @router.get(
     "/{project_id}/timeline/data",
-    response_model=TimelineDataResponse,
     summary="获取完整时间线数据",
 )
 async def get_timeline_data_api(
@@ -1949,12 +1952,11 @@ async def get_timeline_data_api(
     project: Project = Depends(get_owned_project),
 ):
     data = await get_timeline_data(db, project_id)
-    return TimelineDataResponse(**data)
+    return ok(data=TimelineDataResponse(**data))
 
 
 @router.patch(
     "/{project_id}/timeline/data",
-    response_model=TimelineDataResponse,
     summary="保存时间线草稿数据",
 )
 async def save_timeline_data_api(
@@ -1970,7 +1972,7 @@ async def save_timeline_data_api(
         draft=data.draft,
     )
     refreshed = await get_timeline_data(db, project_id)
-    return TimelineDataResponse(**refreshed)
+    return ok(data=TimelineDataResponse(**refreshed))
 
 
 # =====================================================
@@ -1990,7 +1992,7 @@ async def list_bgms_api(
     project: Project = Depends(get_owned_project),
 ):
     """BGM 内置库列表（available 字段标识文件是否就绪）"""
-    return list_bgm_library(mood=mood)
+    return ok(data=list_bgm_library(mood=mood))
 
 
 @router.get(
@@ -2000,7 +2002,7 @@ async def list_bgms_api(
 async def list_bgm_moods_api(
     project: Project = Depends(get_owned_project),
 ):
-    return {"moods": list_bgm_moods()}
+    return ok(data={"moods": list_bgm_moods()})
 
 
 @router.get(
@@ -2036,7 +2038,7 @@ async def upload_bgm_api(
     if len(content) > 20 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="BGM 文件过大，最大 20MB")
     display_name = (name or file.filename or "自定义 BGM").rsplit(".", 1)[0]
-    return await save_uploaded_bgm(display_name, mood, content)
+    return ok(data=await save_uploaded_bgm(display_name, mood, content))
 
 
 # =====================================================
@@ -2048,7 +2050,6 @@ async def upload_bgm_api(
 
 @router.get(
     "/{project_id}/media-library",
-    response_model=MediaLibraryResponse,
     summary="项目素材库（4 类素材聚合）",
 )
 async def get_media_library_api(
@@ -2057,7 +2058,9 @@ async def get_media_library_api(
     project: Project = Depends(get_owned_project),
 ):
     """聚合项目下所有可拖拽到时间线的素材（视频/音频/帧图/BGM）"""
-    return await get_media_library(db, project_id)
+    return ok(data=MediaLibraryResponse.model_validate(
+        await get_media_library(db, project_id)
+    ))
 
 
 # =====================================================
@@ -2071,7 +2074,6 @@ async def get_media_library_api(
 
 @router.get(
     "/{project_id}/markers",
-    response_model=List[MarkerResponse],
     summary="列出项目标记",
 )
 async def list_markers_api(
@@ -2079,12 +2081,12 @@ async def list_markers_api(
     db: AsyncSession = Depends(get_async_db),
     project: Project = Depends(get_owned_project),
 ):
-    return await list_project_markers(db, project_id)
+    markers = await list_project_markers(db, project_id)
+    return ok(data=[MarkerResponse.model_validate(m) for m in markers])
 
 
 @router.post(
     "/{project_id}/markers",
-    response_model=MarkerResponse,
     status_code=201,
     summary="创建标记",
 )
@@ -2094,10 +2096,11 @@ async def create_marker_api(
     db: AsyncSession = Depends(get_async_db),
     project: Project = Depends(get_owned_project),
 ):
-    return await create_project_marker(
+    marker = await create_project_marker(
         db, project_id,
         time=data.time, name=data.name, color=data.color,
     )
+    return ok(data=MarkerResponse.model_validate(marker))
 
 
 @router.delete(
@@ -2110,7 +2113,7 @@ async def delete_marker_api(
     db: AsyncSession = Depends(get_async_db),
     project: Project = Depends(get_owned_project),
 ):
-    ok = await delete_project_marker(db, project_id, marker_id)
-    if not ok:
+    deleted = await delete_project_marker(db, project_id, marker_id)
+    if not deleted:
         raise HTTPException(status_code=404, detail="标记不存在")
-    return {"status": "ok", "message": "标记已删除"}
+    return ok(message="标记已删除")

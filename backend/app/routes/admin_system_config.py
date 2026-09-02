@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
 from app.core.database import get_async_db
+from app.core.response import ok
 from app.core.security import get_current_admin_user
 from app.models.user import User
 from app.services.system_config_service import get_smtp_config, update_smtp_config, SmtpConfig
@@ -48,7 +49,7 @@ async def get_smtp(
 ):
     """获取 SMTP 邮件服务器配置（密码字段返回空字符串，不回显）"""
     config = await get_smtp_config(db)
-    return {
+    return ok(data={
         "smtp_host": config.host,
         "smtp_port": config.port,
         "smtp_user": config.user,
@@ -57,7 +58,7 @@ async def get_smtp(
         "smtp_from_name": config.from_name,
         "smtp_use_tls": config.use_tls,
         "is_enabled": config.is_enabled,
-    }
+    })
 
 
 @router.put("/smtp", summary="[管理员] 更新 SMTP 配置")
@@ -85,7 +86,7 @@ async def update_smtp(
     })
 
     logger.info("[系统配置] %s 更新了 SMTP 配置", admin.username)
-    return {"message": "配置已保存"}
+    return ok(message="配置已保存")
 
 
 @router.post("/smtp/test", summary="[管理员] 测试 SMTP 邮件发送")
@@ -105,7 +106,7 @@ async def test_smtp(
         raise HTTPException(status_code=500, detail="测试邮件发送失败，请检查 SMTP 配置是否正确")
 
     logger.info("[系统配置] %s 测试 SMTP 邮件发送到 %s 成功", admin.username, req.test_email)
-    return {"message": "测试邮件发送成功"}
+    return ok(message="测试邮件发送成功")
 
 
 # =====================================================
@@ -135,10 +136,10 @@ async def get_model_configs(
     """返回三个系统级模型配置项当前值 + 可选 chat 模型列表（供下拉选择）"""
     configs = {key: await get_config_value(db, key, "") for key in _MODEL_CONFIG_KEYS}
     chat_models = await get_models_by_type("chat")
-    return {
+    return ok(data={
         "configs": configs,
         "options": [{"id": m.id, "name": m.name} for m in chat_models],
-    }
+    })
 
 
 @router.put("/models", summary="[管理员] 更新系统级模型配置")
@@ -157,4 +158,4 @@ async def update_model_configs(
             raise HTTPException(status_code=400, detail=f"模型 {value} 不在聊天模型注册表中")
         await set_config_value(db, key, value)
     configs = {key: await get_config_value(db, key, "") for key in _MODEL_CONFIG_KEYS}
-    return {"status": "success", "message": "系统级模型配置已更新", "configs": configs}
+    return ok(data={"configs": configs}, message="系统级模型配置已更新")

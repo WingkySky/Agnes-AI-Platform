@@ -96,7 +96,7 @@ async def test_create_character_with_script_id(
         json={"script_id": s2.id, "name": "角色B"},
     )
     assert resp.status_code == 200, resp.text
-    data = resp.json()
+    data = resp.json()["data"]
     assert data["script_id"] == s2.id
     # 数据库验证归属
     char = await db.get(ProjectCharacter, data["id"])
@@ -141,7 +141,7 @@ async def test_list_characters_filter_by_script_id(
         f"/api/projects/{project.id}/characters?script_id={s2.id}"
     )
     assert resp.status_code == 200, resp.text
-    data = resp.json()
+    data = resp.json()["data"]
     assert len(data) == 1
     assert data[0]["name"] == "角色2"
     assert data[0]["script_id"] == s2.id
@@ -169,7 +169,7 @@ async def test_list_characters_without_script_id_returns_all(
 
     resp = await auth_client.get(f"/api/projects/{project.id}/characters")
     assert resp.status_code == 200, resp.text
-    assert len(resp.json()) == 2
+    assert len(resp.json()["data"]) == 2
 
 
 # =====================================================
@@ -201,7 +201,7 @@ async def test_shot_sequence_no_resets_per_script(
         json={"script_id": s2.id},
     )
     assert resp.status_code == 200, resp.text
-    shot = resp.json()
+    shot = resp.json()["data"]
     assert shot["sequence_no"] == 1
     assert shot["script_id"] == s2.id
 
@@ -250,7 +250,7 @@ async def test_copy_character_to_other_episode(
         json={"target_script_id": s2.id},
     )
     assert resp.status_code == 200, resp.text
-    new_char = resp.json()
+    new_char = resp.json()["data"]
     assert new_char["script_id"] == s2.id
     assert new_char["name"] == "主角"
     assert new_char["id"] != src.id
@@ -281,7 +281,7 @@ async def test_copy_character_name_conflict_adds_suffix(
         json={"target_script_id": s2.id},
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["name"] == "主角（副本）"
+    assert resp.json()["data"]["name"] == "主角（副本）"
 
 
 # =====================================================
@@ -350,6 +350,6 @@ async def test_response_includes_episode_no(
 
     resp = await auth_client.get(f"/api/projects/{project.id}/characters")
     assert resp.status_code == 200, resp.text
-    items = resp.json()
+    items = resp.json()["data"]
     assert len(items) == 1
     assert items[0]["episode_no"] == 1

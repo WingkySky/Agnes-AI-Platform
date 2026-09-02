@@ -6,10 +6,10 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_db
+from app.core.response import ok
 from app.core.security import get_current_user_optional
 from app.models.user import User
 from app.schemas.storyboard import StoryboardRequest
@@ -19,14 +19,7 @@ from app.services.model_registry import resolve_user_chat_model_id
 router = APIRouter(prefix="/storyboard", tags=["分镜脚本"])
 
 
-class StoryboardResponse(BaseModel):
-    """统一响应结构"""
-    status: str
-    message: str
-    data: Optional[dict] = Field(None, description="{ shots: [...], assets: { characters: [...], scenes: [...] } }")
-
-
-@router.post("", response_model=StoryboardResponse, summary="生成分镜脚本")
+@router.post("", summary="生成分镜脚本")
 async def generate_storyboard(
     req: StoryboardRequest,
     current_user: Optional[User] = Depends(get_current_user_optional),
@@ -42,8 +35,7 @@ async def generate_storyboard(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"分镜脚本生成失败: {e}")
-    return StoryboardResponse(
-        status="success",
+    return ok(
         message="ok",
         data={
             "shots": [s.model_dump() for s in result.shots],
