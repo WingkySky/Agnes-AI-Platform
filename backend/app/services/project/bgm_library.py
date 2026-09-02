@@ -19,6 +19,7 @@ import asyncio
 import json
 import logging
 import os
+import secrets
 import time
 from typing import List, Optional, Dict
 
@@ -186,7 +187,6 @@ async def save_uploaded_bgm(name: str, mood: str, content: bytes) -> Dict:
     返回新登记的元数据（含 available=True）。
     """
     os.makedirs(_BGM_DIR, exist_ok=True)
-    import secrets
     filename = f"bgm_custom_{int(time.time())}_{secrets.token_hex(4)}.mp3"
     file_path = os.path.join(_BGM_DIR, filename)
     with open(file_path, "wb") as f:

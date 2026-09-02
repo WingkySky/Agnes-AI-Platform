@@ -11,10 +11,16 @@
 #   - user_id / credits_consumed 写入 generations 表
 # =====================================================
 
+import base64
+import hashlib
 import logging
+import os
+import time
+import uuid
 from datetime import datetime
 from typing import Optional
 
+import httpx
 from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -83,9 +89,7 @@ async def create_image_task_async(
 
     # --- 必须登录：先预扣积分再发起生成（积分不足会抛 402）---
     # 预先生成 task_id，作为积分流水的 ref_id，确保后续 confirm/refund 能匹配到
-    import time as _time
-    import uuid as _uuid
-    task_id = f"img_{int(_time.time() * 1000)}_{_uuid.uuid4().hex[:8]}"
+    task_id = f"img_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
     await consume_credits(
         db, current_user, cost,
         description=f"image/{mode}/{size}",
@@ -413,7 +417,6 @@ async def download_watermarked_image(
     - 如果全局水印关闭且用户未开启水印，则返回原图
     """
     from fastapi.responses import Response
-    import httpx
 
     # 校验 URL 格式
     if not url.startswith(("http://", "https://", "/")):
@@ -432,7 +435,6 @@ async def download_watermarked_image(
     try:
         if url.startswith("/"):
             # 本地路径，直接读文件
-            import os
             local_path = os.path.join(
                 os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                 url.lstrip("/"),
@@ -462,8 +464,6 @@ async def download_watermarked_image(
             logger.warning("[水印下载] 水印处理失败，返回原图: %s", e)
 
     # 返回图片（触发下载）
-    import base64
-    import hashlib
     filename = f"watermarked_{hashlib.md5(url.encode()).hexdigest()[:8]}.png"
     return Response(
         content=image_bytes,

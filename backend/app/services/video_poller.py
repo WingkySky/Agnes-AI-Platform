@@ -18,6 +18,7 @@ import logging
 import time
 from typing import Dict, Optional
 
+from app.core.config import settings
 from app.services.agnes_client import agnes_client
 from app.services.provider_registry import provider_registry
 from app.services._generation_persist import (
@@ -327,24 +328,14 @@ class VideoPollerManager:
         self._started = False
         logger.info("[视频轮询器] 已关闭所有后台任务")
 
-    # ---------- 工具函数：获取配置（可替换为读取 settings ----------
+    # ---------- 工具函数：获取配置 ----------
     @staticmethod
     def _get_interval() -> int:
-        try:
-            from app.core.config import settings as _settings
-
-            return int(_settings.video_poll_interval_sec or 5)
-        except Exception:
-            return 5
+        return int(settings.video_poll_interval_sec or 5)
 
     @staticmethod
     def _get_timeout() -> int:
-        try:
-            from app.core.config import settings as _settings
-
-            return int(_settings.video_poll_timeout_sec or 600)
-        except Exception:
-            return 600
+        return int(settings.video_poll_timeout_sec or 600)
 
 
 # 全局单例

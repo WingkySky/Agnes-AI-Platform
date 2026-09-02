@@ -4,6 +4,8 @@
 # 模型列表从数据库 model_definitions 表读取（由 provider_registry 管理）
 # =====================================================
 
+import logging
+
 from fastapi import APIRouter, Depends
 from app.core.config import settings
 from app.schemas.common import ConfigResponse, ImageSizeOption, VideoAspectRatioOption, VideoResolutionOption, WatermarkConfigPublic
@@ -94,7 +96,6 @@ async def get_config(db: AsyncSession = Depends(get_async_db)):
             image_width=wm.image_width,
         )
     except Exception as e:
-        import logging
         logging.getLogger("agnes_platform").warning("[config] 获取水印配置失败: %s", e)
 
     return ConfigResponse(

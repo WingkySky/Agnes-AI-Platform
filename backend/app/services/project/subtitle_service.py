@@ -23,12 +23,15 @@
 # 字幕片段统一写入 project_timeline_clips 表（track_type='subtitle'）
 # =====================================================
 
+import asyncio
 import json
 import logging
 import os
+import shutil
 import tempfile
 from typing import List, Optional
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -277,8 +280,6 @@ async def _generate_subtitles_with_whisper(
         logger.warning("whisper 模式调用但 faster-whisper 未安装，回退 LLM")
         return await _generate_subtitles_llm(db, project_id, shots)
 
-    import httpx
-
     # 1. 收集需要 whisper 转写的分镜（有 active_audio_id）
     whisper_shots: List[tuple] = []  # [(shot, audio_url, audio_duration_ms)]
     fallback_shots: List[ProjectShot] = []  # 无音频的分镜，回退 LLM
@@ -331,7 +332,6 @@ async def _generate_subtitles_with_whisper(
                 })
 
                 # whisper 转写（同步 API，放在线程池避免阻塞事件循环）
-                import asyncio
                 segments_iter, _info = await asyncio.to_thread(
                     model.transcribe,
                     local_path,
@@ -386,7 +386,6 @@ async def _generate_subtitles_with_whisper(
     finally:
         # 清理临时目录
         try:
-            import shutil
             shutil.rmtree(tmp_dir, ignore_errors=True)
         except Exception:
             pass

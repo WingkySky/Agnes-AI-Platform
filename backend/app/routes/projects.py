@@ -26,6 +26,7 @@
 
 import asyncio
 import logging
+import os
 from typing import AsyncGenerator, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, Form
@@ -55,7 +56,7 @@ from app.models.project import (
 from app.schemas.project import (
     # 项目
     ProjectCreate, ProjectUpdate, ProjectResponse, ProjectListResponse,
-    ActiveViewUpdate,
+    ActiveViewUpdate, SetCoverRequest,
     # 向导
     WizardCreateRequest, WizardResumeRequest,
     # 剧本
@@ -302,15 +303,14 @@ async def rebuild_cover_api(
 @router.post("/{project_id}/set-cover", response_model=ProjectResponse, summary="指定帧图设置封面")
 async def set_cover_api(
     project_id: int,
-    data: dict,
+    req: SetCoverRequest,
     db: AsyncSession = Depends(get_async_db),
     project: Project = Depends(get_owned_project),
 ):
     """将指定帧图设为项目封面"""
-    frame_image_id = data.get("frame_image_id")
-    if not frame_image_id:
+    if not req.frame_image_id:
         raise HTTPException(status_code=400, detail="缺少 frame_image_id 参数")
-    updated = await set_project_cover_from_frame(db, project_id, int(frame_image_id))
+    updated = await set_project_cover_from_frame(db, project_id, req.frame_image_id)
     if not updated:
         raise HTTPException(status_code=400, detail="帧图不存在或不属于该项目")
     return updated
@@ -1566,8 +1566,6 @@ async def get_final_video_api(
     - 认证：支持 Authorization header 和 ?token=<jwt> query 参数两种方式
       （<video> 标签和 window.open 无法设置 header，必须用 query token）
     """
-    import os
-
     # 认证：优先 header，其次 query 参数
     auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
     jwt_token = _extract_token_from_header(auth_header) or token

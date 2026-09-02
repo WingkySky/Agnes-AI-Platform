@@ -1465,7 +1465,6 @@ class ChatService:
         Returns:
             附件列表 [{"name": ..., "base64_image": URL, "size": 0, "mime_type": ..., "_is_url": True}, ...]
         """
-        import re
         results = []
 
         # 倒序遍历消息，找到最近的已完成媒体

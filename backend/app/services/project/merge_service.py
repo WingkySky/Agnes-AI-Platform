@@ -20,11 +20,14 @@
 import asyncio
 import logging
 import os
+import shutil
 import tempfile
+import time
 from datetime import datetime, timedelta
 from typing import Optional, List
 from uuid import uuid4
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -218,8 +221,6 @@ async def execute_merge(
     )
 
     # 下载视频到临时目录
-    import httpx
-
     tmp_dir = tempfile.mkdtemp(prefix=f"project_merge_{project_id}_")
     local_paths: list = []
     try:
@@ -275,8 +276,7 @@ async def execute_merge(
         # final_video_url 存储为后端可访问的相对 URL
         # 前端通过 baseURL + 此路径访问 /api/projects/{id}/final-video 流式端点
         # 加版本时间戳避免缓存
-        import time as _time
-        final_url = f"/api/projects/{project_id}/final-video?v={int(_time.time())}"
+        final_url = f"/api/projects/{project_id}/final-video?v={int(time.time())}"
 
         # 更新项目
         project.final_video_url = final_url
@@ -307,7 +307,6 @@ async def execute_merge(
         # 清理临时下载目录（final.mp4 已持久化到 outputs/projects/{id}/）
         # 保留 outputs 下的成片供前端访问，不在此清理
         try:
-            import shutil
             shutil.rmtree(tmp_dir, ignore_errors=True)
         except Exception:
             pass
@@ -395,8 +394,6 @@ async def execute_merge_advanced(
     })
 
     # 2. 下载视频和音频片段到临时目录
-    import httpx
-
     tmp_dir = tempfile.mkdtemp(prefix=f"project_merge_adv_{project_id}_")
     video_paths: List[str] = []
     audio_paths: List[str] = []
@@ -598,8 +595,7 @@ async def execute_merge_advanced(
         logger.info("[合成] project_id=%s ffmpeg 最终合成完成: %s", project_id, output_path)
 
         # 7. 更新项目
-        import time as _time
-        final_url = f"/api/projects/{project_id}/final-video?v={int(_time.time())}"
+        final_url = f"/api/projects/{project_id}/final-video?v={int(time.time())}"
 
         # 计算总时长（取所有视频片段 end_time 的最大值）
         total_duration = _timeline_total_duration(video_clips)
@@ -630,7 +626,6 @@ async def execute_merge_advanced(
         return project
 
     finally:
-        import shutil
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 

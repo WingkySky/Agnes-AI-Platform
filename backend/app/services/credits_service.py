@@ -95,7 +95,6 @@ async def get_image_cost_async(
     异步版本：从数据库读取积分规则，计算一次图片任务的消耗。
     当 db 为 None 时使用默认值（便于在无数据库上下文的单元测试中使用）。
     """
-    mode_key = "image.image2image.base_cost"
     if mode and mode.lower() in ("image2image", "img2img"):
         rule_key = "image.image2image.base_cost"
     else:
@@ -124,31 +123,20 @@ async def get_video_cost_async(
     num_frames: Optional[int] = None,
 ) -> int:
     """异步版本：读取数据库中的视频积分规则"""
-    # 每秒消耗基础积分
+    # 每秒消耗基础积分（按模式选择规则与系数）
     if mode and mode.lower() in ("image2video", "keyframes"):
-        per_second = _get_default_value("video.image2video.per_second") or 6
-        if db is not None:
-            try:
-                per_second = await _get_rule_value(db, "video.image2video.per_second", per_second)
-            except Exception as e:
-                logger.warning("[积分服务] 读取 video.image2video.per_second 失败: %s", e)
-        mode_factor = 1.2
+        rule_key, fallback_per_second, mode_factor = "video.image2video.per_second", 6, 1.2
     elif mode and mode.lower() == "video2video":
-        per_second = _get_default_value("video.video2video.per_second") or 8
-        if db is not None:
-            try:
-                per_second = await _get_rule_value(db, "video.video2video.per_second", per_second)
-            except Exception as e:
-                logger.warning("[积分服务] 读取 video.video2video.per_second 失败: %s", e)
-        mode_factor = 1.5
+        rule_key, fallback_per_second, mode_factor = "video.video2video.per_second", 8, 1.5
     else:
-        per_second = _get_default_value("video.text2video.per_second") or 5
-        if db is not None:
-            try:
-                per_second = await _get_rule_value(db, "video.text2video.per_second", per_second)
-            except Exception as e:
-                logger.warning("[积分服务] 读取 video.text2video.per_second 失败: %s", e)
-        mode_factor = 1.0
+        rule_key, fallback_per_second, mode_factor = "video.text2video.per_second", 5, 1.0
+
+    per_second = _get_default_value(rule_key) or fallback_per_second
+    if db is not None:
+        try:
+            per_second = await _get_rule_value(db, rule_key, per_second)
+        except Exception as e:
+            logger.warning("[积分服务] 读取 %s 失败: %s", rule_key, e)
 
     duration_factor = max(1.0, (seconds or 5) / 5.0)
     frame_factor = max(0.8, (num_frames or 33) / 33.0) if num_frames else 1.0

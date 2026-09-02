@@ -23,6 +23,7 @@ import logging
 import os
 from typing import Optional, List
 
+import edge_tts
 from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -201,11 +202,6 @@ async def _call_tts_provider(
 
     返回: (audio_url, duration_ms, file_size)
     """
-    try:
-        import edge_tts
-    except ImportError as e:
-        raise RuntimeError("edge_tts 未安装，无法进行 TTS 合成（pip install edge-tts）") from e
-
     edge_voice = _resolve_edge_voice(voice_id)
     rate = f"{int(round((speed - 1) * 100)):+d}%" if speed and abs(speed - 1.0) > 0.01 else None
     communicate = edge_tts.Communicate(text, edge_voice, rate=rate) if rate else edge_tts.Communicate(text, edge_voice)

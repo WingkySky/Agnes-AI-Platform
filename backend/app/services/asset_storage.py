@@ -73,6 +73,7 @@ class S3CompatBackend:
     def _get_client(self):
         """懒加载 boto3 S3 客户端（同步对象，调用时包装到 asyncio.to_thread）"""
         if self._client is None:
+            # boto3 是可选依赖（仅 S3 兼容存储后端需要），保持懒加载避免未安装时影响其他存储后端
             import boto3
             self._client = boto3.client(
                 "s3",

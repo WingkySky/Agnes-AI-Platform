@@ -17,6 +17,8 @@ import tempfile
 from typing import List, Optional
 from uuid import uuid4
 
+import httpx
+
 from app.services.media_compose import (
     run_ffmpeg,
     parse_resolution,
@@ -143,8 +145,6 @@ async def compose_videos(
 
     tmp_dir = tempfile.mkdtemp(prefix="canvas_compose_")
     try:
-        import httpx
-
         # 1. 下载视频片段（/uploads 本地文件直接映射，其余走 HTTP）
         async with httpx.AsyncClient(timeout=300) as client:
             local_paths: List[str] = []

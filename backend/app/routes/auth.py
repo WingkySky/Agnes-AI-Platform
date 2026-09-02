@@ -14,12 +14,13 @@
 # PUT    /api/auth/users/{id}/active    启用/禁用用户（仅管理员）
 # =====================================================
 
+import base64
 import logging
 import os
 import time
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Body
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -49,6 +50,7 @@ from app.schemas.user import (
     SendEmailCodeRequest,
     ResetPasswordRequest,
     ChangePasswordRequest,
+    ToggleFlagRequest,
 )
 
 logger = logging.getLogger("agnes_platform")
@@ -68,7 +70,6 @@ async def get_captcha():
     - 验证成功后自动删除，防止重复使用
     """
     from app.services.captcha_service import create_captcha
-    import base64
 
     captcha_id, image_bytes = create_captcha()
     image_base64 = base64.b64encode(image_bytes).decode("utf-8")
@@ -606,7 +607,7 @@ async def update_user_role(
 @router.put("/users/{user_id}/watermark", summary="[管理员] 修改用户水印开关")
 async def update_user_watermark(
     user_id: int,
-    req: dict = Body(...),
+    req: ToggleFlagRequest,
     db: AsyncSession = Depends(get_async_db),
     _admin: User = Depends(get_current_admin_user),
 ):
@@ -615,7 +616,7 @@ async def update_user_watermark(
     if user is None:
         raise HTTPException(status_code=404, detail="用户不存在")
 
-    enabled = bool(req.get("enabled", False))
+    enabled = req.enabled
     user.watermark_enabled = enabled
     await db.commit()
 
@@ -630,7 +631,7 @@ async def update_user_watermark(
 @router.put("/users/{user_id}/content-safety", summary="[管理员] 修改用户内容安全严格模式")
 async def update_user_content_safety(
     user_id: int,
-    req: dict = Body(...),
+    req: ToggleFlagRequest,
     db: AsyncSession = Depends(get_async_db),
     _admin: User = Depends(get_current_admin_user),
 ):
@@ -639,7 +640,7 @@ async def update_user_content_safety(
     if user is None:
         raise HTTPException(status_code=404, detail="用户不存在")
 
-    enabled = bool(req.get("enabled", False))
+    enabled = req.enabled
     user.content_safety_strict = enabled
     await db.commit()
 

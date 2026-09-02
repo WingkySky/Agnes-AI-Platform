@@ -14,7 +14,10 @@
 # =====================================================
 
 import asyncio
+import base64
 import logging
+import re
+import struct
 import time
 from typing import List, Optional, Dict, Any
 
@@ -328,7 +331,6 @@ class AgnesAIClient:
     @staticmethod
     def _clean_and_pad_base64(b64_str: str) -> str:
         """清理纯 base64 字符串中的空白并补齐 padding（长度为 4 的倍数）。"""
-        import re
         b64 = re.sub(r'\s', '', b64_str).rstrip('=')
         pad = len(b64) % 4
         if pad:
@@ -356,14 +358,12 @@ class AgnesAIClient:
             if pad_needed:
                 head_b64 += '=' * pad_needed
             try:
-                import base64
                 raw = base64.b64decode(head_b64, validate=False)
             except Exception:
                 return None
 
             if len(raw) < 8:
                 return None
-            import struct
             # PNG: 89 50 4E 47 0D 0A 1A 0A + length(4) + 'IHDR' + width(4) + height(4)
             if raw[:8] == b'\x89PNG\r\n\x1a\n':
                 if len(raw) >= 24 and raw[12:16] == b'IHDR':

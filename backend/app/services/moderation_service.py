@@ -7,6 +7,7 @@
 
 import asyncio
 import base64
+import json
 import logging
 import os
 import tempfile
@@ -188,7 +189,6 @@ async def _extract_video_first_frame(video_url: str) -> Optional[str]:
     提取视频首帧图片并转为 base64 data URI。
     使用 ffmpeg 提取，失败返回 None。
     """
-    import asyncio
     tmp_video = os.path.join(tempfile.gettempdir(), f"mod_vid_{os.urandom(8).hex()}.mp4")
     tmp_frame = os.path.join(tempfile.gettempdir(), f"mod_frame_{os.urandom(8).hex()}.jpg")
     try:
@@ -252,7 +252,6 @@ def _parse_moderation_result(content: str) -> Dict[str, Any]:
     解析 AI 返回的审核结果 JSON。
     返回：{is_violation: bool, categories: [...], reason: str, confidence: float}
     """
-    import json
     text = (content or "").strip()
     # 尝试直接解析
     try:

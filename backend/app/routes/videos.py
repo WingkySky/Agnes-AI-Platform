@@ -14,6 +14,7 @@
 # =====================================================
 
 import logging
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends, Request
@@ -152,8 +153,7 @@ async def create_video_task(
             )
 
     cost = await get_video_cost_async(db, mode=req.mode, seconds=req.seconds or 5, num_frames=req.num_frames)
-    import uuid as _uuid
-    _pending_ref_id = f"pending_{_uuid.uuid4().hex}"
+    _pending_ref_id = f"pending_{uuid.uuid4().hex}"
     await consume_credits(
         db, current_user, cost,
         description=f"video/{req.mode}/{req.seconds}s",

@@ -5,10 +5,12 @@
 # - 依赖 Pillow 库
 # =====================================================
 
+import base64
 import io
 import random
 import string
 import time
+import uuid
 import logging
 from typing import Optional, Tuple
 
@@ -121,7 +123,6 @@ def _generate_captcha_image(code: str, width: int = 120, height: int = 40) -> by
 
 def base64_to_bytes(b64_str: str) -> bytes:
     """Base64 字符串转字节（兜底用）"""
-    import base64
     return base64.b64decode(b64_str)
 
 
@@ -134,8 +135,6 @@ def create_captcha(captcha_id: Optional[str] = None) -> Tuple[str, bytes]:
 
     返回：(captcha_id, image_bytes)
     """
-    import uuid
-
     # 清理过期验证码（每 100 次请求清理一次）
     global _last_cleanup_time
     if time.time() - _last_cleanup_time > 60:

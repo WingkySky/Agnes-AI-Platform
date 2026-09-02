@@ -14,6 +14,7 @@ import asyncio
 import logging
 import os
 import re
+import shutil
 from typing import Optional, List, Any
 
 logger = logging.getLogger("agnes_platform.media_compose")
@@ -290,7 +291,6 @@ async def probe_video_resolution(video_path: str) -> tuple:
 async def concat_normalized_videos(normalized_paths: List[str], output_path: str) -> None:
     """用 concat demuxer 拼接已归一化片段（-c copy，最快）"""
     if len(normalized_paths) == 1:
-        import shutil
         shutil.copy2(normalized_paths[0], output_path)
         return
     concat_list_path = output_path + ".concat.txt"

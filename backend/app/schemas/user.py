@@ -191,6 +191,11 @@ class UpdateActiveRequest(BaseModel):
     is_active: bool
 
 
+class ToggleFlagRequest(BaseModel):
+    """切换布尔开关（管理员修改用户水印 / 内容安全严格模式）"""
+    enabled: bool
+
+
 # =====================================================
 # 四、积分规则 Schema
 # =====================================================

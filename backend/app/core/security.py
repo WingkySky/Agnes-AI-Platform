@@ -125,9 +125,6 @@ def create_access_token(user_id: int, expires_delta: Optional[timedelta] = None)
         "iat": datetime.now(timezone.utc),
     }
     token = jwt.encode(payload, settings.jwt_secret, algorithm=ALGORITHM)
-    # PyJWT 2.x 返回 str，兼容 str
-    if isinstance(token, bytes):
-        token = token.decode("utf-8")
     return token
 
 

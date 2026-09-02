@@ -2,13 +2,14 @@
  * 全局 Task Queue Store（任务队列）
  * - 统一管理图片与视频的异步生成任务
  * - 按任务独立轮询状态
- * - localStorage 持久化（刷新页面后继续轮询）
+ * - localforage（IndexedDB）持久化（刷新页面后继续轮询）
  * - 页面可见性感知（后台降低轮询频率）
  * - 并发上限：每种类型最多 5 个同时生成
  * - 历史任务：最多保留 5 个已完成任务，20 分钟后清理
  * ===================================================== */
 
 import { defineStore } from 'pinia'
+import localforage from 'localforage'
 import { useUserStore } from '@/stores/user'
 import { usePreferencesStore } from '@/stores/preferences'
 import { isMediaSuccess, isMediaFailed } from '@/lib/media-status'
@@ -39,6 +40,18 @@ import type {
 const BASE_STORAGE_KEY = 'agnes_task_queue_v1'
 /** 当前绑定的用户标识；空值为 "anon"（匿名） */
 let _currentUserKey: string = 'anon'
+
+/** localforage 实例（不同用户共用实例，仅 key 前缀不同） */
+const taskPersistStore = localforage.createInstance({
+  name: 'agnes-task-queue',
+  storeName: 'task_queue',
+})
+
+/** 持久化的数据结构 */
+interface PersistedQueueData {
+  tasks: QueueTask[]
+  activeTaskId?: string | null
+}
 
 /** 计算当前用户的存储 key */
 function storageKey(): string {
@@ -234,12 +247,12 @@ export const useTaskQueueStore = defineStore('taskQueue', {
     // =====================================================
     // 【初始化】—— 在应用启动时调用一次
     // =====================================================
-    init(): void {
+    async init(): Promise<void> {
       if (this._initialized) return
       this._initialized = true
 
-      // 1. 从 localStorage 恢复
-      this._restoreFromStorage()
+      // 1. 从 localforage 恢复（等待恢复完成后再启动轮询）
+      await this._restoreFromStorage()
 
       // 2. 注册页面可见性监听
       if (typeof document !== 'undefined') {
@@ -1018,47 +1031,23 @@ export const useTaskQueueStore = defineStore('taskQueue', {
     // 【持久化】
     // =====================================================
     _saveToStorage(): void {
-      if (typeof localStorage === 'undefined') return
-      try {
-        const tasksToSave = Object.values(this.tasks).map((t) => ({
-          taskId: t.taskId,
-          type: t.type,
-          status: t.status,
-          prompt: t.prompt,
-          params: t.params,
-          resultUrl: t.resultUrl,
-          posterUrl: t.posterUrl,
-          progress: t.progress,
-          errorMessage: t.errorMessage,
-          createdAt: t.createdAt,
-          updatedAt: t.updatedAt,
-          pollIntervalMs: t.pollIntervalMs,
-          backendTaskId: t.backendTaskId,
-          source: t.source || null,
-          panelId: t.panelId || null,
-          // 自动重试相关字段（持久化以支持刷新页面后恢复重试状态）
-          retryCount: t.retryCount ?? 0,
-          maxRetries: t.maxRetries ?? 0,
-          retryScheduledAt: t.retryScheduledAt ?? null,
-        }))
-        const data = {
-          tasks: tasksToSave,
-          // 持久化当前选中的任务 ID，刷新后可恢复选中状态
-          activeTaskId: this.activeTaskId,
-          savedAt: Date.now(),
-        }
-        localStorage.setItem(storageKey(), JSON.stringify(data))
-      } catch (_) {
-        // localStorage 写入失败（如隐私模式），静默忽略
-      }
+      if (typeof indexedDB === 'undefined') return
+      // JSON 序列化剥离 Pinia Proxy，转成纯对象再写入（Proxy 无法被 IndexedDB 结构化克隆）
+      const plain = JSON.parse(JSON.stringify({
+        tasks: Object.values(this.tasks),
+        // 持久化当前选中的任务 ID，刷新后可恢复选中状态
+        activeTaskId: this.activeTaskId,
+      }))
+      taskPersistStore
+        .setItem(storageKey(), plain)
+        .catch((err) => {
+          console.warn('[TaskQueue] 任务队列持久化失败:', err)
+        })
     },
 
-    _restoreFromStorage(): void {
-      if (typeof localStorage === 'undefined') return
+    async _restoreFromStorage(): Promise<void> {
       try {
-        const raw = localStorage.getItem(storageKey())
-        if (!raw) return
-        const data = JSON.parse(raw) as { tasks: QueueTask[]; activeTaskId?: string }
+        const data = await taskPersistStore.getItem<PersistedQueueData>(storageKey())
         if (!data || !Array.isArray(data.tasks)) return
         const now = Date.now()
         for (const t of data.tasks) {
@@ -1072,7 +1061,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
 
           // 【自动重试恢复】若任务处于失败且已调度重试，重新计算剩余等待时间并重新调度
           if (t.status === 'failed' && t.retryScheduledAt && (t.retryCount ?? 0) < (t.maxRetries ?? 0)) {
-            const remainingMs = (t.retryScheduledAt as number) - now
+            const remainingMs = t.retryScheduledAt - now
             if (remainingMs > 0) {
               // 仍在等待重试窗口，重新设置 setTimeout
               setTimeout(() => this._executeRetry(t.taskId), remainingMs)
@@ -1086,8 +1075,8 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         if (data.activeTaskId && this.tasks[data.activeTaskId]) {
           this.activeTaskId = data.activeTaskId
         }
-      } catch (_) {
-        // 解析失败不影响启动
+      } catch (err) {
+        console.warn('[TaskQueue] 任务队列恢复失败:', err)
       }
     },
 
@@ -1097,7 +1086,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
      * - 清空当前任务
      * - 切换存储 key 并重载
      */
-    _switchUserStorage(userId: number | string | null): void {
+    async _switchUserStorage(userId: number | string | null): Promise<void> {
       // 停止所有轮询定时器
       for (const id of Object.keys(this.pollTimers)) {
         clearInterval(this.pollTimers[id])
@@ -1106,7 +1095,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
       this.tasks = {}
       this.activeTaskId = null
       switchTaskUser(userId)
-      this._restoreFromStorage()
+      await this._restoreFromStorage()
       // 用户切换后，重启对进行中任务的轮询
       for (const task of Object.values(this.tasks)) {
         if (!isFinalStatus(task.status) && task.source !== 'chat' && task.source !== 'canvas') {

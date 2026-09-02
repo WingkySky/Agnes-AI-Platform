@@ -68,6 +68,11 @@ class ActiveViewUpdate(BaseModel):
     view: str = Field(..., description="视图类型：manager/canvas")
 
 
+class SetCoverRequest(BaseModel):
+    """指定帧图设置项目封面"""
+    frame_image_id: int = Field(..., description="帧图 ID（须属于该项目）")
+
+
 # =====================================================
 # 向导 Schema
 # =====================================================

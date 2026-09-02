@@ -11,6 +11,7 @@
 
 import asyncio
 import logging
+import re
 import time
 import uuid
 import os
@@ -67,7 +68,6 @@ def _parse_rate_limit_wait(message: str) -> float:
       "Retry-After: 30" → 32.0
     无法识别时返回默认值 62.0。
     """
-    import re
     msg = message or ""
     # 形如 "per 1 minute(s)" / "per 5 minute(s)"
     m = re.search(r"per\s+(\d+)\s*minute", msg, re.IGNORECASE)

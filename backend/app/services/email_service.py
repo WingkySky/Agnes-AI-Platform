@@ -4,6 +4,7 @@
 # - 使用 Python 内置 smtplib，异步封装
 # =====================================================
 
+import asyncio
 import logging
 import smtplib
 from email.mime.text import MIMEText
@@ -48,8 +49,6 @@ async def send_email(
     if not is_email_enabled(smtp_config):
         logger.warning("[邮件] SMTP 未配置，跳过邮件发送 to=%s", to_email)
         return False
-
-    import asyncio
 
     loop = asyncio.get_event_loop()
     try:

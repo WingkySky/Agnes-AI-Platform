@@ -20,6 +20,7 @@
 # =====================================================
 
 import logging
+import re
 import time
 from typing import Dict, List, Optional, Any, Union
 
@@ -133,7 +134,6 @@ def _resolve_gen_params(model_id: str, explicit: Optional[dict]) -> Optional[Mod
 
 def _generate_display_name(model_id: str, provider: str, model_type: str) -> str:
     """根据模型 ID 生成可读的显示名称（保留版本号中的点号）"""
-    import re
     name = model_id
     for prefix in _PROVIDER_PREFIXES:
         if name.lower().startswith(prefix):

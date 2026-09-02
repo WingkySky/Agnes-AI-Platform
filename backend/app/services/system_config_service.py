@@ -5,6 +5,7 @@
 # =====================================================
 
 import logging
+import time
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -30,7 +31,6 @@ async def get_config_by_category(db: AsyncSession, category: str) -> dict[str, s
 async def get_config_value(db: AsyncSession, key: str, default: str = "") -> str:
     """获取单个配置值"""
     # 先查缓存：检查 TTL 是否在 60 秒内
-    import time
     cached = _config_cache.get(key)
     if cached:
         value, updated_at = cached

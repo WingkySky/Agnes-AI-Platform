@@ -8,6 +8,7 @@
 
 import logging
 import os
+import secrets
 import time
 from typing import Optional
 
@@ -90,7 +91,6 @@ async def save_upload_file(
         ext = "." + file.filename.rsplit(".", 1)[-1].lower()
 
     # 文件名：时间戳 + 随机数避免冲突
-    import secrets
     filename = f"{int(time.time())}_{secrets.token_hex(4)}{ext}"
     filepath = os.path.join(target_dir, filename)
 
@@ -121,7 +121,6 @@ async def save_audio_bytes(
     target_dir = os.path.join(UPLOADS_DIR, folder)
     os.makedirs(target_dir, exist_ok=True)
 
-    import secrets
     filename = f"{int(time.time())}_{secrets.token_hex(4)}{ext}"
     filepath = os.path.join(target_dir, filename)
     with open(filepath, "wb") as f:

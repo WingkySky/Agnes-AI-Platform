@@ -12,6 +12,7 @@
 # =====================================================
 
 import logging
+import re
 from datetime import datetime
 from typing import Optional
 
@@ -187,8 +188,6 @@ async def batch_import_sensitive_words(
     - category: 默认分类
     - skip_existing: 是否跳过已存在的词（默认 true）
     """
-    import re
-
     raw_text = (data.get("words") or "").strip()
     category = data.get("category", "other")
     skip_existing = data.get("skip_existing", True)
