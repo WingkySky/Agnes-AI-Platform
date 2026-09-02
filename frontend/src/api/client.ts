@@ -49,7 +49,20 @@ client.interceptors.request.use(
 client.interceptors.response.use(
   (response) => {
     // 直接返回 data，简化组件写法
-    return response.data
+    // 后端统一 envelope（{status:'success', message, data}）时透明解包，组件仍拿裸数据；
+    // 旧形状（无 data 键或非 envelope）原样透传，兼容切换期两形状并存。
+    const data = response.data
+    if (
+      data &&
+      typeof data === 'object' &&
+      !Array.isArray(data) &&
+      !(data instanceof Blob) &&
+      data.status === 'success' &&
+      Object.prototype.hasOwnProperty.call(data, 'data')
+    ) {
+      return data.data
+    }
+    return data
   },
   (error: any) => {
     // 401：未认证或 token 已过期 — 清理本地状态并提示
