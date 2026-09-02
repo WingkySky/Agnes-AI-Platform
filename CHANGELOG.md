@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### 优化精简（2026-09-03 全局代码优化，约 -6,400 行）
+- **Bug 修复**：水印 Logo 上传改走登录态 token（原读取不存在的 `access_token` key，鉴权必失败且重登后携带旧 token）；删除 auth.py 重复注册的水印/内容安全死路由；`/chat/media-callback` 补会话归属鉴权（原完全无鉴权可改写任意消息）；流式对话第二轮补传 `user_id` 修复偏好模型两轮不一致
+- **死代码删除（约 -4,200 行）**：后端 chat_service 非流式 `chat()`（含 NameError 级 bug）、style/script_template/asset_library 未用 CRUD（各仅剩 1-4 个在用函数）、model_registry 兼容层副本、16 处零散死函数、同步 DB 层（engine/SessionLocal/get_db）、main.py 手写迁移、一次性迁移脚本、6 个孤儿 schema、menu_item 死模型；前端 camera 死链路、pipeline 风格元素组件族 5 组件、canvas.ts 死 action/getter（网格/对齐/剪贴板/待创建连线等）、api 层 14+ 死函数、`VideoStatusResponse` 重复定义与孤儿类型、i18n 孤儿 key；顺带恢复 HistoryView 详情图 `@load` 误删绑定
+- **重复逻辑收敛（约 -2,100 行）**：后端项目归属校验依赖注入替换 93 处样板、视频 Range 代理合一（`_media_proxy`）、agnes_client 重试循环与 LLM 取文本（`chat_text`）收敛、admin_review 改用权限依赖、时长计算三合一、历史用户隔离过滤收敛、chat `send_message` 365 行瘦身至 43 行（校验/历史/SSE 编排下沉 chat_service）、会话归属依赖注入、moderation 双审核函数合并、history 下载代理/审核后台任务下沉、`get_history` 改 model_validate、character/scene/prop 剧本提取三合一（`extract_entities`）、实体 schema 九合一、帧图/视频/音频 19 条路由接入工厂、双 poller 公共落库逻辑抽 `_generation_persist`；前端 canvas-generation 四个 execute 复用 runMediaTask、双轮询合一（`pollMediaTask`）、taskQueue 图片/视频提交与注册更新合并、项目轮询归一、上游节点编号三处合一、`isMediaSuccess/Failed` 抽取、`formatTime`/`useCopyText`/`useConfirm`/`fetchBlobAsUrl`/`getIconByName`/`usePromptLength` 全库贯彻
+- **规范修正**：taskQueue 持久化 localStorage 换 localforage（消除 5MB 配额写失败被静默吞掉的丢任务隐患）；37 处函数体内 import 上移；裸 dict 入参换 Pydantic schema（set_cover / 管理员开关）；video_poller 假防御、security 永假分支、credits 死变量清理
+- **响应结构彻底统一**：全部业务端点（231+）改用 `ok()` envelope（`{status:"success", message, data}`），移除 130 处 `response_model`，HTTP 200 `success:false` 表失败处改 `HTTPException`（错误统一 `{"detail": ...}`），前端拦截器对 envelope 透明解包（组件消费零改动），文件流/SSE/预览不包装；设计文档 `docs/superpowers/specs/2026-09-02-codebase-slimming-design.md`
+
 ### 功能
 - 模型生成能力统一配置（gen_params）：`model_definitions` 新增 `gen_params` JSON 列（启动自动迁移），解析链 = DB 显式配置逐键覆盖 > 按模型名自动画像（seedream 系=关闭「AI生成」显式水印 + 尺寸归一化到方舟 2K/4K 合法档；agnes-image-2.1 家族=参考图≤6）> 无特例默认，已知键由 Pydantic `ModelGenParams` 唯一定义（max_ref_images / watermark_param_off / size_rule / image_sizes / default_size）；`agnes_client` / `agn_sdk_client` 原硬编码特例全部改读配置，`/api/config` 模型项携带解析后的 gen_params，前端参考图截断（图片/视频链路）与 ParamSelector 尺寸选项/默认尺寸改读所选模型配置（缺省回退全局），设置页模型编辑弹窗新增参考图上限/「AI生成」水印/尺寸归一化/默认尺寸四字段（i18n 两语言），模型增改接口透传校验；未来同族新模型同步即自动获得配置、特例在弹窗一配即生效，不再改生成代码。覆盖修复：画布分镜图批量生成参考图 7-8 张被上游 400 拒绝、openai 兼容端点（火山 agent plan）seedream 尺寸原样透传低于最小档且带水印（已实测 plan 端点 1024→2048 归一化生效且无水印；发布内容时按平台规则声明 AI 生成的义务由使用方承担）
 - 统一预设广场重构：预设中心改造为对标风格/特效广场的卡片画廊（广场/我的收藏/最近使用三 tab + 类型/分类导航 + 搜索 + 排序），生图页"风格库"、生视频页"特效库"弹窗即选即用

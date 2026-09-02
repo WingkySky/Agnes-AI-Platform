@@ -5,6 +5,8 @@ Swagger UI（交互式文档）：`http://localhost:8000/docs`
 健康检查：`http://localhost:8000/health`
 
 > 说明：所有接口（除 `/health`、`/docs` 外）均以 `/api` 为前缀。返回 JSON 格式响应。
+>
+> **统一响应结构**：业务成功响应统一为 envelope `{"status": "success", "message": "", "data": ...}`（`data` 为原业务载荷）；业务失败一律返回 `HTTPException` 标准 `{"detail": "错误说明"}` 配合 4xx/5xx 状态码。前端 axios 客户端已对 envelope 透明解包。文件流 / SSE / 图片代理等非 JSON 响应不包装。
 
 ---
 
