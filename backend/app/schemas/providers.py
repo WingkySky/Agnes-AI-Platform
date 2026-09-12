@@ -1,0 +1,162 @@
+# =====================================================
+# Provider 与模型定义相关的 Pydantic Schema
+# 用于 /api/providers/* 和 /api/models/* 接口的请求/响应校验
+# =====================================================
+
+from typing import Optional, List, Dict, Any
+from datetime import datetime
+from pydantic import BaseModel, Field
+
+from app.schemas.common import ModelGenParams
+
+
+# =====================================================
+# Provider 相关 Schema
+# =====================================================
+
+class ProviderCreateRequest(BaseModel):
+    """创建 Provider 请求体"""
+    name: str = Field(..., description="Provider 名称，如 Agnes AI（默认）")
+    provider_type: str = Field(
+        default="agnes",
+        description="aibridge adapter 标识：agnes / volcengine_cv / kling / runway / pika 等",
+    )
+    base_url: str = Field(..., description="API 基础地址，如 https://apihub.agnes-ai.com/v1")
+    api_key: str = Field(..., description="API Key（明文传入，后端加密存储）")
+    poll_url: str = Field(default="", description="异步任务轮询专用接口（如视频轮询）")
+    is_active: bool = Field(default=True, description="是否激活")
+    is_default: bool = Field(default=False, description="是否设为默认 Provider")
+    sort_order: int = Field(default=0, description="排序权重（越小越靠前）")
+
+
+class ProviderUpdateRequest(BaseModel):
+    """更新 Provider 请求体（所有字段可选）"""
+    name: Optional[str] = Field(default=None, description="Provider 名称")
+    provider_type: Optional[str] = Field(
+        default=None, description="aibridge adapter 标识"
+    )
+    base_url: Optional[str] = Field(default=None, description="API 基础地址")
+    api_key: Optional[str] = Field(default=None, description="API Key（留空表示不修改）")
+    poll_url: Optional[str] = Field(default=None, description="异步任务轮询接口")
+    is_active: Optional[bool] = Field(default=None, description="是否激活")
+    is_default: Optional[bool] = Field(default=None, description="是否设为默认 Provider")
+    sort_order: Optional[int] = Field(default=None, description="排序权重")
+
+
+class ProviderResponse(BaseModel):
+    """Provider 响应体（不含明文 API Key）"""
+    id: int
+    name: str
+    provider_type: str = "agnes"
+    base_url: str
+    api_key: str = Field(description="API Key 脱敏后的展示值，如 sk-a****b123")
+    poll_url: str = ""
+    is_active: bool
+    is_default: bool
+    sort_order: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ProviderListResponse(BaseModel):
+    """Provider 列表响应"""
+    total: int
+    items: List[ProviderResponse]
+
+
+# =====================================================
+# 模型定义相关 Schema
+# =====================================================
+
+class CustomModelCreateRequest(BaseModel):
+    """添加自定义模型请求体"""
+    provider_id: int = Field(..., description="所属 Provider ID")
+    model_id: str = Field(..., description="模型标识，如 agnes-image-2.1-flash")
+    display_name: str = Field(default="", description="显示名称（留空自动推断）")
+    model_type: str = Field(default="", description="模型类型：image / video / chat（留空自动推断）")
+    provider_name: str = Field(default="", description="供应商名称（留空自动推断）")
+    capabilities: Optional[List[str]] = Field(default=None, description="能力标签列表")
+    gen_params: Optional[ModelGenParams] = Field(
+        default=None,
+        description="生成能力配置（参考图上限/水印/尺寸规则/默认尺寸等）；None=按模型名自动画像",
+    )
+    sort_order: int = Field(default=0, description="排序权重")
+    asset_storage_mode: str = Field(default="auto", description="资源存储策略: auto/keep/migrate")
+
+
+class ModelUpdateRequest(BaseModel):
+    """更新模型定义请求体（所有字段可选）"""
+    display_name: Optional[str] = Field(default=None, description="显示名称")
+    model_type: Optional[str] = Field(default=None, description="模型类型")
+    provider_name: Optional[str] = Field(default=None, description="供应商名称")
+    capabilities: Optional[List[str]] = Field(default=None, description="能力标签列表")
+    gen_params: Optional[ModelGenParams] = Field(
+        default=None,
+        description="生成能力配置（全默认值=清空显式配置回退自动画像）；None=不修改",
+    )
+    is_active: Optional[bool] = Field(default=None, description="是否激活")
+    is_disabled: Optional[bool] = Field(
+        default=None,
+        description="是否用户手动停用（停用后不出现在生成页模型列表，同步不会自动恢复）",
+    )
+    sort_order: Optional[int] = Field(default=None, description="排序权重")
+    asset_storage_mode: Optional[str] = Field(default=None, description="资源存储策略: auto/keep/migrate")
+
+
+class ModelDefinitionResponse(BaseModel):
+    """模型定义响应体（含管理字段）"""
+    id: int
+    provider_id: int
+    model_id: str
+    display_name: str = ""
+    type: str
+    provider_name: str = ""
+    capabilities: List[str] = Field(default_factory=list)
+    gen_params: Optional[ModelGenParams] = None
+    is_active: bool
+    is_disabled: bool = False
+    is_custom: bool
+    sort_order: int
+    asset_storage_mode: str = Field(default="auto", description="资源存储策略: auto/keep/migrate")
+
+    class Config:
+        from_attributes = True
+
+
+class ModelListResponse(BaseModel):
+    """模型定义列表响应"""
+    total: int
+    items: List[ModelDefinitionResponse]
+
+
+class ModelBatchUpdateRequest(BaseModel):
+    """批量更新模型请求体（当前仅支持停用/启用）"""
+    model_ids: List[str] = Field(..., description="模型 ID 列表")
+    is_disabled: bool = Field(..., description="是否停用")
+
+
+class ModelBatchDeleteRequest(BaseModel):
+    """批量删除模型请求体"""
+    model_ids: List[str] = Field(..., description="模型 ID 列表")
+
+
+# =====================================================
+# 模型同步相关 Schema
+# =====================================================
+
+class SyncModelsResponse(BaseModel):
+    """模型同步结果响应"""
+    provider_id: int
+    added: int = Field(description="新增的模型数量")
+    updated: int = Field(description="更新的模型数量")
+    deactivated: int = Field(description="被软删除（API 中已不存在）的模型数量")
+    total: int = Field(description="API 返回的模型总数")
+    error: Optional[str] = Field(default=None, description="同步失败时的错误信息")
+
+
+class SyncAllResponse(BaseModel):
+    """同步所有 Provider 模型的响应"""
+    results: List[SyncModelsResponse]

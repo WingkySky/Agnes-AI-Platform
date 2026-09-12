@@ -1,0 +1,1063 @@
+# =====================================================
+# Provider 注册表（核心预处理层）
+# 职责：
+#   1. 管理多个 API Provider（不同 base_url / api_key / provider_type 的 API 接入）
+#   2. 为每个 Provider 按 provider_type 路由到对应的 client 实现：
+#      - "agnes" → AgnesAIClient（保留业务适配层：8n+1 / 8 倍数 / mode 归一化等 Agnes-specific 经验）
+#      - 其他 provider_type（volcengine_cv / kling / runway / pika 等）→ AGNSDKClientWrapper
+#        （封装 aibridge Client，统一协议层接入，无业务字段适配）
+#   3. 从数据库加载 Provider 配置和模型定义，支持运行时增删改
+#   4. 调用 Provider 的 /models API 自动同步模型列表（保留用户自定义模型）
+#   5. 启动时配置全局 agnes_client 单例指向默认 Provider（兼容现有代码）
+#
+# 数据流：
+#   数据库 api_providers / model_definitions 表
+#     ↓ 启动时加载
+#   ProviderRegistry._clients: {provider_id: AgnesAIClient | AGNSDKClientWrapper}
+#   ProviderRegistry._models_cache: List[ModelInfo]
+#     ↓ 全局单例兼容（仅默认 Provider，类型仍为 AgnesAIClient）
+#   agnes_client.configure(default_provider_config)
+# =====================================================
+
+import logging
+import re
+import time
+from typing import Dict, List, Optional, Any, Union
+
+from sqlalchemy import select, update, delete, and_
+
+from app.core.config import settings
+from app.core.database import new_async_session
+from app.core.security import encrypt_api_key, decrypt_api_key
+from app.models.api_provider import ApiProvider
+from app.models.model_definition import ModelDefinition
+from app.schemas.common import ModelInfo, ModelGenParams
+from app.services.agnes_client import AgnesAIClient, agnes_client
+from app.services.agn_sdk_client import AGNSDKClientWrapper
+
+logger = logging.getLogger("agnes_platform")
+
+# ---------- aibridge Adapter 类型与 client 实现的映射 ----------
+# "agnes" 走现有 AgnesAIClient（业务适配层 + 协议层一体）
+# 其他 provider_type 走 AGNSDKClientWrapper（aibridge 统一协议层）
+_PROVIDER_TYPE_AGNES = "agnes"
+
+# ---------- 模型类型推断规则（与原 model_registry 保持一致） ----------
+
+_TYPE_KEYWORDS: Dict[str, List[str]] = {
+    "image": ["image", "flux", "sd3", "sdxl", "dall", "seedream", "wanx", "ideogram", "midjourney"],
+    "video": ["video", "veo", "seedance", "cogvideox", "wan", "kling", "runway", "pika", "luma"],
+}
+
+_PROVIDER_PREFIXES: Dict[str, str] = {
+    "agnes-": "Agnes",
+    "doubao-": "字节跳动",
+    "qwen-": "阿里云",
+    "gpt-": "OpenAI",
+    "gemini-": "Google",
+    "claude-": "Anthropic",
+    "deepseek-": "DeepSeek",
+    "glm-": "智谱AI",
+}
+
+_DEFAULT_CAPABILITIES: Dict[str, List[str]] = {
+    "image": ["text2image", "image2image"],
+    "video": ["text2video", "image2video", "keyframes"],
+    "chat": ["text"],
+}
+
+
+# ---------- 模型推断工具函数 ----------
+
+def _detect_type(model_id: str) -> str:
+    """根据模型 ID 中的关键词推断类型（image / video / chat）"""
+    lower = model_id.lower()
+    for type_name, keywords in _TYPE_KEYWORDS.items():
+        if any(kw in lower for kw in keywords):
+            return type_name
+    return "chat"
+
+
+def _detect_provider(model_id: str) -> str:
+    """根据模型 ID 前缀推断供应商"""
+    lower = model_id.lower()
+    for prefix, provider in _PROVIDER_PREFIXES.items():
+        if lower.startswith(prefix):
+            return provider
+    return "Unknown"
+
+
+def _detect_capabilities(model_id: str, model_type: str) -> List[str]:
+    """根据类型推断默认能力列表（Agnes Video 2.5 非 Flash 家族额外支持 video2video）"""
+    caps = list(_DEFAULT_CAPABILITIES.get(model_type, []))
+    lower = (model_id or "").lower()
+    # Agnes Video 2.5（非 Flash）支持视频参考（video2video）；Flash 不支持
+    if model_type == "video" and "video-2.5" in lower and "flash" not in lower:
+        if "video2video" not in caps:
+            caps.append("video2video")
+    return caps
+
+
+def _detect_gen_params(model_id: str) -> Optional[ModelGenParams]:
+    """
+    根据模型 ID 推断生成能力配置（同族模型开箱即用；DB gen_params 显式配置优先于此推断）。
+    新增画像 = 在此追加一条分支；模型特例的"分配"数据化后不再改生成代码。
+    """
+    lower = (model_id or "").lower()
+    if "seedream" in lower:
+        # 火山 Seedream 系：官方 watermark 参数可关「AI生成」显式水印；尺寸需归一化到合法档（≥2K）
+        return ModelGenParams(watermark_param_off=True, size_rule="seedream")
+    if lower.startswith("agnes-image-2.1"):
+        # Agnes Image 2.1 家族：上游参考图上限 6 张（超出 HTTP 400）
+        return ModelGenParams(max_ref_images=6)
+    return None
+
+
+def _resolve_gen_params(model_id: str, explicit: Optional[dict]) -> Optional[ModelGenParams]:
+    """
+    合并生成能力配置：DB 显式配置（gen_params 列）逐键覆盖自动画像，未设置的键（None）沿用画像；
+    显式配置非法时整体忽略（回退画像）。
+    """
+    profile = _detect_gen_params(model_id)
+    if not explicit:
+        return profile
+    try:
+        explicit_params = ModelGenParams(**explicit)
+    except Exception as e:
+        logger.warning("[ProviderRegistry] 模型 %s 的 gen_params 配置无效，已忽略: %s", model_id, e)
+        return profile
+    if profile is None:
+        return explicit_params
+    merged = {**profile.model_dump(), **explicit_params.model_dump(exclude_none=True)}
+    return ModelGenParams(**merged)
+
+
+def _generate_display_name(model_id: str, provider: str, model_type: str) -> str:
+    """根据模型 ID 生成可读的显示名称（保留版本号中的点号）"""
+    name = model_id
+    for prefix in _PROVIDER_PREFIXES:
+        if name.lower().startswith(prefix):
+            name = name[len(prefix):]
+            break
+    # 先保护版本号中的点号（如 2.1 → 2⑴），替换后再恢复
+    protected = re.sub(r'(\d)\.(\d)', r'\1⑴\2', name)
+    protected = protected.replace("-", " ").replace(".", " ").title()
+    result = protected.replace("⑴", ".")
+    return f"{provider} {result}" if provider != "Unknown" else result
+
+
+def _build_model_info_from_definition(defn: ModelDefinition) -> ModelInfo:
+    """从 ModelDefinition ORM 对象构建 ModelInfo"""
+    # 优先使用数据库中存储的 display_name / type，否则自动推断
+    model_type = defn.type or _detect_type(defn.model_id)
+    provider_name = defn.provider_name or _detect_provider(defn.model_id)
+    display_name = defn.display_name or _generate_display_name(defn.model_id, provider_name, model_type)
+    capabilities = defn.capabilities if defn.capabilities else _detect_capabilities(defn.model_id, model_type)
+    return ModelInfo(
+        id=defn.model_id,
+        name=display_name,
+        type=model_type,
+        provider=provider_name,
+        capabilities=capabilities,
+        gen_params=_resolve_gen_params(defn.model_id, defn.gen_params),
+    )
+
+
+# =====================================================
+# ProviderRegistry - 单例注册表
+# =====================================================
+class ProviderRegistry:
+    """
+    Provider 注册表单例。
+
+    管理多个 API Provider 的 client 实例和模型列表缓存。
+    启动时从数据库加载配置，运行时支持增删改 Provider 和模型。
+    """
+
+    def __init__(self):
+        # {provider_id: AgnesAIClient | AGNSDKClientWrapper} - 每个 Provider 一个独立 client
+        # provider_type="agnes" 用 AgnesAIClient（保留业务适配层）
+        # 其他 provider_type 用 AGNSDKClientWrapper（aibridge 统一协议层）
+        self._clients: Dict[int, Union[AgnesAIClient, AGNSDKClientWrapper]] = {}
+        # 默认 Provider 的 ID（用于 agnes_client 单例兼容）
+        self._default_provider_id: Optional[int] = None
+        # 模型列表缓存（聚合所有 Provider 的 active 模型）
+        self._models_cache: Optional[List[ModelInfo]] = None
+        self._models_cache_time: float = 0
+        self._models_cache_ttl: int = 300  # 5 分钟
+        # 是否已初始化
+        self._initialized: bool = False
+
+    # ---------- 生命周期 ----------
+
+    async def initialize(self) -> None:
+        """
+        应用启动时初始化：
+        1. 从数据库加载所有 active Provider
+        2. 若数据库为空，用 settings 引导配置创建默认 Provider
+        3. 为每个 Provider 创建 AgnesAIClient 实例
+        4. 用默认 Provider 配置全局 agnes_client 单例
+        5. 加载模型列表缓存
+        """
+        if self._initialized:
+            return
+
+        logger.info("[ProviderRegistry] 开始初始化...")
+
+        # 1) 加载所有 active Provider
+        providers = await self._load_active_providers()
+
+        # 2) 首次启动：数据库无 Provider 时用引导配置创建默认 Provider
+        if not providers:
+            providers = await self._create_default_provider_from_settings()
+
+        # 3) 为每个 Provider 创建 client 实例
+        for provider in providers:
+            await self._init_client_for_provider(provider)
+
+        # 4) 确定默认 Provider 并配置全局 agnes_client 单例
+        await self._configure_default_client()
+
+        # 5) 加载模型列表缓存
+        await self.refresh_models_cache()
+
+        self._initialized = True
+        logger.info(
+            "[ProviderRegistry] 初始化完成: %d 个 Provider, 默认 Provider ID=%s",
+            len(self._clients), self._default_provider_id,
+        )
+
+    async def shutdown(self) -> None:
+        """应用关闭时释放所有 client 连接池"""
+        for provider_id, client in self._clients.items():
+            try:
+                await client.shutdown()
+            except Exception as e:
+                logger.warning("[ProviderRegistry] 关闭 Provider %s 的 client 失败: %s", provider_id, e)
+        self._clients.clear()
+        self._default_provider_id = None
+        self._initialized = False
+
+    # ---------- 数据库操作 ----------
+
+    async def _load_active_providers(self) -> List[ApiProvider]:
+        """从数据库加载所有 is_active=True 的 Provider，按 sort_order 排序"""
+        async with new_async_session() as session:
+            result = await session.execute(
+                select(ApiProvider)
+                .where(ApiProvider.is_active == True)
+                .order_by(ApiProvider.sort_order, ApiProvider.id)
+            )
+            return list(result.scalars().all())
+
+    async def _load_provider_by_id(self, provider_id: int) -> Optional[ApiProvider]:
+        """根据 ID 加载单个 Provider"""
+        async with new_async_session() as session:
+            result = await session.execute(
+                select(ApiProvider).where(ApiProvider.id == provider_id)
+            )
+            return result.scalars().first()
+
+    async def _create_default_provider_from_settings(self) -> List[ApiProvider]:
+        """
+        首次启动时用 settings 中的引导配置创建默认 Provider。
+        仅当 agnes_api_key 已配置时才创建。
+        """
+        if not settings.agnes_api_key:
+            logger.warning("[ProviderRegistry] settings.agnes_api_key 为空，跳过默认 Provider 创建")
+            return []
+
+        logger.info("[ProviderRegistry] 数据库无 Provider，使用 settings 引导配置创建默认 Provider")
+        async with new_async_session() as session:
+            provider = ApiProvider(
+                name="Agnes AI（默认）",
+                provider_type=_PROVIDER_TYPE_AGNES,
+                base_url=settings.agnes_api_base_url,
+                api_key_encrypted=encrypt_api_key(settings.agnes_api_key),
+                poll_url=settings.agnes_api_poll_url,
+                is_active=True,
+                is_default=True,
+                sort_order=0,
+            )
+            session.add(provider)
+            await session.commit()
+            await session.refresh(provider)
+            logger.info("[ProviderRegistry] 默认 Provider 已创建: id=%s, name=%s", provider.id, provider.name)
+            return [provider]
+
+    async def _init_client_for_provider(self, provider: ApiProvider) -> None:
+        """
+        为指定 Provider 创建并启动 client 实例。
+
+        按 provider_type 路由：
+        - "agnes" → AgnesAIClient（保留业务适配层：8n+1 / 8 倍数 / mode 归一化等 Agnes-specific 经验）
+        - 其他 provider_type → AGNSDKClientWrapper（封装 aibridge Client，统一协议层接入）
+        """
+        decrypted_key = decrypt_api_key(provider.api_key_encrypted or "")
+        provider_type = (provider.provider_type or _PROVIDER_TYPE_AGNES).strip().lower()
+
+        if provider_type == _PROVIDER_TYPE_AGNES:
+            # Agnes 走现有业务适配层 + 协议层一体实现
+            client: Union[AgnesAIClient, AGNSDKClientWrapper] = AgnesAIClient(
+                base_url=provider.base_url,
+                api_key=decrypted_key,
+                poll_url=provider.poll_url or "",
+            )
+        else:
+            # 其他 provider_type 走 aibridge 统一协议层
+            client = AGNSDKClientWrapper(
+                provider_type=provider_type,
+                base_url=provider.base_url,
+                api_key=decrypted_key,
+            )
+        await client.start()
+        self._clients[provider.id] = client
+        logger.info(
+            "[ProviderRegistry] Provider %s (id=%s, type=%s) client 已启动: base_url=%s",
+            provider.name, provider.id, provider_type, provider.base_url,
+        )
+
+    async def _configure_default_client(self) -> None:
+        """
+        确定默认 Provider，用其配置全局 agnes_client 单例。
+        优先选择 is_default=True 的 Provider，否则选第一个 active Provider。
+
+        注意：agnes_client 单例的类型固定为 AgnesAIClient，只有 provider_type="agnes"
+        的默认 Provider 才会 configure 该单例。如果默认 Provider 是其他 provider_type
+        （如 volcengine_cv / kling），则跳过 agnes_client 单例配置，业务层需通过
+        provider_registry.get_client(provider_id) 路由到对应的 AGNSDKClientWrapper。
+        """
+        if not self._clients:
+            logger.warning("[ProviderRegistry] 无可用 Provider，agnes_client 单例保持引导配置")
+            return
+
+        # 查询默认 Provider
+        async with new_async_session() as session:
+            result = await session.execute(
+                select(ApiProvider)
+                .where(and_(ApiProvider.is_active == True, ApiProvider.is_default == True))
+                .order_by(ApiProvider.sort_order)
+                .limit(1)
+            )
+            default_provider = result.scalars().first()
+
+        if default_provider is None:
+            # 没有 is_default=True 的，取第一个
+            async with new_async_session() as session:
+                result = await session.execute(
+                    select(ApiProvider)
+                    .where(ApiProvider.is_active == True)
+                    .order_by(ApiProvider.sort_order, ApiProvider.id)
+                    .limit(1)
+                )
+                default_provider = result.scalars().first()
+
+        if default_provider is None:
+            logger.warning("[ProviderRegistry] 无法确定默认 Provider")
+            return
+
+        self._default_provider_id = default_provider.id
+        default_provider_type = (default_provider.provider_type or _PROVIDER_TYPE_AGNES).strip().lower()
+
+        if default_provider_type != _PROVIDER_TYPE_AGNES:
+            # 默认 Provider 不是 agnes 类型，不 configure agnes_client 单例
+            # （agnes_client 是 AgnesAIClient 类型，无法承载其他 provider_type 的协议）
+            # 业务层需通过 provider_registry.get_client(provider_id) 路由到对应的 AGNSDKClientWrapper
+            logger.warning(
+                "[ProviderRegistry] 默认 Provider (id=%s, name=%s, type=%s) 非 agnes 类型，"
+                "跳过 agnes_client 单例配置（业务层需通过 get_client 路由）",
+                default_provider.id, default_provider.name, default_provider_type,
+            )
+            return
+
+        decrypted_key = decrypt_api_key(default_provider.api_key_encrypted or "")
+        # 配置全局 agnes_client 单例（兼容现有代码）
+        agnes_client.configure(
+            base_url=default_provider.base_url,
+            api_key=decrypted_key,
+            poll_url=default_provider.poll_url or "",
+        )
+        # 确保 agnes_client 的连接池已启动
+        await agnes_client.start()
+        logger.info(
+            "[ProviderRegistry] 全局 agnes_client 单例已配置为默认 Provider: id=%s, name=%s",
+            default_provider.id, default_provider.name,
+        )
+
+    # ---------- Client 获取 ----------
+
+    def get_client(self, provider_id: Optional[int] = None) -> Union[AgnesAIClient, AGNSDKClientWrapper]:
+        """
+        获取指定 Provider 的 client。
+        provider_id 为 None 时返回默认 Provider 的 client（即全局 agnes_client 单例）。
+
+        返回类型可能是 AgnesAIClient（provider_type="agnes"）或 AGNSDKClientWrapper（其他 provider_type），
+        两者都暴露 list_models / create_image / create_video_task / poll_video_status 等兼容方法。
+        """
+        if provider_id is None:
+            return agnes_client
+        client = self._clients.get(provider_id)
+        if client is None:
+            raise RuntimeError(f"Provider {provider_id} 不存在或未激活")
+        return client
+
+    # ---------- 模型→Provider 自动路由 ----------
+
+    # 模型 ID → Provider ID 的内存缓存（避免每次生图都查库）
+    # key: model_id (str), value: provider_id (int)
+    # 启动时 refresh_models_cache 会自动填充；增删 Provider/模型时也会刷新
+    _model_provider_map: Dict[str, int] = {}
+
+    async def get_client_for_model(
+        self,
+        model_id: str,
+    ) -> Union[AgnesAIClient, AGNSDKClientWrapper]:
+        """
+        根据模型 ID 自动路由到对应 Provider 的 client。
+
+        路由逻辑：
+        1. 先查内存缓存 _model_provider_map（由 refresh_models_cache 填充）
+        2. 缓存未命中时查数据库 ModelDefinition 表
+        3. 找到 provider_id 后返回 self._clients[provider_id]
+        4. 找不到时回退到默认 agnes_client 单例（兼容旧行为）
+
+        Args:
+            model_id: 模型标识（如 doubao-seedream-4-0-250828 / agnes-image-2.1-flash）
+
+        Returns:
+            对应 Provider 的 client（AgnesAIClient 或 AGNSDKClientWrapper）
+        """
+        if not model_id:
+            return agnes_client
+
+        # 1) 内存缓存命中
+        provider_id = self._model_provider_map.get(model_id)
+        if provider_id is not None:
+            client = self._clients.get(provider_id)
+            if client is not None:
+                return client
+
+        # 2) 缓存未命中，查数据库
+        if provider_id is None:
+            try:
+                async with new_async_session() as session:
+                    result = await session.execute(
+                        select(ModelDefinition.provider_id)
+                        .where(and_(ModelDefinition.model_id == model_id,
+                                    ModelDefinition.is_active == True))
+                        .limit(1)
+                    )
+                    row = result.first()
+                    if row is not None:
+                        provider_id = row[0]
+                        # 回填缓存
+                        self._model_provider_map[model_id] = provider_id
+            except Exception as e:
+                logger.warning("[ProviderRegistry] 查询模型 %s 的 Provider 失败: %s", model_id, e)
+
+        # 3) 找到 provider_id，返回对应 client
+        if provider_id is not None:
+            client = self._clients.get(provider_id)
+            if client is not None:
+                return client
+            logger.warning(
+                "[ProviderRegistry] 模型 %s 对应的 Provider %s 未激活或未启动，回退到默认 client",
+                model_id, provider_id,
+            )
+
+        # 4) 兜底：回退到默认 agnes_client 单例
+        return agnes_client
+
+    async def get_model_gen_params(self, model_id: str) -> ModelGenParams:
+        """
+        获取模型生成能力配置（解析链：模型缓存 → DB gen_params 列 → 按名自动画像）。
+        永不返回 None：无任何特例时返回全默认 ModelGenParams。
+        """
+        model_id = (model_id or "").strip()
+        if not model_id:
+            return ModelGenParams()
+
+        # 1) 模型缓存（refresh_models_cache 时已按"显式配置 > 自动画像"解析）
+        for m in (self._models_cache or []):
+            if m.id == model_id and m.gen_params is not None:
+                return m.gen_params
+
+        # 2) 缓存未命中（停用模型/缓存过期）直查 DB，仍无则按名画像
+        async with new_async_session() as session:
+            result = await session.execute(
+                select(ModelDefinition.gen_params).where(ModelDefinition.model_id == model_id)
+            )
+            explicit = result.scalar_one_or_none()
+        resolved = _resolve_gen_params(model_id, explicit)
+        return resolved or ModelGenParams()
+
+    # ---------- 模型列表管理 ----------
+
+    async def refresh_models_cache(self) -> List[ModelInfo]:
+        """
+        从数据库重新加载所有 active 模型到缓存。
+        返回聚合后的模型列表（所有 Provider 的 active 模型）。
+
+        同时刷新 _model_provider_map（模型 ID → Provider ID 映射），
+        供 get_client_for_model 自动路由使用。
+        """
+        async with new_async_session() as session:
+            result = await session.execute(
+                select(ModelDefinition)
+                .where(ModelDefinition.is_active == True)
+                .where(ModelDefinition.is_disabled == False)  # 用户手动停用的模型不进入生成页模型列表
+                .order_by(ModelDefinition.sort_order, ModelDefinition.id)
+            )
+            definitions = list(result.scalars().all())
+
+        self._models_cache = [_build_model_info_from_definition(d) for d in definitions]
+        self._models_cache_time = time.time()
+
+        # 同步刷新 模型→Provider 路由缓存
+        # 注意：用类属性赋值而非 self._model_provider_map.clear() + update，
+        # 避免多实例间共享可变状态时出现并发问题
+        new_map: Dict[str, int] = {}
+        for d in definitions:
+            new_map[d.model_id] = d.provider_id
+        ProviderRegistry._model_provider_map = new_map
+
+        logger.info(
+            "[ProviderRegistry] 模型缓存已刷新: %d 个模型, 路由映射 %d 条",
+            len(self._models_cache), len(new_map),
+        )
+        return self._models_cache
+
+    async def list_all_models(self, use_cache: bool = True) -> List[ModelInfo]:
+        """
+        获取所有可用模型（带缓存）。
+        缓存过期或 use_cache=False 时从数据库重新加载。
+        """
+        if use_cache and self._models_cache is not None:
+            if (time.time() - self._models_cache_time) < self._models_cache_ttl:
+                return self._models_cache
+        return await self.refresh_models_cache()
+
+    async def list_models_by_type(self, model_type: str) -> List[ModelInfo]:
+        """按类型筛选模型"""
+        all_models = await self.list_all_models()
+        return [m for m in all_models if m.type == model_type]
+
+    async def get_model_definition(self, model_id: str) -> Optional[ModelDefinition]:
+        """根据 model_id 查询模型定义（用于校验模型是否存在）"""
+        async with new_async_session() as session:
+            result = await session.execute(
+                select(ModelDefinition).where(ModelDefinition.model_id == model_id)
+            )
+            return result.scalars().first()
+
+    async def get_provider_type(self, model_id: str) -> str:
+        """
+        根据模型 ID 查询所属 Provider 的 provider_type（单次 JOIN 查询）。
+        用于资源转存策略判断（agnes 保持原样，其他转存）。
+        不过滤 is_active，因为转存场景需要查询历史记录的 provider_type。
+        返回空字符串表示未找到。
+        """
+        async with new_async_session() as session:
+            stmt = (
+                select(ApiProvider.provider_type)
+                .join(ModelDefinition, ModelDefinition.provider_id == ApiProvider.id)
+                .where(ModelDefinition.model_id == model_id)
+            )
+            result = await session.execute(stmt)
+            row = result.first()
+            return row[0] if row else ""
+
+    # ---------- Provider 同步模型（调用 /models API） ----------
+
+    async def sync_provider_models(self, provider_id: int) -> Dict[str, Any]:
+        """
+        调用指定 Provider 的 /models API，同步模型列表到数据库。
+        - 新增的模型自动添加（is_custom=False）
+        - 已存在的 API 模型保持不变（用户可能修改过 display_name 等）
+        - 用户自定义模型（is_custom=True）不会被覆盖或删除
+        - 用户手动停用（is_disabled=True）的模型保持停用，不会被同步重新激活
+        - API 中已不存在的非自定义模型会被标记为 is_active=False（软删除）
+
+        返回: {"added": N, "updated": N, "deactivated": N, "total": N}
+        """
+        client = self._clients.get(provider_id)
+        if client is None:
+            raise RuntimeError(f"Provider {provider_id} 不存在或未激活")
+
+        # 调用 /models API
+        raw_models = await client.list_models()
+        api_model_ids = set()
+        for m in raw_models:
+            mid = m.get("id", "")
+            if mid:
+                api_model_ids.add(mid)
+
+        logger.info(
+            "[ProviderRegistry] Provider %s 的 /models API 返回 %d 个模型",
+            provider_id, len(api_model_ids),
+        )
+
+        # 加载该 Provider 在数据库中已有的模型定义
+        async with new_async_session() as session:
+            result = await session.execute(
+                select(ModelDefinition).where(ModelDefinition.provider_id == provider_id)
+            )
+            existing_defs = {d.model_id: d for d in result.scalars().all()}
+
+            added = 0
+            updated = 0
+            deactivated = 0
+
+            # 1) 新增 API 中存在但数据库中没有的模型
+            for mid in api_model_ids:
+                if mid in existing_defs:
+                    # 已存在：重新激活（如果之前被软删除）
+                    defn = existing_defs[mid]
+                    if not defn.is_active and not defn.is_custom:
+                        defn.is_active = True
+                        updated += 1
+                    continue
+                # 新增
+                model_type = _detect_type(mid)
+                provider_name = _detect_provider(mid)
+                new_defn = ModelDefinition(
+                    provider_id=provider_id,
+                    model_id=mid,
+                    display_name=_generate_display_name(mid, provider_name, model_type),
+                    type=model_type,
+                    provider_name=provider_name,
+                    capabilities=_detect_capabilities(mid, model_type),
+                    is_active=True,
+                    is_custom=False,
+                    sort_order=0,
+                )
+                session.add(new_defn)
+                added += 1
+
+            # 2) 软删除 API 中已不存在的非自定义模型
+            for mid, defn in existing_defs.items():
+                if mid not in api_model_ids and not defn.is_custom and defn.is_active:
+                    defn.is_active = False
+                    deactivated += 1
+
+            await session.commit()
+
+        # 刷新缓存
+        await self.refresh_models_cache()
+
+        result_summary = {
+            "added": added,
+            "updated": updated,
+            "deactivated": deactivated,
+            "total": len(api_model_ids),
+        }
+        logger.info("[ProviderRegistry] Provider %s 模型同步完成: %s", provider_id, result_summary)
+        return result_summary
+
+    async def sync_all_providers(self) -> List[Dict[str, Any]]:
+        """同步所有 active Provider 的模型列表"""
+        results = []
+        for provider_id in list(self._clients.keys()):
+            try:
+                result = await self.sync_provider_models(provider_id)
+                result["provider_id"] = provider_id
+                results.append(result)
+            except Exception as e:
+                logger.error("[ProviderRegistry] 同步 Provider %s 失败: %s", provider_id, e)
+                results.append({"provider_id": provider_id, "error": str(e)})
+        return results
+
+    # ---------- Provider CRUD ----------
+
+    async def create_provider(
+        self,
+        name: str,
+        base_url: str,
+        api_key: str,
+        provider_type: str = _PROVIDER_TYPE_AGNES,
+        poll_url: str = "",
+        is_active: bool = True,
+        is_default: bool = False,
+        sort_order: int = 0,
+    ) -> ApiProvider:
+        """
+        新增 Provider。
+        - api_key 会用 Fernet 加密后存储
+        - provider_type 决定走 AgnesAIClient（agnes）还是 AGNSDKClientWrapper（其他 adapter）
+        - 如果 is_default=True，会把其他 Provider 的 is_default 置为 False
+        - 创建后立即初始化 client 实例
+        """
+        # 规范化 provider_type（默认 agnes）
+        normalized_provider_type = (provider_type or _PROVIDER_TYPE_AGNES).strip().lower() or _PROVIDER_TYPE_AGNES
+
+        # 如果设为默认，先取消其他默认
+        async with new_async_session() as session:
+            if is_default:
+                await session.execute(
+                    update(ApiProvider).values(is_default=False)
+                )
+
+            provider = ApiProvider(
+                name=name,
+                provider_type=normalized_provider_type,
+                base_url=base_url,
+                api_key_encrypted=encrypt_api_key(api_key) if api_key else "",
+                poll_url=poll_url,
+                is_active=is_active,
+                is_default=is_default,
+                sort_order=sort_order,
+            )
+            session.add(provider)
+            await session.commit()
+            await session.refresh(provider)
+
+        # 初始化 client
+        if is_active:
+            await self._init_client_for_provider(provider)
+            # 如果是默认 Provider，重新配置全局单例
+            if is_default:
+                await self._configure_default_client()
+
+        logger.info(
+            "[ProviderRegistry] Provider 已创建: id=%s, name=%s, provider_type=%s",
+            provider.id, provider.name, normalized_provider_type,
+        )
+        return provider
+
+    async def update_provider(
+        self,
+        provider_id: int,
+        name: Optional[str] = None,
+        provider_type: Optional[str] = None,
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+        poll_url: Optional[str] = None,
+        is_active: Optional[bool] = None,
+        is_default: Optional[bool] = None,
+        sort_order: Optional[int] = None,
+    ) -> Optional[ApiProvider]:
+        """
+        更新 Provider 配置。
+        - api_key 非空时才更新（避免误清空）
+        - provider_type 变更后会重建 client（切换 AgnesAIClient ↔ AGNSDKClientWrapper）
+        - is_default=True 时取消其他默认
+        - base_url/api_key/poll_url/provider_type 变更后重建 client
+        """
+        async with new_async_session() as session:
+            result = await session.execute(
+                select(ApiProvider).where(ApiProvider.id == provider_id)
+            )
+            provider = result.scalars().first()
+            if provider is None:
+                return None
+
+            # 如果设为默认，先取消其他默认
+            if is_default is True:
+                await session.execute(
+                    update(ApiProvider)
+                    .where(ApiProvider.id != provider_id)
+                    .values(is_default=False)
+                )
+
+            need_rebuild = False
+            if name is not None:
+                provider.name = name
+            # provider_type 变更：规范化后比对，变更则触发 client 重建
+            if provider_type is not None:
+                normalized_pt = (provider_type or _PROVIDER_TYPE_AGNES).strip().lower() or _PROVIDER_TYPE_AGNES
+                if normalized_pt != (provider.provider_type or _PROVIDER_TYPE_AGNES).lower():
+                    provider.provider_type = normalized_pt
+                    need_rebuild = True
+            if base_url is not None and base_url != provider.base_url:
+                provider.base_url = base_url
+                need_rebuild = True
+            if api_key:  # 非空才更新
+                provider.api_key_encrypted = encrypt_api_key(api_key)
+                need_rebuild = True
+            if poll_url is not None and poll_url != provider.poll_url:
+                provider.poll_url = poll_url
+                need_rebuild = True
+            if is_active is not None:
+                provider.is_active = is_active
+            if is_default is not None:
+                provider.is_default = is_default
+            if sort_order is not None:
+                provider.sort_order = sort_order
+
+            await session.commit()
+            await session.refresh(provider)
+
+        # 重建 client（如果配置变更或激活状态变更）
+        was_active = provider_id in self._clients
+        is_now_active = provider.is_active
+
+        if need_rebuild or (was_active and not is_now_active):
+            # 关闭旧 client
+            old_client = self._clients.pop(provider_id, None)
+            if old_client is not None:
+                await old_client.shutdown()
+
+        if is_now_active and (need_rebuild or not was_active):
+            await self._init_client_for_provider(provider)
+
+        # 如果是默认 Provider 或默认 Provider 变了，重新配置全局单例
+        if is_default is True or (self._default_provider_id is None and is_now_active):
+            await self._configure_default_client()
+
+        logger.info("[ProviderRegistry] Provider 已更新: id=%s, name=%s", provider.id, provider.name)
+        return provider
+
+    async def delete_provider(self, provider_id: int) -> bool:
+        """
+        删除 Provider。
+        - 关闭对应的 client
+        - 级联删除其下所有模型定义（由外键 ON DELETE CASCADE 保证）
+        - 如果删除的是默认 Provider，自动选择新的默认
+        """
+        was_default = False
+        # 关闭 client
+        client = self._clients.pop(provider_id, None)
+        if client is not None:
+            await client.shutdown()
+
+        async with new_async_session() as session:
+            # 检查是否是默认 Provider
+            result = await session.execute(
+                select(ApiProvider).where(ApiProvider.id == provider_id)
+            )
+            provider = result.scalars().first()
+            if provider is None:
+                return False
+            was_default = provider.is_default
+
+            # 删除 Provider（级联删除模型定义）
+            await session.execute(
+                delete(ApiProvider).where(ApiProvider.id == provider_id)
+            )
+            await session.commit()
+
+        # 如果删除的是默认 Provider，重新选择默认
+        if was_default:
+            self._default_provider_id = None
+            await self._configure_default_client()
+
+        # 刷新模型缓存
+        await self.refresh_models_cache()
+
+        logger.info("[ProviderRegistry] Provider 已删除: id=%s", provider_id)
+        return True
+
+    async def list_providers(self, include_key: bool = False) -> List[Dict[str, Any]]:
+        """
+        列出所有 Provider（按 sort_order 排序）。
+        - include_key=False: API Key 以掩码形式返回（如 sk-a****b123），前端展示用
+        - include_key=True: 返回解密后的明文 API Key（仅后端内部使用）
+        """
+        async with new_async_session() as session:
+            result = await session.execute(
+                select(ApiProvider).order_by(ApiProvider.sort_order, ApiProvider.id)
+            )
+            providers = list(result.scalars().all())
+
+        # 始终解密 API Key，由 to_dict 根据 include_key 决定返回掩码还是明文
+        return [
+            p.to_dict(
+                include_key=include_key,
+                decrypted_key=decrypt_api_key(p.api_key_encrypted or ""),
+            )
+            for p in providers
+        ]
+
+    # ---------- 模型 CRUD ----------
+
+    async def add_custom_model(
+        self,
+        provider_id: int,
+        model_id: str,
+        display_name: str = "",
+        model_type: str = "",
+        provider_name: str = "",
+        capabilities: Optional[List[str]] = None,
+        sort_order: int = 0,
+        asset_storage_mode: str = "auto",
+        gen_params: Optional[dict] = None,
+    ) -> ModelDefinition:
+        """
+        添加用户自定义模型。
+        - is_custom=True，同步时不会被覆盖或删除
+        - 字段为空时自动推断
+        """
+        # 自动推断缺失字段
+        if not model_type:
+            model_type = _detect_type(model_id)
+        if not provider_name:
+            provider_name = _detect_provider(model_id)
+        if not display_name:
+            display_name = _generate_display_name(model_id, provider_name, model_type)
+        if capabilities is None:
+            capabilities = _detect_capabilities(model_id, model_type)
+
+        async with new_async_session() as session:
+            defn = ModelDefinition(
+                provider_id=provider_id,
+                model_id=model_id,
+                display_name=display_name,
+                type=model_type,
+                provider_name=provider_name,
+                capabilities=capabilities,
+                is_active=True,
+                is_custom=True,
+                sort_order=sort_order,
+                asset_storage_mode=asset_storage_mode,
+                gen_params=gen_params,
+            )
+            session.add(defn)
+            await session.commit()
+            await session.refresh(defn)
+
+        await self.refresh_models_cache()
+        logger.info(
+            "[ProviderRegistry] 自定义模型已添加: provider_id=%s, model_id=%s",
+            provider_id, model_id,
+        )
+        return defn
+
+    async def update_model(
+        self,
+        model_id: str,
+        display_name: Optional[str] = None,
+        model_type: Optional[str] = None,
+        provider_name: Optional[str] = None,
+        capabilities: Optional[List[str]] = None,
+        is_active: Optional[bool] = None,
+        is_disabled: Optional[bool] = None,
+        sort_order: Optional[int] = None,
+        asset_storage_mode: Optional[str] = None,
+        gen_params: Optional[dict] = None,
+    ) -> Optional[ModelDefinition]:
+        """更新模型定义"""
+        async with new_async_session() as session:
+            result = await session.execute(
+                select(ModelDefinition).where(ModelDefinition.model_id == model_id)
+            )
+            defn = result.scalars().first()
+            if defn is None:
+                return None
+
+            if display_name is not None:
+                defn.display_name = display_name
+            if model_type is not None:
+                defn.type = model_type
+            if provider_name is not None:
+                defn.provider_name = provider_name
+            if capabilities is not None:
+                defn.capabilities = capabilities
+            if is_active is not None:
+                defn.is_active = is_active
+            if is_disabled is not None:
+                defn.is_disabled = is_disabled
+            if sort_order is not None:
+                defn.sort_order = sort_order
+            if asset_storage_mode is not None:
+                defn.asset_storage_mode = asset_storage_mode
+            if gen_params is not None:
+                defn.gen_params = gen_params  # 空 dict = 清空显式配置，回退自动画像
+
+            await session.commit()
+            await session.refresh(defn)
+
+        await self.refresh_models_cache()
+        logger.info("[ProviderRegistry] 模型已更新: model_id=%s", model_id)
+        return defn
+
+    async def delete_model(self, model_id: str) -> bool:
+        """删除模型定义（包括自定义和 API 同步的）"""
+        async with new_async_session() as session:
+            result = await session.execute(
+                delete(ModelDefinition).where(ModelDefinition.model_id == model_id)
+            )
+            await session.commit()
+            deleted = result.rowcount > 0
+
+        if deleted:
+            await self.refresh_models_cache()
+            logger.info("[ProviderRegistry] 模型已删除: model_id=%s", model_id)
+        return deleted
+
+    async def batch_update_models(self, model_ids: List[str], is_disabled: bool) -> int:
+        """
+        批量停用/启用模型（一次 UPDATE，一次缓存刷新）。
+        只修改 is_disabled（用户手动停用标记），不触碰同步管理的 is_active。
+        返回实际更新的行数。
+        """
+        if not model_ids:
+            return 0
+        async with new_async_session() as session:
+            result = await session.execute(
+                update(ModelDefinition)
+                .where(ModelDefinition.model_id.in_(model_ids))
+                .values(is_disabled=is_disabled)
+            )
+            await session.commit()
+            updated = result.rowcount
+
+        await self.refresh_models_cache()
+        logger.info("[ProviderRegistry] 批量%s模型: %d 个", "停用" if is_disabled else "启用", updated)
+        return updated
+
+    async def batch_delete_models(self, model_ids: List[str]) -> int:
+        """批量删除模型定义（一次 DELETE，一次缓存刷新），返回实际删除的行数"""
+        if not model_ids:
+            return 0
+        async with new_async_session() as session:
+            result = await session.execute(
+                delete(ModelDefinition).where(ModelDefinition.model_id.in_(model_ids))
+            )
+            await session.commit()
+            deleted = result.rowcount
+
+        await self.refresh_models_cache()
+        logger.info("[ProviderRegistry] 批量删除模型: %d 个", deleted)
+        return deleted
+
+    async def list_models(self, provider_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        列出模型定义（可按 Provider 过滤）。
+        返回字典列表（包含 is_custom / is_active 等管理字段）。
+        """
+        async with new_async_session() as session:
+            stmt = select(ModelDefinition).order_by(ModelDefinition.sort_order, ModelDefinition.id)
+            if provider_id is not None:
+                stmt = stmt.where(ModelDefinition.provider_id == provider_id)
+            result = await session.execute(stmt)
+            definitions = list(result.scalars().all())
+
+        return [
+            {
+                "id": d.id,
+                "provider_id": d.provider_id,
+                "model_id": d.model_id,
+                "display_name": d.display_name or "",
+                "type": d.type,
+                "provider_name": d.provider_name or "",
+                "capabilities": d.capabilities or [],
+                "gen_params": d.gen_params,
+                "is_active": d.is_active,
+                "is_disabled": d.is_disabled,
+                "is_custom": d.is_custom,
+                "sort_order": d.sort_order,
+                "asset_storage_mode": d.asset_storage_mode or "auto",
+            }
+            for d in definitions
+        ]
+
+    # ---------- 缓存控制 ----------
+
+    def invalidate_cache(self) -> None:
+        """手动清除模型缓存（用于配置变更后强制刷新）"""
+        self._models_cache = None
+        self._models_cache_time = 0
+
+
+# ---------- 全局单例 ----------
+provider_registry = ProviderRegistry()

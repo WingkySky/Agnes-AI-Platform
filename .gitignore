@@ -1,0 +1,74 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# 数据库
+*.db
+*.sqlite
+*.sqlite3
+
+# 环境变量（含敏感信息，禁止提交）
+.env
+
+# Node
+node_modules/
+dist/
+# 临时构建验证目录（vite build --outDir 校验用）
+dist-verify-*/
+# Vite 读取配置文件时生成的临时产物
+vite.config.ts.timestamp-*.mjs
+
+# 编辑器
+.vscode/
+.idea/
+.DS_Store
+
+# 日志
+*.log
+backend/logs/
+
+#设计文档
+.trae/
+.workbuddy/
+
+
+
+# 上传的文件
+.uploads/
+.claude/
+.agents/
+uploads/
+
+#数据
+backend/data/
+outputs/
+
+#test
+backend/test/
+backend/test_data/
+
+# AI skill 工作目录（brainstorming 缓存等）
+.superpowers/
+# AI 会话工作目录（计划文件等）
+.zcode/
+
+# AI 会话规划/调试产物（planning-with-files 技能约定文件名，本地保留不入库）
+task_plan.md
+findings.md
+progress.md
+check_db.py
+skills-lock.json
+
+# Vite 依赖预构建缓存
+.vite/
+
+# TypeScript 增量编译缓存
+*.tsbuildinfo
+
+#pytest
+pytest_cache/

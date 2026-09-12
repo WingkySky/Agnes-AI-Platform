@@ -1,0 +1,93 @@
+/* =====================================================
+ * Provider 与模型管理 API 封装
+ * 对应后端 /api/providers/* 和 /api/models/* 接口
+ * ===================================================== */
+
+import client from './client'
+import type {
+  ApiProvider,
+  ProviderListResponse,
+  ProviderCreateRequest,
+  ProviderUpdateRequest,
+  ModelDefinition,
+  ModelListResponse,
+  CustomModelCreateRequest,
+  ModelUpdateRequest,
+  ModelBatchUpdateRequest,
+  ModelBatchDeleteRequest,
+  SyncModelsResponse,
+  SyncAllResponse,
+} from '@/types'
+
+// =====================================================
+// Provider 管理
+// =====================================================
+
+/** 列出所有 Provider */
+export function listProviders(): Promise<ProviderListResponse> {
+  return client.get('/api/providers')
+}
+
+/** 创建 Provider */
+export function createProvider(data: ProviderCreateRequest): Promise<ApiProvider> {
+  return client.post('/api/providers', data)
+}
+
+/** 更新 Provider */
+export function updateProvider(providerId: number, data: ProviderUpdateRequest): Promise<ApiProvider> {
+  return client.put(`/api/providers/${providerId}`, data)
+}
+
+/** 删除 Provider */
+export function deleteProvider(providerId: number): Promise<null> {
+  return client.delete(`/api/providers/${providerId}`)
+}
+
+// =====================================================
+// 模型定义管理
+// =====================================================
+
+/** 列出指定 Provider 的模型 */
+/** 列出所有模型定义（管理视图） */
+export function listAllModels(): Promise<ModelListResponse> {
+  return client.get('/api/models')
+}
+
+/** 添加自定义模型 */
+export function addCustomModel(data: CustomModelCreateRequest): Promise<ModelDefinition> {
+  return client.post('/api/models', data)
+}
+
+/** 更新模型定义 */
+export function updateModel(modelId: string, data: ModelUpdateRequest): Promise<ModelDefinition> {
+  return client.put(`/api/models/${modelId}`, data)
+}
+
+/** 删除模型定义 */
+export function deleteModel(modelId: string): Promise<null> {
+  return client.delete(`/api/models/${modelId}`)
+}
+
+/** 批量停用/启用模型 */
+export function batchUpdateModels(data: ModelBatchUpdateRequest): Promise<{ updated: number }> {
+  return client.put('/api/models/batch', data)
+}
+
+/** 批量删除模型 */
+export function batchDeleteModels(data: ModelBatchDeleteRequest): Promise<{ deleted: number }> {
+  return client.post('/api/models/batch-delete', data)
+}
+
+// =====================================================
+// 模型同步
+// =====================================================
+
+/** 同步指定 Provider 的模型列表（调用 /models API） */
+export function syncProviderModels(providerId: number): Promise<SyncModelsResponse> {
+  return client.post(`/api/providers/${providerId}/sync-models`)
+}
+
+/** 同步所有 Provider 的模型列表 */
+export function syncAllProvidersModels(): Promise<SyncAllResponse> {
+  return client.post('/api/providers/sync-all-models')
+}

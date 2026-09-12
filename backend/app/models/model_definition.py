@@ -1,0 +1,79 @@
+# =====================================================
+# ModelDefinition 模型 — 模型定义
+# 从各 Provider 的 /models 接口拉取后持久化到数据库
+# 支持用户手动新增自定义模型（is_custom=True，刷新时不覆盖）
+# =====================================================
+
+from datetime import datetime
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, JSON, ForeignKey
+from sqlalchemy.orm import relationship
+
+from app.core.database import Base
+
+
+class ModelDefinition(Base):
+    """
+    模型定义
+
+    字段说明:
+    - id: 主键
+    - provider_id: 关联的 ApiProvider ID
+    - model_id: 模型标识（如 agnes-image-2.1-flash）
+    - display_name: 显示名称
+    - type: 模型类型（image / video / chat）
+    - provider_name: 供应商名称（如 Agnes / OpenAI）
+    - capabilities: 能力标签数组（JSON）
+    - gen_params: 生成能力配置（JSON，ModelGenParams 结构；NULL 时按注册表自动画像推断）
+    - is_active: 是否激活（同步管理：API 中存在的模型为 True，下线模型为 False）
+    - is_disabled: 用户手动停用（同步永不修改；停用后不出现在生成页模型列表）
+    - is_custom: 是否用户手动新增（true 时刷新模型列表不被覆盖）
+    - sort_order: 排序权重
+    - asset_storage_mode: 资源存储策略（auto/keep/migrate）
+    - created_at / updated_at: 时间戳
+    """
+
+    __tablename__ = "model_definitions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    provider_id = Column(Integer, ForeignKey("api_providers.id", ondelete="CASCADE"), nullable=False, index=True)
+    model_id = Column(String(100), nullable=False, comment="模型标识")
+    display_name = Column(String(200), nullable=True, comment="显示名称")
+    type = Column(String(20), nullable=False, default="chat", comment="模型类型: image/video/chat")
+    provider_name = Column(String(100), nullable=True, comment="供应商名称")
+    capabilities = Column(JSON, nullable=True, comment="能力标签数组")
+    gen_params = Column(JSON, nullable=True, comment="生成能力配置（参考图上限/水印/尺寸规则等，None=按模型名自动画像）")
+    is_active = Column(Boolean, default=True, nullable=False, comment="是否激活")
+    is_disabled = Column(Boolean, default=False, nullable=False, comment="用户手动停用（同步不修改，停用后不进入生成页模型列表）")
+    is_custom = Column(Boolean, default=False, nullable=False, comment="是否用户自定义")
+    sort_order = Column(Integer, default=0, nullable=False, comment="排序权重")
+    asset_storage_mode = Column(String(20), default="auto", nullable=False, comment="资源存储策略: auto(按provider_type自动判断) / keep(保留原URL) / migrate(强制转存对象存储)")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    def to_dict(self) -> dict:
+        """转换为字典（对齐前端 ModelInfo 结构）"""
+        return {
+            "id": self.id,
+            "provider_id": self.provider_id,
+            "id_field": self.model_id,  # 兼容旧 ModelInfo.id
+            "model_id": self.model_id,
+            "name": self.display_name or self.model_id,
+            "type": self.type,
+            "provider": self.provider_name or "Unknown",
+            "capabilities": self.capabilities or [],
+            "gen_params": self.gen_params,
+            "is_active": self.is_active,
+            "is_disabled": self.is_disabled,
+            "is_custom": self.is_custom,
+            "sort_order": self.sort_order,
+            "asset_storage_mode": self.asset_storage_mode,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+# ===== 数据库 schema 升级说明 =====
+# 由于项目使用 SQLAlchemy create_all 自动建表，SQLite 不会自动给已存在的表加新列。
+# 升级时需手动执行以下 SQL：
+#   ALTER TABLE model_definitions ADD COLUMN asset_storage_mode VARCHAR(20) NOT NULL DEFAULT 'auto';
+#   ALTER TABLE model_definitions ADD COLUMN is_disabled BOOLEAN NOT NULL DEFAULT 0;

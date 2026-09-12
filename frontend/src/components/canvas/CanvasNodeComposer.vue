@@ -1,0 +1,647 @@
+<!-- =====================================================
+  CanvasNodeComposer 节点悬浮 AI 对话框
+  - 选中节点时悬浮在节点正下方，所有可 AI 生成的节点共用此输入条
+  - 支持：script（剧情→生分镜）/ text（提示词→AI 生成回填）/ config（生图/视频提示词生成）
+  - image / video：输入框即节点提示词本体（打开回填 content.prompt，输入即保存），
+    Enter 保存并就地重新生成（"从当前图派生新节点"走工具栏图生图/图生视频快捷面板）
+  - config 模式切换/模型/参数全部在条内，写回节点 content，发送复用现有生成链路
+  - 文本节点走会话 SSE 流式回填（会话 id 存节点 content 复用）
+  - 定位由父组件（CanvasView）按视口变换计算，本组件只管交互
+===================================================== -->
+
+<template>
+  <div v-if="panel" class="node-composer" :style="boxStyle">
+    <!-- 生成模式切换（仅 config 节点） -->
+    <div v-if="isConfig" class="composer-tabs">
+      <button
+        v-for="m in configModes"
+        :key="m.value"
+        type="button"
+        :class="['composer-tab', { active: configContent.mode === m.value }]"
+        :style="tabStyle(configContent.mode === m.value)"
+        @click="updateContent({ mode: m.value })"
+      >{{ m.label }}</button>
+    </div>
+
+    <!-- 上游接入输入 chips（连线接入的模块缩略图在输入区可见，序号与生成引用一致） -->
+    <div v-if="isMedia && upstreamInputs.length > 0" class="composer-inputs" :style="chipBorderStyle">
+      <div v-for="u in upstreamInputs" :key="u.panel.id" class="composer-input-chip" :style="chipBorderStyle" :title="u.label">
+        <img v-if="u.panel.type === 'image'" class="chip-thumb" :src="inputThumbUrl(u.panel)" alt="">
+        <span v-else-if="u.panel.type === 'video'" class="chip-video-icon">▶</span>
+        <span class="chip-label">{{ u.label }}</span>
+      </div>
+    </div>
+
+    <!-- 提示词输入区 -->
+    <textarea
+      ref="inputRef"
+      v-model="text"
+      class="composer-input"
+      :style="inputStyle"
+      rows="3"
+      :placeholder="placeholder"
+      @input="onInput"
+      @keydown="onKeyDown"
+      @blur="handleMentionBlur"
+    ></textarea>
+
+    <!-- 底部：参数 + 状态 + 发送 -->
+    <div class="composer-bottom">
+      <!-- script 参数：镜头数 + 风格 + 分镜聊天模型 -->
+      <template v-if="panelType === 'script'">
+        <span class="composer-param-label">{{ t('canvas.script.shotCount') }}</span>
+        <input v-model.number="scriptShotMin" type="number" min="1" max="30" class="composer-num" :style="selectStyle" @input="persistScriptParams">
+        <span class="composer-param-label">–</span>
+        <input v-model.number="scriptShotMax" type="number" min="1" max="30" class="composer-num" :style="selectStyle" @input="persistScriptParams">
+        <span class="composer-param-label">{{ t('canvas.composer.chatModel') }}</span>
+        <select v-model="scriptChatModel" class="composer-select" :style="selectStyle">
+          <option v-for="m in modelsStore.chatModels" :key="m.id" :value="m.id">{{ m.name }}</option>
+        </select>
+      </template>
+      <!-- image / video 节点：模型与参数写回节点 content，随画布持久化 -->
+      <ComposerParamBar v-if="isMedia" :panel="panel" :mode="panelType === 'video' ? 'video' : 'image'" />
+      <template v-if="isConfig">
+        <!-- 参数栏：模式决定取图参数还是视频参数，字段名与合并生成链路共用 -->
+        <ComposerParamBar :panel="panel" :mode="isVideoMode ? 'video' : 'image'" />
+        <!-- 关键帧开关（仅图生视频） -->
+        <label v-if="configContent.mode === 'image2video'" class="composer-kf">
+          <el-switch
+            :model-value="configContent.use_keyframes || false"
+            size="small"
+            @update:model-value="updateContent({ use_keyframes: $event })"
+          />
+          <span class="composer-kf-label">{{ t('canvas.node.keyframesMode') }}</span>
+        </label>
+      </template>
+
+      <!-- 状态提示 -->
+      <span class="composer-tip" :style="mutedStyle">
+        {{ busy ? t('canvas.composer.busy') : t('canvas.composer.sendTip') }}
+      </span>
+      <!-- 发送按钮 -->
+      <button
+        type="button"
+        class="composer-send"
+        :style="sendStyle"
+        :disabled="!canSend"
+        :title="t('canvas.composer.send')"
+        @click="onSend"
+      >↑</button>
+    </div>
+
+    <!-- @ 提及弹窗（config 节点） -->
+    <Teleport to="body">
+      <div
+        v-if="mentionVisible && mentionCandidates.length > 0"
+        class="composer-mention"
+        :style="{ top: mentionPosition.top + 'px', left: mentionPosition.left + 'px' }"
+        @mousedown="handlePopupMouseDown"
+      >
+        <div
+          v-for="(candidate, idx) in mentionCandidates"
+          :key="candidate.id"
+          class="composer-mention-item"
+          :class="{ active: idx === mentionActiveIndex }"
+          @mousedown.prevent.stop="selectMention(candidate)"
+        >
+          <span class="mention-index">{{ candidate.index }}</span>
+          <span class="mention-name">{{ candidate.label }}</span>
+          <span v-if="candidate.preview" class="mention-preview">{{ candidate.preview }}</span>
+        </div>
+      </div>
+    </Teleport>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed, ref, watch, nextTick } from 'vue'
+import { useI18n } from '@/i18n'
+import { ElMessage } from 'element-plus'
+import { useCanvasStore } from '@/stores/canvas'
+import { useModelsStore } from '@/stores/models'
+import ComposerParamBar from '@/components/canvas/ComposerParamBar.vue'
+import { createChatSession, sendMessageStream } from '@/api/chat'
+import { getErrorMessage } from '@/lib/type-helpers'
+import { getUpstreamNodes } from '@/lib/canvas-generation'
+import { mergeExtractedAssets, readAssets, readShots } from '@/lib/canvas-storyboard'
+import { planStoryboard } from '@/lib/storyboard/pipeline'
+import { listCameraVocabulary } from '@/lib/storyboard/library'
+import type { StoryboardEntity } from '@/lib/storyboard/schemas'
+import type { EntityKind } from '@/lib/storyboard/schemas'
+import { useNodeMention } from '@/composables/useNodeMention'
+
+const props = defineProps<{ panelId: string }>()
+const emit = defineEmits<{ (e: 'generate'): void; (e: 'regenerate'): void }>()
+
+const { t } = useI18n()
+const store = useCanvasStore()
+const modelsStore = useModelsStore()
+
+/** 当前节点 */
+const panel = computed(() => store.panels.find((p) => p.id === props.panelId) || null)
+const panelType = computed(() => panel.value?.type || '')
+
+/** 是否 config（生图/视频配置节点） */
+const isConfig = computed(() => panelType.value === 'config')
+
+/** 是否媒体节点（图片=图生图，视频=首帧生视频） */
+const isMedia = computed(() => panelType.value === 'image' || panelType.value === 'video')
+
+/* ---------- config 节点内容与参数选项 ---------- */
+const configContent = computed<Record<string, any>>(() => ({
+  mode: 'text2image',
+  model: modelsStore.defaultImageModel,
+  size: '1024x1024',
+  prompt: '',
+  aspect_ratio: modelsStore.defaultVideoAspectRatio,
+  resolution: modelsStore.defaultVideoResolution,
+  frame_rate: modelsStore.defaultFrameRate,
+  seconds: modelsStore.defaultVideoDuration,
+  ...(panel.value?.content || {}),
+}))
+
+const isVideoMode = computed(() => configContent.value.mode?.includes('video'))
+
+const configModes = computed(() => [
+  { value: 'text2image', label: t('canvas.node.configMode.text2image') },
+  { value: 'image2image', label: t('canvas.node.configMode.image2image') },
+  { value: 'text2video', label: t('canvas.node.configMode.text2video') },
+  { value: 'image2video', label: t('canvas.node.configMode.image2video') },
+])
+
+/* ---------- 输入状态（按节点类型读写不同字段） ---------- */
+const text = ref('')
+const busy = ref(false)
+const inputRef = ref<HTMLTextAreaElement | null>(null)
+
+/** 占位文案：按节点类型区分 */
+const placeholder = computed(() => {
+  if (panelType.value === 'script') return t('canvas.composer.placeholderScript')
+  if (panelType.value === 'text') return t('canvas.composer.placeholderText')
+  if (panelType.value === 'image') return t('canvas.composer.placeholderImage')
+  if (panelType.value === 'video') return t('canvas.composer.placeholderVideo')
+  return t('canvas.composer.placeholderGenerate')
+})
+
+/** 输入写回：config→prompt，script→story，image/video→prompt（即节点重生成的实际依据），text→仅本地 */
+function persistText() {
+  if (!panel.value) return
+  if (panelType.value === 'config') store.updatePanel(panel.value.id, { content: { prompt: text.value } })
+  else if (panelType.value === 'script') store.updatePanel(panel.value.id, { content: { story: text.value } })
+  else if (isMedia.value) store.updatePanel(panel.value.id, { content: { prompt: text.value } })
+}
+
+function updateContent(patch: Record<string, unknown>) {
+  if (panel.value) store.updatePanel(panel.value.id, { content: patch })
+}
+
+/* ---------- script 节点生成参数（镜头数/风格，随输入持久化） ---------- */
+const scriptShotMin = ref(6)
+const scriptShotMax = ref(12)
+/** 分镜聊天模型：未选择时回落偏好/列表第一个，选中后随节点持久化 */
+const scriptChatModel = computed({
+  get: () => {
+    const stored = panel.value?.content?.chat_model
+    return typeof stored === 'string' && stored ? stored : modelsStore.getDefaultModel('chat')
+  },
+  set: (value: string) => updateContent({ chat_model: value }),
+})
+
+// 切换目标节点时重新载入输入内容
+watch(() => props.panelId, () => {
+  busy.value = false
+  if (panelType.value === 'config') text.value = configContent.value.prompt || ''
+  else if (panelType.value === 'script') {
+    text.value = typeof panel.value?.content?.story === 'string' ? panel.value.content.story : ''
+    scriptShotMin.value = typeof panel.value?.content?.shotMin === 'number' ? panel.value.content.shotMin : 6
+    scriptShotMax.value = typeof panel.value?.content?.shotMax === 'number' ? panel.value.content.shotMax : 12
+  }
+  else if (isMedia.value) {
+    // 图/视频节点：输入框即节点提示词本体，回填当前 content.prompt
+    const prompt = panel.value?.content?.prompt
+    text.value = typeof prompt === 'string' ? prompt : ''
+  }
+  else text.value = ''
+  nextTick(autosize)
+}, { immediate: true })
+
+/** 镜头数范围钳制并持久化 */
+function persistScriptParams() {
+  const clamp = (v: number, min: number, max: number) =>
+    Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : min
+  scriptShotMin.value = clamp(scriptShotMin.value, 1, scriptShotMax.value || 12)
+  scriptShotMax.value = clamp(scriptShotMax.value, scriptShotMin.value || 1, 30)
+  updateContent({ shotMin: scriptShotMin.value, shotMax: scriptShotMax.value })
+}
+
+/* ---------- @ 提及（config 节点） ---------- */
+const {
+  mentionPopupVisible: mentionVisible,
+  mentionActiveIndex,
+  mentionCandidates,
+  mentionPopupPosition: mentionPosition,
+  handleInput: handleMentionInput,
+  handleKeyDown: handleMentionKeyDown,
+  handleBlur: handleMentionBlur,
+  handlePopupMouseDown,
+  selectMention,
+  setCurrentPanel,
+} = useNodeMention(inputRef)
+
+watch(() => props.panelId, (id) => setCurrentPanel(isConfig.value ? id : null), { immediate: true })
+
+/** 输入事件：v-model 之外做 @ 提及处理 + 自适应高度 */
+function onInput() {
+  if (isConfig.value) handleMentionInput()
+  persistText()
+  autosize()
+}
+
+/** 自适应高度（上限 300px 后滚动，长提示词可直接回看） */
+function autosize() {
+  const el = inputRef.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = Math.min(el.scrollHeight, 300) + 'px'
+}
+
+/** 键盘：Enter 发送（@ 弹窗打开时交给提及导航），Shift+Enter 换行 */
+function onKeyDown(event: KeyboardEvent) {
+  if (isConfig.value && mentionVisible.value) {
+    handleMentionKeyDown(event)
+    if (mentionVisible.value) return
+  }
+  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+    event.preventDefault()
+    onSend()
+  }
+}
+
+const canSend = computed(() => text.value.trim().length > 0 && !busy.value)
+
+/* ---------- 发送：按节点类型分发 ---------- */
+function onSend() {
+  if (!canSend.value || !panel.value) return
+  if (panelType.value === 'config') sendConfig()
+  else if (panelType.value === 'script') void sendScript()
+  else if (panelType.value === 'text') void sendText()
+  else if (isMedia.value) sendMediaRegenerate()
+  else ElMessage.info(t('canvas.composer.unsupported'))
+}
+
+/** config：写入 prompt 后交由父组件走现有合并生成流程 */
+function sendConfig() {
+  persistText()
+  emit('generate')
+}
+
+/** image / video：输入即节点提示词，保存后交由父组件就地重新生成（保留模型/参数/参考图） */
+function sendMediaRegenerate() {
+  persistText()
+  emit('regenerate')
+}
+
+/** script：剧情 → 生成分镜脚本 → 唤起分镜向导 */
+async function sendScript() {
+  if (!panel.value) return
+  busy.value = true
+  try {
+    persistText()
+    // 上游图片节点 = 角色参考图，上游文本节点 = 角色设定；已有资产卡一并回传（反向通道，分镜沿用已有设定）
+    const upstreamNodes = getUpstreamNodes(panel.value.id, store.panels, store.connections)
+    const assets = readAssets(panel.value)
+    const toEntity = (kind: EntityKind) => (a: { name: string; description: string; imageUrl: string }): StoryboardEntity => ({
+      kind,
+      name: a.name,
+      description: a.description,
+      refImageUrl: a.imageUrl || '',
+    })
+    const characters: StoryboardEntity[] = [
+      ...upstreamNodes.map((p): StoryboardEntity => {
+        const content = typeof p.content?.content === 'string' ? p.content.content : ''
+        if (p.type === 'image') return { kind: 'character', name: p.name || '', description: '', refImageUrl: content }
+        return { kind: 'character', name: p.name || '', description: content, refImageUrl: '' }
+      }),
+      ...assets.characters.filter((a) => a.name.trim()).map(toEntity('character')),
+    ]
+    const scenes = assets.scenes.filter((a) => a.name.trim()).map(toEntity('scene'))
+    const out = await planStoryboard(text.value.trim(), {
+      characters,
+      scenes,
+      styleConfig: store.activeStyleConfig,
+      cameraVocabulary: await listCameraVocabulary(),
+      shotCountMin: scriptShotMin.value,
+      shotCountMax: scriptShotMax.value,
+      model: scriptChatModel.value || undefined,
+    })
+    const shots = out.shots.map((s, i) => ({
+      id: `shot_${Date.now().toString(36)}_${i}_${Math.random().toString(36).slice(2, 6)}`,
+      no: s.no,
+      duration: 5,
+      shotSize: s.shotSize,
+      camera: s.camera,
+      description: s.description,
+      dialogue: s.dialogue,
+      characters: s.characters,
+      props: s.props,
+      location: s.location,
+    }))
+    updateContent({ shots: JSON.parse(JSON.stringify(shots)) })
+    // LLM 提取的实体清单按名去重预填资产卡（不覆盖已有卡）
+    const merged = mergeExtractedAssets(readAssets(panel.value!), {
+      characters: out.assets.characters,
+      scenes: out.assets.scenes,
+      props: out.assets.props,
+    })
+    if (merged) updateContent({ assets: JSON.parse(JSON.stringify(merged)) })
+    // 已有分镜数量变化时清空旧的派生标记由向导处理；这里唤起向导进入确认镜头
+    if (readShots(panel.value!).length > 0) {
+      store.openScriptWizardId = panel.value!.id
+      text.value = ''
+    } else {
+      ElMessage.warning(t('canvas.messages.shotsEmpty'))
+    }
+  } catch (err) {
+    ElMessage.error(getErrorMessage(err) || t('canvas.composer.generateFailed'))
+  } finally {
+    busy.value = false
+  }
+}
+
+/** text：提示词 → 聊天 SSE 流式回填节点内容（会话 id 存节点复用） */
+async function sendText() {
+  if (!panel.value) return
+  busy.value = true
+  try {
+    let sessionId = typeof panel.value.content?.chat_session_id === 'number'
+      ? panel.value.content.chat_session_id
+      : null
+    if (!sessionId) {
+      const session = await createChatSession({ title: panel.value.name || 'Canvas Text' })
+      sessionId = session.id
+      updateContent({ chat_session_id: sessionId })
+    }
+    let acc = ''
+    updateContent({ content: '', status: 'loading' })
+    await sendMessageStream(sessionId, text.value.trim(), [], (event) => {
+      if (event.type === 'text' && event.content) {
+        acc += event.content
+        updateContent({ content: acc, status: 'loading' })
+      } else if (event.type === 'error') {
+        throw new Error(event.content || t('canvas.composer.generateFailed'))
+      }
+    })
+    updateContent({ content: acc, status: 'idle' })
+    text.value = ''
+  } catch (err) {
+    updateContent({ status: 'idle' })
+    ElMessage.error(getErrorMessage(err) || t('canvas.composer.generateFailed'))
+  } finally {
+    busy.value = false
+  }
+}
+
+/* ---------- 上游接入输入（media 节点） ---------- */
+const upstreamInputs = computed(() => (isMedia.value && panel.value ? store.getInputNodesWithIndex(panel.value.id) : []))
+
+function inputThumbUrl(p: { content?: Record<string, unknown> }): string {
+  return typeof p.content?.content === 'string' ? p.content.content : ''
+}
+
+const chipBorderStyle = computed(() => ({ borderColor: theme.value.node.faint }))
+
+/* ---------- 主题样式 ---------- */
+const theme = computed(() => store.canvasTheme)
+const boxStyle = computed(() => ({
+  background: theme.value.node.panel,
+  borderColor: theme.value.node.stroke,
+  color: theme.value.node.text,
+}))
+const inputStyle = computed(() => ({
+  background: 'transparent',
+  borderColor: theme.value.node.faint,
+  color: theme.value.node.text,
+}))
+const selectStyle = computed(() => ({
+  background: theme.value.node.fill,
+  borderColor: theme.value.node.stroke,
+  color: theme.value.node.text,
+}))
+const mutedStyle = computed(() => ({ color: theme.value.node.muted }))
+
+function tabStyle(active: boolean) {
+  return active
+    ? { background: theme.value.node.activeStroke, color: '#fff', borderColor: theme.value.node.activeStroke }
+    : { background: 'transparent', color: theme.value.node.muted, borderColor: theme.value.node.stroke }
+}
+
+const sendStyle = computed(() => {
+  if (canSend.value) {
+    return { background: theme.value.node.activeStroke, borderColor: theme.value.node.activeStroke, color: '#fff' }
+  }
+  return { background: theme.value.node.fill, borderColor: theme.value.node.stroke, color: theme.value.node.muted }
+})
+</script>
+
+<style scoped>
+/* 悬浮对话框：圆角深色卡，父组件控制 left/top/width */
+.node-composer {
+  position: absolute;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid;
+  border-radius: 14px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+  box-sizing: border-box;
+}
+
+/* 模式切换 tabs */
+.composer-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.composer-tab {
+  border: 1px solid;
+  border-radius: 8px;
+  padding: 3px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.composer-tab.active {
+  font-weight: 600;
+}
+
+/* 输入区 */
+.composer-input {
+  width: 100%;
+  border: 1px solid;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.6;
+  outline: none;
+  resize: none;
+  box-sizing: border-box;
+  font-family: inherit;
+  min-height: 84px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.composer-input:focus {
+  border-color: rgba(107, 156, 255, 0.6);
+}
+
+/* 上游接入输入 chips */
+.composer-inputs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.composer-input-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px 2px 2px;
+  border: 1px solid;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1;
+}
+.chip-thumb {
+  width: 24px;
+  height: 24px;
+  object-fit: cover;
+  border-radius: 6px;
+  display: block;
+}
+.chip-video-icon {
+  font-size: 10px;
+  padding-left: 4px;
+}
+.chip-label {
+  white-space: nowrap;
+}
+
+/* 底部参数行 */
+.composer-bottom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.composer-select {
+  border: 1px solid;
+  border-radius: 8px;
+  padding: 3px 6px;
+  font-size: 11px;
+  outline: none;
+  cursor: pointer;
+  max-width: 150px;
+}
+.composer-kf {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.composer-kf-label {
+  font-size: 11px;
+  white-space: nowrap;
+}
+/* script 参数：镜头数/风格 */
+.composer-param-label {
+  font-size: 11px;
+  white-space: nowrap;
+}
+.composer-num {
+  width: 52px;
+  border: 1px solid;
+  border-radius: 8px;
+  padding: 3px 6px;
+  font-size: 11px;
+  outline: none;
+}
+.composer-style {
+  width: 130px;
+  border: 1px solid;
+  border-radius: 8px;
+  padding: 3px 6px;
+  font-size: 11px;
+  outline: none;
+}
+.composer-tip {
+  margin-left: auto;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.composer-send {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  flex: none;
+  line-height: 1;
+  transition: opacity 0.15s, transform 0.15s;
+}
+.composer-send:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.composer-send:not(:disabled):hover {
+  transform: scale(1.06);
+}
+
+/* @ 提及弹窗（Teleport 到 body） */
+.composer-mention {
+  position: fixed;
+  z-index: 99999;
+  min-width: 220px;
+  max-width: 320px;
+  max-height: 260px;
+  overflow-y: auto;
+  background: rgba(15, 22, 38, 0.98);
+  border: 1px solid rgba(120, 170, 230, 0.25);
+  border-radius: 10px;
+  padding: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+.composer-mention-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #e8eef7;
+  cursor: pointer;
+}
+.composer-mention-item:hover,
+.composer-mention-item.active {
+  background: rgba(107, 156, 255, 0.15);
+}
+.mention-index {
+  color: #8ba3c9;
+  font-size: 11px;
+  width: 16px;
+  text-align: right;
+  flex: none;
+}
+.mention-name {
+  flex: none;
+}
+.mention-preview {
+  color: #6b84aa;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+</style>

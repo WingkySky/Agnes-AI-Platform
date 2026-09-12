@@ -1,0 +1,325 @@
+<!--
+  CanvasToolbar.vue
+  画布底部浮动工具栏组件
+  提供移动/选择、撤销/重做、新增节点（文本/图片/视频/音频/配置/上传）、
+  素材库、画布外观、删除选中、清空画布等操作入口
+  按钮通过 emits 让父组件处理具体逻辑
+-->
+<template>
+  <div class="canvas-toolbar-wrap" ref="wrapRef">
+    <!-- 顶部悬浮提示 -->
+    <span
+      v-if="tip"
+      class="dock-tip"
+      :style="tipStyle"
+    >{{ tip }}</span>
+
+    <!-- 工具栏主体 -->
+    <div class="canvas-toolbar" :style="dockStyle">
+      <template v-for="(group, gIdx) in buttonGroups" :key="gIdx">
+        <!-- 组间分隔符：1px 竖线 -->
+        <span
+          v-if="gIdx > 0"
+          class="toolbar-divider"
+          :style="{ background: theme.toolbar.border }"
+        ></span>
+
+        <!-- 组内按钮 -->
+        <template v-for="btn in group" :key="btn.id">
+          <button
+            v-if="!btn.conditional || hasSelection"
+            type="button"
+            class="toolbar-btn"
+            :aria-label="btn.label"
+            :disabled="btn.disabled"
+            :style="btnStyle(btn)"
+            @mouseenter="onHover(btn.id, $event)"
+            @mouseleave="onLeave"
+            @click="onBtnClick(btn)"
+          >
+            <component :is="btn.icon" :size="18" />
+          </button>
+        </template>
+      </template>
+    </div>
+
+    <!-- 画布外观面板 -->
+    <CanvasAppearancePanel
+      v-if="showAppearancePanel"
+      :theme="theme"
+      :theme-mode="themeMode"
+      :background-mode="backgroundMode"
+      :show-image-info="showImageInfo"
+      @set-theme="(mode) => $emit('set-theme', mode)"
+      @set-background="(mode) => $emit('set-background', mode)"
+      @toggle-image-info="(val) => $emit('toggle-image-info', val)"
+    />
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, computed } from 'vue'
+import {
+  Hand, MousePointer2, Undo2, Redo2, Type, Image, Video, Music2, Settings2, Upload,
+  FolderOpen, Palette, Trash2, Eraser, Keyboard, GitBranch,
+  Mic, FileText, Puzzle, Clapperboard, Bot,
+} from 'lucide-vue-next'
+import CanvasAppearancePanel from './CanvasAppearancePanel.vue'
+import { useI18n } from '@/i18n'
+
+const { t } = useI18n()
+
+const props = defineProps({
+  theme: { type: Object, required: true },
+  hasSelection: { type: Boolean, default: false },
+  canUndo: { type: Boolean, default: false },
+  canRedo: { type: Boolean, default: false },
+  showAppearancePanel: { type: Boolean, default: false },
+  themeMode: { type: String, default: 'dark' },
+  backgroundMode: { type: String, default: 'dots' },
+  showImageInfo: { type: Boolean, default: false },
+  // 当前激活的工具：hand（移动）/ select（选择框选）
+  activeTool: { type: String, default: 'hand' },
+  // 流程模式是否启用
+  isFlowMode: { type: Boolean, default: false },
+  // Agent 面板是否打开
+  showAgentPanel: { type: Boolean, default: false },
+})
+
+const emit = defineEmits([
+  'select-tool',
+  'undo', 'redo',
+  'add-node',
+  'upload-asset',
+  'open-asset-library',
+  'toggle-appearance-panel',
+  'toggle-agent-panel',
+  'delete-selected',
+  'clear-canvas',
+  'set-theme',
+  'set-background',
+  'toggle-image-info',
+  'show-shortcuts',
+  'toggle-flow-mode',
+])
+
+// 工具栏容器引用，用于计算 tooltip 水平位置
+const wrapRef = ref<HTMLElement | null>(null)
+// 当前 hover 的按钮 id
+const hovered = ref<string | null>(null)
+// tooltip 的水平偏移（相对工具栏容器）
+const tipX = ref(0)
+
+// 按钮分组配置：组间会渲染分隔符
+const buttonGroups = computed<any[][]>(() => [
+  // 组1：移动/选择（互斥工具，根据 activeTool 高亮）
+  [
+    { id: 'tool-hand', label: t('canvas.toolbar.toolHand'), icon: Hand, active: props.activeTool === 'hand', emit: 'select-tool', payload: 'hand' },
+    { id: 'tool-select', label: t('canvas.toolbar.toolSelect'), icon: MousePointer2, active: props.activeTool === 'select', emit: 'select-tool', payload: 'select' },
+  ],
+  // 组2：撤销/重做
+  [
+    { id: 'tool-undo', label: t('canvas.toolbar.toolUndo'), icon: Undo2, disabled: !props.canUndo, emit: 'undo' },
+    { id: 'tool-redo', label: t('canvas.toolbar.toolRedo'), icon: Redo2, disabled: !props.canRedo, emit: 'redo' },
+  ],
+  // 组3：新增节点（文本/图片/视频/音频/生成配置/配音/字幕/合成/上传素材）
+  [
+    { id: 'tool-text', label: t('canvas.toolbar.toolText'), icon: Type, emit: 'add-node', payload: 'text' },
+    { id: 'tool-image', label: t('canvas.toolbar.toolImage'), icon: Image, emit: 'add-node', payload: 'image' },
+    { id: 'tool-video', label: t('canvas.toolbar.toolVideo'), icon: Video, emit: 'add-node', payload: 'video' },
+    { id: 'tool-audio', label: t('canvas.toolbar.toolAudio'), icon: Music2, emit: 'add-node', payload: 'audio' },
+    { id: 'tool-config', label: t('canvas.toolbar.toolConfig'), icon: Settings2, emit: 'add-node', payload: 'config' },
+    // 脚本节点：短剧分镜主链路源头
+    { id: 'tool-script', label: t('canvas.toolbar.toolScript'), icon: Clapperboard, emit: 'add-node', payload: 'script' },
+    // 新增 3 种节点类型（spec 5.4.3）：配音/字幕/合成
+    { id: 'tool-tts', label: t('canvas.toolbar.toolTts') || '配音', icon: Mic, emit: 'add-node', payload: 'tts' },
+    { id: 'tool-subtitle', label: t('canvas.toolbar.toolSubtitle') || '字幕', icon: FileText, emit: 'add-node', payload: 'subtitle' },
+    { id: 'tool-compose', label: t('canvas.toolbar.toolCompose') || '成片合成', icon: Puzzle, emit: 'add-node', payload: 'compose' },
+    { id: 'tool-upload', label: t('canvas.toolbar.toolUpload'), icon: Upload, emit: 'upload-asset' },
+  ],
+  // 组4：流程模式（识别执行顺序、步骤分组）
+  [
+    { id: 'tool-flow', label: t('canvas.toolbar.toolFlow'), icon: GitBranch, active: props.isFlowMode, emit: 'toggle-flow-mode' },
+  ],
+  // 组6：我的素材/画布外观
+  [
+    { id: 'tool-assets', label: t('canvas.toolbar.toolAssets'), icon: FolderOpen, emit: 'open-asset-library' },
+    { id: 'tool-style', label: t('canvas.toolbar.toolStyle'), icon: Palette, active: props.showAppearancePanel, emit: 'toggle-appearance-panel' },
+  ],
+  // 组7：画布 Agent（右侧对话面板）
+  [
+    { id: 'tool-agent', label: t('canvas.toolbar.toolAgent'), icon: Bot, active: props.showAgentPanel, emit: 'toggle-agent-panel' },
+  ],
+  // 组5：快捷键帮助（独立一组，方便用户查阅）
+  [
+    { id: 'tool-help', label: t('canvas.toolbar.toolHelp'), icon: Keyboard, emit: 'show-shortcuts' },
+  ],
+  // 组6：删除选中（仅选中时显示，红色）+ 清空画布（红色）
+  [
+    { id: 'tool-delete', label: t('canvas.toolbar.toolDelete'), icon: Trash2, danger: true, conditional: true, emit: 'delete-selected' },
+    { id: 'tool-clear', label: t('canvas.toolbar.toolClear'), icon: Eraser, danger: true, emit: 'clear-canvas' },
+  ],
+])
+
+// 工具栏主体样式：背景/边框/文字色由主题 token 控制，阴影随主题模式变化
+const dockStyle = computed(() => ({
+  background: props.theme.toolbar.panel,
+  borderColor: props.theme.toolbar.border,
+  color: props.theme.toolbar.item,
+  boxShadow: props.themeMode === 'dark'
+    ? '0 18px 45px rgba(0,0,0,.32)'
+    : '0 16px 40px rgba(28,25,23,.12)',
+}))
+
+// 按钮 hover 样式
+const hoverStyle = computed(() => ({
+  background: props.theme.toolbar.itemHover,
+  color: props.theme.toolbar.activeText,
+}))
+
+// 按钮激活样式
+const activeStyle = computed(() => ({
+  background: props.theme.toolbar.activeBg,
+  color: props.theme.toolbar.activeText,
+}))
+
+// tooltip 文案映射
+const tip = computed(() => {
+  const map: Record<string, string> = {
+    'tool-hand': t('canvas.toolbar.toolHand'),
+    'tool-select': t('canvas.toolbar.toolSelect'),
+    'tool-undo': t('canvas.toolbar.toolUndo'),
+    'tool-redo': t('canvas.toolbar.toolRedo'),
+    'tool-text': t('canvas.toolbar.toolText'),
+    'tool-image': t('canvas.toolbar.toolImage'),
+    'tool-video': t('canvas.toolbar.toolVideo'),
+    'tool-audio': t('canvas.toolbar.toolAudio'),
+    'tool-config': t('canvas.toolbar.toolConfig'),
+    'tool-script': t('canvas.toolbar.toolScript'),
+    'tool-upload': t('canvas.toolbar.toolUpload'),
+    'tool-assets': t('canvas.toolbar.toolAssets'),
+    'tool-style': t('canvas.toolbar.toolStyle'),
+    'tool-help': t('canvas.toolbar.toolHelp'),
+    'tool-delete': t('canvas.toolbar.toolDelete'),
+    'tool-clear': t('canvas.toolbar.toolClear'),
+    'tool-pipeline': t('canvas.toolbar.toolPipeline'),
+  }
+  return map[hovered.value!] || ''
+})
+
+// tooltip 样式：背景/文字色用 node token，水平位置跟随按钮中心
+const tipStyle = computed(() => ({
+  left: tipX.value + 'px',
+  background: props.theme.node.text,
+  color: props.theme.node.panel,
+}))
+
+// 计算按钮 style：激活态 > hover 态 > 默认态
+function btnStyle(btn: any) {
+  if (btn.active) return activeStyle.value
+  if (hovered.value === btn.id && !btn.disabled) return hoverStyle.value
+  return {
+    color: btn.danger ? '#f87171' : props.theme.toolbar.item,
+    opacity: btn.disabled ? 0.35 : 1,
+  }
+}
+
+// 计算 tooltip 相对工具栏容器的水平位置（按钮中心）
+function getTipX(target: HTMLElement) {
+  const wrap = wrapRef.value
+  if (!wrap) return 0
+  const wrapBox = wrap.getBoundingClientRect()
+  const box = target.getBoundingClientRect()
+  return box.left - wrapBox.left + box.width / 2
+}
+
+// 按钮 hover：记录 id 和 tooltip 位置
+function onHover(id: string, event: MouseEvent) {
+  hovered.value = id
+  tipX.value = getTipX(event.currentTarget as HTMLElement)
+}
+
+// 按钮 leave：清除 hover 状态
+function onLeave() {
+  hovered.value = null
+}
+
+// 按钮点击：根据配置 emit 对应事件（带 payload 时一并发出）
+function onBtnClick(btn: any) {
+  if (btn.disabled) return
+  if (btn.payload !== undefined) {
+    emit(btn.emit, btn.payload)
+  } else {
+    emit(btn.emit)
+  }
+}
+</script>
+
+<style scoped>
+/* 工具栏外层容器：fixed 定位在画布底部中央 */
+.canvas-toolbar-wrap {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  pointer-events: none;
+}
+
+/* 工具栏主体：56px 高、12px 圆角、毛玻璃效果 */
+.canvas-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 56px;
+  padding: 0 8px;
+  border: 1px solid;
+  border-radius: 12px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  overflow-x: auto;
+  pointer-events: auto;
+}
+
+/* 工具栏按钮：32×32px */
+.toolbar-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.toolbar-btn:disabled {
+  cursor: not-allowed;
+}
+
+/* 组间分隔符：1px 竖线 */
+.toolbar-divider {
+  flex-shrink: 0;
+  display: inline-block;
+  width: 1px;
+  height: 24px;
+  margin: 0 4px;
+}
+
+/* 顶部悬浮提示：浮于工具栏上方 */
+.dock-tip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+}
+</style>

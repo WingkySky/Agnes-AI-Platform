@@ -1,0 +1,220 @@
+# =====================================================
+# 用户 / 认证相关 Schema
+# - 注册请求、登录请求、token 响应、当前用户信息响应
+# - 用户管理（列表、修改角色/积分、启停用）
+# - 积分规则（查询、更新）
+# =====================================================
+
+from typing import List, Optional
+from datetime import datetime
+from pydantic import BaseModel, Field, field_validator
+
+
+# =====================================================
+# 一、请求体
+# =====================================================
+
+class RegisterRequest(BaseModel):
+    """注册请求体"""
+    username: str = Field(..., min_length=3, max_length=32, description="用户名（3~32 字符）")
+    email: str = Field(..., min_length=5, max_length=128, description="邮箱（必填）")
+    password: str = Field(..., min_length=6, max_length=64, description="密码（6~64 字符）")
+    captcha_id: Optional[str] = Field(default=None, description="图片验证码 ID")
+    captcha_code: Optional[str] = Field(default=None, description="图片验证码")
+
+    @field_validator("username")
+    @classmethod
+    def username_alphanumeric(cls, v: str) -> str:
+        # 允许字母数字 + 下划线 + 中文
+        if not all(ch.isalnum() or ch == "_" or ord(ch) > 127 for ch in v):
+            raise ValueError("用户名只能包含字母、数字、下划线和中文")
+        return v
+
+    @field_validator("email")
+    @classmethod
+    def email_must_be_valid(cls, v: str) -> str:
+        # 简单邮箱格式校验
+        v = v.strip().lower()
+        if "@" not in v or "." not in v:
+            raise ValueError("邮箱格式不正确")
+        return v
+
+
+class LoginRequest(BaseModel):
+    """登录请求体"""
+    username: str = Field(..., min_length=3, max_length=32, description="用户名")
+    password: str = Field(..., min_length=6, max_length=64, description="密码")
+    captcha_id: Optional[str] = Field(default=None, description="图片验证码 ID")
+    captcha_code: Optional[str] = Field(default=None, description="图片验证码")
+
+
+# =====================================================
+# 验证码相关
+# =====================================================
+
+class CaptchaResponse(BaseModel):
+    """图片验证码响应"""
+    captcha_id: str = Field(..., description="验证码 ID")
+    image_base64: str = Field(..., description="验证码图片（Base64 编码，不含 data:image/png;base64, 前缀）")
+
+
+class SendEmailCodeRequest(BaseModel):
+    """发送邮箱验证码请求"""
+    email: str = Field(..., min_length=5, max_length=128, description="邮箱地址")
+    purpose: str = Field(default="reset_password", description="验证码用途：reset_password")
+
+    @field_validator("email")
+    @classmethod
+    def email_must_be_valid(cls, v: str) -> str:
+        v = v.strip().lower()
+        if "@" not in v or "." not in v:
+            raise ValueError("邮箱格式不正确")
+        return v
+
+
+class ResetPasswordRequest(BaseModel):
+    """重置密码请求"""
+    email: str = Field(..., min_length=5, max_length=128, description="邮箱地址")
+    code: str = Field(..., min_length=6, max_length=6, description="邮箱验证码（6位数字）")
+    new_password: str = Field(..., min_length=6, max_length=64, description="新密码（6~64 字符）")
+
+    @field_validator("email")
+    @classmethod
+    def email_must_be_valid(cls, v: str) -> str:
+        v = v.strip().lower()
+        if "@" not in v or "." not in v:
+            raise ValueError("邮箱格式不正确")
+        return v
+
+
+class ChangePasswordRequest(BaseModel):
+    """修改密码请求（已登录用户用旧密码换新密码）"""
+    old_password: str = Field(..., min_length=6, max_length=64, description="当前密码")
+    new_password: str = Field(..., min_length=6, max_length=64, description="新密码（6~64 字符，不能与旧密码相同）")
+
+
+# =====================================================
+# 二、响应体
+# =====================================================
+
+class TokenResponse(BaseModel):
+    """登录/注册成功后返回的 token 响应"""
+    access_token: str = Field(..., description="JWT access token（前端需存入 localStorage，并以 Authorization: Bearer <token> 发送）")
+    token_type: str = Field(default="bearer", description="token 类型，固定为 bearer")
+    expires_in: int = Field(..., description="token 有效期（秒）")
+    # 是否需要在登录后强制修改密码（默认管理员账号、首位注册管理员为 True）
+    must_change_password: bool = Field(default=False, description="是否需要强制修改密码")
+
+
+class UserInfoResponse(BaseModel):
+    """当前用户信息（不含 password_hash）"""
+    id: int
+    username: str
+    nickname: Optional[str] = None
+    email: Optional[str] = None
+    avatar_url: Optional[str] = None
+    credits: int
+    role: str           # admin / user
+    is_active: bool
+    is_admin: bool      # 向后兼容：等价于 role == 'admin'
+    watermark_enabled: bool = False
+    content_safety_strict: bool = False
+    must_change_password: bool = False
+    created_at: Optional[datetime] = None
+    last_login_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class UserCreditsResponse(BaseModel):
+    """用户积分查询响应"""
+    credits: int
+
+
+class UpdateProfileRequest(BaseModel):
+    """更新个人资料请求体（支持修改邮箱、昵称）"""
+    nickname: Optional[str] = Field(default=None, max_length=32, description="昵称（可选，广场等公开场景展示）")
+    email: Optional[str] = Field(default=None, max_length=128, description="新邮箱（可选，传 null 清空）")
+
+
+# =====================================================
+# 三、管理员：用户管理接口 Schema
+# =====================================================
+
+class UserAdminRow(BaseModel):
+    """管理员在用户列表页看到的一行"""
+    id: int
+    username: str
+    nickname: Optional[str] = None
+    email: Optional[str] = None
+    avatar_url: Optional[str] = None
+    credits: int
+    role: str
+    is_active: bool
+    is_admin: bool
+    watermark_enabled: bool = False
+    content_safety_strict: bool = False
+    created_at: Optional[datetime] = None
+    last_login_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class UserListResponse(BaseModel):
+    """用户列表响应"""
+    items: List[UserAdminRow]
+    total: int
+
+
+class UpdateRoleRequest(BaseModel):
+    """修改用户角色"""
+    role: str = Field(..., description="新角色：admin / moderator / user")
+
+    @field_validator("role")
+    @classmethod
+    def role_must_be_valid(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        if v not in ("admin", "moderator", "user"):
+            raise ValueError("role 仅可取值 admin / moderator / user")
+        return v
+
+
+class UpdateCreditsRequest(BaseModel):
+    """调整用户积分"""
+    credits: int = Field(..., ge=0, description="新的积分余额（>=0）")
+
+
+class UpdateActiveRequest(BaseModel):
+    """启用 / 禁用用户"""
+    is_active: bool
+
+
+class ToggleFlagRequest(BaseModel):
+    """切换布尔开关（管理员修改用户水印 / 内容安全严格模式）"""
+    enabled: bool
+
+
+# =====================================================
+# 四、积分规则 Schema
+# =====================================================
+
+class CreditRuleResponse(BaseModel):
+    """一条积分规则"""
+    id: int
+    rule_key: str
+    name: str
+    value: int
+    description: str
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class CreditRuleUpdateRequest(BaseModel):
+    """修改一条积分规则"""
+    name: Optional[str] = Field(default=None, description="中文名称（可选）")
+    value: int = Field(..., ge=0, description="积分值（>=0）")
+    description: Optional[str] = Field(default=None, description="说明（可选）")

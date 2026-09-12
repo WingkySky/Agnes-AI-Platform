@@ -1,0 +1,201 @@
+/* =====================================================
+ * 模型配置 Store
+ * 从后端 /api/config 获取可用模型列表和参数配置
+ * 按 provider 匹配参数预设，兜底使用本地配置
+ * ===================================================== */
+
+import { defineStore } from 'pinia'
+import { ref, computed } from 'vue'
+import { getPlatformConfig } from '@/api/history'
+import { usePreferencesStore } from '@/stores/preferences'
+import type { ModelInfo, ConfigResponse, ImageSizeOption, VideoAspectRatioOption, VideoResolutionOption, WatermarkConfigPublic, ModelGenParams } from '@/types'
+import {
+  getModelParams as getLocalModelParams,
+  type ModelParams,
+} from '@/config/model-params'
+
+export const useModelsStore = defineStore('models', () => {
+  // 所有模型列表
+  const models = ref<ModelInfo[]>([])
+  // 图片尺寸选项（兼容旧版，纯字符串数组）
+  const imageSizes = ref<string[]>([])
+  // 图片尺寸选项（结构化，含比例信息）
+  const imageSizeOptions = ref<ImageSizeOption[]>([])
+  // 默认图片尺寸
+  const defaultImageSize = ref('1024x1024')
+  // 视频宽高比选项
+  const videoAspectRatios = ref<VideoAspectRatioOption[]>([])
+  // 默认视频宽高比
+  const defaultVideoAspectRatio = ref('16:9')
+  // 视频分辨率选项
+  const videoResolutions = ref<VideoResolutionOption[]>([])
+  // 默认视频分辨率（高度）
+  const defaultVideoResolution = ref(720)
+  // 视频时长选项（秒）
+  const videoDurations = ref<number[]>([3, 5, 7, 10, 15])
+  // 默认视频时长
+  const defaultVideoDuration = ref(5)
+  // 视频帧率选项
+  const videoFrameRates = ref<number[]>([24, 30])
+  // 默认帧率
+  const defaultFrameRate = ref(24)
+  // 水印配置
+  const watermark = ref<WatermarkConfigPublic | null>(null)
+  // 是否已加载
+  const loaded = ref(false)
+
+  // 按类型分类的模型
+  const imageModels = computed(() => models.value.filter((m) => m.type === 'image'))
+  const videoModels = computed(() => models.value.filter((m) => m.type === 'video'))
+  const chatModels = computed(() => models.value.filter((m) => m.type === 'chat'))
+
+  // 用户偏好（默认模型的优先来源）
+  const preferencesStore = usePreferencesStore()
+
+  /**
+   * 按类型取默认模型：用户偏好 > 该类型列表第一个
+   * 偏好未设置、模型已下架或类型不匹配时，回退到列表第一个
+   */
+  function getDefaultModel(type: 'image' | 'video' | 'chat'): string {
+    const list =
+      type === 'video' ? videoModels.value : type === 'chat' ? chatModels.value : imageModels.value
+    const gen = preferencesStore.generation
+    const preferredId =
+      type === 'video'
+        ? gen.default_video_model_id
+        : type === 'image'
+          ? gen.default_image_model_id
+          : gen.default_chat_model_id
+    if (preferredId && list.some((m) => m.id === preferredId)) return preferredId
+    return list[0]?.id || ''
+  }
+
+  // 默认模型（偏好优先，未命中取各类型第一个）
+  const defaultImageModel = computed(() => getDefaultModel('image'))
+  const defaultVideoModel = computed(() => getDefaultModel('video'))
+
+  /** 从后端加载配置（仅加载一次） */
+  async function fetchConfig() {
+    if (loaded.value) return
+    try {
+      const resp: ConfigResponse = await getPlatformConfig()
+      models.value = resp.models || []
+      // 图片尺寸
+      imageSizes.value = resp.image_sizes || []
+      imageSizeOptions.value = resp.image_size_options || []
+      defaultImageSize.value = resp.default_image_size || '1024x1024'
+      // 视频参数
+      videoAspectRatios.value = resp.video_aspect_ratios || []
+      defaultVideoAspectRatio.value = resp.default_video_aspect_ratio || '16:9'
+      videoResolutions.value = resp.video_resolutions || []
+      defaultVideoResolution.value = resp.default_video_resolution || 720
+      videoDurations.value = resp.video_durations || [3, 5, 7, 10, 15]
+      defaultVideoDuration.value = resp.default_video_duration || 5
+      videoFrameRates.value = resp.video_frame_rates || [24, 30]
+      defaultFrameRate.value = resp.default_frame_rate || 24
+      // 水印配置
+      watermark.value = resp.watermark || null
+      loaded.value = true
+    } catch (err) {
+      console.error('[models store] 加载配置失败:', err)
+    }
+  }
+
+  /** 根据模型 ID 查找模型信息 */
+  function getModelById(id: string): ModelInfo | undefined {
+    return models.value.find((m) => m.id === id)
+  }
+
+  /** 获取模型生成能力配置（参考图上限/水印/尺寸规则等；无特例返回 null） */
+  function getModelGenParams(modelId?: string): ModelGenParams | null {
+    if (!modelId) return null
+    return models.value.find((m) => m.id === modelId)?.gen_params ?? null
+  }
+
+  /** 视频时长档位：模型 gen_params.video_durations 优先，未配置用全局档位 */
+  function getModelVideoDurations(modelId?: string): number[] {
+    const per = getModelGenParams(modelId)?.video_durations
+    return per && per.length > 0 ? per : videoDurations.value
+  }
+
+  /**
+   * 模型是否支持视频生视频（video2video）
+   * 口径与后端 _detect_capabilities 一致：capabilities 显式声明优先；
+   * 数据库未更新时按模型名兜底（agnes-video-2.5 非 Flash 家族支持，Flash 不支持）
+   */
+  function supportsVideo2Video(modelId?: string): boolean {
+    if (!modelId) return false
+    const model = models.value.find((m) => m.id === modelId)
+    if (model?.capabilities?.includes('video2video')) return true
+    const lower = modelId.toLowerCase()
+    return lower.includes('video-2.5') && !lower.includes('flash')
+  }
+
+  /** 根据模式获取对应的模型列表 */
+  function getModelsByMode(mode: string): ModelInfo[] {
+    if (mode.includes('video')) return videoModels.value
+    return imageModels.value
+  }
+
+  /** 根据模式获取默认模型 ID */
+  function getDefaultModelByMode(mode: string): string {
+    if (mode.includes('video')) return defaultVideoModel.value
+    return defaultImageModel.value
+  }
+
+  /**
+   * 获取当前模型的参数配置
+   * 优先使用后端返回的结构化配置，兜底使用本地 model-params 配置
+   * provider 参数用于匹配本地预设，后端配置为主
+   */
+  function getModelParamsConfig(provider?: string): ModelParams {
+    // 后端已返回结构化配置时直接使用
+    if (imageSizeOptions.value.length > 0) {
+      return {
+        imageSizes: imageSizeOptions.value,
+        defaultImageSize: defaultImageSize.value,
+        videoAspectRatios: videoAspectRatios.value,
+        defaultVideoAspectRatio: defaultVideoAspectRatio.value,
+        videoResolutions: videoResolutions.value,
+        defaultVideoResolution: defaultVideoResolution.value,
+        videoDurations: videoDurations.value,
+        defaultVideoDuration: defaultVideoDuration.value,
+        videoFrameRates: videoFrameRates.value,
+        defaultFrameRate: defaultFrameRate.value,
+      }
+    }
+    // 兜底：使用本地配置（按 provider 匹配）
+    return getLocalModelParams(provider)
+  }
+
+  return {
+    models,
+    imageSizes,
+    imageSizeOptions,
+    defaultImageSize,
+    videoAspectRatios,
+    defaultVideoAspectRatio,
+    videoResolutions,
+    defaultVideoResolution,
+    videoDurations,
+    defaultVideoDuration,
+    videoFrameRates,
+    defaultFrameRate,
+    watermark,
+    loaded,
+    imageModels,
+    videoModels,
+    chatModels,
+    defaultImageModel,
+    defaultVideoModel,
+    getDefaultModel,
+    fetchConfig,
+    getModelById,
+    getModelGenParams,
+    getModelVideoDurations,
+    supportsVideo2Video,
+    getModelsByMode,
+    getDefaultModelByMode,
+    getModelParamsConfig,
+  }
+})

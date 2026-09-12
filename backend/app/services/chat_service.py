@@ -1,0 +1,2046 @@
+# =====================================================
+# Chat Service — 聊天服务层
+#
+# 核心功能：
+#   1. 调用 Agnes AI Chat API（对话模型按解析链选择）进行对话
+#   2. 通过工具调用（Tool Calling）检测用户生图/生视频意图
+#   3. 自动触发图片/视频生成任务
+#   4. 支持流式响应（SSE），逐 token 返回给前端
+#
+# 流程：
+#   用户消息 → Agnes Chat API（带 tools 定义）
+#     → 如果模型返回 tool_calls：
+#         → 执行对应工具（generate_image / generate_video）
+#         → 将工具结果回传给模型
+#         → 模型生成最终文本回复
+#     → 如果模型返回纯文本：
+#         → 直接流式返回给前端
+# =====================================================
+
+import logging
+import json
+import re
+from datetime import datetime
+from typing import AsyncGenerator, Optional, Dict, Any, List
+
+import httpx
+from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+
+from app.core.config import settings
+from app.core.database import async_session
+from app.models.chat import ChatMessage, ChatSession
+from app.services.agnes_client import agnes_client
+from app.services.image_poller import image_poller_manager
+from app.services.video_poller import poller_manager as video_poller_manager
+
+logger = logging.getLogger("agnes_platform")
+
+
+# =====================================================
+# 工具定义（告诉 Agnes AI 可以调用哪些工具）
+# =====================================================
+CHAT_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_image",
+            "description": (
+                "当用户明确要求生成、创建、绘制图片时调用此工具。"
+                "用户可能说'帮我画一张图'、'生成一张风景图'、'画一个猫咪'等。"
+                "请将用户的描述转化为详细的英文图片提示词。"
+                "注意：用户上传图片或提供图片链接不代表要生成图片，只有用户明确使用'生成'、'画'、'创建'等动作词时才调用。"
+                "如果用户提供了参考图且明确要求基于参考图生成，将 mode 设置为 'image2image'。"
+                "如果用户明确说'忽略图片，直接画图'，请将 use_reference_image 设置为 false。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        "description": "图片生成的英文提示词，需要详细描述主体、场景、风格、光照、构图等",
+                    },
+                    "size": {
+                        "type": "string",
+                        "description": "图片尺寸，如 1024x1024、1024x768、768x1024",
+                        "enum": ["1024x1024", "1024x768", "768x1024"],
+                    },
+                    "mode": {
+                        "type": "string",
+                        "description": "生成模式：text2image（纯文生图）或 image2image（基于参考图）",
+                        "enum": ["text2image", "image2image"],
+                    },
+                    "use_reference_image": {
+                        "type": "boolean",
+                        "description": "是否使用用户上传的参考图（有参考图时默认 true；若用户明确说忽略则设为 false）",
+                    },
+                    "camera_params": {
+                        "type": "object",
+                        "description": "摄像机参数（可选）。当用户提到摄像机/镜头/运镜相关描述时填充。含 enabled(bool)、camera_model、focal_length、aperture、depth_of_field、shutter_speed、shutter_angle、camera_movement、camera_angle、aspect_ratio、visual_style 字段",
+                        "properties": {
+                            "enabled": {"type": "boolean", "description": "是否启用摄像机参数"},
+                            "camera_model": {"type": "string", "description": "摄影机型号"},
+                            "focal_length": {"type": "string", "description": "镜头焦段"},
+                            "aperture": {"type": "string", "description": "光圈值"},
+                            "depth_of_field": {"type": "string", "description": "景深描述"},
+                            "shutter_speed": {"type": "string", "description": "快门速度"},
+                            "shutter_angle": {"type": "string", "description": "快门角度"},
+                            "camera_movement": {"type": "string", "description": "运镜方式"},
+                            "camera_angle": {"type": "string", "description": "拍摄角度"},
+                            "aspect_ratio": {"type": "string", "description": "画幅比例"},
+                            "visual_style": {"type": "string", "description": "视觉风格"},
+                        },
+                    },
+                },
+                "required": ["prompt"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_video",
+            "description": (
+                "当用户明确要求生成、创建视频时调用此工具。"
+                "用户可能说'帮我生成一段视频'、'创建一个短视频'、'做个视频'等。"
+                "请将用户的描述转化为详细的英文视频提示词。"
+                "注意：用户上传图片或提供图片链接不代表要生成视频，只有用户明确使用'生成'、'创建'等动作词时才调用。"
+                "如果用户提供了 1 张参考图且明确要求生成视频，将 mode 设置为 'image2video'；"
+                "如果用户提供了 2 张或多张参考图且明确要求生成视频，将 mode 设置为 'keyframes' 以制作过渡动画。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        "description": "视频生成的英文提示词，需要详细描述主体、动作、场景、镜头运动、光照、风格等",
+                    },
+                    "num_frames": {
+                        "type": "integer",
+                        "description": "视频总帧数，必须满足 8n+1（如 81 约3秒, 121 约5秒, 241 约10秒）",
+                        "enum": [81, 121, 161, 241, 441],
+                    },
+                    "width": {
+                        "type": "integer",
+                        "description": "视频宽度",
+                        "default": 1152,
+                    },
+                    "height": {
+                        "type": "integer",
+                        "description": "视频高度",
+                        "default": 768,
+                    },
+                    "mode": {
+                        "type": "string",
+                        "description": "生成模式：text2video（纯文生视频）/ image2video（基于单张参考图动起来）/ keyframes（基于多张参考图做过渡动画）/ video2video（视频转视频，需传入 reference_videos）",
+                        "enum": ["text2video", "image2video", "keyframes", "video2video"],
+                    },
+                    "reference_videos": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "参考视频 URL 列表（video2video 模式使用，最多 5 个）",
+                    },
+                    "reference_audios": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "参考音频 URL 列表（可选，video2video 模式使用）",
+                    },
+                    "camera_params": {
+                        "type": "object",
+                        "description": "摄像机参数（可选）。当用户提到摄像机/镜头/运镜相关描述时填充，含 enabled(bool) 及全部 10 个摄像参数字段",
+                    },
+                },
+                "required": ["prompt"],
+            },
+        },
+    },
+]
+
+# 系统提示词（引导模型行为）
+SYSTEM_PROMPT = """你是 Agnes AI 助手，一个友好、专业的 AI 创作伙伴。
+
+你的核心能力：
+1. **日常对话**：可以和用户自由聊天，回答问题
+2. **图片生成**：当用户想要生成图片时，使用 generate_image 工具
+3. **视频生成**：当用户想要生成视频时，使用 generate_video 工具
+
+重要规则：
+# =====================================================
+# 【第一层级：严格区分"讨论"与"执行"】
+# =====================================================
+- 用户上传图片或提供图片链接，**不代表**用户要生成图片！
+- 以下情况**绝对不要**调用 generate_image 工具，只回复文字：
+  - 用户上传图片并说"帮我描述这张图"、"这张图里有什么"、"帮我写个提示词"、"帮我分析一下"
+  - 用户上传图片但没有明确要求生成/画/创建新图片
+  - 用户只是分享图片、讨论图片内容、询问图片相关信息
+- 只有当用户**明确**使用"生成"、"画"、"创建"、"做一张"、"修改"、"调整"、"改一改"、"换一种"等动作词时，才调用 generate_image 工具
+- 如果不确定用户意图，**先确认**再行动，宁可多问一句也不要误触发生图
+
+# =====================================================
+# 【第二层级：会话连续性——同一会话内上下文自动继承】
+# （这是核心改进：解决"继续修改时 AI 不知道该用图生图"的问题）
+# =====================================================
+- 【会话内历史图片识别】同一会话中，如果之前已经**成功生成过图片**，那么：
+  - 最近一次成功生成的图片 = "当前讨论的图片"
+  - 用户说"在这张图的基础上"、"继续修改"、"调整一下"、"改一改"、"换个风格"、
+    "再做一张类似的"、"保持构图但改颜色" 等 → 明确意图是**基于最近的图片做图生图**
+  - 此时必须调用 generate_image 工具，**mode=image2image**，参考图 = 最近生成的那张图片
+  - 不要去做"图片理解/描述"，不要用纯文生图（text2image），不要"先看看图片再说"
+
+- 【会话内历史视频识别】同一会话中，如果之前已经成功生成过视频，类似地，
+  用户说"继续调整视频"、"基于刚才的视频再做一版" → generate_video，mode=image2video 或 keyframes
+
+- 【什么情况下不用历史图片】
+  - 用户明确说"不用刚才的图，重新画一张" → 用 text2image
+  - 用户开启了全新的话题（例如上一条是生成海边风景，现在说"帮我写个会议纪要"）→ 不调用图片工具
+  - 用户明确要求纯文字描述/分析 → 只回复文字
+
+# =====================================================
+# 【第三层级：工具调用通用规则】
+# =====================================================
+- 当用户要求生成图片或视频时，必须调用对应的工具，不要只是描述如何生成
+- 生成提示词时，请将中文描述翻译为详细的英文提示词，以获得更好的生成效果
+- 英文提示词应包含：主体、场景、风格、光照、构图、质量要求等细节
+- 如果用户的描述不够具体，可以适当补充合理的细节
+- 对于普通对话（不需要生成内容），直接回复即可，不要调用工具
+- **引用已生成的图片**：如果对话中之前生成了图片，用户说"用这张图"、"用刚才的图"等，
+  请将 mode 设置为对应的参考图模式（image2image / image2video），不要用纯文本模式
+- **URL 链接处理**：用户可能提供图片 URL 链接作为参考图。如果用户明确要求基于该链接图片生成新图，
+  将 mode 设为 image2image；如果只是讨论链接内容，不要调用工具
+- 【严禁输出图片 URL】：不要在回复中输出任何图片 URL、Markdown 图片链接（如 ![xxx](url)）或图片地址。
+  生成的图片会在前端自动展示，你只需回复文字内容即可
+- 回复使用中文
+
+# =====================================================
+# 【第四层级：摄像机参数自动提取】
+# =====================================================
+- 当用户描述中包含摄像机/镜头/运镜/画幅/视觉风格等关键词时，请自动提取并填充到 camera_params：
+  - 摄影机型号 → camera_model（如 Sony FX3、ARRI Alexa、RED Komodo、iPhone 15 Pro）
+  - 镜头焦段 → focal_length（如 85mm、24-70mm、50mm f/1.4）
+  - 光圈 → aperture（如 f/2.8、f/1.4）
+  - 景深 → depth_of_field（如 浅景深、深景深、背景虚化）
+  - 快门速度 → shutter_speed（如 1/250s、1/1000s）
+  - 快门角度 → shutter_angle（如 180°、90°）
+  - 运镜方式 → camera_movement（如 手持运镜、推轨镜头、无人机航拍、斯坦尼康）
+  - 拍摄角度 → camera_angle（如 平视、低角度仰拍、俯拍、荷兰角）
+  - 画幅比例 → aspect_ratio（如 2.35:1 电影宽银幕、16:9、4:3、1:1）
+  - 视觉风格 → visual_style（如 暖色调胶片风格、赛博朋克霓虹、日系清新、复古颗粒感）
+- 提取到任意一个字段后，将 enabled 设为 true
+- 如用户描述不包含任何摄像相关描述，不传 camera_params 或传 enabled=false
+
+# =====================================================
+# 【第五层级：预设引用自动匹配】
+# =====================================================
+- 当用户提到某个预设的名称时（如"用预设XXX生成"、"按XXX来"），
+  在调用 generate_image / generate_video 时传入 preset_ref，值为预设的 ID
+- 预设的 prompt_text 和参数会自动注入，你无需手动复制预设内容到 prompt 字段
+- 如果你不知道该预设的 ID 或名称不明确，把 preset_ref 设为 null 即可
+"""
+
+
+class ChatService:
+    """
+    聊天服务：封装 Agnes AI Chat API 调用 + 工具执行逻辑
+    """
+
+    @property
+    def chat_url(self) -> str:
+        """动态获取聊天 API 地址（从 agnes_client 读取最新的 base_url）"""
+        return f"{agnes_client.base_url}/chat/completions"
+
+    async def _get_default_chat_model(self, user_id: Optional[int] = None) -> str:
+        """
+        解析对话模型：用户偏好 default_chat_model_id > 系统默认（管理员配置 model.chat_default）> 注册表第一个 chat 模型。
+        user_id 为空时跳过用户偏好层。
+        """
+        from app.core.database import new_async_session
+        from app.services.model_registry import resolve_user_chat_model_id
+        async with new_async_session() as db:
+            model = await resolve_user_chat_model_id(db, user_id or 0)
+        if not model:
+            raise RuntimeError("未配置可用的对话模型，请先在配置页同步或添加对话模型")
+        return model
+
+    async def _resolve_stream_model(self, model_hint: Any, user_id: Optional[int] = None) -> str:
+        """透传流式模型解析：显式 model 命中聊天注册表才用（分镜管线/对话选择），占位 id 走默认链"""
+        if isinstance(model_hint, str) and model_hint.strip():
+            from app.services.model_registry import get_models_by_type
+            chat_models = await get_models_by_type("chat")
+            if any(m.id == model_hint for m in chat_models):
+                return model_hint
+        return await self._get_default_chat_model(user_id)
+
+    @staticmethod
+    def _sanitize_passthrough_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """透传消息清洗：剔除畸形 tool_call 与孤儿 tool 结果。
+        上游推理模型偶发吐出 id/name 全空的 tool_call（arguments 为 {}），内核以"Tool not found"
+        回填后，畸形 assistant 消息随历史重放会被上游 400（Invalid JSON data）拒绝并卡死后续回合。"""
+        out: List[Dict[str, Any]] = []
+        for msg in messages:
+            if not isinstance(msg, dict):
+                continue
+            role = msg.get("role")
+            if role == "assistant" and isinstance(msg.get("tool_calls"), list):
+                raw_calls = msg["tool_calls"]
+                valid = [
+                    tc for tc in raw_calls
+                    if isinstance(tc, dict)
+                    and isinstance(tc.get("function"), dict)
+                    and str((tc.get("function") or {}).get("name") or "").strip()
+                    and str(tc.get("id") or "").strip()
+                ]
+                if len(valid) != len(raw_calls):
+                    content = msg.get("content")
+                    has_text = isinstance(content, str) and bool(content.strip())
+                    if not valid and not has_text:
+                        continue  # 整条只有空调用且无正文：丢弃
+                    msg = {**msg, "tool_calls": valid} if valid else {k: v for k, v in msg.items() if k != "tool_calls"}
+            if role == "tool" and not str(msg.get("tool_call_id") or "").strip():
+                continue  # 空 tool_call_id 的结果无处挂靠，重放必被上游拒绝
+            out.append(msg)
+        return out
+
+    async def _get_default_media_model(self, model_type: str, user_id: Optional[int] = None) -> str:
+        """
+        解析生图/生视频模型：用户偏好 default_image_model_id / default_video_model_id > 该类型第一个。
+        user_id 为空时跳过用户偏好层，避免静默用错模型产生费用偏差。
+        """
+        from app.core.database import new_async_session
+        from app.services.model_registry import resolve_user_media_model_id
+        async with new_async_session() as db:
+            return await resolve_user_media_model_id(db, user_id or 0, model_type)
+
+    async def open_completions_stream(self, payload: Dict[str, Any], user_id: Optional[int] = None):
+        """
+        LLM 透传流式连接（画布 Agent 前端内核专用）：不落会话库，工具循环由前端驱动，
+        后端只负责代理 Agnes Chat API（API key 不出后端）。
+        payload 为 OpenAI Chat Completions 请求形状的子集：messages 必填，
+        tools / tool_choice / temperature 可选；模型始终由后端默认解析链决定——
+        前端内核只知道占位 id（如 agnes-chat），若透传会 upstream model_not_found。
+        建连失败抛异常由路由转 502；返回原始 SSE 行生成器（data: {...} / data: [DONE]），
+        调用方需完整消费以释放连接。
+        """
+        body: Dict[str, Any] = {
+            "model": await self._resolve_stream_model(payload.get("model"), user_id),
+            "messages": self._sanitize_passthrough_messages(payload.get("messages") or []),
+            "stream": True,
+        }
+        if payload.get("tools"):
+            body["tools"] = payload["tools"]
+        if payload.get("tool_choice") is not None:
+            body["tool_choice"] = payload["tool_choice"]
+        if payload.get("temperature") is not None:
+            body["temperature"] = payload["temperature"]
+
+        headers = {
+            "Authorization": f"Bearer {agnes_client.api_key}",
+            "Content-Type": "application/json",
+        }
+        # 请求体日志（与 _post 同风格，截断长字段）：透传链路排障用——此前流式端点无日志导致 Agent 行为无法取证
+        safe_body = {
+            k: (f"<str len={len(v)}> {v[:120]}..." if isinstance(v, str) and len(v) > 200 else v)
+            for k, v in body.items()
+        }
+        logger.info("[Chat] completions 流式透传 body=%s", safe_body)
+        request = agnes_client.client.build_request(
+            "POST",
+            self.chat_url,
+            json=body,
+            headers=headers,
+            timeout=httpx.Timeout(120.0, connect=30.0),
+        )
+        response = await agnes_client.client.send(request, stream=True)
+        if response.status_code != 200:
+            error_text = await response.aread()
+            await response.aclose()
+            raise RuntimeError(f"上游 API 错误 (HTTP {response.status_code}): {error_text.decode()[:200]}")
+
+        async def sse_lines():
+            try:
+                done_seen = False
+                async for line in response.aiter_lines():
+                    line = line.strip()
+                    if not line.startswith("data: "):
+                        continue
+                    # SSE 事件以空行分隔；aiter_lines 已去换行，必须补 \n\n 否则整条流连成一行，客户端解析器切不出事件
+                    yield f"{line}\n\n"
+                    if line[6:] == "[DONE]":
+                        done_seen = True
+                        return
+                if not done_seen:
+                    # 上游提前断流：补 [DONE] 让前端流式解析正常收尾
+                    yield "data: [DONE]\n\n"
+            except Exception as e:
+                logger.error("[Chat] completions 流式透传中断: %s", e)
+                err = json.dumps({"error": {"message": f"上游连接中断: {e}", "type": "upstream_error"}}, ensure_ascii=False)
+                yield f"data: {err}\n\n"
+                yield "data: [DONE]\n\n"
+            finally:
+                await response.aclose()
+
+        return sse_lines()
+
+    # =====================================================
+    # 【会话标题总结】—— 根据对话内容自动生成有意义的标题
+    # =====================================================
+    async def summarize_session_title(self, messages) -> str:
+        """
+        根据对话内容，使用 AI 生成一个简洁、有意义的会话标题。
+
+        Args:
+            messages: 消息对象列表（ChatMessage ORM 对象）
+
+        Returns:
+            生成的标题字符串（不超过 30 字）
+        """
+        # 提取对话内容（只用前 5 条，控制上下文长度）
+        chat_history = []
+        for msg in messages[:5]:
+            if msg.role in ("user", "assistant"):
+                content = msg.content or ""
+                if content.strip():
+                    # 截断过长的单条消息
+                    if len(content) > 500:
+                        content = content[:500] + "..."
+                    chat_history.append({
+                        "role": msg.role,
+                        "content": content,
+                    })
+
+        if not chat_history:
+            return "新对话"
+
+        # 构造总结标题的请求
+        system_prompt = """你是一个对话总结助手。请根据提供的对话内容，生成一个简洁、有意义的中文标题。
+
+要求：
+1. 标题必须使用中文
+2. 不超过 20 个字符
+3. 准确概括对话的核心主题或用户意图
+4. 不要加引号、冒号等前缀
+5. 只输出标题本身，不要输出任何其他文字、解释或说明"""
+
+        user_prompt = "请根据以下对话生成一个简洁的中文标题（不超过 20 字）：\n\n"
+        for item in chat_history:
+            role_label = "用户" if item["role"] == "user" else "助手"
+            user_prompt += f"{role_label}: {item['content']}\n"
+        user_prompt += "\n标题："
+
+        # 标题总结为系统级任务：管理员配置 model.title_summary_chat > 系统默认
+        from app.services.model_registry import resolve_system_chat_model_id, SYSTEM_CHAT_MODEL_KEYS
+        title_model = await resolve_system_chat_model_id(None, SYSTEM_CHAT_MODEL_KEYS["title_summary"])
+        body = {
+            "model": title_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": 0.5,
+            "max_tokens": 50,
+        }
+
+        try:
+            result = await agnes_client._post(self.chat_url, body)
+            choice = result.get("choices", [{}])[0]
+            message = choice.get("message", {})
+            title = message.get("content", "") or ""
+            title = title.strip().strip('"').strip("'").strip("`")
+            # 去除可能的前缀说明
+            if "：" in title and len(title) > 40:
+                title = title.split("：")[-1].strip()
+            if ":" in title and len(title) > 40:
+                title = title.split(":")[-1].strip()
+            # 限制长度
+            if len(title) > 30:
+                title = title[:30]
+            return title or "新对话"
+        except Exception as e:
+            logger.warning("[Chat] 总结标题失败: %s", e)
+            # 降级：取第一条用户消息的前 30 字
+            first_user = next((m for m in chat_history if m["role"] == "user"), None)
+            if first_user and first_user.get("content"):
+                return first_user["content"][:30]
+            return "新对话"
+
+    # =====================================================
+    # 【消息编排】—— 附件校验 / 媒体刷新 / 历史构建 / 流式回复
+    # =====================================================
+
+    async def refresh_message_media_items(self, messages: List[ChatMessage], db: AsyncSession) -> None:
+        """
+        将消息里的 pending/processing 媒体项刷新为最新状态。
+
+        发送下一轮聊天前也必须做这件事，否则用户虽然已经在前端看到图片完成，
+        但后端构建上下文时仍可能只看到 pending，导致无法把上一张图作为 image2image 参考图。
+        """
+        for msg in messages:
+            if not msg.media_items:
+                continue
+
+            updated = False
+            refreshed_items = []
+            for original_item in msg.media_items:
+                item = dict(original_item)
+                if item.get("status") not in ("pending", "processing") or not item.get("task_id"):
+                    refreshed_items.append(item)
+                    continue
+
+                task_id = item["task_id"]
+                result_url = None
+                new_status = None
+
+                img_task = await image_poller_manager.get_status(task_id)
+                if img_task:
+                    d = img_task.to_dict()
+                    if d.get("status") in ("success", "completed", "done"):
+                        result_url = d.get("result_url") or d.get("url")
+                        new_status = "success"
+                    elif d.get("status") in ("failed", "error"):
+                        new_status = "failed"
+
+                if not result_url and not new_status:
+                    vid_task = await video_poller_manager.get_status(task_id=task_id)
+                    if not vid_task:
+                        vid_task = await video_poller_manager.get_status(video_id=task_id)
+                    if vid_task:
+                        d = vid_task.to_dict()
+                        if d.get("status") in ("success", "completed", "done"):
+                            result_url = d.get("video_url") or d.get("url")
+                            new_status = "success"
+                        elif d.get("status") in ("failed", "error"):
+                            new_status = "failed"
+
+                if not result_url and not new_status:
+                    try:
+                        from app.models.generation import Generation
+                        gen_result = await db.execute(
+                            select(Generation).filter(Generation.task_id == task_id)
+                        )
+                        gen_record = gen_result.scalar_one_or_none()
+                        if gen_record:
+                            if gen_record.status == "success":
+                                result_url = gen_record.result_url
+                                new_status = "success"
+                            elif gen_record.status == "failed":
+                                new_status = "failed"
+                    except Exception:
+                        pass
+
+                if result_url or new_status:
+                    if result_url:
+                        item["url"] = result_url
+                    if new_status:
+                        item["status"] = new_status
+                    updated = True
+                refreshed_items.append(item)
+
+            if updated:
+                msg.media_items = refreshed_items
+
+        await db.commit()
+
+    @staticmethod
+    def validate_attachments(raw_attachments: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+        """
+        附件校验与清洗。
+        如果用户提供了 attachments，进行大小/数量/格式校验。
+        """
+        MAX_ATTACHMENTS = 10
+        MAX_SIZE_PER_FILE = 5 * 1024 * 1024  # 5MB
+
+        validated_attachments: List[Dict[str, Any]] = []
+        if raw_attachments:
+            if len(raw_attachments) > MAX_ATTACHMENTS:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"最多上传 {MAX_ATTACHMENTS} 张参考图，当前 {len(raw_attachments)} 张"
+                )
+            for att in raw_attachments:
+                try:
+                    size = int(att.get("size", 0))
+                except (TypeError, ValueError):
+                    size = 0
+                if size > MAX_SIZE_PER_FILE:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"单张参考图大小超过 5MB 限制: {att.get('name', 'unknown')}"
+                    )
+
+                # =====================================================
+                # 支持四种附件格式：
+                #   1. base64 data URI     → base64_image
+                #   2. 图片 URL 链接        → image_url（传给 AI 多模态）
+                #   3. 视频 URL 链接        → video_url（仅展示，AI 当前不看视频）
+                #   4. 文档 URL 链接        → doc_url（仅展示，AI 当前不读文档）
+                # =====================================================
+                base64_image = att.get("base64_image", "")
+                image_url = att.get("image_url", "")
+                video_url = att.get("video_url", "")
+                doc_url = att.get("doc_url", "")
+                link_type = att.get("_link_type", "")
+
+                if base64_image and isinstance(base64_image, str) and base64_image.startswith("data:image/"):
+                    # base64 上传图片
+                    validated_attachments.append({
+                        "name": att.get("name", "image.png"),
+                        "base64_image": base64_image,
+                        "size": size,
+                        "mime_type": att.get("mime_type", "image/png"),
+                    })
+                elif image_url and isinstance(image_url, str) and (image_url.startswith("http://") or image_url.startswith("https://")):
+                    # 图片 URL 链接
+                    validated_attachments.append({
+                        "name": att.get("name", "url_image"),
+                        "base64_image": "",
+                        "image_url": image_url,
+                        "size": 0,
+                        "mime_type": "image/url",
+                        "source": "url",
+                        "_link_type": link_type or "image",
+                    })
+                elif video_url and isinstance(video_url, str) and (video_url.startswith("http://") or video_url.startswith("https://")):
+                    # 视频 URL 链接（前端自动识别的视频链接）
+                    validated_attachments.append({
+                        "name": att.get("name", "video.mp4"),
+                        "video_url": video_url,
+                        "size": 0,
+                        "mime_type": "video/url",
+                        "source": "url",
+                        "_link_type": "video",
+                    })
+                elif doc_url and isinstance(doc_url, str) and (doc_url.startswith("http://") or doc_url.startswith("https://")):
+                    # 文档 URL 链接（前端自动识别的文档链接）
+                    validated_attachments.append({
+                        "name": att.get("name", "document"),
+                        "doc_url": doc_url,
+                        "size": 0,
+                        "mime_type": "application/url",
+                        "source": "url",
+                        "_link_type": "document",
+                    })
+                else:
+                    # 非法格式 —— 跳过并记录警告，不阻塞整个请求
+                    logger.warning("[Chat] 忽略非法的附件: name=%s mime=%s",
+                                   att.get("name"), att.get("mime_type"))
+                    continue
+
+        return validated_attachments
+
+    async def build_history(self, db: AsyncSession, session_id: int) -> List[Dict[str, Any]]:
+        """
+        获取会话全部消息并构建对话历史
+        （包含附件上下文标注，帮助 AI 区分不同轮次的参考图/视频/文档）。
+        """
+        result = await db.execute(
+            select(ChatMessage)
+            .filter(ChatMessage.session_id == session_id)
+            .order_by(ChatMessage.id)
+        )
+        all_messages = result.scalars().all()
+        await self.refresh_message_media_items(all_messages, db)
+
+        chat_history = []
+        for msg in all_messages:
+            if msg.role in ("user", "assistant"):
+                content = msg.content or ""
+                # 如果用户消息有附件，在内容中标注（帮助 AI 区分不同轮次的参考图/视频/文档）
+                if msg.role == "user" and msg.attachments and len(msg.attachments) > 0:
+                    att_count = len(msg.attachments)
+                    # =====================================================
+                    # 按类型统计附件：
+                    #   - image 类：base64_image 或 image_url（AI 可以看图）
+                    #   - video 类：video_url（AI 当前不看视频，仅文字告知）
+                    #   - document 类：doc_url（AI 当前不读文档，仅文字告知）
+                    # =====================================================
+                    image_count = sum(
+                        1 for a in msg.attachments
+                        if a.get("base64_image") or a.get("image_url")
+                    )
+                    video_count = sum(1 for a in msg.attachments if a.get("video_url"))
+                    doc_count = sum(1 for a in msg.attachments if a.get("doc_url"))
+
+                    note_parts = []
+                    if image_count > 0:
+                        has_base64 = any(a.get("base64_image") and a["base64_image"].startswith("data:image/") for a in msg.attachments if a.get("base64_image"))
+                        if has_base64 and image_count > 1:
+                            note_parts.append(f"{image_count} 张参考图片")
+                        elif has_base64:
+                            note_parts.append(f"{image_count} 张上传的参考图片")
+                        else:
+                            note_parts.append(f"{image_count} 张链接图片")
+                    if video_count > 0:
+                        note_parts.append(f"{video_count} 个视频链接（AI 当前无法观看视频内容，请以用户描述为准）")
+                    if doc_count > 0:
+                        note_parts.append(f"{doc_count} 个文档链接（AI 当前无法读取文档内容，请以用户描述为准）")
+
+                    if note_parts:
+                        att_note = f"\n[用户在本轮提供了: {', '.join(note_parts)}]"
+                        content = (content + att_note) if content else att_note.strip()
+                    else:
+                        att_note = f"\n[用户在本轮提供了 {att_count} 个参考附件]"
+                        content = (content + att_note) if content else att_note.strip()
+                # 如果 assistant 消息包含已生成的媒体项，传结构化 media_items 到消息对象
+                # 【核心改动】不再在 content 中注入文本格式的媒体 URL（防止 AI 引用后输出链接给用户）
+                # 而是把 media_items 作为消息对象的字段，供 chat_service 在工具执行时自动识别
+                media_items_for_history = msg.media_items if (msg.role == "assistant" and msg.media_items and len(msg.media_items) > 0) else None
+                chat_history.append({"role": msg.role, "content": content, "media_items": media_items_for_history})
+
+        return chat_history
+
+    async def stream_reply(
+        self,
+        db: AsyncSession,
+        session: ChatSession,
+        content: str,
+        attachments: Optional[List[Dict[str, Any]]],
+        user_id: Optional[int],
+        camera_params: Optional[Dict[str, Any]] = None,
+        preset_ref: Optional[int] = None,
+    ) -> AsyncGenerator[str, None]:
+        """
+        发送消息编排：保存用户消息 → 构建历史 → 返回 SSE 事件流。
+
+        保存用户消息与历史构建在返回响应前完成（保持原路由的事务边界），
+        SSE 事件流使用 async_session() 独立写库，避免与请求级 db 的事务冲突。
+        """
+        # 保存用户消息（同时保存 attachments）
+        user_msg = ChatMessage(
+            session_id=session.id,
+            role="user",
+            content=content,
+            attachments=attachments if attachments else [],
+        )
+        db.add(user_msg)
+
+        # 注意：不再简单截断用户消息作为标题
+        # 改为在 AI 回复完成后，由 AI 自动总结对话主题生成有意义的标题
+        # 更新会话时间
+        session.updated_at = datetime.utcnow()
+        await db.commit()
+        await db.refresh(user_msg)
+
+        # 获取历史消息（用于构建上下文）
+        chat_history = await self.build_history(db, session.id)
+
+        return self._reply_event_stream(
+            session_id=session.id,
+            user_msg=user_msg,
+            chat_history=chat_history,
+            attachments=attachments,
+            user_id=user_id,
+            camera_params=camera_params,
+            preset_ref=preset_ref,
+        )
+
+    def _reply_event_stream(
+        self,
+        session_id: int,
+        user_msg: ChatMessage,
+        chat_history: List[Dict[str, Any]],
+        attachments: Optional[List[Dict[str, Any]]],
+        user_id: Optional[int],
+        camera_params: Optional[Dict[str, Any]],
+        preset_ref: Optional[int],
+    ) -> AsyncGenerator[str, None]:
+        """
+        SSE 事件生成器。
+
+        关键设计（参考 AgnesAI-main 的可靠性模式）：
+          - 流式开始前就创建 assistant 消息（占位）并写入数据库，
+            这样即使客户端中途断开/切换页面，已生成的内容也不会丢失。
+          - 每收到一个 text / tool_result 事件就增量更新数据库，
+            保证切换页面后从数据库能恢复最新状态。
+          - 使用 async_session() 创建独立的数据库连接，
+            避免与外层请求 db 的事务边界冲突。
+        """
+        async def event_generator():
+            # 先发送用户消息确认
+            yield f"data: {json.dumps({'type': 'user_message', 'message': user_msg.to_dict()}, ensure_ascii=False)}\n\n"
+
+            # 收集 AI 回复内容
+            assistant_content = ""
+            # 收集所有媒体项（支持多个）
+            media_items = []
+            tool_calls_info = []
+
+            # ── 流式开始前：先在数据库里创建一条 assistant 消息（占位） ──
+            #    这样即使客户端中途断开，已经推送给用户的内容也能被恢复。
+            assistant_msg_id = None
+            try:
+                async with async_session() as db_write:
+                    assistant_msg = ChatMessage(
+                        session_id=session_id,
+                        role="assistant",
+                        content="",
+                        media_items=[],
+                        tool_calls=None,
+                    )
+                    db_write.add(assistant_msg)
+                    # 同时更新会话时间
+                    session_result_w = await db_write.execute(
+                        select(ChatSession).filter(ChatSession.id == session_id)
+                    )
+                    session_obj_w = session_result_w.scalar_one_or_none()
+                    if session_obj_w:
+                        session_obj_w.updated_at = datetime.utcnow()
+                    await db_write.commit()
+                    await db_write.refresh(assistant_msg)
+                    assistant_msg_id = assistant_msg.id
+            except Exception as e:
+                logger.error("[Chat] 创建 assistant 占位消息失败: %s", e)
+
+            # 发送刚创建的 assistant_message_created（含真实 DB ID）
+            # 这样前端一上来就拿到真实 message_id，media_callback 随时可以回写
+            if assistant_msg_id:
+                try:
+                    async with async_session() as db_read:
+                        first_msg = await db_read.get(ChatMessage, assistant_msg_id)
+                        if first_msg:
+                            yield f"data: {json.dumps({'type': 'assistant_message_created', 'message': first_msg.to_dict()}, ensure_ascii=False)}\n\n"
+                except Exception as e:
+                    logger.warning("[Chat] 读取刚创建的 assistant 消息失败: %s", e)
+
+            # ── 流式生成主循环 ──
+            try:
+                async for chunk in self.chat_stream(
+                    chat_history,
+                    session_id,
+                    attachments=attachments if attachments else None,
+                    user_id=user_id,
+                    camera_params=camera_params,
+                    preset_ref=preset_ref,
+                ):
+                    yield f"data: {chunk}\n\n"
+
+                    # 解析事件，收集信息并增量写入数据库
+                    try:
+                        event = json.loads(chunk)
+                        changed = False
+                        if event.get("type") == "text":
+                            assistant_content += event.get("content", "")
+                            changed = True
+                        elif event.get("type") == "tool_result":
+                            result_data = event.get("result", {})
+                            tool_name = event.get("tool", "")
+                            if result_data.get("media_type") and result_data.get("status") != "error":
+                                media_item = {
+                                    "type": result_data.get("media_type"),
+                                    "url": result_data.get("url", ""),
+                                    "task_id": result_data.get("task_id") or result_data.get("video_id", ""),
+                                    "status": result_data.get("status", "pending"),
+                                }
+                                # 避免重复添加同一个 task_id
+                                if not any(m.get("task_id") == media_item["task_id"] for m in media_items):
+                                    media_items.append(media_item)
+                            tool_calls_info.append({
+                                "tool": tool_name,
+                                "result": result_data,
+                            })
+                            changed = True
+
+                        # 增量更新数据库（只有当有变化且 assistant_msg_id 存在时才更新）
+                        if changed and assistant_msg_id:
+                            try:
+                                async with async_session() as db_upd:
+                                    msg_upd = await db_upd.get(ChatMessage, assistant_msg_id)
+                                    if msg_upd:
+                                        msg_upd.content = assistant_content
+                                        msg_upd.media_items = list(media_items) if media_items else []
+                                        msg_upd.tool_calls = tool_calls_info if tool_calls_info else None
+                                        session_result_upd = await db_upd.execute(
+                                            select(ChatSession).filter(ChatSession.id == session_id)
+                                        )
+                                        session_obj_upd = session_result_upd.scalar_one_or_none()
+                                        if session_obj_upd:
+                                            session_obj_upd.updated_at = datetime.utcnow()
+                                        await db_upd.commit()
+                            except Exception as inner_e:
+                                logger.warning("[Chat] 增量更新消息失败: %s", inner_e)
+                    except (json.JSONDecodeError, KeyError):
+                        pass
+
+            except Exception as e:
+                logger.error("[Chat] SSE 生成异常: %s", e)
+                yield f"data: {json.dumps({'type': 'error', 'content': str(e)}, ensure_ascii=False)}\n\n"
+
+            # ── 流结束：发送最终的 assistant_message 事件（供前端更新最终状态） ──
+            if assistant_msg_id:
+                try:
+                    async with async_session() as db_final:
+                        final_msg = await db_final.get(ChatMessage, assistant_msg_id)
+                        if final_msg:
+                            yield f"data: {json.dumps({'type': 'assistant_message', 'message': final_msg.to_dict()}, ensure_ascii=False)}\n\n"
+                except Exception as e:
+                    logger.error("[Chat] 读取最终 AI 消息失败: %s", e)
+
+            # ── 自动总结会话标题（如果是新对话的第一轮） ──
+            #    对话完成后，AI 自动生成一个有意义的标题
+            #    这个过程在后台进行，不阻塞用户的对话体验
+            try:
+                async with async_session() as db_title:
+                    session_for_title = await db_title.get(ChatSession, session_id)
+                    if session_for_title and session_for_title.title == "新对话":
+                        # 收集会话的前几条消息（用户 + AI 的回复）用于总结
+                        msgs_for_title_result = await db_title.execute(
+                            select(ChatMessage)
+                            .filter(ChatMessage.session_id == session_id)
+                            .order_by(ChatMessage.id)
+                            .limit(6)
+                        )
+                        msgs_for_title = msgs_for_title_result.scalars().all()
+
+                        if msgs_for_title:
+                            # 调用 AI 生成标题
+                            auto_title = await self.summarize_session_title(msgs_for_title)
+                            if auto_title and auto_title != "新对话":
+                                session_for_title.title = auto_title[:200]
+                                session_for_title.updated_at = datetime.utcnow()
+                                await db_title.commit()
+                                logger.info("[Chat] 自动总结会话标题: id=%s, title=%s", session_id, auto_title)
+                                # 通过 SSE 发送标题更新事件，通知前端刷新
+                                yield f"data: {json.dumps({'type': 'title_updated', 'title': auto_title}, ensure_ascii=False)}\n\n"
+            except Exception as e:
+                # 自动总结失败不影响主流程，只记录日志
+                logger.warning("[Chat] 自动总结会话标题失败: %s", e)
+
+            yield "data: [DONE]\n\n"
+
+        return event_generator()
+
+    # =====================================================
+    # 【流式聊天】—— SSE 逐 token 返回
+    # =====================================================
+    async def chat_stream(
+        self,
+        messages: List[Dict[str, str]],
+        session_id: Optional[int] = None,
+        attachments: Optional[List[Dict[str, Any]]] = None,
+        user_id: Optional[int] = None,
+        camera_params: Optional[Dict[str, Any]] = None,
+        preset_ref: Optional[int] = None,
+    ) -> AsyncGenerator[str, None]:
+        """
+        流式聊天接口，通过 SSE 逐块返回结果。
+
+        SSE 事件格式：
+        - {"type": "text", "content": "..."} — 文本增量
+        - {"type": "tool_call", "tool": "generate_image", "args": {...}} — 工具调用开始
+        - {"type": "tool_result", "tool": "generate_image", "result": {...}} — 工具执行结果
+        - {"type": "done"} — 结束
+
+        Args:
+            messages: 对话历史 [{"role": "user/assistant/system", "content": "..."}]
+            session_id: 会话 ID（用于关联生成任务）
+            attachments: 可选的用户参考图列表（用于 System Prompt 上下文注入与工具执行）
+            user_id: 当前登录用户的 ID（用于隔离生成记录）
+            camera_params: 前端摄像机参数（可选），enabled=true 时注入系统提示
+        """
+        # ── 根据附件和会话历史，动态追加 System Prompt 上下文 ──
+        # 区分三种类型的附件，对 AI 说明其能力边界：
+        #   - image (base64 / image_url): AI 可以"看图"，走多模态注入
+        #   - video (video_url): AI 当前无法"看视频"，仅文字告知有视频链接
+        #   - document (doc_url): AI 当前无法"读文档"，仅文字告知有文档链接
+        # 【新增】：收集会话内历史生成的图片，以文字形式给 AI 一个强信号，
+        #           让它知道"最近刚生成了哪些图片"，从而在用户说"继续修改"时
+        #           正确判断意图为 image2image。
+        attachment_note = ""
+
+        # ── 【新增】从对话历史中提取最近生成的图片（给 AI 一个"上下文地图"） ──
+        # 这一步是让 AI 在"本轮没有新上传图片"时仍知道"之前生成过图片"，
+        # 从而避免把"继续修改"误判为纯文字或图片理解。
+        history_images = self._collect_history_images(messages)
+        history_videos = self._collect_history_media(messages, media_type="video")
+        has_history_images = len(history_images) > 0
+        has_history_videos = len(history_videos) > 0
+
+        # 本轮是否有新图片/视频/文档附件
+        has_new_image = False
+        has_new_video = False
+        has_new_doc = False
+        image_count = 0
+        video_count = 0
+        doc_count = 0
+
+        if attachments:
+            image_atts = [a for a in attachments
+                          if (a.get("base64_image") and a["base64_image"].startswith("data:image/"))
+                          or a.get("image_url")]
+            video_atts = [a for a in attachments if a.get("video_url")]
+            doc_atts = [a for a in attachments if a.get("doc_url")]
+
+            image_count = len(image_atts)
+            video_count = len(video_atts)
+            doc_count = len(doc_atts)
+            has_new_image = image_count > 0
+            has_new_video = video_count > 0
+            has_new_doc = doc_count > 0
+
+        note_segments = []
+
+        # ── 历史生成的图片上下文信号（本轮无新图片，但历史有图片时最关键） ──
+        if has_history_images and not has_new_image:
+            note_segments.append(
+                f"【会话历史上下文 · 图片】\n"
+                f"- 本会话之前已经成功生成过 {len(history_images)} 张图片\n"
+                f"- 最近一张生成的图片 = 用户当前在讨论/修改的默认参考图\n"
+                f"- 用户说'在这张图的基础上'、'继续修改'、'调整一下'、'改一改'、'换个风格'等时：\n"
+                f"  → 必须调用 generate_image，mode=image2image\n"
+                f"  → 不要用纯文生图 text2image\n"
+                f"  → 不要去做图片描述/理解\n"
+                f"- 参考图不用你传 URL——后端会自动把最近一张历史图片作为 image2image 的参考图\n"
+                f"- 如果用户明确说'忽略之前的图，重新画' → 用 text2image\n"
+                f"- 【重要】不要回复任何图片 URL 给用户，图片会自动生成并在前端展示"
+            )
+        elif has_history_images and has_new_image:
+            # 本轮有新图片 + 历史也有图片 → 让 AI 知道有两套参考图可用
+            note_segments.append(
+                f"【会话历史上下文 · 图片】\n"
+                f"- 本轮用户上传了 {image_count} 张新图片（多模态方式注入，你可以看到）\n"
+                f"- 历史上本会话还生成过 {len(history_images)} 张图片\n"
+                f"- 用户说'基于本轮上传的图片' → 用本轮新图片做 image2image\n"
+                f"- 用户说'基于之前生成的图片'或'继续修改' → 用历史最近图片做 image2image\n"
+                f"- 【重要】不要回复任何图片 URL 给用户，图片会自动生成并在前端展示"
+            )
+
+        # 本轮图片上下文
+        if has_new_image:
+            image_atts_local = [a for a in attachments
+                          if (a.get("base64_image") and a["base64_image"].startswith("data:image/"))
+                          or a.get("image_url")]
+            has_base64 = any(a.get("base64_image") and a["base64_image"].startswith("data:image/") for a in image_atts_local)
+            has_url = any(a.get("image_url") for a in image_atts_local)
+            if has_base64 and has_url:
+                source_label = "上传+链接"
+            elif has_url:
+                source_label = "链接"
+            else:
+                source_label = "上传"
+            note_segments.append(
+                f"【参考图上下文】用户【本轮】提供了 {image_count} 张图片（{source_label}）。\n"
+                f"重要提示：\n"
+                f"- 提供图片 ≠ 用户要生成图片，请根据用户文字意图判断\n"
+                f"- 只有用户明确说'生成'、'画'、'创建'、'修改'、'调整'时才调用 generate_image\n"
+                f"- 如果用户只是描述/分析/讨论图片，直接文字回复，不要调用工具\n"
+                f"- 如果用户要求基于此图生成新图，将 mode 设为 'image2image'\n"
+                f"- 如果用户明确说'忽略这张图'或'只按文字生成'，则设 use_reference_image=false 或 mode='text2image'"
+            )
+
+        # 视频上下文（仅文字提示，AI 不能看视频）
+        if has_new_video:
+            note_segments.append(
+                f"【参考视频上下文】用户【本轮】提供了 {video_count} 个视频链接。\n"
+                f"重要提示：\n"
+                f"- AI 当前无法观看视频内容，视频链接仅供你知道用户在谈论某个视频\n"
+                f"- 不要假装描述视频内容，以用户的文字描述为准\n"
+                f"- 如果用户要求基于视频风格生成新内容，使用用户文字描述来完成\n"
+            )
+        elif has_history_videos and not has_new_video:
+            note_segments.append(
+                f"【会话历史上下文 · 视频】\n"
+                f"- 本会话之前生成过 {len(history_videos)} 个视频\n"
+                f"- 用户说'基于刚才的视频继续调整'时，调用 generate_video，mode=image2video"
+            )
+
+        # 文档上下文（仅文字提示，AI 不能读文档）
+        if has_new_doc:
+            note_segments.append(
+                f"【参考文档上下文】用户【本轮】提供了 {doc_count} 个文档链接。\n"
+                f"重要提示：\n"
+                f"- AI 当前无法读取文档（PDF / DOC / TXT 等）内容\n"
+                f"- 不要假装描述文档内容，以用户的文字描述为准\n"
+                f"- 如果用户讨论文档主题，按用户文字进行回复即可\n"
+            )
+
+        # ── 摄像机参数上下文（前端启用时注入）──
+        if camera_params and camera_params.get("enabled"):
+            # 收集非空的摄像参数用于提示
+            cam_fields = []
+            field_map = {
+                "camera_model": "摄影机型号",
+                "focal_length": "镜头焦段",
+                "aperture": "光圈",
+                "depth_of_field": "景深",
+                "shutter_speed": "快门速度",
+                "shutter_angle": "快门角度",
+                "camera_movement": "运镜方式",
+                "camera_angle": "拍摄角度",
+                "aspect_ratio": "画幅比例",
+                "visual_style": "视觉风格",
+            }
+            for key, label in field_map.items():
+                val = camera_params.get(key)
+                if val and str(val).strip():
+                    cam_fields.append(f"  - {label}: {val}")
+            if cam_fields:
+                note_segments.append(
+                    f"【摄像机参数上下文】\n"
+                    f"用户已在界面中启用了摄像机参数控制，当前参数如下：\n"
+                    + "\n".join(cam_fields) + "\n"
+                    f"请在调用 generate_image / generate_video 时将这些参数填入 camera_params 字段，"
+                    f"并将 enabled 设为 true。"
+                )
+
+        # ── 【新增】注入预设引用上下文 ——
+        # 当前轮有效，下一轮不会自动带入
+        if preset_ref:
+            preset = None
+            try:
+                from app.models.prompt_preset import PromptPreset
+                from app.core.database import new_async_session
+                async with new_async_session() as db:
+                    result = await db.execute(
+                        select(PromptPreset).filter(PromptPreset.id == preset_ref)
+                    )
+                    preset = result.scalar_one_or_none()
+            except Exception as e:
+                logger.warning("[Chat] 查询预设失败: preset_ref=%s, err=%s", preset_ref, e)
+                preset = None
+            if preset:
+                note_segments.append(
+                    f"【预设引用上下文】\n"
+                    f"用户已选择了预设「{preset.name}」(ID={preset.id})，该预设仅当前轮有效。\n"
+                    f"预设内容：{preset.prompt_text[:200]}{'…' if len(preset.prompt_text or '') > 200 else ''}\n"
+                    f"请在调用 generate_image / generate_video 时将 preset_ref 设置为 {preset.id}，"
+                    f"预设的完整 prompt_text 和参数会自动注入到生成流程中。"
+                )
+            else:
+                note_segments.append(
+                    f"【预设引用上下文】\n"
+                    f"用户引用了预设 ID={preset_ref}，但未能查询到该预设。生成时忽略预设即可。"
+                )
+
+        if note_segments:
+            attachment_note = "\n\n" + "\n\n".join(note_segments)
+        # 无附件且无历史图片：不注入额外提示
+
+        system_prompt = SYSTEM_PROMPT + attachment_note
+        request_messages = [{"role": "system", "content": system_prompt}] + messages
+
+        # ── 将本轮新附件（上传图片 / 链接图片）以多模态格式注入最后一条用户消息 ──
+        # 让 AI 模型真正"看到"本轮上传的图片内容，以生成准确的 image2image 提示词
+        # 支持 base64 data URI 和 URL 链接两种格式
+        # 【重要决策】历史图片不在这里注入多模态内容（否则 AI 会在回复中输出图片链接），
+        # 而是改在 _execute_generate_image 工具执行阶段，自动从 messages 的 media_items
+        # 中识别最近一张生成的图片作为 image2image 的参考图——这是"后台自动"处理的。
+        # 本轮是否有新图片附件
+        has_image_attachments = False
+        image_parts = []  # 收集本轮新图片附件的多模态 image_url 部分
+
+        if attachments:
+            for att in attachments:
+                if att.get("base64_image") and att["base64_image"].startswith("data:image/"):
+                    image_parts.append({
+                        "type": "image_url",
+                        "image_url": {"url": att["base64_image"]}
+                    })
+                    has_image_attachments = True
+                elif att.get("image_url"):
+                    image_parts.append({
+                        "type": "image_url",
+                        "image_url": {"url": att["image_url"]}
+                    })
+                    has_image_attachments = True
+
+        # 如果本轮有新图片附件，将这些图片以多模态内容形式注入到最后一条 user 消息
+        # 如果本轮没有新图片附件但历史有图片 → 不在这里处理，改在 _execute_generate_image 中自动处理
+        if has_image_attachments and image_parts:
+            for i in range(len(request_messages) - 1, -1, -1):
+                if request_messages[i]["role"] == "user":
+                    original_content = request_messages[i]["content"]
+                    multi_content = []
+                    # 保留用户原始文本
+                    if isinstance(original_content, str) and original_content.strip():
+                        multi_content.append({"type": "text", "text": original_content})
+                    elif isinstance(original_content, list):
+                        for part in original_content:
+                            if isinstance(part, dict) and part.get("type") == "text":
+                                multi_content.append(part)
+                    # 注入本轮新上传/链接图片
+                    multi_content.extend(image_parts)
+                    if multi_content:
+                        request_messages[i] = {
+                            "role": "user",
+                            "content": multi_content,
+                        }
+                    break
+
+        body = {
+            "model": await self._get_default_chat_model(user_id),
+            "messages": request_messages,
+            "tools": CHAT_TOOLS,
+            "stream": True,
+        }
+
+        # 第一次调用：可能返回文本或 tool_calls
+        full_content = ""
+        tool_calls_list = []
+
+        try:
+            async for event in self._stream_chat_api(body):
+                if event["type"] == "text":
+                    full_content += event["content"]
+                    yield json.dumps(event, ensure_ascii=False)
+                elif event["type"] == "tool_calls":
+                    tool_calls_list = event["calls"]
+                    break
+                elif event["type"] == "done":
+                    async for fallback_event in self._fallback_history_image_edit_stream(
+                        messages=messages,
+                        session_id=session_id,
+                        history_images=history_images,
+                    ):
+                        yield fallback_event
+                    if self._should_fallback_to_history_image_edit(messages, history_images):
+                        return
+                    yield json.dumps({"type": "done"}, ensure_ascii=False)
+                    return
+                elif event["type"] == "error":
+                    yield json.dumps(event, ensure_ascii=False)
+                    yield json.dumps({"type": "done"}, ensure_ascii=False)
+                    return
+        except Exception as e:
+            logger.error("[Chat] 流式调用失败: %s", e)
+            yield json.dumps({"type": "error", "content": str(e)}, ensure_ascii=False)
+            yield json.dumps({"type": "done"}, ensure_ascii=False)
+            return
+
+        # 如果有工具调用，执行工具并继续对话
+        if tool_calls_list:
+            # 通知前端工具调用开始
+            for tc in tool_calls_list:
+                yield json.dumps({
+                    "type": "tool_call",
+                    "tool": tc["function"]["name"],
+                    "args": json.loads(tc["function"]["arguments"]) if isinstance(tc["function"]["arguments"], str) else tc["function"]["arguments"],
+                }, ensure_ascii=False)
+
+            # ── 从对话历史中提取最近已完成的图片 URL ──
+            # 当用户说"用刚才的图生成视频"时，AI 可能没有附件但需要引用历史图片
+            # 这里自动从历史消息中找到最近的已完成图片，下载为 base64 后作为附件传入
+            history_images = self._collect_history_images(messages)
+
+            # 执行每个工具调用（传入 attachments 以支持 image2image / image2video / keyframes）
+            tool_results = []
+            for tc in tool_calls_list:
+                func_name = tc["function"]["name"]
+                func_args = tc["function"]["arguments"]
+                if isinstance(func_args, str):
+                    func_args = json.loads(func_args)
+
+                # 合并附件：优先使用本轮用户上传的附件（只取图片类型，视频/文档不参与图生图），其次补充历史图片
+                # 过滤：只有 base64_image 或 image_url 的附件才能作为生成工具的参考图
+                raw_atts = list(attachments) if attachments else []
+                effective_attachments = [
+                    a for a in raw_atts
+                    if (a.get("base64_image") and a["base64_image"].startswith("data:image/"))
+                    or a.get("image_url")
+                ]
+                if not effective_attachments and raw_atts:
+                    logger.info("[Chat] 本轮附件中过滤出 %d 张可用图片（总数 %d），其余为视频/文档链接，不参与图生图参考",
+                                len(effective_attachments), len(raw_atts))
+                if not effective_attachments and history_images:
+                    # 本轮无新图片附件但会话历史中之前生成过图片 → 自动引用最近生成的图片做参考图
+                    # 这是"继续修改"场景的核心逻辑：用户不说"上传图片"，但刚生成过图片
+                    # 所以默认意图就是"基于刚刚生成的那张图继续改"
+                    llm_mode = func_args.get("mode")
+                    if func_name == "generate_video":
+                        # 视频生成：如果 AI 没显式指定 text2video，自动引用历史图片
+                        if llm_mode != "text2video":
+                            effective_attachments = history_images[:2]
+                            logger.info("[Chat] 自动引用历史图片作为视频生成参考图: %d 张", len(effective_attachments))
+                    elif func_name == "generate_image":
+                        # 图生图（核心修复！）：
+                        # 不看 AI 写了什么 mode，只要它调用了 generate_image 且本轮没新附件
+                        # 就自动用最近一张历史图片做 image2image
+                        # 理由：用户在同一会话中先生成了图片，现在继续调用生成工具
+                        #       其意图默认就是"继续修改那张图"
+                        #       AI 可能写 text2image 是因为它没看到历史图片（历史图片不在对话文本中）
+                        eff = history_images[-1:]  # 只取最近一张
+                        if eff:
+                            effective_attachments = eff
+                            # 【关键】改写 func_args 的 mode 为 image2image
+                            # 因为 AI 看不到历史图片，它写 text2image 是正常的
+                            # 后端根据上下文连续性判断应做 image2image，所以强制纠正
+                            original_mode = func_args.get("mode", "not_specified")
+                            func_args["mode"] = "image2image"
+                            func_args["use_reference_image"] = True
+                            if original_mode != "image2image":
+                                logger.info(
+                                    "[Chat] 自动切换为图生图 image2image：AI 请求 mode=%s，"
+                                    "但会话历史中最近生成过图片（共 %d 张历史图片），"
+                                    "后端根据上下文自动纠正为 image2image 并引用最近一张历史图片",
+                                    original_mode, len(history_images)
+                                )
+                            else:
+                                logger.info("[Chat] 使用历史图片作为 image2image 参考图（AI 已正确指定）")
+
+                # 处理历史图片附件：URL 类型直接使用，无需下载
+                if effective_attachments:
+                    for i, att in enumerate(effective_attachments):
+                        if att.get("_is_url"):
+                            url = att.get("base64_image", "")
+                            # 直接使用 URL 作为 image_url，不再下载为 base64
+                            effective_attachments[i] = {
+                                "name": att["name"],
+                                "base64_image": "",
+                                "image_url": url,
+                                "size": att["size"],
+                                "mime_type": att["mime_type"],
+                                "source": "url",
+                            }
+                    effective_attachments = [a for a in effective_attachments if a is not None]
+
+                result = await self._execute_tool(func_name, func_args, session_id, attachments=effective_attachments if effective_attachments else None, messages=messages, user_id=user_id, frontend_camera_params=camera_params, preset_ref=preset_ref)
+                tool_results.append({
+                    "tool_call_id": tc.get("id", ""),
+                    "role": "tool",
+                    "name": func_name,
+                    "content": json.dumps(result, ensure_ascii=False),
+                })
+
+                # 通知前端工具执行结果
+                yield json.dumps({
+                    "type": "tool_result",
+                    "tool": func_name,
+                    "result": result,
+                }, ensure_ascii=False)
+
+            # 将工具结果回传给模型，获取最终回复
+            # 构建包含工具调用的消息历史
+            assistant_msg = {
+                "role": "assistant",
+                "content": full_content or None,
+                "tool_calls": tool_calls_list,
+            }
+            second_messages = request_messages + [assistant_msg] + tool_results
+
+            second_body = {
+                "model": await self._get_default_chat_model(user_id),
+                "messages": second_messages,
+                "stream": True,
+            }
+
+            try:
+                async for event in self._stream_chat_api(second_body):
+                    if event["type"] == "text":
+                        yield json.dumps(event, ensure_ascii=False)
+                    elif event["type"] == "done":
+                        yield json.dumps({"type": "done"}, ensure_ascii=False)
+                        return
+                    elif event["type"] == "error":
+                        yield json.dumps(event, ensure_ascii=False)
+                        yield json.dumps({"type": "done"}, ensure_ascii=False)
+                        return
+            except Exception as e:
+                logger.error("[Chat] 二次流式调用失败: %s", e)
+                yield json.dumps({"type": "error", "content": str(e)}, ensure_ascii=False)
+
+            yield json.dumps({"type": "done"}, ensure_ascii=False)
+
+    # =====================================================
+    # 【流式 API 调用封装】—— 解析 SSE 事件
+    # =====================================================
+    async def _stream_chat_api(self, body: Dict[str, Any]) -> AsyncGenerator[Dict, None]:
+        """
+        调用 Agnes AI Chat API（流式），解析 SSE 事件并 yield 结构化结果。
+        """
+        # 从 agnes_client 获取最新的鉴权头（Provider 配置可能运行时修改）
+        headers = {
+            "Authorization": f"Bearer {agnes_client.api_key}",
+            "Content-Type": "application/json",
+        }
+
+        tool_calls_accum = {}  # 累积 tool_calls（SSE 分块发送）
+        current_text = ""
+
+        try:
+            async with agnes_client.client.stream(
+                "POST",
+                self.chat_url,
+                json=body,
+                headers=headers,
+                timeout=httpx.Timeout(120.0, connect=30.0),
+            ) as response:
+                if response.status_code != 200:
+                    error_text = await response.aread()
+                    yield {"type": "error", "content": f"API 错误 (HTTP {response.status_code}): {error_text.decode()[:200]}"}
+                    return
+
+                async for line in response.aiter_lines():
+                    line = line.strip()
+                    if not line or not line.startswith("data: "):
+                        continue
+
+                    data_str = line[6:]  # 去掉 "data: " 前缀
+                    if data_str == "[DONE]":
+                        # 流结束，检查是否有未完成的 tool_calls
+                        if tool_calls_accum:
+                            yield {
+                                "type": "tool_calls",
+                                "calls": list(tool_calls_accum.values()),
+                            }
+                        elif current_text:
+                            yield {"type": "done"}
+                        else:
+                            yield {"type": "done"}
+                        return
+
+                    try:
+                        chunk = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+
+                    choices = chunk.get("choices", [])
+                    if not choices:
+                        continue
+
+                    delta = choices[0].get("delta", {})
+                    finish_reason = choices[0].get("finish_reason")
+
+                    # 处理文本内容
+                    content = delta.get("content")
+                    if content:
+                        current_text += content
+                        yield {"type": "text", "content": content}
+
+                    # 处理工具调用（SSE 分块发送，需要累积）
+                    tc_deltas = delta.get("tool_calls")
+                    if tc_deltas:
+                        for tc_delta in tc_deltas:
+                            idx = tc_delta.get("index", 0)
+                            if idx not in tool_calls_accum:
+                                tool_calls_accum[idx] = {
+                                    "id": tc_delta.get("id", ""),
+                                    "type": "function",
+                                    "function": {
+                                        "name": "",
+                                        "arguments": "",
+                                    },
+                                }
+                            if tc_delta.get("id"):
+                                tool_calls_accum[idx]["id"] = tc_delta["id"]
+                            fn = tc_delta.get("function", {})
+                            if fn.get("name"):
+                                tool_calls_accum[idx]["function"]["name"] += fn["name"]
+                            if fn.get("arguments"):
+                                tool_calls_accum[idx]["function"]["arguments"] += fn["arguments"]
+
+                    # 流结束信号
+                    if finish_reason == "tool_calls":
+                        yield {
+                            "type": "tool_calls",
+                            "calls": list(tool_calls_accum.values()),
+                        }
+                        return
+                    elif finish_reason == "stop":
+                        yield {"type": "done"}
+                        return
+
+        except Exception as e:
+            logger.error("[Chat] 流式 API 调用异常: %s", e)
+            yield {"type": "error", "content": f"聊天服务异常: {str(e)}"}
+
+    # =====================================================
+    # 【历史图片收集】—— 从对话历史中提取最近生成的图片
+    # =====================================================
+    def _collect_history_images(self, messages: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+        """
+        从对话历史中提取最近已完成的图片 URL，返回附件格式列表。
+
+        用于当用户说"用刚才的图生成视频"或"继续修改图片"时，
+        自动将历史图片作为参考图传入工具。
+        按时间倒序遍历，优先取最近生成的图片。
+
+        Returns:
+            附件列表 [{"name": ..., "base64_image": ..., "size": 0, "mime_type": "image/png"}, ...]
+        """
+        return self._collect_history_media(messages, media_type="image")
+
+    # =====================================================
+    # 【历史图片编辑兜底】—— 模型未调用工具时由后端补救
+    # =====================================================
+    def _latest_user_text(self, messages: List[Dict[str, Any]]) -> str:
+        """取最近一条用户文本，兼容纯文本与多模态 content。"""
+        for msg in reversed(messages):
+            if msg.get("role") != "user":
+                continue
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                return content.strip()
+            if isinstance(content, list):
+                parts = [
+                    part.get("text", "")
+                    for part in content
+                    if isinstance(part, dict) and part.get("type") == "text"
+                ]
+                return "\n".join(parts).strip()
+        return ""
+
+    def _should_fallback_to_history_image_edit(
+        self,
+        messages: List[Dict[str, Any]],
+        history_images: Optional[List[Dict[str, Any]]] = None,
+    ) -> bool:
+        """
+        判断是否应当把"继续修改刚才那张图"兜底为图生图。
+
+        这个判断只在模型没有返回 tool_calls 时使用，避免模型把明确的编辑意图
+        当成图片理解或纯文生图。显式要求重画/不用上一张图/只分析图片时不触发。
+        """
+        if not history_images:
+            return False
+
+        text = self._latest_user_text(messages)
+        if not text:
+            return False
+
+        negative_pattern = (
+            r"(不用|不要|忽略|别用).{0,8}(刚才|上一张|这张|原图|参考图|之前)|"
+            r"(重新|从头|另起).{0,8}(画|生成|做|创建)|"
+            r"(描述|分析|看一下|识别|理解|有什么|提示词|prompt)"
+        )
+        if re.search(negative_pattern, text, flags=re.IGNORECASE):
+            return False
+
+        reference_pattern = r"(这张图|这张|刚才|上一张|原图|参考图|它|当前图|图片)"
+        edit_pattern = (
+            r"(基础上|基于|继续|修改|调整|改|改成|改为|换成|换个|添加|加上|增加|"
+            r"去掉|移除|删除|保留|保持|变成|做一版|再来一张|类似|让|戴|穿|拿|牵|拖|"
+            r"站|坐|走|跑|看着|面向|背对|风格|背景|颜色|人物|情侣|帽子|衣服|猫|狗|元素|细节)"
+        )
+        explicit_reference_edit = re.search(reference_pattern, text) and re.search(edit_pattern, text)
+        short_followup_edit = len(text) <= 80 and re.search(edit_pattern, text)
+        return bool(explicit_reference_edit or short_followup_edit)
+
+    def _build_history_image_edit_args(self, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """构造兜底图生图参数，保留用户原话作为编辑指令。"""
+        instruction = self._latest_user_text(messages)
+        prompt = (
+            "Edit the provided reference image according to this instruction: "
+            f"{instruction}. Preserve the original composition, main subjects, perspective, "
+            "lighting consistency, and overall visual quality unless the instruction says otherwise."
+        )
+        return {
+            "prompt": prompt,
+            "size": "1024x1024",
+            "mode": "image2image",
+            "use_reference_image": True,
+        }
+
+    async def _fallback_history_image_edit_stream(
+        self,
+        messages: List[Dict[str, Any]],
+        session_id: Optional[int],
+        history_images: List[Dict[str, Any]],
+    ) -> AsyncGenerator[str, None]:
+        """流式接口中模型未调用工具时，补发一次基于历史图的 image2image。"""
+        if not self._should_fallback_to_history_image_edit(messages, history_images):
+            return
+
+        func_args = self._build_history_image_edit_args(messages)
+        logger.info("[Chat] 模型未触发工具，后端根据历史图片编辑意图兜底调用 image2image")
+        yield json.dumps({
+            "type": "tool_call",
+            "tool": "generate_image",
+            "args": func_args,
+            "fallback": "history_image_edit",
+        }, ensure_ascii=False)
+
+        result = await self._execute_generate_image(
+            func_args,
+            session_id=session_id,
+            attachments=[history_images[-1]],
+            messages=messages,
+        )
+        yield json.dumps({
+            "type": "tool_result",
+            "tool": "generate_image",
+            "result": result,
+            "fallback": "history_image_edit",
+        }, ensure_ascii=False)
+        yield json.dumps({
+            "type": "text",
+            "content": "好的，我会基于刚才生成的图片继续修改。",
+        }, ensure_ascii=False)
+        yield json.dumps({"type": "done"}, ensure_ascii=False)
+
+    # =====================================================
+    # 【通用历史媒体收集】—— 从对话历史中提取 image / video URL
+    # =====================================================
+    def _collect_history_media(self, messages: List[Dict[str, str]], media_type: str = "image") -> List[Dict[str, Any]]:
+        """
+        通用的历史媒体收集函数。从 assistant 消息的媒体上下文中提取已完成的图片/视频 URL。
+
+        提取策略：
+        1) 从 routes/chat.py 注入的格式 "类型: image, 状态: 已完成, URL: https://..." 中提取
+        2) 从 messages 的 media_items 结构化数据（若存在）中提取
+        3) 最多取最近 2 个，避免上下文过载
+
+        Args:
+            messages: 对话历史
+            media_type: "image" / "video"
+
+        Returns:
+            附件列表 [{"name": ..., "base64_image": URL, "size": 0, "mime_type": ..., "_is_url": True}, ...]
+        """
+        results = []
+
+        # 倒序遍历消息，找到最近的已完成媒体
+        for msg in reversed(messages):
+            if msg.get("role") != "assistant":
+                continue
+            content = msg.get("content", "")
+            found_in_this_msg = []
+
+            # 策略 1：文本上下文格式
+            pattern = rf"类型: {media_type}, 状态: 已完成, URL: (https?://\S+)"
+            for url in re.findall(pattern, content):
+                url = url.rstrip("]").rstrip(",")
+                found_in_this_msg.append(url)
+
+            # 策略 2：结构化 media_items（更可靠）
+            media_items = msg.get("media_items")
+            if media_items and isinstance(media_items, list):
+                for item in media_items:
+                    if (item.get("type") == media_type
+                            and item.get("status") in ("success", "completed", "done")
+                            and item.get("url")):
+                        found_in_this_msg.append(item["url"])
+
+            # 去重后加入结果
+            seen = set()
+            for url in found_in_this_msg:
+                if url not in seen:
+                    seen.add(url)
+                    if media_type == "image":
+                        results.append({
+                            "name": f"history_{media_type}.png",
+                            "base64_image": url,  # 存 URL，下游统一处理
+                            "image_url": url,      # 同时存 image_url 以便直接使用
+                            "size": 0,
+                            "mime_type": "image/png",
+                            "_is_url": True,
+                        })
+                    else:
+                        results.append({
+                            "name": f"history_{media_type}.mp4",
+                            "base64_image": url,
+                            "image_url": url,
+                            "size": 0,
+                            "mime_type": "video/mp4",
+                            "_is_url": True,
+                        })
+
+            if len(results) >= 2:
+                break
+
+        results.reverse()
+        return results
+
+    # =====================================================
+    # 【工具执行】—— 根据工具名调用对应的生成服务
+    # =====================================================
+    async def _execute_tool(
+        self,
+        func_name: str,
+        func_args: Dict,
+        session_id: Optional[int] = None,
+        attachments: Optional[List[Dict[str, Any]]] = None,
+        messages: Optional[List[Dict[str, Any]]] = None,
+        user_id: Optional[int] = None,
+        frontend_camera_params: Optional[Dict[str, Any]] = None,
+        preset_ref: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        执行工具调用（generate_image / generate_video）。
+        返回工具执行结果（包含任务 ID、状态等）。
+
+        【新增】messages 参数用于在"继续修改"场景下，
+        从会话历史中找到最近生成的图片，作为 image2image 参考图。
+        【新增】user_id 参数用于将生成任务绑定到当前用户，实现数据隔离。
+        【新增】frontend_camera_params 参数用于合并前端摄像机设置（AI 未提取时兜底）。
+        【新增】preset_ref 参数用于加载预设内容并合并到 tool args：
+          - prompt 类型预设：把 prompt_text 追加合并到 args.prompt
+          - camera 类型预设：把 camera_params 注入 args.camera_params（enabled=true）
+          - 其他类型：仅注入对应字段（如 style_params 等）
+        """
+        # ── 加载预设内容并合并到 func_args（Phase 2 §6.2） ──
+        if preset_ref:
+            try:
+                from app.models.prompt_preset import PromptPreset
+                from app.models.camera_preset import CameraPreset
+                from app.core.database import new_async_session
+
+                async with new_async_session() as db:
+                    # 先查 PromptPreset
+                    result = await db.execute(
+                        select(PromptPreset).filter(PromptPreset.id == preset_ref)
+                    )
+                    pp = result.scalar_one_or_none()
+                    if pp:
+                        # prompt 类型预设：合并 prompt_text
+                        if pp.prompt_text:
+                            existing_prompt = func_args.get("prompt", "") or ""
+                            if pp.prompt_text not in existing_prompt:
+                                func_args["prompt"] = (
+                                    f"{existing_prompt}，{pp.prompt_text}".lstrip("，").strip()
+                                    if existing_prompt
+                                    else pp.prompt_text
+                                )
+                                logger.info(
+                                    "[Chat] preset_ref=%s prompt_text 已合并到 args.prompt", preset_ref
+                                )
+                        # 若 PromptPreset 也带了 camera_params，注入
+                        if pp.camera_params and isinstance(pp.camera_params, dict):
+                            if not func_args.get("camera_params"):
+                                func_args["camera_params"] = {**pp.camera_params, "enabled": True}
+                                logger.info("[Chat] preset_ref=%s camera_params 已注入", preset_ref)
+                        # ── increment usage_count（Phase 2 §3.4.1：预设使用次数统计） ──
+                        pp.usage_count = (pp.usage_count or 0) + 1
+                        await db.commit()
+                        logger.info(
+                            "[Chat] preset_ref=%s usage_count 已 +1 → %s",
+                            preset_ref, pp.usage_count,
+                        )
+            except Exception as e:
+                logger.warning("[Chat] 加载 preset_ref=%s 失败: %s", preset_ref, e)
+
+        # ── 合并前端摄像机参数：AI 提取的优先，AI 未提取时用前端兜底 ──
+        if frontend_camera_params and frontend_camera_params.get("enabled"):
+            if not func_args.get("camera_params") or not func_args["camera_params"].get("enabled"):
+                func_args["camera_params"] = frontend_camera_params
+                logger.info("[Chat] 前端摄像机参数已注入到工具调用 (AI 未包含)")
+
+        if func_name == "generate_image":
+            return await self._execute_generate_image(func_args, session_id, attachments, messages=messages, user_id=user_id, preset_id=preset_ref)
+        elif func_name == "generate_video":
+            return await self._execute_generate_video(func_args, session_id, attachments, user_id=user_id, preset_id=preset_ref)
+        else:
+            return {"status": "error", "message": f"未知工具: {func_name}"}
+
+    async def _execute_generate_image(
+        self,
+        args: Dict,
+        session_id: Optional[int] = None,
+        attachments: Optional[List[Dict[str, Any]]] = None,
+        messages: Optional[List[Dict[str, Any]]] = None,
+        user_id: Optional[int] = None,
+        preset_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        执行图片生成工具（支持 text2image 与 image2image 两种模式）。
+
+        策略（改进版）：
+        - 显式 use_reference_image=False 或 mode=text2image → 文生图
+        - 显式 use_reference_image=True 或 mode=image2image + 有参考图 → 图生图
+        - 模型未指定 mode + 本轮有参考图 → 自动走 image2image
+        - 【新增】模型未指定 mode + 本轮无参考图 + 会话历史最近生成过图片
+          → 自动走 image2image，以历史最近一张图片为参考图（"继续修改"场景）
+        - 其他情况 → 文生图
+
+        参考图支持两种来源：
+        - base64_image：用户上传的图片（data URI 格式）
+        - image_url：用户提供的公网图片链接
+        - 【新增】会话历史中最近生成的图片 URL
+        """
+        from app.services.image_poller import image_poller_manager
+
+        prompt = args.get("prompt", "")
+        size = args.get("size", "1024x1024")
+
+        if not prompt:
+            return {"status": "error", "message": "提示词不能为空"}
+
+        # ── 解析 LLM 指定的模式参数
+        llm_mode = args.get("mode")
+        use_ref = args.get("use_reference_image")
+        att_count = len(attachments) if attachments else 0
+
+        # ── 【新增】从会话历史中查最近生成的图片（当本轮没有附件时作为备选参考图）
+        history_images = []
+        effective_attachments = attachments if att_count > 0 else None
+        if att_count == 0 and messages:
+            history_images = self._collect_history_images(messages)
+            if history_images:
+                # 【改造点】之前只取一张，现在取全部历史图片（最新 8 张）作为参考图
+                effective_attachments = history_images[-8:]
+                logger.info(
+                    "[Chat] generate_image: 本轮无附件，使用会话历史 %d 张图片作为参考图（最多保留 8 张）",
+                    len(effective_attachments),
+                )
+
+        # ── 决策最终模式（基于 effective_attachments 而不是原始 attachments）
+        eff_count = len(effective_attachments) if effective_attachments else 0
+
+        # 【核心修复】本轮没有新附件但有历史图片 → 强制用 image2image
+        # 理由：AI 看不到历史图片（我们不把它注入对话文本，避免输出链接），
+        #       所以 AI 写 mode=text2image 是正常的盲操作。但根据上下文连续性，
+        #       用户在"先生成图 → 再说改一下"的场景下，意图显然是图生图。
+        # 只有当 AI 显式写了 use_reference_image=False（说"不用刚才的图"）时才尊重它的选择
+        if att_count == 0 and history_images and use_ref is not False:
+            final_mode = "image2image"
+            use_image = True
+            # 确保 effective_attachments 已在上面的逻辑中设置（应该已设置为 history_images[-1:]）
+            logger.info(
+                "[Chat] generate_image: 本轮无新附件 + 有 %d 张历史生成图片 + AI 未明确禁止参考图 "
+                "→ 强制模式 image2image（忽略 AI 请求的 mode=%s，因为 AI 看不到历史图片）",
+                len(history_images), llm_mode
+            )
+        # AI 显式说"不用刚才的图，重新画" → 尊重用户意图
+        elif use_ref is False:
+            final_mode = "text2image"
+            use_image = False
+            effective_attachments = None
+            logger.info("[Chat] generate_image: AI 明确禁用参考图，使用纯文生图 text2image")
+        elif llm_mode == "image2image" or use_ref is True:
+            final_mode = "image2image"
+            use_image = True if eff_count > 0 else False
+            if not use_image:
+                logger.info("[Chat] generate_image: AI 请求 image2image 但没有可用参考图，降级为 text2image")
+                final_mode = "text2image"
+            else:
+                logger.info("[Chat] generate_image: AI 请求 image2image，使用参考图（本轮上传或历史生成）")
+        else:
+            # LLM 未指定 mode（或指定了 text2image 但不影响上面的逻辑）
+            if eff_count > 0:
+                final_mode = "image2image"
+                use_image = True
+                logger.info("[Chat] generate_image: 存在有效参考图，自动切换为 image2image 模式")
+            else:
+                final_mode = "text2image"
+                use_image = False
+                logger.info("[Chat] generate_image: 无参考图，使用纯文生图 text2image")
+
+        # 获取默认图片模型（用户偏好 default_image_model_id > 该类型第一个）
+        _default_image_model = await self._get_default_media_model("image", user_id)
+
+        try:
+            params = {
+                "model": _default_image_model,
+                "size": size,
+                "response_format": "url",
+                "mode": final_mode,
+            }
+
+            if use_image and effective_attachments and len(effective_attachments) > 0:
+                # ── 【改造点】之前只取第一张，现在遍历全部附件收集为多图数组
+                b64_list: List[str] = []
+                url_list: List[str] = []
+
+                for ref in effective_attachments:
+                    img_url = ref.get("image_url")
+                    b64_img = ref.get("base64_image")
+
+                    # 优先使用 image_url（公网 URL 体积小、稳定）
+                    if img_url and isinstance(img_url, str) and img_url.strip():
+                        url_list.append(img_url)
+                        continue
+
+                    # base64_image 字段里如果已经是 URL（历史图片兼容写法）
+                    if b64_img and isinstance(b64_img, str) and b64_img.strip():
+                        if b64_img.startswith("http") or b64_img.startswith("data:image/"):
+                            b64_list.append(b64_img)
+                            continue
+                        # 兜底：纯 base64 字符串（没有前缀）
+                        b64_list.append(b64_img)
+
+                # 注入到 params（给 image_poller → agnes_client.create_image 使用）
+                if b64_list:
+                    params["base64_images"] = b64_list
+                if url_list:
+                    params["image_urls"] = url_list
+
+                logger.info(
+                    "[Chat] 图生图参考图汇总: base64=%d 张, url=%d 张, 总计=%d 张",
+                    len(b64_list), len(url_list), len(b64_list) + len(url_list),
+                )
+
+            # ── 摄像机参数处理：enabled=True 时拼接到 prompt 末尾
+            camera_params = args.get("camera_params")
+            if camera_params and camera_params.get("enabled"):
+                from app.services.camera_presets import build_camera_prompt_suffix
+                camera_suffix = build_camera_prompt_suffix(camera_params)
+                prompt = prompt + "\n\n" + camera_suffix
+                logger.info("[Chat] 摄像机 prompt 后缀已拼接 (len=%d)", len(camera_suffix))
+
+            task = await image_poller_manager.create_task(
+                prompt=prompt,
+                params=params,
+                user_id=user_id,
+                preset_id=preset_id,
+            )
+            logger.info("[Chat] 图片生成任务已创建: task_id=%s, mode=%s, prompt=%s",
+                        task.task_id, final_mode, prompt[:50])
+
+            return {
+                "status": "pending",
+                "task_id": task.task_id,
+                "media_type": "image",
+                "prompt": prompt,
+                "size": size,
+                "mode": final_mode,
+                "message": "图片生成任务已提交，请稍候...",
+            }
+        except Exception as e:
+            logger.error("[Chat] 图片生成失败: %s", e)
+            return {"status": "error", "message": f"图片生成失败: {str(e)}"}
+
+    async def _execute_generate_video(
+        self,
+        args: Dict,
+        session_id: Optional[int] = None,
+        attachments: Optional[List[Dict[str, Any]]] = None,
+        user_id: Optional[int] = None,
+        preset_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        执行视频生成工具（支持 text2video / image2video / keyframes 三种模式）。
+
+        策略（Task 6 / FR-6 / FR-7）：
+        - LLM 显式 mode=keyframes 且附件≥2 → keyframes
+        - LLM 显式 mode=image2video 且附件≥1 → image2video
+        - LLM 显式 mode=text2video 或未指定+无附件 → text2video
+        - LLM 显式 text2video 但有 1 张参考图 → 自动纠正为 image2video 并记日志
+        - LLM 显式 text2video 但有 ≥2 张参考图 → 自动纠正为 keyframes 并记日志
+        """
+        prompt = args.get("prompt", "")
+        num_frames = args.get("num_frames", 121)
+        width = args.get("width", 1152)
+        height = args.get("height", 768)
+
+        if not prompt:
+            return {"status": "error", "message": "提示词不能为空"}
+
+        # 校验帧数
+        valid_frames = [81, 121, 161, 241, 441]
+        if num_frames not in valid_frames:
+            num_frames = min(valid_frames, key=lambda x: abs(x - num_frames))
+
+        llm_mode = args.get("mode")
+        att_count = len(attachments) if attachments else 0
+
+        # ── 模式决策
+        if llm_mode == "keyframes":
+            final_mode = "keyframes" if att_count >= 2 else ("image2video" if att_count == 1 else "text2video")
+        elif llm_mode == "image2video":
+            final_mode = "image2video" if att_count >= 1 else "text2video"
+        elif llm_mode == "text2video":
+            # LLM 明确选择纯文本，但后端根据参考图纠正（FR-7）
+            if att_count >= 2:
+                final_mode = "keyframes"
+                logger.info("[Chat] generate_video: LLM 选择 text2video，但存在 %d 张参考图，自动纠正为 keyframes", att_count)
+            elif att_count == 1:
+                final_mode = "image2video"
+                logger.info("[Chat] generate_video: LLM 选择 text2video，但存在 1 张参考图，自动纠正为 image2video")
+            else:
+                final_mode = "text2video"
+        else:
+            # LLM 未指定 mode：根据附件数推断
+            if att_count >= 2:
+                final_mode = "keyframes"
+                logger.info("[Chat] generate_video: 存在 %d 张参考图，自动选择 keyframes 模式", att_count)
+            elif att_count == 1:
+                final_mode = "image2video"
+                logger.info("[Chat] generate_video: 存在 1 张参考图，自动选择 image2video 模式")
+            else:
+                final_mode = "text2video"
+
+        # ── 根据 final_mode 准备调用参数
+        image_param = None
+        images_param = None
+        reference_videos_param = args.get("reference_videos") or []
+        reference_audios_param = args.get("reference_audios") or []
+
+        if final_mode == "image2video":
+            ref = attachments[0]
+            # 优先使用 base64，其次使用 URL
+            image_param = ref.get("base64_image") or ref.get("image_url")
+        elif final_mode == "keyframes":
+            images_param = [a.get("base64_image") or a.get("image_url") for a in attachments if a.get("base64_image") or a.get("image_url")]
+        elif final_mode == "video2video":
+            # video2video: 从 attachments 提取视频 URL，或从 args.reference_videos 获取
+            if not reference_videos_param and attachments:
+                reference_videos_param = [a.get("video_url") for a in attachments if a.get("video_url")]
+            # 如果有音频附件，提取音频 URL
+            if not reference_audios_param:
+                for a in attachments:
+                    if a.get("audio_url"):
+                        reference_audios_param.append(a.get("audio_url"))
+
+        # 获取默认视频模型（用户偏好 default_video_model_id > 该类型第一个）
+        _default_video_model = await self._get_default_media_model("video", user_id)
+
+        try:
+            # ── 摄像机参数处理：enabled=True 时拼接到 prompt 末尾
+            camera_params = args.get("camera_params")
+            if camera_params and camera_params.get("enabled"):
+                from app.services.camera_presets import build_camera_prompt_suffix
+                camera_suffix = build_camera_prompt_suffix(camera_params)
+                prompt = prompt + "\n\n" + camera_suffix
+                logger.info("[Chat] 视频摄像机 prompt 后缀已拼接 (len=%d)", len(camera_suffix))
+
+            # 按模型 ID 路由到对应 Provider
+            from app.services.provider_registry import provider_registry
+            _video_client = await provider_registry.get_client_for_model(_default_video_model)
+            result = await _video_client.create_video_task(
+                prompt=prompt,
+                model=_default_video_model,
+                num_frames=num_frames,
+                frame_rate=24,
+                width=width,
+                height=height,
+                mode=final_mode,
+                image=image_param,
+                images=images_param,
+                reference_videos=reference_videos_param if reference_videos_param else None,
+                reference_audios=reference_audios_param if reference_audios_param else None,
+            )
+
+            video_id = result.get("video_id") or (
+                result.get("data", {}).get("video_id") if isinstance(result.get("data"), dict) else None
+            )
+            task_id = (
+                result.get("task_id")
+                or result.get("id")
+                or (result.get("data", {}).get("task_id") if isinstance(result.get("data"), dict) else None)
+            )
+
+            # 启动后台轮询
+            from app.services.video_poller import poller_manager
+            params = {
+                "model": _default_video_model,
+                "num_frames": num_frames,
+                "frame_rate": 24,
+                "width": width,
+                "height": height,
+                "mode": final_mode,
+            }
+            await poller_manager.start_polling(
+                task_id=task_id,
+                video_id=video_id,
+                prompt=prompt,
+                params=params,
+                user_id=user_id,
+                preset_id=preset_id,
+            )
+
+            logger.info("[Chat] 视频生成任务已创建: task_id=%s, video_id=%s, mode=%s", task_id, video_id, final_mode)
+
+            return {
+                "status": "pending",
+                "task_id": task_id,
+                "video_id": video_id,
+                "media_type": "video",
+                "prompt": prompt,
+                "num_frames": num_frames,
+                "mode": final_mode,
+                "message": "视频生成任务已提交，通常需要 1-3 分钟...",
+            }
+        except Exception as e:
+            logger.error("[Chat] 视频生成失败: %s", e)
+            return {"status": "error", "message": f"视频生成失败: {str(e)}"}
+
+
+# 全局单例
+chat_service = ChatService()
