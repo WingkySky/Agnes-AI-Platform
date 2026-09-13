@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### MCP 市场：能力发现与一键安装（对齐插件市场心智）
+- **市场双来源**：官方内置目录（后端常量幂等 seed：本地文件系统/网页抓取/知识记忆库三个经典 MCP 服务器，标注所需运行环境）+ 管理员自建源（URL 指向 manifest JSON，对齐"添加插件市场"交互；仅 http(s)、超时 15s、≤2MB、≤100 条、整源替换）
+- **一键安装**：市场项预填 command/args/url 可编辑，按 `env_fields/headers_fields` 声明生成密钥输入框；安装即创建 `mcp_servers` 记录并写 `market_slug` 溯源列——市场列表标「已安装」，删除源不影响已安装服务器
+- **管理页市场标签**：`/admin/mcp` 改「已安装 | 市场」双标签——市场标签含源管理条（添加/刷新/删除，条目数展示）+ 分类分组卡片（传输 tag/工具数预览/emoji 图标/已安装标记）+ 安装弹窗
+- **对话侧能力可见性**：系统提示追加「已接入的外部能力」段（按服务器分组列工具清单，提升模型对 mcp__ 工具的触发率；画布 ensureSession 与对话页 _applySkillsPrompt 单点组合）；画布 Agent 面板新增「外部能力」胶囊下拉（Zap 图标，按服务器列工具）
+- **manifest 格式**：`{ name, items: [{ slug, name, description, category, transport, command/args 或 url, env_fields/headers_fields 密钥声明, tools_preview }] }`（详见 API.md 第 13 章）
+- **测试**：后端 pytest 5 例（官方 seed 幂等/源刷新整源替换/manifest 校验拒绝/install 密钥合成与查重/非 http 源拒绝），前端 vitest 245 例全绿
+- **范围分期**：用户投稿与审核上架二期（复用预设广场审核管线）；全员市场页、源定时刷新不做
+
+### MCP 桥：Agent 外部工具生态（stdio / streamable HTTP 双传输）
 ### 工具步骤文案统一 i18n（工具标签注册表）
 - **单一注册表**：新增 `lib/agent/tool-labels.ts`——`toolStepLabel()` 统一「工具原始名 → 用户可读文案」，带参富文案（节点名/技能名/生成类型/操作计数）内聚 detail；画布面板 `stepAction` 与对话 store `toolLabel` 两套手写 switch 收敛删除，步骤行/确认卡/子任务进度行同源取词
 - **MCP 外部工具可读化**：`mcp__{serverId}__{tool}` 在步骤行与确认卡显示「外部工具 · {短名}」，完整名收进悬停提示；未注册工具兜底显示原始名

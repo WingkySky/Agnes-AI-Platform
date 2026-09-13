@@ -723,6 +723,21 @@ multipart 上传，支持 jpeg/png/webp，≤5MB，存 `uploads/preset-covers/`�
 
 响应 `data`: `{ "text": "内容块拼接文本", "is_error": false }`。连接/超时/工具错误统一 502（detail 带原因）；服务器不存在或停用 404。
 
+### 市场接口（需管理员）——发现与一键安装
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/mcp/market/sources` | 市场源列表（官方内置目录不在此表） |
+| POST | `/api/mcp/market/sources` | 添加自建源（`{ name, url }`，URL 指向 manifest JSON，仅 http(s)） |
+| DELETE | `/api/mcp/market/sources/{id}` | 删除源（其市场项一并移除，已安装服务器不受影响） |
+| POST | `/api/mcp/market/sources/{id}/refresh` | 拉取 manifest 并整源替换市场项（超时 15s/≤2MB/≤100 条） |
+| GET | `/api/mcp/market/items?q=` | 市场项合并列表（官方 + 远程，带 `installed` 标记；官方目录首次访问自动入库） |
+| POST | `/api/mcp/market/install` | 从市场项安装：`{ slug, name?, command?, args?, url?, env?, headers? }`（预填可覆盖，密钥按声明的 key 传入合成；成功后 `market_slug` 写入安装溯源） |
+
+manifest 格式：`{ "name": "...", "items": [{ "slug", "name", "description", "category", "transport": "stdio\|http", "command", "args", "url", "env_fields": [{key, description, required}], "headers_fields": [...], "tools_preview": [...] }] }`。
+
 ### 数据表
 
-- `mcp_servers`：name（唯一）/ transport('stdio'\|'http') / command / args_json / env_json / url / headers_json / enabled / created_at / updated_at。stdio 的 env_json 与 http 的 headers_json 为敏感值存储，仅服务端持有。
+- `mcp_servers`：name（唯一）/ transport('stdio'\|'http') / command / args_json / env_json / url / headers_json / enabled / market_slug（市场安装溯源）/ created_at / updated_at。stdio 的 env_json 与 http 的 headers_json 为敏感值存储，仅服务端持有。
+- `mcp_market_sources`：name / url / enabled / last_fetched_at / item_count（管理员自建市场源）。
+- `mcp_market_items`：source_type('official'\|'remote') / source_id / slug（唯一）/ category / payload（市场项完整定义 JSON）。
