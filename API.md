@@ -696,3 +696,33 @@ multipart 上传，支持 jpeg/png/webp，≤5MB，存 `uploads/preset-covers/`�
 | `model` | string | 否 | 模型提示：命中聊天模型注册表才采用（分镜管线/对话模型选择）；未命中（含内核占位 id 如 `agnes-chat`）走后端默认解析链（用户偏好 > 管理员配置 > 注册表第一个） |
 
 响应：`text/event-stream`，原样转发上游 SSE 行（`data: {...}` chunk 与 `data: [DONE]` 收尾；上游提前断流时补发 `[DONE]`，连接异常下发 `{"error": {...}}` 事件后收尾）。**本端点为统一 ok() envelope 的特例**（流式响应不包装）；上游非 200 时返回 HTTP 502。前端由 openai-completions 适配负责 SSE 解析与 tool_calls 增量聚合。
+
+## 13. MCP 服务器（Agent 外部工具桥）
+
+管理员配置 MCP 服务器（stdio / streamable HTTP 双传输），Agent 经 BFF 调用其工具。工具在前端内核以 `mcp__{serverId}__{tool}` 命名注入；env/headers 的值只存服务端，任何响应不回传（只回键名）。
+
+### 管理接口（需管理员）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/mcp/servers` | 服务器列表（脱敏：env/headers 只回 `env_keys`/`header_keys` 键名） |
+| POST | `/api/mcp/servers` | 创建。stdio 传 `command`+`args`+`env`；http 传 `url`+`headers`；`transport` 必填 `stdio\|http` |
+| PUT | `/api/mcp/servers/{id}` | 更新。env/headers **缺省=保留原值，传 `{}`=清空**；切换传输类型时两侧密钥重置 |
+| DELETE | `/api/mcp/servers/{id}` | 删除（同时回收后端连接） |
+| POST | `/api/mcp/servers/{id}/test` | 连接测试，返回该服务器工具清单（name/description/input_schema） |
+
+### 工具调用（需登录）
+
+### POST /api/mcp/call — Agent 调用 MCP 工具
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `server_id` | int | 是 | 服务器 id（必须存在且 enabled） |
+| `tool` | string | 是 | 工具名 |
+| `arguments` | object | 否 | 工具入参 |
+
+响应 `data`: `{ "text": "内容块拼接文本", "is_error": false }`。连接/超时/工具错误统一 502（detail 带原因）；服务器不存在或停用 404。
+
+### 数据表
+
+- `mcp_servers`：name（唯一）/ transport('stdio'\|'http') / command / args_json / env_json / url / headers_json / enabled / created_at / updated_at。stdio 的 env_json 与 http 的 headers_json 为敏感值存储，仅服务端持有。

@@ -69,6 +69,7 @@ from app.services.video_poller import poller_manager
 from app.services.image_poller import image_poller_manager
 from app.services.agnes_client import agnes_client
 from app.services.provider_registry import provider_registry
+from app.routes import mcp as mcp_route
 
 # ---------- 日志配置（替换原 logging.basicConfig）----------
 # 使用自定义日志系统：控制台 + 文件轮转 + JSON 错误日志 + Request ID 追踪
@@ -302,6 +303,7 @@ app.include_router(uploads_route.router, prefix="/api", tags=["上传"])
 app.include_router(admin_review_route.router, prefix="/api", tags=["管理员-统一审核"])
 app.include_router(asset_route.router, prefix="/api", tags=["管理员-资源转存"])
 app.include_router(scenes_route.router, prefix="/api", tags=["3D 场景（导演台）"])
+app.include_router(mcp_route.router, prefix="/api", tags=["MCP 服务器"])
 app.include_router(projects_route.router, prefix="/api", tags=["项目制创作"])
 app.include_router(canvas_route.router, prefix="/api", tags=["无限画布"])
 

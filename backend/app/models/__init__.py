@@ -15,6 +15,7 @@ from app.models.credit_rule import CreditRule
 from app.models.credit_transaction import CreditTransaction
 from app.models.user_preference import UserPreference, DEFAULT_PREFERENCES
 from app.models.system_config import SystemConfig, DEFAULT_SYSTEM_CONFIGS
+from app.models.mcp_server import McpServer
 from app.models.pipeline import (
     PipelineTemplate,
     ScriptTemplate,
