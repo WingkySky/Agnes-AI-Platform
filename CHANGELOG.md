@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+### MCP 桥：Agent 外部工具生态（stdio / streamable HTTP 双传输）
+- **后端网关**：`mcp_servers` 全局配置表 + 官方 mcp SDK 连接管理——每服务器一个 owner task 持有客户端上下文（anyio 作用域约束），会话缓存 + 配置指纹失效重建，stdio 子进程懒拉起、调用失败即报错下次重建；env/headers 值仅存服务端，所有响应只回键名
+- **管理接口（管理员）**：服务器 CRUD（名称唯一/transport 校验；env/headers **缺省=保留原值，传 {}=清空**，切换传输类型两侧密钥重置）、`POST /{id}/test` 连接测试返回工具清单
+- **Agent 接口（登录用户）**：`GET /api/mcp/tools` 按服务器聚合工具清单（配置指纹缓存，单服务器故障跳过不阻塞）、`POST /api/mcp/call` 工具调用 BFF（连接/超时/工具错误统一 502）
+- **前端工具注入**：`lib/agent/mcp.ts` 转译 MCP 工具为内核工具（命名 `mcp__{serverId}__{tool}`、description 前缀服务器名、Type.Unsafe schema 透传）；内核 `extraTools` 构造注入 + `setExtraTools` 运行时重装配（流式中跳过）；两个 store 会话建立时后台刷新，失败降级为空
+- **策略**：`mcp__` 前缀走独立 'mcp' 组——confirm 档每工具首次过门（复用 gatedKinds，确认卡走工具卡分支带参数与子任务来源），auto 直通、readonly 拒绝；子代理经 createChildKernel 继承 MCP 工具并同套过门；技能 allowed-tools 白名单天然兼容 `mcp__` 工具名
+- **管理页**：`/admin/mcp`（McpServersView，管理员）——表格+弹窗 CRUD、启停、连接测试与工具清单预览、密钥键名标签（值不回显）；侧边栏菜单、路由、i18n 中英同步
+- **文档**：API.md 新增第 13 章；技能编写指南更新"脚本边界"——管理员可配本地 MCP 服务器提供脚本类能力，`allowed-tools` 可列 `mcp__` 工具
+- **测试**：后端 pytest 11 例（脱敏/CRUD 语义/transport 校验/鉴权/连接缓存指纹），前端 vitest 240 例全绿（转译 6 例 + policy mcp 组 2 例）
+
+### 子代理（agent_delegate）：任务拆解 / 多视角评审 / 批量子流程
 ### 子代理（agent_delegate）：任务拆解 / 多视角评审 / 批量子流程
 - **agent_delegate 工具**（画布 write 组 + 对话工具组）：把可独立完成的子任务委派给子代理执行——长任务上下文隔离（过程细节不进主对话，父只收结论摘要）、多视角并行评审（不同角色视角各派一个）、批量子流程（逐分镜生成→自检→修正）；参数 task / context / tools_allowed（只能收窄）
 - **子运行时复用 AgentKernel**（`lib/agent/subagent.ts`）：子内核继承父的 LLM 通道/当前模型/鉴权/工具上下文；硬上限并发 ≤3（信号量排队）、子回合 ≤20、摘要 ≤4000 字符截断；禁递归（子工具清单剔除自身，tools_allowed 白名单亦禁止）
