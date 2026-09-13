@@ -11,7 +11,7 @@
 import { Type } from 'typebox'
 import type { HostTool } from './kernel'
 import { callMcpTool, fetchMcpAgentTools } from '@/api/mcp'
-import type { McpAgentTool } from '@/api/mcp'
+import type { McpAgentTool, McpServerTools } from '@/api/mcp'
 
 export const MCP_TOOL_PREFIX = 'mcp__'
 
@@ -36,12 +36,41 @@ function toHostTool(serverId: number, serverName: string, def: McpAgentTool): Ho
   }
 }
 
-/** 拉取全部启用服务器的工具并转译为内核工具组（会话建立时调用；失败降级为空） */
-export async function buildMcpTools(): Promise<HostTool[]> {
+/** 已接入能力（面板清单展示用，按服务器聚合） */
+export interface McpCapability {
+  name: string
+  tools: string[]
+}
+
+/** 能力摘要（系统提示追加段）：按服务器列工具清单，提升模型对 mcp__ 工具的触发率 */
+export function mcpCapabilitySummary(servers: McpServerTools[]): string {
+  const lines = servers
+    .filter((s) => (s.tools ?? []).length > 0)
+    .map((s) => {
+      const shown = s.tools.slice(0, 8).map((t) => t.name).join('、')
+      const more = s.tools.length > 8 ? ` 等 ${s.tools.length} 个工具` : ''
+      return `- ${s.server_name}（${shown}${more}）`
+    })
+  if (!lines.length) return ''
+  return ['## 已接入的外部能力（MCP）', '', '当任务需要以下能力时，优先使用对应的 mcp__ 前缀工具：', ...lines].join('\n')
+}
+
+/** 拉取工具清单并转译：工具组 + 系统能力摘要一次取齐（失败降级为空，不阻塞会话） */
+export async function fetchMcpBundle(): Promise<{ tools: HostTool[]; summary: string; capabilities: McpCapability[] }> {
   try {
     const servers = await fetchMcpAgentTools()
-    return servers.flatMap((s) => (s.tools ?? []).map((t) => toHostTool(s.server_id, s.server_name, t)))
+    const usable = servers.filter((s) => (s.tools ?? []).length > 0)
+    return {
+      tools: usable.flatMap((s) => s.tools.map((t) => toHostTool(s.server_id, s.server_name, t))),
+      summary: mcpCapabilitySummary(usable),
+      capabilities: usable.map((s) => ({ name: s.server_name, tools: s.tools.map((t) => t.name) })),
+    }
   } catch {
-    return []
+    return { tools: [], summary: '', capabilities: [] }
   }
+}
+
+/** 拉取全部启用服务器的工具并转译为内核工具组（会话建立时调用；失败降级为空） */
+export async function buildMcpTools(): Promise<HostTool[]> {
+  return (await fetchMcpBundle()).tools
 }

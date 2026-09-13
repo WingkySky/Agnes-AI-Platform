@@ -3364,6 +3364,8 @@ const zhCN = {
     stylePromptPlaceholder: '描述你想要的画面风格，如：日式真实电视剧质感，冷色调',
     stylePromptEmpty: '请输入风格描述',
     delegateProgress: '子任务运行中 · 第 {n} 回合',
+    capabilities: '外部能力',
+    capabilitiesEmpty: '尚未接入外部能力（管理员可在后台 MCP 服务器/市场配置）',
     confirmSource: '来自子任务',
     stageTitle: '阶段完成',
     stageContinue: '满意，继续下一步',

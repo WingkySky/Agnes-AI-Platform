@@ -3373,6 +3373,8 @@ const enUS = {
     stylePromptPlaceholder: 'Describe the look you want, e.g. Japanese live-action drama texture, cool tones',
     stylePromptEmpty: 'Please enter a style description',
     delegateProgress: 'Subtask running · round {n}',
+    capabilities: 'Capabilities',
+    capabilitiesEmpty: 'No external capabilities yet (admins can configure MCP servers/market in the admin console)',
     confirmSource: 'From subtask',
     stageTitle: 'Stage complete',
     stageContinue: 'Good, continue',

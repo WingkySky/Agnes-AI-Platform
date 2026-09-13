@@ -189,6 +189,25 @@
 
           <!-- 对话模型胶囊（共享组件；选择真实生效：内核 model id → BFF 命中 chat 注册表） -->
           <template #trail>
+            <div v-if="agent.mcpCapabilities.length" class="cap-anchor">
+              <button
+                type="button"
+                class="cap-pill"
+                :style="{ color: theme.toolbar.item, borderColor: theme.toolbar.border }"
+                :title="t('agent.capabilities')"
+                @click="capOpen = !capOpen"
+              >
+                <Zap :size="12" />
+                <span>{{ t('agent.capabilities') }}</span>
+                <span class="cap-count">{{ agent.mcpCapabilities.length }}</span>
+              </button>
+              <div v-if="capOpen" class="cap-dropdown" :style="{ borderColor: theme.toolbar.border, background: theme.toolbar.panel }" @click.stop>
+                <div v-for="c in agent.mcpCapabilities" :key="c.name" class="cap-item">
+                  <div class="cap-item-name" :style="{ color: theme.node.text }">{{ c.name }}</div>
+                  <div class="cap-item-tools" :style="{ color: theme.node.muted }">{{ c.tools.slice(0, 6).join('、') }}{{ c.tools.length > 6 ? ' …' : '' }}</div>
+                </div>
+              </div>
+            </div>
             <ChatModelPill
               :model-id="currentChatModelId"
               :models="chatModelChoices"
@@ -611,6 +630,9 @@ function removeAttach(idx: number): void {
 
 // ---------- "/" 技能快速清单（共享组合式；菜单渲染用共享 ChatSkillMenu） ----------
 const { skillMenuVisible, filteredSkills, skillHighlight, pickSkill, handleMenuKeydown } = useSlashSkills(draft, () => !agent.busy)
+
+// 外部能力（MCP）清单下拉
+const capOpen = ref(false)
 
 function onDraftKeydown(e: KeyboardEvent): void {
   handleMenuKeydown(e)
@@ -1262,4 +1284,61 @@ watch(
   padding: 0;
 }
 
+
+.cap-anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+.cap-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  border: 1px solid;
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.cap-count {
+  font-size: 10px;
+  opacity: 0.75;
+}
+
+.cap-dropdown {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  min-width: 220px;
+  max-width: 300px;
+  max-height: 240px;
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid;
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
+}
+
+.cap-item {
+  padding: 5px 6px;
+  border-radius: 6px;
+}
+
+.cap-item:hover {
+  background: rgba(127, 127, 127, 0.12);
+}
+
+.cap-item-name {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.cap-item-tools {
+  font-size: 11px;
+  margin-top: 2px;
+  word-break: break-all;
+}
 </style>
