@@ -169,6 +169,12 @@ const routes: RouteRecordRaw[] = [
         meta: { titleKey: 'admin.modelConfig', requiresAdmin: true }
       },
       {
+        path: 'mcp',
+        name: 'admin-mcp',
+        component: () => import('@/views/admin/McpServersView.vue'),
+        meta: { titleKey: 'nav.mcpServers', requiresAdmin: true }
+      },
+      {
         path: 'system-models',
         name: 'admin-system-models',
         component: () => import('@/views/admin/ModelServiceConfigView.vue'),
