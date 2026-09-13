@@ -24,6 +24,7 @@ from app.models.mcp_market import McpMarketItem, McpMarketSource
 from app.models.mcp_server import McpServer
 from app.models.user import User
 from app.services import mcp_market_service, mcp_service
+from app.services import memory_service
 
 logger = logging.getLogger("agnes_platform")
 router = APIRouter(prefix="/mcp", tags=["MCP 服务器"])
@@ -302,3 +303,41 @@ async def market_install(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return ok(server.to_safe_dict(), f"「{server.name}」已从市场安装")
+
+
+# ---------- 用户记忆库（登录用户；官方 memory 服务器 per_user 隔离） ----------
+
+class MemoryPreferenceDelete(BaseModel):
+    """删除单条偏好"""
+    observation: str
+
+
+@router.get("/memory/summary", summary="[登录用户] 当前用户的偏好记忆摘要")
+async def memory_summary(
+    db: AsyncSession = Depends(get_async_db),
+    _user: User = Depends(get_current_user),
+):
+    return ok(await memory_service.read_preferences(db, user_id=_user.id))
+
+
+@router.delete("/memory/preference", summary="[登录用户] 删除单条偏好记忆")
+async def memory_delete_preference(
+    body: MemoryPreferenceDelete,
+    db: AsyncSession = Depends(get_async_db),
+    _user: User = Depends(get_current_user),
+):
+    done = await memory_service.delete_preference(db, user_id=_user.id, observation=body.observation)
+    if not done:
+        raise HTTPException(status_code=404, detail="记忆服务器未安装或未启用")
+    return ok(None, "已删除")
+
+
+@router.delete("/memory/preferences", summary="[登录用户] 清空偏好记忆（保留图谱其他记忆）")
+async def memory_clear_preferences(
+    db: AsyncSession = Depends(get_async_db),
+    _user: User = Depends(get_current_user),
+):
+    done = await memory_service.clear_preferences(db, user_id=_user.id)
+    if not done:
+        raise HTTPException(status_code=404, detail="记忆服务器未安装或未启用")
+    return ok(None, "偏好记忆已清空")
