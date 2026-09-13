@@ -87,6 +87,7 @@
                 <span class="cb-step-label">{{ step.label }}</span>
                 <span class="cb-step-status">{{ statusText(step.status) }}</span>
               </div>
+              <div v-if="step.progress" class="cb-step-progress">{{ step.progress }}</div>
               <slot name="step-extra" :step="step" />
             </template>
           </div>
@@ -349,6 +350,15 @@ function mediaImageIndex(currentIdx: number): number {
   gap: 6px;
   font-size: 12px;
   color: var(--cb-muted, var(--agnes-text-muted, #8b93a8));
+}
+
+.cb-step-progress {
+  font-size: 11px;
+  color: var(--cb-muted, var(--agnes-text-muted, #8b93a8));
+  padding-left: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .cb-step .el-icon {

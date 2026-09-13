@@ -96,6 +96,7 @@
             <!-- 阶段门确认卡片：阶段成果审阅 -->
             <div v-if="agent.pendingConfirm?.kind === 'stage'" class="confirm-card" :style="confirmCardStyle">
               <div class="confirm-title" :style="{ color: theme.node.text }">{{ t('agent.stageTitle') }}：{{ agent.pendingConfirm.stage }}</div>
+              <div v-if="agent.pendingConfirm.source" class="confirm-source" :style="{ color: theme.node.muted }">{{ t('agent.confirmSource') }}：{{ agent.pendingConfirm.source }}</div>
               <div class="confirm-summary" :style="{ color: theme.node.text }">{{ agent.pendingConfirm.summary }}</div>
               <div class="confirm-btns">
                 <button
@@ -488,7 +489,15 @@ function stepToView(step: AgentToolStep): ChatStepView {
     tooltip: step.tool,
     status: step.status,
     result: step.result,
+    progress: delegateProgressText(step),
   }
+}
+
+/** agent_delegate 步骤的实时进度文本（running 态渲染） */
+function delegateProgressText(step: AgentToolStep): string | undefined {
+  if (step.status !== 'running' || !step.delegateProgress) return undefined
+  const { round, tool } = step.delegateProgress
+  return `${t('agent.delegateProgress', { n: round })}${tool ? ` · ${tool}` : ''}`
 }
 
 const items = computed<ChatBubbleItem[]>(() =>
@@ -1182,6 +1191,10 @@ watch(
 .confirm-title {
   font-size: 12px;
   font-weight: 600;
+}
+
+.confirm-source {
+  font-size: 11px;
 }
 
 .confirm-tool {

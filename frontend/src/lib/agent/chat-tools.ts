@@ -25,8 +25,6 @@ import { loadAgentSkillFull, readSkillResource, saveAgentSkill, SKILL_CONTENT_MA
 export interface ChatToolContext {
   /** 最近一次成功生成的媒体 URL（图生图/图生视频默认参考） */
   getRecentMediaUrl(type: 'image' | 'video'): string | null
-  /** 子代理进度上报（agent_delegate 执行器消费；chat store 更新父时间线步骤行，缺省无进度） */
-  reportDelegateProgress?: (callId: string, text: string) => void
 }
 
 function isChatCtx(ctx: unknown): ctx is ChatToolContext {
@@ -324,19 +322,15 @@ const delegateTool = {
     context: Type.Optional(Type.String({ description: '子任务需要的背景材料（原文片段/约束/已确认的设定）' })),
     tools_allowed: Type.Optional(Type.Array(Type.String(), { description: '可选：收窄子代理可用工具名清单（只能收窄不能放大，禁止包含 agent_delegate）' })),
   }),
-  execute: async (args: Record<string, unknown>, ctx: unknown, callId?: string, parent?: AgentKernel): Promise<AgentToolResult> => {
+  execute: async (args: Record<string, unknown>, _ctx: unknown, callId?: string, parent?: AgentKernel): Promise<AgentToolResult> => {
     if (!parent) return { ok: false, error: '子代理不可用（缺少父内核上下文）' }
-    const report = isChatCtx(ctx) && typeof ctx.reportDelegateProgress === 'function' ? ctx.reportDelegateProgress : undefined
     return runSubagent(
       {
         task: typeof args.task === 'string' ? args.task : '',
         context: typeof args.context === 'string' ? args.context : undefined,
         tools_allowed: Array.isArray(args.tools_allowed) ? args.tools_allowed.filter((x): x is string => typeof x === 'string') : undefined,
       },
-      subagentHostFromParent(parent, {
-        tools: CHAT_TOOLS,
-        onProgress: report && callId ? (text) => report(callId, text) : undefined,
-      }),
+      subagentHostFromParent(parent, { tools: CHAT_TOOLS, callId }),
     )
   },
 }

@@ -13,6 +13,7 @@ import { useCanvasStore } from '@/stores/canvas'
 import { useUserStore } from '@/stores/user'
 import { AgentKernel, rebuildTimeline } from '@/lib/agent/kernel'
 import type { KernelEvent, KernelTimelineMessage, AgentImageAttachment } from '@/lib/agent/kernel'
+import { setDelegateProgressSink } from '@/lib/agent/subagent'
 import { MAX_IMAGES_PER_MESSAGE } from '@/lib/agent/attachments'
 import { AGENT_SYSTEM_PROMPT_BASE, buildAgentSystemPrompt } from '@/lib/agent/system-prompt'
 import { listAgentSkills } from '@/lib/agent/skills'
@@ -36,6 +37,8 @@ export interface AgentToolStep {
   status: 'pending' | 'running' | 'done' | 'error' | 'rejected'
   /** 回填给 LLM 的结果 JSON（恢复会话时重建上下文用） */
   result: string | null
+  /** agent_delegate 步骤的实时子任务进度（running 态渲染，结束后不清理由结果覆盖展示） */
+  delegateProgress?: { round: number; tool: string | null }
 }
 
 export interface AgentMessage {
@@ -54,6 +57,8 @@ export interface AgentPendingConfirm {
   args: Record<string, unknown>
   stage: string
   summary: string
+  /** 子代理门请求的来源标签（确认卡展示"来自子任务"） */
+  source?: string
 }
 
 const STOPPED_NOTICE = '已停止执行。进行中的生成任务会继续在后台完成，结果仍会写回对应节点；你可以随时继续对话。'
@@ -146,6 +151,11 @@ export const useAgentStore = defineStore('agent', {
         },
       })
       kernel.subscribe((e) => boundStore?._onKernelEvent(e))
+      // 子代理进度 sink：delegate 步骤行实时更新（running 态）
+      setDelegateProgressSink(kernel, (callId, info) => {
+        const step = store._findStep(callId)
+        if (step && step.status === 'running') step.delegateProgress = info
+      })
       // 面板直接改 store.mode：同步内核工具清单
       this.$subscribe(() => {
         kernel?.setMode(store.mode)
@@ -204,7 +214,7 @@ export const useAgentStore = defineStore('agent', {
           break
         }
         case 'confirm_request': {
-          this.pendingConfirm = { kind: e.kind, tool: e.tool, args: e.args, stage: e.stage, summary: e.summary }
+          this.pendingConfirm = { kind: e.kind, tool: e.tool, args: e.args, stage: e.stage, summary: e.summary, source: e.source }
           break
         }
         case 'done': {

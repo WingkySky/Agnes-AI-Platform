@@ -22,14 +22,30 @@ export interface DelegateInput {
   tools_allowed?: string[]
 }
 
+/** 子代理进度快照（store 渲染成步骤行文本） */
+export interface DelegateProgress {
+  round: number
+  /** 当前执行的工具名（空闲时 null） */
+  tool: string | null
+}
+
+/** 宿主进度 sink 注册表：store 在内核创建时按实例注册，delegate 进度按父内核路由到对应会话时间线 */
+const progressSinks = new WeakMap<AgentKernel, (callId: string, info: DelegateProgress) => void>()
+
+export function setDelegateProgressSink(parent: AgentKernel, sink: (callId: string, info: DelegateProgress) => void): void {
+  progressSinks.set(parent, sink)
+}
+
 /** 子代理宿主（由工具执行器从父内核组装） */
 export interface SubagentHost {
   /** 父内核：门请求经 authorizeTool 前移；子内核经 createChildKernel 创建（自动注册停止传导） */
   parent: AgentKernel
   /** 子代理可用工具组（父宿主工具组；delegate 剔除与 tools_allowed 收窄在执行器内做） */
   getTools: () => HostTool[]
-  /** 进度上报（store 更新父时间线步骤行） */
-  onProgress?: (text: string) => void
+  /** delegate 工具调用的机制层 callId（进度 sink 据此定位父时间线步骤行） */
+  callId?: string
+  /** 进度上报覆盖（缺省走 setDelegateProgressSink 注册的 sink） */
+  onProgress?: (info: DelegateProgress) => void
   /** 父流程已请求停止（子工具直接拒执行，防僵尸子循环） */
   isStopped?: () => boolean
 }
@@ -98,14 +114,15 @@ function lastAssistantText(child: AgentKernel): string {
   return ''
 }
 
-/** 从父内核组装子代理宿主（isStopped 缺省读父内核停止标记） */
+/** 从父内核组装子代理宿主（进度缺省路由到 setDelegateProgressSink 注册的宿主 sink） */
 export function subagentHostFromParent(
   parent: AgentKernel,
-  opts: { tools: HostTool[]; onProgress?: (text: string) => void; isStopped?: () => boolean },
+  opts: { tools: HostTool[]; callId?: string; onProgress?: (info: DelegateProgress) => void; isStopped?: () => boolean },
 ): SubagentHost {
   return {
     parent,
     getTools: () => opts.tools,
+    callId: opts.callId,
     onProgress: opts.onProgress,
     isStopped: opts.isStopped ?? (() => parent.isStopRequested),
   }
@@ -136,7 +153,11 @@ export async function runSubagent(input: DelegateInput, host: SubagentHost): Pro
     let currentTool = ''
     let stopped = false
     let childError: string | null = null
-    const report = () => host.onProgress?.(`子任务运行中 · 第 ${Math.max(round, 1)} 回合${currentTool ? ` · ${currentTool}` : ''}`)
+    const report = () => {
+      const info: DelegateProgress = { round: Math.max(round, 1), tool: currentTool || null }
+      if (host.onProgress) host.onProgress(info)
+      else if (host.callId) progressSinks.get(host.parent)?.(host.callId, info)
+    }
     const off = child.subscribe((e) => {
       if (e.type === 'round_start') {
         round++

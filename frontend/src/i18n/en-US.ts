@@ -3314,6 +3314,8 @@ const enUS = {
     stylePromptTitle: 'Custom style',
     stylePromptPlaceholder: 'Describe the look you want, e.g. Japanese live-action drama texture, cool tones',
     stylePromptEmpty: 'Please enter a style description',
+    delegateProgress: 'Subtask running · round {n}',
+    confirmSource: 'From subtask',
     stageTitle: 'Stage complete',
     stageContinue: 'Good, continue',
     stagePause: 'Pause, I want changes',

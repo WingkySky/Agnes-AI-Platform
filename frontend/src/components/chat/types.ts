@@ -14,6 +14,8 @@ export interface ChatStepView {
   status: 'pending' | 'running' | 'done' | 'error' | 'rejected'
   /** 工具结果原文（宿主插槽可用于领域渲染，如画布风格卡片） */
   result?: string | null
+  /** 运行态实时进度文本（agent_delegate 子任务进度，宿主 i18n 组装） */
+  progress?: string
 }
 
 /** 用户消息附图（缩略图，点击预览） */

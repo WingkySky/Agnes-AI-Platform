@@ -312,6 +312,8 @@ export interface AgentStepRecord {
   args?: Record<string, unknown>
   status: string
   result?: string | null
+  /** agent_delegate 步骤的实时子任务进度（运行态内存字段，不参与落库语义） */
+  delegateProgress?: { round: number; tool: string | null }
 }
 
 /** 画布 Agent 会话全量同步载荷（POST 创建 / PUT 同步共用形状） */

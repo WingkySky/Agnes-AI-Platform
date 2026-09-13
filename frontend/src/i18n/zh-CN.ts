@@ -3305,6 +3305,8 @@ const zhCN = {
     stylePromptTitle: '自定义风格',
     stylePromptPlaceholder: '描述你想要的画面风格，如：日式真实电视剧质感，冷色调',
     stylePromptEmpty: '请输入风格描述',
+    delegateProgress: '子任务运行中 · 第 {n} 回合',
+    confirmSource: '来自子任务',
     stageTitle: '阶段完成',
     stageContinue: '满意，继续下一步',
     stagePause: '暂停，我要调整',

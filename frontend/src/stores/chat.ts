@@ -31,6 +31,7 @@ import { CHAT_TOOLS } from '@/lib/agent/chat-tools'
 import { CHAT_SYSTEM_PROMPT_BASE, buildChatSystemPrompt } from '@/lib/agent/chat-system-prompt'
 import { listAgentSkills } from '@/lib/agent/skills'
 import { toBackendMessages } from '@/lib/agent/session-store'
+import { setDelegateProgressSink } from '@/lib/agent/subagent'
 import type {
   ProjectableMessage,
 } from '@/lib/agent/session-store'
@@ -125,7 +126,14 @@ function toolLabel(tool: string, args?: Record<string, unknown>): string {
 }
 
 function toStepView(s: AgentStepRecord): ChatStepView {
-  return { callId: s.callId, label: toolLabel(s.tool, s.args), tooltip: s.tool, status: toStepStatus(s.status) }
+  return { callId: s.callId, label: toolLabel(s.tool, s.args), tooltip: s.tool, status: toStepStatus(s.status), progress: delegateProgressText(s) }
+}
+
+/** agent_delegate 步骤的实时进度文本（running 态渲染，i18n 组装） */
+function delegateProgressText(s: AgentStepRecord): string | undefined {
+  if (s.status !== 'running' || !s.delegateProgress) return undefined
+  const { round, tool } = s.delegateProgress
+  return `${t('agent.delegateProgress', { n: round })}${tool ? ` · ${tool}` : ''}`
 }
 
 function toStepStatus(status: string): ChatStepView['status'] {
@@ -354,6 +362,12 @@ export const useChatStore = defineStore('chat', {
         }
       }
       k.subscribe((e) => this._onKernelEvent(sessionId, e))
+      // 子代理进度 sink：delegate 步骤行实时更新（running 态）
+      setDelegateProgressSink(k, (callId, info) => {
+        if (!this.sessions.some((s) => s.id === sessionId)) return
+        const step = this._findStep(this._messagesOf(sessionId), callId)
+        if (step && step.status === 'running') step.delegateProgress = info
+      })
       return k
     },
 
