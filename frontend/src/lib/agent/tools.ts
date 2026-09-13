@@ -67,7 +67,7 @@ export interface AgentTool {
   description: string
   /** TypeBox 定义（即 JSON Schema，单一来源）：机制层直接消费；OpenAI function 格式由 agentToolSchemasOpenAI 直出 */
   parameters: TSchema
-  execute: (args: Record<string, unknown>, canvas: AgentCanvasStore) => Promise<AgentToolResult> | AgentToolResult
+  execute: (args: Record<string, unknown>, canvas: AgentCanvasStore, callId?: string) => Promise<AgentToolResult> | AgentToolResult
 }
 
 // ---------- 参数安全读取（不做类型断言） ----------

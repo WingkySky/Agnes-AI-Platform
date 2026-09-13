@@ -1,6 +1,7 @@
 /* AgentKernel 直测：假 LLM 流 + 内存画布 store（不经过 Pinia） */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { Type } from 'typebox'
 import { AgentKernel, rebuildTimeline } from '../kernel'
 import type { AgentKernelDeps, KernelEvent } from '../kernel'
 import { AGENT_SYSTEM_PROMPT_BASE } from '../system-prompt'
@@ -300,6 +301,112 @@ describe('AgentKernel：技能工具围栏', () => {
     } finally {
       setActiveSkillScope([])
     }
+  })
+})
+
+describe('AgentKernel：子代理门扩展', () => {
+  it('门请求 FIFO：confirm 按入队顺序逐个唤醒，放行后同阶段不再重复拦', async () => {
+    const { kernel, events } = makeKernel([], 'confirm')
+    const p1 = kernel.authorizeTool('agent_run_generation', { panel_id: 'p1', kind: 'image' })
+    const p2 = kernel.authorizeTool('agent_run_generation', { panel_id: 'p2', kind: 'image' })
+    await new Promise((r) => setTimeout(r, 0))
+    // 门未决阶段不共享门状态，两个请求都弹卡入队
+    expect(events.filter((e) => e.type === 'confirm_request').length).toBe(2)
+
+    kernel.confirm(true)
+    expect((await p1).allowed).toBe(true)
+    // FIFO：第一个确认后第二个仍在队中等待，不会被误唤醒
+    const secondSettled = await Promise.race([p2.then(() => true), new Promise((r) => setTimeout(() => r(false), 10))])
+    expect(secondSettled).toBe(false)
+
+    kernel.confirm(true)
+    expect((await p2).allowed).toBe(true)
+    // 门状态父回合共享：同 kind 已过门，第三个同阶段请求直通
+    const p3 = await kernel.authorizeTool('agent_run_generation', { panel_id: 'p3', kind: 'image' })
+    expect(p3.allowed).toBe(true)
+    expect(events.filter((e) => e.type === 'confirm_request').length).toBe(2)
+  })
+
+  it('子代理门请求带 source 标签透传到确认卡事件', async () => {
+    const { kernel, events } = makeKernel([], 'confirm')
+    const gate = kernel.authorizeTool('agent_run_generation', { panel_id: 'p1', kind: 'image' }, '子任务:分镜1')
+    await new Promise((r) => setTimeout(r, 0))
+    const req = events.find((e) => e.type === 'confirm_request')
+    expect(req && 'source' in req && req.source === '子任务:分镜1').toBe(true)
+    kernel.confirm(true)
+    expect((await gate).allowed).toBe(true)
+  })
+
+  it('requestStop：挂起门按拒绝放行（stop 语义），注册的子代理内核一并中止', async () => {
+    const { kernel } = makeKernel([], 'confirm')
+    const gate = kernel.authorizeTool('agent_run_generation', { panel_id: 'p1', kind: 'image' }, '子任务:分镜1')
+    await new Promise((r) => setTimeout(r, 0))
+
+    const child = new AgentKernel({
+      systemPrompt: '子代理',
+      getAuthToken: async () => null,
+      streamFn: createFakeStreamFn([]).streamFn,
+    })
+    const childStopSpy = vi.spyOn(child, 'requestStop')
+    const unregister = kernel.registerChild(child)
+
+    kernel.requestStop()
+    expect(childStopSpy).toHaveBeenCalledTimes(1)
+    const decision = await gate
+    expect(decision.allowed).toBe(false)
+    expect(decision.stop).toBe(true)
+    expect(decision.reason).toContain('停止')
+
+    unregister()
+    kernel.requestStop()
+    expect(childStopSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('maxTurns 可配：上限 2 时第 3 轮触发中止并报错', async () => {
+    const fake = createFakeStreamFn([
+      { toolCalls: [{ id: 't1', name: 'agent_get_state', args: {} }] },
+      { toolCalls: [{ id: 't2', name: 'agent_get_state', args: {} }] },
+      { toolCalls: [{ id: 't3', name: 'agent_get_state', args: {} }] },
+    ])
+    const kernel = new AgentKernel({
+      getCanvas: makeCanvas,
+      getMode: () => 'auto',
+      systemPrompt: AGENT_SYSTEM_PROMPT_BASE,
+      getAuthToken: async () => 'test-token',
+      streamFn: fake.streamFn,
+      maxTurns: 2,
+    })
+    const events: KernelEvent[] = []
+    kernel.subscribe((e) => events.push(e))
+    await kernel.send('子任务循环')
+    const done = events.find((e) => e.type === 'done')
+    expect(done?.error).toContain('上限（2 轮）')
+    expect(fake.calls.length).toBe(3)
+  })
+
+  it('宿主工具 execute 收到机制层 callId（子代理进度定位用）', async () => {
+    const seen: string[] = []
+    const kernel = new AgentKernel({
+      systemPrompt: AGENT_SYSTEM_PROMPT_BASE,
+      getAuthToken: async () => null,
+      streamFn: createFakeStreamFn([
+        { toolCalls: [{ id: 'host-1', name: 'probe', args: {} }] },
+        { text: 'ok' },
+      ]).streamFn,
+      tools: [
+        {
+          name: 'probe',
+          description: '探针',
+          parameters: Type.Object({}),
+          execute: async (_args, _ctx, callId) => {
+            seen.push(callId ?? '')
+            return { ok: true, data: {} }
+          },
+        },
+      ],
+    })
+    await kernel.send('探针调用')
+    expect(seen).toEqual(['host-1'])
   })
 })
 

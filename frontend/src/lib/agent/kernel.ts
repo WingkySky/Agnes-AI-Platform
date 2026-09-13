@@ -42,15 +42,16 @@ export type KernelEvent =
   | { type: 'tool_start'; callId: string; tool: string; args: Record<string, unknown> }
   | { type: 'tool_end'; callId: string; tool: string; ok: boolean; result: string }
   | { type: 'tool_rejected'; callId: string; tool: string; reason: string }
-  | { type: 'confirm_request'; kind: 'stage'; tool: string; args: Record<string, unknown>; stage: string; summary: string }
+  | { type: 'confirm_request'; kind: 'stage'; tool: string; args: Record<string, unknown>; stage: string; summary: string; source?: string }
   | { type: 'done'; stopped: boolean; error: string | null }
 
-/** 宿主自带工具（chat 宿主等）：结构与画布 AgentTool 对齐，execute 的 ctx 由 deps.toolContext 提供 */
+/** 宿主自带工具（chat 宿主等）：结构与画布 AgentTool 对齐，execute 的 ctx 由 deps.toolContext 提供；
+ *  callId 为机制层工具调用 id（子代理进度定位用） */
 export interface HostTool {
   name: string
   description: string
   parameters: TSchema
-  execute(args: Record<string, unknown>, ctx: unknown): AgentToolResult | Promise<AgentToolResult>
+  execute(args: Record<string, unknown>, ctx: unknown, callId?: string): AgentToolResult | Promise<AgentToolResult>
 }
 
 export interface AgentKernelDeps {
@@ -62,6 +63,8 @@ export interface AgentKernelDeps {
   getAuthToken: () => Promise<string | null>
   /** LLM 流函数（缺省用 provider 适配；测试注入假流） */
   streamFn?: StreamFn
+  /** 单回合 LLM 调用上限（缺省 40；子代理实例传更小值） */
+  maxTurns?: number
   /** 宿主自带工具组：提供则不挂画布工具与阶段门策略（技能围栏仍生效，其余放行） */
   tools?: HostTool[]
   /** 宿主工具执行上下文（缺省用画布 store） */
@@ -93,13 +96,18 @@ interface PendingConfirm {
 export class AgentKernel {
   private agent: Agent
   private listeners: Array<(e: KernelEvent) => void> = []
-  private pending: PendingConfirm | null = null
+  /** 挂起确认 FIFO 队列：并行子代理同时撞门时按序唤醒，确认卡逐张展示 */
+  private pendingQueue: PendingConfirm[] = []
   private stopRequested = false
   private lastError: string | null = null
   private turnCount = 0
   private gatedKinds: string[] = []
+  private maxTurns: number
+  /** 活跃子代理内核（运行期间注册）；requestStop 时全部一并中止 */
+  private children = new Set<AgentKernel>()
 
   constructor(private deps: AgentKernelDeps) {
+    this.maxTurns = deps.maxTurns ?? MAX_TURNS
     this.agent = new Agent({
       streamFn: deps.streamFn ?? agentStreamFn,
       initialState: {
@@ -129,6 +137,14 @@ export class AgentKernel {
     for (const l of this.listeners) l(e)
   }
 
+  /** 注册子代理内核（运行期间），返回注销函数；requestStop 时全部子代理一并中止 */
+  registerChild(child: AgentKernel): () => void {
+    this.children.add(child)
+    return () => {
+      this.children.delete(child)
+    }
+  }
+
   /** 档位切换：同步机制层工具清单（只读档仅挂 read 组；策略层在 beforeToolCall 兜底）。宿主工具组模式无档位，no-op */
   setMode(mode: AgentMode): void {
     if (!this.deps.tools) this.agent.state.tools = this.piTools(mode)
@@ -156,9 +172,9 @@ export class AgentKernel {
       label: tool.name,
       description: tool.description,
       parameters: tool.parameters,
-      execute: async (_toolCallId: string, params: unknown) => {
+      execute: async (toolCallId: string, params: unknown) => {
         const args = isRecord(params) ? params : {}
-        const r = await tool.execute(args, this.deps.toolContext ?? this.deps.getCanvas?.())
+        const r = await tool.execute(args, this.deps.toolContext ?? this.deps.getCanvas?.(), toolCallId)
         if (!r.ok) throw new Error(r.error || '工具执行失败')
         const imageBlocks: ImageContent[] = validImages(r.images).map((i) => ({ type: 'image' as const, data: i.data, mimeType: i.mimeType }))
         return {
@@ -175,17 +191,26 @@ export class AgentKernel {
 
   private async handleBeforeToolCall(ctx: BeforeToolCallContext): Promise<BeforeToolCallResult | undefined> {
     const toolName = ctx.toolCall.name
-    // 技能工具围栏：allowed_tools 非空的技能加载后，白名单外工具一律拒绝（画布/对话宿主都生效）
+    const args = isRecord(ctx.args) ? ctx.args : {}
+    // 技能工具围栏：allowed_tools 非空的技能加载后，白名单外工具一律拒绝（画布/对话/子代理宿主都生效）
     const scope = getActiveSkillScope()
     if (scope && !scope.has(toolName)) {
       const reason = `当前技能限定了可用工具白名单，禁止调用 ${toolName}（允许：${[...scope].join('、')}）`
       this.emit({ type: 'tool_rejected', callId: ctx.toolCall.id, tool: toolName, reason })
       return { block: true, reason }
     }
-    // 宿主自带工具组无档位策略（围栏之外全放行）
-    if (this.deps.tools) return undefined
+    const decision = await this.authorizeTool(toolName, args)
+    if (decision.allowed) return undefined
+    this.emit({ type: 'tool_rejected', callId: ctx.toolCall.id, tool: toolName, reason: decision.reason ?? '工具调用被拒绝' })
+    return { block: true, reason: decision.reason, terminate: decision.stop }
+  }
+
+  /** 门决策唯一入口：父工具循环（beforeToolCall）与子代理门请求共用。
+   *  宿主工具组模式无档位策略（围栏由各宿主 beforeToolCall 负责）；画布宿主走 policy 三档，
+   *  阶段门确认卡入 FIFO 队列，confirm 按序唤醒。source 标记来自子任务的请求，确认卡据此展示来源。 */
+  async authorizeTool(toolName: string, args: Record<string, unknown>, source?: string): Promise<{ allowed: boolean; reason?: string; stop: boolean }> {
+    if (this.deps.tools) return { allowed: true, stop: false }
     const tool = AGENT_TOOLS.find((t) => t.name === toolName)
-    const args = isRecord(ctx.args) ? ctx.args : {}
     const panelId = typeof args.panel_id === 'string' ? args.panel_id : ''
     const panelType = panelId ? this.deps.getCanvas?.().panels.find((p) => p.id === panelId)?.type : undefined
 
@@ -200,15 +225,14 @@ export class AgentKernel {
 
     if (decision.action === 'allow') {
       this.recordGatedKind(toolName, args, panelType)
-      return undefined
+      return { allowed: true, stop: false }
     }
     if (decision.action === 'reject') {
       if (decision.stop) this.stopRequested = true
-      this.emit({ type: 'tool_rejected', callId: ctx.toolCall.id, tool: toolName, reason: decision.reason })
-      return { block: true, reason: decision.reason, terminate: decision.stop }
+      return { allowed: false, reason: decision.reason, stop: decision.stop }
     }
 
-    // 阶段门/阶段汇报：发确认卡片事件并挂起等用户确认；confirm(false) 或 requestStop 唤醒
+    // 阶段门/阶段汇报：发确认卡片事件并入队等用户确认；confirm(false) 或 requestStop 唤醒
     this.emit({
       type: 'confirm_request',
       kind: decision.kind,
@@ -216,19 +240,20 @@ export class AgentKernel {
       args,
       stage: decision.stage,
       summary: decision.summary,
+      source,
     })
     const approved = await new Promise<boolean>((resolve) => {
-      this.pending = { tool: toolName, args, stage: decision.stage, summary: decision.summary, resolve }
+      this.pendingQueue.push({ tool: toolName, args, stage: decision.stage, summary: decision.summary, resolve })
     })
-    this.pending = null
     if (!approved) {
       this.stopRequested = true
-      this.emit({ type: 'tool_rejected', callId: ctx.toolCall.id, tool: toolName, reason: decision.onReject })
-      return { block: true, reason: decision.onReject, terminate: true }
+      return { allowed: false, reason: decision.onReject, stop: true }
     }
     this.recordGatedKind(toolName, args, panelType)
-    return undefined
-  }  private recordGatedKind(toolName: string, args: Record<string, unknown>, panelType: string | undefined): void {
+    return { allowed: true, stop: false }
+  }
+
+  private recordGatedKind(toolName: string, args: Record<string, unknown>, panelType: string | undefined): void {
     const kind = gatedKindOf(toolName, args, panelType)
     if (kind && !this.gatedKinds.includes(kind)) this.gatedKinds.push(kind)
   }
@@ -241,8 +266,8 @@ export class AgentKernel {
         this.turnCount++
         // LLM 回合开始（含请求 latency 期）：点亮"思考中"指示，UI 据此给出工作反馈
         this.emit({ type: 'thinking', active: true })
-        if (this.turnCount > MAX_TURNS) {
-          this.lastError = `已达单轮工具调用上限（${MAX_TURNS} 轮），请拆分任务后重试`
+        if (this.turnCount > this.maxTurns) {
+          this.lastError = `已达单轮工具调用上限（${this.maxTurns} 轮），请拆分任务后重试`
           this.stopRequested = true
           this.agent.abort()
         }
@@ -287,18 +312,18 @@ export class AgentKernel {
     }
   }
 
-  /** 用户确认（阶段门/阶段汇报卡片）：true 放行、false 拒绝并停止 */
+  /** 用户确认（阶段门/阶段汇报卡片）：按 FIFO 唤醒队首；true 放行、false 拒绝并停止 */
   confirm(approved: boolean): void {
-    const pending = this.pending
-    this.pending = null
-    pending?.resolve(approved)
+    this.pendingQueue.shift()?.resolve(approved)
   }
 
-  /** 停止：挂起确认按拒绝放行，中止循环；生成中任务由 taskQueue 转后台继续 */
+  /** 停止：挂起确认（含子代理门请求）全部按拒绝放行，中止本内核与全部子代理；生成中任务由 taskQueue 转后台继续 */
   requestStop(): void {
-    if (!this.agent.state.isStreaming && !this.pending) return
+    if (!this.agent.state.isStreaming && this.pendingQueue.length === 0) return
     this.stopRequested = true
-    this.confirm(false)
+    for (const p of this.pendingQueue) p.resolve(false)
+    this.pendingQueue = []
+    for (const child of this.children) child.requestStop()
     this.agent.abort()
   }
 
@@ -311,7 +336,7 @@ export class AgentKernel {
     this.lastError = null
     this.turnCount = 0
     this.gatedKinds = []
-    this.pending = null
+    this.pendingQueue = []
     try {
       await this.agent.prompt(text, toPiImages(images))
     } catch (e) {
@@ -355,7 +380,8 @@ export class AgentKernel {
 
   reset(): void {
     this.agent.reset()
-    this.pending = null
+    for (const p of this.pendingQueue) p.resolve(false)
+    this.pendingQueue = []
     this.stopRequested = false
     this.lastError = null
     this.turnCount = 0
