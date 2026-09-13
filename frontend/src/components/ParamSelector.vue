@@ -27,7 +27,7 @@
             :style="{ background: currentTierColor }"
           ></span>
           <span class="param-tag__icon">
-            <span class="param-tag__shape" :style="currentShapeStyle"></span>
+            <span class="param-tag__shape" :class="{ 'param-tag__shape--auto': currentSize === 'auto' }" :style="currentShapeStyle"></span>
           </span>
           <span class="param-tag__text">{{ currentSizeLabel }}</span>
           <!-- 图片模式：实际像素数 -->
@@ -38,7 +38,14 @@
       <RatioPicker
         v-model="currentSize"
         :mode="sizeMode"
+        :auto="enableAuto"
         :video-aspect-ratios="config.videoAspectRatios"
+        :video-resolutions="config.videoResolutions"
+        :resolution="currentResolution"
+        :resolved-size="resolvedSize"
+        :resolved-ratio="resolvedAspectRatio"
+        :resolved-resolution="resolvedResolution"
+        @update:resolution="currentResolution = $event"
       />
     </el-popover>
 
@@ -69,68 +76,7 @@
       </div>
     </el-popover>
 
-    <!-- 分辨率标签（视频模式） -->
-    <el-popover
-      v-if="mode === 'video'"
-      v-model:visible="resolutionPopoverVisible"
-      placement="bottom-start"
-      :width="220"
-      trigger="click"
-    >
-      <template #reference>
-        <span class="param-tag">
-          <el-icon><Picture /></el-icon>
-          <span class="param-tag__text">{{ currentResolutionLabel }}</span>
-          <el-icon class="param-tag__arrow"><ArrowDown /></el-icon>
-        </span>
-      </template>
-      <div class="resolution-popover">
-        <div class="param-btn-group">
-          <button
-            v-for="res in resolutionOptions"
-            :key="res.value"
-            type="button"
-            class="param-btn"
-            :class="{ 'param-btn--active': currentResolution === res.value && !isCustomResolution }"
-            @click="selectPresetResolution(res.value)"
-          >{{ res.label }}</button>
-          <button
-            type="button"
-            class="param-btn custom-res-btn"
-            :class="{ 'param-btn--active': isCustomResolution }"
-            @click="enterCustomResolution"
-          >{{ t('video.customResolution') }}</button>
-        </div>
-        <!-- 自定义分辨率输入 -->
-        <div v-if="isCustomResolution" class="custom-resolution-input">
-          <div class="custom-res-row">
-            <span class="custom-res-label">{{ t('video.height') }}:</span>
-            <el-input-number
-              v-model="customResolutionHeight"
-              :min="CUSTOM_VIDEO_SIZE.minHeight"
-              :max="CUSTOM_VIDEO_SIZE.maxHeight"
-              :step="8"
-              controls-position="right"
-              size="small"
-              @change="applyCustomResolution"
-            />
-            <span class="custom-res-unit">px</span>
-          </div>
-          <div class="custom-res-info">
-            <span v-if="customResolutionValid" class="info-ok">
-              {{ calculatedVideoWidth }}×{{ alignedVideoHeight }} ({{ videoResolutionMp }}MP)
-            </span>
-            <span v-else class="info-error">
-              {{ t('video.resolutionRange', { min: CUSTOM_VIDEO_SIZE.minHeight, max: CUSTOM_VIDEO_SIZE.maxHeight }) }}
-            </span>
-            <div class="custom-res-tip">{{ t('video.alignTo8') }}</div>
-            <button class="back-to-preset-btn" @click="exitCustomResolution">
-              {{ t('video.usePresetResolution') }}
-            </button>
-          </div>
-        </div>
-      </div>
-    </el-popover>
+    <!-- 分辨率已并入「尺寸」标签的统一面板（RatioPicker） -->
 
     <!-- 帧率标签（视频模式） -->
     <el-popover
@@ -209,48 +155,56 @@
  * 功能：图片/视频生成参数选择，支持自定义尺寸/分辨率
  */
 import { ref, computed, watch } from 'vue'
-import { ArrowDown, VideoCamera, Film, Picture } from '@element-plus/icons-vue'
+import { ArrowDown, VideoCamera, Film } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import RatioPicker from '@/components/RatioPicker.vue'
 import { useModelsStore } from '@/stores/models'
 import {
   getImageSizeLabel,
-  getVideoAspectRatioLabel,
   getTierBySize,
   formatPixels,
   IMAGE_TIER_CONFIG,
-  CUSTOM_VIDEO_SIZE,
-  alignToMultiple,
-  validateCustomVideoSize,
-  calculateVideoWidth,
-  CUSTOM_VIDEO_RESOLUTION_VALUE,
 } from '@/config/model-params'
 import type { ModelInfo } from '@/types'
 
 const { t } = useI18n()
 
-const props = defineProps<{
-  mode: 'image' | 'video'
-  /** 图片尺寸，如 "1024x1024" */
-  size?: string
-  /** 视频宽高比，如 "16:9" */
-  aspectRatio?: string
-  /** 视频分辨率高度（如 480/768/1080） */
-  resolution?: number
-  /** 视频时长（秒） */
-  seconds?: number
-  /** 视频帧率 */
-  frameRate?: number
-  /** 模型 ID */
-  model?: string
-  /** 模型列表（外部传入，不传则从 store 获取） */
-  modelList?: ModelInfo[]
-}>()
+const props = withDefaults(
+  defineProps<{
+    mode: 'image' | 'video'
+    /** 图片尺寸，如 "1024x1024"；'auto'=跟随参考图/偏好 */
+    size?: string
+    /** 视频宽高比，如 "16:9"；'auto'=跟随参考图/偏好 */
+    aspectRatio?: string
+    /** 视频分辨率档（高度值，如 720）；'auto'=跟随偏好 */
+    resolution?: number | 'auto'
+    /** 视频时长（秒） */
+    seconds?: number
+    /** 视频帧率 */
+    frameRate?: number
+    /** 模型 ID */
+    model?: string
+    /** 模型列表（外部传入，不传则从 store 获取） */
+    modelList?: ModelInfo[]
+    /** 是否显示「自动」选项（默认显示；画布等场景显式传 false 关闭） */
+    enableAuto?: boolean
+    /** 图片自动模式的解析尺寸（标签/面板展示实际生效值） */
+    resolvedSize?: string
+    /** 视频自动模式的解析比例 / 档位 */
+    resolvedAspectRatio?: string
+    resolvedResolution?: number
+  }>(),
+  {
+    // 注意：Vue 对未传的可选 boolean prop 会转换为 false（resolvePropValue 缺省转换），
+    // 「默认显示」必须用显式默认值表达，不能用 enableAuto !== false 判断
+    enableAuto: true,
+  },
+)
 
 const emit = defineEmits<{
   'update:size': [value: string]
   'update:aspectRatio': [value: string]
-  'update:resolution': [value: number]
+  'update:resolution': [value: number | 'auto']
   'update:seconds': [value: number]
   'update:frameRate': [value: number]
   'update:model': [value: string]
@@ -260,7 +214,6 @@ const modelsStore = useModelsStore()
 
 // Popover 显隐
 const sizePopoverVisible = ref(false)
-const resolutionPopoverVisible = ref(false)
 const durationPopoverVisible = ref(false)
 const fpsPopoverVisible = ref(false)
 const modelPopoverVisible = ref(false)
@@ -289,80 +242,13 @@ const currentFrameRate = computed({
   set: (v) => emit('update:frameRate', v),
 })
 const currentResolution = computed({
-  get: () => props.resolution ?? 720,
+  get: () => props.resolution ?? 'auto',
   set: (v) => emit('update:resolution', v),
 })
 const currentModel = computed({
   get: () => props.model || '',
   set: (v) => emit('update:model', v),
 })
-
-// ========== 视频自定义分辨率状态 ==========
-const isCustomResolution = ref(false)
-const customResolutionHeight = ref(720)
-
-// 对齐后的视频高度（必须是8的倍数）
-const alignedVideoHeight = computed(() =>
-  alignToMultiple(customResolutionHeight.value, CUSTOM_VIDEO_SIZE.align)
-)
-
-// 根据当前宽高比计算宽度
-const calculatedVideoWidth = computed(() =>
-  calculateVideoWidth(currentSize.value, alignedVideoHeight.value)
-)
-
-// 自定义分辨率校验
-const customResolutionValid = computed(() => {
-  const result = validateCustomVideoSize(calculatedVideoWidth.value, alignedVideoHeight.value)
-  return result.valid
-})
-
-// 视频分辨率 MP 数
-const videoResolutionMp = computed(() =>
-  ((calculatedVideoWidth.value * alignedVideoHeight.value) / 1e6).toFixed(2)
-)
-
-/**
- * 选择预设分辨率
- */
-function selectPresetResolution(value: number) {
-  isCustomResolution.value = false
-  currentResolution.value = value
-  resolutionPopoverVisible.value = false
-}
-
-/**
- * 进入自定义分辨率模式
- */
-function enterCustomResolution() {
-  // 用当前分辨率初始化
-  if (currentResolution.value > 0) {
-    customResolutionHeight.value = currentResolution.value
-  }
-  isCustomResolution.value = true
-  applyCustomResolution()
-}
-
-/**
- * 退出自定义分辨率模式
- */
-function exitCustomResolution() {
-  isCustomResolution.value = false
-  currentResolution.value = 720
-  resolutionPopoverVisible.value = false
-}
-
-/**
- * 应用自定义分辨率
- */
-function applyCustomResolution() {
-  if (!customResolutionValid.value) return
-  // 使用负数表示自定义高度（或者我们直接传实际值，后端会处理）
-  // 这里直接传高度值，因为分辨率选项中的 value 也是高度值
-  // 我们用一个特殊标记来区分自定义，但更简单的是直接传高度
-  // 实际上，我们可以直接传高度值，只要它不是预设值之一就行
-  currentResolution.value = alignedVideoHeight.value
-}
 
 // 选项列表：当前模型 gen_params 覆盖尺寸选项/默认尺寸（如 Seedream 只出合法档），缺省用全局配置
 const config = computed(() => {
@@ -392,19 +278,7 @@ const availableDurations = computed(() => {
   const max = getMaxDurationForFps(currentFrameRate.value || 24)
   return config.value.videoDurations.filter(sec => sec <= max)
 })
-const durationOptions = computed(() => config.value.videoDurations)
 const frameRateOptions = computed(() => config.value.videoFrameRates)
-const resolutionOptions = computed(() => config.value.videoResolutions)
-const currentResolutionLabel = computed(() => {
-  const opt = resolutionOptions.value.find(o => o.value === currentResolution.value)
-  if (opt) return opt.label
-  // 自定义分辨率
-  if (isCustomResolution.value || currentResolution.value > 0) {
-    const w = calculateVideoWidth(currentSize.value, currentResolution.value)
-    return `${w}×${currentResolution.value}`
-  }
-  return `${currentResolution.value}p`
-})
 const modelList = computed(() => props.modelList || (
   props.mode === 'video' ? modelsStore.videoModels : modelsStore.imageModels
 ))
@@ -477,13 +351,31 @@ function parseSizeString(size: string): { w: number; h: number } | null {
   return { w: parseInt(m[1], 10), h: parseInt(m[2], 10) }
 }
 
+// 视频「尺寸」的两个维度当前值（auto 用解析值代入）与档位文案
+const videoSizeParts = computed(() => {
+  const ratioAuto = currentSize.value === 'auto'
+  const resAuto = currentResolution.value === 'auto'
+  const resValue = resAuto ? props.resolvedResolution : (currentResolution.value as number)
+  const ratioValue = ratioAuto ? (props.resolvedAspectRatio || '16:9') : currentSize.value
+  const resOpt = config.value.videoResolutions.find(o => o.value === resValue)
+  return {
+    bothAuto: ratioAuto && resAuto,
+    ratioValue,
+    full: resOpt ? resOpt.label : `${resValue ?? ''}p`,
+    short: resOpt ? resOpt.label.split(' ')[0] : `${resValue ?? ''}p`,
+  }
+})
+
 // 当前尺寸/比例的友好标签
+// 「自动」：跟随参考图（图生）或偏好（文生）
 // 图片模式：清晰度等级 + 比例（如"标清 · 1:1"）
-// 视频模式：直接显示比例（如"16:9 横屏"）
+// 视频模式：档位 · 比例（如"720p · 16:9"），自动维度用解析值代入
 const currentSizeLabel = computed(() => {
   if (props.mode === 'video') {
-    return getVideoAspectRatioLabel(currentSize.value)
+    const parts = videoSizeParts.value
+    return parts.bothAuto ? t('params.autoRatio') : `${parts.short} · ${parts.ratioValue}`
   }
+  if (currentSize.value === 'auto') return t('params.autoRatio')
   const tier = currentTier.value
   const sizeLabel = getImageSizeLabel(currentSize.value)
   // 提取比例部分（如 "1:1 方形" → "1:1"）
@@ -504,7 +396,8 @@ const currentModelLabel = computed(() => {
 const currentShapeStyle = computed(() => {
   let w = 16, h = 9
   if (props.mode === 'video') {
-    const opt = config.value.videoAspectRatios.find(o => o.value === currentSize.value)
+    const ratio = currentSize.value === 'auto' ? (props.resolvedAspectRatio || '16:9') : currentSize.value
+    const opt = config.value.videoAspectRatios.find(o => o.value === ratio)
     w = opt?.w || 16
     h = opt?.h || 9
   } else {
@@ -538,8 +431,10 @@ const currentTierColor = computed(() => {
 // 尺寸标签的悬停提示：显示完整信息（清晰度 + 比例 + 像素 + 耗时）
 const sizeTagTitle = computed(() => {
   if (props.mode === 'video') {
-    return getVideoAspectRatioLabel(currentSize.value)
+    const parts = videoSizeParts.value
+    return parts.bothAuto ? t('params.autoRatioHint') : `${parts.full} · ${parts.ratioValue}`
   }
+  if (currentSize.value === 'auto') return t('params.autoRatioHint')
   const tier = currentTier.value
   if (!tier) return currentSize.value
   const cfg = IMAGE_TIER_CONFIG[tier]
@@ -547,8 +442,8 @@ const sizeTagTitle = computed(() => {
   return `${cfg.label} · ${cfg.desc}${px ? ' · ' + px : ''}`
 })
 
-// Popover 宽度
-const popoverWidth = computed(() => props.mode === 'video' ? 320 : 400)
+// Popover 宽度（统一面板两模式同宽）
+const popoverWidth = computed(() => 400)
 </script>
 
 <style scoped>
@@ -613,6 +508,12 @@ const popoverWidth = computed(() => props.mode === 'video' ? 320 : 400)
   display: block;
   border-radius: 2px;
   background: var(--agnes-primary);
+}
+
+/* 自动模式：虚线框表示跟随参考图 */
+.param-tag__shape--auto {
+  background: transparent;
+  border: 1.5px dashed var(--agnes-primary);
 }
 
 .param-tag__text {
@@ -745,80 +646,5 @@ const popoverWidth = computed(() => props.mode === 'video' ? 320 : 400)
   background: rgba(107, 156, 255, 0.2);
   color: var(--agnes-primary-soft);
   margin-left: 8px;
-}
-
-/* 自定义分辨率 */
-.resolution-popover {
-  padding: 4px;
-}
-
-.custom-res-btn {
-  border-style: dashed;
-}
-
-.custom-resolution-input {
-  margin-top: 8px;
-  padding: 10px;
-  background: color-mix(in srgb, #e6a23c 8%, transparent);
-  border: 1px solid color-mix(in srgb, #e6a23c 25%, transparent);
-  border-radius: 8px;
-}
-
-.custom-res-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.custom-res-label {
-  font-size: 12px;
-  color: var(--agnes-text-secondary);
-  white-space: nowrap;
-}
-
-.custom-res-unit {
-  font-size: 12px;
-  color: var(--agnes-text-tertiary);
-}
-
-.custom-res-info {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 12px;
-  align-items: center;
-}
-
-.custom-res-info .info-ok {
-  color: #67c23a;
-  font-weight: 500;
-}
-
-.custom-res-info .info-error {
-  color: #f56c6c;
-}
-
-.custom-res-tip {
-  font-size: 11px;
-  color: var(--agnes-text-tertiary);
-}
-
-.back-to-preset-btn {
-  margin-top: 4px;
-  padding: 3px 12px;
-  font-size: 11px;
-  border: 1px solid rgba(107, 126, 156, 0.3);
-  border-radius: 4px;
-  background: #fff;
-  cursor: pointer;
-  color: var(--agnes-text-secondary);
-  font-family: inherit;
-  transition: all 0.15s ease;
-}
-
-.back-to-preset-btn:hover {
-  border-color: var(--agnes-primary);
-  color: var(--agnes-primary);
 }
 </style>

@@ -27,6 +27,8 @@ DEFAULT_PREFERENCES = {
         "default_video_model_id": "",
         "default_chat_model_id": "",
         "default_aspect_ratio": "1:1",
+        "default_image_tier": "sd",        # 默认清晰度档：sd / hd / 4k（生成页「自动」尺寸的档位来源）
+        "default_video_resolution": 720,   # 默认视频分辨率档（高度）：480 / 720 / 1080 / 1440 / 2160
         "auto_copy_prompt": True,
         "default_image_count": 1,
     },

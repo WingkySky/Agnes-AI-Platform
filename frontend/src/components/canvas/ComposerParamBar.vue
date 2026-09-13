@@ -18,6 +18,7 @@
     :resolution="resolution"
     :seconds="seconds"
     :frame-rate="frameRate"
+    :enable-auto="false"
     @update:model="persist('model', $event)"
     @update:size="persist('size', $event)"
     @update:aspect-ratio="persist('aspect_ratio', $event)"

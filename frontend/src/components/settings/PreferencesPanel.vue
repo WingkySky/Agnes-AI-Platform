@@ -270,6 +270,43 @@
         </el-select>
       </div>
 
+      <!-- 默认清晰度（图片）：生成页「自动」尺寸的档位来源 -->
+      <div class="pref-row">
+        <div class="pref-info">
+          <span class="pref-label">{{ t('prefs.generation.defaultImageTier') }}</span>
+          <span class="pref-hint">{{ t('prefs.generation.defaultImageTierHint') }}</span>
+        </div>
+        <el-select
+          v-model="form.generation.default_image_tier"
+          size="small"
+          style="width: 140px"
+          @change="markDirty">
+          <el-option :label="t('prefs.generation.tierSd')" value="sd" />
+          <el-option :label="t('prefs.generation.tierHd')" value="hd" />
+          <el-option :label="t('prefs.generation.tier4k')" value="4k" />
+        </el-select>
+      </div>
+
+      <!-- 默认分辨率（视频）：生成页「自动」档位的来源 -->
+      <div class="pref-row">
+        <div class="pref-info">
+          <span class="pref-label">{{ t('prefs.generation.defaultVideoResolution') }}</span>
+          <span class="pref-hint">{{ t('prefs.generation.defaultVideoResolutionHint') }}</span>
+        </div>
+        <el-select
+          v-model="form.generation.default_video_resolution"
+          size="small"
+          style="width: 140px"
+          @change="markDirty">
+          <el-option
+            v-for="res in modelsStore.getModelParamsConfig().videoResolutions"
+            :key="res.value"
+            :label="res.label"
+            :value="res.value"
+          />
+        </el-select>
+      </div>
+
       <!-- 自动复制提示词 -->
       <div class="pref-row">
         <div class="pref-info">
@@ -468,6 +505,8 @@ const form = reactive({
     default_video_model_id: '',
     default_chat_model_id: '',
     default_aspect_ratio: '1:1',
+    default_image_tier: 'sd' as 'sd' | 'hd' | '4k',
+    default_video_resolution: 720,
     auto_copy_prompt: true,
     default_image_count: 1,
     // 任务失败自动重试（纯前端本地偏好，不通过后端 preferences 同步）
@@ -614,6 +653,8 @@ function syncFormFromStore() {
   form.generation.default_video_model_id = g.default_video_model_id
   form.generation.default_chat_model_id = g.default_chat_model_id || ''
   form.generation.default_aspect_ratio = g.default_aspect_ratio
+  form.generation.default_image_tier = g.default_image_tier || 'sd'
+  form.generation.default_video_resolution = g.default_video_resolution || 720
   form.generation.auto_copy_prompt = g.auto_copy_prompt
   form.generation.default_image_count = g.default_image_count
   // 任务失败自动重试开关（纯前端本地偏好，从 prefsStore.autoRetry 同步）

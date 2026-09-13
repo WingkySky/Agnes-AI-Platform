@@ -138,7 +138,13 @@
 
             <!-- 紧凑参数选择：尺寸 + 模型，一行标签搞定 -->
             <el-form-item :label="t('params.size')">
-              <ParamSelector mode="image" v-model:size="size" v-model:model="model" @update:model="modelTouched = true" />
+              <ParamSelector
+                mode="image"
+                v-model:size="size"
+                v-model:model="model"
+                :resolved-size="resolvedSize"
+                @update:model="modelTouched = true"
+              />
             </el-form-item>
 
             <!-- 生成按钮 -->
@@ -252,7 +258,7 @@
               </div>
               <div class="meta-row">
               <span class="meta-label">{{ t('params.size') }}：</span>
-              <span class="meta-value">{{ getImageSizeLabel(size) }}</span>
+              <span class="meta-value">{{ getImageSizeLabel(resolvedSize) }}</span>
               </div>
             </div>
           </div>
@@ -338,7 +344,7 @@ import { useAsset } from '@/api/pipeline'
 import { useI18n } from '@/i18n'
 import { useCreditEstimate } from '@/composables/useCreditEstimate'
 import { useDownload } from '@/composables/useDownload'
-import { matchImageSize, getImageSizeLabel, getModelParams, autoMatchImageSize } from '@/config/model-params'
+import { matchImageSize, matchSizeByRatio, getImageSizeLabel, autoMatchImageSize, AUTO_RATIO_VALUE } from '@/config/model-params'
 import { getScenes, previewScenePrompt } from '@/api/scenes'
 import type { FileInfo } from '@/types'
 import type { Scene3D, SceneData } from '@/types/scene'
@@ -410,38 +416,41 @@ const { levelClass: promptLengthLevel, text: promptLengthText } = usePromptLengt
 // 分享到广场开关：是否将本次生成结果公开到广场
 const shareToPlaza = ref(false)
 
-/** 根据偏好设置的比例（如 "1:1"）匹配对应的图片尺寸（如 "1024x1024"） */
-function sizeFromAspectRatio(ratio: string): string {
-  const params = getModelParams()
-  const [w, h] = ratio.split(':').map(Number)
-  if (w && h) {
-    const matched = params.imageSizes.find(o => o.w === w && o.h === h)
-    if (matched) return matched.value
-  }
-  return modelsStore.defaultImageSize || '1024x1024'
-}
-
-// 默认尺寸：优先从偏好设置的比例匹配，其次从 store 配置获取
-const size = ref(sizeFromAspectRatio(prefsStore.generation.default_aspect_ratio) || modelsStore.defaultImageSize || '1024x1024')
+// 默认「自动」：图生图跟随参考图比例，文生图跟随偏好比例 + 偏好清晰度档
+const size = ref(AUTO_RATIO_VALUE)
 const model = ref('')  // 初始值在 store 加载后自动设置
 // 用户手动选过模型后，本会话不再自动跟随偏好默认（重新进入页面即恢复跟随）
 const modelTouched = ref(false)
+// 「自动」模式下按第一张参考图匹配到的具体尺寸
+const autoMatchedSize = ref('')
+
+// 「自动」模式的最终尺寸：图生图有参考图时用匹配值，否则按偏好比例+偏好清晰度档解析
+const resolvedSize = computed(() => {
+  if (size.value !== AUTO_RATIO_VALUE) return size.value
+  if (mode.value === 'image2image' && autoMatchedSize.value) return autoMatchedSize.value
+  return matchSizeByRatio(
+    prefsStore.generation.default_aspect_ratio || '1:1',
+    prefsStore.generation.default_image_tier || 'sd',
+  )
+})
 
 // ---------- 积分预估：根据 mode + size 自动计算本次生成消耗 ----------
 const { cost, loading: costLoading, insufficient: costInsufficient } = useCreditEstimate(
   () => ({
     type: 'image' as const,
     mode: mode.value,
-    size: size.value,
+    size: resolvedSize.value,
   })
 )
 
-// store 加载完成后自动设置默认模型和默认尺寸（模型始终跟随偏好默认，包括偏好晚于模型列表到达的情况）
+// store 加载完成后自动设置默认模型（模型始终跟随偏好默认，包括偏好晚于模型列表到达的情况）
 watch(() => modelsStore.defaultImageModel, (v) => {
   if (v && !modelTouched.value) model.value = v
 }, { immediate: true })
-watch(() => modelsStore.defaultImageSize, (v) => {
-  if (v && size.value === '1024x1024') size.value = v
+// 切到「自动」时按已有参考图立即解析一次
+watch(size, (v) => {
+  const first = referenceFileList.value[0]
+  if (v === AUTO_RATIO_VALUE && first?.previewUrl) autoMatchSize(first)
 })
 const referenceFileList = ref<FileInfo[]>([])   // 【多图】数组
 
@@ -559,9 +568,9 @@ watch(scenePopoverVisible, (v) => {
   if (v) loadScenes()
 })
 
-// 参考图变化（含「用于生成」v-model 预填）时自动匹配分辨率
+// 参考图变化（含「用于生成」v-model 预填）：「自动」模式下跟随第一张参考图重新适配
 watch(referenceFileList, (list) => {
-  if (list.length > 0 && list[0]?.previewUrl) {
+  if (list.length > 0 && list[0]?.previewUrl && size.value === AUTO_RATIO_VALUE) {
     autoMatchSize(list[0])
   }
 })
@@ -588,16 +597,12 @@ onMounted(async () => {
   } catch (_) { /* ignore */ }
 })
 
-/** 根据上传图片的实际尺寸自动匹配最接近的预设分辨率 */
+/** 「自动」模式：按参考图实际尺寸在偏好清晰度档内匹配最接近的预设尺寸 */
 function autoMatchSize(file: FileInfo) {
   autoMatchImageSize(
     file,
-    (width, height) => matchImageSize(width, height),
-    (matched) => {
-      if (matched && matched !== size.value) {
-        size.value = matched
-      }
-    }
+    (width, height) => matchImageSize(width, height, undefined, prefsStore.generation.default_image_tier || 'sd'),
+    (matched) => { if (matched) autoMatchedSize.value = matched },
   )
 }
 
@@ -623,7 +628,7 @@ async function handleGenerate() {
 
   const params: Record<string, any> = {
     model: model.value,
-    size: size.value,
+    size: resolvedSize.value,
     mode: mode.value,
     is_public: shareToPlaza.value,
   }

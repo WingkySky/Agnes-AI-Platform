@@ -137,8 +137,8 @@
               </el-tag>
             </div>
 
-            <!-- 紧凑参数选择：比例 + 分辨率 + 时长 + 帧率 + 模型，一行标签搞定 -->
-            <el-form-item :label="t('params.aspectRatio')">
+            <!-- 紧凑参数选择：尺寸 + 时长 + 帧率 + 模型，一行标签搞定 -->
+            <el-form-item :label="t('params.size')">
               <ParamSelector
                 mode="video"
                 v-model:aspectRatio="aspectRatio"
@@ -146,6 +146,8 @@
                 v-model:seconds="seconds"
                 v-model:frameRate="frameRate"
                 v-model:model="videoModel"
+                :resolved-aspect-ratio="resolvedAspectRatio"
+                :resolved-resolution="resolvedResolution"
                 @update:model="videoModelTouched = true"
               />
             </el-form-item>
@@ -350,17 +352,19 @@ import type { PromptPreset } from '@/types/preset'
 import { useAsset } from '@/api/pipeline'
 import { useModelsStore } from '@/stores/models'
 import { useUserStore } from '@/stores/user'
+import { usePreferencesStore } from '@/stores/preferences'
 import { useI18n } from '@/i18n'
 import { useCreditEstimate } from '@/composables/useCreditEstimate'
 import { useDownload } from '@/composables/useDownload'
 import { useCopyText } from '@/composables/useCopyText'
 import { usePromptLength } from '@/composables/usePromptLength'
 const { copyText } = useCopyText()
-import { matchVideoAspectRatio, getVideoAspectRatioLabel, autoMatchImageSize } from '@/config/model-params'
+import { matchVideoAspectRatio, autoMatchImageSize, AUTO_RATIO_VALUE } from '@/config/model-params'
 import type { FileInfo } from '@/types'
 
 const { t } = useI18n()
 const userStore = useUserStore()
+const prefsStore = usePreferencesStore()
 const { downloadViaProxy } = useDownload()
 
 // ---------- 模型列表 ----------
@@ -376,15 +380,29 @@ const { levelClass: promptLengthLevel, text: promptLengthText } = usePromptLengt
 
 // 分享到广场开关：是否将本次生成结果公开到广场
 const shareToPlaza = ref(false)
-// 画面比例、时长、帧率均从 store 配置获取默认值
-const aspectRatio = ref(modelsStore.defaultVideoAspectRatio || '16:9')
-const resolution = ref(modelsStore.defaultVideoResolution || 720)
+// 默认「自动」：比例跟随参考图（图生）或偏好比例（文生），档位跟随偏好分辨率
+const aspectRatio = ref(AUTO_RATIO_VALUE)
+const resolution = ref<number | 'auto'>(AUTO_RATIO_VALUE)
 const seconds = ref(modelsStore.defaultVideoDuration || 5)
 const frameRate = ref(modelsStore.defaultFrameRate || 24)
 const seed = ref('')
 const videoModel = ref('')  // 初始值在 store 加载后自动设置
 // 用户手动选过模型后，本会话不再自动跟随偏好默认（重新进入页面即恢复跟随）
 const videoModelTouched = ref(false)
+// 「自动」模式下按第一张参考图匹配到的具体比例
+const autoMatchedRatio = ref('')
+
+// 「自动」比例的最终值：图生视频有参考图时用匹配值，否则按偏好比例
+const resolvedAspectRatio = computed(() => {
+  if (aspectRatio.value !== AUTO_RATIO_VALUE) return aspectRatio.value
+  if (referenceFiles.value.length && autoMatchedRatio.value) return autoMatchedRatio.value
+  return prefsStore.generation.default_aspect_ratio || '16:9'
+})
+
+// 「自动」档位的最终值：偏好「默认分辨率」
+const resolvedResolution = computed(() =>
+  resolution.value === 'auto' ? (prefsStore.generation.default_video_resolution || 720) : resolution.value,
+)
 
 // ---------- 模型能力：视频生视频（video2video）仅对支持的模型开放 ----------
 // 优先看模型的 capabilities 标签；数据库未更新时按模型名兜底
@@ -420,9 +438,6 @@ const { cost, loading: costLoading, insufficient: costInsufficient } = useCredit
 watch(() => modelsStore.defaultVideoModel, (v) => {
   if (v && !videoModelTouched.value) videoModel.value = v
 }, { immediate: true })
-watch(() => modelsStore.defaultVideoAspectRatio, (v) => {
-  if (v && aspectRatio.value === '16:9') aspectRatio.value = v
-})
 watch(() => modelsStore.defaultVideoDuration, (v) => {
   if (v && seconds.value === 5) seconds.value = v
 })
@@ -433,6 +448,12 @@ watch(() => modelsStore.defaultFrameRate, (v) => {
 // ---------- 图片状态（图生视频：支持单张/多张；关键帧模式：最多2张）----------
 const isKeyframesMode = ref(false)              // 是否开启关键帧模式
 const referenceFiles = ref<FileInfo[]>([])      // 图生视频/关键帧模式的参考图列表
+
+// 切到「自动」比例时按已有参考图立即解析一次
+watch(aspectRatio, (v) => {
+  const first = referenceFiles.value[0]
+  if (v === AUTO_RATIO_VALUE && first) autoMatchAspectRatio(first)
+})
 
 // ---------- 视频生视频参考资源 ----------
 const referenceVideoUrl = ref('')               // video2video 参考视频 URL
@@ -575,8 +596,8 @@ function handleImageListChange(files: FileInfo[]) {
     referenceFiles.value = referenceFiles.value.slice(0, 2)
     ElMessage.warning(t('message.maxKeyframes'))
   }
-  // 第一张参考图上传后自动匹配比例
-  if (files && files.length > 0) {
+  // 第一张参考图上传后：「自动」比例跟随参考图重新适配
+  if (files && files.length > 0 && aspectRatio.value === AUTO_RATIO_VALUE) {
     autoMatchAspectRatio(files[0])
   }
 }
@@ -593,16 +614,12 @@ function handleKeyframesToggle(enabled: boolean) {
   }
 }
 
-/** 根据上传图片的实际尺寸自动匹配最接近的视频宽高比 */
+/** 「自动」比例：按参考图实际尺寸匹配最接近的预设宽高比 */
 function autoMatchAspectRatio(file: FileInfo) {
   autoMatchImageSize(
     file,
     (width, height) => matchVideoAspectRatio(width, height),
-    (matched) => {
-      if (matched && matched !== aspectRatio.value) {
-        aspectRatio.value = matched
-      }
-    }
+    (matched) => { if (matched) autoMatchedRatio.value = matched },
   )
 }
 
@@ -643,16 +660,16 @@ async function startGenerate() {
   }
 
   // 根据分辨率（高度）和宽高比计算具体的 width/height
-  // 宽高必须为 8 的倍数（视频编码硬性要求）
+  // 宽高必须为 8 的倍数（视频编码硬性要求）；「自动」的比值/档位在此解析
   let videoWidth: number | undefined
   let videoHeight: number | undefined
-  if (resolution.value && aspectRatio.value) {
-    const arParts = aspectRatio.value.split(':')
+  if (resolvedResolution.value && resolvedAspectRatio.value) {
+    const arParts = resolvedAspectRatio.value.split(':')
     if (arParts.length === 2) {
       const arW = parseInt(arParts[0], 10)
       const arH = parseInt(arParts[1], 10)
       if (arW > 0 && arH > 0) {
-        const h = resolution.value
+        const h = resolvedResolution.value
         const w = Math.round(h * arW / arH)
         // 确保宽高为 8 的倍数（视频编码硬性要求，向上取整）
         videoWidth = Math.floor((w + 7) / 8) * 8
@@ -663,7 +680,7 @@ async function startGenerate() {
 
   const params: Record<string, any> = {
     model: videoModel.value,
-    aspect_ratio: aspectRatio.value,
+    aspect_ratio: resolvedAspectRatio.value,
     width: videoWidth,
     height: videoHeight,
     seconds: seconds.value,

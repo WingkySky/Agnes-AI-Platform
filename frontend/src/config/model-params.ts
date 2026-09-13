@@ -238,27 +238,35 @@ export function parseSize(size: string): { width: number; height: number } | nul
 }
 
 /**
+ * 「自动」比例选项的值：图生图/图生视频时跟随参考图比例，
+ * 由页面在提交前解析为最接近的预设尺寸/比例，'auto' 不会传给后端
+ */
+export const AUTO_RATIO_VALUE = 'auto'
+
+/**
  * 根据输入图片尺寸匹配最接近的预设尺寸
  * 用于图生图时自动适配分辨率，免去手动选择
  *
  * 匹配逻辑：
  *   1. 优先匹配宽高比最接近的选项
- *   2. 同比例下选面积最接近的
+ *   2. 传入 tier 时只在对应清晰度档内匹配（自动模式锚定用户已选的档位）
  *   3. 找不到时返回默认尺寸
  */
 export function matchImageSize(
   imgWidth: number,
   imgHeight: number,
   provider?: string,
+  tier?: ImageTier,
 ): string {
   const params = getModelParams(provider)
   if (!imgWidth || !imgHeight) return params.defaultImageSize
 
+  const pool = tier ? params.imageSizes.filter(o => o.tier === tier) : params.imageSizes
   const imgRatio = imgWidth / imgHeight
   let bestMatch = params.defaultImageSize
   let bestScore = Infinity
 
-  for (const opt of params.imageSizes) {
+  for (const opt of pool) {
     const optRatio = opt.w / opt.h
     // 比例差异权重更高，面积差异次之
     const ratioDiff = Math.abs(imgRatio - optRatio)
@@ -299,6 +307,32 @@ export function matchVideoAspectRatio(
   }
 
   return bestMatch
+}
+
+/**
+ * 根据比例串（如 "16:9" 或 "1216:832"）在指定清晰度档内取具体图片尺寸
+ * 档内无精确比例时取最接近的；用于「自动」模式按偏好比例 + 偏好档解析尺寸
+ */
+export function matchSizeByRatio(
+  ratio: string,
+  tier?: ImageTier,
+  provider?: string,
+): string {
+  const params = getModelParams(provider)
+  const [w, h] = ratio.split(':').map(Number)
+  const target = w && h ? w / h : 1
+
+  const pool = tier ? params.imageSizes.filter(o => o.tier === tier) : params.imageSizes
+  let best = pool[0]
+  let bestDiff = Infinity
+  for (const opt of pool) {
+    const diff = Math.abs(target - opt.w / opt.h)
+    if (diff < bestDiff) {
+      bestDiff = diff
+      best = opt
+    }
+  }
+  return best?.value || params.defaultImageSize
 }
 
 /**

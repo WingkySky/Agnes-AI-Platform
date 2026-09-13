@@ -448,6 +448,10 @@ export interface GenerationPreferences {
   /** 默认对话模型（创作类 LLM 环节：分镜/聊天/向导/镜头/角色/道具） */
   default_chat_model_id: string
   default_aspect_ratio: string
+  /** 默认清晰度档（图片）：生成页「自动」尺寸的档位来源 */
+  default_image_tier: 'sd' | 'hd' | '4k'
+  /** 默认分辨率档（视频，高度值）：生成页「自动」档位的来源 */
+  default_video_resolution: number
   auto_copy_prompt: boolean
   default_image_count: number
 }

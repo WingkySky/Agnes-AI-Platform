@@ -448,6 +448,8 @@ export const usePreferencesStore = defineStore('preferences', () => {
       default_video_model_id: '',
       default_chat_model_id: '',
       default_aspect_ratio: '1:1',
+      default_image_tier: 'sd',
+      default_video_resolution: 720,
       auto_copy_prompt: true,
       default_image_count: 1,
     },
