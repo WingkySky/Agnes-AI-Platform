@@ -736,6 +736,16 @@ multipart 上传，支持 jpeg/png/webp，≤5MB，存 `uploads/preset-covers/`�
 
 manifest 格式：`{ "name": "...", "items": [{ "slug", "name", "description", "category", "transport": "stdio\|http", "command", "args", "url", "env_fields": [{key, description, required}], "headers_fields": [...], "tools_preview": [...] }] }`。
 
+### 用户记忆库（需登录）
+
+创作偏好存储在用户自己的 MCP 记忆图谱里（「创作偏好」实体，observations 格式"类别：内容"），per_user 隔离。写入由 Agent 按系统提示记忆守则调用 memory 工具完成，本组接口只做读取与管理：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/mcp/memory/summary` | 当前用户偏好摘要 `{ available, preferences }`（未安装/未启用官方记忆服务器 → available:false） |
+| DELETE | `/api/mcp/memory/preference` | 删除单条偏好（body `{ observation }`） |
+| DELETE | `/api/mcp/memory/preferences` | 清空偏好实体（保留图谱其他记忆） |
+
 ### 数据表
 
 - `mcp_servers`：name（唯一）/ transport('stdio'\|'http') / command / args_json / env_json / url / headers_json / enabled / market_slug（市场安装溯源）/ created_at / updated_at。stdio 的 env_json 与 http 的 headers_json 为敏感值存储，仅服务端持有。
