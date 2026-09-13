@@ -112,6 +112,28 @@ describe('辅助函数', () => {
     if (imageGate.action === 'gate') expect(imageGate.stage).toBe('分镜图')
   })
 
+  it('mcp 组：确认档每工具首次过门（kind=tool），已过门直通；只读拒、自动直通', () => {
+    const gate = resolveToolCall({ ...base, mode: 'confirm', toolName: 'mcp__1__read_file', toolGroup: 'mcp' })
+    expect(gate.action).toBe('gate')
+    if (gate.action === 'gate') {
+      expect(gate.kind).toBe('tool')
+      expect(gate.stage).toBe('mcp__1__read_file')
+      expect(gate.summary).toContain('MCP')
+    }
+    // 同工具已过门 → 直通；不同工具 → 仍要过门
+    expect(resolveToolCall({ ...base, mode: 'confirm', toolName: 'mcp__1__read_file', toolGroup: 'mcp', gatedKinds: ['mcp__1__read_file'] }).action).toBe('allow')
+    expect(resolveToolCall({ ...base, mode: 'confirm', toolName: 'mcp__2__list_dir', toolGroup: 'mcp', gatedKinds: ['mcp__1__read_file'] }).action).toBe('gate')
+    // 自动档直通；只读档拒绝
+    expect(resolveToolCall({ ...base, mode: 'auto', toolName: 'mcp__1__read_file', toolGroup: 'mcp' }).action).toBe('allow')
+    const ro = resolveToolCall({ ...base, mode: 'readonly', toolName: 'mcp__1__read_file', toolGroup: 'mcp' })
+    expect(ro.action).toBe('reject')
+  })
+
+  it('gatedKindOf：mcp 工具记工具名本身，非生成类返回 null', () => {
+    expect(gatedKindOf('mcp__1__read_file', {}, undefined)).toBe('mcp__1__read_file')
+    expect(gatedKindOf('agent_create_text_node', {}, undefined)).toBeNull()
+  })
+
   it('阶段通过指引：实体设定指向分镜提示词', () => {
     expect(stageApprovedMessage('实体设定')).toContain('分镜提示词')
     expect(stageApprovedMessage('剧本')).toContain('实体设定')

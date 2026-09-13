@@ -32,6 +32,7 @@ import { CHAT_SYSTEM_PROMPT_BASE, buildChatSystemPrompt } from '@/lib/agent/chat
 import { listAgentSkills } from '@/lib/agent/skills'
 import { toBackendMessages } from '@/lib/agent/session-store'
 import { setDelegateProgressSink } from '@/lib/agent/subagent'
+import { buildMcpTools } from '@/lib/agent/mcp'
 import type {
   ProjectableMessage,
 } from '@/lib/agent/session-store'
@@ -388,6 +389,8 @@ export const useChatStore = defineStore('chat', {
       }
       const k = this._createKernel(sessionId)
       pool.set(key, k)
+      // MCP 工具清单：会话建立时后台刷新（失败降级为空；流式中内核侧跳过，下次刷新生效）
+      void buildMcpTools().then((tools) => k.setExtraTools(tools))
       try {
         const [detail, rowsResp] = await Promise.all([
           getAgentSession(sessionId).catch(() => null),

@@ -173,6 +173,16 @@ async def test_server(
     return ok({"name": server.name, "transport": server.transport, "tools": tools})
 
 
+# ---------- Agent 工具清单（登录用户） ----------
+
+@router.get("/tools", summary="[登录用户] Agent 可用的 MCP 工具清单（按服务器聚合，带指纹缓存）")
+async def agent_tools(
+    db: AsyncSession = Depends(get_async_db),
+    _user: User = Depends(get_current_user),
+):
+    return ok(await mcp_service.agent_tools(db))
+
+
 # ---------- Agent 工具调用（登录用户 BFF） ----------
 
 @router.post("/call", summary="[登录用户] 调用 MCP 工具")

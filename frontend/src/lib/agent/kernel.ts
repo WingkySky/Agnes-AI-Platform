@@ -42,7 +42,7 @@ export type KernelEvent =
   | { type: 'tool_start'; callId: string; tool: string; args: Record<string, unknown> }
   | { type: 'tool_end'; callId: string; tool: string; ok: boolean; result: string }
   | { type: 'tool_rejected'; callId: string; tool: string; reason: string }
-  | { type: 'confirm_request'; kind: 'stage'; tool: string; args: Record<string, unknown>; stage: string; summary: string; source?: string }
+  | { type: 'confirm_request'; kind: 'stage' | 'tool'; tool: string; args: Record<string, unknown>; stage: string; summary: string; source?: string }
   | { type: 'done'; stopped: boolean; error: string | null }
 
 /** 宿主自带工具（chat 宿主等）：结构与画布 AgentTool 对齐，execute 的 ctx 由 deps.toolContext 提供；
@@ -67,6 +67,8 @@ export interface AgentKernelDeps {
   maxTurns?: number
   /** 对话模型（缺省占位 id 走后端解析链；子代理由 createChildKernel 继承父的当前模型） */
   model?: Model<'openai-completions'>
+  /** MCP 等动态注入工具（画布模式追加到档位组之后；宿主模式追加到自带组之后） */
+  extraTools?: HostTool[]
   /** 宿主自带工具组：提供则不挂画布工具与阶段门策略（技能围栏仍生效，其余放行） */
   tools?: HostTool[]
   /** 宿主工具执行上下文（缺省用画布 store） */
@@ -107,16 +109,19 @@ export class AgentKernel {
   private maxTurns: number
   /** 活跃子代理内核（运行期间注册）；requestStop 时全部一并中止 */
   private children = new Set<AgentKernel>()
+  /** 动态注入工具（MCP 等）；setExtraTools 运行时更新 */
+  private extraTools: HostTool[]
 
   constructor(private deps: AgentKernelDeps) {
     this.maxTurns = deps.maxTurns ?? MAX_TURNS
+    this.extraTools = deps.extraTools ?? []
     this.agent = new Agent({
       streamFn: deps.streamFn ?? agentStreamFn,
       initialState: {
         systemPrompt: deps.systemPrompt,
         model: deps.model ?? createAgentModel(),
         messages: [],
-        tools: deps.tools ? this.wrapTools(deps.tools) : this.piTools(deps.getMode?.() ?? 'confirm'),
+        tools: this.buildTools(deps.getMode?.() ?? 'confirm'),
       },
       getApiKey: async () => (await deps.getAuthToken()) || 'anonymous',
       toolExecution: 'parallel',
@@ -147,13 +152,13 @@ export class AgentKernel {
     }
   }
 
-  /** 创建子代理内核：继承父的 LLM 通道/当前模型/鉴权/工具上下文，并注册进 children（requestStop 传导）。
+  /** 创建子代理内核：继承父的 LLM 通道/当前模型/鉴权/工具上下文/动态注入组，并注册进 children（requestStop 传导）。
    *  调用方在子任务结束时调用返回的 unregister 注销。 */
   createChildKernel(input: { systemPrompt: string; maxTurns?: number; tools: HostTool[]; toolContext?: unknown }): { kernel: AgentKernel; unregister: () => void } {
     const child = new AgentKernel({
       systemPrompt: input.systemPrompt,
       maxTurns: input.maxTurns,
-      tools: input.tools,
+      tools: [...input.tools, ...this.extraTools],
       toolContext: input.toolContext ?? this.deps.toolContext ?? this.deps.getCanvas?.(),
       getAuthToken: this.deps.getAuthToken,
       streamFn: this.deps.streamFn,
@@ -169,7 +174,14 @@ export class AgentKernel {
 
   /** 档位切换：同步机制层工具清单（只读档仅挂 read 组；策略层在 beforeToolCall 兜底）。宿主工具组模式无档位，no-op */
   setMode(mode: AgentMode): void {
-    if (!this.deps.tools) this.agent.state.tools = this.piTools(mode)
+    if (!this.deps.tools) this.agent.state.tools = this.buildTools(mode)
+  }
+
+  /** 运行时更新 MCP 等动态注入工具并重装配工具清单（会话建立时刷新；流式中跳过，下次刷新生效） */
+  setExtraTools(tools: HostTool[]): void {
+    if (this.agent.state.isStreaming) return
+    this.extraTools = tools
+    this.agent.state.tools = this.buildTools(this.deps.getMode?.() ?? 'confirm')
   }
 
   /** 会话建立时刷新系统提示（技能清单快照；对齐 setMode 的状态直改模式） */
@@ -207,8 +219,10 @@ export class AgentKernel {
     }))
   }
 
-  private piTools(mode: AgentMode): PiAgentTool[] {
-    return this.wrapTools(toolsForMode(mode))
+  /** 工具清单装配：宿主自带组（或画布档位组）+ 动态注入组（MCP 等） */
+  private buildTools(mode: AgentMode): PiAgentTool[] {
+    const base = this.deps.tools ?? toolsForMode(mode)
+    return this.wrapTools([...base, ...this.extraTools])
   }
 
   private async handleBeforeToolCall(ctx: BeforeToolCallContext): Promise<BeforeToolCallResult | undefined> {
@@ -232,14 +246,15 @@ export class AgentKernel {
    *  阶段门确认卡入 FIFO 队列，confirm 按序唤醒。source 标记来自子任务的请求，确认卡据此展示来源。 */
   async authorizeTool(toolName: string, args: Record<string, unknown>, source?: string): Promise<{ allowed: boolean; reason?: string; stop: boolean }> {
     if (this.deps.tools) return { allowed: true, stop: false }
-    const tool = AGENT_TOOLS.find((t) => t.name === toolName)
+    // mcp__ 前缀 = 外部 MCP 工具（命名约定，见 lib/agent/mcp.ts），走独立 'mcp' 组策略
+    const toolGroup = toolName.startsWith('mcp__') ? 'mcp' : AGENT_TOOLS.find((t) => t.name === toolName)?.group ?? 'write'
     const panelId = typeof args.panel_id === 'string' ? args.panel_id : ''
     const panelType = panelId ? this.deps.getCanvas?.().panels.find((p) => p.id === panelId)?.type : undefined
 
     const decision = resolveToolCall({
       mode: this.deps.getMode?.() ?? 'confirm',
       toolName,
-      toolGroup: tool?.group ?? 'write',
+      toolGroup,
       args,
       gatedKinds: this.gatedKinds,
       panelType,

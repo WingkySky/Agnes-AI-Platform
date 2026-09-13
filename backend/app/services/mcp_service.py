@@ -155,8 +155,33 @@ def _get_session(server: McpServer) -> _ServerSession:
     return old
 
 
+# 工具清单缓存：{server_id: (fingerprint, tools)}，避免每次会话建立都拉起 stdio 子进程
+_tools_cache: dict[int, tuple[str, list[dict]]] = {}
+
+
+async def agent_tools(db: AsyncSession) -> list[dict]:
+    """聚合启用服务器的工具清单（登录用户；单服务器失败跳过不阻塞整体）"""
+    out: list[dict] = []
+    for server in await list_servers(db, enabled_only=True):
+        fp = _config_fingerprint(server)
+        cached = _tools_cache.get(server.id)
+        if cached and cached[0] == fp:
+            tools = cached[1]
+        else:
+            try:
+                tools = await _get_session(server).list_tools()
+                _tools_cache[server.id] = (fp, tools)
+            except Exception as e:  # noqa: BLE001 —— 单服务器故障不影响其余工具注入
+                logger.warning("MCP 服务器「%s」工具清单获取失败：%s", server.name, e)
+                _tools_cache.pop(server.id, None)
+                continue
+        out.append({"server_id": server.id, "server_name": server.name, "tools": tools})
+    return out
+
+
 async def drop_session(server_id: int) -> None:
-    """服务器删除/停用时显式回收连接"""
+    """服务器删除/停用时显式回收连接并失效工具缓存"""
+    _tools_cache.pop(server_id, None)
     session = _sessions.pop(server_id, None)
     if session:
         await session.close()

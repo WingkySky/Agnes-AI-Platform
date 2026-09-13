@@ -14,6 +14,7 @@ import { useUserStore } from '@/stores/user'
 import { AgentKernel, rebuildTimeline } from '@/lib/agent/kernel'
 import type { KernelEvent, KernelTimelineMessage, AgentImageAttachment } from '@/lib/agent/kernel'
 import { setDelegateProgressSink } from '@/lib/agent/subagent'
+import { buildMcpTools } from '@/lib/agent/mcp'
 import { MAX_IMAGES_PER_MESSAGE } from '@/lib/agent/attachments'
 import { AGENT_SYSTEM_PROMPT_BASE, buildAgentSystemPrompt } from '@/lib/agent/system-prompt'
 import { listAgentSkills } from '@/lib/agent/skills'
@@ -52,7 +53,7 @@ export interface AgentMessage {
 }
 
 export interface AgentPendingConfirm {
-  kind: 'stage'
+  kind: 'stage' | 'tool'
   tool: string
   args: Record<string, unknown>
   stage: string
@@ -269,6 +270,8 @@ export const useAgentStore = defineStore('agent', {
       const scope = this._scope()
       if (this.loadedKey === scope) return
       const k = this._ensureKernel()
+      // MCP 工具清单：会话建立时后台刷新（失败降级为空；流式中内核侧跳过，下次刷新生效）
+      if (!this.busy) void buildMcpTools().then((tools) => k.setExtraTools(tools))
       // 恢复用户选定的对话模型（无选择则保持占位 id 走后端默认解析链）
       if (this.chatModelId) k.setModel(createAgentModel(this.chatModelId))
       // 会话建立时快照技能清单进系统提示（技能库不可用则沿用基础提示，不阻塞对话）

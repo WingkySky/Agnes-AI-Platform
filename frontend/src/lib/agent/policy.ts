@@ -38,17 +38,18 @@ export function stageNameOfKind(kind: GenerationKind): string {
 
 export type PolicyDecision =
   | { action: 'allow' }
-  /** 过门：等用户确认；拒绝时回填 onReject 并停止流程交还用户（当前两类确认均属阶段卡） */
-  | { action: 'gate'; kind: 'stage'; stage: string; summary: string; onReject: string }
+  /** 过门：等用户确认；拒绝时回填 onReject 并停止流程交还用户（stage=阶段卡，tool=MCP 工具卡） */
+  | { action: 'gate'; kind: 'stage' | 'tool'; stage: string; summary: string; onReject: string }
   /** 拒绝：reason 回填 LLM；stop=true 时内核强制终止本回合 */
   | { action: 'reject'; reason: string; stop: boolean }
 
 export interface PolicyInput {
   mode: AgentMode
   toolName: string
-  toolGroup: 'read' | 'write' | 'generation'
+  /** mcp 组（mcp__ 前缀约定，见 kernel.authorizeTool）：副作用不可预测，confirm 档每工具首次过门 */
+  toolGroup: 'read' | 'write' | 'generation' | 'mcp'
   args: Record<string, unknown>
-  /** 本回合已过门的生成阶段（image/video/compose） */
+  /** 本回合已过门的生成阶段（image/video/compose）与 MCP 工具名 */
   gatedKinds: string[]
   /** args.panel_id 对应节点类型（kind 推断用，由内核注入） */
   panelType: string | undefined
@@ -89,11 +90,23 @@ export function resolveToolCall(input: PolicyInput): PolicyDecision {
     }
   }
 
+  // 需确认档 MCP 工具关卡：每个外部工具首次执行前必须过门（gatedKinds 记工具名本身），不依赖 LLM 自觉
+  if (toolGroup === 'mcp' && mode === 'confirm' && !gatedKinds.includes(toolName)) {
+    return {
+      action: 'gate',
+      kind: 'tool',
+      stage: toolName,
+      summary: `Agent 即将调用外部 MCP 工具「${toolName}」，请确认`,
+      onReject: `用户未允许调用 MCP 工具 ${toolName}，流程已停止，等用户调整后再试`,
+    }
+  }
+
   return { action: 'allow' }
 }
 
-/** 阶段门放行后应记录的 kind（非生成类工具返回 null） */
+/** 阶段门放行后应记录的 kind（MCP 工具记工具名本身，生成类记 kind，其余返回 null） */
 export function gatedKindOf(toolName: string, args: Record<string, unknown>, panelType: string | undefined): string | null {
+  if (toolName.startsWith('mcp__')) return toolName
   if (toolName !== 'agent_run_generation') return null
   return inferGenerationKind(typeof args.kind === 'string' ? args.kind : '', panelType)
 }
