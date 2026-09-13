@@ -95,6 +95,20 @@ OFFICIAL_EFFECTS = [
 # 官方技能（Agent 技能：name=技能名，description=何时使用，prompt_text=正文）
 # 系统提示只列 名称+description，正文由 agent_load_skill 按需加载
 # =====================================================
+
+# 技能创作/技能转译共用的技能卡格式规范段
+_SKILL_FORMAT_SPEC = (
+    "技能卡格式规范（name/tag/description/content 四字段，保存后进入\"可用技能\"清单）：\n"
+    "- name：唯一技能名，与已有技能不得同名，见名知义\n"
+    "- tag：2-4 字短标识，/ 快速清单对齐用，可空\n"
+    "- description：\"何时使用\"触发行——技能清单只列名称+本行，模型据此决定是否加载；"
+    "用\"当用户……时使用\"句式并点出具体场景，≤60 字\n"
+    "- content：正文方法论，结构=适用场景→步骤/原则→约束与禁忌→示例，上限 20000 字符\n"
+    "能力边界：Agent 无代码执行、不能联网、不能读写本地文件，只能调用本产品内置工具；"
+    "整包导入的技能可带附件资源（agent_load_skill 结果会列出，用 agent_read_skill_file 按需读取原文），"
+    "其中脚本只是存档文本，当前不会被执行；用户要求\"运行脚本\"时如实说明，可把脚本意图改写为方法论步骤"
+)
+
 OFFICIAL_SKILLS = [
     {
         "name": "分镜节奏与情绪曲线",
@@ -140,6 +154,45 @@ OFFICIAL_SKILLS = [
             "5. 换装/受伤等状态变化只改锚点差异项，其余锚点保持原词"
         ),
     },
+    {
+        "name": "技能创作",
+        "tag": "创作",
+        "category": "元技能",
+        "description": "当用户想创建新技能、把工作方法沉淀为技能卡时使用：访谈收集需求，起草技能卡，确认后保存",
+        "prompt_text": (
+            "技能创作方法：帮用户从零编写一张新技能卡并保存到个人技能库。\n"
+            "流程：\n"
+            "1. 明确用途：技能要解决什么任务、给谁用；用户一句话能说清就直接起草，说不清再追问\n"
+            "2. 访谈收集：适用场景（何时触发）、核心步骤或原则、约束与禁忌、1-2 个好例子\n"
+            "3. 起草四要素（name/tag/description/content，规范见下）\n"
+            "4. 在回复中完整展示草稿，请用户确认；用户要求修改就改完再确认，不要未经同意直接保存\n"
+            "5. 用户同意后调用 agent_save_skill 保存，成功后告知：/tag 可快速调用，预设中心可编辑或投稿广场\n"
+            "\n"
+            + _SKILL_FORMAT_SPEC
+        ),
+    },
+    {
+        "name": "技能转译",
+        "tag": "转译",
+        "category": "元技能",
+        "description": "当用户想引入外部技能（粘贴技能文本、导入文件或提到外部技能格式）时使用：按本产品能力改写外部技能并保存",
+        "prompt_text": (
+            "技能转译方法：把外部技能（主流 Agent 技能格式的 SKILL.md 或用户粘贴的技能文本）改写为本产品可用的技能卡并保存。\n"
+            "本产品技能是纯文本方法论包：Agent 无代码执行、不能联网、不能读写本地文件，外部技能默认存在的这些能力都没有。\n"
+            "流程：\n"
+            "1. 通读原文，弄清技能的真实意图（它帮用户完成什么）\n"
+            "2. 能力映射改写：\n"
+            "   - 脚本调用 → 剔除；脚本的算法意图能用方法论步骤表达的改写为步骤，不能表达的如实告知丢弃（脚本文件本身在整包导入时已存档，但不会被执行）\n"
+            "   - 对外部文件的引用（references/ 等）→ 用户上传的整包里已含该文件时，可用 agent_read_skill_file 读取原文辅助转译，转译保存的技能卡是纯文本、引用要点并入正文；整包里没有则删除引用\n"
+            "   - 对通用工具的依赖（Bash/Read/Write 等）→ 能映射到本产品内置工具（画布操作、生成任务）就映射，否则删除\n"
+            "   - 外文内容 → 翻译为中文\n"
+            "   - description 一律重写为触发句式（规范见下）\n"
+            "3. 输出转译报告：保留了什么、丢弃了什么及原因、转译后预期效果差异；价值完全依赖脚本的技能（如文档解析类）如实告知无法有效转译并建议放弃，不要硬转空壳\n"
+            "4. 展示草稿+转译报告请用户确认，同意后调用 agent_save_skill 保存，并在 import_meta 传入 {\"source_format\": \"skill_md\", \"original_name\": 原技能名, \"dropped\": [丢弃要点]} 便于日后重新转译\n"
+            "\n"
+            + _SKILL_FORMAT_SPEC
+        ),
+    },
 ]
 
 
@@ -172,6 +225,33 @@ async def _add(db: AsyncSession, preset_type: str, name: str, category: str,
     return 1
 
 
+async def _upsert_official_skill(db: AsyncSession, s: dict) -> int:
+    """官方技能卡随代码更新（已存在且是官方卡则刷新文案；用户同名卡不动）"""
+    result = await db.execute(
+        select(PromptPreset).filter(PromptPreset.type == "skill", PromptPreset.name == s["name"])
+    )
+    existing = result.scalar_one_or_none()
+    if existing:
+        if not existing.is_official:
+            return 0
+        existing.category = s["category"]
+        existing.description = s["description"]
+        existing.prompt_text = s["prompt_text"]
+        existing.prompt_config = {"tag": s["tag"]}
+        return 0
+    db.add(PromptPreset(
+        name=s["name"],
+        type="skill",
+        category=s["category"],
+        description=s["description"],
+        prompt_text=s["prompt_text"],
+        prompt_config={"tag": s["tag"]},
+        cover_image=None,
+        **OFFICIAL,
+    ))
+    return 1
+
+
 async def seed_official_presets(db: AsyncSession) -> None:
     added = 0
 
@@ -180,10 +260,9 @@ async def seed_official_presets(db: AsyncSession) -> None:
         added += await _add(db, "style", s["name"], s["category"], s["description"],
                             {"suffix": s["suffix"]}, None)
 
-    # 1.5 官方技能（Agent 技能：正文走 prompt_text）
+    # 1.5 官方技能（Agent 技能：正文走 prompt_text；官方卡随代码更新文案）
     for s in OFFICIAL_SKILLS:
-        added += await _add(db, "skill", s["name"], s["category"], s["description"],
-                            {"tag": s["tag"]}, None, prompt_text=s["prompt_text"])
+        added += await _upsert_official_skill(db, s)
 
     # 2. style_presets 内置风格 → 官方风格卡（画布侧原表保留不动）
     result = await db.execute(select(StylePreset).filter(StylePreset.is_builtin == True))  # noqa: E712

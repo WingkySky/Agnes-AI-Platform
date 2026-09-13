@@ -17,7 +17,7 @@ import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useModelsStore } from '@/stores/models'
 import type { ImageGenerationRequest, VideoGenerationRequest } from '@/types'
 import type { AgentToolResult } from './tools'
-import { getCachedSkill, getCachedSkills } from './skills'
+import { loadAgentSkillFull, readSkillResource, saveAgentSkill, SKILL_CONTENT_MAX_CHARS } from './skills'
 
 /** chat 工具执行上下文（chat store 提供）：会话连续性所需的媒体状态 */
 export interface ChatToolContext {
@@ -244,21 +244,74 @@ const videoTool = {
 
 const loadSkillTool = {
   name: 'agent_load_skill',
-  description: '加载技能全文。当用户消息带【使用技能：名称】标记，或任务与可用技能清单中某技能高度相关时调用，把技能方法论注入你的工作上下文。',
+  description: '加载技能全文。当用户消息带【使用技能：名称】标记，或任务与可用技能清单中某技能高度相关时调用，把技能方法论注入你的工作上下文。结果含附件资源清单，需要时用 agent_read_skill_file 按需读取（脚本只存档，不会被执行）。',
   parameters: Type.Object({
     name: Type.String({ description: '技能名称（来自可用技能清单）' }),
   }),
   execute: async (args: Record<string, unknown>): Promise<AgentToolResult> => {
     const name = typeof args.name === 'string' ? args.name.trim() : ''
     if (!name) return { ok: false, error: '缺少技能名称' }
-    const skill = getCachedSkill(name)
-    if (!skill) {
-      const available = getCachedSkills().map((s) => s.name).join('、') || '（技能库为空）'
-      return { ok: false, error: `技能「${name}」不存在。可用技能：${available}` }
+    try {
+      return { ok: true, data: await loadAgentSkillFull(name) }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
     }
-    return { ok: true, data: { name: skill.name, content: skill.content } }
   },
 }
 
-/** chat 宿主工具组（经内核 HostTool 包装后挂载） */
-export const CHAT_TOOLS = [imageTool, videoTool, loadSkillTool]
+// ---------- agent_read_skill_file ----------
+
+const readSkillFileTool = {
+  name: 'agent_read_skill_file',
+  description: '读取技能附件资源的原文（agent_load_skill 结果里列出的资源文件）。仅用于查看参考文档、脚本等内容；脚本只是文本存档，本产品不会执行任何技能脚本。',
+  parameters: Type.Object({
+    skill: Type.String({ description: '技能名称' }),
+    path: Type.String({ description: '资源路径（与资源清单一致）' }),
+  }),
+  execute: async (args: Record<string, unknown>): Promise<AgentToolResult> => {
+    const skill = typeof args.skill === 'string' ? args.skill.trim() : ''
+    const path = typeof args.path === 'string' ? args.path.trim() : ''
+    if (!skill) return { ok: false, error: '缺少技能名称' }
+    if (!path) return { ok: false, error: '缺少资源路径' }
+    try {
+      return { ok: true, data: await readSkillResource(skill, path) }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  },
+}
+
+// ---------- agent_save_skill ----------
+
+const saveSkillTool = {
+  name: 'agent_save_skill',
+  description: '把技能保存到用户个人技能库（保存后当前会话即可 agent_load_skill 加载）。流程：先在回复中完整展示草稿（name/tag/description/content）并征得用户同意，再调用本工具；保存成功后告知用户可用 /tag 快速调用、预设中心可编辑或投稿广场。与已有技能同名会被拒绝。技能是纯文本方法论包（无代码执行），正文不要写脚本或对外部工具的调用指引。',
+  parameters: Type.Object({
+    name: Type.String({ description: '技能名（唯一，与已有技能不得同名）' }),
+    description: Type.String({ description: '"何时使用"触发行：技能清单只列名称+本行，模型据此决定是否加载；用"当用户……时使用"句式，≤60 字' }),
+    tag: Type.Optional(Type.String({ description: '短标识（/ 快速清单对齐用，2-4 字，可选）' })),
+    content: Type.String({ description: `技能正文方法论，结构=适用场景/步骤/约束/示例，上限 ${SKILL_CONTENT_MAX_CHARS} 字符` }),
+    import_meta: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: '转译溯源（来源格式、原始名称、丢弃清单等），仅技能转译时传' })),
+  }),
+  execute: async (args: Record<string, unknown>): Promise<AgentToolResult> => {
+    const meta = args.import_meta
+    try {
+      const r = await saveAgentSkill({
+        name: typeof args.name === 'string' ? args.name : '',
+        description: typeof args.description === 'string' ? args.description : '',
+        content: typeof args.content === 'string' ? args.content : '',
+        tag: typeof args.tag === 'string' && args.tag.trim() ? args.tag : undefined,
+        importMeta: isRecord(meta) ? meta : undefined,
+      })
+      return { ok: true, data: { name: r.name, tag: r.tag, message: `技能「${r.name}」已保存到个人技能库，可用 /${r.tag || r.name} 快速调用` } }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  },
+}
+
+/** chat 宿主工具组（经内核 HostTool 包装后挂载；追加新工具放末尾，测试按索引取用） */
+export const CHAT_TOOLS = [imageTool, videoTool, loadSkillTool, saveSkillTool, readSkillFileTool]
+
+/** 工具名清单（allowed-tools 白名单映射目标） */
+export const CHAT_TOOL_NAMES = CHAT_TOOLS.map((t) => t.name)

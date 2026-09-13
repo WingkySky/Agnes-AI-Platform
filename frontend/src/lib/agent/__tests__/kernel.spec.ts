@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { AgentKernel, rebuildTimeline } from '../kernel'
 import type { AgentKernelDeps, KernelEvent } from '../kernel'
 import { AGENT_SYSTEM_PROMPT_BASE } from '../system-prompt'
+import { setActiveSkillScope } from '../skills'
 import { createFakeStreamFn } from './fake-llm'
 import type { FakeTurn } from './fake-llm'
 import type { AgentMode } from '../policy'
@@ -234,6 +235,71 @@ describe('AgentKernel：工具循环', () => {
     })
     expect(kernel.restore({ messages: 'bad' })).toBe(false)
     expect(kernel.restore(null)).toBe(false)
+  })
+
+  it('恢复坏形状上下文后续发不炸（历史落库：字符串内容 + 缺 stopReason/usage）', async () => {
+    const { kernel, events } = makeKernel([{ text: '续上了' }], 'auto')
+    const brokenContext = {
+      messages: [
+        { role: 'user', content: '第一问', timestamp: Date.now() - 1000 },
+        { role: 'assistant', content: '第一答', timestamp: Date.now() },
+      ],
+    }
+    expect(kernel.restore(brokenContext)).toBe(true)
+    // 修复前：下一回合上下文估算读 usage.totalTokens 对 undefined 抛 TypeError，send 直接失败
+    await kernel.send('继续')
+    const doneEvent = events.find((e) => e.type === 'done')
+    expect(doneEvent && 'error' in doneEvent && doneEvent.error).toBeNull()
+    const data = kernel.serializeState() as {
+      messages: Array<{ role: string; content: unknown; stopReason?: string; usage?: { totalTokens: number } }>
+    }
+    const assistants = data.messages.filter((m) => m.role === 'assistant')
+    expect(assistants.length).toBeGreaterThanOrEqual(2)
+    for (const a of assistants) {
+      expect(Array.isArray(a.content)).toBe(true)
+      expect(a.stopReason).toBeDefined()
+      expect(a.usage).toBeDefined()
+    }
+  })
+})
+
+describe('AgentKernel：技能工具围栏', () => {
+  it('allowed_tools 白名单外的工具被拒绝（画布宿主），回合继续收尾', async () => {
+    setActiveSkillScope(['agent_get_state'])
+    try {
+      const { kernel, events, calls } = makeKernel(
+        [
+          { toolCalls: [{ id: 't1', name: 'agent_create_text_node', args: { text: '越权' } }] },
+          { text: '被围栏拦下' },
+        ],
+        'auto',
+      )
+      await kernel.send('越权建节点')
+      const rejected = events.find((e) => e.type === 'tool_rejected')
+      expect(rejected?.reason).toContain('白名单')
+      expect(mocks.panels.length).toBe(0)
+      expect(calls.length).toBe(2)
+    } finally {
+      setActiveSkillScope([])
+    }
+  })
+
+  it('白名单内的工具正常执行；清空围栏后恢复不限制', async () => {
+    setActiveSkillScope(['agent_create_text_node'])
+    try {
+      const { kernel, events } = makeKernel(
+        [
+          { toolCalls: [{ id: 't1', name: 'agent_create_text_node', args: { text: '圈内' } }] },
+          { text: '完成' },
+        ],
+        'auto',
+      )
+      await kernel.send('建节点')
+      expect(events.some((e) => e.type === 'tool_rejected')).toBe(false)
+      expect(mocks.panels.some((p) => p.content.content === '圈内')).toBe(true)
+    } finally {
+      setActiveSkillScope([])
+    }
   })
 })
 

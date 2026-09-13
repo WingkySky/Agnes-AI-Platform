@@ -243,6 +243,14 @@
                 {{ t(`admin.review.types.${row.review_type}`) }}
               </el-tag>
               <el-tag
+                v-if="row.review_type === 'preset' && row.preset_type"
+                size="small"
+                type="warning"
+                effect="plain"
+                style="margin-left: 4px">
+                {{ presetTypeLabel(row.preset_type) }}
+              </el-tag>
+              <el-tag
                 v-if="(row.review_type === 'work' || row.review_type === 'asset') && row.work_type"
                 size="small"
                 :type="row.work_type === 'image' ? 'primary' : 'warning'"
@@ -555,6 +563,65 @@
             </div>
           </el-descriptions-item>
         </el-descriptions>
+
+        <!-- ====== 预设审核详情：完整正文 / 技能资源 / 权限声明（列表只有索引信息） ====== -->
+        <div v-if="currentItem.review_type === 'preset'" v-loading="detailLoading" class="preset-detail">
+          <template v-if="presetDetail">
+            <!-- 技能审核要点 + 概览 -->
+            <template v-if="presetDetail.preset_type === 'skill'">
+              <el-alert
+                :title="t('admin.review.detailSkillTips')"
+                type="warning"
+                :closable="false"
+                style="margin-top: 16px" />
+              <div class="skill-meta">
+                <el-tag size="small">{{ t('admin.review.detailContentChars').replace('{n}', String(presetDetail.prompt_text.length)) }}</el-tag>
+                <el-tag v-if="skillResources.length" size="small" type="primary">
+                  {{ t('admin.review.detailResourceCount').replace('{n}', String(skillResources.length)) }}
+                </el-tag>
+                <el-tag v-if="scriptCount > 0" size="small" type="danger">
+                  {{ t('admin.review.detailScriptCount').replace('{n}', String(scriptCount)) }}
+                </el-tag>
+                <el-tag v-if="allowedTools.length" size="small" type="warning">
+                  {{ t('admin.review.detailToolsAllowed') }}: {{ allowedTools.join('、') }}
+                </el-tag>
+                <el-tag v-else size="small" type="info">{{ t('admin.review.detailToolsUnlimited') }}</el-tag>
+                <el-tag v-if="presetDetail.source" size="small" effect="plain">
+                  {{ t(SOURCE_LABELS[presetDetail.source] || 'admin.review.detailSourceManual') }}
+                </el-tag>
+              </div>
+            </template>
+
+            <!-- 完整正文 -->
+            <div class="detail-section">
+              <div class="section-label">{{ presetDetail.preset_type === 'skill' ? t('admin.review.detailSkillContent') : t('admin.review.detailPromptText') }}</div>
+              <pre class="content-pre">{{ presetDetail.prompt_text || '-' }}</pre>
+            </div>
+
+            <!-- 附件资源（逐个展开看原文） -->
+            <div v-if="skillResources.length > 0" class="detail-section">
+              <div class="section-label">{{ t('admin.review.detailResources').replace('{n}', String(skillResources.length)) }}</div>
+              <el-collapse class="resource-collapse">
+                <el-collapse-item v-for="r in skillResources" :key="r.path" :name="r.path">
+                  <template #title>
+                    <span class="resource-path">{{ r.path }}</span>
+                    <el-tag v-if="/\.(py|js|mjs|cjs|ts|jsx|tsx|sh|bash|zsh|sql)$/i.test(r.path)" size="small" type="danger" effect="light" style="margin-left: 8px">
+                      {{ t('admin.review.detailScriptTag') }}
+                    </el-tag>
+                    <span class="muted" style="margin-left: 8px">{{ t('admin.review.detailResourceChars').replace('{n}', String(r.content.length)) }}</span>
+                  </template>
+                  <pre class="content-pre resource-pre">{{ r.content }}</pre>
+                </el-collapse-item>
+              </el-collapse>
+            </div>
+
+            <!-- 导入溯源（原始 frontmatter / 跳过清单） -->
+            <div v-if="importMeta" class="detail-section">
+              <div class="section-label">{{ t('admin.review.detailImportMeta') }}</div>
+              <pre class="content-pre resource-pre">{{ JSON.stringify(importMeta, null, 2) }}</pre>
+            </div>
+          </template>
+        </div>
       </template>
       <template #footer>
         <el-button @click="detailVisible = false">{{ t('common.close') }}</el-button>
@@ -599,7 +666,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, Search, Check, Close, Warning, VideoPlay, Clock, MagicStick } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
@@ -689,6 +756,63 @@ const itemIdInput = ref<string>('')
 // 详情相关
 const detailVisible = ref(false)
 const currentItem = ref<ReviewItem | null>(null)
+
+// 预设审核详情（列表只有索引信息，打开详情时拉取全文/技能资源/权限声明）
+interface SkillResource {
+  path: string
+  content: string
+}
+interface PresetReviewDetail {
+  item_id: number
+  preset_id: number
+  name: string
+  description?: string | null
+  preset_type: string
+  category: string
+  tags?: string[]
+  prompt_text: string
+  prompt_config?: Record<string, any> | null
+  source?: string | null
+  user_id?: number | null
+}
+const detailLoading = ref(false)
+const presetDetail = ref<PresetReviewDetail | null>(null)
+
+const skillConfig = computed<Record<string, any>>(() =>
+  presetDetail.value?.preset_type === 'skill' ? presetDetail.value.prompt_config || {} : {}
+)
+const skillResources = computed<SkillResource[]>(() => {
+  const list = skillConfig.value.resources
+  return Array.isArray(list) ? list.filter((r: any) => r && typeof r.path === 'string' && typeof r.content === 'string') : []
+})
+const scriptCount = computed(() => skillResources.value.filter((r) => /\.(py|js|mjs|cjs|ts|jsx|tsx|sh|bash|zsh|sql)$/i.test(r.path)).length)
+const allowedTools = computed<string[]>(() => {
+  const list = skillConfig.value.allowed_tools
+  return Array.isArray(list) ? list.filter((t: any) => typeof t === 'string') : []
+})
+const importMeta = computed<Record<string, any> | null>(() => {
+  const meta = skillConfig.value.import_meta
+  return meta && typeof meta === 'object' ? meta : null
+})
+
+const SOURCE_LABELS: Record<string, string> = {
+  skill_md: 'admin.review.detailSourceUpload',
+  agent_created: 'admin.review.detailSourceAgent',
+}
+const PRESET_TYPE_KEYS: Record<string, string> = {
+  skill: 'presets.plaza.typeSkill',
+  style: 'presets.plaza.typeStyle',
+  effect: 'presets.plaza.typeEffect',
+  camera: 'presets.plaza.typeCamera',
+  prompt: 'presets.plaza.typePrompt',
+  script: 'presets.plaza.typeScript',
+  pipeline: 'presets.editor.typePipeline',
+}
+
+function presetTypeLabel(type?: string): string {
+  const key = type ? PRESET_TYPE_KEYS[type] : undefined
+  return key ? t(key) : type || '-'
+}
 
 // 驳回相关
 const rejectVisible = ref(false)
@@ -864,9 +988,20 @@ function truncatePrompt(prompt?: string): string {
 }
 
 // ---- 操作 ----
-function handleView(row: ReviewItem) {
+async function handleView(row: ReviewItem) {
   currentItem.value = row
+  presetDetail.value = null
   detailVisible.value = true
+  if (row.review_type === 'preset') {
+    detailLoading.value = true
+    try {
+      presetDetail.value = await client.get(`/api/admin/review/preset/${row.item_id}/detail`)
+    } catch {
+      ElMessage.error(t('admin.review.detailLoadFailed'))
+    } finally {
+      detailLoading.value = false
+    }
+  }
 }
 
 /** 审核动作通用流水线：POST → 成功提示 → 刷新列表与统计；失败统一报错，返回是否成功 */
@@ -1243,6 +1378,47 @@ onBeforeUnmount(() => {
 .desc-text {
   line-height: 1.6;
   white-space: pre-wrap;
+}
+
+/* 预设审核详情（完整正文/技能资源/溯源） */
+.preset-detail {
+  margin-top: 16px;
+  min-height: 40px;
+}
+.skill-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+.detail-section {
+  margin-top: 16px;
+}
+.section-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--agnes-text-primary);
+  margin-bottom: 8px;
+}
+.content-pre {
+  margin: 0;
+  padding: 12px;
+  max-height: 320px;
+  overflow: auto;
+  background: var(--agnes-bg-hover);
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+}
+.resource-pre {
+  max-height: 240px;
+}
+.resource-path {
+  font-size: 13px;
+  color: var(--agnes-text-primary);
 }
 .reject-text {
   color: var(--el-color-danger);

@@ -29,7 +29,8 @@
           <el-option :label="t('presets.plaza.typeEffect')" value="effect" />
           <el-option :label="t('presets.editor.typeScript')" value="script" />
           <el-option :label="t('presets.editor.typePipeline')" value="pipeline" />
-          <el-option :label="t('presets.plaza.typeSkill')" value="skill" />
+          <!-- 技能不提供手输创建：入口收敛为「上传技能」整包导入与对话 Agent 创作/转译 -->
+          <el-option v-if="isEdit" :label="t('presets.plaza.typeSkill')" value="skill" />
         </el-select>
       </el-form-item>
 
@@ -43,12 +44,12 @@
         />
       </el-form-item>
 
-      <el-form-item :label="t('presets.editor.descLabel')">
+      <el-form-item :label="t('presets.editor.descLabel')" :required="form.type === 'skill'">
         <el-input
           v-model="form.description"
           type="textarea"
           :rows="2"
-          :placeholder="t('presets.editor.descPlaceholder')"
+          :placeholder="descPlaceholder"
           maxlength="300"
           show-word-limit
         />
@@ -134,10 +135,10 @@
         <el-input v-model="form.tag" :placeholder="t('presets.editor.tagPlaceholder')" maxlength="20" />
       </el-form-item>
 
-      <!-- ====== 提示词文本（prompt / camera / pipeline 共用） ====== -->
+      <!-- ====== 提示词文本（prompt / camera / pipeline / skill 共用，技能走专属 label） ====== -->
       <el-form-item
         v-if="form.type !== 'pipeline' && form.type !== 'style' && form.type !== 'effect'"
-        :label="t('presets.editor.promptLabel')"
+        :label="promptLabel"
       >
         <el-input
           v-model="form.prompt_text"
@@ -356,7 +357,7 @@ import { MagicStick } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { uploadImage } from '@/api/uploads'
 import { getHistoryList } from '@/api/history'
-import type { PromptPreset, PresetCreate, PresetType } from '@/types/preset'
+import type { PromptPreset, PresetCreate, PresetPromptConfig, PresetType } from '@/types/preset'
 
 const { t } = useI18n()
 
@@ -439,8 +440,13 @@ const form = reactive<FormData>({
   tag: '',
 })
 
-// 提示词文本占位符（按类型走 i18n）
+// 提示词文本占位符（按类型走 i18n；技能正文有专属 label 与占位）
+const promptLabel = computed(() => (form.type === 'skill' ? t('presets.editor.skillContentLabel') : t('presets.editor.promptLabel')))
+
+const descPlaceholder = computed(() => (form.type === 'skill' ? t('presets.editor.skillDescPlaceholder') : t('presets.editor.descPlaceholder')))
+
 const promptTextPlaceholder = computed(() => {
+  if (form.type === 'skill') return t('presets.editor.skillContentPlaceholder')
   const map: Record<string, string> = {
     prompt: t('presets.editor.promptPlaceholderPrompt'),
     camera: t('presets.editor.promptPlaceholderPrompt'),
@@ -517,8 +523,7 @@ function pickHistoryCover(item: { result_url: string }) {
 }
 
 // 编辑模式：加载已有预设数据
-function loadPreset() {
-  if (!props.preset) return
+function loadPreset() {  if (!props.preset) return
   const p = props.preset
   form.name = p.name
   form.description = p.description || ''
@@ -560,9 +565,7 @@ watch(
   (val) => {
     if (val) {
       resetForm()
-      if (props.preset) {
-        loadPreset()
-      }
+      if (props.preset) loadPreset()
     }
   }
 )
@@ -592,6 +595,11 @@ async function handleSubmit() {
     ElMessage.warning(t('presets.editor.nameRequired'))
     return
   }
+  // 技能：description 是"何时使用"触发行，必填
+  if (form.type === 'skill' && !form.description.trim()) {
+    ElMessage.warning(t('presets.editor.skillDescRequired'))
+    return
+  }
 
   submitting.value = true
   try {
@@ -614,9 +622,12 @@ async function handleSubmit() {
       data.prompt_config = Object.keys(cfg).length ? cfg : undefined
     }
 
-    // 技能：短标识（/ 快速对齐用）
-    if (form.type === 'skill' && form.tag.trim()) {
-      data.prompt_config = { tag: form.tag.trim() }
+    // 技能：短标识（/ 快速对齐用）；编辑时保留既有 import_meta/resources/allowed_tools/disabled
+    if (form.type === 'skill') {
+      const cfg: PresetPromptConfig = { ...(props.preset?.prompt_config || {}) }
+      if (form.tag.trim()) cfg.tag = form.tag.trim()
+      else delete cfg.tag
+      data.prompt_config = cfg
     }
 
     // 按类型附加专属字段

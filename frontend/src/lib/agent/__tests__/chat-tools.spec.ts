@@ -12,9 +12,11 @@ vi.mock('@/stores/models', () => ({
   useModelsStore: () => ({ getDefaultModel: (t: string) => (t === 'image' ? 'img-x' : 'vid-x') }),
 }))
 vi.mock('../skills', () => ({
-  getCachedSkill: vi.fn(),
-  getCachedSkills: vi.fn(() => [{ name: '分镜节奏', tag: '', description: 'x', content: 'y' }]),
-  buildSkillsSection: vi.fn(() => ''),
+  loadAgentSkillFull: vi.fn(),
+  readSkillResource: vi.fn(),
+  saveAgentSkill: vi.fn(),
+  SKILL_CONTENT_MAX_CHARS: 20000,
+  getActiveSkillScope: vi.fn(() => null),
 }))
 
 const mocks = vi.hoisted(() => ({
@@ -31,6 +33,7 @@ import { createFakeStreamFn, fakeModel } from './fake-llm'
 const imageTool = CHAT_TOOLS[0]
 const videoTool = CHAT_TOOLS[1]
 const skillTool = CHAT_TOOLS[2]
+const saveSkillTool = CHAT_TOOLS[3]
 
 function imageResp(taskId = 'img_1') {
   return { task_id: taskId, status: 'pending' }
@@ -104,18 +107,33 @@ describe('generate_video', () => {
   })
 })
 
-describe('agent_load_skill', () => {
-  it('命中返回全文，未命中列出可用技能', async () => {
-    const { getCachedSkill } = await import('../skills')
-    vi.mocked(getCachedSkill).mockReturnValueOnce({ name: '分镜节奏', tag: '', description: 'x', content: '正文' })
+describe('agent_load_skill / agent_read_skill_file', () => {
+  it('load_skill 命中回传 loadAgentSkillFull 结果，未命中转 ok:false', async () => {
+    const { loadAgentSkillFull } = await import('../skills')
+    vi.mocked(loadAgentSkillFull).mockResolvedValueOnce({ name: '分镜节奏', description: 'x', content: '正文+资源清单' })
     const ok = await skillTool.execute({ name: '分镜节奏' }, null)
     expect(ok.ok).toBe(true)
-    expect(ok.data).toMatchObject({ content: '正文' })
+    expect(ok.data).toMatchObject({ content: '正文+资源清单' })
 
-    vi.mocked(getCachedSkill).mockReturnValueOnce(undefined)
+    vi.mocked(loadAgentSkillFull).mockRejectedValueOnce(new Error('技能「不存在」不存在。可用技能：分镜节奏'))
     const miss = await skillTool.execute({ name: '不存在' }, null)
     expect(miss.ok).toBe(false)
     expect(miss.error).toContain('分镜节奏')
+  })
+
+  it('read_skill_file：回传资源原文，抛错转 ok:false', async () => {
+    const { readSkillResource } = await import('../skills')
+    const readFileTool = CHAT_TOOLS[4]
+    expect(readFileTool.name).toBe('agent_read_skill_file')
+    vi.mocked(readSkillResource).mockResolvedValueOnce({ path: 'references/x.md', content: '参考内容' })
+    const ok = await readFileTool.execute({ skill: '分镜节奏', path: 'references/x.md' }, null)
+    expect(ok.ok).toBe(true)
+    expect(ok.data).toEqual({ path: 'references/x.md', content: '参考内容' })
+
+    vi.mocked(readSkillResource).mockRejectedValueOnce(new Error('资源「nope」不存在'))
+    const bad = await readFileTool.execute({ skill: '分镜节奏', path: 'nope' }, null)
+    expect(bad.ok).toBe(false)
+    expect(bad.error).toContain('不存在')
   })
 })
 
@@ -150,5 +168,24 @@ describe('内核宿主工具组注入（无阶段门路径）', () => {
     expect(seenCtx).toEqual([{ marker: 'chat-ctx' }])
     expect(events).toContain('done')
     expect(events).not.toContain('confirm_request')
+  })
+})
+
+describe('agent_save_skill', () => {
+  it('执行器透传参数，成功返回 name/tag', async () => {
+    const { saveAgentSkill } = await import('../skills')
+    vi.mocked(saveAgentSkill).mockResolvedValueOnce({ name: '台词师', tag: '台词' })
+    const ok = await saveSkillTool.execute({ name: '台词师', description: 'd', content: 'c', tag: '台词' }, null)
+    expect(ok.ok).toBe(true)
+    expect(ok.data).toMatchObject({ name: '台词师', tag: '台词' })
+    expect(vi.mocked(saveAgentSkill)).toHaveBeenCalledWith(expect.objectContaining({ name: '台词师', tag: '台词' }))
+  })
+
+  it('saveAgentSkill 抛错转 ok:false', async () => {
+    const { saveAgentSkill } = await import('../skills')
+    vi.mocked(saveAgentSkill).mockRejectedValueOnce(new Error('同名技能已存在：「X」'))
+    const bad = await saveSkillTool.execute({ name: 'X', description: 'd', content: 'c' }, null)
+    expect(bad.ok).toBe(false)
+    expect(bad.error).toContain('同名技能已存在')
   })
 })

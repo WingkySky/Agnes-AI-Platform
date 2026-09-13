@@ -12,6 +12,13 @@ export type PresetTab = 'plaza' | 'favorites' | 'recent' | 'mine'
 /** 预设排序方式 */
 export type PresetSort = 'new' | 'hot' | 'name'
 
+/** skill 类型附件资源（整包导入的 references/脚本等文本；脚本仅存档不执行） */
+export interface SkillResource {
+  /** 相对 SKILL.md 所在目录的路径 */
+  path: string
+  content: string
+}
+
 /** 提示词配置（style/effect 类型的核心字段） */
 export interface PresetPromptConfig {
   prefix?: string
@@ -19,8 +26,14 @@ export interface PresetPromptConfig {
   negative_prompt?: string
   /** skill 类型：短标识（/ 快速对齐用） */
   tag?: string
-  /** skill 类型导入元信息（原始 frontmatter / 跳过的文件清单） */
-  import_meta?: { frontmatter: Record<string, unknown>; skipped_files: string[] }
+  /** skill 类型导入/转译元信息（原始 frontmatter、跳过的文件清单、来源格式等溯源） */
+  import_meta?: Record<string, unknown>
+  /** skill 类型：整包导入的附件资源（references/脚本存档，脚本本期不执行） */
+  resources?: SkillResource[]
+  /** skill 类型：允许工具白名单（映射到产品工具名；空/缺省 = 不限制） */
+  allowed_tools?: string[]
+  /** skill 类型：停用标记（我的技能开关，停用后不进技能清单） */
+  disabled?: boolean
 }
 
 /** 基础预设字段 */

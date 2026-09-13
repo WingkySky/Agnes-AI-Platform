@@ -25,7 +25,10 @@
             <Cpu v-if="s.canvas" class="cb-session-canvas-tag" :title="t('chat.canvasSession')" />
             {{ s.title || t('chat.newChat') }}
           </span>
-          <span class="cb-session-time">{{ formatTime(s.updatedAt) }}</span>
+          <span class="cb-session-time">
+            <el-icon v-if="s.generating" class="is-loading cb-session-generating" :title="t('agent.thinking')"><Loading /></el-icon>
+            {{ formatTime(s.updatedAt) }}
+          </span>
         </div>
         <div class="cb-session-actions" @click.stop>
           <el-dropdown trigger="click" @command="(cmd: string | number | object) => onCommand(String(cmd), s)">
@@ -78,7 +81,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { Plus, Edit, Delete, MoreFilled, Cpu } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, MoreFilled, Cpu, Loading } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import type { ChatSessionView, ChatSessionCommand } from './types'
 
@@ -220,6 +223,12 @@ function formatTime(iso?: string): string {
   font-size: 11px;
   color: var(--cb-muted, var(--agnes-text-faint, #5c6478));
   margin-top: 2px;
+}
+
+.cb-session-generating {
+  font-size: 11px;
+  vertical-align: -1px;
+  margin-right: 3px;
 }
 
 .cb-session-actions {

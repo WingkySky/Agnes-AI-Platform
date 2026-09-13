@@ -48,6 +48,14 @@
       <template v-else>
         <ChatMessageList ref="messageListRef" :items="chatStore.messageItems">
           <template #footer>
+            <div v-if="chatStore.activeError" class="chat-error">
+              <el-icon><WarningFilled /></el-icon>
+              <span>{{ chatStore.activeError }}</span>
+            </div>
+            <div v-if="chatStore.busy && chatStore.thinking" class="chat-thinking">
+              <el-icon class="is-loading"><Loading /></el-icon>
+              <span>{{ t('agent.thinking') }}</span>
+            </div>
             <div v-if="chatStore.loadingMessages" class="chat-loading">
               <el-icon class="is-loading"><Loading /></el-icon>
               <span>{{ t('common.loading') }}</span>
@@ -120,7 +128,7 @@ defineOptions({ name: 'ChatView' })
 import { ref, onMounted, onActivated, onBeforeUnmount, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { MessageAttachment } from '@/types'
-import { Loading, ChatDotRound, Document } from '@element-plus/icons-vue'
+import { Loading, ChatDotRound, Document, WarningFilled } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { useChatStore } from '@/stores/chat'
 import { getPreset } from '@/api/presets'
@@ -156,6 +164,7 @@ const sessionViews = computed<ChatSessionView[]>(() =>
     title: s.title,
     updatedAt: s.updated_at,
     canvas: s.session_type === 'canvas',
+    generating: chatStore.isRunning(s.id),
   })),
 )
 
@@ -248,7 +257,7 @@ async function handleSwitchSession(sessionId: number | string) {
   }
 }
 
-/** 删除会话 */
+/** 删除会话（会话若在生成中，store 会先终止其内核再删） */
 async function handleDeleteSession(sessionId: number | string) {
   if (typeof sessionId !== 'number') return
   try {
@@ -570,6 +579,26 @@ function extractUrlsAsAttachments(text: string) {
 }
 
 /* 加载中 */
+.chat-thinking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--agnes-text-muted);
+  font-size: 13px;
+  padding: 16px;
+  justify-content: center;
+}
+
+.chat-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--el-color-danger, #f56c6c);
+  font-size: 13px;
+  padding: 12px 16px;
+  justify-content: center;
+}
+
 .chat-loading {
   display: flex;
   align-items: center;

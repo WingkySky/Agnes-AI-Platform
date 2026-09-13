@@ -16,7 +16,7 @@ import { Type } from 'typebox'
 import type { TSchema } from 'typebox'
 import { stageApprovedMessage } from './policy'
 import { fetchPanelImageBase64 } from './attachments'
-import { getCachedSkill, getCachedSkills } from './skills'
+import { loadAgentSkillFull, readSkillResource, saveAgentSkill, SKILL_CONTENT_MAX_CHARS } from './skills'
 import type { AgentImageAttachment } from './attachments'
 import { extractEntities, splitStoryboard } from '@/lib/storyboard/pipeline'
 import { buildAssetPrompt } from '@/lib/storyboard/prompts'
@@ -501,19 +501,65 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: 'agent_load_skill',
     group: 'read',
-    description: '加载技能全文。系统提示「可用技能」清单里的技能适用当前任务时，先调用本工具获取完整方法论再回答或动手；技能名必须与清单一致。',
+    description: '加载技能全文。系统提示「可用技能」清单里的技能适用当前任务时，先调用本工具获取完整方法论再回答或动手；技能名必须与清单一致。结果含附件资源清单，需要时用 agent_read_skill_file 按需读取（脚本只存档，不会被执行）。',
     parameters: Type.Object({
       name: Type.String({ description: '技能名称（须与可用技能清单一致）' }),
     }),
     execute: async (args) => {
       const name = asString(args.name).trim()
       if (!name) return { ok: false, error: 'name 为空' }
-      const skill = getCachedSkill(name)
-      if (!skill) {
-        const known = getCachedSkills().map((s) => s.name).join('、') || '无'
-        return { ok: false, error: `技能不存在: ${name}（可用技能：${known}）` }
+      try {
+        return { ok: true, data: await loadAgentSkillFull(name) }
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) }
       }
-      return { ok: true, data: { name: skill.name, description: skill.description, content: skill.content } }
+    },
+  },
+  {
+    name: 'agent_read_skill_file',
+    group: 'read',
+    description: '读取技能附件资源的原文（agent_load_skill 结果里列出的资源文件）。仅用于查看参考文档、脚本等内容；脚本只是文本存档，本产品不会执行任何技能脚本。',
+    parameters: Type.Object({
+      skill: Type.String({ description: '技能名称' }),
+      path: Type.String({ description: '资源路径（与资源清单一致）' }),
+    }),
+    execute: async (args) => {
+      const skill = asString(args.skill).trim()
+      const path = asString(args.path).trim()
+      if (!skill) return { ok: false, error: 'skill 为空' }
+      if (!path) return { ok: false, error: 'path 为空' }
+      try {
+        return { ok: true, data: await readSkillResource(skill, path) }
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) }
+      }
+    },
+  },
+  {
+    name: 'agent_save_skill',
+    group: 'write',
+    description: '把技能保存到用户个人技能库（保存后当前会话即可 agent_load_skill 加载）。流程：先在回复中完整展示草稿（name/tag/description/content）并征得用户同意，再调用本工具；保存成功后告知用户可用 /tag 快速调用、预设中心可编辑或投稿广场。与已有技能同名会被拒绝。技能是纯文本方法论包（无代码执行），正文不要写脚本或对外部工具的调用指引。',
+    parameters: Type.Object({
+      name: Type.String({ description: '技能名（唯一，与已有技能不得同名）' }),
+      description: Type.String({ description: '"何时使用"触发行：技能清单只列名称+本行，模型据此决定是否加载；用"当用户……时使用"句式，≤60 字' }),
+      tag: Type.Optional(Type.String({ description: '短标识（/ 快速清单对齐用，2-4 字，可选）' })),
+      content: Type.String({ description: `技能正文方法论，结构=适用场景/步骤/约束/示例，上限 ${SKILL_CONTENT_MAX_CHARS} 字符` }),
+      import_meta: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: '转译溯源（来源格式、原始名称、丢弃清单等），仅技能转译时传' })),
+    }),
+    execute: async (args) => {
+      const meta = args.import_meta
+      try {
+        const r = await saveAgentSkill({
+          name: asString(args.name),
+          description: asString(args.description),
+          content: asString(args.content),
+          tag: asString(args.tag) || undefined,
+          importMeta: isRecord(meta) ? meta : undefined,
+        })
+        return { ok: true, data: { name: r.name, tag: r.tag, message: `技能「${r.name}」已保存到个人技能库，可用 /${r.tag || r.name} 快速调用` } }
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) }
+      }
     },
   },
   {
@@ -720,6 +766,9 @@ export const AGENT_TOOLS: AgentTool[] = [
     }),
   },
 ]
+
+/** 工具名清单（allowed-tools 白名单映射目标；供 skillImport 等消费，避免新增循环依赖） */
+export const AGENT_TOOL_NAMES = AGENT_TOOLS.map((t) => t.name)
 
 /** OpenAI function calling 格式的工具定义（TypeBox schema 即 JSON Schema，直出；未来 MCP server 复用） */
 export function agentToolSchemasOpenAI(tools: AgentTool[] = AGENT_TOOLS) {

@@ -27,7 +27,7 @@ from app.core.security import get_current_reviewer
 from app.models.user import User
 from app.models.asset import Asset
 from app.models.generation import Generation
-from app.models.prompt_preset import PresetIndex
+from app.models.prompt_preset import PresetIndex, PromptPreset
 
 logger = logging.getLogger("agnes_platform")
 router = APIRouter(prefix="/admin/review", tags=["管理员-统一审核"])
@@ -240,6 +240,55 @@ async def get_review_stats(
         "ai_violated": ai_violated,
         "ai_failed": ai_failed,
         "ai_pending": ai_pending,
+    })
+
+
+# =====================================================
+# 审核通过
+# =====================================================
+
+# =====================================================
+# 预设审核详情
+# =====================================================
+
+@router.get("/preset/{item_id}/detail", summary="预设审核详情（含正文/技能资源/权限声明）")
+async def preset_review_detail(
+    item_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_reviewer),
+):
+    """
+    审核者查看预设完整内容（列表只含索引信息，看不到正文与技能资源）。
+
+    item_id 是 preset_index 表的 id；返回预设本体全文 prompt_text 与完整
+    prompt_config（技能的附件资源 resources、工具白名单 allowed_tools、导入溯源 import_meta）。
+    """
+    result = await db.execute(select(PresetIndex).filter(PresetIndex.id == item_id))
+    entry = result.scalar_one_or_none()
+    if not entry:
+        raise HTTPException(status_code=404, detail="待审核预设不存在")
+    result = await db.execute(select(PromptPreset).filter(PromptPreset.id == entry.preset_id))
+    preset = result.scalar_one_or_none()
+    if not preset:
+        raise HTTPException(status_code=404, detail="预设不存在")
+    return ok(data={
+        "item_id": item_id,
+        "preset_id": preset.id,
+        "name": preset.name,
+        "description": preset.description,
+        "preset_type": preset.type,
+        "category": preset.category,
+        "tags": preset.tags or [],
+        "prompt_text": preset.prompt_text or "",
+        "prompt_config": preset.prompt_config,
+        "source": preset.source,
+        "script_text": preset.script_text,
+        "user_id": preset.user_id,
+        "is_public": preset.is_public,
+        "is_approved": preset.is_approved,
+        "is_rejected": preset.is_rejected,
+        "created_at": preset.created_at.isoformat() if preset.created_at else None,
+        "updated_at": preset.updated_at.isoformat() if preset.updated_at else None,
     })
 
 

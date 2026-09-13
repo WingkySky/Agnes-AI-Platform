@@ -540,8 +540,10 @@ class AgentCompletionsRequest(BaseModel):
     """画布 Agent LLM 透传请求（OpenAI Chat Completions 形状的子集）
 
     工具循环由前端驱动，本端点只代理 Agnes Chat API，不落会话库。
-    模型由后端默认解析链决定（前端内核的 model 字段为占位 id，直接忽略）。
+    model 为前端模型选择提示（对话页模型胶囊/分镜管线）：命中聊天注册表才采用，
+    占位 id（agnes-chat）或未命中走默认解析链。
     """
+    model: Optional[str] = Field(default=None, description="模型提示：命中聊天注册表才采用，未命中走默认解析链")
     messages: List[Dict[str, Any]] = Field(..., min_length=1, description="OpenAI 格式消息数组（含工具结果回填）")
     tools: Optional[List[Dict[str, Any]]] = Field(default=None, description="OpenAI function calling 工具定义")
     tool_choice: Optional[Any] = Field(default=None, description="工具选择策略（auto 或具体函数）")

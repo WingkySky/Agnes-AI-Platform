@@ -32,8 +32,10 @@ vi.mock('@/lib/storyboard/pipeline', () => ({
 }))
 
 vi.mock('@/lib/agent/skills', () => ({
-  getCachedSkill: vi.fn(),
-  getCachedSkills: vi.fn(() => []),
+  loadAgentSkillFull: vi.fn(),
+  readSkillResource: vi.fn(),
+  saveAgentSkill: vi.fn(),
+  SKILL_CONTENT_MAX_CHARS: 20000,
 }))
 
 vi.mock('@/lib/storyboard/library', () => ({
@@ -43,7 +45,7 @@ vi.mock('@/lib/storyboard/library', () => ({
 }))
 
 import { extractEntities, splitStoryboard } from '@/lib/storyboard/pipeline'
-import { getCachedSkill, getCachedSkills } from '../skills'
+import { loadAgentSkillFull, readSkillResource, saveAgentSkill } from '../skills'
 
 import { AGENT_TOOLS, agentToolSchemasOpenAI, toolsForMode, findAgentTool } from '../tools'
 import { resolveToolCall } from '../policy'
@@ -581,19 +583,61 @@ describe('agent_read_image', () => {
   })
 })
 
-describe('agent_load_skill', () => {
-  it('归 read 组：只读档可用；命中返回正文，未命中列可用技能', async () => {
-    vi.mocked(getCachedSkill).mockReturnValueOnce(undefined)
-    vi.mocked(getCachedSkills).mockReturnValueOnce([
-      { name: '节奏技能', tag: '节奏', description: 'x', content: 'y' },
-    ])
+describe('agent_load_skill / agent_read_skill_file', () => {
+  it('load_skill 归 read 组：命中回传 loadAgentSkillFull 结果，抛错转 ok:false', async () => {
+    expect(tool('agent_load_skill').group).toBe('read')
+    vi.mocked(loadAgentSkillFull).mockResolvedValueOnce({ name: '节奏技能', description: 'x', content: '方法论全文+资源清单' })
+    const hit = await tool('agent_load_skill').execute({ name: '节奏技能' }, makeCanvas()) as { ok: boolean; data: Record<string, unknown> }
+    expect(hit.ok).toBe(true)
+    expect(hit.data.content).toBe('方法论全文+资源清单')
+
+    vi.mocked(loadAgentSkillFull).mockRejectedValueOnce(new Error('技能「不存在」不存在。可用技能：节奏技能'))
     const miss = await tool('agent_load_skill').execute({ name: '不存在' }, makeCanvas()) as { ok: boolean; error?: string }
     expect(miss.ok).toBe(false)
     expect(miss.error).toContain('节奏技能')
+  })
 
-    vi.mocked(getCachedSkill).mockReturnValueOnce({ name: '节奏技能', tag: '节奏', description: 'x', content: '方法论全文' })
-    const hit = await tool('agent_load_skill').execute({ name: '节奏技能' }, makeCanvas()) as { ok: boolean; data: Record<string, unknown> }
-    expect(hit.ok).toBe(true)
-    expect(hit.data.content).toBe('方法论全文')
+  it('read_skill_file 归 read 组：回传资源原文，抛错转 ok:false', async () => {
+    expect(tool('agent_read_skill_file').group).toBe('read')
+    vi.mocked(readSkillResource).mockResolvedValueOnce({ path: 'scripts/run.py', content: 'print(1)' })
+    const ok = await tool('agent_read_skill_file').execute({ skill: '节奏技能', path: 'scripts/run.py' }, makeCanvas()) as { ok: boolean; data: Record<string, unknown> }
+    expect(ok.ok).toBe(true)
+    expect(ok.data).toEqual({ path: 'scripts/run.py', content: 'print(1)' })
+    expect(readSkillResource).toHaveBeenCalledWith('节奏技能', 'scripts/run.py')
+
+    vi.mocked(readSkillResource).mockRejectedValueOnce(new Error('资源「nope」不存在'))
+    const bad = await tool('agent_read_skill_file').execute({ skill: '节奏技能', path: 'nope' }, makeCanvas()) as { ok: boolean; error?: string }
+    expect(bad.ok).toBe(false)
+    expect(bad.error).toContain('不存在')
+  })
+})
+
+describe('agent_save_skill', () => {
+  it('归 write 组：只读档被策略拒绝；confirm/auto 档直通', () => {
+    expect(tool('agent_save_skill').group).toBe('write')
+    expect(resolveToolCall({ mode: 'readonly', toolName: 'agent_save_skill', toolGroup: 'write', args: {}, gatedKinds: [], panelType: undefined }).action).toBe('reject')
+    expect(resolveToolCall({ mode: 'confirm', toolName: 'agent_save_skill', toolGroup: 'write', args: {}, gatedKinds: [], panelType: undefined }).action).toBe('allow')
+    expect(resolveToolCall({ mode: 'auto', toolName: 'agent_save_skill', toolGroup: 'write', args: {}, gatedKinds: [], panelType: undefined }).action).toBe('allow')
+  })
+
+  it('保存成功返回 name/tag 与用法提示，import_meta 透传', async () => {
+    vi.mocked(saveAgentSkill).mockResolvedValueOnce({ name: '分镜师', tag: '分镜' })
+    const ok = await tool('agent_save_skill').execute(
+      { name: '分镜师', description: 'd', content: 'c', tag: '分镜', import_meta: { source_format: 'skill_md' } },
+      makeCanvas(),
+    ) as { ok: boolean; data: Record<string, unknown> }
+    expect(ok.ok).toBe(true)
+    expect(ok.data).toMatchObject({ name: '分镜师', tag: '分镜' })
+    expect(vi.mocked(saveAgentSkill)).toHaveBeenCalledWith(expect.objectContaining({
+      name: '分镜师',
+      importMeta: { source_format: 'skill_md' },
+    }))
+  })
+
+  it('保存失败（同名等）转 ok:false 错误文案', async () => {
+    vi.mocked(saveAgentSkill).mockRejectedValueOnce(new Error('同名技能已存在：「X」'))
+    const bad = await tool('agent_save_skill').execute({ name: 'X', description: 'd', content: 'c' }, makeCanvas()) as { ok: boolean; error?: string }
+    expect(bad.ok).toBe(false)
+    expect(bad.error).toContain('同名技能已存在')
   })
 })

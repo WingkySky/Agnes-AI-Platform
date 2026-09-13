@@ -58,6 +58,8 @@ export interface ChatSessionView {
   updatedAt?: string
   /** 画布 Agent 会话：侧栏带角标，点击由宿主跳转画布 */
   canvas?: boolean
+  /** 该会话正在后台生成回复（侧栏转圈角标） */
+  generating?: boolean
 }
 
 /** 侧栏三点菜单的扩展命令（宿主自定义，如「AI 总结」） */

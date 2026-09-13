@@ -139,8 +139,11 @@ async def get_preset(db: AsyncSession, preset_id: int) -> Optional[PromptPreset]
 PLAZA_EXCLUDED_TYPES = ("pipeline",)
 
 
-def _to_plaza_item(p: PromptPreset, is_favorite: bool, author: str) -> dict:
-    """PromptPreset → 广场卡片统一 dict"""
+def _to_plaza_item(p: PromptPreset, is_favorite: bool, author: str, slim_skill: bool = False) -> dict:
+    """PromptPreset → 广场卡片统一 dict；slim_skill=True 时剥离技能附件资源（渐进披露，L3 经详情接口按需拉取）"""
+    prompt_config = p.prompt_config
+    if slim_skill and p.type == "skill" and isinstance(prompt_config, dict):
+        prompt_config = {k: v for k, v in prompt_config.items() if k != "resources"}
     return {
         "id": p.id,
         "user_id": p.user_id,
@@ -152,7 +155,7 @@ def _to_plaza_item(p: PromptPreset, is_favorite: bool, author: str) -> dict:
         "prompt_text": p.prompt_text or "",
         "camera_params": p.camera_params,
         "style_params": p.style_params,
-        "prompt_config": p.prompt_config,
+        "prompt_config": prompt_config,
         "cover_image": p.cover_image,
         "cover_video": p.cover_video,
         "script_text": p.script_text,
@@ -280,7 +283,13 @@ async def list_plaza(
             author_map[u.id] = u.nickname or u.username
 
     items = [
-        _to_plaza_item(p, is_favorite=p.id in fav_ids, author=author_map.get(p.user_id, ""))
+        _to_plaza_item(
+            p,
+            is_favorite=p.id in fav_ids,
+            author=author_map.get(p.user_id, ""),
+            # 管理视图保留全量（编辑/开关需完整 prompt_config）；其余 tab 技能卡剥离 resources
+            slim_skill=(tab != "mine"),
+        )
         for p in rows
     ]
     return items, total

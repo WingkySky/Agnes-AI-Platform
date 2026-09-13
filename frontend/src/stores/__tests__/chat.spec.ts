@@ -47,12 +47,15 @@ vi.mock('@/stores/models', () => ({
 }))
 vi.mock('@/lib/agent/skills', () => ({
   listAgentSkills: vi.fn(async () => []),
+  SKILL_CONTENT_MAX_CHARS: 20000,
+  getActiveSkillScope: vi.fn(() => null),
 }))
 
 import { useChatStore, chatContextFromRows } from '../chat'
 import {
   createChatSession, getChatSessions, summarizeChatSession,
   getChatMessages, getMediaStatus, getAgentSession, syncAgentSession,
+  deleteChatSession,
 } from '@/api/chat'
 import { createImageTask } from '@/api/images'
 
@@ -93,7 +96,7 @@ describe('chat store：内核投影', () => {
     const chat = useChatStore()
     await chat.send('你好')
 
-    expect(chat.error).toBeNull()
+    expect(chat.activeError).toBeNull()
     expect(chat.busy).toBe(false)
     expect(chat.messages.map((m) => m.role)).toEqual(['user', 'assistant'])
     expect(chat.messages[1].content).toBe('你好呀')
@@ -174,6 +177,79 @@ describe('chat store：切换与存量兼容', () => {
     expect(chat.messages[1].steps[0]).toMatchObject({ tool: 'generate_image', status: 'done' })
   })
 
+  it('并行运行：切走后事件按归属路由、done 按归属落库、切回即见', async () => {
+    const chat = useChatStore()
+    chat.sessions = [
+      { id: 1, title: '新对话', session_type: 'chat', created_at: '', updated_at: '' },
+      { id: 2, title: '另一个', session_type: 'chat', created_at: '', updated_at: '' },
+    ] as never[]
+    chat.activeSessionId = 1
+    // 模拟发送后的运行态（会话 1 运行中，用户消息已入列）
+    chat.runningSessions['1'] = { thinking: true }
+    const arr = chat._messagesOf(1)
+    arr.push({ id: 'u1', role: 'user', content: '你好', media: [], steps: [], createdAt: '' })
+    chat.messages = arr
+
+    // 切到会话 2：纯视图切换，会话 1 的事件照常路由到其消息数组
+    await chat.switchSession(2)
+    expect(chat.messages).toHaveLength(0)
+    expect(chat.sessionMessages['1']).toHaveLength(1)
+
+    chat._onKernelEvent(1, { type: 'round_start' })
+    chat._onKernelEvent(1, { type: 'text_delta', delta: '你好呀' })
+    expect(chat.sessionMessages['1']).toHaveLength(2)
+    expect(chat.sessionMessages['1'][1].content).toBe('你好呀')
+    expect(chat.messages).toHaveLength(0)
+
+    // done：按归属会话 1 落库（而非前台会话 2），运行态清除
+    chat._onKernelEvent(1, { type: 'done', stopped: false, error: null })
+    expect(chat.runningSessions['1']).toBeUndefined()
+    await vi.waitFor(() => {
+      const calls = api.syncAgentSession.mock.calls.filter((c) => c[0] === 1)
+      expect(calls.length).toBeGreaterThan(0)
+      const payload = calls[calls.length - 1][1]
+      expect(payload.messages.map((m: { role: string }) => m.role)).toEqual(['user', 'assistant'])
+    })
+
+    // 切回会话 1：内存缓存即最终内容
+    await chat.switchSession(1)
+    expect(chat.messages.map((m) => m.content)).toEqual(['你好', '你好呀'])
+  })
+
+  it('多会话互不阻塞：会话 2 运行中会话 1 照常发消息', async () => {
+    const chat = useChatStore()
+    chat.sessions = [
+      { id: 1, title: '新对话', session_type: 'chat', created_at: '', updated_at: '' },
+      { id: 2, title: '另一个', session_type: 'chat', created_at: '', updated_at: '' },
+    ] as never[]
+    chat.activeSessionId = 2
+    chat.runningSessions['2'] = { thinking: true } // 会话 2 运行中
+
+    mocks.script.push(textTurn('来自会话1的回复'))
+    chat.activeSessionId = 1
+    await chat.send('你好')
+
+    expect(chat.busy).toBe(false)
+    expect(chat.messages.map((m) => m.content)).toEqual(['你好', '来自会话1的回复'])
+    expect(chat.runningSessions['1']).toBeUndefined()
+    expect(chat.runningSessions['2']).toBeDefined() // 会话 2 的运行不受影响
+  })
+
+  it('删除运行中会话：终止内核并移除，残余事件被忽略', async () => {
+    const chat = useChatStore()
+    chat.sessions = [{ id: 1, title: '新对话', session_type: 'chat', created_at: '', updated_at: '' }] as never[]
+    chat.activeSessionId = 1
+    chat.runningSessions['1'] = { thinking: true }
+
+    await chat.removeSession(1)
+
+    expect(vi.mocked(deleteChatSession)).toHaveBeenCalledWith(1)
+    expect(chat.sessions).toHaveLength(0)
+    expect(chat.runningSessions['1']).toBeUndefined()
+    // 残余事件（会话已不存在）被忽略，不再落库
+    chat._onKernelEvent(1, { type: 'done', stopped: true, error: null })
+  })
+
   it('存量会话无 context 时从消息行重建（chatContextFromRows）', () => {
     const ctx = chatContextFromRows([
       {
@@ -182,10 +258,13 @@ describe('chat store：切换与存量兼容', () => {
       },
       { id: 2, session_id: 1, role: 'assistant', content: '好的', created_at: '' },
     ] as never[] as never)
-    const messages = (ctx as { messages: Array<{ role: string; content: unknown }> }).messages
+    const messages = (ctx as { messages: Array<{ role: string; content: unknown; stopReason?: string; usage?: unknown }> }).messages
     expect(messages).toHaveLength(2)
     const userContent = messages[0].content as Array<{ type: string }>
     expect(userContent.some((b) => b.type === 'image')).toBe(true)
-    expect(messages[1].content).toBe('好的')
+    // assistant 必须是 pi 内部形状：块数组 + stopReason + usage（否则 restore 后下一回合崩）
+    expect(Array.isArray(messages[1].content)).toBe(true)
+    expect(messages[1].stopReason).toBe('stop')
+    expect(messages[1].usage).toBeDefined()
   })
 })

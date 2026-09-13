@@ -4,6 +4,41 @@
 
 ## [Unreleased]
 
+### 技能生态二期：整包导入 / Agent 处理双模式
+- **入口收敛**：推倒技能"手输 + 模板生成"路径——编辑器新建类型不再提供 skill、删除"填入模板"（`utils/skillTemplate.ts` 删除）；技能创建只剩「上传技能」整包导入与对话 Agent 创作/转译（一期链路保留）两种
+- **整包导入（ZIP/文件夹）**：`SkillImportDialog` 重写——选择文件夹（webkitdirectory）或 ZIP（新增 `fflate` 解压），须含 SKILL.md（YAML frontmatter name/description）；其余文本文件存为附件资源 `prompt_config.resources`（脚本仅存档不执行；二进制/超限跳过，单文件 10 万字符/总量 30 万字符/最多 50 个）；解析预览（资源清单/警告）确认后**直接落库**并刷技能缓存，导入即用，同名冲突报错
+- **渐进披露 L3**：列表接口（tab≠mine）剥离 `prompt_config.resources`（`_to_plaza_item` 加 `slim_skill`），技能缓存只背 L1/L2；新增 `agent_read_skill_file` 工具（画布 read 组 + chat 工具组末位，共享 `readSkillResource`，单次读取 2 万字符截断），`agent_load_skill` 结果附加资源清单引导按需读取；详情接口承载 L3 按需拉取
+- **allowed-tools 声明式权限**：frontmatter `allowed-tools` 解析映射到产品工具名（原始值存 import_meta），非空时内核 `beforeToolCall` 强制收窄（两种宿主生效，load/read 技能工具豁免；映射为空不限制）——内核改为始终挂载 beforeToolCall，宿主工具组模式围栏外全放行
+- **技能启用开关**：预设中心"我的预设"技能行 el-switch 写 `prompt_config.disabled`，停用后 `buildSkillsSection`/`filterSkills`/load 全部过滤；编辑器保存技能时合并既有 prompt_config，不再抹掉 import_meta/resources/allowed_tools/disabled
+- **种子与文档**：`seed_plaza_presets.py` 格式规范段改为"附件资源存档、脚本不执行"边界，「技能转译」资源引用规则更新（整包资源可 agent_read_skill_file 读取辅助转译）；`docs/skill-authoring-guide.md` 重写为双模式指南；i18n 中英同步
+- **审核侧可见性加强**：预设审核列表只含索引信息（PresetIndex，无正文/资源），审核者此前只能看到描述一段——新增 `GET /api/admin/review/preset/{item_id}/detail`（reviewer 鉴权，item_id 经 PresetIndex→preset_id 映射回预设本体，返回全文 prompt_text 与完整 prompt_config）；统一审核页详情弹窗对预设类型拉取详情渲染：技能类型显示审核要点警示（诱导越权/伪造系统提示/外链/积分消耗检查项）+ 概览标签（正文字数/资源数/脚本数/工具白名单或"不限制"/来源）+ 全文正文 + 附件资源逐个折叠查看原文（脚本标红）+ 导入溯源 JSON；列表类型列补预设子类型标签（技能/风格/提示词…）便于一眼识别技能条目
+- **测试**：skillImport 解析重写为整包断言（frontmatter/资源/二进制跳过/allowed-tools 映射/上限），新增 load/read 工具与内核围栏用例
+
+### 技能生态一期：Agent 技能创作/转译 + 保存工具 + 导出
+- **agent_save_skill 共享工具**：技能库共享实现（`skills.ts`：name/description/正文必填校验、正文 2 万字符上限、同名拒重（trim+大小写不敏感）、落库 `source=agent_created`、保存后刷技能缓存当前会话立即可用），画布（write 组，confirm/auto 直通、只读档拒绝）与对话页两处内核注册
+- **官方种子技能 ×2**（`seed_plaza_presets.py`，category=元技能）：「技能创作」访谈式起草→草稿确认→落库收尾话术；「技能转译」外部技能（主流 Agent 技能格式）能力映射改写（脚本剔除或改写为方法论步骤、文件引用并入、外部工具引用映射内置工具或删除、外文转中文、description 重写触发句式）+ 转译报告 + `import_meta` 溯源；两者共用格式规范段
+- **手动路径引导（去重设计）**：技能创建统一收敛到预设编辑器一个表单——手动填写、"填入模板"（`utils/skillTemplate.ts`，格式规范与种子文案一致）、SKILL.md 导入解析后填入表单三条路共享同一确认点，技能同名查重统一在提交时做；编辑器技能形态加编写引导与三条路径互相指引、description 必填、技能正文专属 label/占位；SKILL.md 导入弹窗精简为"解析预览（来源可信提示、frontmatter 要求、附件并入、脚本跳过→引导 Agent 转译）→ 填入新建表单"，不再直接落库；修复编辑器 `presets.editor.tagLabel/tagPlaceholder` 缺失 key（裸 key 遗留 bug）；预设中心 JSON 批量按钮改名"导入 JSON/导出 JSON"消除双"导入"歧义；i18n 中英同步
+- **技能导出**：`utils/skillExport.ts` 技能卡→SKILL.md（yaml 序列化 frontmatter，与导入解析互逆）+ 预设中心"我的预设"技能行导出按钮（useDownload 触发下载）
+- **类型放宽**：`prompt_config.import_meta` 放宽为 `Record<string, unknown>`（容纳转译溯源自由结构；原仅导入路径写入、无读取方）
+- **测试**：新增 saveAgentSkill/工具执行器/导出互逆单测，前端 vitest 174 例全绿
+
+### 修复：对话模型提示被丢弃 + 运行失败静默（实测三会话并发中暴露）
+- **透传 schema 补 `model` 字段**：`AgentCompletionsRequest` 此前没有 `model` 字段，Pydantic 直接丢弃前端的模型提示——`_resolve_stream_model` 的注册表匹配成为死代码，模型胶囊选择从未生效，所有请求走默认解析链；默认链选中"注册表第一个"若上游无通道（如 doubao-seed-2-1-turbo-260628）即 503→502，会话静默死亡。补字段后胶囊选择真实生效
+- **错误按会话可见**：`error` 全局字段改为 `errors`（按会话存储，`activeError` getter），消息区尾部新增错误行（画布面板同款）——此前运行失败前端无任何展示，用户只看到"没有回答"
+- **内核补齐缺失的 usage**：上游偶发不回传 usage 块时，assistant 消息的 `usage` 为 undefined，机制层下一回合的上下文估算（`calculateContextTokens` 读 `usage.totalTokens`）抛 TypeError，该会话从下一跳起静默停摆（即"多轮对话第二轮必停"）。内核在 message_end/restore/send 收尾三处归一化补零值；实测旧存量会话恢复后可正常续聊
+- **坏形状上下文归一化 + 卡死复位**：行重建的上下文（`chatContextFromRows`）此前的 assistant 消息为字符串内容且缺 stopReason/usage，restore 后消息转换/估算读 `.length` 抛错——重建函数改产 pi 内部形状；内核 `normalizeContext` 三处兜底（content 字符串块化、补 stopReason/usage）；pi 异常路径可能把 `isStreaming` 卡在 true 导致该会话后续发送被静默吞掉，send 前置 `abort()` 强制复位
+- 实测验收（浏览器自动化）：三会话同时各跑一轮生成全部成功，`runningSessions` 三路并行、各自回复落库
+
+### 多会话并行生成（对话页）
+- **per-session 内核池**：`chat store` 从单内核 + serialize/restore 热切换改为每会话一个 `AgentKernel` 实例（模块级 WeakMap 池，上限 8 个 LRU 淘汰非运行内核），各内核独立持有 LLM 上下文——**多会话可同时各跑一轮生成，切换会话纯视图切换**，彻底修复此前"流式中切会话被 abort、回答丢失"
+- **状态按会话归属**：`sessionMessages`（各会话内存消息数组，活跃会话与视图同引用）、`runningSessions`（运行态+思考指示，busy/thinking 改为活跃会话维度的 getter）；内核事件按创建时绑定的会话路由；done 按归属落库（`_persist` 参数化）；媒体轮询登记归属会话、跨会话续跑
+- **新内核缺席恢复**：被淘汰/首次使用的会话在发送前从后端拉 context（缺省从消息行重建）；删除运行中会话先终止其内核，残余事件由会话存在性检查忽略
+- **侧栏生成中角标**：`ChatSessionView.generating` + `isRunning(id)`，正在生成的会话在列表显示转圈标记
+
+### 对话页观感对齐画布 Agent
+- **「思考中…」指示行**：消息区尾部在 busy+thinking 时显示转圈指示（复用 agent.thinking 文案），LLM 延迟/思考阶段不再只有空泡；画布面板此前已有，对话页补齐
+- **步骤标签文案修复**：工具步骤标签改用画布同款 agent.actGenImage/actGenVideo/actLoadSkill 键（原引用的 chat.tool* 键不存在，界面会露原始 key）；加载技能标签带技能名（与画布同款「加载技能：名称」）
+
 ### 三期内核统一：对话页宿主化到前端 Agent 内核
 - **内核泛化**：`AgentKernel` deps 增加可选 `tools`/`toolContext`——宿主自带工具组时无阶段门（工具全放行）、ctx 由宿主提供，画布宿主路径不变（16 工具 + 三档权限 + 阶段门）
 - **chat 工具组**：generate_image/generate_video 前端执行（images/videos tasks 端点提交 + taskQueue 注册 + 立即返回 pending，不阻塞回合；媒体占位/轮询/media-callback 机制沿用）；参考图经 ChatToolContext 取「最近成功生成媒体」（图生图/图生视频会话连续性）；preset_ref 预设合并（prompt_text 在前）；agent_load_skill 复用技能模块

@@ -15,6 +15,7 @@ import { AGENT_TOOLS, toolsForMode } from './tools'
 import type { AgentCanvasStore, AgentToolResult } from './tools'
 import { resolveToolCall, gatedKindOf } from './policy'
 import type { AgentMode } from './policy'
+import { getActiveSkillScope } from './skills'
 import { createAgentModel, agentStreamFn } from './provider'
 import type { AgentImageAttachment } from './attachments'
 
@@ -23,6 +24,16 @@ export type { AgentImageAttachment }
 
 /** 单轮对话回合上限（一轮 = 一次 LLM 调用） */
 const MAX_TURNS = 40
+
+/** 零值 usage（上游缺 usage 块时兜底，形状与 pi-ai Usage 一致） */
+const EMPTY_USAGE = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+}
 
 export type KernelEvent =
   | { type: 'thinking'; active: boolean }
@@ -51,7 +62,7 @@ export interface AgentKernelDeps {
   getAuthToken: () => Promise<string | null>
   /** LLM 流函数（缺省用 provider 适配；测试注入假流） */
   streamFn?: StreamFn
-  /** 宿主自带工具组：提供则不挂画布工具与阶段门策略（工具全放行） */
+  /** 宿主自带工具组：提供则不挂画布工具与阶段门策略（技能围栏仍生效，其余放行） */
   tools?: HostTool[]
   /** 宿主工具执行上下文（缺省用画布 store） */
   toolContext?: unknown
@@ -99,8 +110,8 @@ export class AgentKernel {
       },
       getApiKey: async () => (await deps.getAuthToken()) || 'anonymous',
       toolExecution: 'parallel',
-      // 宿主自带工具组无阶段门（全放行）；画布宿主走 policy 策略
-      beforeToolCall: deps.tools ? undefined : (ctx) => this.handleBeforeToolCall(ctx),
+      // beforeToolCall 始终挂载：先做技能工具围栏（两种宿主生效），画布宿主再走 policy 档位策略
+      beforeToolCall: (ctx) => this.handleBeforeToolCall(ctx),
       // 阶段门拒绝/阶段汇报暂停/停止/回合上限：当前回合收尾后不再发起下一次 LLM 调用
       shouldStopAfterTurn: () => this.stopRequested,
     })
@@ -164,6 +175,15 @@ export class AgentKernel {
 
   private async handleBeforeToolCall(ctx: BeforeToolCallContext): Promise<BeforeToolCallResult | undefined> {
     const toolName = ctx.toolCall.name
+    // 技能工具围栏：allowed_tools 非空的技能加载后，白名单外工具一律拒绝（画布/对话宿主都生效）
+    const scope = getActiveSkillScope()
+    if (scope && !scope.has(toolName)) {
+      const reason = `当前技能限定了可用工具白名单，禁止调用 ${toolName}（允许：${[...scope].join('、')}）`
+      this.emit({ type: 'tool_rejected', callId: ctx.toolCall.id, tool: toolName, reason })
+      return { block: true, reason }
+    }
+    // 宿主自带工具组无档位策略（围栏之外全放行）
+    if (this.deps.tools) return undefined
     const tool = AGENT_TOOLS.find((t) => t.name === toolName)
     const args = isRecord(ctx.args) ? ctx.args : {}
     const panelId = typeof args.panel_id === 'string' ? args.panel_id : ''
@@ -247,6 +267,7 @@ export class AgentKernel {
         if (isRecord(m) && m.role === 'assistant' && m.stopReason === 'error') {
           this.lastError = typeof m.errorMessage === 'string' && m.errorMessage ? m.errorMessage : 'LLM 调用失败'
         }
+        this.normalizeContext()
         break
       }
       case 'tool_execution_start':
@@ -283,7 +304,9 @@ export class AgentKernel {
 
   /** 用户消息：text 必填、images 可选（裸 base64，prompt 原生第二参数） */
   async send(text: string, images?: AgentImageAttachment[]): Promise<void> {
-    if (this.agent.state.isStreaming) return
+    // 机制层异常路径可能把 isStreaming 卡在 true（pi 的复位不在 finally 里）：
+    // 静默 return 会让该会话后续每条消息无声消失，abort 走机制层正式复位后正常发起
+    if (this.agent.state.isStreaming) this.agent.abort()
     this.stopRequested = false
     this.lastError = null
     this.turnCount = 0
@@ -294,6 +317,7 @@ export class AgentKernel {
     } catch (e) {
       this.lastError = e instanceof Error ? e.message : String(e)
     } finally {
+      this.normalizeContext()
       this.emit({ type: 'done', stopped: this.stopRequested, error: this.lastError })
     }
   }
@@ -307,7 +331,26 @@ export class AgentKernel {
   restore(data: unknown): boolean {
     if (!isRecord(data) || !Array.isArray(data.messages)) return false
     this.agent.state.messages = data.messages
+    this.normalizeContext()
     return true
+  }
+
+  /** 上下文归一化：上游偶发不回传 usage 块、历史版本落库过字符串内容的 assistant 消息——
+   *  任一缺失都会让机制层的上下文估算/消息转换在下一回合抛 TypeError（如读 usage.totalTokens、
+   *  content.length），整个会话从下一跳起静默停摆。restore/message_end/send 收尾三处兜底。 */
+  private normalizeContext(): void {
+    for (const m of this.agent.state.messages) {
+      if (!m || typeof m !== 'object') continue
+      if (m.role === 'assistant') {
+        if (typeof m.content === 'string') {
+          m.content = [{ type: 'text', text: m.content }]
+        }
+        if (!m.stopReason) m.stopReason = 'stop'
+        if (!m.usage) m.usage = { ...EMPTY_USAGE }
+      } else if (m.role === 'user' && typeof m.content === 'string') {
+        // user 字符串内容 pi-ai 能消费，保持原样
+      }
+    }
   }
 
   reset(): void {

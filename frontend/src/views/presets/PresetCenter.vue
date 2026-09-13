@@ -41,9 +41,27 @@
             <el-tag size="small" :type="statusOf(row).tagType">{{ statusOf(row).label }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column :label="t('presets.center.actionsLabel')" width="180" fixed="right">
+        <el-table-column :label="t('presets.center.enabledLabel')" width="80">
+          <template #default="{ row }">
+            <el-switch
+              v-if="row.type === 'skill'"
+              :model-value="row.prompt_config?.disabled !== true"
+              :loading="togglingId === row.id"
+              @change="handleToggleSkill(row, $event)"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('presets.center.actionsLabel')" width="230" fixed="right">
           <template #default="{ row }">
             <el-button link size="small" @click="openEditDialog(row)">{{ t('presets.center.edit') }}</el-button>
+            <el-button
+              v-if="row.type === 'skill'"
+              link
+              size="small"
+              @click="handleExportSkill(row)"
+            >
+              {{ t('presets.center.exportSkill') }}
+            </el-button>
             <el-button
               v-if="!row.is_public"
               link
@@ -61,15 +79,11 @@
       </el-table>
     </section>
 
-    <!-- ====== SKILL.md 导入弹窗 ====== -->
-    <SkillImportDialog v-model="importVisible" @imported="onImported" />
+    <!-- ====== 技能整包上传弹窗（zip/文件夹，直接落库） ====== -->
+    <SkillImportDialog v-model="importVisible" @imported="fetchMine" />
 
     <!-- ====== 编辑弹窗 ====== -->
-    <PresetEditorDialog
-      v-model="editorVisible"
-      :preset="editingPreset"
-      @submit="handleEditorSubmit"
-    />
+    <PresetEditorDialog v-model="editorVisible" :preset="editingPreset" @submit="handleEditorSubmit" />
   </div>
 </template>
 
@@ -84,12 +98,15 @@ import PresetEditorDialog from '@/components/presets/PresetEditorDialog.vue'
 import ImportExport from '@/components/presets/ImportExport.vue'
 import SkillImportDialog from '@/components/presets/SkillImportDialog.vue'
 import { listAgentSkills } from '@/lib/agent/skills'
-import { getPresets, submitPreset } from '@/api/presets'
+import { getPresets, submitPreset, updatePreset } from '@/api/presets'
+import { skillToSkillMd } from '@/utils/skillExport'
+import { useDownload } from '@/composables/useDownload'
 import { usePresetStore } from '@/stores/presets'
 import type { PromptPreset, PresetCreate } from '@/types/preset'
 
 const { t } = useI18n()
 const { confirm } = useConfirm()
+const { triggerDownload } = useDownload()
 const store = usePresetStore()
 
 /* ====== 我的预设列表（独立请求，与画廊 store 互不干扰） ====== */
@@ -127,14 +144,8 @@ function statusOf(row: PromptPreset): { label: string; tagType: 'success' | 'war
   return { label: t('presets.center.statusPrivate'), tagType: 'info' }
 }
 
-/* ====== SKILL.md 导入 ====== */
+/* ====== 技能上传：弹窗内直接落库，这里只负责刷新列表 ====== */
 const importVisible = ref(false)
-
-async function onImported() {
-  await fetchMine()
-  await store.fetchList().catch(() => {})
-  await listAgentSkills(true).catch(() => {})
-}
 
 /* ====== 编辑 / 新建 ====== */
 const editorVisible = ref(false)
@@ -158,6 +169,8 @@ async function handleEditorSubmit(data: PresetCreate) {
     } else {
       await store.createPreset(data)
       ElMessage.success(t('presets.center.createSuccess'))
+      // 新建技能：刷新 Agent 技能缓存，当前会话 load_skill 立即可用
+      if (data.type === 'skill') await listAgentSkills(true).catch(() => {})
     }
     await fetchMine()
   } catch {
@@ -165,7 +178,34 @@ async function handleEditorSubmit(data: PresetCreate) {
   }
 }
 
-/* ====== 投稿 / 删除 ====== */
+/* ====== 技能启用开关（停用后不进 Agent 技能清单） ====== */
+const togglingId = ref<number | null>(null)
+
+async function handleToggleSkill(row: PromptPreset, value: string | number | boolean) {
+  const disabled = value !== true
+  togglingId.value = row.id
+  try {
+    // 整体替换 prompt_config 前先合并原值，避免抹掉 import_meta/resources/allowed_tools
+    const prompt_config = { ...(row.prompt_config || {}), disabled: disabled || undefined }
+    await updatePreset(row.id, { prompt_config })
+    row.prompt_config = prompt_config
+    await listAgentSkills(true).catch(() => {})
+  } catch {
+    /* 错误已由拦截器提示 */
+  } finally {
+    togglingId.value = null
+  }
+}
+
+/* ====== 投稿 / 删除 / 技能导出 ====== */
+
+/** 技能卡导出为主流 Agent 技能格式 SKILL.md（可在其他支持该格式的 Agent 中使用） */
+function handleExportSkill(preset: PromptPreset) {
+  const blob = new Blob([skillToSkillMd(preset)], { type: 'text/markdown;charset=utf-8' })
+  const filename = `${preset.name.replace(/[\\/:*?"<>|]/g, '_')}.md`
+  triggerDownload(blob, filename)
+  ElMessage.success(t('presets.center.exportSkillDone'))
+}
 
 async function handleSubmitReview(preset: PromptPreset) {
   await confirm(t('presets.center.submitConfirmMsg'), t('common.confirm'))
