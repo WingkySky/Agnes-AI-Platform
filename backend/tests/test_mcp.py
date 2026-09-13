@@ -94,7 +94,7 @@ async def test_delete_drops_session(db):
     await db.commit()
     await db.refresh(server)
     # 预置缓存连接 → 删除后应被回收
-    mcp_service._sessions[server.id] = mcp_service._ServerSession(server)
+    mcp_service._sessions[(server.id, None)] = mcp_service._ServerSession(server)
     await mcp_service.delete_server(db, server)
     assert server.id not in mcp_service._sessions
 
@@ -117,7 +117,39 @@ async def test_get_session_reuses_and_rebuilds():
     assert conn2 is not conn1  # 配置变更重建
     await conn1.close()
     await conn2.close()
-    mcp_service._sessions.pop(9, None)
+    mcp_service._sessions.pop((9, None), None)
+
+
+# ---------- 多用户隔离 ----------
+
+def test_session_key_isolation():
+    shared = McpServer(id=1, name="s", transport="http", url="http://x")  # isolation 未设 → shared
+    per_user = McpServer(id=2, name="m", transport="stdio", command="npx", isolation="per_user")
+
+    assert mcp_service._session_key(shared, 7) == (1, None)          # shared 不按用户分
+    assert mcp_service._session_key(per_user, 7) == (2, 7)
+    with pytest.raises(ValueError, match="用户身份"):
+        mcp_service._session_key(per_user, None)
+
+
+def test_get_session_distinct_instances_per_user():
+    per_user = McpServer(id=3, name="m", transport="http", url="http://x", isolation="per_user")
+    c1 = mcp_service._get_session(per_user, 1)
+    c2 = mcp_service._get_session(per_user, 2)
+    c1_again = mcp_service._get_session(per_user, 1)
+    assert c1 is not c2 and c1 is c1_again
+    # shared 同配置跨用户同实例
+    shared = McpServer(id=4, name="f", transport="http", url="http://x")
+    assert mcp_service._get_session(shared, 1) is mcp_service._get_session(shared, 2)
+
+
+def test_apply_user_template():
+    per_user = McpServer(id=5, name="m", transport="stdio", command="npx", isolation="per_user")
+    conn = mcp_service._ServerSession(per_user, 42)
+    assert conn._apply_user_template("data/mcp-memory/u_{user_id}.json") == "data/mcp-memory/u_42.json"
+    assert conn._apply_user_template("no-template") == "no-template"
+    shared_conn = mcp_service._ServerSession(shared := McpServer(id=6, name="f", transport="http", url="http://x"))
+    assert shared_conn._apply_user_template("data/u_{user_id}.json") == "data/u_{user_id}.json"  # shared 不替换
 
 
 # ---------- 路由鉴权与调用守卫 ----------
@@ -156,7 +188,7 @@ async def test_admin_can_manage_servers(auth_client, db, seed_user, monkeypatch)
     server_id = data["id"]
 
     # 连接测试：mock 掉真实连接
-    async def _fake_tools(server):
+    async def _fake_tools(server, user_id=None):
         return [{"name": "read_file", "description": "d", "input_schema": {"type": "object"}}]
 
     monkeypatch.setattr(mcp_service, "list_server_tools", _fake_tools)

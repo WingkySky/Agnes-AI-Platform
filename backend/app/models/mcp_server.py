@@ -28,6 +28,7 @@ class McpServer(Base):
     url = Column(String(500), nullable=True)
     headers_json = Column(Text, nullable=True)   # JSON: {"Authorization": "..."}（值敏感，不回传）
     enabled = Column(Boolean, nullable=False, default=True)
+    isolation = Column(String(16), nullable=False, default="shared", server_default="shared")  # shared=全局共享实例；per_user=按用户各起实例（有状态服务器防串数据）
     market_slug = Column(String(100), nullable=True, index=True)  # 从市场安装时的市场项 slug（手动添加为空）
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
@@ -55,6 +56,7 @@ class McpServer(Base):
             "url": self.url,
             "header_keys": keys_of(self.headers_json),
             "enabled": self.enabled,
+            "isolation": self.isolation,
             "market_slug": self.market_slug,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,

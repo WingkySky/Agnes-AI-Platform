@@ -129,3 +129,30 @@ async def test_install_composes_fields_and_marks_slug(db):
     from app.models.mcp_server import McpServer  # noqa: F401
     with pytest.raises(ValueError, match="已存在"):
         await mcp_market_service.install_item(db, item, overrides={"name": "我的记忆库"}, secrets={})
+
+
+@pytest.mark.asyncio
+async def test_official_items_declare_isolation(db):
+    """官方目录归一后：memory/filesystem 按用户隔离且带 {user_id} 模板，fetch 共享"""
+    await mcp_market_service.seed_official_items(db)
+    items = {i["slug"]: i for i in await mcp_market_service.list_market_items(db)}
+    assert items["official-memory"]["isolation"] == "per_user"
+    assert "{user_id}" in items["official-memory"]["env"]["MEMORY_FILE_PATH"]
+    assert items["official-filesystem"]["isolation"] == "per_user"
+    assert "{user_id}" in items["official-filesystem"]["args"][2]
+    assert items["official-fetch"]["isolation"] == "shared"
+
+
+@pytest.mark.asyncio
+async def test_install_carries_isolation(db):
+    """安装把市场项的 isolation 透传到 mcp_servers，预置 env 模板原样入库"""
+    item = McpMarketItem(source_type="official", source_id=None, slug="official-memory", category="官方精选",
+                         payload=json.dumps(mcp_market_service.OFFICIAL_ITEMS[2]))
+    db.add(item)
+    await db.commit()
+    await db.refresh(item)
+
+    server = await mcp_market_service.install_item(db, item, overrides={}, secrets={})
+    assert server.isolation == "per_user"
+    env = json.loads(server.env_json)
+    assert env["MEMORY_FILE_PATH"] == "data/mcp-memory/u_{user_id}.json"

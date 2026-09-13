@@ -32,12 +32,14 @@ OFFICIAL_ITEMS: list[dict] = [
     {
         "slug": "official-filesystem",
         "name": "本地文件系统",
-        "description": "让 Agent 读取/搜索/写入服务器本机指定目录的文件（官方 filesystem 服务器）。需要后端环境已安装 Node.js（npx）。",
+        "description": "让 Agent 读取/搜索/写入服务器本机自己专属目录的文件（官方 filesystem 服务器）。按用户隔离：每个用户一个独立沙箱目录。需要后端环境已安装 Node.js（npx）。",
         "category": CATEGORY_OFFICIAL,
         "transport": "stdio",
+        "isolation": "per_user",
         "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp/agnes-workspace"],
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "data/mcp-ws/u_{user_id}"],
         "url": None,
+        "env": {},
         "env_fields": [],
         "headers_fields": [],
         "tools_preview": ["read_file", "write_file", "list_directory", "search_files"],
@@ -45,12 +47,14 @@ OFFICIAL_ITEMS: list[dict] = [
     {
         "slug": "official-fetch",
         "name": "网页抓取",
-        "description": "让 Agent 抓取网页并转为 Markdown 供阅读总结（官方 fetch 服务器）。需要后端环境已安装 uv/uvx（Python）。",
+        "description": "让 Agent 抓取网页并转为 Markdown 供阅读总结（官方 fetch 服务器）。无状态，全站共享一个实例。需要后端环境已安装 uv/uvx（Python）。",
         "category": CATEGORY_OFFICIAL,
         "transport": "stdio",
+        "isolation": "shared",
         "command": "uvx",
         "args": ["mcp-server-fetch"],
         "url": None,
+        "env": {},
         "env_fields": [],
         "headers_fields": [],
         "tools_preview": ["fetch"],
@@ -58,13 +62,15 @@ OFFICIAL_ITEMS: list[dict] = [
     {
         "slug": "official-memory",
         "name": "知识记忆库",
-        "description": "给 Agent 一个跨会话的知识图谱记忆（官方 memory 服务器，基于本地 JSON 持久化）。需要后端环境已安装 Node.js（npx）。",
+        "description": "给 Agent 一个跨会话的知识图谱记忆（官方 memory 服务器，基于本地 JSON 持久化）。按用户隔离：每人一份独立记忆文件，互不可见。需要后端环境已安装 Node.js（npx）。",
         "category": CATEGORY_OFFICIAL,
         "transport": "stdio",
+        "isolation": "per_user",
         "command": "npx",
         "args": ["-y", "@modelcontextprotocol/server-memory"],
         "url": None,
-        "env_fields": [{"key": "MEMORY_FILE_PATH", "description": "记忆持久化文件路径（缺省内存态，重启丢失）", "required": False}],
+        "env": {"MEMORY_FILE_PATH": "data/mcp-memory/u_{user_id}.json"},
+        "env_fields": [],
         "headers_fields": [],
         "tools_preview": ["create_entities", "search_nodes", "read_graph"],
     },
@@ -159,15 +165,20 @@ def _normalize_item(raw) -> dict:
         raise ValueError(f"市场项 {slug} 为 stdio 但缺少 command")
     if transport == "http" and not str(raw.get("url") or "").strip():
         raise ValueError(f"市场项 {slug} 为 http 但缺少 url")
+    isolation = raw.get("isolation") or "shared"
+    if isolation not in ("shared", "per_user"):
+        raise ValueError(f"市场项 {slug} 的 isolation 非法")
     return {
         "slug": slug,
         "name": name,
         "description": str(raw.get("description") or ""),
         "category": str(raw.get("category") or "").strip(),
+        "isolation": isolation,
         "transport": transport,
         "command": str(raw.get("command") or "") or None,
         "args": [str(a) for a in raw.get("args") or []],
         "url": str(raw.get("url") or "") or None,
+        "env": {str(k): str(v) for k, v in (raw.get("env") or {}).items()} if isinstance(raw.get("env"), dict) else {},
         "env_fields": [f for f in raw.get("env_fields") or [] if isinstance(f, dict) and f.get("key")],
         "headers_fields": [f for f in raw.get("headers_fields") or [] if isinstance(f, dict) and f.get("key")],
         "tools_preview": [str(t) for t in raw.get("tools_preview") or []],
@@ -209,14 +220,16 @@ async def install_item(db: AsyncSession, item: McpMarketItem, overrides: dict, s
     fields: dict = {
         "name": str(overrides.get("name") or payload["name"]).strip(),
         "transport": transport,
+        "isolation": payload.get("isolation") or "shared",
         "enabled": True,
         "market_slug": item.slug,
     }
     if transport == "stdio":
         fields["command"] = str(overrides.get("command") or payload.get("command") or "").strip()
         fields["args_json"] = json.dumps(overrides.get("args") if overrides.get("args") is not None else payload.get("args") or [], ensure_ascii=False)
-        env_values = secrets.get("env") or {}
-        fields["env_json"] = json.dumps({k: str(v) for k, v in env_values.items() if v != ""}, ensure_ascii=False) if env_values else None
+        # 预置 env 模板（可含 {user_id}，网关按调用者替换）+ 安装时填写的密钥值（覆盖同名）
+        env_values = {**(payload.get("env") or {}), **{k: v for k, v in (secrets.get("env") or {}).items() if v != ""}}
+        fields["env_json"] = json.dumps(env_values, ensure_ascii=False) if env_values else None
         fields["url"] = None
         fields["headers_json"] = None
     else:

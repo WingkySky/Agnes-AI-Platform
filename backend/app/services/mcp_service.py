@@ -10,6 +10,8 @@
 import asyncio
 import json
 import logging
+import os
+import time
 from datetime import datetime
 
 from sqlalchemy import select
@@ -22,6 +24,7 @@ logger = logging.getLogger("agnes_platform")
 # 连接/调用超时（秒）
 CONNECT_TIMEOUT = 30
 CALL_TIMEOUT = 120
+IDLE_TTL_SECONDS = 600      # per_user 实例空闲回收阈值（秒）
 
 
 def _config_fingerprint(server: McpServer) -> str:
@@ -40,8 +43,10 @@ def _config_fingerprint(server: McpServer) -> str:
 class _ServerSession:
     """单服务器连接：owner task 进入客户端上下文并保持，暴露 list_tools / call_tool"""
 
-    def __init__(self, server: McpServer):
+    def __init__(self, server: McpServer, user_id: int | None = None):
         self._server = server
+        self.user_id = user_id          # per_user 实例所属用户；shared 恒为 None
+        self.last_used = time.monotonic()
         self._task: asyncio.Task | None = None
         self._session = None
         self._ready = asyncio.Event()
@@ -49,10 +54,17 @@ class _ServerSession:
         self._error: str | None = None
         self.fingerprint = _config_fingerprint(server)
 
+    def _apply_user_template(self, value: str | None) -> str | None:
+        """配置模板替换：{user_id} → 实例所属用户 id（shared 实例无用户上下文，原样返回）"""
+        if value is None or self.user_id is None or "{user_id}" not in value:
+            return value
+        return value.replace("{user_id}", str(int(self.user_id)))
+
     # ---------- 生命周期 ----------
 
     async def ensure(self) -> None:
         """按需启动并等待就绪；连接死亡/出错时重建"""
+        self.last_used = time.monotonic()
         if self._task is None or self._task.done():
             self._session = None
             self._error = None
@@ -80,17 +92,22 @@ class _ServerSession:
 
             extra_client = None
             if self._server.transport == "stdio":
+                args = [self._apply_user_template(a) for a in McpServer.parse_json(self._server.args_json, [])]
+                env = {k: self._apply_user_template(v) for k, v in (McpServer.parse_json(self._server.env_json, None) or {}).items()}
+                if self.user_id is not None:
+                    _ensure_user_dirs(args + list(env.values()))
                 params = StdioServerParameters(
-                    command=self._server.command or "",
-                    args=McpServer.parse_json(self._server.args_json, []),
-                    env=McpServer.parse_json(self._server.env_json, None) or None,  # 空 {} 视为默认环境（保留 PATH）
+                    command=self._apply_user_template(self._server.command) or "",
+                    args=args,
+                    env=env or None,  # 空 {} 视为默认环境（保留 PATH）
                 )
                 streams_ctx = stdio_client(params)
             else:
-                headers = McpServer.parse_json(self._server.headers_json, None)
+                url = self._apply_user_template(self._server.url)
+                headers = {k: self._apply_user_template(v) for k, v in (McpServer.parse_json(self._server.headers_json, None) or {}).items()}
                 # mcp 2.x：headers 经自建 httpx 客户端传入，且自建客户端由本任务管理生命周期
                 extra_client = create_mcp_http_client(headers=headers) if headers else None
-                streams_ctx = streamable_http_client(self._server.url or "", http_client=extra_client)
+                streams_ctx = streamable_http_client(url or "", http_client=extra_client)
 
             async with contextlib.AsyncExitStack() as stack:
                 if extra_client is not None:
@@ -150,18 +167,38 @@ class _ServerSession:
 
 # ---------- 连接缓存（进程级） ----------
 
-_sessions: dict[int, _ServerSession] = {}
+_sessions: dict[tuple[int, int | None], _ServerSession] = {}
 
 
-def _get_session(server: McpServer) -> _ServerSession:
-    """按 server id 取连接；配置指纹变更或不存在时重建（旧连接异步回收）"""
-    old = _sessions.get(server.id)
+def _session_key(server: McpServer, user_id: int | None) -> tuple[int, int | None]:
+    """连接键：per_user 服务器按 (server_id, user_id) 隔离实例；shared 全局一个"""
+    if (server.isolation or "shared") == "per_user":
+        if user_id is None:
+            raise ValueError("per_user 服务器必须携带用户身份")
+        return (server.id, int(user_id))
+    return (server.id, None)
+
+
+def _sweep_idle_sessions() -> None:
+    """回收长时间空闲的 per_user 实例（子进程数随用户增长需收敛）；shared 实例常驻不清"""
+    now = time.monotonic()
+    for key, conn in list(_sessions.items()):
+        if key[1] is not None and now - conn.last_used > IDLE_TTL_SECONDS:
+            _sessions.pop(key, None)
+            asyncio.get_running_loop().create_task(conn.close())
+
+
+def _get_session(server: McpServer, user_id: int | None = None) -> _ServerSession:
+    """按连接键取实例；配置指纹变更或不存在时重建（旧连接异步回收）"""
+    key = _session_key(server, user_id)
+    old = _sessions.get(key)
     if old and old.fingerprint != _config_fingerprint(server):
         asyncio.get_running_loop().create_task(old.close())
         old = None
     if old is None:
-        old = _ServerSession(server)
-        _sessions[server.id] = old
+        _sweep_idle_sessions()
+        old = _ServerSession(server, key[1])
+        _sessions[key] = old
     return old
 
 
@@ -190,11 +227,12 @@ async def agent_tools(db: AsyncSession) -> list[dict]:
 
 
 async def drop_session(server_id: int) -> None:
-    """服务器删除/停用时显式回收连接并失效工具缓存"""
+    """服务器删除/停用时显式回收全部连接并失效工具缓存"""
     _tools_cache.pop(server_id, None)
-    session = _sessions.pop(server_id, None)
-    if session:
-        await session.close()
+    for key in [k for k in _sessions if k[0] == server_id]:
+        session = _sessions.pop(key, None)
+        if session:
+            await session.close()
 
 
 # ---------- 数据访问与对外接口 ----------
@@ -243,14 +281,29 @@ async def _name_taken(db: AsyncSession, name: str) -> bool:
     return row.scalar() is not None
 
 
-async def list_server_tools(server: McpServer) -> list[dict]:
-    """连接测试 / 工具清单（不含调用）"""
-    return await _get_session(server).list_tools()
+async def list_server_tools(server: McpServer, user_id: int | None = None) -> list[dict]:
+    """连接测试 / 工具清单（不含调用）；per_user 服务器以发起人身份出实例"""
+    return await _get_session(server, user_id).list_tools()
 
 
-async def call_server_tool(server: McpServer, tool: str, arguments: dict | None) -> dict:
-    """Agent 调用入口（BFF /api/mcp/call）"""
-    return await _get_session(server).call_tool(tool, arguments)
+async def call_server_tool(server: McpServer, tool: str, arguments: dict | None, user_id: int | None = None) -> dict:
+    """Agent 调用入口（BFF /api/mcp/call）；per_user 服务器按调用者隔离实例"""
+    return await _get_session(server, user_id).call_tool(tool, arguments)
+
+
+def _ensure_user_dirs(values: list[str | None]) -> None:
+    """per_user 实例路径自举：替换后的相对路径自动建目录（无扩展名视为目录本身，
+    有扩展名视为文件、建其父目录），避免官方 memory/filesystem 项因目录缺失启动失败"""
+    for raw in values:
+        if not raw or "://" in raw:
+            continue
+        base = os.path.basename(raw)
+        target = os.path.dirname(raw) if "." in base else raw
+        if target:
+            try:
+                os.makedirs(target, exist_ok=True)
+            except OSError:
+                pass  # 路径不可建目录时交由服务器自身报错，不阻断连接
 
 
 def dump_json(value, fallback: str) -> str:

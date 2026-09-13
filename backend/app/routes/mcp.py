@@ -15,7 +15,6 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_db
@@ -187,7 +186,7 @@ async def test_server(
     if not server:
         raise HTTPException(status_code=404, detail="MCP 服务器不存在")
     try:
-        tools = await mcp_service.list_server_tools(server)
+        tools = await mcp_service.list_server_tools(server, user_id=_admin.id)
     except Exception as e:  # noqa: BLE001 —— 连接失败原样转可读错误
         raise HTTPException(status_code=502, detail=f"连接失败：{e}")
     return ok({"name": server.name, "transport": server.transport, "tools": tools})
@@ -215,7 +214,7 @@ async def call_tool(
     if not server or not server.enabled:
         raise HTTPException(status_code=404, detail="MCP 服务器不存在或已停用")
     try:
-        result = await mcp_service.call_server_tool(server, body.tool, body.arguments)
+        result = await mcp_service.call_server_tool(server, body.tool, body.arguments, user_id=_user.id)
     except Exception as e:  # noqa: BLE001 —— 调用失败转可读错误（连接/超时/工具错误）
         raise HTTPException(status_code=502, detail=f"MCP 工具调用失败：{e}")
     if result.get("is_error"):
@@ -283,9 +282,8 @@ async def market_items(
     db: AsyncSession = Depends(get_async_db),
     _admin: User = Depends(get_current_admin_user),
 ):
-    # 官方目录懒初始化（幂等）：首次访问入库
-    if not (await db.execute(select(McpMarketItem.id).where(McpMarketItem.source_type == "official").limit(1))).scalar():
-        await mcp_market_service.seed_official_items(db)
+    # 官方目录幂等 upsert：随代码更新官方项定义（描述/模板/隔离级别），已部署环境自动跟进
+    await mcp_market_service.seed_official_items(db)
     return ok(await mcp_market_service.list_market_items(db, q))
 
 
