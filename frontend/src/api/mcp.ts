@@ -81,3 +81,73 @@ export function fetchMcpAgentTools(): Promise<McpServerTools[]> {
 export function callMcpTool(serverId: number, tool: string, args?: Record<string, unknown>): Promise<McpCallResult> {
   return client.post('/api/mcp/call', { server_id: serverId, tool, arguments: args })
 }
+
+// ---------- 市场（发现与一键安装） ----------
+
+/** 市场源（管理员自建：URL 指向 manifest JSON） */
+export interface McpMarketSourceInfo {
+  id: number
+  name: string
+  url: string
+  enabled: boolean
+  last_fetched_at: string | null
+  item_count: number
+}
+
+/** 市场项密钥声明（安装弹窗按声明生成输入框） */
+export interface McpSecretField {
+  key: string
+  description?: string
+  required?: boolean
+}
+
+/** 市场项（官方 + 远程合并；command/args/url 为可编辑预填） */
+export interface McpMarketItemInfo {
+  slug: string
+  name: string
+  description: string
+  category: string
+  transport: 'stdio' | 'http'
+  command: string | null
+  args: string[]
+  url: string | null
+  env_fields: McpSecretField[]
+  headers_fields: McpSecretField[]
+  tools_preview: string[]
+  source_type: 'official' | 'remote'
+  installed: boolean
+}
+
+export function listMarketSources(): Promise<McpMarketSourceInfo[]> {
+  return client.get('/api/mcp/market/sources')
+}
+
+export function createMarketSource(name: string, url: string): Promise<McpMarketSourceInfo> {
+  return client.post('/api/mcp/market/sources', { name, url })
+}
+
+export function deleteMarketSource(id: number): Promise<null> {
+  return client.delete(`/api/mcp/market/sources/${id}`)
+}
+
+export function refreshMarketSource(id: number): Promise<{ count: number }> {
+  return client.post(`/api/mcp/market/sources/${id}/refresh`)
+}
+
+export function listMarketItems(q = ''): Promise<McpMarketItemInfo[]> {
+  return client.get('/api/mcp/market/items', { params: q ? { q } : {} })
+}
+
+export interface McpMarketInstallBody {
+  slug: string
+  name?: string
+  command?: string
+  args?: string[]
+  url?: string
+  env?: Record<string, string>
+  headers?: Record<string, string>
+}
+
+export function installMarketItem(body: McpMarketInstallBody): Promise<McpServerSafe> {
+  return client.post('/api/mcp/market/install', body)
+}
