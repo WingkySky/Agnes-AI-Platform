@@ -17,12 +17,16 @@ import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useModelsStore } from '@/stores/models'
 import type { ImageGenerationRequest, VideoGenerationRequest } from '@/types'
 import type { AgentToolResult } from './tools'
+import type { AgentKernel } from './kernel'
+import { runSubagent, subagentHostFromParent } from './subagent'
 import { loadAgentSkillFull, readSkillResource, saveAgentSkill, SKILL_CONTENT_MAX_CHARS } from './skills'
 
 /** chat 工具执行上下文（chat store 提供）：会话连续性所需的媒体状态 */
 export interface ChatToolContext {
   /** 最近一次成功生成的媒体 URL（图生图/图生视频默认参考） */
   getRecentMediaUrl(type: 'image' | 'video'): string | null
+  /** 子代理进度上报（agent_delegate 执行器消费；chat store 更新父时间线步骤行，缺省无进度） */
+  reportDelegateProgress?: (callId: string, text: string) => void
 }
 
 function isChatCtx(ctx: unknown): ctx is ChatToolContext {
@@ -310,8 +314,35 @@ const saveSkillTool = {
   },
 }
 
+// ---------- agent_delegate ----------
+
+const delegateTool = {
+  name: 'agent_delegate',
+  description: '把可独立完成的子任务委派给子代理执行：子代理继承对话工具但拥有独立上下文，过程细节不进入主对话，只返回结论摘要。适合：长任务上下文隔离（长文分析、多步调研）、多视角并行评审（不同角色视角各派一个）、批量重复性子任务。一次委派只做一件事；并行场景在同一条消息里发多个委派。',
+  parameters: Type.Object({
+    task: Type.String({ description: '子任务目标（一句话说清做什么、产出什么）' }),
+    context: Type.Optional(Type.String({ description: '子任务需要的背景材料（原文片段/约束/已确认的设定）' })),
+    tools_allowed: Type.Optional(Type.Array(Type.String(), { description: '可选：收窄子代理可用工具名清单（只能收窄不能放大，禁止包含 agent_delegate）' })),
+  }),
+  execute: async (args: Record<string, unknown>, ctx: unknown, callId?: string, parent?: AgentKernel): Promise<AgentToolResult> => {
+    if (!parent) return { ok: false, error: '子代理不可用（缺少父内核上下文）' }
+    const report = isChatCtx(ctx) && typeof ctx.reportDelegateProgress === 'function' ? ctx.reportDelegateProgress : undefined
+    return runSubagent(
+      {
+        task: typeof args.task === 'string' ? args.task : '',
+        context: typeof args.context === 'string' ? args.context : undefined,
+        tools_allowed: Array.isArray(args.tools_allowed) ? args.tools_allowed.filter((x): x is string => typeof x === 'string') : undefined,
+      },
+      subagentHostFromParent(parent, {
+        tools: CHAT_TOOLS,
+        onProgress: report && callId ? (text) => report(callId, text) : undefined,
+      }),
+    )
+  },
+}
+
 /** chat 宿主工具组（经内核 HostTool 包装后挂载；追加新工具放末尾，测试按索引取用） */
-export const CHAT_TOOLS = [imageTool, videoTool, loadSkillTool, saveSkillTool, readSkillFileTool]
+export const CHAT_TOOLS = [imageTool, videoTool, loadSkillTool, saveSkillTool, readSkillFileTool, delegateTool]
 
 /** 工具名清单（allowed-tools 白名单映射目标） */
 export const CHAT_TOOL_NAMES = CHAT_TOOLS.map((t) => t.name)

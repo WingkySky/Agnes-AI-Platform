@@ -15,8 +15,10 @@ import type { ModelInfo } from '@/types'
 import { Type } from 'typebox'
 import type { TSchema } from 'typebox'
 import { stageApprovedMessage } from './policy'
+import { runSubagent, subagentHostFromParent } from './subagent'
 import { fetchPanelImageBase64 } from './attachments'
 import { loadAgentSkillFull, readSkillResource, saveAgentSkill, SKILL_CONTENT_MAX_CHARS } from './skills'
+import type { AgentKernel } from './kernel'
 import type { AgentImageAttachment } from './attachments'
 import { extractEntities, splitStoryboard } from '@/lib/storyboard/pipeline'
 import { buildAssetPrompt } from '@/lib/storyboard/prompts'
@@ -53,6 +55,8 @@ export interface AgentCanvasStore {
   deleteConnection: (id: string) => void
   selectPanel: (id: string | null, opts?: { append?: boolean }) => void
   pushSnapshot: () => void
+  /** 子代理进度上报（agent_delegate 执行器消费；store 更新父时间线步骤行，缺省无进度） */
+  reportDelegateProgress?: (callId: string, text: string) => void
 }
 
 /** agent_apply_ops 的单条操作 */
@@ -67,7 +71,7 @@ export interface AgentTool {
   description: string
   /** TypeBox 定义（即 JSON Schema，单一来源）：机制层直接消费；OpenAI function 格式由 agentToolSchemasOpenAI 直出 */
   parameters: TSchema
-  execute: (args: Record<string, unknown>, canvas: AgentCanvasStore, callId?: string) => Promise<AgentToolResult> | AgentToolResult
+  execute: (args: Record<string, unknown>, canvas: AgentCanvasStore, callId?: string, parent?: AgentKernel) => Promise<AgentToolResult> | AgentToolResult
 }
 
 // ---------- 参数安全读取（不做类型断言） ----------
@@ -764,6 +768,31 @@ export const AGENT_TOOLS: AgentTool[] = [
       ok: true,
       data: { stage: asString(args.stage), approved: true, message: stageApprovedMessage(asString(args.stage)) },
     }),
+  },
+  {
+    name: 'agent_delegate',
+    group: 'write',
+    description: '把可独立完成的子任务委派给子代理执行：子代理继承画布工具但拥有独立上下文，过程细节不进入主对话，只返回结论摘要。适合：长任务上下文隔离（逐分镜细化、长文分析）、多视角并行评审（导演/摄影/观众等不同角色视角各派一个）、批量子流程（逐分镜生成→自检→修正）。一次委派只做一件事；并行场景在同一条消息里发多个委派。',
+    parameters: Type.Object({
+      task: Type.String({ description: '子任务目标（一句话说清做什么、产出什么）' }),
+      context: Type.Optional(Type.String({ description: '子任务需要的背景材料（原文片段/约束/已确认的设定）' })),
+      tools_allowed: Type.Optional(Type.Array(Type.String(), { description: '可选：收窄子代理可用工具名清单（只能收窄不能放大，禁止包含 agent_delegate）' })),
+    }),
+    execute: async (args, canvas, callId, parent) => {
+      if (!parent) return { ok: false, error: '子代理不可用（缺少父内核上下文）' }
+      const report = canvas.reportDelegateProgress
+      return runSubagent(
+        {
+          task: asString(args.task),
+          context: typeof args.context === 'string' ? args.context : undefined,
+          tools_allowed: Array.isArray(args.tools_allowed) ? args.tools_allowed.filter((x): x is string => typeof x === 'string') : undefined,
+        },
+        subagentHostFromParent(parent, {
+          tools: AGENT_TOOLS,
+          onProgress: report && callId ? (text) => report(callId, text) : undefined,
+        }),
+      )
+    },
   },
 ]
 

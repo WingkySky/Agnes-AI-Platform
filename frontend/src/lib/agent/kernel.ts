@@ -46,12 +46,12 @@ export type KernelEvent =
   | { type: 'done'; stopped: boolean; error: string | null }
 
 /** 宿主自带工具（chat 宿主等）：结构与画布 AgentTool 对齐，execute 的 ctx 由 deps.toolContext 提供；
- *  callId 为机制层工具调用 id（子代理进度定位用） */
+ *  callId 为机制层工具调用 id（子代理进度定位用），parent 为执行本工具的内核实例（agent_delegate 构建子代理宿主用） */
 export interface HostTool {
   name: string
   description: string
   parameters: TSchema
-  execute(args: Record<string, unknown>, ctx: unknown, callId?: string): AgentToolResult | Promise<AgentToolResult>
+  execute(args: Record<string, unknown>, ctx: unknown, callId?: string, parent?: AgentKernel): AgentToolResult | Promise<AgentToolResult>
 }
 
 export interface AgentKernelDeps {
@@ -65,6 +65,8 @@ export interface AgentKernelDeps {
   streamFn?: StreamFn
   /** 单回合 LLM 调用上限（缺省 40；子代理实例传更小值） */
   maxTurns?: number
+  /** 对话模型（缺省占位 id 走后端解析链；子代理由 createChildKernel 继承父的当前模型） */
+  model?: Model<'openai-completions'>
   /** 宿主自带工具组：提供则不挂画布工具与阶段门策略（技能围栏仍生效，其余放行） */
   tools?: HostTool[]
   /** 宿主工具执行上下文（缺省用画布 store） */
@@ -112,7 +114,7 @@ export class AgentKernel {
       streamFn: deps.streamFn ?? agentStreamFn,
       initialState: {
         systemPrompt: deps.systemPrompt,
-        model: createAgentModel(),
+        model: deps.model ?? createAgentModel(),
         messages: [],
         tools: deps.tools ? this.wrapTools(deps.tools) : this.piTools(deps.getMode?.() ?? 'confirm'),
       },
@@ -145,6 +147,26 @@ export class AgentKernel {
     }
   }
 
+  /** 创建子代理内核：继承父的 LLM 通道/当前模型/鉴权/工具上下文，并注册进 children（requestStop 传导）。
+   *  调用方在子任务结束时调用返回的 unregister 注销。 */
+  createChildKernel(input: { systemPrompt: string; maxTurns?: number; tools: HostTool[]; toolContext?: unknown }): { kernel: AgentKernel; unregister: () => void } {
+    const child = new AgentKernel({
+      systemPrompt: input.systemPrompt,
+      maxTurns: input.maxTurns,
+      tools: input.tools,
+      toolContext: input.toolContext ?? this.deps.toolContext ?? this.deps.getCanvas?.(),
+      getAuthToken: this.deps.getAuthToken,
+      streamFn: this.deps.streamFn,
+      model: this.agent.state.model,
+    })
+    return { kernel: child, unregister: this.registerChild(child) }
+  }
+
+  /** 父流程是否已请求停止（子代理工具执行前检查，防僵尸子循环） */
+  get isStopRequested(): boolean {
+    return this.stopRequested
+  }
+
   /** 档位切换：同步机制层工具清单（只读档仅挂 read 组；策略层在 beforeToolCall 兜底）。宿主工具组模式无档位，no-op */
   setMode(mode: AgentMode): void {
     if (!this.deps.tools) this.agent.state.tools = this.piTools(mode)
@@ -174,7 +196,7 @@ export class AgentKernel {
       parameters: tool.parameters,
       execute: async (toolCallId: string, params: unknown) => {
         const args = isRecord(params) ? params : {}
-        const r = await tool.execute(args, this.deps.toolContext ?? this.deps.getCanvas?.(), toolCallId)
+        const r = await tool.execute(args, this.deps.toolContext ?? this.deps.getCanvas?.(), toolCallId, this)
         if (!r.ok) throw new Error(r.error || '工具执行失败')
         const imageBlocks: ImageContent[] = validImages(r.images).map((i) => ({ type: 'image' as const, data: i.data, mimeType: i.mimeType }))
         return {
