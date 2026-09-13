@@ -69,32 +69,42 @@ class _ServerSession:
             raise RuntimeError(f"MCP 服务器连接失败：{self._error}")
 
     async def _run(self) -> None:
-        """owner task：进入传输与客户端上下文，初始化后保持到 stop"""
-        from mcp import ClientSession, StdioServerParameters
-        from mcp.client.stdio import stdio_client
-        from mcp.client.streamable_http import streamablehttp_client
-
+        """owner task：进入传输与客户端上下文，初始化后保持到 stop。
+        SDK 导入放 try 内：导入失败（版本不匹配）转为可读连接错误而非超时。"""
         try:
+            import contextlib
+
+            from mcp import ClientSession, StdioServerParameters
+            from mcp.client.stdio import stdio_client
+            from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
+
+            extra_client = None
             if self._server.transport == "stdio":
                 params = StdioServerParameters(
                     command=self._server.command or "",
                     args=McpServer.parse_json(self._server.args_json, []),
-                    env=McpServer.parse_json(self._server.env_json, None),
+                    env=McpServer.parse_json(self._server.env_json, None) or None,  # 空 {} 视为默认环境（保留 PATH）
                 )
-                ctx = stdio_client(params)
+                streams_ctx = stdio_client(params)
             else:
                 headers = McpServer.parse_json(self._server.headers_json, None)
-                ctx = streamablehttp_client(self._server.url or "", headers=headers or None)
-            async with ctx as streams:
-                read, write = streams[0], streams[1]
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    self._session = session
-                    self._ready.set()
-                    await self._stop.wait()
+                # mcp 2.x：headers 经自建 httpx 客户端传入，且自建客户端由本任务管理生命周期
+                extra_client = create_mcp_http_client(headers=headers) if headers else None
+                streams_ctx = streamable_http_client(self._server.url or "", http_client=extra_client)
+
+            async with contextlib.AsyncExitStack() as stack:
+                if extra_client is not None:
+                    await stack.enter_async_context(extra_client)
+                async with streams_ctx as streams:
+                    read, write = streams[0], streams[1]
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+                        self._session = session
+                        self._ready.set()
+                        await self._stop.wait()
         except asyncio.CancelledError:
             raise
-        except Exception as e:  # noqa: BLE001 —— 传输/初始化失败统一转可读错误
+        except Exception as e:  # noqa: BLE001 —— 传输/初始化/导入失败统一转可读错误
             self._error = str(e)
             self._ready.set()
 
@@ -118,7 +128,7 @@ class _ServerSession:
             {
                 "name": tool.name,
                 "description": tool.description or "",
-                "input_schema": tool.inputSchema if isinstance(tool.inputSchema, dict) else {},
+                "input_schema": getattr(tool, "input_schema", None) or getattr(tool, "inputSchema", None) or {},
             }
             for tool in result.tools
         ]

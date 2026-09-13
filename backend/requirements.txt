@@ -26,4 +26,4 @@ aibridge-sdk[edge-tts]>=2.1.0  # 统一 AI SDK：https://github.com/WingkySky/Ai
 # 对象存储（资源转存，S3 兼容协议：Cloudflare R2 / AWS S3 / MinIO / OSS）
 boto3>=1.34.0             # AWS SDK for Python，支持任何 S3 兼容服务商
 # MCP 网关（Agent 外部工具桥，stdio / streamable HTTP 客户端）
-mcp>=1.0.0
+mcp>=2.0.0  # 依赖 2.x API（streamable_http_client / create_mcp_http_client）
