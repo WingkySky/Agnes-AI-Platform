@@ -76,6 +76,10 @@ vi.mock('@/stores/canvas', () => ({
 }))
 
 import { useAgentStore } from '../agent'
+import { setLocale } from '@/i18n'
+
+// 阶段门 stage/summary 断言依赖中文文案，固定测试语言
+setLocale('zh-CN')
 
 function textTurn(content: string) {
   return { text: content }

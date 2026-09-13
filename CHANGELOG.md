@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### 工具步骤文案统一 i18n（工具标签注册表）
+- **单一注册表**：新增 `lib/agent/tool-labels.ts`——`toolStepLabel()` 统一「工具原始名 → 用户可读文案」，带参富文案（节点名/技能名/生成类型/操作计数）内聚 detail；画布面板 `stepAction` 与对话 store `toolLabel` 两套手写 switch 收敛删除，步骤行/确认卡/子任务进度行同源取词
+- **MCP 外部工具可读化**：`mcp__{serverId}__{tool}` 在步骤行与确认卡显示「外部工具 · {短名}」，完整名收进悬停提示；未注册工具兜底显示原始名
+- **策略层门文案 i18n**：`policy.ts` 生成阶段门/MCP 工具门 summary 与 `stageNameOfKind` 四阶段名改走 i18n（`onReject` 为回填 LLM 的提示，保持中文）；确认文案不再硬编码
+- **i18n 补键**：storyboard 四工具/保存技能/读取技能文件/派发子任务/门确认模板/阶段名等 15 键中英同步；`detectInitialLocale` 对非浏览器残缺 localStorage 防御
+- **测试**：新增 tool-labels 注册表（全工具必有条目完整性 + mcp 兜底 + 富文案）5 例，vitest 245 例全绿
+
 ### MCP 桥：Agent 外部工具生态（stdio / streamable HTTP 双传输）
 - **后端网关**：`mcp_servers` 全局配置表 + 官方 mcp SDK 连接管理——每服务器一个 owner task 持有客户端上下文（anyio 作用域约束），会话缓存 + 配置指纹失效重建，stdio 子进程懒拉起、调用失败即报错下次重建；env/headers 值仅存服务端，所有响应只回键名
 - **管理接口（管理员）**：服务器 CRUD（名称唯一/transport 校验；env/headers **缺省=保留原值，传 {}=清空**，切换传输类型两侧密钥重置）、`POST /{id}/test` 连接测试返回工具清单

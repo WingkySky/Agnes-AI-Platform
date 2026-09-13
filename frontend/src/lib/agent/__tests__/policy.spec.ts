@@ -1,7 +1,10 @@
 /* 策略层直测：三档权限 × 工具组 × 阶段门状态矩阵 */
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeAll } from 'vitest'
 import { resolveToolCall, gatedKindOf, inferGenerationKind, stageNameOfKind, stageApprovedMessage } from '../policy'
+import { setLocale } from '@/i18n'
+
+beforeAll(() => setLocale('zh-CN'))
 
 const base = {
   args: {} as Record<string, unknown>,

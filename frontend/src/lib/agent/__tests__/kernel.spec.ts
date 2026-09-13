@@ -6,6 +6,10 @@ import { AgentKernel, rebuildTimeline } from '../kernel'
 import type { AgentKernelDeps, KernelEvent } from '../kernel'
 import { AGENT_SYSTEM_PROMPT_BASE } from '../system-prompt'
 import { setActiveSkillScope } from '../skills'
+import { setLocale } from '@/i18n'
+
+// 阶段门 stage 断言依赖中文文案，固定测试语言
+setLocale('zh-CN')
 import { createFakeStreamFn } from './fake-llm'
 import type { FakeTurn } from './fake-llm'
 import type { AgentMode } from '../policy'

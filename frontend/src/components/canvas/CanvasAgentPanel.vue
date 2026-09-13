@@ -117,7 +117,7 @@
             <!-- 写操作确认卡片 -->
             <div v-else-if="agent.pendingConfirm" class="confirm-card" :style="confirmCardStyle">
               <div class="confirm-title" :style="{ color: theme.node.text }">{{ t('agent.confirmTitle') }}</div>
-              <div class="confirm-tool" :style="{ color: theme.toolbar.activeText }">{{ agent.pendingConfirm.tool }}</div>
+              <div class="confirm-tool" :style="{ color: theme.toolbar.activeText }" :title="agent.pendingConfirm.tool">{{ toolStepLabel(agent.pendingConfirm.tool) }}</div>
               <pre class="confirm-args" :style="{ background: theme.toolbar.itemHover, color: theme.node.muted }">{{ prettyArgs }}</pre>
               <div class="confirm-btns">
                 <button
@@ -251,6 +251,7 @@ import {
   attachmentErrorKey, MAX_IMAGES_PER_MESSAGE,
 } from '@/lib/agent/attachments'
 import type { AgentImageAttachment } from '@/lib/agent/kernel'
+import { toolStepLabel } from '@/lib/agent/tool-labels'
 import ChatMessageList from '@/components/chat/ChatMessageList.vue'
 import ChatSkillMenu from '@/components/chat/ChatSkillMenu.vue'
 import ChatModelPill from '@/components/chat/ChatModelPill.vue'
@@ -477,15 +478,22 @@ const rootVars = computed<CSSProperties>(() => ({
 
 const expandLabel = computed(() => (isExpanded.value ? t('agent.collapse') : t('agent.expand')))
 
-// ---------- 消息视图映射（AgentMessage → ChatBubbleItem；步骤文案经 stepAction 转译） ----------
+// ---------- 消息视图映射（AgentMessage → ChatBubbleItem；步骤文案经 toolStepLabel 统一转译） ----------
 function attachmentSrc(img: AgentImageAttachment): string {
   return `data:${img.mimeType};base64,${img.data}`
+}
+
+/** panel_id → 节点显示名（注入共享标签层；找不到回落原始引用） */
+function nodeNameOf(ref: unknown): string {
+  if (typeof ref !== 'string') return ''
+  const panel = canvasStore.panels.find((p) => p.id === ref)
+  return panel?.name || ref
 }
 
 function stepToView(step: AgentToolStep): ChatStepView {
   return {
     callId: step.callId,
-    label: stepAction(step),
+    label: toolStepLabel(step.tool, step.args, { nodeNameOf }),
     tooltip: step.tool,
     status: step.status,
     result: step.result,
@@ -497,7 +505,7 @@ function stepToView(step: AgentToolStep): ChatStepView {
 function delegateProgressText(step: AgentToolStep): string | undefined {
   if (step.status !== 'running' || !step.delegateProgress) return undefined
   const { round, tool } = step.delegateProgress
-  return `${t('agent.delegateProgress', { n: round })}${tool ? ` · ${tool}` : ''}`
+  return `${t('agent.delegateProgress', { n: round })}${tool ? ` · ${toolStepLabel(tool)}` : ''}`
 }
 
 const items = computed<ChatBubbleItem[]>(() =>
@@ -670,7 +678,7 @@ const prettyArgs = computed(() => {
   return text.length > 600 ? `${text.slice(0, 600)}\n…` : text
 })
 
-// ---------- 工具步骤转译（中文动作为主行，英文工具名收进 tooltip） ----------
+// ---------- 风格卡片（storyboard_list_styles 结果 → 可点选风格卡） ----------
 /** 风格卡片数据：list_styles 步骤结果可解析时返回条目（守卫式，不做类型断言） */
 interface AgentStyleEntry { id: number; name: string; description: string; cover: string }
 function styleEntriesOf(step: ChatStepView): AgentStyleEntry[] {
@@ -714,53 +722,6 @@ async function customStyle() {
     if (value && value.trim()) void agent.send(t('agent.styleCustomMsg', { text: value.trim() }))
   } catch {
     // 用户取消
-  }
-}
-
-function stepAction(step: AgentToolStep): string {
-  const args = step.args
-  const nodeName = (ref: unknown): string => {
-    if (typeof ref !== 'string') return ''
-    const panel = canvasStore.panels.find((p) => p.id === ref)
-    return panel?.name || ref
-  }
-  switch (step.tool) {
-    case 'agent_get_state':
-      return t('agent.actGetState')
-    case 'agent_get_selection':
-      return t('agent.actGetSelection')
-    case 'agent_get_models':
-      return t('agent.actGetModels')
-    case 'agent_stage_review':
-      return typeof args.stage === 'string' && args.stage
-        ? `${t('agent.actStageReview')}：${args.stage}`
-        : t('agent.actStageReview')
-    case 'agent_select':
-      return `${t('agent.actSelect')}：${nodeName(args.panel_id)}`
-    case 'agent_read_image':
-      return `${t('agent.actReadImage')}：${nodeName(args.panel_id)}`
-    case 'agent_load_skill':
-      return `${t('agent.actLoadSkill')}：${typeof args.name === 'string' ? args.name : ''}`
-    case 'agent_create_text_node':
-      return `${t('agent.actCreateText')}${typeof args.name === 'string' && args.name ? `：${args.name}` : ''}`
-    case 'agent_apply_ops': {
-      const ops = Array.isArray(args.ops) ? args.ops : []
-      const count = (kind: string) => ops.filter((o) => o && typeof o === 'object' && !Array.isArray(o) && (o as Record<string, unknown>).op === kind).length
-      const parts: string[] = []
-      if (count('add_panel')) parts.push(`${t('agent.opsAddPanel')} ×${count('add_panel')}`)
-      if (count('add_connection')) parts.push(`${t('agent.opsConnect')} ×${count('add_connection')}`)
-      if (count('update_panel')) parts.push(`${t('agent.opsUpdatePanel')} ×${count('update_panel')}`)
-      if (count('delete_panel') || count('delete_connection')) parts.push(`${t('agent.opsDelete')} ×${count('delete_panel') + count('delete_connection')}`)
-      return parts.length ? `${t('agent.actApplyOps')}：${parts.join(t('agent.opsJoiner'))}` : t('agent.actApplyOps')
-    }
-    case 'agent_run_generation': {
-      const kind = typeof args.kind === 'string' ? args.kind : ''
-      const label = kind === 'video' ? t('agent.actGenVideo') : kind === 'compose' ? t('agent.actCompose') : t('agent.actGenImage')
-      const name = nodeName(args.panel_id)
-      return name ? `${label}：${name}` : label
-    }
-    default:
-      return step.tool
   }
 }
 

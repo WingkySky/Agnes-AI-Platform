@@ -24,6 +24,7 @@ import {
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { isMediaSuccess, isMediaFailed } from '@/lib/media-status'
 import { t } from '@/i18n'
+import { toolStepLabel } from '@/lib/agent/tool-labels'
 import { AgentKernel } from '@/lib/agent/kernel'
 import type { KernelEvent, AgentImageAttachment } from '@/lib/agent/kernel'
 import { createAgentModel } from '@/lib/agent/provider'
@@ -115,26 +116,15 @@ function imageDataUrl(img: { data: string; mimeType: string }): string {
   return `data:${img.mimeType};base64,${img.data}`
 }
 
-/** 工具步骤标签：复用画布 agent.act* 文案（两宿主同词） */
-function toolLabel(tool: string, args?: Record<string, unknown>): string {
-  if (tool === 'generate_image') return t('agent.actGenImage')
-  if (tool === 'generate_video') return t('agent.actGenVideo')
-  if (tool === 'agent_load_skill') {
-    const name = args && typeof args.name === 'string' ? args.name : ''
-    return name ? `${t('agent.actLoadSkill')}：${name}` : t('agent.actLoadSkill')
-  }
-  return tool
-}
-
 function toStepView(s: AgentStepRecord): ChatStepView {
-  return { callId: s.callId, label: toolLabel(s.tool, s.args), tooltip: s.tool, status: toStepStatus(s.status), progress: delegateProgressText(s) }
+  return { callId: s.callId, label: toolStepLabel(s.tool, s.args), tooltip: s.tool, status: toStepStatus(s.status), progress: delegateProgressText(s) }
 }
 
 /** agent_delegate 步骤的实时进度文本（running 态渲染，i18n 组装） */
 function delegateProgressText(s: AgentStepRecord): string | undefined {
   if (s.status !== 'running' || !s.delegateProgress) return undefined
   const { round, tool } = s.delegateProgress
-  return `${t('agent.delegateProgress', { n: round })}${tool ? ` · ${tool}` : ''}`
+  return `${t('agent.delegateProgress', { n: round })}${tool ? ` · ${toolStepLabel(tool)}` : ''}`
 }
 
 function toStepStatus(status: string): ChatStepView['status'] {

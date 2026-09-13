@@ -74,9 +74,11 @@ export const state = reactive({
  *  3) 其他 → zh-CN
  */
 function detectInitialLocale(): Locale {
-  if (typeof localStorage !== 'undefined') {
-    const saved = localStorage.getItem(STORAGE_KEY)
+  try {
+    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null
     if (saved && SUPPORTED_LOCALES.includes(saved as Locale)) return saved as Locale
+  } catch (_) {
+    // 非浏览器环境（测试/SSR）的残缺 localStorage 实现直接跳过
   }
   if (typeof navigator !== 'undefined' && navigator.language) {
     const lang = navigator.language.toLowerCase()

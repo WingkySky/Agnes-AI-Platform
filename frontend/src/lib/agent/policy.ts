@@ -3,7 +3,12 @@
  *
  * - 三档权限（readonly/confirm/auto）与阶段门判定
  * - 从内核循环拆出：可独立单测；未来 MCP 桥复用同一套策略
+ * - onReject/stageApprovedMessage 是回填 LLM 的提示（模型侧统一中文）；
+ *   summary/stageName 是用户可见文案，走 i18n
  * ===================================================== */
+
+import { t } from '@/i18n'
+import { mcpShortName } from './tool-labels'
 
 export type AgentMode = 'readonly' | 'confirm' | 'auto'
 
@@ -33,7 +38,7 @@ export function inferGenerationKind(argKind: string, panelType: string | undefin
 }
 
 export function stageNameOfKind(kind: GenerationKind): string {
-  return kind === 'asset' ? '实体设定' : kind === 'image' ? '分镜图' : kind === 'video' ? '分段视频' : '成片合成'
+  return kind === 'asset' ? t('agent.stageAsset') : kind === 'image' ? t('agent.stageImage') : kind === 'video' ? t('agent.stageVideo') : t('agent.stageCompose')
 }
 
 export type PolicyDecision =
@@ -84,7 +89,7 @@ export function resolveToolCall(input: PolicyInput): PolicyDecision {
         action: 'gate',
         kind: 'stage',
         stage: stageName,
-        summary: `Agent 即将开始「${stageName}」阶段的生成，请确认`,
+        summary: t('agent.confirmStageGen', { stage: stageName }),
         onReject: `用户不同意进入「${stageName}」生成阶段，流程已停止，等用户调整后再试`,
       }
     }
@@ -96,7 +101,7 @@ export function resolveToolCall(input: PolicyInput): PolicyDecision {
       action: 'gate',
       kind: 'tool',
       stage: toolName,
-      summary: `Agent 即将调用外部 MCP 工具「${toolName}」，请确认`,
+      summary: t('agent.confirmMcpTool', { tool: mcpShortName(toolName) }),
       onReject: `用户未允许调用 MCP 工具 ${toolName}，流程已停止，等用户调整后再试`,
     }
   }

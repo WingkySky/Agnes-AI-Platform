@@ -12,16 +12,19 @@
 import logging
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_db
 from app.core.response import ok
 from app.core.security import get_current_admin_user, get_current_user
+from app.models.mcp_market import McpMarketItem, McpMarketSource
 from app.models.mcp_server import McpServer
 from app.models.user import User
-from app.services import mcp_service
+from app.services import mcp_market_service, mcp_service
 
 logger = logging.getLogger("agnes_platform")
 router = APIRouter(prefix="/mcp", tags=["MCP 服务器"])
@@ -95,6 +98,23 @@ class McpToolCall(BaseModel):
         if not v:
             raise ValueError("工具名不能为空")
         return v
+
+
+class McpMarketSourceCreate(BaseModel):
+    """添加市场源"""
+    name: str = ""
+    url: str
+
+
+class McpMarketInstall(BaseModel):
+    """从市场项安装：预填可覆盖，env/headers 为密钥值（按声明的 key 合成）"""
+    slug: str
+    name: str | None = None
+    command: str | None = None
+    args: list[str] | None = None
+    url: str | None = None
+    env: dict[str, str] | None = None
+    headers: dict[str, str] | None = None
 
 
 # ---------- 服务器管理（管理员） ----------
@@ -201,3 +221,86 @@ async def call_tool(
     if result.get("is_error"):
         raise HTTPException(status_code=502, detail=f"MCP 工具返回错误：{result.get('text', '')}")
     return ok(result)
+
+
+# ---------- 市场（管理员）：发现与一键安装 ----------
+
+@router.get("/market/sources", summary="[管理员] 市场源列表")
+async def market_sources(
+    db: AsyncSession = Depends(get_async_db),
+    _admin: User = Depends(get_current_admin_user),
+):
+    return ok([s.to_dict() for s in await mcp_market_service.list_sources(db)])
+
+
+@router.post("/market/sources", summary="[管理员] 添加市场源（URL 指向 manifest JSON）")
+async def create_market_source(
+    body: McpMarketSourceCreate,
+    db: AsyncSession = Depends(get_async_db),
+    _admin: User = Depends(get_current_admin_user),
+):
+    try:
+        source = await mcp_market_service.create_source(db, body.name, body.url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return ok(source.to_dict(), "市场源已添加")
+
+
+@router.delete("/market/sources/{source_id}", summary="[管理员] 删除市场源（其市场项一并移除）")
+async def delete_market_source(
+    source_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    _admin: User = Depends(get_current_admin_user),
+):
+    source = await db.get(McpMarketSource, source_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="市场源不存在")
+    await mcp_market_service.delete_source(db, source)
+    return ok(None, "市场源已删除")
+
+
+@router.post("/market/sources/{source_id}/refresh", summary="[管理员] 刷新市场源（整源替换市场项）")
+async def refresh_market_source(
+    source_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    _admin: User = Depends(get_current_admin_user),
+):
+    source = await db.get(McpMarketSource, source_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="市场源不存在")
+    try:
+        count = await mcp_market_service.refresh_source(db, source)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"拉取市场源失败：{e}")
+    return ok({"count": count, "last_fetched_at": source.last_fetched_at.isoformat() if source.last_fetched_at else None}, f"已拉取 {count} 个市场项")
+
+
+@router.get("/market/items", summary="[管理员] 市场项列表（官方 + 远程合并，带已安装标记）")
+async def market_items(
+    q: str = "",
+    db: AsyncSession = Depends(get_async_db),
+    _admin: User = Depends(get_current_admin_user),
+):
+    # 官方目录懒初始化（幂等）：首次访问入库
+    if not (await db.execute(select(McpMarketItem.id).where(McpMarketItem.source_type == "official").limit(1))).scalar():
+        await mcp_market_service.seed_official_items(db)
+    return ok(await mcp_market_service.list_market_items(db, q))
+
+
+@router.post("/market/install", summary="[管理员] 从市场项安装 MCP 服务器")
+async def market_install(
+    body: McpMarketInstall,
+    db: AsyncSession = Depends(get_async_db),
+    _admin: User = Depends(get_current_admin_user),
+):
+    item = await mcp_market_service.get_market_item(db, body.slug)
+    if not item:
+        raise HTTPException(status_code=404, detail="市场项不存在（源可能已刷新，请重新拉取）")
+    overrides = {k: v for k, v in {"name": body.name, "command": body.command, "args": body.args, "url": body.url}.items() if v is not None}
+    try:
+        server = await mcp_market_service.install_item(db, item, overrides, {"env": body.env, "headers": body.headers})
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return ok(server.to_safe_dict(), f"「{server.name}」已从市场安装")
