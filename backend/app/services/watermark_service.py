@@ -52,15 +52,13 @@ def should_apply_watermark(config: WatermarkConfig, user: Optional[User]) -> boo
 def apply_image_watermark(
     image_bytes: bytes,
     config: WatermarkConfig,
-    output_path: Optional[str] = None,
 ) -> bytes:
     """
     给图片加文字水印，返回加水印后的图片字节。
-    
+
     参数：
     - image_bytes: 原始图片字节数据
     - config: 水印配置
-    - output_path: 可选，保存到文件路径
     """
     try:
         from PIL import Image, ImageDraw, ImageFont
@@ -179,13 +177,7 @@ def apply_image_watermark(
         output = io.BytesIO()
         watermarked.save(output, format="PNG")
         result_bytes = output.getvalue()
-        
-        # 如果指定了输出路径
-        if output_path:
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            with open(output_path, "wb") as f:
-                f.write(result_bytes)
-        
+
         return result_bytes
         
     except Exception as e:

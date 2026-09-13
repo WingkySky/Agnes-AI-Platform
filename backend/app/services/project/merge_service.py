@@ -24,6 +24,7 @@ import shutil
 import tempfile
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional, List
 from uuid import uuid4
 
@@ -31,6 +32,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.pathsafe import ensure_within
 from app.models.project import (
     Project,
     ProjectShot,
@@ -540,10 +542,9 @@ async def execute_merge_advanced(
             can_hardburn = await _check_subtitles_filter_available()
             if can_hardburn:
                 # 模式 1: ASS 硬烧（libass 可用时优先，样式最丰富）
-                subtitle_path = os.path.join(tmp_dir, "subtitles.ass")
+                subtitle_path = ensure_within(tmp_dir, "subtitles.ass")
                 ass_content = build_ass(clips_data, subtitle_style)
-                with open(subtitle_path, "w", encoding="utf-8") as f:
-                    f.write(ass_content)
+                Path(subtitle_path).write_text(ass_content, encoding="utf-8")
                 subtitle_mode = "hard"
                 logger.info("[合成] project_id=%s 字幕模式: 硬烧(ASS) %d 条", project_id, len(clips_data))
             else:
@@ -564,10 +565,9 @@ async def execute_merge_advanced(
                     )
                 else:
                     # 模式 3: SRT 软字幕兜底（mov_text 嵌入容器，播放器可选显示）
-                    subtitle_path = os.path.join(tmp_dir, "subtitles.srt")
+                    subtitle_path = ensure_within(tmp_dir, "subtitles.srt")
                     srt_content = build_srt(clips_data)
-                    with open(subtitle_path, "w", encoding="utf-8") as f:
-                        f.write(srt_content)
+                    Path(subtitle_path).write_text(srt_content, encoding="utf-8")
                     subtitle_mode = "soft"
                     logger.info("[合成] project_id=%s 字幕模式: 软字幕(SRT) %d 条", project_id, len(clips_data))
 

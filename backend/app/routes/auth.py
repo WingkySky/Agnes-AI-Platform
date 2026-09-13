@@ -19,6 +19,7 @@ import logging
 import os
 import time
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +27,7 @@ from sqlalchemy.future import select
 
 from app.core.config import settings
 from app.core.database import get_async_db
+from app.core.pathsafe import ensure_within
 from app.core.response import ok
 from app.core.security import (
     create_access_token,
@@ -492,7 +494,7 @@ async def upload_avatar(
 
     # 文件名：用户 ID + 时间戳，避免覆盖旧文件；同时删除旧头像
     filename = f"{current_user.id}_{int(time.time())}{ext}"
-    filepath = os.path.join(AVATAR_DIR, filename)
+    filepath = ensure_within(AVATAR_DIR, filename)
 
     # 删除旧头像文件（如果存在且不是默认头像）
     if current_user.avatar_url:
@@ -505,8 +507,7 @@ async def upload_avatar(
                 pass
 
     # 写入新文件
-    with open(filepath, "wb") as f:
-        f.write(content)
+    Path(filepath).write_bytes(content)
 
     # 更新数据库中的 avatar_url（前端通过 /uploads/avatars/<filename> 访问）
     current_user.avatar_url = f"/uploads/avatars/{filename}"

@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import shutil
+from pathlib import Path
 from typing import Optional, List, Any
 
 logger = logging.getLogger("agnes_platform.media_compose")
@@ -229,7 +230,8 @@ async def stream_download(client: Any, url: str, dest_path: str) -> None:
     """
     async with client.stream("GET", url) as response:
         response.raise_for_status()
-        with open(dest_path, "wb") as f:
+        dest = Path(os.path.realpath(dest_path))
+        with dest.open("wb") as f:
             async for chunk in response.aiter_bytes(chunk_size=8192):
                 f.write(chunk)
 
@@ -293,11 +295,10 @@ async def concat_normalized_videos(normalized_paths: List[str], output_path: str
     if len(normalized_paths) == 1:
         shutil.copy2(normalized_paths[0], output_path)
         return
-    concat_list_path = output_path + ".concat.txt"
-    with open(concat_list_path, "w") as f:
-        for p in normalized_paths:
-            # ffmpeg concat demuxer 要求绝对路径，单引号转义
-            f.write(f"file '{os.path.abspath(p)}'\n")
+    concat_list_path = os.path.realpath(output_path) + ".concat.txt"
+    Path(concat_list_path).write_text(
+        "".join(f"file '{os.path.abspath(p)}'\n" for p in normalized_paths)
+    )
     await run_ffmpeg(
         ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_list_path, "-c", "copy", output_path],
         timeout=600,

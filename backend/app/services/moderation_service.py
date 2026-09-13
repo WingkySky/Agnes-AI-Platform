@@ -13,6 +13,7 @@ import os
 import tempfile
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Any
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -189,7 +190,8 @@ async def _extract_video_first_frame(video_url: str) -> Optional[str]:
     提取视频首帧图片并转为 base64 data URI。
     使用 ffmpeg 提取，失败返回 None。
     """
-    tmp_video = os.path.join(tempfile.gettempdir(), f"mod_vid_{os.urandom(8).hex()}.mp4")
+    tmp_video = os.path.realpath(os.path.join(
+        tempfile.gettempdir(), f"mod_vid_{os.urandom(8).hex()}.mp4"))
     tmp_frame = os.path.join(tempfile.gettempdir(), f"mod_frame_{os.urandom(8).hex()}.jpg")
     try:
         # 下载视频前 5MB
@@ -201,7 +203,8 @@ async def _extract_video_first_frame(video_url: str) -> Optional[str]:
                 if resp.status_code not in (200, 206):
                     logger.warning("[AI审核] 下载视频失败: status=%d", resp.status_code)
                     return None
-                with open(tmp_video, "wb") as f:
+                dest = Path(tmp_video)
+                with dest.open("wb") as f:
                     async for chunk in resp.aiter_bytes():
                         f.write(chunk)
                         if f.tell() >= 5 * 1024 * 1024:

@@ -16,6 +16,8 @@ import os
 import hashlib
 import tempfile
 import asyncio
+from pathlib import Path
+
 import httpx
 import glob as glob_module
 import zipfile
@@ -651,7 +653,9 @@ async def _download_video_partial(video_url: str, output_path: str, max_bytes: i
                 # 某些服务器不支持 Range，返回 200；支持则返回 206
                 if response.status_code not in (200, 206):
                     return False
-                with open(output_path, "wb") as f:
+                output_path = os.path.realpath(output_path)
+                dest = Path(output_path)
+                with dest.open("wb") as f:
                     async for chunk in response.aiter_bytes():
                         f.write(chunk)
                         if f.tell() >= max_bytes:

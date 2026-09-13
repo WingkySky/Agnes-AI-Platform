@@ -14,6 +14,7 @@ import asyncio
 import logging
 import os
 import sys
+from pathlib import Path
 
 # 允许直接以脚本形式运行
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -24,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import async_session
+from app.core.pathsafe import ensure_within
 from app.models.style_element import StyleElement
 from app.services.agnes_client import agnes_client
 
@@ -102,9 +104,8 @@ async def generate_preview_for_element(element: StyleElement, db: AsyncSession) 
 
             # 保存
             os.makedirs(PREVIEW_DIR, exist_ok=True)
-            out_path = os.path.join(PREVIEW_DIR, f"{element.key}.png")
-            with open(out_path, "wb") as f:
-                f.write(resp.content)
+            out_path = ensure_within(PREVIEW_DIR, f"{element.key}.png")
+            Path(out_path).write_bytes(resp.content)
 
         # 更新 DB 中的 preview_image 字段
         element.preview_image = f"/api/style-elements/preview/{element.key}"

@@ -5,8 +5,10 @@
 
 import os
 import time
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from app.core.pathsafe import ensure_within
 from app.core.response import ok
 
 from app.core.security import get_current_user
@@ -41,8 +43,7 @@ async def upload_image(
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     ext_map = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
     filename = f"{current_user.id}_{int(time.time())}{ext_map.get(file.content_type, '.jpg')}"
-    filepath = os.path.join(UPLOAD_DIR, filename)
-    with open(filepath, "wb") as f:
-        f.write(content)
+    filepath = ensure_within(UPLOAD_DIR, filename)
+    Path(filepath).write_bytes(content)
 
     return ok(data={"url": f"/uploads/preset-covers/{filename}"})

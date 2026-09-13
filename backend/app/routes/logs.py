@@ -24,6 +24,7 @@ import time
 from collections import deque
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -263,10 +264,14 @@ def _read_text_logs(
 
 
 def _resolve_log_path(file: str) -> str:
-    """白名单校验，防目录穿越；返回日志文件绝对路径"""
+    """白名单校验 + realpath 规范化（父目录必须等于日志目录），杜绝目录穿越；返回绝对路径"""
     if file not in ALLOWED_FILES:
         raise HTTPException(status_code=400, detail=f"不支持的日志文件：{file}")
-    return os.path.join(settings.log_dir, file)
+    base = os.path.realpath(settings.log_dir)
+    path = os.path.realpath(os.path.join(base, file))
+    if os.path.dirname(path) != base:
+        raise HTTPException(status_code=400, detail=f"不支持的日志文件：{file}")
+    return path
 
 
 # =====================================================
@@ -433,8 +438,7 @@ async def clear_log(
                 os.remove(backup_path)
                 removed.append(file + suffix)
         if os.path.exists(log_path):
-            with open(log_path, "w"):
-                pass
+            Path(log_path).write_text("", encoding="utf-8")
     else:
         # 备份文件：单独删除
         if os.path.exists(log_path):

@@ -8,10 +8,12 @@
 import asyncio
 import os
 import time
+from pathlib import Path
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.pathsafe import ensure_within
 from app.models.prompt_preset import PromptPreset
 from app.services.agnes_client import agnes_client
 
@@ -91,8 +93,7 @@ async def generate_cover_image(preset: PromptPreset) -> str:
 
     os.makedirs(COVER_DIR, exist_ok=True)
     filename = f"cover_{preset.id}_{int(time.time())}.png"
-    with open(os.path.join(COVER_DIR, filename), "wb") as f:
-        f.write(content)
+    Path(ensure_within(COVER_DIR, filename)).write_bytes(content)
     return f"/uploads/preset-covers/{filename}"
 
 
@@ -170,8 +171,7 @@ async def generate_cover_video(preset: PromptPreset) -> str:
 
     os.makedirs(COVER_VIDEO_DIR, exist_ok=True)
     filename = f"cover_{preset.id}_{int(time.time())}.mp4"
-    with open(os.path.join(COVER_VIDEO_DIR, filename), "wb") as f:
-        f.write(content)
+    Path(ensure_within(COVER_VIDEO_DIR, filename)).write_bytes(content)
     return f"/uploads/preset-videos/{filename}"
 
 

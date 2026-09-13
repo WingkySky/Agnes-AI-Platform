@@ -8,13 +8,20 @@
 
 import logging
 import os
+import re
 import secrets
 import time
+from pathlib import Path
 from typing import Optional
 
 from fastapi import UploadFile, HTTPException
 
+from app.core.pathsafe import ensure_within
+
 logger = logging.getLogger("agnes_platform.upload")
+
+# 合法扩展名：点 + 1~8 位小写字母/数字（阻断 filename 里的 / 与 .. 穿越成分）
+_EXT_PATTERN = re.compile(r"\.[a-z0-9]{1,8}")
 
 # uploads 根目录（与 main.py 的 UPLOADS_DIR 一致）
 UPLOADS_DIR = os.path.join(
@@ -59,7 +66,8 @@ async def save_upload_file(
         可访问的 URL（如 /uploads/projects/123/...）
     """
     allowed = allowed_types or ALLOWED_ALL
-    if file.content_type and file.content_type not in allowed:
+    # content_type 缺失同样拒绝（缺失时无法做白名单校验）
+    if file.content_type not in allowed:
         raise HTTPException(
             status_code=400,
             detail=f"不支持的文件格式：{file.content_type}",
@@ -72,8 +80,11 @@ async def save_upload_file(
             detail=f"文件过大，最大 {max_size // 1024 // 1024}MB",
         )
 
-    # 确保目录存在
-    target_dir = os.path.join(UPLOADS_DIR, folder)
+    # 确保目录存在（folder 含穿越成分时拒绝）
+    try:
+        target_dir = ensure_within(UPLOADS_DIR, folder)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="非法的保存目录")
     os.makedirs(target_dir, exist_ok=True)
 
     # 扩展名
@@ -89,13 +100,14 @@ async def save_upload_file(
     ext = ext_map.get(file.content_type, "")
     if not ext and file.filename and "." in file.filename:
         ext = "." + file.filename.rsplit(".", 1)[-1].lower()
+    if not _EXT_PATTERN.fullmatch(ext):
+        ext = ""
 
     # 文件名：时间戳 + 随机数避免冲突
     filename = f"{int(time.time())}_{secrets.token_hex(4)}{ext}"
-    filepath = os.path.join(target_dir, filename)
+    filepath = ensure_within(target_dir, filename)
 
-    with open(filepath, "wb") as f:
-        f.write(content)
+    Path(filepath).write_bytes(content)
 
     url = f"/uploads/{folder}/{filename}"
     logger.info(f"[文件上传] 保存到 {filepath}, url={url}")
@@ -117,14 +129,18 @@ async def save_audio_bytes(
         raise HTTPException(status_code=400, detail="音频内容为空")
     if len(content) > MAX_FILE_BYTES:
         raise HTTPException(status_code=400, detail=f"音频文件过大，最大 {MAX_FILE_BYTES // 1024 // 1024}MB")
+    if not _EXT_PATTERN.fullmatch(ext):
+        raise HTTPException(status_code=400, detail="非法的音频扩展名")
 
-    target_dir = os.path.join(UPLOADS_DIR, folder)
+    try:
+        target_dir = ensure_within(UPLOADS_DIR, folder)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="非法的保存目录")
     os.makedirs(target_dir, exist_ok=True)
 
     filename = f"{int(time.time())}_{secrets.token_hex(4)}{ext}"
-    filepath = os.path.join(target_dir, filename)
-    with open(filepath, "wb") as f:
-        f.write(content)
+    filepath = ensure_within(target_dir, filename)
+    Path(filepath).write_bytes(content)
 
     url = f"/uploads/{folder}/{filename}"
     logger.info(f"[音频落盘] 保存到 {filepath}, url={url}")

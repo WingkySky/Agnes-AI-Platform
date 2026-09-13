@@ -21,7 +21,10 @@ import logging
 import os
 import secrets
 import time
+from pathlib import Path
 from typing import List, Optional, Dict
+
+from app.core.pathsafe import ensure_within
 
 logger = logging.getLogger("agnes_platform.project.bgm")
 
@@ -161,8 +164,9 @@ def _load_custom_bgms() -> List[Dict]:
 
 def _save_custom_bgms(items: List[Dict]) -> None:
     os.makedirs(_BGM_DIR, exist_ok=True)
-    with open(_CUSTOM_REGISTRY_FILE, "w", encoding="utf-8") as f:
-        json.dump(items, f, ensure_ascii=False, indent=2)
+    Path(_CUSTOM_REGISTRY_FILE).write_text(
+        json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 
 async def _probe_duration_seconds(file_path: str) -> int:
@@ -188,9 +192,8 @@ async def save_uploaded_bgm(name: str, mood: str, content: bytes) -> Dict:
     """
     os.makedirs(_BGM_DIR, exist_ok=True)
     filename = f"bgm_custom_{int(time.time())}_{secrets.token_hex(4)}.mp3"
-    file_path = os.path.join(_BGM_DIR, filename)
-    with open(file_path, "wb") as f:
-        f.write(content)
+    file_path = ensure_within(_BGM_DIR, filename)
+    Path(file_path).write_bytes(content)
 
     duration = await _probe_duration_seconds(file_path)
     item = {

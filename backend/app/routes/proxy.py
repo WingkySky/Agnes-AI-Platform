@@ -8,11 +8,13 @@
 # =====================================================
 
 import logging
-from urllib.parse import urlparse
+from urllib.parse import urljoin
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
+
+from app.core.urlsafe import is_safe_url
 
 logger = logging.getLogger("agnes_platform")
 router = APIRouter(prefix="/proxy", tags=["图片代理"])
@@ -45,23 +47,24 @@ async def _get_proxy_client() -> httpx.AsyncClient:
 
 def _is_safe_url(url: str) -> bool:
     """校验 URL 是否安全：必须是 http/https，且不是内网地址（简单防 SSRF）"""
-    try:
-        parsed = urlparse(url)
-    except Exception:
-        return False
-    if parsed.scheme not in ("http", "https"):
-        return False
-    if not parsed.hostname:
-        return False
-    # 禁止 localhost / 127.x / 10.x / 192.168.x / 169.254.x / ::1
-    host = parsed.hostname.lower()
-    if host in ("localhost",):
-        return False
-    if host.startswith(("127.", "10.", "192.168.", "169.254.")):
-        return False
-    if host in ("::1",):
-        return False
-    return True
+    return is_safe_url(url)
+
+
+async def _get_with_safe_redirects(
+    client: httpx.AsyncClient, url: str, max_hops: int = 5, **kwargs
+) -> httpx.Response:
+    """GET 并手动逐跳跟随重定向：每一跳都重新过 SSRF 校验（防 302 跳内网）"""
+    current = url
+    for _ in range(max_hops):
+        resp = await client.get(current, follow_redirects=False, **kwargs)
+        if resp.is_redirect:
+            location = urljoin(current, resp.headers.get("location", ""))
+            if not _is_safe_url(location):
+                raise HTTPException(status_code=400, detail="重定向目标不合法")
+            current = location
+            continue
+        return resp
+    raise HTTPException(status_code=502, detail="重定向次数过多")
 
 
 @router.get("/image", summary="代理远程图片（绕过 CORS）")
@@ -89,7 +92,8 @@ async def proxy_image(
         # 完整下载图片到内存后再返回（不用 StreamingResponse）
         # 原因：StreamingResponse 的 gen() 在 async with 上下文关闭后
         #   无法再从 upstream 读取数据，导致返回空响应体
-        resp = await client.get(
+        resp = await _get_with_safe_redirects(
+            client,
             url,
             timeout=30.0,
             headers={"User-Agent": UPSTREAM_USER_AGENT},

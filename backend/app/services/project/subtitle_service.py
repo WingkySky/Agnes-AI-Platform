@@ -29,11 +29,14 @@ import logging
 import os
 import shutil
 import tempfile
+from pathlib import Path
 from typing import List, Optional
 
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.pathsafe import ensure_within
 
 from app.models.project import ProjectShot, ProjectShotAudio, ProjectTimelineClip
 from app.services.project.sse_manager import project_sse_manager
@@ -311,12 +314,11 @@ async def _generate_subtitles_with_whisper(
         async with httpx.AsyncClient(timeout=300) as client:
             for idx, (shot, audio_url, audio_duration_ms) in enumerate(whisper_shots):
                 # 下载音频
-                local_path = os.path.join(tmp_dir, f"audio_{idx:04d}.mp3")
+                local_path = ensure_within(tmp_dir, f"audio_{idx:04d}.mp3")
                 try:
                     resp = await client.get(audio_url)
                     resp.raise_for_status()
-                    with open(local_path, "wb") as f:
-                        f.write(resp.content)
+                    Path(local_path).write_bytes(resp.content)
                 except Exception as e:
                     logger.warning(f"分镜 {shot.id} 音频下载失败，跳过: {e}")
                     # 推进时间轴（用 duration_ms 估算）

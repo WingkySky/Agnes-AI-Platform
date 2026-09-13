@@ -19,6 +19,12 @@ from uuid import uuid4
 
 import httpx
 
+from pathlib import Path
+
+from fastapi import HTTPException
+
+from app.core.pathsafe import ensure_within
+from app.core.urlsafe import is_safe_url
 from app.services.media_compose import (
     run_ffmpeg,
     parse_resolution,
@@ -119,9 +125,12 @@ async def generate_subtitles(text: str, max_chars: int = 20) -> dict:
 # =====================================================
 
 def _resolve_local_media(url: str) -> Optional[str]:
-    """本地 /uploads/... URL 直接映射磁盘文件（上传素材无需绕 HTTP 下载）"""
+    """本地 /uploads/... URL 直接映射磁盘文件（上传素材无需绕 HTTP 下载）；越界 URL 一律视为非本地"""
     if url.startswith("/uploads/"):
-        path = os.path.join(UPLOADS_DIR, url.removeprefix("/uploads/"))
+        try:
+            path = ensure_within(UPLOADS_DIR, url.removeprefix("/uploads/"))
+        except ValueError:
+            return None
         return path if os.path.isfile(path) else None
     return None
 
@@ -142,6 +151,12 @@ async def compose_videos(
     """
     if not video_urls:
         raise ValueError("没有可合成的视频")
+
+    # SSRF 防护：非本地 /uploads/ 的远程地址必须是公网 http(s)（拒绝内网/环回/非常规协议）
+    remote_urls = [u for u in video_urls if u] + ([audio_url] if audio_url else [])
+    for u in remote_urls:
+        if not u.startswith("/uploads/") and not is_safe_url(u):
+            raise HTTPException(status_code=400, detail=f"不允许的素材地址：{u[:80]}")
 
     tmp_dir = tempfile.mkdtemp(prefix="canvas_compose_")
     try:
@@ -194,18 +209,18 @@ async def compose_videos(
         clips = subtitles if (with_subtitle and subtitles) else None
         if clips:
             if await check_subtitles_filter_available():
-                subtitle_path = os.path.join(tmp_dir, "subtitles.ass")
-                with open(subtitle_path, "w", encoding="utf-8") as f:
-                    f.write(build_ass(clips, DEFAULT_SUBTITLE_STYLE))
+                subtitle_path = ensure_within(tmp_dir, "subtitles.ass")
+                Path(subtitle_path).write_text(
+                    build_ass(clips, DEFAULT_SUBTITLE_STYLE), encoding="utf-8"
+                )
                 subtitle_mode = "hard"
             elif await check_drawtext_filter_available():
                 vid_w, vid_h = await probe_video_resolution(composite_video_path)
                 drawtext_filter = build_drawtext_subtitles_filter(clips, DEFAULT_SUBTITLE_STYLE, vid_w, vid_h)
                 subtitle_mode = "drawtext"
             else:
-                subtitle_path = os.path.join(tmp_dir, "subtitles.srt")
-                with open(subtitle_path, "w", encoding="utf-8") as f:
-                    f.write(build_srt(clips))
+                subtitle_path = ensure_within(tmp_dir, "subtitles.srt")
+                Path(subtitle_path).write_text(build_srt(clips), encoding="utf-8")
                 subtitle_mode = "soft"
 
         # 6. 最终合成 → uploads/canvas/
