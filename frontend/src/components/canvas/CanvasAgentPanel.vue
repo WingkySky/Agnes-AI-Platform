@@ -189,6 +189,29 @@
 
           <!-- 对话模型胶囊（共享组件；选择真实生效：内核 model id → BFF 命中 chat 注册表） -->
           <template #trail>
+            <div v-if="agent.memoryAvailable" class="cap-anchor">
+              <button
+                type="button"
+                class="cap-pill"
+                :style="{ color: theme.toolbar.item, borderColor: theme.toolbar.border }"
+                :title="t('agent.memoryPill')"
+                @click="memOpen = !memOpen"
+              >
+                <Brain :size="12" />
+                <span>{{ t('agent.memoryPill') }}</span>
+                <span class="cap-count">{{ agent.memoryPreferences.length }}</span>
+              </button>
+              <div v-if="memOpen" class="cap-dropdown" :style="{ borderColor: theme.toolbar.border, background: theme.toolbar.panel }" @click.stop>
+                <template v-if="agent.memoryPreferences.length">
+                  <div v-for="p in agent.memoryPreferences" :key="p" class="cap-item mem-row">
+                    <span class="cap-item-name" :style="{ color: theme.node.text }">{{ p }}</span>
+                    <button type="button" class="mem-del" :style="{ color: theme.node.muted }" :title="t('common.delete')" @click="removePreference(p)">×</button>
+                  </div>
+                  <button type="button" class="mem-clear" :style="{ color: theme.node.muted }" @click="clearAllPreferences">{{ t('agent.memoryClear') }}</button>
+                </template>
+                <div v-else class="cap-item-tools" :style="{ color: theme.node.muted }">{{ t('agent.memoryEmpty') }}</div>
+              </div>
+            </div>
             <div v-if="agent.mcpCapabilities.length" class="cap-anchor">
               <button
                 type="button"
@@ -253,7 +276,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   Bot, Trash2, X, Loader2, Maximize2, Minimize2, ChevronDown, Check,
-  Eye, Hand, Zap,
+  Eye, Hand, Zap, Brain,
 } from 'lucide-vue-next'
 import type { CSSProperties } from 'vue'
 import { useI18n } from '@/i18n'
@@ -631,8 +654,26 @@ function removeAttach(idx: number): void {
 // ---------- "/" 技能快速清单（共享组合式；菜单渲染用共享 ChatSkillMenu） ----------
 const { skillMenuVisible, filteredSkills, skillHighlight, pickSkill, handleMenuKeydown } = useSlashSkills(draft, () => !agent.busy)
 
-// 外部能力（MCP）清单下拉
+// 外部能力（MCP）清单下拉 + 用户偏好记忆管理
 const capOpen = ref(false)
+const memOpen = ref(false)
+
+async function removePreference(p: string) {
+  try {
+    await agent.removeMemoryPreference(p)
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : String(e))
+  }
+}
+
+async function clearAllPreferences() {
+  await confirm(t('agent.memoryClearConfirm'), t('common.confirm'))
+  try {
+    await agent.clearMemory()
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : String(e))
+  }
+}
 
 function onDraftKeydown(e: KeyboardEvent): void {
   handleMenuKeydown(e)
@@ -1340,5 +1381,33 @@ watch(
   font-size: 11px;
   margin-top: 2px;
   word-break: break-all;
+}
+
+.mem-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mem-del {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.mem-clear {
+  width: 100%;
+  margin-top: 4px;
+  padding: 4px 0;
+  border: none;
+  border-top: 1px solid rgba(127, 127, 127, 0.2);
+  background: transparent;
+  font-size: 11px;
+  cursor: pointer;
 }
 </style>

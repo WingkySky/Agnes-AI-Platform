@@ -16,6 +16,8 @@ import type { KernelEvent, KernelTimelineMessage, AgentImageAttachment } from '@
 import { setDelegateProgressSink } from '@/lib/agent/subagent'
 import { fetchMcpBundle } from '@/lib/agent/mcp'
 import type { McpCapability } from '@/lib/agent/mcp'
+import { fetchMemoryState } from '@/lib/agent/memory'
+import { deleteMemoryPreference, clearMemoryPreferences } from '@/api/mcp'
 import { MAX_IMAGES_PER_MESSAGE } from '@/lib/agent/attachments'
 import { AGENT_SYSTEM_PROMPT_BASE, buildAgentSystemPrompt } from '@/lib/agent/system-prompt'
 import { listAgentSkills } from '@/lib/agent/skills'
@@ -111,6 +113,9 @@ export const useAgentStore = defineStore('agent', {
     loadedKey: string
     /** 已接入的 MCP 能力清单（会话建立时刷新；面板能力入口展示） */
     mcpCapabilities: McpCapability[]
+    /** 用户偏好记忆（会话建立时刷新；面板记忆入口展示与删除） */
+    memoryAvailable: boolean
+    memoryPreferences: string[]
   } => ({
     open: false,
     mode: 'confirm',
@@ -124,6 +129,8 @@ export const useAgentStore = defineStore('agent', {
     pendingConfirm: null,
     loadedKey: '',
     mcpCapabilities: [],
+    memoryAvailable: false,
+    memoryPreferences: [],
   }),
 
   actions: {
@@ -254,6 +261,18 @@ export const useAgentStore = defineStore('agent', {
       this._ensureKernel().requestStop()
     },
 
+    /** 删除单条偏好记忆（管理胶囊） */
+    async removeMemoryPreference(observation: string) {
+      await deleteMemoryPreference(observation)
+      this.memoryPreferences = this.memoryPreferences.filter((p) => p !== observation)
+    },
+
+    /** 清空偏好记忆（保留图谱其他记忆） */
+    async clearMemory() {
+      await clearMemoryPreferences()
+      this.memoryPreferences = []
+    },
+
     /** 确认卡片放行/拒绝（阶段门与阶段汇报共用） */
     confirmPending(approved: boolean): void {
       this._ensureKernel().confirm(approved)
@@ -280,13 +299,17 @@ export const useAgentStore = defineStore('agent', {
       const skills = await listAgentSkills()
       const basePrompt = buildAgentSystemPrompt(skills)
       k.setSystemPrompt(basePrompt)
-      // MCP 工具与能力摘要：会话建立时后台刷新（失败降级；流式中内核侧跳过，下次刷新生效）
+      // MCP 工具/能力摘要 + 用户偏好记忆：会话建立时后台刷新（失败降级；流式中内核侧跳过，下次刷新生效）
       if (!this.busy) {
-        void fetchMcpBundle().then(({ tools, summary, capabilities }) => {
+        void (async () => {
+          const [{ tools, summary, capabilities }, memory] = await Promise.all([fetchMcpBundle(), fetchMemoryState()])
           k.setExtraTools(tools)
-          if (summary) k.setSystemPrompt(`${basePrompt}\n\n${summary}`)
           this.mcpCapabilities = capabilities
-        })
+          this.memoryAvailable = memory.available
+          this.memoryPreferences = memory.preferences
+          const prompt = [basePrompt, memory.section, summary].filter(Boolean).join('\n\n')
+          if (prompt !== basePrompt) k.setSystemPrompt(prompt)
+        })()
       }
       const meta = await listSessionsMeta(scope, workspaceId)
       this.sessions = meta.sessions

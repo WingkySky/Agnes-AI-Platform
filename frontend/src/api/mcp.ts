@@ -151,3 +151,23 @@ export interface McpMarketInstallBody {
 export function installMarketItem(body: McpMarketInstallBody): Promise<McpServerSafe> {
   return client.post('/api/mcp/market/install', body)
 }
+
+// ---------- 用户记忆库（官方 memory 服务器 per_user 隔离） ----------
+
+/** 偏好记忆摘要（未安装记忆服务器时 available=false） */
+export interface McpMemorySummary {
+  available: boolean
+  preferences: string[]
+}
+
+export function fetchMemorySummary(): Promise<McpMemorySummary> {
+  return client.get('/api/mcp/memory/summary')
+}
+
+export function deleteMemoryPreference(observation: string): Promise<null> {
+  return client.delete('/api/mcp/memory/preference', { data: { observation } })
+}
+
+export function clearMemoryPreferences(): Promise<null> {
+  return client.delete('/api/mcp/memory/preferences')
+}

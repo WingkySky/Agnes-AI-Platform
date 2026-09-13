@@ -34,6 +34,7 @@ import { listAgentSkills } from '@/lib/agent/skills'
 import { toBackendMessages } from '@/lib/agent/session-store'
 import { setDelegateProgressSink } from '@/lib/agent/subagent'
 import { fetchMcpBundle } from '@/lib/agent/mcp'
+import { fetchMemoryState } from '@/lib/agent/memory'
 import type {
   ProjectableMessage,
 } from '@/lib/agent/session-store'
@@ -75,8 +76,9 @@ const STORAGE_KEY = 'agnes_chat_state_v1'
 const MAX_KERNELS = 8
 // 技能清单缓存（全局一份，套用到每个新内核的系统提示）
 let skillsCache: Awaited<ReturnType<typeof listAgentSkills>> | null = null
-// MCP 能力摘要（会话建立时刷新；_applySkillsPrompt 组合进系统提示）
+// MCP 能力摘要 + 用户偏好记忆段（会话建立时刷新；_applySkillsPrompt 单点组合进系统提示）
 let mcpSummaryCache = ''
+let memorySectionCache = ''
 // per-session 内核池（按 store 实例分池；类实例不进响应式 state，避免 Vue 类型解包破坏其私有结构）
 const kernelPools = new WeakMap<object, Map<string, AgentKernel>>()
 function poolOf(store: object): Map<string, AgentKernel> {
@@ -381,10 +383,14 @@ export const useChatStore = defineStore('chat', {
       }
       const k = this._createKernel(sessionId)
       pool.set(key, k)
-      // MCP 工具与能力摘要：会话建立时后台刷新（失败降级；流式中内核侧跳过，下次刷新生效）
+      // MCP 工具/能力摘要 + 用户偏好记忆：会话建立时后台刷新（失败降级；流式中内核侧跳过，下次刷新生效）
       void fetchMcpBundle().then(({ tools, summary }) => {
         mcpSummaryCache = summary
         k.setExtraTools(tools)
+        void this._applySkillsPrompt(k)
+      })
+      void fetchMemoryState().then((memory) => {
+        memorySectionCache = memory.section
         void this._applySkillsPrompt(k)
       })
       try {
@@ -423,7 +429,8 @@ export const useChatStore = defineStore('chat', {
         if (!skillsCache) {
           skillsCache = await listAgentSkills()
         }
-        k.setSystemPrompt(buildChatSystemPrompt(skillsCache) + (mcpSummaryCache ? `\n\n${mcpSummaryCache}` : ''))
+        const prompt = [buildChatSystemPrompt(skillsCache), memorySectionCache, mcpSummaryCache].filter(Boolean).join('\n\n')
+        k.setSystemPrompt(prompt)
       } catch {
         // 技能库不可用沿用基础提示
       }
