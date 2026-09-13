@@ -35,6 +35,7 @@ PERMISSION_DEFS = [
     {"key": "user:manage", "name": "用户管理", "description": "管理用户账号、积分、角色分配", "group": "用户与权限"},
     {"key": "role:manage", "name": "角色管理", "description": "创建/修改/删除角色、配置权限", "group": "用户与权限"},
     {"key": "credit:manage", "name": "积分规则管理", "description": "配置积分消耗与奖励规则", "group": "用户与权限"},
+    {"key": "log:view", "name": "日志查看", "description": "查看、下载、清理系统日志与前端错误上报", "group": "用户与权限"},
     # 内容审核
     {"key": "plaza:moderate", "name": "广场内容审核", "description": "屏蔽/恢复广场作品、处理举报", "group": "内容审核"},
     {"key": "moderation:config", "name": "审核配置管理", "description": "配置敏感词、审核规则等", "group": "内容审核"},

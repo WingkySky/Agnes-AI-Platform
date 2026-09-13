@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### 管理员日志查看（后端日志 + 前端错误上报）
+- **管理页**：新增 `/admin/logs`「日志查看」（AdminLayout 系统配置组菜单项，`log:view` 权限点 + requiresAdmin 双重门控）——双 Tab（后端日志 / 前端日志）各自独立记忆数据源与筛选；后端 Tab 数据源可在全量日志 / 错误日志 / 轮转备份间切换（文件名+大小来自 stats）；筛选（级别/关键词/request_id/时间范围快捷项）、行展开完整堆栈与上下文、复制单条、按 request_id 一键追踪、before 游标「加载更多」、手动刷新 + 10 秒自动刷新开关、下载当前文件（带 JWT 走 useDownload）、清空当前文件（二次确认，主文件连同轮转备份一并处理）；i18n 中英同步
+- **前端错误上报链路**：新增 `lib/logReporter.ts` 全局收集器（window error 含资源加载 / unhandledrejection / console.error 包装 / axios 拦截器挂钩仅 5xx 与网络失败），原生 fetch + sendBeacon 上报（不经 axios 防递归），满 10 条或每 10 秒批量，单条 message/stack 截断、单会话 200 条上限防错误风暴；main.ts 安装一次
+- **后端**：`POST /api/logs/frontend` 公开上报端点（字段白名单 + 服务端截断 + 每 IP 每分钟 60 条滑动窗口限频 + 恒返回 200 防重试风暴，登录态由服务端解析 user_id 入 context），错误归一写入 `logs/frontend.jsonl`（与 errors.jsonl 同结构同轮转策略，RotatingFileHandler 10MB×5）；`GET /api/logs` 的 `format` 参数废弃改 `file` 白名单参数（默认 `errors.jsonl`，Agent 既有调用不感知）并新增 `before` 翻页游标；新增 `GET /api/logs/download`（FileResponse）与 `DELETE /api/logs`（主文件截断+删备份 / 备份单删）；文本日志读取补级别过滤
+- **鉴权修复**：既有 `/api/logs`、`/api/logs/errors`、`/api/logs/stats` 三端点原本完全无鉴权（裸奔），全部收口挂 `require_permission("log:view")`（未登录 401 / 无权限 403）；权限点注册进角色管理 PERMISSION_DEFS（「用户与权限」组），admin 天然持有、可授权自定义角色
+- **测试**：pytest 新增 17 例（上报归一/截断/批量上限/限频/user_id 服务端 stamp、鉴权三态、白名单防穿越、before 翻页、文本级别过滤、下载、清空）；vitest 新增 5 例（批量/定时 flush、截断、会话上限），全量 vitest 261 例全绿、vue-tsc 类型检查通过
+
 ### 生图/生视频统一比例与分辨率 UI（方案 A：档位 tab 统一）
 - **统一面板**：RatioPicker 重构为两模式同构——「自动按钮 + 档位 tab + 比例分组（横/方/竖）+ 选中信息 + 自定义」；图片档位=清晰度（sd/hd/4k/自定义）、视频档位=分辨率（480p~4K/自定义）；点比例只改比例、点档位只改档位（切档保持当前比例）；视频自定义高度输入从 ParamSelector 迁入面板，宽度按当前比例实时计算
 - **视频标签合并**：ParamSelector 删除独立「分辨率」标签，比例+分辨率合并为一个「尺寸」标签（显示 `720p · 16:9` 格式），时长/帧率/模型不变

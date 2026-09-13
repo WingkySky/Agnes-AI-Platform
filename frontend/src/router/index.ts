@@ -198,6 +198,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/presets/PresetCenter.vue'),
         meta: { titleKey: 'nav.presetsAdmin', requiresAdmin: true }
       },
+      {
+        path: 'logs',
+        name: 'admin-logs',
+        component: () => import('@/views/admin/LogsView.vue'),
+        meta: { titleKey: 'nav.logViewer', requiresAdmin: true }
+      },
     ]
   },
   // 兜底路由

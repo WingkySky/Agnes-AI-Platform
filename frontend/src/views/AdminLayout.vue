@@ -109,6 +109,12 @@
               <el-icon><Menu /></el-icon>
               <span>{{ t('nav.menuAdmin') }}</span>
             </el-menu-item>
+            <el-menu-item
+              v-if="permissionStore.hasPermission('log:view')"
+              index="/admin/logs">
+              <el-icon><Tickets /></el-icon>
+              <span>{{ t('nav.logViewer') }}</span>
+            </el-menu-item>
           </el-menu-item-group>
         </template>
       </el-menu>
@@ -130,7 +136,7 @@ import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Setting, Warning, UserFilled, User,
-  Picture, Coin, Cpu, Message, Menu, Checked, Opportunity, Connection,
+  Picture, Coin, Cpu, Message, Menu, Checked, Opportunity, Connection, Tickets,
 } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { useUserStore } from '@/stores/user'
@@ -179,6 +185,7 @@ const cachedViews = [
   'SettingsView',
   'EmailConfigView',
   'MenuAdminView',
+  'LogsView',
 ]
 
 // 菜单点击跳转
@@ -210,6 +217,7 @@ const firstAccessiblePage = computed(() => {
   if (userStore.isAdmin) return '/admin/models'
   if (userStore.isAdmin) return '/admin/email'
   if (userStore.isAdmin) return '/admin/menus'
+  if (permissionStore.hasPermission('log:view')) return '/admin/logs'
   return null
 })
 </script>

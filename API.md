@@ -751,3 +751,29 @@ manifest 格式：`{ "name": "...", "items": [{ "slug", "name", "description", "
 - `mcp_servers`：name（唯一）/ transport('stdio'\|'http') / command / args_json / env_json / url / headers_json / enabled / market_slug（市场安装溯源）/ created_at / updated_at。stdio 的 env_json 与 http 的 headers_json 为敏感值存储，仅服务端持有。
 - `mcp_market_sources`：name / url / enabled / last_fetched_at / item_count（管理员自建市场源）。
 - `mcp_market_items`：source_type('official'\|'remote') / source_id / slug（唯一）/ category / payload（市场项完整定义 JSON）。
+
+## 14. 日志查询与前端错误上报
+
+后端日志文件在 `backend/logs/`：`agnes_platform.log`（全量，10MB 轮转 ×5 备份 `.1`~`.5`）、`errors.jsonl`（WARNING 及以上 JSON 行）、`frontend.jsonl`（浏览器端错误上报，同样 10MB 轮转 ×5）。管理界面在 `/admin/logs`。
+
+### 查询与管理（需 `log:view` 权限，admin 天然持有）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/logs` | 查询日志（倒序最新在前）。参数：`file`（白名单：`agnes_platform.log[.1~.5]` / `errors.jsonl` / `frontend.jsonl`，默认 `errors.jsonl`）、`level`（INFO/WARNING/ERROR/CRITICAL）、`request_id`、`keyword`（匹配 message 与 exception）、`module`、`since`（起始 ISO 时间）、`before`（翻页游标：只返回早于该时间的条目，取上一页最后一条 `timestamp`）、`limit`（1-200，默认 50）。响应 `data`: `{ logs, total, file }`；jsonl 条目为结构化字段（timestamp/level/request_id/module/func/lineno/message/exception/context），文本文件条目为 `{ raw, timestamp, level }` |
+| GET | `/api/logs/errors` | 最近错误日志（仅 ERROR/CRITICAL），参数 `limit`（默认 20）、`keyword` |
+| GET | `/api/logs/stats` | 日志文件统计：`{ exists, files: { 文件名: { size_bytes, size_mb, line_count, modified } } }` |
+| GET | `/api/logs/download` | 下载日志文件，参数 `file`（白名单内，含轮转备份）；文件不存在 404 |
+| DELETE | `/api/logs` | 清空 / 删除：`file` 为主文件时截断当前文件并删除 `.1`~`.5` 轮转备份；`file` 为备份时单独删除。响应 `data`: `{ cleared, removed }` |
+
+`file` 白名单外取值（含目录穿越形态）一律 400。
+
+### 前端错误上报（公开，无需登录）
+
+### POST /api/logs/frontend
+
+浏览器端错误批量上报。登录态请求会由服务端解析 `user_id` 记入 `context`（客户端传的 `user_id` 被忽略）；限频每 IP 每分钟 60 条，超出整批丢弃（恒返回 `received: 0`）；除单批超过 50 条返回 400 外恒返回 200，客户端不重试。
+
+请求体：`{ "events": [{ "message", "stack?", "level?"（error/warning，缺省 error）, "url?", "timestamp?" }] }`，`message` 截断 2048 字符、`stack` 截断 8192 字符（服务端兜底，前端先行截断）。
+
+响应 `data`: `{ "received": 实际落盘条数 }`。落盘条目与 errors.jsonl 字段对齐，`module` 固定 `frontend`，`url`/`ip`/`ua`/`user_id`/`client_ts` 在 `context` 内。

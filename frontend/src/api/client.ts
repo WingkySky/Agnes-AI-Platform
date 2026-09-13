@@ -10,6 +10,7 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
+import { reportEvent } from '@/lib/logReporter'
 
 // 使用 Vite 代理（开发环境）或 VITE_API_BASE_URL（生产环境）
 const baseURL: string = import.meta.env.VITE_API_BASE_URL || ''
@@ -129,6 +130,21 @@ client.interceptors.response.use(
         duration: 4000,
         showClose: true
       })
+    }
+
+    // 接口失败入队前端错误日志：仅服务端错误 / 网络层失败，排除上报接口自身防自环
+    const requestUrl: unknown = error.config?.url
+    if (
+      typeof requestUrl !== 'string' || !requestUrl.includes('/logs/frontend')
+    ) {
+      if (!error.response || error.response.status >= 500) {
+        try {
+          reportEvent({
+            message: `接口失败 ${String(error.config?.method || 'get').toUpperCase()} ${requestUrl || ''}${error.response ? ` HTTP ${error.response.status}` : ''}: ${message}`,
+            stack: error.stack
+          })
+        } catch (_) { /* ignore */ }
+      }
     }
 
     return Promise.reject(new Error(message))

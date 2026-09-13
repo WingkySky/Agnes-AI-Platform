@@ -23,9 +23,14 @@ import { useThemeStore } from './stores/theme'
 import i18n from '@/i18n'
 // 权限插件
 import permissionPlugin from '@/plugins/permission'
+// 前端错误收集与上报
+import { installLogReporter } from '@/lib/logReporter'
 
 // 创建 Vue 应用
 const app = createApp(App)
+
+// 安装前端错误收集器（window error / unhandledrejection / console.error）
+installLogReporter()
 
 // 全局注册所有 Element Plus 图标组件
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
