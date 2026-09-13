@@ -3366,6 +3366,7 @@ const zhCN = {
     delegateProgress: '子任务运行中 · 第 {n} 回合',
     capabilities: '外部能力',
     capabilitiesEmpty: '尚未接入外部能力（管理员可在后台 MCP 服务器/市场配置）',
+    capabilitiesTitle: '能力与记忆',
     memoryPill: '记忆',
     memoryEmpty: '暂无偏好记忆。对话中告诉 Agent 你的创作偏好，它会自动记住',
     memoryClear: '清空偏好记忆',

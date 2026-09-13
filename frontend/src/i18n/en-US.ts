@@ -3375,6 +3375,7 @@ const enUS = {
     delegateProgress: 'Subtask running · round {n}',
     capabilities: 'Capabilities',
     capabilitiesEmpty: 'No external capabilities yet (admins can configure MCP servers/market in the admin console)',
+    capabilitiesTitle: 'Capabilities & Memory',
     memoryPill: 'Memory',
     memoryEmpty: 'No preference memories yet. Tell the Agent your creative preferences in chat and it will remember',
     memoryClear: 'Clear preferences',
