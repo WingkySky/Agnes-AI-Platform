@@ -1,13 +1,13 @@
 <!-- =====================================================
      无限画布主视图（融合项目全局导航风格）
      - 画布标题栏：浮动在画布左上角（标题编辑 + 画布管理按钮）
-     - 画布主体：InfiniteCanvas（连线层 + 节点层）+ 框选覆盖层
+     - 画布主体：InfiniteCanvas（分组层 + 连线层 + 节点层）+ 框选覆盖层
      - 底部浮动工具栏：节点创建 / 撤销重做 / 外观面板 / 删除清空
      - 左下角缩放控件 + 小地图
      - 节点悬停工具栏（浮动定位）
-     - 右键菜单（仅节点）
+     - 右键菜单（节点 / 分组 / 连线）
      - 图片预览弹窗 + 快捷键帮助弹窗
-     - 全局快捷键：Escape / Delete / Ctrl+Z / Ctrl+Shift+Z / Ctrl+D / Ctrl+A / Ctrl+S / Ctrl+L
+     - 全局快捷键：Escape / Delete / Ctrl+Z / Ctrl+Shift+Z / Ctrl+D / Ctrl+A / Ctrl+S / Ctrl+L / Ctrl+G
      ===================================================== -->
 
 <template>
@@ -80,35 +80,32 @@
         @pointerdown="handleCanvasPointerDown"
         @drop-asset="handleCanvasDropAsset"
       >
-        <!-- 流程模式指示条 -->
-        <div v-if="store.isFlowMode" class="flow-mode-indicator">
-          <svg class="flow-icon" viewBox="0 0 16 16" width="14" height="14"><path fill="currentColor" d="M8 1a2 2 0 110 4 2 2 0 010-4zM5 7a2 2 0 100 4 2 2 0 000-4zm6 0a2 2 0 100 4 2 2 0 000-4zM3 13h10M6 9l2-2m2 2l-2-2"/></svg>
-          <span class="flow-text">{{ t('canvas.flowModeIndicator', { n: store.analyzedSteps.length }) }}</span>
-          <button class="flow-btn" @click.stop="store.analyzeCurrentFlow()" :title="t('canvas.reanalyze')">↻</button>
-          <button class="flow-close" @click.stop="store.toggleFlowMode()" :title="t('canvas.flowModeClose')">×</button>
-        </div>
-
-        <!-- 流程模式：步骤分组可视化 -->
-        <template v-if="store.isFlowMode">
-          <CanvasStepGroup
-            v-for="step in store.analyzedSteps"
-            :key="step.id"
-            :step="step"
-            :panels="store.panels"
-            :is-active="selectedStepId === step.id"
-            @click="handleStepClick(step.id)"
-            @edit="handleStepEdit(step.id)"
-            @delete="handleStepDelete(step.id)"
-          />
-        </template>
+        <!-- 分组层（组框在连线/节点层之下；折叠组成员由 v-show 隐藏） -->
+        <CanvasGroupLayer
+          v-for="group in store.groups"
+          :key="group.id"
+          :group="group"
+          :panels="store.panels"
+          :selected="selectedGroupId === group.id"
+          @toggle-collapse="store.toggleGroupCollapsed(group.id)"
+          @toggle-lock="store.toggleGroupLocked(group.id)"
+          @cycle-color="handleGroupCycleColor(group.id)"
+          @rename="(name) => store.updateGroup(group.id, { name })"
+          @reference="(type) => handleGroupReference(group.id, type)"
+          @rerun="handleGroupRerun(group.id)"
+          @delete-group="handleGroupDeleteWithNodes(group.id)"
+          @drag-start="(e) => handleGroupDragStart(group.id, e)"
+          @context-menu="(e) => handleGroupContextMenu(group.id, e)"
+        />
 
         <!-- 连线层（不传 props 时自动使用 store 数据） -->
         <CanvasConnectionsLayer />
 
-        <!-- 节点层：遍历所有面板渲染节点 -->
+        <!-- 节点层：遍历所有面板渲染节点（折叠分组成员隐藏但保留 DOM 状态） -->
         <CanvasNode
           v-for="panel in store.panels"
           :key="panel.id"
+          v-show="!hiddenPanelIds.has(panel.id)"
           :panel="panel"
           :selected="store.selectedPanelIds.includes(panel.id)"
           :is-connecting="!!store.connecting"
@@ -164,7 +161,6 @@
         :background-mode="store.backgroundMode"
         :show-image-info="store.showImageInfo"
         :active-tool="activeTool"
-        :is-flow-mode="store.isFlowMode"
         :show-agent-panel="agentStore.open"
         @select-tool="handleSelectTool"
         @undo="store.undo()"
@@ -180,7 +176,8 @@
         @set-background="(mode) => store.setBackgroundMode(mode)"
         @toggle-image-info="(val) => handleToggleImageInfo(val)"
         @show-shortcuts="handleShowShortcuts"
-        @toggle-flow-mode="handleToggleFlowMode"
+        @smart-group="handleSmartGroup"
+        @arrange-layout="handleArrangeLayout"
       />
 
       <!-- ============ 左下角缩放控件 ============ -->
@@ -254,15 +251,21 @@
         />
       </div>
 
-      <!-- ============ 右键菜单（仅节点） ============ -->
+      <!-- ============ 右键菜单（节点 / 分组 / 连线） ============ -->
       <CanvasContextMenu
         v-if="contextMenu.open"
         :x="contextMenu.x"
         :y="contextMenu.y"
         :target-type="contextMenu.targetType"
+        :selection-count="store.selectedPanelIds.length"
+        :can-remove-from-group="canRemoveFromGroup"
         :theme="store.canvasTheme"
         @duplicate="handleContextDuplicate"
         @delete="handleContextDelete"
+        @group-create="handleContextGroupCreate"
+        @group-remove-panel="handleContextRemoveFromGroup"
+        @group-dissolve="handleGroupDissolve(contextMenu.targetId)"
+        @group-delete-with-nodes="handleGroupDeleteWithNodes(contextMenu.targetId)"
         @close="contextMenu.open = false"
       />
 
@@ -323,14 +326,25 @@
         @confirm="handleAngleConfirm"
         @cancel="imageOpsState.angle.visible = false"
       />
-      <!-- 步骤编辑弹窗（流程模式） -->
-      <StepEditDialog
-        v-if="stepEditState.visible"
-        :visible="stepEditState.visible"
-        :step="stepEditState.step"
-        @close="stepEditState.visible = false"
-        @save="handleStepEditSave"
-      />
+      <!-- ============ 分类分组模式选择弹窗 ============ -->
+      <el-dialog
+        v-model="smartGroupDialog.visible"
+        :title="t('canvas.groupMode.title')"
+        width="460px"
+        :append-to-body="true"
+      >
+        <div class="group-mode-options">
+          <el-checkbox v-model="smartGroupDialog.byChain">{{ t('canvas.groupMode.byChain') }}</el-checkbox>
+          <el-checkbox v-model="smartGroupDialog.byCategory">{{ t('canvas.groupMode.byCategory') }}</el-checkbox>
+        </div>
+        <p class="group-mode-preview" :style="{ color: store.canvasTheme.node.muted }">
+          {{ t('canvas.smartGroupConfirm', { n: smartGroupPreview.count, m: smartGroupPreview.nodes }) }}
+        </p>
+        <template #footer>
+          <el-button @click="smartGroupDialog.visible = false">{{ t('canvas.templates.cancel') }}</el-button>
+          <el-button type="primary" @click="handleSmartGroupConfirm">{{ t('canvas.groupMode.confirm') }}</el-button>
+        </template>
+      </el-dialog>
 
       <!-- ============ 画布管理弹窗（批量操作、模板库） ============ -->
       <CanvasManagerPopover
@@ -505,15 +519,14 @@ import CanvasImageCropDialog from '@/components/canvas/CanvasImageCropDialog.vue
 import CanvasImageSplitDialog from '@/components/canvas/CanvasImageSplitDialog.vue'
 import CanvasImageUpscaleDialog from '@/components/canvas/CanvasImageUpscaleDialog.vue'
 import CanvasImageAngleDialog from '@/components/canvas/CanvasImageAngleDialog.vue'
-// 流程步骤分组组件
-import CanvasStepGroup from '@/components/canvas/CanvasStepGroup.vue'
-import StepEditDialog from '@/components/canvas/StepEditDialog.vue'
+// 画布分组层组件（成员制分组，替代旧流程模式步骤）
+import CanvasGroupLayer from '@/components/canvas/CanvasGroupLayer.vue'
 // 带水印的图片组件（预览大图时显示水印）
 import ImageWithWatermark from '@/components/ImageWithWatermark.vue'
 // 画布模板库组件
 import CanvasManagerPopover from '@/components/canvas/CanvasManagerPopover.vue'
 // 画布积分预估与校验（生图/生视频/局部编辑前预检积分）
-import type { CanvasStep, CanvasPanel, CanvasConnection } from '@/stores/canvas'
+import { CANVAS_GROUP_COLORS, type CanvasPanel, type CanvasConnection } from '@/stores/canvas'
 import { checkCreditsBeforeGenerate, showCostConsumedMessage } from '@/lib/canvas-credits'
 import {
   type CanvasTemplate,
@@ -522,8 +535,12 @@ import {
 } from '@/lib/canvas-templates'
 // 画布生成：上游节点查找（用于配置节点 prompt 为空时检查上游文本）+ 生成归档上下文
 import { getUpstreamNodes, buildCanvasContext, resumeLoadingCanvasNodes, type CanvasGenerationStore } from '@/lib/canvas-generation'
-// 分镜派生：单镜头图生视频
-import { deriveVideoForShot, deriveTailFrameFromImageNode, derivePrevFrameFromImageNode, deriveChainVideosFromImageNode, readLineage, getShotLineageInfo } from '@/lib/canvas-storyboard'
+// 分镜派生：单镜头图生视频 + 整组重跑的批量积分确认
+import { confirmGroupedCost, deriveVideoForShot, deriveTailFrameFromImageNode, derivePrevFrameFromImageNode, deriveChainVideosFromImageNode, readLineage, getShotLineageInfo } from '@/lib/canvas-storyboard'
+// 分组包络计算与智能建议分组（按连线连通分量）
+import { calculateGroupBounds, suggestGroups } from '@/lib/canvas-groups'
+// 一键整理布局（面板摆放位置优化，按类别分块平铺）
+import { computeArrangedLayout } from '@/lib/canvas-layout'
 // 画布三节点执行（spec M3：配音/字幕/成片合成）
 import { generateCanvasTts, generateCanvasSubtitles, composeCanvasVideos, type CanvasSubtitleSegment } from '@/api/canvas'
 import { parseSrt } from '@/lib/canvas-media'
@@ -675,56 +692,215 @@ function cancelTitle() {
 
 const canvasRef = ref(null)
 
-// ==================== 流程模式状态 ====================
+// ==================== 分组状态 ====================
 
-// 当前选中的步骤 ID
-const selectedStepId = ref<string | null>(null)
+// 当前选中的分组 id（点击组框选中；Delete 仅解散组不删节点）
+const selectedGroupId = ref<string | null>(null)
 
-// 步骤编辑弹窗状态
-const stepEditState = reactive({
-  visible: false,
-  step: null as typeof store.steps[number] | null,
+// 折叠分组成员集合（节点 v-show 隐藏 + 框选/全选排除）
+const hiddenPanelIds = computed(() => {
+  const ids = new Set<string>()
+  for (const group of store.groups) {
+    if (!group.collapsed) continue
+    for (const pid of group.panel_ids) ids.add(pid)
+  }
+  return ids
 })
 
-// 流程模式：步骤操作
-function handleStepClick(stepId: string) {
-  selectedStepId.value = stepId
-  // 选中该步骤的所有节点
-  const step = store.steps.find(s => s.id === stepId)
-  if (step) {
-    store.selectPanel(null)
-    store.selectedPanelIds = [...step.panel_ids]
-    if (step.panel_ids.length > 0) {
-      store.selectedPanelId = step.panel_ids[0]
+// 换组颜色（按色板循环）
+function handleGroupCycleColor(groupId: string) {
+  const group = store.groups.find((g) => g.id === groupId)
+  if (!group) return
+  const idx = CANVAS_GROUP_COLORS.indexOf(group.color)
+  const next = CANVAS_GROUP_COLORS[(idx + 1) % CANVAS_GROUP_COLORS.length]
+  store.updateGroup(groupId, { color: next })
+}
+
+// 解散分组（保留节点）
+async function handleGroupDissolve(groupId: string | null) {
+  if (!groupId) return
+  store.dissolveGroup(groupId)
+  if (selectedGroupId.value === groupId) selectedGroupId.value = null
+  ElMessage.success(t('canvas.group.groupDissolved'))
+}
+
+// 删除分组与组内节点
+async function handleGroupDeleteWithNodes(groupId: string | null) {
+  if (!groupId) return
+  const group = store.groups.find((g) => g.id === groupId)
+  if (!group) return
+  await confirm(t('canvas.group.confirmDeleteWithNodes', { name: group.name }), t('common.confirm'), { confirmButtonText: t('common.delete') })
+  store.pushSnapshot()
+  for (const pid of [...group.panel_ids]) {
+    store.deletePanel(pid)
+  }
+  if (selectedGroupId.value === groupId) selectedGroupId.value = null
+  ElMessage.success(t('canvas.group.groupDeleted'))
+}
+
+// 引用整组：在组框右侧建下游节点，并把资源成员全部连过去（生成侧沿用现有上游收集协议）
+function handleGroupReference(groupId: string, type: 'image' | 'video') {
+  const group = store.groups.find((g) => g.id === groupId)
+  if (!group) return
+  const members = store.panels.filter((p) => group.panel_ids.includes(p.id))
+  if (members.length === 0) return
+  const bounds = calculateGroupBounds(group, store.panels)
+  const size = NODE_DEFAULT_SIZES[type]
+  store.pushSnapshot()
+  const panelId = store.addPanel({
+    type,
+    name: `${group.name} · ${type === 'image' ? t('canvas.nodeNames.image') : t('canvas.nodeNames.video')}`,
+    x: bounds ? bounds.left + bounds.width + 80 : 0,
+    y: bounds ? bounds.top + bounds.height / 2 - size.height / 2 : 0,
+    width: size.width,
+    height: size.height,
+    content: {},
+  })
+  // 资源成员（文本并入提示词、图片/视频/音频作参考输入）连到新节点；config/script 等不参与
+  for (const m of members) {
+    if (!['text', 'image', 'video', 'audio'].includes(m.type || 'text')) continue
+    const exists = store.connections.some((c) => c.source_panel_id === m.id && c.target_panel_id === panelId)
+    if (!exists) store.addConnection({ source_panel_id: m.id, target_panel_id: panelId, type: 'auto' })
+  }
+  store.selectPanel(panelId, { append: false })
+  store.centerOnPanel(panelId)
+}
+
+// 整组重跑：组内 image/video 节点按成员间连线拓扑序逐个重生成（下游等上游落定）
+async function handleGroupRerun(groupId: string) {
+  const group = store.groups.find((g) => g.id === groupId)
+  if (!group) return
+  const runnable = store.panels.filter(
+    (p) => group.panel_ids.includes(p.id)
+      && (p.type === 'image' || p.type === 'video')
+      && contentString(p.content?.status) !== 'loading',
+  )
+  if (runnable.length === 0) {
+    ElMessage.warning(t('canvas.group.rerunEmpty'))
+    return
+  }
+  // 批量积分预估确认（一次）
+  const imageCount = runnable.filter((p) => p.type === 'image').length
+  const videoCount = runnable.length - imageCount
+  const ok = await confirmGroupedCost([
+    ...(imageCount > 0 ? [{ type: 'image' as const, count: imageCount }] : []),
+    ...(videoCount > 0 ? [{ type: 'video' as const, count: videoCount }] : []),
+  ])
+  if (!ok) return
+  ElMessage.info(t('canvas.messages.regenerate'))
+  for (const panel of topoSortByConnections(runnable)) {
+    // 重跑过程中节点可能被删（如重跑失败自动清理），跳过已不存在的
+    if (!store.panels.some((p) => p.id === panel.id)) continue
+    await retryGeneration(panel)
+  }
+  const failed = runnable
+    .filter((p) => contentString(store.panels.find((x) => x.id === p.id)?.content?.status) === 'error')
+    .map((p) => p.name || p.id)
+  if (failed.length > 0) {
+    ElMessage.error(t('canvas.group.rerunFailed', { names: failed.join('、') }))
+  } else {
+    ElMessage.success(t('canvas.group.rerunDone'))
+  }
+}
+
+/** 成员间按连线拓扑排序（Kahn；仅考虑成员之间的边，有环时剩余节点按原顺序兜底） */
+function topoSortByConnections(members: CanvasPanel[]): CanvasPanel[] {
+  const idSet = new Set(members.map((p) => p.id))
+  const inDegree = new Map(members.map((p) => [p.id, 0]))
+  for (const conn of store.connections) {
+    if (idSet.has(conn.source_panel_id) && idSet.has(conn.target_panel_id)) {
+      inDegree.set(conn.target_panel_id, (inDegree.get(conn.target_panel_id) || 0) + 1)
     }
   }
+  const queue = members.filter((p) => (inDegree.get(p.id) || 0) === 0)
+  const ordered: CanvasPanel[] = []
+  while (queue.length > 0) {
+    const panel = queue.shift()!
+    ordered.push(panel)
+    for (const conn of store.connections) {
+      if (conn.source_panel_id !== panel.id || !idSet.has(conn.target_panel_id)) continue
+      const degree = (inDegree.get(conn.target_panel_id) || 0) - 1
+      inDegree.set(conn.target_panel_id, degree)
+      if (degree === 0) {
+        const next = members.find((p) => p.id === conn.target_panel_id)
+        if (next) queue.push(next)
+      }
+    }
+  }
+  for (const p of members) {
+    if (!ordered.includes(p)) ordered.push(p)
+  }
+  return ordered
 }
 
-function handleStepEdit(stepId: string) {
-  const step = store.steps.find(s => s.id === stepId)
-  if (step) {
-    stepEditState.step = { ...step }
-    stepEditState.visible = true
+// ==================== 分组拖动（整体移动成员） ====================
+
+const groupDragState = reactive({
+  groupId: null as string | null,
+  startX: 0,
+  startY: 0,
+  initialPositions: {} as Record<string, { x: number; y: number }>,
+  hasMoved: false,
+})
+
+function handleGroupDragStart(groupId: string, { event }: { event: PointerEvent }) {
+  selectedGroupId.value = groupId
+  groupDragState.groupId = groupId
+  groupDragState.startX = event.clientX
+  groupDragState.startY = event.clientY
+  groupDragState.hasMoved = false
+  groupDragState.initialPositions = {}
+  window.addEventListener('pointermove', handleGroupDragMove)
+  window.addEventListener('pointerup', handleGroupDragUp)
+}
+
+function handleGroupDragMove(event: PointerEvent) {
+  if (!groupDragState.groupId) return
+  if (!groupDragState.hasMoved) {
+    // 首次实际移动才选中成员并压快照（单纯点击组框只选中组）
+    const group = store.groups.find((g) => g.id === groupDragState.groupId)
+    if (!group) return
+    store.selectPanel(null)
+    store.selectedPanelIds = [...group.panel_ids]
+    for (const pid of group.panel_ids) {
+      const p = store.panels.find((pp) => pp.id === pid)
+      if (p) groupDragState.initialPositions[pid] = { x: p.x, y: p.y }
+    }
+    store.pushSnapshot()
+    groupDragState.hasMoved = true
+  }
+  const zoom = store.viewport.zoom
+  const dx = (event.clientX - groupDragState.startX) / zoom
+  const dy = (event.clientY - groupDragState.startY) / zoom
+  for (const [pid, init] of Object.entries(groupDragState.initialPositions)) {
+    store._updatePanelDirect(pid, { x: init.x + dx, y: init.y + dy })
   }
 }
 
-function handleStepEditSave(data: { id: string; name: string; color: string; description?: string }) {
-  store.updateStep(data.id, {
-    name: data.name,
-    color: data.color,
-    description: data.description,
-  })
-  stepEditState.visible = false
-  ElMessage.success(t('canvas.messages.stepUpdated'))
+function handleGroupDragUp() {
+  if (groupDragState.groupId && groupDragState.hasMoved) {
+    for (const pid of Object.keys(groupDragState.initialPositions)) {
+      const p = store.panels.find((pp) => pp.id === pid)
+      if (p) store.updatePanel(pid, { x: p.x, y: p.y })
+    }
+  }
+  groupDragState.groupId = null
+  groupDragState.hasMoved = false
+  groupDragState.initialPositions = {}
+  window.removeEventListener('pointermove', handleGroupDragMove)
+  window.removeEventListener('pointerup', handleGroupDragUp)
 }
 
-async function handleStepDelete(stepId: string) {
-  await confirm(t('canvas.messages.confirmDeleteStep'), t('common.confirm'), { confirmButtonText: t('common.delete') })
-  store.removeStep(stepId)
-  if (selectedStepId.value === stepId) {
-    selectedStepId.value = null
-  }
-  ElMessage.success(t('canvas.messages.stepDeleted'))
+// 分组右键菜单
+function handleGroupContextMenu(groupId: string, event: PointerEvent) {
+  event.preventDefault()
+  event.stopPropagation()
+  selectedGroupId.value = groupId
+  contextMenu.open = true
+  contextMenu.x = event.clientX - store.canvasRect.left
+  contextMenu.y = event.clientY - store.canvasRect.top
+  contextMenu.targetType = 'group'
+  contextMenu.targetId = groupId
 }
 
 // ==================== 背景点击处理 ====================
@@ -732,6 +908,7 @@ async function handleStepDelete(stepId: string) {
 function handleBackgroundClick() {
   // InfiniteCanvas 在无 props 时已自动清空选中
   showAppearancePanel.value = false
+  selectedGroupId.value = null
 }
 
 // ==================== 工具模式（hand=移动，select=选择框选） ====================
@@ -819,6 +996,7 @@ function handleSelectionUp() {
 const ctrlPressed = ref(false)
 
 function handleNodeSelect(panelId: string) {
+  selectedGroupId.value = null
   store.selectPanel(panelId, { append: ctrlPressed.value })
 }
 
@@ -833,6 +1011,12 @@ const dragState = reactive({
 
 // 节点拖拽开始：记录所有选中节点的初始位置
 function handleNodeDragStart({ id, event: _event }: { id: string; event: PointerEvent }) {
+  // 锁定分组成员不可单独拖动（组整体仍可拖动）
+  const memberGroup = store.getGroupOfPanel(id)
+  if (memberGroup?.locked) {
+    ElMessage.warning(t('canvas.group.lockedDragBlocked'))
+    return
+  }
   // 如果拖拽的节点不在选中列表中，只选中它
   if (!store.selectedPanelIds.includes(id)) {
     store.selectPanel(id, { append: false })
@@ -842,6 +1026,8 @@ function handleNodeDragStart({ id, event: _event }: { id: string; event: Pointer
   dragState.hasMoved = false
   dragState.initialPositions = {}
   for (const pid of store.selectedPanelIds) {
+    // 锁定分组成员不随多选拖动移动
+    if (store.getGroupOfPanel(pid)?.locked) continue
     const p = store.panels.find((pp) => pp.id === pid)
     if (p) dragState.initialPositions[pid] = { x: p.x, y: p.y }
   }
@@ -859,9 +1045,7 @@ function handleNodeDrag({ id, x, y }: { id: string; x: number; y: number }) {
   const dx = x - initial.x
   const dy = y - initial.y
   // 应用增量到所有选中节点
-  for (const pid of store.selectedPanelIds) {
-    const init = dragState.initialPositions[pid]
-    if (!init) continue
+  for (const [pid, init] of Object.entries(dragState.initialPositions)) {
     store._updatePanelDirect(pid, { x: init.x + dx, y: init.y + dy })
   }
 }
@@ -1041,9 +1225,14 @@ const contextMenu = reactive({
   open: false,
   x: 0,
   y: 0,
-  targetType: 'node' as 'node' | 'connection',
+  targetType: 'node' as 'node' | 'connection' | 'group',
   targetId: null as string | null,
 })
+
+// 目标节点是否已在分组中（控制"移出分组"菜单项）
+const canRemoveFromGroup = computed(() =>
+  !!contextMenu.targetId && contextMenu.targetType === 'node' && !!store.getGroupOfPanel(contextMenu.targetId),
+)
 
 // 节点右键：打开菜单
 function handleNodeContextMenu(event: PointerEvent) {
@@ -1057,6 +1246,91 @@ function handleNodeContextMenu(event: PointerEvent) {
   contextMenu.y = event.clientY - store.canvasRect.top
   contextMenu.targetType = 'node'
   contextMenu.targetId = targetId
+}
+
+// 右键菜单：成组（框选/多选时）
+function handleContextGroupCreate() {
+  if (store.selectedPanelIds.length < 2) return
+  const { id, skipped } = store.createGroup([...store.selectedPanelIds], {
+    name: t('canvas.group.defaultName', { n: store.groups.length + 1 }),
+  })
+  if (id) {
+    selectedGroupId.value = id
+    ElMessage.success(t('canvas.group.groupCreated'))
+  }
+  if (skipped.length > 0) {
+    ElMessage.warning(t('canvas.group.groupCreatedSkipped', { n: skipped.length }))
+  }
+}
+
+// 右键菜单：把目标节点移出所属分组
+function handleContextRemoveFromGroup() {
+  if (!contextMenu.targetId) return
+  store.removePanelFromGroup(contextMenu.targetId)
+  ElMessage.success(t('canvas.group.removedFromGroup'))
+}
+
+// ==================== 智能建议分组 ====================
+
+// 分类分组弹窗：成组模式可多选（生成链条 / 资产类别）
+const smartGroupDialog = reactive({
+  visible: false,
+  byChain: true,
+  byCategory: true,
+})
+
+// 点击工具栏按钮：打开模式选择弹窗
+function handleSmartGroup() {
+  smartGroupDialog.visible = true
+}
+
+// 弹窗内实时预览将创建的分组数与覆盖节点数
+const smartGroupPreview = computed(() => {
+  const suggestions = suggestGroups(store.panels, store.groups, {
+    byChain: smartGroupDialog.byChain,
+    byCategory: smartGroupDialog.byCategory,
+  })
+  return {
+    count: suggestions.length,
+    nodes: suggestions.reduce((sum, s) => sum + s.panelIds.length, 0),
+  }
+})
+
+// 确认创建：链条组用“脚本名 · 生成链”命名，类别组用资产类别名命名
+async function handleSmartGroupConfirm() {
+  smartGroupDialog.visible = false
+  const suggestions = suggestGroups(store.panels, store.groups, {
+    byChain: smartGroupDialog.byChain,
+    byCategory: smartGroupDialog.byCategory,
+  })
+  if (suggestions.length === 0) {
+    ElMessage.info(t('canvas.smartGroupNone'))
+    return
+  }
+  store.pushSnapshot()
+  let created = 0
+  for (const suggestion of suggestions) {
+    const name = suggestion.chainScriptName
+      ? `${suggestion.chainScriptName} · ${t('canvas.chainGroupSuffix')}`
+      : t(`canvas.assetCategory.${suggestion.category}`)
+    const { id } = store.createGroup(suggestion.panelIds, { name }, { snapshot: false })
+    if (id) created++
+  }
+  selectedGroupId.value = null
+  ElMessage.success(t('canvas.smartGroupDone', { n: created }))
+}
+
+// ==================== 一键整理布局 ====================
+
+// 面板摆放位置优化：组/类型作为块横向平铺，块内整齐网格；已分组(锁定)节点不动，一步可撤销
+function handleArrangeLayout() {
+  const positions = computeArrangedLayout(store.panels, store.groups)
+  const moved = store.applyPanelPositions(positions)
+  if (moved === 0) {
+    ElMessage.info(t('canvas.arrangeNone'))
+    return
+  }
+  ElMessage.success(t('canvas.arrangeDone', { n: moved }))
 }
 
 // 右键菜单：复制
@@ -3031,16 +3305,6 @@ function handleShowShortcuts() {
   zoomControlsRef.value?.openShortcuts()
 }
 
-/** 切换流程模式 */
-function handleToggleFlowMode() {
-  store.toggleFlowMode()
-  if (store.isFlowMode) {
-    ElMessage.success(t('canvas.messages.flowModeEnabled'))
-  } else {
-    ElMessage.info(t('canvas.messages.flowModeDisabled'))
-  }
-}
-
 // 小地图定位：将视口中心移动到指定世界坐标
 function handleMinimapLocate(worldX: number, worldY: number) {
   const { zoom } = store.viewport
@@ -3201,15 +3465,35 @@ function handleKeyDown(event: KeyboardEvent) {
     if (store.connecting) store.cancelConnecting()
     else if (contextMenu.open) contextMenu.open = false
     else if (showAppearancePanel.value) showAppearancePanel.value = false
+    else if (selectedGroupId.value) selectedGroupId.value = null
     else store.clearSelection()
     return
   }
 
-  // Delete / Backspace：删除选中节点
+  // Delete / Backspace：删除选中分组（仅解散）/ 删除选中节点
   if (event.key === 'Delete' || event.key === 'Backspace') {
-    if (store.selectedPanelIds.length > 0) {
+    if (selectedGroupId.value) {
+      event.preventDefault()
+      handleGroupDissolve(selectedGroupId.value)
+    } else if (store.selectedPanelIds.length > 0) {
       event.preventDefault()
       handleDeleteSelected()
+    }
+    return
+  }
+
+  // Cmd/Ctrl+G：成组；Cmd/Ctrl+Shift+G：解散组 / 移出分组
+  if (ctrl && (event.key === 'g' || event.key === 'G')) {
+    event.preventDefault()
+    if (event.shiftKey) {
+      if (selectedGroupId.value) {
+        handleGroupDissolve(selectedGroupId.value)
+      } else if (store.selectedPanelIds.length === 1) {
+        store.removePanelFromGroup(store.selectedPanelIds[0])
+        ElMessage.success(t('canvas.group.removedFromGroup'))
+      }
+    } else {
+      handleContextGroupCreate()
     }
     return
   }
@@ -3238,10 +3522,12 @@ function handleKeyDown(event: KeyboardEvent) {
     return
   }
 
-  // Ctrl+A：全选
+  // Ctrl+A：全选（排除折叠分组的隐藏成员）
   if (ctrl && event.key === 'a') {
     event.preventDefault()
-    store.selectedPanelIds = store.panels.map((p) => p.id)
+    store.selectedPanelIds = store.panels
+      .filter((p) => !hiddenPanelIds.value.has(p.id))
+      .map((p) => p.id)
     store.selectedPanelId = store.selectedPanelIds[0] ?? null
     return
   }
@@ -3314,6 +3600,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointerup', handleSelectionUp)
   window.removeEventListener('pointermove', handleConnectingMove)
   window.removeEventListener('pointerup', handleConnectingUp)
+  window.removeEventListener('pointermove', handleGroupDragMove)
+  window.removeEventListener('pointerup', handleGroupDragUp)
   window.removeEventListener('agnes:user-login', handleUserSwitch)
   window.removeEventListener('agnes:user-logout', handleUserLogout)
   // 清理 hover 定时器
@@ -3340,6 +3628,19 @@ async function handleUserLogout() {
 </script>
 
 <style scoped>
+/* ==================== 分类分组弹窗 ==================== */
+.group-mode-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.group-mode-preview {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
 /* ==================== 画布主容器 ==================== */
 /* 在 app-main 内占满可用空间（App.vue canvas-mode 已设 position:relative） */
 .canvas-view {
@@ -3457,68 +3758,6 @@ async function handleUserLogout() {
   width: 100%;
   height: 100%;
 }
-
-/* ==================== 流程模式指示条 ==================== */
-.flow-mode-indicator {
-  position: absolute;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 45;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 14px;
-  border-radius: 20px;
-  background: rgba(64, 158, 255, 0.9);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 500;
-  box-shadow: 0 4px 16px rgba(64, 158, 255, 0.35);
-  backdrop-filter: blur(8px);
-  animation: flowIndicatorIn 0.3s ease-out;
-}
-@keyframes flowIndicatorIn {
-  from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
-  to { opacity: 1; transform: translateX(-50%) translateY(0); }
-}
-.flow-icon { flex-shrink: 0; opacity: 0.9; }
-.flow-text { white-space: nowrap; }
-.flow-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  background: rgba(255,255,255,0.2);
-  border: none;
-  border-radius: 4px;
-  color: #fff;
-  font-size: 13px;
-  cursor: pointer;
-  line-height: 1;
-  padding: 0;
-  transition: background 0.15s;
-  margin-right: 2px;
-}
-.flow-btn:hover { background: rgba(255,255,255,0.4); }
-.flow-close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  background: rgba(255,255,255,0.25);
-  border: none;
-  border-radius: 50%;
-  color: #fff;
-  font-size: 13px;
-  cursor: pointer;
-  line-height: 1;
-  padding: 0;
-  transition: background 0.15s;
-}
-.flow-close:hover { background: rgba(255,255,255,0.45); }
 
 /* ==================== 框选矩形 ==================== */
 .selection-box {

@@ -322,6 +322,7 @@ function handleDrop(e: DragEvent) {
     @pointerdown="handlePointerDown"
     @dragover="handleDragOver"
     @drop="handleDrop"
+    @contextmenu.prevent
   >
     <!-- 背景网格层（dots / lines / blank），pointer-events none，透明度 0.4 -->
     <div class="infinite-canvas-grid" :style="gridStyle" />

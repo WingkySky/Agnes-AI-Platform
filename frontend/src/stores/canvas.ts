@@ -11,7 +11,6 @@ import { defineStore } from 'pinia'
 import { canvasThemes } from '@/lib/canvas-theme'
 import { loadCanvas, saveCanvas, switchCanvasUser, cancelSaveCanvas } from '@/lib/canvas-storage'
 import { useThemeStore } from './theme'
-import { analyzeFlow } from '@/lib/canvas-flow-analyzer'
 import { getUpstreamNodesWithIndex } from '@/lib/canvas-generation'
 import type { StyleConfig } from '@/lib/storyboard/schemas'
 
@@ -94,29 +93,20 @@ export interface CanvasConnection {
   [key: string]: unknown
 }
 
-/** 画布步骤（流程分组） */
-export interface CanvasStep {
+/** 画布分组（成员制：每个节点最多属于一个组；组框边界实时由成员包络计算） */
+export interface CanvasGroup {
   id: string
   name: string
-  description?: string
-  color?: string
+  color: string
   panel_ids: string[]
-  order: number
-  depends_on: string[]
-  status?: 'pending' | 'running' | 'success' | 'failed'
+  collapsed: boolean
+  locked: boolean
   created_at: string
   updated_at: string
 }
 
-/** 画布流程图 */
-interface CanvasFlow {
-  id: string
-  name: string
-  workspace_id: string
-  steps: CanvasStep[]
-  created_at: string
-  updated_at: string
-}
+/** 分组色板（按组序循环） */
+export const CANVAS_GROUP_COLORS = ['#409eff', '#67c23a', '#e6a23c', '#f56c6c', '#9b59b6', '#1abc9c']
 
 /** 画布工作区 */
 interface CanvasWorkspace {
@@ -127,6 +117,7 @@ interface CanvasWorkspace {
   viewport: Viewport
   panels: CanvasPanel[]
   connections: CanvasConnection[]
+  groups: CanvasGroup[]
   /** 工作区级风格选择（实体设定图/分镜图统一取用；随工作区持久化） */
   styleConfig?: CanvasStyleSelection | null
 }
@@ -149,6 +140,7 @@ interface HistorySnapshot {
   viewport: Viewport
   panels: CanvasPanel[]
   connections: CanvasConnection[]
+  groups: CanvasGroup[]
 }
 
 /** 历史（撤销/重做） */
@@ -185,12 +177,13 @@ function uid(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36)
 }
 
-/** 深拷贝快照（panels / connections / viewport） */
+/** 深拷贝快照（panels / connections / groups / viewport） */
 function snapshot(state: CanvasState): HistorySnapshot {
   return {
     viewport: { ...state.viewport },
     panels: JSON.parse(JSON.stringify(state.panels)),
     connections: JSON.parse(JSON.stringify(state.connections)),
+    groups: JSON.parse(JSON.stringify(state.groups)),
   }
 }
 
@@ -199,6 +192,7 @@ function restoreFromSnapshot(state: CanvasState, snap: HistorySnapshot): void {
   state.viewport = { ...snap.viewport }
   state.panels = JSON.parse(JSON.stringify(snap.panels))
   state.connections = JSON.parse(JSON.stringify(snap.connections))
+  state.groups = JSON.parse(JSON.stringify(snap.groups ?? []))
 }
 
 /**
@@ -294,10 +288,8 @@ interface CanvasState {
   // ---------- 搜索与筛选 ----------
   searchQuery: string
 
-  // ---------- 流程模式 ----------
-  isFlowMode: boolean
-  steps: CanvasStep[]
-  flows: CanvasFlow[]
+  // ---------- 分组 ----------
+  groups: CanvasGroup[]
 
   // ---------- 持久化标记 ----------
   _storageReady: boolean
@@ -360,10 +352,8 @@ export const useCanvasStore = defineStore('canvas', {
     // ---------- 搜索与筛选 ----------
     searchQuery: '',
 
-    // ---------- 流程模式 ----------
-    isFlowMode: false,
-    steps: new Array<CanvasStep>(),
-    flows: new Array<CanvasFlow>(),
+    // ---------- 分组 ----------
+    groups: new Array<CanvasGroup>(),
 
     // ---------- 持久化标记 ----------
     _storageReady: false,
@@ -425,18 +415,10 @@ export const useCanvasStore = defineStore('canvas', {
     getInputNodesWithIndex: (state) => (targetPanelId: string) =>
       getUpstreamNodesWithIndex(targetPanelId, state.panels, state.connections),
 
-    // ==================== 流程模式 ====================
-
-    /**
-     * 获取分析后的步骤列表（按执行顺序排序）
-     * - 自动分析节点连线，识别执行顺序
-     * - 返回 CanvasStep[] 数组
-     */
-    analyzedSteps(state): CanvasStep[] {
-      if (!state.isFlowMode || state.panels.length === 0) return []
-      
-      // 使用静态导入的函数
-      return analyzeFlow(state.panels, state.connections)
+    /** 节点所属分组（未分组返回 null） */
+    getGroupOfPanel(state) {
+      return (panelId: string): CanvasGroup | null =>
+        state.groups.find((g) => g.panel_ids.includes(panelId)) ?? null
     },
   },
 
@@ -497,6 +479,7 @@ export const useCanvasStore = defineStore('canvas', {
         viewport: { x: 0, y: 0, zoom: 1 },
         panels: [],
         connections: [],
+        groups: [],
         styleConfig: null,
       }
       this.workspaces.push(ws)
@@ -504,6 +487,7 @@ export const useCanvasStore = defineStore('canvas', {
       this.viewport = { ...ws.viewport }
       this.panels = []
       this.connections = []
+      this.groups = []
       this.selectedPanelIds = []
       this.selectedPanelId = null
       this.history = { past: [], future: [] }
@@ -522,10 +506,12 @@ export const useCanvasStore = defineStore('canvas', {
         this.viewport = { ...target.viewport }
         this.panels = JSON.parse(JSON.stringify(target.panels))
         this.connections = JSON.parse(JSON.stringify(target.connections))
+        this.groups = JSON.parse(JSON.stringify(target.groups ?? []))
       } else {
         this.viewport = { x: 0, y: 0, zoom: 1 }
         this.panels = []
         this.connections = []
+        this.groups = []
       }
       this.selectedPanelIds = []
       this.selectedPanelId = null
@@ -546,6 +532,7 @@ export const useCanvasStore = defineStore('canvas', {
           this.viewport = { x: 0, y: 0, zoom: 1 }
           this.panels = []
           this.connections = []
+          this.groups = []
           this.selectedPanelIds = []
           this.selectedPanelId = null
           this.history = { past: [], future: [] }
@@ -621,6 +608,7 @@ export const useCanvasStore = defineStore('canvas', {
         viewport: { ...ws.viewport },
         panels: newPanels,
         connections: newConnections,
+        groups: [],
       }
       this.workspaces.push(newWs)
       this.switchWorkspace(newWs.id)
@@ -643,6 +631,7 @@ export const useCanvasStore = defineStore('canvas', {
           viewport: { ...ws.viewport },
           panels: JSON.parse(JSON.stringify(ws.panels)),
           connections: JSON.parse(JSON.stringify(ws.connections)),
+          groups: JSON.parse(JSON.stringify(ws.groups ?? [])),
         },
       }
       return JSON.stringify(data, null, 2)
@@ -661,6 +650,7 @@ export const useCanvasStore = defineStore('canvas', {
           this.viewport = { x: 0, y: 0, zoom: 1 }
           this.panels = []
           this.connections = []
+          this.groups = []
           this.selectedPanelIds = []
           this.selectedPanelId = null
           this.history = { past: [], future: [] }
@@ -771,7 +761,7 @@ export const useCanvasStore = defineStore('canvas', {
       Object.assign(panel, changes, { updated_at: new Date().toISOString() })
     },
 
-    /** 删除面板（同时清理相关连线） */
+    /** 删除面板（同时清理相关连线与分组归属） */
     deletePanel(id: string): void {
       this.connections = this.connections.filter(
         (c) => c.source_panel_id !== id && c.target_panel_id !== id,
@@ -779,6 +769,7 @@ export const useCanvasStore = defineStore('canvas', {
       this.panels = this.panels.filter((p) => p.id !== id)
       this.selectedPanelIds = this.selectedPanelIds.filter((pid) => pid !== id)
       if (this.selectedPanelId === id) this.selectedPanelId = null
+      this._prunePanelFromGroups(id)
       this._save()
     },
 
@@ -787,6 +778,7 @@ export const useCanvasStore = defineStore('canvas', {
       if (this.panels.length === 0) return
       this.connections = []
       this.panels = []
+      this.groups = []
       this.selectedPanelIds = []
       this.selectedPanelId = null
     },
@@ -867,7 +859,7 @@ export const useCanvasStore = defineStore('canvas', {
       this.selectedPanelId = null
     },
 
-    /** 框选：所有中心点落在 rect 内的面板 */
+    /** 框选：所有中心点落在 rect 内的面板（折叠分组的隐藏成员不参与框选） */
     selectPanelsInRect({ startWorld, endWorld }: { startWorld: { x: number; y: number }; endWorld: { x: number; y: number } }, { append = false }: { append?: boolean } = {}): void {
       const left = Math.min(startWorld.x, endWorld.x)
       const right = Math.max(startWorld.x, endWorld.x)
@@ -876,6 +868,7 @@ export const useCanvasStore = defineStore('canvas', {
 
       const matched = this.panels
         .filter((p) => {
+          if (this.getGroupOfPanel(p.id)?.collapsed) return false
           const cx = p.x + p.width / 2
           const cy = p.y + p.height / 2
           return cx >= left && cx <= right && cy >= top && cy <= bottom
@@ -1077,6 +1070,7 @@ export const useCanvasStore = defineStore('canvas', {
           viewport: { ...this.viewport },
           panels: JSON.parse(JSON.stringify(this.panels)),
           connections: JSON.parse(JSON.stringify(this.connections)),
+          groups: JSON.parse(JSON.stringify(this.groups)),
         },
       }
       return JSON.stringify(data, null, 2)
@@ -1101,6 +1095,7 @@ export const useCanvasStore = defineStore('canvas', {
       }
       this.panels = JSON.parse(JSON.stringify(wsObj.panels))
       this.connections = JSON.parse(JSON.stringify(wsObj.connections))
+      this.groups = Array.isArray(wsObj.groups) ? JSON.parse(JSON.stringify(wsObj.groups)) : []
       this.selectedPanelIds = []
       this.selectedPanelId = null
       this._save()
@@ -1138,6 +1133,7 @@ export const useCanvasStore = defineStore('canvas', {
           }
           if (Array.isArray(rawData.panels)) this.panels = rawData.panels as CanvasPanel[]
           if (Array.isArray(rawData.connections)) this.connections = rawData.connections as CanvasConnection[]
+          if (Array.isArray(rawData.groups)) this.groups = rawData.groups as CanvasGroup[]
           // 加载完成后同步一次：确保 workspaces 中当前工作区数据与顶层一致
           // 避免旧版本数据中 workspaces 与顶层不同步，导致切换工作区时丢失数据
           this._syncCurrentWorkspace()
@@ -1160,6 +1156,7 @@ export const useCanvasStore = defineStore('canvas', {
       current.viewport = { ...this.viewport }
       current.panels = JSON.parse(JSON.stringify(this.panels))
       current.connections = JSON.parse(JSON.stringify(this.connections))
+      current.groups = JSON.parse(JSON.stringify(this.groups))
       current.updated_at = new Date().toISOString()
     },
 
@@ -1190,6 +1187,7 @@ export const useCanvasStore = defineStore('canvas', {
       this.activeWorkspaceId = null
       this.panels = []
       this.connections = []
+      this.groups = []
       this.selectedPanelId = null
       this.history.past = []
       this.history.future = []
@@ -1198,115 +1196,128 @@ export const useCanvasStore = defineStore('canvas', {
       await this._hydrateFromStorage()
     },
 
-    // ==================== 流程模式 ====================
+    // ==================== 分组 ====================
 
     /**
-     * 切换流程模式
+     * 从所有分组中移除指定节点，并解散因此变空的组（不触发保存）
      */
-    toggleFlowMode(): void {
-      this.isFlowMode = !this.isFlowMode
-      if (this.isFlowMode) {
-        // 进入流程模式时，自动分析流程
-        this.analyzeCurrentFlow()
+    _prunePanelFromGroups(panelId: string): void {
+      for (const group of this.groups) {
+        const idx = group.panel_ids.indexOf(panelId)
+        if (idx >= 0) group.panel_ids.splice(idx, 1)
       }
-      this._save()
+      this.groups = this.groups.filter((g) => g.panel_ids.length > 0)
     },
 
     /**
-     * 分析当前画布的流程，自动生成步骤分组
+     * 创建分组：已在其他组或已不存在的节点跳过
+     * @param options.snapshot=false 时不压撤销快照（批量建组由调用方压一次）
+     * @returns 新组 id（无可成组成员时为空串）与被跳过的节点 id 列表
      */
-    analyzeCurrentFlow(): void {
-      if (!this.isFlowMode) return
-
-      const steps = analyzeFlow(this.panels, this.connections)
-      
-      // 保留现有步骤的状态（如自定义名称、颜色等）
-      const existingStepMap = new Map(this.steps.map(s => [s.id, s]))
-      
-      this.steps = steps.map(newStep => {
-        const existing = existingStepMap.get(newStep.id)
-        if (existing) {
-          // 保留用户自定义的信息
-          return {
-            ...newStep,
-            name: existing.name || newStep.name,
-            description: existing.description || newStep.description,
-            color: existing.color || newStep.color,
-            status: existing.status || newStep.status,
-          }
+    createGroup(panelIds: string[], partial: Partial<CanvasGroup> = {}, options: { snapshot?: boolean } = {}): { id: string; skipped: string[] } {
+      const members: string[] = []
+      const skipped: string[] = []
+      for (const pid of panelIds) {
+        if (this.getGroupOfPanel(pid) || !this.panels.some((p) => p.id === pid)) {
+          skipped.push(pid)
+          continue
         }
-        return newStep
+        members.push(pid)
+      }
+      if (members.length === 0) return { id: '', skipped }
+
+      if (options.snapshot !== false) this.pushSnapshot()
+      const group: CanvasGroup = {
+        id: uid(),
+        name: partial.name || `分组 ${this.groups.length + 1}`,
+        color: partial.color || CANVAS_GROUP_COLORS[this.groups.length % CANVAS_GROUP_COLORS.length],
+        panel_ids: members,
+        collapsed: partial.collapsed ?? false,
+        locked: partial.locked ?? false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
+      this.groups.push(group)
+      this._save()
+      return { id: group.id, skipped }
+    },
+
+    /** 更新分组（名称/颜色） */
+    updateGroup(groupId: string, updates: Partial<Pick<CanvasGroup, 'name' | 'color'>>): void {
+      const group = this.groups.find((g) => g.id === groupId)
+      if (!group) return
+      this.pushSnapshot()
+      if (updates.name !== undefined) group.name = updates.name
+      if (updates.color !== undefined) group.color = updates.color
+      group.updated_at = new Date().toISOString()
+      this._save()
+    },
+
+    /** 解散分组（保留节点） */
+    dissolveGroup(groupId: string): void {
+      if (!this.groups.some((g) => g.id === groupId)) return
+      this.pushSnapshot()
+      this.groups = this.groups.filter((g) => g.id !== groupId)
+      this._save()
+    },
+
+    /** 把节点加入分组：已在其他组的节点跳过，返回跳过列表 */
+    addPanelsToGroup(groupId: string, panelIds: string[]): string[] {
+      const group = this.groups.find((g) => g.id === groupId)
+      if (!group) return []
+      const skipped: string[] = []
+      for (const pid of panelIds) {
+        if (this.getGroupOfPanel(pid) || !this.panels.some((p) => p.id === pid)) {
+          skipped.push(pid)
+          continue
+        }
+        group.panel_ids.push(pid)
+      }
+      if (skipped.length === panelIds.length) return skipped
+      group.updated_at = new Date().toISOString()
+      this._save()
+      return skipped
+    },
+
+    /** 把节点移出所属分组（组因此变空时自动解散） */
+    removePanelFromGroup(panelId: string): void {
+      if (!this.getGroupOfPanel(panelId)) return
+      this.pushSnapshot()
+      this._prunePanelFromGroups(panelId)
+      this._save()
+    },
+
+    /** 批量落位（一键整理布局用）：一次快照整体可撤销；返回实际移动的节点数 */
+    applyPanelPositions(positions: Record<string, { x: number; y: number }>): number {
+      const entries = Object.entries(positions).filter(([id, pos]) => {
+        const panel = this.panels.find((p) => p.id === id)
+        return !!panel && (panel.x !== pos.x || panel.y !== pos.y)
       })
-
-      this._save()
-    },
-
-    /**
-     * 添加步骤
-     */
-    addStep(step: Partial<CanvasStep>): string {
-      const id = step.id || `step_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-      const newStep: CanvasStep = {
-        id,
-        name: step.name || `步骤 ${this.steps.length + 1}`,
-        description: step.description,
-        color: step.color || '#409eff',
-        panel_ids: step.panel_ids || [],
-        order: step.order ?? this.steps.length,
-        depends_on: step.depends_on || [],
-        status: step.status,
-        created_at: step.created_at || new Date().toISOString(),
-        updated_at: step.updated_at || new Date().toISOString(),
+      if (entries.length === 0) return 0
+      this.pushSnapshot()
+      for (const [id, pos] of entries) {
+        this._updatePanelDirect(id, { x: pos.x, y: pos.y })
       }
-      
-      this.steps.push(newStep)
       this._save()
-      return id
+      return entries.length
     },
 
-    /**
-     * 更新步骤
-     */
-    updateStep(stepId: string, updates: Partial<CanvasStep>): void {
-      const index = this.steps.findIndex(s => s.id === stepId)
-      if (index === -1) return
-
-      const step = this.steps[index]
-      if (updates.name !== undefined) step.name = updates.name
-      if (updates.description !== undefined) step.description = updates.description
-      if (updates.color !== undefined) step.color = updates.color
-      if (updates.panel_ids !== undefined) step.panel_ids = updates.panel_ids
-      if (updates.order !== undefined) step.order = updates.order
-      if (updates.depends_on !== undefined) step.depends_on = updates.depends_on
-      if (updates.status !== undefined) step.status = updates.status
-      step.updated_at = new Date().toISOString()
-
+    /** 切换分组折叠 */
+    toggleGroupCollapsed(groupId: string): void {
+      const group = this.groups.find((g) => g.id === groupId)
+      if (!group) return
+      group.collapsed = !group.collapsed
+      group.updated_at = new Date().toISOString()
       this._save()
     },
 
-    /**
-     * 删除步骤
-     */
-    removeStep(stepId: string): void {
-      const index = this.steps.findIndex(s => s.id === stepId)
-      if (index === -1) return
-
-      this.steps.splice(index, 1)
+    /** 切换分组锁定 */
+    toggleGroupLocked(groupId: string): void {
+      const group = this.groups.find((g) => g.id === groupId)
+      if (!group) return
+      group.locked = !group.locked
+      group.updated_at = new Date().toISOString()
       this._save()
-    },
-
-    /**
-     * 添加节点到步骤
-     */
-    addPanelToStep(stepId: string, panelId: string): void {
-      const step = this.steps.find(s => s.id === stepId)
-      if (!step) return
-
-      if (!step.panel_ids.includes(panelId)) {
-        step.panel_ids.push(panelId)
-        step.updated_at = new Date().toISOString()
-        this._save()
-      }
     },
   },
 })

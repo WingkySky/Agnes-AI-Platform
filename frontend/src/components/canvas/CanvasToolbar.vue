@@ -61,7 +61,7 @@
 import { ref, computed } from 'vue'
 import {
   Hand, MousePointer2, Undo2, Redo2, Type, Image, Video, Music2, Settings2, Upload,
-  FolderOpen, Palette, Trash2, Eraser, Keyboard, GitBranch,
+  FolderOpen, Palette, Trash2, Eraser, Keyboard, Wand2, LayoutDashboard,
   Mic, FileText, Puzzle, Clapperboard, Bot,
 } from 'lucide-vue-next'
 import CanvasAppearancePanel from './CanvasAppearancePanel.vue'
@@ -80,8 +80,6 @@ const props = defineProps({
   showImageInfo: { type: Boolean, default: false },
   // 当前激活的工具：hand（移动）/ select（选择框选）
   activeTool: { type: String, default: 'hand' },
-  // 流程模式是否启用
-  isFlowMode: { type: Boolean, default: false },
   // Agent 面板是否打开
   showAgentPanel: { type: Boolean, default: false },
 })
@@ -100,7 +98,8 @@ const emit = defineEmits([
   'set-background',
   'toggle-image-info',
   'show-shortcuts',
-  'toggle-flow-mode',
+  'smart-group',
+  'arrange-layout',
 ])
 
 // 工具栏容器引用，用于计算 tooltip 水平位置
@@ -137,12 +136,10 @@ const buttonGroups = computed<any[][]>(() => [
     { id: 'tool-compose', label: t('canvas.toolbar.toolCompose') || '成片合成', icon: Puzzle, emit: 'add-node', payload: 'compose' },
     { id: 'tool-upload', label: t('canvas.toolbar.toolUpload'), icon: Upload, emit: 'upload-asset' },
   ],
-  // 组4：流程模式（识别执行顺序、步骤分组）
+  // 组4：智能分组 / 整理布局 / 我的素材/画布外观
   [
-    { id: 'tool-flow', label: t('canvas.toolbar.toolFlow'), icon: GitBranch, active: props.isFlowMode, emit: 'toggle-flow-mode' },
-  ],
-  // 组6：我的素材/画布外观
-  [
+    { id: 'tool-smart-group', label: t('canvas.toolbar.toolSmartGroup'), icon: Wand2, emit: 'smart-group' },
+    { id: 'tool-arrange', label: t('canvas.toolbar.toolArrange'), icon: LayoutDashboard, emit: 'arrange-layout' },
     { id: 'tool-assets', label: t('canvas.toolbar.toolAssets'), icon: FolderOpen, emit: 'open-asset-library' },
     { id: 'tool-style', label: t('canvas.toolbar.toolStyle'), icon: Palette, active: props.showAppearancePanel, emit: 'toggle-appearance-panel' },
   ],

@@ -1,7 +1,8 @@
 <!-- =====================================================
      CanvasContextMenu 画布右键上下文菜单
      - 固定定位在右键位置（由父组件传入 x, y）
-     - 节点右键：复制、删除
+     - 节点右键：成组（多选）、移出分组、复制、删除
+     - 分组右键：解散组、删除组与节点
      - 连线右键：删除
      - min-w-44（176px）、rounded-xl（12px）、边框 + 阴影 + backdrop-blur
      - 点击外部或菜单项后关闭
@@ -14,13 +15,33 @@
     @pointerdown.stop
     @click.stop
   >
-    <!-- 节点右键：复制 + 删除 -->
+    <!-- 节点右键：成组（多选）/ 移出分组 / 复制 / 删除 -->
     <template v-if="targetType === 'node'">
+      <button
+        v-if="selectionCount > 1"
+        type="button"
+        class="menu-item"
+        :style="itemStyle"
+        @click="handleEmit('group-create')"
+      >
+        <Boxes :size="16" />
+        <span>{{ t('canvas.group.create') }}</span>
+      </button>
+      <button
+        v-if="canRemoveFromGroup"
+        type="button"
+        class="menu-item"
+        :style="itemStyle"
+        @click="handleEmit('group-remove-panel')"
+      >
+        <Ungroup :size="16" />
+        <span>{{ t('canvas.group.removeFromGroup') }}</span>
+      </button>
       <button
         type="button"
         class="menu-item"
         :style="itemStyle"
-        @click="handleDuplicate"
+        @click="handleEmit('duplicate')"
       >
         <Plus :size="16" />
         <span>{{ t('canvas.contextMenu.duplicate') }}</span>
@@ -29,10 +50,32 @@
         type="button"
         class="menu-item is-danger"
         :style="dangerItemStyle"
-        @click="handleDelete"
+        @click="handleEmit('delete')"
       >
         <Trash2 :size="16" />
         <span>{{ t('canvas.contextMenu.delete') }}</span>
+      </button>
+    </template>
+
+    <!-- 分组右键：解散组（保留节点）/ 删除组与节点 -->
+    <template v-else-if="targetType === 'group'">
+      <button
+        type="button"
+        class="menu-item"
+        :style="itemStyle"
+        @click="handleEmit('group-dissolve')"
+      >
+        <Ungroup :size="16" />
+        <span>{{ t('canvas.group.ungroup') }}</span>
+      </button>
+      <button
+        type="button"
+        class="menu-item is-danger"
+        :style="dangerItemStyle"
+        @click="handleEmit('group-delete-with-nodes')"
+      >
+        <Trash2 :size="16" />
+        <span>{{ t('canvas.group.deleteGroupWithNodes') }}</span>
       </button>
     </template>
 
@@ -42,7 +85,7 @@
         type="button"
         class="menu-item is-danger"
         :style="dangerItemStyle"
-        @click="handleDelete"
+        @click="handleEmit('delete')"
       >
         <Trash2 :size="16" />
         <span>{{ t('canvas.contextMenu.delete') }}</span>
@@ -57,12 +100,14 @@
  *
  * 数据约定：
  *   - x, y：菜单显示位置（屏幕坐标）
- *   - targetType：'node' | 'connection'
+ *   - targetType：'node' | 'connection' | 'group'
+ *   - selectionCount：多选节点数（>1 显示"成组"）
+ *   - canRemoveFromGroup：目标节点已在分组中（显示"移出分组"）
  *   - theme：主题 token 对象
  * ===================================================== */
 
 import { onMounted, onUnmounted, computed } from 'vue'
-import { Plus, Trash2 } from 'lucide-vue-next'
+import { Boxes, Plus, Trash2, Ungroup } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
 
 const { t } = useI18n()
@@ -71,12 +116,24 @@ const { t } = useI18n()
 const props = defineProps({
   x: { type: Number, required: true },
   y: { type: Number, required: true },
-  targetType: { type: String, required: true }, // 'node' | 'connection'
+  targetType: { type: String, required: true }, // 'node' | 'connection' | 'group'
   theme: { type: Object, required: true },
+  // 多选节点数（>1 时节点菜单显示"成组"）
+  selectionCount: { type: Number, default: 1 },
+  // 目标节点是否属于某个分组（显示"移出分组"）
+  canRemoveFromGroup: { type: Boolean, default: false },
 })
 
 /* ---------- Emits 定义 ---------- */
-const emit = defineEmits(['duplicate', 'delete', 'close'])
+const emit = defineEmits([
+  'duplicate',
+  'delete',
+  'group-create',
+  'group-remove-panel',
+  'group-dissolve',
+  'group-delete-with-nodes',
+  'close',
+])
 
 /* ---------- 菜单容器样式 ---------- */
 
@@ -102,15 +159,9 @@ const dangerItemStyle = computed(() => ({
 
 /* ---------- 菜单项点击处理 ---------- */
 
-/** 复制：触发 duplicate 并关闭菜单 */
-function handleDuplicate() {
-  emit('duplicate')
-  emit('close')
-}
-
-/** 删除：触发 delete 并关闭菜单 */
-function handleDelete() {
-  emit('delete')
+/** 触发菜单动作并关闭菜单 */
+function handleEmit(action: 'duplicate' | 'delete' | 'group-create' | 'group-remove-panel' | 'group-dissolve' | 'group-delete-with-nodes') {
+  emit(action)
   emit('close')
 }
 

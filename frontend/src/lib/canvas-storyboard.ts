@@ -402,8 +402,8 @@ function defaultImageSize(): string {
   return matched?.value || '1024x1024'
 }
 
-/** 批量生成前积分预估确认（多组模式混合时分别估后汇总，一次确认） */
-async function confirmGroupedCost(
+/** 批量生成前积分预估确认（多组模式混合时分别估后汇总，一次确认；供整组重跑复用） */
+export async function confirmGroupedCost(
   groups: Array<{ type: 'image' | 'video'; mode?: string; size?: string; seconds?: number; count: number }>,
 ): Promise<boolean> {
   const { t } = useI18n()
@@ -440,22 +440,6 @@ async function confirmGroupedCost(
 /** 批量生成前积分预估确认（单组便捷封装） */
 async function confirmBatchCost(params: { type: 'image' | 'video'; mode?: string; size?: string; seconds?: number }, count: number): Promise<boolean> {
   return confirmGroupedCost([{ ...params, count }])
-}
-
-/** 脚本节点的分镜步骤组（StepGroup）：复用已有组，id 记录在节点 content.stepId */
-function ensureShotStep(scriptPanel: CanvasPanel): string {
-  const store = useCanvasStore()
-  const stepId = readString(scriptPanel.content, 'stepId')
-  if (stepId && store.steps.some((s) => s.id === stepId)) {
-    store.addPanelToStep(stepId, scriptPanel.id)
-    return stepId
-  }
-  const newId = store.addStep({
-    name: `${scriptPanel.name || '脚本'} · 分镜`,
-    panel_ids: [scriptPanel.id],
-  })
-  store.updatePanel(scriptPanel.id, { content: { stepId: newId } })
-  return newId
 }
 
 /* ---------- 批量派生分镜图 / 尾帧图 ---------- */
@@ -504,7 +488,6 @@ async function deriveImagesInternal(scriptPanel: CanvasPanel, items: PendingFram
   if (!ok) return
 
   store.pushSnapshot()
-  const stepId = ensureShotStep(scriptPanel)
   const baseX = scriptPanel.x + scriptPanel.width + 80
   // 前段帧行带基线：分镜网格下方独立行带；尾帧在其下一行带，链帧再按 seq 向下延伸（均与其首帧同列）
   const tailBaseY = scriptPanel.y + Math.ceil(allShots.length / GRID_COLS) * IMG_PITCH_Y + 60
@@ -576,7 +559,6 @@ async function deriveImagesInternal(scriptPanel: CanvasPanel, items: PendingFram
             lineage,
           },
         })
-        store.addPanelToStep(stepId, panelId)
         const target = store.panels.find((p) => p.id === panelId)
         if (!target) return
         const generatedId = await executeInNodeGeneration(target, store, { waitFor: true })
@@ -608,7 +590,6 @@ async function deriveImagesInternal(scriptPanel: CanvasPanel, items: PendingFram
         lineage,
       },
     })
-    store.addPanelToStep(stepId, panelId)
     if (item.role === 'last') {
       // 完成句柄：供下游衔接首帧 await 拿底图 URL
       let settle: (url: string | null) => void = () => {}
@@ -960,7 +941,6 @@ export async function deriveStoryboardVideos(scriptPanel: CanvasPanel): Promise<
   if (!ok) return
 
   store.pushSnapshot()
-  const stepId = ensureShotStep(scriptPanel)
   const tasks: Array<() => Promise<void>> = []
   let failedCount = 0
 
@@ -998,7 +978,6 @@ export async function deriveStoryboardVideos(scriptPanel: CanvasPanel): Promise<
     })
     // 连线：源分镜图 -> 视频节点（视觉血缘；image -> video 连线校验允许）
     store.addConnection({ source_panel_id: item.imageNodeId, target_panel_id: panelId, type: 'auto' })
-    store.addPanelToStep(stepId, panelId)
     tasks.push(async () => {
       const target = store.panels.find((p) => p.id === panelId)
       if (!target) return
@@ -1048,7 +1027,6 @@ export async function deriveVideoForShot(imageResultPanel: CanvasPanel): Promise
   if (!canGenerate) return
 
   store.pushSnapshot()
-  const stepId = ensureShotStep(scriptPanel)
   const panelId = store.addPanel({
     type: 'video',
     name: `#${shot.no} ${t('canvas.script.videoSuffix')}`,
@@ -1074,7 +1052,6 @@ export async function deriveVideoForShot(imageResultPanel: CanvasPanel): Promise
   })
   const sourceNode = firstPanel || imageResultPanel
   store.addConnection({ source_panel_id: sourceNode.id, target_panel_id: panelId, type: 'auto' })
-  store.addPanelToStep(stepId, panelId)
   const target = store.panels.find((p) => p.id === panelId)
   if (target) await executeInNodeVideoGeneration(target, store)
   ElMessage.success(t('canvas.messages.videoDerived'))
@@ -1154,7 +1131,6 @@ export async function deriveChainVideosForShot(scriptPanel: CanvasPanel, shot: C
   if (!ok) return
 
   store.pushSnapshot()
-  const stepId = ensureShotStep(scriptPanel)
   if (fillItems.length + reshootPanels.length > 0) {
     ElMessage.info(t('canvas.messages.chainFillingFrames', { n: fillItems.length + reshootPanels.length }))
   }
@@ -1198,7 +1174,6 @@ export async function deriveChainVideosForShot(scriptPanel: CanvasPanel, shot: C
         },
       })
       chainIds[seq] = panelId
-      store.addPanelToStep(stepId, panelId)
       const target = store.panels.find((p) => p.id === panelId)
       if (!target) return
       await executeInNodeGeneration(target, store, { waitFor: true })
@@ -1262,7 +1237,6 @@ export async function deriveChainVideosForShot(scriptPanel: CanvasPanel, shot: C
     segPanelIds.push(panelId)
     store.addConnection({ source_panel_id: chainIds[i - 1]!, target_panel_id: panelId, type: 'auto' })
     store.addConnection({ source_panel_id: chainIds[i]!, target_panel_id: panelId, type: 'auto' })
-    store.addPanelToStep(stepId, panelId)
     segTasks.push(async () => {
       const target = store.panels.find((p) => p.id === panelId)
       if (!target) return
@@ -1297,7 +1271,6 @@ export async function deriveChainVideosForShot(scriptPanel: CanvasPanel, shot: C
   for (const segId of segPanelIds) {
     store.addConnection({ source_panel_id: segId, target_panel_id: composeId, type: 'auto' })
   }
-  store.addPanelToStep(stepId, composeId)
   await runChainCompose(composeId, segPanelIds)
 }
 

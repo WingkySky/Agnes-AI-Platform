@@ -780,8 +780,9 @@ function formatBytes(bytes: number) {
 
 /* ---------- 交互：拖拽移动 ---------- */
 
-/** 鼠标按下：开始拖拽节点 */
+/** 鼠标按下：开始拖拽节点（仅左键；右键需保留多选状态供上下文菜单"成组"使用） */
 function handleMouseDown(event: MouseEvent) {
+  if (event.button !== 0) return
   // 输入类元素不拦截，让元素正常工作
   const tag = (event.target instanceof Element ? event.target.tagName : '') || ''
   if (['INPUT', 'TEXTAREA', 'BUTTON', 'SELECT'].includes(tag)) return

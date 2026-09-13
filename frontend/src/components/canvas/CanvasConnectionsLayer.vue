@@ -10,6 +10,7 @@
 import { computed } from 'vue'
 import { useCanvasStore } from '@/stores/canvas'
 import type { CanvasPanel, CanvasConnection } from '@/stores/canvas'
+import { collapsedGroupAnchors } from '@/lib/canvas-groups'
 
 /** 连线拖拽中的临时状态 */
 interface ConnectingState {
@@ -61,7 +62,7 @@ function getPanelById(id: string): CanvasPanel | null {
 
 // ---------- 计算贝塞尔曲线路径 ----------
 // 从源节点右侧中点到目标节点左侧中点，曲率为距离的 50%（最小 50）
-function computePath(from: CanvasPanel, to: CanvasPanel) {
+function computePath(from: { x: number; y: number; width: number; height: number }, to: { x: number; y: number; width: number; height: number }) {
   const startX = from.x + from.width
   const startY = from.y + from.height / 2
   const endX = to.x
@@ -71,16 +72,24 @@ function computePath(from: CanvasPanel, to: CanvasPanel) {
   return `M ${startX} ${startY} C ${startX + curvature} ${startY}, ${endX - curvature} ${endY}, ${endX} ${endY}`
 }
 
+// ---------- 折叠组成员的胶囊锚点（端点在折叠组内时，连线锚到胶囊边缘） ----------
+const memberAnchors = computed(() => collapsedGroupAnchors(store.groups, currentPanels.value))
+
 // ---------- 已建立连线路径列表 ----------
 const connectionPaths = computed(() => {
   const result: { id: string; path: string; active: boolean }[] = []
+  const anchors = memberAnchors.value
   for (const conn of currentConnections.value || []) {
     const from = getPanelById(conn.source_panel_id)
     const to = getPanelById(conn.target_panel_id)
     if (!from || !to) continue
+    const fromAnchor = anchors.get(conn.source_panel_id)
+    const toAnchor = anchors.get(conn.target_panel_id)
+    // 折叠组内部互连：隐藏
+    if (fromAnchor && toAnchor && fromAnchor.groupId === toAnchor.groupId) continue
     result.push({
       id: conn.id,
-      path: computePath(from, to),
+      path: computePath(fromAnchor?.rect ?? from, toAnchor?.rect ?? to),
       active: conn.id === currentSelectedId.value,
     })
   }

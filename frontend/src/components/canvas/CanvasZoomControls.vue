@@ -143,6 +143,7 @@ const shortcuts = computed(() => [
   { label: 'Ctrl + A', value: t('canvas.help.ctrlA') },
   { label: 'Ctrl + S', value: t('canvas.help.ctrlS') },
   { label: 'Ctrl + L', value: t('canvas.help.ctrlL') },
+  { label: 'Ctrl + G', value: t('canvas.help.ctrlG') },
   { label: 'Delete / Backspace', value: t('canvas.help.delete') },
   { label: 'Escape', value: t('canvas.help.escape') },
 ])

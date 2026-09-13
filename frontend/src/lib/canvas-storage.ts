@@ -20,6 +20,7 @@ interface CanvasStorageData {
   viewport?: Record<string, any>
   panels?: any[]
   connections?: any[]
+  groups?: any[]
 }
 
 const BASE_STORAGE_KEY = 'agnes_canvas_v2'
@@ -157,6 +158,7 @@ export function saveCanvas(state: CanvasStorageData): void {
         viewport: state.viewport,
         panels: state.panels,
         connections: state.connections,
+        groups: state.groups,
       }))
       const key = storageKey()
       await canvasStore.setItem(key, plain)
