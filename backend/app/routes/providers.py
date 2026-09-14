@@ -6,9 +6,10 @@
 #   - 模型同步（调用 Provider 的 /models API）
 # =====================================================
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.response import ok
+from app.core.security import get_current_admin_user
 
 from app.schemas.providers import (
     ProviderCreateRequest,
@@ -26,7 +27,8 @@ from app.schemas.providers import (
 )
 from app.services.provider_registry import provider_registry
 
-router = APIRouter()
+# Provider/模型管理是纯管理员功能，整路由挂 admin 依赖（未登录 401 / 普通用户 403）
+router = APIRouter(dependencies=[Depends(get_current_admin_user)])
 
 
 # =====================================================
