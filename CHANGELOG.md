@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### 安全收尾：验证码 CSPRNG + 依赖升级
+- **验证码随机源**：captcha_service 全部随机数从 `random` 换成 `secrets`（CSPRNG）——图形验证码字符、**邮箱重置密码验证码**（可预测源等于账号接管入口）、干扰线/点/颜色装饰性随机一并切换（新增 `_randint` 封装 `secrets.randbelow`）
+- **依赖升级**（pip-audit 全清，0 已知漏洞通告）：pillow 12.2→12.3（7 条通告）、starlette 1.2.1→1.3.1、pydantic-settings 2.14.1→2.14.2、cryptography 49→50、aiohttp 3.14.1→3.14.3、h2 4.3→4.4.1；requirements.txt 地板同步（Pillow>=12.3.0 / pydantic-settings>=2.14.2 / cryptography>=50.0.0）
+- **安全扫描**：Mimosa 复扫 57→35 条，低危清零；剩余 6 高危为已核实误报（pipeline 所有权已绑定 + i18n UI 文案）、29 中危为 Depends 解析盲区候选
+
 ### 管理员日志查看（后端日志 + 前端错误上报）
 - **管理页**：新增 `/admin/logs`「日志查看」（AdminLayout 系统配置组菜单项，`log:view` 权限点 + requiresAdmin 双重门控）——双 Tab（后端日志 / 前端日志）各自独立记忆数据源与筛选；后端 Tab 数据源可在全量日志 / 错误日志 / 轮转备份间切换（文件名+大小来自 stats）；筛选（级别/关键词/request_id/时间范围快捷项）、行展开完整堆栈与上下文、复制单条、按 request_id 一键追踪、before 游标「加载更多」、手动刷新 + 10 秒自动刷新开关、下载当前文件（带 JWT 走 useDownload）、清空当前文件（二次确认，主文件连同轮转备份一并处理）；i18n 中英同步
 - **前端错误上报链路**：新增 `lib/logReporter.ts` 全局收集器（window error 含资源加载 / unhandledrejection / console.error 包装 / axios 拦截器挂钩仅 5xx 与网络失败），原生 fetch + sendBeacon 上报（不经 axios 防递归），满 10 条或每 10 秒批量，单条 message/stack 截断、单会话 200 条上限防错误风暴；main.ts 安装一次

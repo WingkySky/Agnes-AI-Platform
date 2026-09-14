@@ -1,6 +1,6 @@
 fastapi>=0.110.0
 uvicorn[standard]>=0.27.0
-pydantic-settings>=2.2.0
+pydantic-settings>=2.14.2
 python-dotenv>=1.0.0
 SQLAlchemy>=2.0.28
 httpx>=0.27.0
@@ -9,12 +9,12 @@ aiofiles>=23.2.1
 aiosqlite>=0.20.0  # SQLite 异步驱动（用于 AsyncSession）
 greenlet>=3.0.0    # SQLAlchemy async 内部依赖（协程切换）
 # API Key 加密存储
-cryptography>=42.0.0  # Fernet 对称加密（用于加密 Provider 的 api_key）
+cryptography>=50.0.0  # Fernet 对称加密（用于加密 Provider 的 api_key）
 # 用户认证与 JWT
 PyJWT>=2.8.0           # JSON Web Token 生成与验证
 bcrypt>=4.1.0          # 密码哈希（替代 passlib，更轻量）
 # 图片验证码
-Pillow>=10.0.0         # 图片验证码生成
+Pillow>=12.3.0         # 图片验证码生成
 # 邮件发送
 aiosmtplib>=3.0.0      # 异步 SMTP 邮件发送
 # LLM 输出 JSON 修复（流水线 LLM 步骤解析容错）

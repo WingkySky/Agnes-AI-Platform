@@ -7,7 +7,7 @@
 
 import base64
 import io
-import random
+import secrets
 import string
 import time
 import uuid
@@ -24,12 +24,17 @@ _captcha_store: dict[str, dict] = {}
 _last_cleanup_time = 0
 
 
+def _randint(lo: int, hi: int) -> int:
+    """闭区间随机整数（CSPRNG，消除随机源可预测性）"""
+    return lo + secrets.randbelow(hi - lo + 1)
+
+
 def _generate_random_code(length: int = 4) -> str:
     """生成随机验证码（字母数字混合，去掉易混淆字符）"""
     # 去掉容易混淆的字符：0, O, o, 1, I, l
     chars = string.ascii_uppercase + string.digits
     chars = chars.replace("0", "").replace("O", "").replace("I", "").replace("1", "")
-    return "".join(random.choices(chars, k=length))
+    return "".join(secrets.choice(chars) for _ in range(length))
 
 
 def _generate_captcha_image(code: str, width: int = 120, height: int = 40) -> bytes:
@@ -54,33 +59,33 @@ def _generate_captcha_image(code: str, width: int = 120, height: int = 40) -> by
     draw = ImageDraw.Draw(image)
 
     # 随机背景色（浅色）
-    bg_r = random.randint(240, 250)
-    bg_g = random.randint(240, 250)
-    bg_b = random.randint(245, 255)
+    bg_r = _randint(240, 250)
+    bg_g = _randint(240, 250)
+    bg_b = _randint(245, 255)
     image = Image.new("RGB", (width, height), (bg_r, bg_g, bg_b))
     draw = ImageDraw.Draw(image)
 
     # 画干扰线
     for _ in range(3):
-        x1 = random.randint(0, width)
-        y1 = random.randint(0, height)
-        x2 = random.randint(0, width)
-        y2 = random.randint(0, height)
+        x1 = _randint(0, width)
+        y1 = _randint(0, height)
+        x2 = _randint(0, width)
+        y2 = _randint(0, height)
         color = (
-            random.randint(150, 200),
-            random.randint(150, 200),
-            random.randint(180, 220),
+            _randint(150, 200),
+            _randint(150, 200),
+            _randint(180, 220),
         )
         draw.line([(x1, y1), (x2, y2)], fill=color, width=1)
 
     # 画干扰点
     for _ in range(30):
-        x = random.randint(0, width)
-        y = random.randint(0, height)
+        x = _randint(0, width)
+        y = _randint(0, height)
         color = (
-            random.randint(100, 200),
-            random.randint(100, 200),
-            random.randint(150, 220),
+            _randint(100, 200),
+            _randint(100, 200),
+            _randint(150, 220),
         )
         draw.point((x, y), fill=color)
 
@@ -100,14 +105,14 @@ def _generate_captcha_image(code: str, width: int = 120, height: int = 40) -> by
     for i, char in enumerate(code):
         # 随机颜色（深色）
         color = (
-            random.randint(30, 100),
-            random.randint(30, 100),
-            random.randint(100, 180),
+            _randint(30, 100),
+            _randint(30, 100),
+            _randint(100, 180),
         )
 
         # 字符位置（带随机偏移）
-        x = i * char_width + random.randint(2, 8)
-        y = random.randint(2, 8)
+        x = i * char_width + _randint(2, 8)
+        y = _randint(2, 8)
 
         # 绘制字符
         draw.text((x, y), char, font=font, fill=color)
@@ -219,7 +224,7 @@ _email_code_store: dict[str, dict] = {}
 
 def generate_email_code() -> str:
     """生成 6 位数字邮箱验证码"""
-    return "".join(random.choices("0123456789", k=6))
+    return "".join(secrets.choice("0123456789") for _ in range(6))
 
 
 def can_send_email_code(email: str) -> Tuple[bool, str]:
