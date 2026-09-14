@@ -54,8 +54,12 @@ backend/test_data/
 
 # AI skill 工作目录（brainstorming 缓存等）
 .superpowers/
-# AI 会话工作目录（计划文件等）
 .zcode/
+
+# 本地工具缓存/扫描产物（不入库）
+.mimosa/
+.v2c/
+.video_agent/
 
 # AI 会话规划/调试产物（planning-with-files 技能约定文件名，本地保留不入库）
 task_plan.md
