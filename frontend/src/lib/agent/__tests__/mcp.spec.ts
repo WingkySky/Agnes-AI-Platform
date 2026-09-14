@@ -69,6 +69,37 @@ describe('mcp 工具转译', () => {
     vi.mocked(fetchMcpAgentTools).mockRejectedValueOnce(new Error('网络错误'))
     expect(await buildMcpTools()).toEqual([])
   })
+
+  it('schema 剥 format：中文 URL 不被内核 format:uri 拒绝（2026-09-13 fetch 失败回归）', async () => {
+    mockedAgentTools = [
+      {
+        server_id: 3,
+        server_name: '网页抓取',
+        tools: [
+          { name: 'fetch', description: '抓取网页', input_schema: { type: 'object', properties: { url: { type: 'string', format: 'uri', description: 'URL' } }, required: ['url'] } },
+        ],
+      },
+    ]
+    const tools = await buildMcpTools()
+    expect(JSON.stringify(tools[0].parameters)).not.toContain('"format"')
+    const fake = createFakeStreamFn([
+      { toolCalls: [{ id: 't1', name: 'mcp__3__fetch', args: { url: 'https://zh.wikipedia.org/wiki/三英战吕布' } }] },
+      { text: 'ok' },
+    ])
+    const events: KernelEvent[] = []
+    const kernel = new AgentKernel({
+      getCanvas: () => makeCanvas(),
+      getMode: () => 'auto',
+      systemPrompt: AGENT_SYSTEM_PROMPT_BASE,
+      getAuthToken: async () => 't',
+      streamFn: fake.streamFn,
+      extraTools: tools,
+    })
+    kernel.subscribe((e) => events.push(e))
+    await kernel.send('查资料')
+    const end = events.find((e) => e.type === 'tool_end')
+    expect(end && 'ok' in end && end.ok).toBe(true)
+  })
 })
 
 describe('内核 MCP 工具注入与门', () => {

@@ -4,7 +4,9 @@
  * - 命名约定 mcp__{serverId}__{tool}：数字 id 合法唯一，前缀同时是 policy
  *   的 'mcp' 组判定依据（纯命名约定，见 policy.ts）
  * - MCP inputSchema（JSON Schema）经 Type.Unsafe 直接作 parameters，
- *   机制层只做序列化透传，不做 TypeBox 重建
+ *   机制层只做序列化透传，不做 TypeBox 重建；仅剥掉 format——内核 TypeBox 对
+ *   format:"uri" 按 RFC 3986 强制 ASCII，LLM 常直接产出未编码 IRI（中文 URL）
+ *   会被前端拒掉，参数把关交给 MCP 服务端
  * - 服务器故障降级：单服务器清单获取失败跳过，整体失败返回空，不阻塞会话
  * ===================================================== */
 
@@ -19,13 +21,27 @@ export function mcpToolName(serverId: number, tool: string): string {
   return `${MCP_TOOL_PREFIX}${serverId}__${tool}`
 }
 
+/** schema 洗一遍剥掉 format（含嵌套）：见文件头注释 */
+function isSchemaObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+function sanitizeSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(schema)) {
+    if (k === 'format') continue
+    out[k] = Array.isArray(v) ? v.map((it) => (isSchemaObject(it) ? sanitizeSchema(it) : it)) : isSchemaObject(v) ? sanitizeSchema(v) : v
+  }
+  return out
+}
+
 /** 单个 MCP 工具定义 → 内核 HostTool（execute 走后端 BFF） */
 function toHostTool(serverId: number, serverName: string, def: McpAgentTool): HostTool {
   const schema = def.input_schema && typeof def.input_schema === 'object' ? def.input_schema : { type: 'object' }
   return {
     name: mcpToolName(serverId, def.name),
     description: `【MCP·${serverName}】${def.description || def.name}`,
-    parameters: Type.Unsafe(schema),
+    parameters: Type.Unsafe(sanitizeSchema(schema)),
     execute: async (args) => {
       try {
         return { ok: true, data: await callMcpTool(serverId, def.name, args) }
