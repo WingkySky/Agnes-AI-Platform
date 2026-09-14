@@ -258,6 +258,9 @@ interface CanvasState {
   selectedPanelId: string | null
   selectedConnectionId: string | null
 
+  // ---------- 连线显示（节点多时隐藏连线让聚类墙更清爽） ----------
+  showConnections: boolean
+
   // ---------- 文本编辑（外部触发节点进入编辑模式） ----------
   // 当值等于某 panel.id 时，对应 CanvasNode 自动进入文本编辑态
   editingPanelId: string | null
@@ -321,6 +324,8 @@ export const useCanvasStore = defineStore('canvas', {
     selectedPanelIds: [],
     selectedPanelId: null,
     selectedConnectionId: null,
+
+    showConnections: true,
 
     // ---------- 文本编辑（外部触发节点进入编辑模式） ----------
     // 当值等于某 panel.id 时，对应 CanvasNode 自动进入文本编辑态
@@ -924,6 +929,11 @@ export const useCanvasStore = defineStore('canvas', {
     deleteConnection(id: string): void {
       this.connections = this.connections.filter((c) => c.id !== id)
       this._save()
+    },
+
+    /** 切换连线显示（节点多时隐藏连线更清爽） */
+    toggleShowConnections(): void {
+      this.showConnections = !this.showConnections
     },
 
     /** 开始拖拽连线：记录源节点和锚点类型；extraSourceIds 为框选批量接入的其他选中节点 */

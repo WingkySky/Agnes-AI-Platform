@@ -69,24 +69,31 @@ export type AssetCategory =
   | 'script' | 'character' | 'prop' | 'scene' | 'storyboard' | 'video'
   | 'audio' | 'subtitle' | 'compose' | 'config' | 'image'
 
-/** 资产类别规范排序（整理布局按此顺序分区：脚本 → 人物 → 物品 → 场景 → 分镜 → 生成视频 → 其余兜底） */
+/** 资产类别规范排序（整理布局按此顺序分堆：脚本 → 人物 → 物品 → 场景 → 分镜 → 视频 → 兜底类 → 合成最后） */
 export const ASSET_CATEGORY_ORDER: AssetCategory[] = [
   'script', 'character', 'prop', 'scene', 'storyboard', 'video',
-  'audio', 'subtitle', 'compose', 'config', 'image',
+  'audio', 'subtitle', 'config', 'image', 'compose',
 ]
 
-/** 图片提示词 → 类别的关键词推断（按序首个命中生效） */
+/** 图片提示词 → 类别的关键词推断（按序首个命中生效；镜头单帧约束与设定图标签是强特征，先于通用词） */
 const CATEGORY_KEYWORDS: Array<[AssetCategory, RegExp]> = [
+  ['storyboard', /单帧画面|电影剧照/],
+  ['character', /角色设定图|角色三视图/],
+  ['scene', /场景设定图/],
+  ['prop', /物品设定图/],
   ['character', /角色|人物|主角|男主|女主|配角|形象|character|portrait/i],
   ['scene', /场景|背景|环境|建筑|街道|房间|风景|scene|background|environment/i],
   ['prop', /道具|物品|服装|服饰|武器|产品|食物|prop|item|product|outfit/i],
 ]
 
+/** 分镜镜头节点命名约定："#镜号 剧本名" */
+const SHOT_NAME_PATTERN = /^#\d+\s/
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/** 判定节点资产类别：手动标记(meta.category) > 派生血缘 > 提示词关键词 > 类型兜底 */
+/** 判定节点资产类别：手动标记(meta.category) > 分镜镜头血缘 > 提示词关键词 > 脚本血缘 > 类型兜底 */
 export function detectAssetCategory(panel: CanvasPanel): AssetCategory {
   if (panel.type === 'script' || panel.type === 'text') return 'script'
   if (panel.type === 'video') return 'video'
@@ -101,16 +108,29 @@ export function detectAssetCategory(panel: CanvasPanel): AssetCategory {
   const matched = ASSET_CATEGORY_ORDER.find((c) => c === tagged)
   if (matched) return matched
 
-  const lineage = isRecord(content?.lineage) ? content?.lineage : undefined
-  if (lineage && typeof lineage.scriptPanelId === 'string') return 'storyboard'
+  const lineage = isRecord(content?.lineage) ? content.lineage : undefined
+  const derived = Boolean(lineage && typeof lineage.scriptPanelId === 'string')
+  // 分镜镜头血缘必有 shotId/shotNo；脚本派生的资产设定图没有
+  const isShot = Boolean(
+    lineage &&
+      derived &&
+      ((typeof lineage.shotId === 'string' && lineage.shotId) || typeof lineage.shotNo === 'number'),
+  )
+  const prompt = panel.type === 'image' && typeof content?.prompt === 'string' ? content.prompt : ''
+  // 无镜头血缘的镜头图兜底识别：提示词带单帧约束，或节点名按 "#镜号" 命名
+  const looksShot =
+    isShot ||
+    (panel.type === 'image' && typeof panel.name === 'string' && SHOT_NAME_PATTERN.test(panel.name)) ||
+    (panel.type === 'image' && /单帧画面|电影剧照/.test(prompt))
+  if (looksShot) return 'storyboard'
 
   if (panel.type === 'image') {
-    const prompt = typeof content?.prompt === 'string' ? content.prompt : ''
     for (const [category, pattern] of CATEGORY_KEYWORDS) {
       if (pattern.test(prompt)) return category
     }
   }
-  return 'image'
+  // 脚本派生的非镜头图（无关键词命中）仍按分镜归档；其余图片落兜底类
+  return derived ? 'storyboard' : 'image'
 }
 
 /** 分类分组建议 */

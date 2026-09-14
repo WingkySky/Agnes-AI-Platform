@@ -53,12 +53,12 @@
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item :label="t('admin.smtp.password')">
+            <el-form-item :label="t('admin.smtp.pwd')">
               <el-input
                 v-model="smtpConfig.smtp_password"
                 type="password"
                 show-password
-                :placeholder="t('admin.smtp.passwordPlaceholder')" />
+                :placeholder="t('admin.smtp.pwdPlaceholder')" />
             </el-form-item>
           </el-col>
         </el-row>

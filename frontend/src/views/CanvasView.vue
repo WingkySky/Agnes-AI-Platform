@@ -187,7 +187,9 @@
         :theme="store.canvasTheme"
         :zoom="store.viewport.zoom"
         :minimap-visible="minimapVisible"
+        :connections-visible="store.showConnections"
         @toggle-minimap="minimapVisible = !minimapVisible"
+        @toggle-connections="store.toggleShowConnections()"
         @reset-view="store.resetView()"
         @zoom-change="(z) => store.setZoom(z)"
       />
@@ -1322,9 +1324,10 @@ async function handleSmartGroupConfirm() {
 
 // ==================== 一键整理布局 ====================
 
-// 面板摆放位置优化：组/类型作为块横向平铺，块内整齐网格；已分组(锁定)节点不动，一步可撤销
+// 按产出管线分带行架堆叠（脚本→人物→物品→场景→分镜→…→合成）：行内排满换行、
+// 行序按上游连线质心校正让产出相邻；分镜图与直连视频配对（图左视频右）；锁定节点不动
 function handleArrangeLayout() {
-  const positions = computeArrangedLayout(store.panels, store.groups)
+  const positions = computeArrangedLayout(store.panels, store.groups, store.connections)
   const moved = store.applyPanelPositions(positions)
   if (moved === 0) {
     ElMessage.info(t('canvas.arrangeNone'))

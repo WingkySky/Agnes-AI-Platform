@@ -21,6 +21,17 @@
         <Compass class="icon" />
       </button>
 
+      <!-- 连线显隐开关（开启时高亮） -->
+      <button
+        class="dock-btn"
+        :style="connectionsVisible ? activeStyle : { color: theme.toolbar.item }"
+        :title="connectionsVisible ? t('canvas.zoom.connectionsHide') : t('canvas.zoom.connectionsShow')"
+        :aria-label="connectionsVisible ? t('canvas.zoom.connectionsHide') : t('canvas.zoom.connectionsShow')"
+        @click="$emit('toggle-connections')"
+      >
+        <Spline class="icon" />
+      </button>
+
       <!-- 重置视图 -->
       <button
         class="dock-btn"
@@ -72,7 +83,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { Compass, Focus } from 'lucide-vue-next'
+import { Compass, Focus, Spline } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
 
 const { t } = useI18n()
@@ -81,9 +92,10 @@ const props = defineProps({
   theme: { type: Object, required: true },
   zoom: { type: Number, default: 1 }, // 当前缩放倍数 0.05-5
   minimapVisible: { type: Boolean, default: false },
+  connectionsVisible: { type: Boolean, default: true },
 })
 
-const emit = defineEmits(['toggle-minimap', 'reset-view', 'zoom-change'])
+const emit = defineEmits(['toggle-minimap', 'toggle-connections', 'reset-view', 'zoom-change'])
 
 // 快捷键帮助弹窗开关
 const shortcutsOpen = ref(false)

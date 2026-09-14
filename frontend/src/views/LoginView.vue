@@ -53,8 +53,8 @@ const loginRules: FormRules = {
     { min: 3, max: 32, message: t('login.usernameLength'), trigger: 'blur' }
   ],
   password: [
-    { required: true, message: t('login.passwordRequired'), trigger: 'blur' },
-    { min: 6, max: 64, message: t('login.passwordLength'), trigger: 'blur' }
+    { required: true, message: t('login.pwdRequired'), trigger: 'blur' },
+    { min: 6, max: 64, message: t('login.pwdLength'), trigger: 'blur' }
   ],
   captcha_code: [
     { required: true, message: t('login.captchaRequired'), trigger: 'blur' },
@@ -112,15 +112,15 @@ const registerRules: FormRules = {
     { type: 'email', message: t('login.emailInvalid'), trigger: 'blur' }
   ],
   password: [
-    { required: true, message: t('login.passwordRequired'), trigger: 'blur' },
-    { min: 6, max: 64, message: t('login.passwordLength'), trigger: 'blur' }
+    { required: true, message: t('login.pwdRequired'), trigger: 'blur' },
+    { min: 6, max: 64, message: t('login.pwdLength'), trigger: 'blur' }
   ],
   confirmPassword: [
-    { required: true, message: t('login.confirmPasswordRequired'), trigger: 'blur' },
+    { required: true, message: t('login.confirmPwdRequired'), trigger: 'blur' },
     {
       validator: (_rule, value, callback) => {
         if (value !== registerForm.value.password) {
-          callback(new Error(t('login.passwordMismatch')))
+          callback(new Error(t('login.pwdMismatch')))
         } else {
           callback()
         }
@@ -179,15 +179,15 @@ const forgotPasswordRules: FormRules = {
     { len: 6, message: t('login.emailCodeLength'), trigger: 'blur' }
   ],
   newPassword: [
-    { required: true, message: t('login.passwordRequired'), trigger: 'blur' },
-    { min: 6, max: 64, message: t('login.passwordLength'), trigger: 'blur' }
+    { required: true, message: t('login.pwdRequired'), trigger: 'blur' },
+    { min: 6, max: 64, message: t('login.pwdLength'), trigger: 'blur' }
   ],
   confirmPassword: [
-    { required: true, message: t('login.confirmPasswordRequired'), trigger: 'blur' },
+    { required: true, message: t('login.confirmPwdRequired'), trigger: 'blur' },
     {
       validator: (_rule, value, callback) => {
         if (value !== forgotPasswordForm.value.newPassword) {
-          callback(new Error(t('login.passwordMismatch')))
+          callback(new Error(t('login.pwdMismatch')))
         } else {
           callback()
         }
@@ -269,7 +269,7 @@ async function handleResetPassword() {
       code: forgotPasswordForm.value.code,
       new_password: forgotPasswordForm.value.newPassword
     })
-    ElMessage.success(t('login.resetPasswordSuccess'))
+    ElMessage.success(t('login.resetPwdSuccess'))
     forgotPasswordVisible.value = false
     // 切换到登录 tab
     activeTab.value = 'login'
@@ -346,11 +346,11 @@ watch(activeTab, (newTab) => {
                   autocomplete="username"
                 />
               </el-form-item>
-              <el-form-item :label="t('login.password')" prop="password">
+              <el-form-item :label="t('login.pwd')" prop="password">
                 <el-input
                   v-model="loginForm.password"
                   type="password"
-                  :placeholder="t('login.passwordPlaceholder')"
+                  :placeholder="t('login.pwdPlaceholder')"
                   show-password
                   :prefix-icon="Lock"
                   autocomplete="current-password"
@@ -393,7 +393,7 @@ watch(activeTab, (newTab) => {
             </el-form>
             <div class="switch-hint">
               <el-link type="primary" class="forgot-link" @click="openForgotPassword">
-                {{ t('login.forgotPassword') }}
+                {{ t('login.forgotPwd') }}
               </el-link>
             </div>
             <div class="switch-hint">
@@ -429,21 +429,21 @@ watch(activeTab, (newTab) => {
                   autocomplete="email"
                 />
               </el-form-item>
-              <el-form-item :label="t('login.password')" prop="password">
+              <el-form-item :label="t('login.pwd')" prop="password">
                 <el-input
                   v-model="registerForm.password"
                   type="password"
-                  :placeholder="t('login.passwordHint')"
+                  :placeholder="t('login.pwdHint')"
                   show-password
                   :prefix-icon="Lock"
                   autocomplete="new-password"
                 />
               </el-form-item>
-              <el-form-item :label="t('login.confirmPassword')" prop="confirmPassword">
+              <el-form-item :label="t('login.confirmPwd')" prop="confirmPassword">
                 <el-input
                   v-model="registerForm.confirmPassword"
                   type="password"
-                  :placeholder="t('login.confirmPasswordPlaceholder')"
+                  :placeholder="t('login.confirmPwdPlaceholder')"
                   show-password
                   :prefix-icon="Lock"
                   autocomplete="new-password"
@@ -496,7 +496,7 @@ watch(activeTab, (newTab) => {
     <!-- 忘记密码弹窗 -->
     <el-dialog
       v-model="forgotPasswordVisible"
-      :title="t('login.forgotPassword')"
+      :title="t('login.forgotPwd')"
       width="420px"
       :close-on-click-modal="false"
       destroy-on-close
@@ -510,7 +510,7 @@ watch(activeTab, (newTab) => {
         <!-- 第一步：输入邮箱 -->
         <template v-if="forgotPasswordStep === 'email'">
           <el-alert
-            :title="t('login.forgotPasswordTip')"
+            :title="t('login.forgotPwdTip')"
             type="info"
             :closable="false"
             show-icon
@@ -550,26 +550,26 @@ watch(activeTab, (newTab) => {
         <!-- 第二步：重置密码 -->
         <template v-else>
           <el-alert
-            :title="t('login.resetPasswordTip')"
+            :title="t('login.resetPwdTip')"
             type="success"
             :closable="false"
             show-icon
             class="forgot-alert"
           />
-          <el-form-item :label="t('login.newPassword')" prop="newPassword" style="margin-top: 16px;">
+          <el-form-item :label="t('login.newPwd')" prop="newPassword" style="margin-top: 16px;">
             <el-input
               v-model="forgotPasswordForm.newPassword"
               type="password"
-              :placeholder="t('login.passwordHint')"
+              :placeholder="t('login.pwdHint')"
               show-password
               :prefix-icon="Lock"
             />
           </el-form-item>
-          <el-form-item :label="t('login.confirmPassword')" prop="confirmPassword">
+          <el-form-item :label="t('login.confirmPwd')" prop="confirmPassword">
             <el-input
               v-model="forgotPasswordForm.confirmPassword"
               type="password"
-              :placeholder="t('login.confirmPasswordPlaceholder')"
+              :placeholder="t('login.confirmPwdPlaceholder')"
               show-password
               :prefix-icon="Lock"
               @keyup.enter="handleResetPassword"

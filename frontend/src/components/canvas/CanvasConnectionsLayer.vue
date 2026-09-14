@@ -2,6 +2,7 @@
      CanvasConnectionsLayer 画布连线层
      - 渲染节点之间的贝塞尔曲线连线
      - 选中/未选中样式（activeStroke 发光 / muted 半透明）
+     - 节点选中聚焦：高亮与选中节点相连的边，压暗其余（产出关系聚焦）
      - 透明热区路径（strokeWidth 16）便于点击命中
      - 拖拽创建连线时显示虚线临时路径
      ===================================================== -->
@@ -75,9 +76,12 @@ function computePath(from: { x: number; y: number; width: number; height: number
 // ---------- 折叠组成员的胶囊锚点（端点在折叠组内时，连线锚到胶囊边缘） ----------
 const memberAnchors = computed(() => collapsedGroupAnchors(store.groups, currentPanels.value))
 
+// ---------- 节点选中聚焦：选中节点后只高亮与其相连的边，其余压暗 ----------
+const focusIds = computed(() => new Set(store.selectedPanelIds))
+
 // ---------- 已建立连线路径列表 ----------
 const connectionPaths = computed(() => {
-  const result: { id: string; path: string; active: boolean }[] = []
+  const result: { id: string; path: string; active: boolean; mode: 'normal' | 'lit' | 'dim' }[] = []
   const anchors = memberAnchors.value
   for (const conn of currentConnections.value || []) {
     const from = getPanelById(conn.source_panel_id)
@@ -87,10 +91,12 @@ const connectionPaths = computed(() => {
     const toAnchor = anchors.get(conn.target_panel_id)
     // 折叠组内部互连：隐藏
     if (fromAnchor && toAnchor && fromAnchor.groupId === toAnchor.groupId) continue
+    const touching = focusIds.value.has(conn.source_panel_id) || focusIds.value.has(conn.target_panel_id)
     result.push({
       id: conn.id,
       path: computePath(fromAnchor?.rect ?? from, toAnchor?.rect ?? to),
       active: conn.id === currentSelectedId.value,
+      mode: focusIds.value.size === 0 ? 'normal' : touching ? 'lit' : 'dim',
     })
   }
   return result
@@ -173,7 +179,7 @@ function handleDeleteConnection(id: string) {
 </script>
 
 <template>
-  <svg class="canvas-connections-layer" xmlns="http://www.w3.org/2000/svg">
+  <svg v-if="store.showConnections" class="canvas-connections-layer" xmlns="http://www.w3.org/2000/svg">
     <!-- 已建立连线 -->
     <g
       v-for="conn in connectionPaths"
@@ -191,15 +197,16 @@ function handleDeleteConnection(id: string) {
         @click.stop="handleSelectConnection(conn.id)"
         @contextmenu.prevent.stop="handleDeleteConnection(conn.id)"
       />
-      <!-- 可见路径：选中时 activeStroke + 发光；未选中时 muted + 半透明 -->
+      <!-- 可见路径：选中/聚焦时实线 + 发光；常态虚线低透明度弱化，被压暗时几乎隐形 -->
       <path
         :d="conn.path"
-        :stroke="conn.active ? currentTheme.node.activeStroke : currentTheme.node.muted"
-        :stroke-width="conn.active ? 3 : 2"
-        :stroke-opacity="conn.active ? 1 : 0.82"
+        :stroke="conn.active || conn.mode === 'lit' ? currentTheme.node.activeStroke : currentTheme.node.muted"
+        :stroke-width="conn.active ? 3 : conn.mode === 'lit' ? 2.5 : 1.5"
+        :stroke-opacity="conn.active || conn.mode === 'lit' ? 1 : conn.mode === 'dim' ? 0.08 : 0.25"
+        :stroke-dasharray="conn.active || conn.mode === 'lit' ? undefined : '5 5'"
         fill="none"
         :style="{
-          filter: conn.active ? `drop-shadow(0 0 8px ${currentTheme.node.activeStroke}66)` : 'none',
+          filter: conn.active || conn.mode === 'lit' ? `drop-shadow(0 0 8px ${currentTheme.node.activeStroke}66)` : 'none',
           pointerEvents: 'none',
         }"
       />
