@@ -15,11 +15,23 @@ Agnes AI Platform is a self-hosted web application that brings together multiple
 - **AI Chat** — Conversational AI with tool calling. Chat naturally, and the AI can automatically trigger image or video generation when it detects your intent.
 - **Image Generation** — Text-to-image and image-to-image, with multiple models and size options.
 - **Video Generation** — Text-to-video, image-to-video, and keyframe animation, with async polling and real-time progress.
-- **Infinite Canvas** — A free-form workspace where you can place generated images as nodes, connect them, and re-generate or remix with context-aware operations.
+- **Infinite Canvas** — A free-form workspace where you can place generated images as nodes, connect them, and re-generate or remix with context-aware operations. A built-in Canvas Agent can operate the canvas for you — just describe what you want.
+- **Preset Center** — Reusable creation configs (styles, effects, camera moves, prompts, scripts, skills) with cover previews, categories, and one-click apply.
 - **Multi-Provider Management** — Add and switch between multiple AI API providers (different base URLs, API keys) from the settings page. No need to edit `.env` files after initial setup.
 - **Generation History** — Persistent history with thumbnails, GIF previews, filtering, and batch operations.
+- **Community Plaza** — Browse community-shared creations for inspiration, or share your own works.
 
 All API keys are encrypted and stored on the server — they never reach the browser.
+
+## Screenshots
+
+| Infinite Canvas | AI Chat with Tool Calling |
+|---|---|
+| ![Infinite Canvas](docs/images/canvas.jpg) | ![AI Chat](docs/images/chat.jpg) |
+| **Image Generation** | **Preset Center** |
+| ![Image Generation](docs/images/image-generation.jpg) | ![Preset Center](docs/images/preset-center.jpg) |
+| **Generation History** | **Multi-Provider Management** |
+| ![Generation History](docs/images/history.jpg) | ![Provider Management](docs/images/settings.jpg) |
 
 ## How We Got Here
 
@@ -31,6 +43,7 @@ Agnes AI Platform started as a simple image & video generation tool. Here's how 
 | **v2 — Multi-Provider** | Replaced the single `.env` API key with a database-backed provider system. Add, edit, and switch providers from the UI. API keys encrypted at rest. |
 | **v3 — AI Chat** | Added a conversational AI interface with tool calling. The AI can detect your intent and trigger image/video generation automatically. Full SSE streaming. |
 | **v4 — Infinite Canvas** | Introduced a free-form canvas for composing and remixing generated images. Nodes, connections, mask editing, and context-aware re-generation. |
+| **v5 — Agent & Presets** | Canvas Agent that operates the canvas through conversation (create nodes, connect them, batch-generate), a Preset Center for reusable styles/effects/skills, and a community Plaza for sharing creations. |
 
 The platform continues to grow, but the core principle remains the same: **a self-hosted, secure, all-in-one AI creation workspace.**
 
