@@ -79,3 +79,6 @@
 - 后端采用全异步架构（FastAPI + httpx.AsyncClient + SQLAlchemy async），图片和视频任务互不阻塞。
 - 前端使用任务队列（Task Queue）统一管理图片和视频的异步生成任务，支持后台轮询和状态同步。
 - 流水线执行器的 `self.config` 是整个步骤对象（含 type/key/depends_on/config 等），内层配置通过 `self.config.get("config", {})` 提取，不要误判为多余嵌套而删除。
+- 后端鉴权靠逐端点/路由级 FastAPI `Depends`（`get_current_user` / `get_current_admin_user` / `require_permission`），没有全局中间件兜底；新增管理类路由必须显式挂鉴权依赖，并补 401/403/200 三态 pytest 用例锁死。Mimosa 静态扫描对 `Depends` 完全失明（含 router 级 `dependencies=[...]`），扫描报「未观察到权限检查」不等于真缺鉴权，复扫通过也不等于鉴权存在，一律以人工核对 + 测试为准。
+- 审计工具只要标出某文件任一端点缺鉴权，必须把该文件/路由的全部端点逐个排查——providers.py 曾整路由 14 个端点全裸但扫描器只标了 1 条。
+- 后端测试统一用 `backend/.venv/bin/python -m pytest`（环境里没有裸 `python`）；服务层自建 session 的模块（如 `provider_registry` 的 `new_async_session()`）不走请求注入的 `get_async_db`，相关测试需 monkeypatch 打桩隔离。
