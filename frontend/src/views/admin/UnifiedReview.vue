@@ -29,7 +29,7 @@
             :active-text="t('admin.review.autoRefreshOn')"
             :inactive-text="t('admin.review.autoRefreshOff')" />
         </el-tooltip>
-        <el-button :loading="loading" @click="loadList">
+        <el-button :loading="loading" @click="loadList()">
           <el-icon><Refresh /></el-icon>
           {{ t('common.refresh') }}
         </el-button>
