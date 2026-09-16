@@ -57,6 +57,11 @@ export function resetPassword(params: ResetPasswordRequest): Promise<null> {
   return client.post('/api/auth/reset-password', params)
 }
 
+/** 修改当前用户密码（需旧密码验证；成功后清除首登强制改密标记） */
+export function changePassword(params: { old_password: string; new_password: string }): Promise<null> {
+  return client.post('/api/auth/change-password', params)
+}
+
 /** 获取当前登录用户信息 */
 export function getMe(): Promise<UserInfoResponse> {
   return client.get('/api/auth/me', { silent: true })

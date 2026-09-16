@@ -19,6 +19,7 @@ import { ElMessage } from 'element-plus'
 import { login as apiLogin, register as apiRegister, getMe, getCredits, updateMyProfile, uploadAvatar, getCaptcha } from '@/api/auth'
 import { usePreferencesStore } from '@/stores/preferences'
 import { usePermissionStore } from '@/stores/permission'
+import { useSetupStore } from '@/stores/setup'
 import type { AuthLoginRequest, AuthRegisterRequest, UserInfoResponse, UpdateProfileRequest, CaptchaResponse } from '@/types'
 
 /** JWT 在 localStorage 中的 key（前端仅保存，不可篡改） */
@@ -189,6 +190,8 @@ export const useUserStore = defineStore('user', () => {
     // 重置权限
     const permStore = usePermissionStore()
     permStore.reset()
+    // 重置首启初始化状态（避免残留上个账号的待办判定）
+    useSetupStore().reset()
     try {
       localStorage.removeItem(TOKEN_STORAGE_KEY)
     } catch (e) {

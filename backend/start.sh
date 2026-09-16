@@ -42,6 +42,11 @@ $PY -c "import fastapi" 2>/dev/null || {
     $PY -m pip install -r requirements.txt -q
 }
 
+# 生成安全密钥（JWT_SECRET / ENCRYPTION_KEY 缺失或为占位串时自动写回 .env）
+# 数据库建表与种子数据由后端 lifespan 启动时自动完成
+echo ""
+$PY ensure_secrets.py
+
 # 检查 8000 端口是否被占用
 PORT=8000
 if lsof -ti:$PORT >/dev/null 2>&1; then

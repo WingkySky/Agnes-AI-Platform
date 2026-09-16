@@ -70,6 +70,13 @@ from app.services.image_poller import image_poller_manager
 from app.services.agnes_client import agnes_client
 from app.services.provider_registry import provider_registry
 from app.routes import mcp as mcp_route
+from app.routes import setup as setup_route
+from app.seed.ensure import (
+    ensure_default_admin,
+    ensure_default_credit_rules,
+    ensure_official_presets,
+    ensure_pipeline_seed,
+)
 
 # ---------- 日志配置（替换原 logging.basicConfig）----------
 # 使用自定义日志系统：控制台 + 文件轮转 + JSON 错误日志 + Request ID 追踪
@@ -143,6 +150,15 @@ async def lifespan(app: FastAPI):
     async with async_session() as db:
         await ensure_default_configs(db)
     logger.info("✓ 系统配置已初始化")
+
+    # 首启初始化：默认超管 / 积分规则 / 流水线内置种子 / 官方预设卡（全部幂等）
+    # 注意 ensure_official_presets 依赖 StylePreset 内置行，必须在 ensure_pipeline_seed 之后
+    async with async_session() as db:
+        await ensure_default_admin(db)
+        await ensure_default_credit_rules(db)
+        await ensure_pipeline_seed(db)
+        await ensure_official_presets(db)
+    logger.info("✓ 种子数据已初始化（管理员/积分规则/流水线/官方预设）")
 
     logger.info("🚀 Agnes AI Platform（全异步架构）后端服务已启动")
 
@@ -304,6 +320,7 @@ app.include_router(admin_review_route.router, prefix="/api", tags=["管理员-�
 app.include_router(asset_route.router, prefix="/api", tags=["管理员-资源转存"])
 app.include_router(scenes_route.router, prefix="/api", tags=["3D 场景（导演台）"])
 app.include_router(mcp_route.router, prefix="/api", tags=["MCP 服务器"])
+app.include_router(setup_route.router, prefix="/api", tags=["首启初始化"])
 app.include_router(projects_route.router, prefix="/api", tags=["项目制创作"])
 app.include_router(canvas_route.router, prefix="/api", tags=["无限画布"])
 
@@ -321,6 +338,12 @@ UPLOADS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 os.makedirs(os.path.join(UPLOADS_DIR, "avatars"), exist_ok=True)
 os.makedirs(os.path.join(UPLOADS_DIR, "watermarked"), exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
+
+# ---------- 静态文件：官方种子资源（官方预设封面等，随仓库分发） ----------
+SEED_ASSETS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app", "seed", "assets"
+)
+app.mount("/seed-assets", StaticFiles(directory=SEED_ASSETS_DIR), name="seed-assets")
 
 
 @app.get("/", summary="根路径 — 返回服务信息")

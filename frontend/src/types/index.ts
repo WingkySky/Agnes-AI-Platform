@@ -784,8 +784,20 @@ export interface UserInfoResponse {
   is_admin: boolean
   watermark_enabled: boolean
   content_safety_strict: boolean
+  /** 首登强制改密标记（默认超管 admin 首次登录为 true） */
+  must_change_password?: boolean
   created_at?: string | null
   last_login_at?: string | null
+}
+
+/** 首启初始化状态（GET /api/setup/status） */
+export interface SetupStatus {
+  /** 当前用户需要修改默认密码 */
+  password_pending: boolean
+  /** 当前用户是管理员且实例未配置任何 AI Provider */
+  provider_pending: boolean
+  /** 实例级标记：管理员已完成首启向导 */
+  setup_completed: boolean
 }
 
 /** 更新个人资料请求体 */

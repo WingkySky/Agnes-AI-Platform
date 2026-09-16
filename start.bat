@@ -78,10 +78,10 @@ if %errorlevel% neq 0 (
     %PY% -m pip install -r requirements.txt -q
 )
 
-:: 初始化数据库
+:: 生成安全密钥（数据库建表与种子数据由后端 lifespan 启动时自动完成）
 echo.
-echo  Initializing database...
-%PY% init_db.py
+echo  Ensuring secrets...
+%PY% ensure_secrets.py
 
 echo.
 echo  Backend starting on port %PORT%...

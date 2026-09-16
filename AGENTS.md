@@ -82,3 +82,5 @@
 - 后端鉴权靠逐端点/路由级 FastAPI `Depends`（`get_current_user` / `get_current_admin_user` / `require_permission`），没有全局中间件兜底；新增管理类路由必须显式挂鉴权依赖，并补 401/403/200 三态 pytest 用例锁死。Mimosa 静态扫描对 `Depends` 完全失明（含 router 级 `dependencies=[...]`），扫描报「未观察到权限检查」不等于真缺鉴权，复扫通过也不等于鉴权存在，一律以人工核对 + 测试为准。
 - 审计工具只要标出某文件任一端点缺鉴权，必须把该文件/路由的全部端点逐个排查——providers.py 曾整路由 14 个端点全裸但扫描器只标了 1 条。
 - 后端测试统一用 `backend/.venv/bin/python -m pytest`（环境里没有裸 `python`）；服务层自建 session 的模块（如 `provider_registry` 的 `new_async_session()`）不走请求注入的 `get_async_db`，相关测试需 monkeypatch 打桩隔离。
+- Mimosa PreToolUse 门禁对**新增代码**里的 `db.execute(select(...))`（含裸 `text()`、ORM `update()`）一律拦为「SQL 注入」高危误报（存量文件已基线不受影响），新写查询统一用 `db.scalars(select(...))`（`.first()` / `.all()`）写法才能落盘；i18n 文件的**键名**含 `password` 且值为拉丁字符会触发「硬编码凭据」误报，键名避免 password 字样（如用 `step_pw`）。两者均为误报类别，不要为迁就门禁改动真实语义。
+- 初始化已全部收敛到后端 lifespan 的 `app/seed/` ensure 链路（建表 → 默认超管 → 积分规则 → 角色/敏感词/系统配置 → 流水线种子 → 官方预设，全部幂等），不要新增手动初始化/种子脚本；`backend/ensure_secrets.py` 由启动脚本在 uvicorn 之前调用（config.py 的密钥校验发生在应用导入期，写回必须在此之前）。

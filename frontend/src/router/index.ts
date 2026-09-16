@@ -11,6 +11,7 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useI18n } from '@/i18n'
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permission'
+import { useSetupStore } from '@/stores/setup'
 
 // ---------- 路由列表 ----------
 const routes: RouteRecordRaw[] = [
@@ -19,6 +20,13 @@ const routes: RouteRecordRaw[] = [
     name: 'home',
     component: () => import('@/views/HomeView.vue'),
     meta: { titleKey: 'router.home', requiresAuth: false }
+  },
+  // 首启初始化向导 — 强制全屏，完成/跳过前拦截其他页面（见守卫）
+  {
+    path: '/setup',
+    name: 'setup',
+    component: () => import('@/views/SetupView.vue'),
+    meta: { titleKey: 'router.setup', requiresAuth: true }
   },
   // 登录 / 注册页 — 未登录时可达，已登录访问则直接跳转到业务页
   {
@@ -241,6 +249,20 @@ router.beforeEach(async (to, _from, next) => {
       ? { redirect: to.fullPath }
       : undefined
     return next({ path: '/login', query })
+  }
+
+  // 首启初始化向导拦截（登录态下判定）：
+  //   - 有待办（待改密 / 管理员待配 Provider 且未完成向导）→ 强制跳 /setup
+  //   - 已无待办却直接访问 /setup → 送回业务页
+  const setupStore = useSetupStore()
+  if (userStore.isAuthenticated && to.name !== 'setup') {
+    if (await setupStore.shouldIntercept()) {
+      return next({ name: 'setup' })
+    }
+  } else if (to.name === 'setup' && userStore.isAuthenticated) {
+    if (!(await setupStore.shouldIntercept())) {
+      return next('/images')
+    }
   }
 
   // 需要管理员角色但当前用户不是管理员 — 跳转首页

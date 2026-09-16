@@ -1,33 +1,8 @@
 # =====================================================
-# 统一预设广场种子数据 — 官方风格卡 + 官方特效卡
-# 使用方式（在 backend 目录下）：
-#   python3 seed_plaza_presets.py
-#
-# 幂等性：按 (type, name) 判断，已存在则跳过
-# 来源：
-#   1. 生图/生视频页原硬编码风格（迁入后前端删除硬编码）
-#   2. style_presets 内置风格（读取现表数据转换为 prompt_config，画布侧原表保留）
-#   3. 全新特效模板（特效广场风格）
+# 统一预设广场官方种子数据（随应用启动自动灌入，幂等）
+# 官方卡统一字段：is_official / is_public / is_approved / user_id=None
+# 封面引用 app/seed/assets/ 静态资源（main.py 以 /seed-assets 挂载），随仓库分发
 # =====================================================
-
-import asyncio
-import logging
-import os
-import sys
-
-script_dir = os.path.dirname(os.path.abspath(__file__))
-if script_dir not in sys.path:
-    sys.path.insert(0, script_dir)
-
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.core.database import async_session
-from app.models.prompt_preset import PromptPreset
-from app.models.pipeline import StylePreset
-
-logging.basicConfig(level=logging.INFO, format="[%(asctime)s] [%(levelname)s] %(message)s")
-logger = logging.getLogger("seed_plaza_presets")
 
 # 官方卡统一字段
 OFFICIAL = {"is_official": True, "is_public": True, "is_approved": True, "user_id": None}
@@ -196,109 +171,57 @@ OFFICIAL_SKILLS = [
 ]
 
 
-async def _exists(db: AsyncSession, preset_type: str, name: str) -> bool:
-    result = await db.execute(
-        select(PromptPreset).filter(
-            PromptPreset.type == preset_type,
-            PromptPreset.name == name,
-        )
-    )
-    return result.scalar_one_or_none() is not None
-
-
-async def _add(db: AsyncSession, preset_type: str, name: str, category: str,
-               description: str, prompt_config: dict, cover_image: str | None,
-               camera_params: dict | None = None, prompt_text: str = "") -> int:
-    if await _exists(db, preset_type, name):
-        return 0
-    db.add(PromptPreset(
-        name=name,
-        type=preset_type,
-        category=category or "通用",
-        description=description,
-        prompt_text=prompt_text,
-        prompt_config=prompt_config,
-        cover_image=cover_image,
-        camera_params=camera_params,
-        **OFFICIAL,
-    ))
-    return 1
-
-
-async def _upsert_official_skill(db: AsyncSession, s: dict) -> int:
-    """官方技能卡随代码更新（已存在且是官方卡则刷新文案；用户同名卡不动）"""
-    result = await db.execute(
-        select(PromptPreset).filter(PromptPreset.type == "skill", PromptPreset.name == s["name"])
-    )
-    existing = result.scalar_one_or_none()
-    if existing:
-        if not existing.is_official:
-            return 0
-        existing.category = s["category"]
-        existing.description = s["description"]
-        existing.prompt_text = s["prompt_text"]
-        existing.prompt_config = {"tag": s["tag"]}
-        return 0
-    db.add(PromptPreset(
-        name=s["name"],
-        type="skill",
-        category=s["category"],
-        description=s["description"],
-        prompt_text=s["prompt_text"],
-        prompt_config={"tag": s["tag"]},
-        cover_image=None,
-        **OFFICIAL,
-    ))
-    return 1
-
-
-async def seed_official_presets(db: AsyncSession) -> None:
-    added = 0
-
-    # 1. 硬编码迁移的官方风格
-    for s in OFFICIAL_STYLES:
-        added += await _add(db, "style", s["name"], s["category"], s["description"],
-                            {"suffix": s["suffix"]}, None)
-
-    # 1.5 官方技能（Agent 技能：正文走 prompt_text；官方卡随代码更新文案）
-    for s in OFFICIAL_SKILLS:
-        added += await _upsert_official_skill(db, s)
-
-    # 2. style_presets 内置风格 → 官方风格卡（画布侧原表保留不动）
-    result = await db.execute(select(StylePreset).filter(StylePreset.is_builtin == True))  # noqa: E712
-    for sp in result.scalars().all():
-        parts = [p for p in [sp.visual_prefix, sp.lighting, sp.color_palette, sp.quality_suffix] if p]
-        if not parts:
-            continue
-        prompt_config = {"suffix": "，".join(parts)}
-        if sp.negative_prompt:
-            prompt_config["negative_prompt"] = sp.negative_prompt
-        added += await _add(db, "style", sp.name, sp.category or "风格插画", sp.description,
-                            prompt_config, sp.preview_image)
-
-    # 3. 官方特效
-    for e in OFFICIAL_EFFECTS:
-        added += await _add(db, "effect", e["name"], e["category"], e["description"],
-                            {"suffix": e["suffix"]}, None)
-
-    # 4. 官方运镜词表
-    for cam in OFFICIAL_CAMERAS:
-        added += await _add(db, "camera", cam["name"], "运镜", f"运镜方式：{cam['camera_movement']}",
-                            {}, None, camera_params={"enabled": True, "camera_movement": cam["camera_movement"]})
-
-    await db.commit()
-    logger.info("官方预设写入完成：新增 %d 条（已存在的跳过）", added)
-
-
-async def main():
-    print("==== 开始写入统一预设广场种子数据 ====")
-    async with async_session() as session:
-        await seed_official_presets(session)
-    print("==== 种子数据写入完成 ====")
-
-
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("已取消")
+# =====================================================
+# 官方封面静态资源映射：(type, name) -> {image?, video?}
+# 文件位于 app/seed/assets/，经 /seed-assets 挂载对外访问
+# 未命中的卡保持无封面，前端用占位样式兜底
+# =====================================================
+OFFICIAL_COVER_ASSETS = {
+    ("camera", "仰拍"): {"video": "camera-low-angle.webm"},
+    ("camera", "俯拍"): {"video": "camera-high-angle.webm"},
+    ("camera", "环绕运镜"): {"video": "camera-orbit.webm"},
+    ("effect", "俯冲地球"): {"image": "effect-earth-dive.webp", "video": "effect-earth-dive.webm"},
+    ("effect", "子弹时间"): {"image": "effect-bullet-time.webp", "video": "effect-bullet-time.webm"},
+    ("effect", "希区柯克变焦"): {"image": "effect-dolly-zoom.webp", "video": "effect-dolly-zoom.webm"},
+    ("effect", "微距世界"): {"image": "effect-macro-world.webp", "video": "effect-macro-world.webm"},
+    ("effect", "慢动作推近"): {"image": "effect-slow-push-in.webp", "video": "effect-slow-push-in.webm"},
+    ("effect", "无人机俯瞰"): {"image": "effect-drone-overview.webp", "video": "effect-drone-overview.webm"},
+    ("effect", "时空转场"): {"image": "effect-spacetime-transition.webp", "video": "effect-spacetime-transition.webm"},
+    ("effect", "时间流逝"): {"image": "effect-time-lapse.webp", "video": "effect-time-lapse.webm"},
+    ("effect", "环绕运镜"): {"image": "effect-orbit-shot.webp", "video": "effect-orbit-shot.webm"},
+    ("effect", "穿云而入"): {"image": "effect-through-clouds.webp", "video": "effect-through-clouds.webm"},
+    ("effect", "第一人称冲刺"): {"image": "effect-first-person-sprint.webp", "video": "effect-first-person-sprint.webm"},
+    ("effect", "逆光剪影"): {"image": "effect-backlit-silhouette.webp", "video": "effect-backlit-silhouette.webm"},
+    ("skill", "分镜节奏与情绪曲线"): {"image": "skill-storyboard-rhythm.webp"},
+    ("skill", "技能创作"): {"image": "skill-skill-authoring.webp"},
+    ("skill", "技能转译"): {"image": "skill-skill-translation.webp"},
+    ("skill", "短剧台词打磨"): {"image": "skill-dialogue-polish.webp"},
+    ("skill", "角色一致性技巧"): {"image": "skill-character-consistency.webp"},
+    ("style", "2D 动画"): {"image": "style-2d-animation.webp"},
+    ("style", "3D 动画"): {"image": "style-3d-animation.webp"},
+    ("style", "3D 皮克斯风"): {"image": "style-pixar.webp"},
+    ("style", "丝滑过渡"): {"image": "style-smooth-transition.webp"},
+    ("style", "中国水墨"): {"image": "style-chinese-ink-wash.webp"},
+    ("style", "产品广告风"): {"image": "style-product-ad.webp"},
+    ("style", "像素风"): {"image": "style-pixel-art.webp"},
+    ("style", "写实摄影"): {"image": "style-photorealistic.webp"},
+    ("style", "写实电影感"): {"image": "style-realistic-cinematic.webp"},
+    ("style", "动漫电影风"): {"image": "style-anime-film.webp"},
+    ("style", "古典油画"): {"image": "style-classical-oil-painting.webp"},
+    ("style", "国彩漫画风"): {"image": "style-chinese-comic.webp"},
+    ("style", "国风水墨"): {"image": "style-guofeng-ink-wash.webp"},
+    ("style", "慢动作"): {"image": "style-slow-motion.webp"},
+    ("style", "手持跟拍"): {"image": "style-handheld-follow.webp"},
+    ("style", "日式动漫"): {"image": "style-anime.webp"},
+    ("style", "日系漫画风"): {"image": "style-manga.webp"},
+    ("style", "条漫/Webtoon风"): {"image": "style-webtoon.webp"},
+    ("style", "柔和水彩"): {"image": "style-watercolor.webp"},
+    ("style", "温暖二次元"): {"image": "style-warm-anime.webp"},
+    ("style", "电影感"): {"image": "style-cinematic.webp"},
+    ("style", "电影镜头感"): {"image": "style-cinematic-shot.webp"},
+    ("style", "航拍大远景"): {"image": "style-aerial-wide.webp"},
+    ("style", "赛博朋克"): {"image": "style-cyberpunk.webp"},
+    ("style", "赛博朋克·霓虹夜"): {"image": "style-cyberpunk-neon-night.webp"},
+    ("style", "超现实主义"): {"image": "style-surrealism.webp"},
+    ("style", "霓虹夜景"): {"image": "style-neon-night.webp"},
+}

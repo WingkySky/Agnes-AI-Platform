@@ -45,10 +45,10 @@ if exist ".venv\Scripts\python.exe" (
     echo         如需创建虚拟环境，运行: python -m venv .venv
 )
 
-:: 初始化数据库（幂等：表/管理员已存在则跳过）
+:: 生成安全密钥（数据库建表与种子数据由后端 lifespan 启动时自动完成）
 echo.
-echo  初始化数据库（创建表 + 默认超级管理员）...
-%VENV_PY% init_db.py
+echo  生成安全密钥（缺失时自动写入 .env）...
+%VENV_PY% ensure_secrets.py
 
 echo.
 echo ================================================

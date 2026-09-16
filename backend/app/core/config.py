@@ -228,6 +228,7 @@ class Settings(BaseSettings):
             "change-me",
             "secret",
             "jwt-secret",
+            "please-change-this-to-a-random-string-at-least-32-bytes-long",
         }
         if not v:
             raise ValueError(
@@ -255,6 +256,7 @@ class Settings(BaseSettings):
         """
         insecure_defaults = {
             "agnes-platform-default-encryption-key",
+            "please-change-this-to-a-random-string-at-least-32-chars-long",
         }
         if not v:
             raise ValueError(

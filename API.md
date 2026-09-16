@@ -670,7 +670,7 @@ multipart 上传，支持 jpeg/png/webp，≤5MB，存 `uploads/preset-covers/`�
 
 - `prompt_presets` 新增：`cover_image`（封面 URL）、`prompt_config`（JSON：`{prefix, suffix, negative_prompt}`，style/effect 使用）、`is_official`（官方卡标记，管理员创建自动置 1）
 - 新表：`preset_favorites`（收藏，user_id+preset_id 唯一）、`preset_recent_uses`（最近使用，含 `last_used_at` / `use_count`）
-- 种子脚本：`backend/seed_plaza_presets.py`（幂等，写入官方风格 / 特效卡）
+- 官方预设与封面随应用启动自动灌入（`app/seed/` 包，lifespan 幂等 ensure 链路），无需手动脚本
 
 ### POST /api/presets/{id}/generate-cover — AI 生成预设封面（管理员）
 
@@ -679,7 +679,7 @@ multipart 上传，支持 jpeg/png/webp，≤5MB，存 `uploads/preset-covers/`�
 - **effect / camera 类型 → 动态封面**：视频 API（agnes-video-2.5-flash，4s、3:4）以「运动主体 + 特效/运镜提示词片段」生成示例片段，轮询至完成（约 1-3 分钟）后写回 `cover_video`，响应 `{cover_video}`；
 - **其他类型 → 静态封面**：生图 API（agnes-image-2.1-flash，512x512）写回 `cover_image`，响应 `{cover_image}`。
 
-仅管理员可用；用户自建卡通过上传或「从生成记录选图」设置封面。批量补齐：`backend/generate_plaza_covers.py`（只为缺封面的官方卡生成，effect/camera 补动态封面、其余补静态图，幂等）。
+仅管理员可用；用户自建卡通过上传或「从生成记录选图」设置封面。
 
 ## 12. 画布 Agent LLM 透传
 
@@ -777,3 +777,14 @@ manifest 格式：`{ "name": "...", "items": [{ "slug", "name", "description", "
 请求体：`{ "events": [{ "message", "stack?", "level?"（error/warning，缺省 error）, "url?", "timestamp?" }] }`，`message` 截断 2048 字符、`stack` 截断 8192 字符（服务端兜底，前端先行截断）。
 
 响应 `data`: `{ "received": 实际落盘条数 }`。落盘条目与 errors.jsonl 字段对齐，`module` 固定 `frontend`，`url`/`ip`/`ua`/`user_id`/`client_ts` 在 `context` 内。
+
+## 15. 首启初始化
+
+数据库建表、默认超管、积分规则、内置角色/敏感词/系统配置、流水线内置模板与官方预设卡（含随仓库分发的封面静态资源 `/seed-assets/*`）均由后端 lifespan 启动时自动幂等灌入，无手动初始化脚本。前端在有待办时由路由守卫强制进入 `/setup` 向导。
+
+| 方法 | 路径 | 鉴权 | 说明 |
+|---|---|---|---|
+| GET | `/api/setup/status` | 登录用户 | 返回 `{ password_pending, provider_pending, setup_completed }`。`password_pending` 为当前用户 `must_change_password`（默认超管首登为 true）；`provider_pending` 仅在当前用户是管理员且实例未配置任何 Provider 时为 true（非管理员恒 false，不泄露配置状态）；`setup_completed` 为实例级标记（`system_config` 的 `setup.completed`） |
+| POST | `/api/setup/complete` | 仅管理员（401/403/200 三态） | 写入实例级完成标记，幂等。前端向导走完（Provider 步可跳过）后调用，之后不再拦截 |
+
+前端拦截条件：`password_pending || (provider_pending && !setup_completed)`；改密走既有 `POST /api/auth/change-password`（成功后清除 `must_change_password`）。

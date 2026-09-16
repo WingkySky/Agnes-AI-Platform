@@ -63,10 +63,11 @@ $PY -c "import fastapi" 2>/dev/null || {
     $PY -m pip install -r requirements.txt -q
 }
 
-# 初始化数据库（幂等）
+# 生成安全密钥（JWT_SECRET / ENCRYPTION_KEY 缺失或为占位串时自动写回 .env）
+# 数据库建表与种子数据由后端 lifespan 启动时自动完成，无需脚本
 echo ""
-echo "  Initializing database..."
-$PY init_db.py
+echo "  Ensuring secrets..."
+$PY ensure_secrets.py
 
 # 查找空闲端口
 PORT=8000
