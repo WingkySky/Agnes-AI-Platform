@@ -263,8 +263,8 @@ class ProviderRegistry:
         首次启动时用 settings 中的引导配置创建默认 Provider。
         仅当 agnes_api_key 已配置时才创建。
         """
-        if not settings.agnes_api_key:
-            logger.warning("[ProviderRegistry] settings.agnes_api_key 为空，跳过默认 Provider 创建")
+        if not settings.agnes_api_key_configured:
+            logger.warning("[ProviderRegistry] settings.agnes_api_key 未配置（空或占位串），跳过默认 Provider 创建")
             return []
 
         logger.info("[ProviderRegistry] 数据库无 Provider，使用 settings 引导配置创建默认 Provider")

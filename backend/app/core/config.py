@@ -43,6 +43,18 @@ class Settings(BaseSettings):
         description="Agnes AI 异步任务轮询专用接口（仅首次启动初始化用）",
     )
 
+    @property
+    def agnes_api_key_configured(self) -> bool:
+        """AGNES_API_KEY 是否为真实可用的配置值。
+
+        空串与 .env.example 的占位串（sk-your* / sk-xxxx*）都视为未配置，
+        避免新用户直接 cp .env.example 启动后被误判为已配置，
+        创建出带无效 Key 的默认 Provider、并跳过首启向导的配 Key 步骤。
+        """
+        key = (self.agnes_api_key or "").strip()
+        return bool(key) and not key.lower().startswith(("sk-your", "sk-xxxx"))
+
+
     # ---------- API Key 加密密钥 ----------
     # 用于加密数据库中存储的 Provider API Key（Fernet 对称加密）
     # 生产环境务必配置为随机字符串

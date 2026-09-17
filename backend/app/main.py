@@ -106,8 +106,8 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
     logger.info("✓ 数据库表已初始化")
 
-    if not settings.agnes_api_key or settings.agnes_api_key.startswith("sk-your"):
-        logger.warning("⚠️ AGNES_API_KEY 未配置！请在前端配置页添加 Provider，或编辑 backend/.env 填入引导配置后重启服务。")
+    if not settings.agnes_api_key_configured:
+        logger.warning("⚠️ AGNES_API_KEY 未配置！首启向导可配置 Provider，或编辑 backend/.env 填入引导配置后重启服务。")
     else:
         logger.info("✓ Agnes AI API Key 引导配置已加载（将用于首次启动创建默认 Provider）")
 

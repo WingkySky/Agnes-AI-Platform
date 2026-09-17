@@ -50,6 +50,11 @@ export default defineConfig({
       '/uploads': {
         target: 'http://localhost:8000',
         changeOrigin: true
+      },
+      // 官方预设封面等种子静态资源走后端服务
+      '/seed-assets': {
+        target: 'http://localhost:8000',
+        changeOrigin: true
       }
     }
   },
@@ -62,10 +67,19 @@ export default defineConfig({
     rollupOptions: {
       output: {
         // 按依赖拆分 chunk，降低单个文件体积
-        manualChunks: {
-          'element-plus': ['element-plus', '@element-plus/icons-vue'],
-          'vue-vendor': ['vue', 'vue-router', 'pinia'],
-          'axios': ['axios']
+        // vite 8（rolldown）仅支持函数形式 manualChunks
+        manualChunks(id: string) {
+          if (!id.includes('node_modules')) return undefined
+          if (id.includes('element-plus') || id.includes('@element-plus/icons-vue')) {
+            return 'element-plus'
+          }
+          if (/[\\/]node_modules[\\/](vue|vue-router|pinia|@vue)[\\/]/.test(id)) {
+            return 'vue-vendor'
+          }
+          if (/[\\/]node_modules[\\/]axios[\\/]/.test(id)) {
+            return 'axios'
+          }
+          return undefined
         }
       }
     }
