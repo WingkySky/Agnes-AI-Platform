@@ -1,9 +1,45 @@
 /* =====================================================
  * 画布媒体工具
  * - compose 节点把上游 SRT 文本节点解析回片段数组供合成烧录
+ * - 媒体节点框体按素材真实比例适配（保宽定高）
  * ===================================================== */
 
 import type { CanvasSubtitleSegment } from '@/api/canvas'
+
+export interface NodeFitSize {
+  width: number
+  height: number
+}
+
+/**
+ * 计算节点框体适配媒体真实比例后的尺寸（保宽定高 + 高度上下限钳制）。
+ * 框体比例与媒体比例已一致（误差 < 1%）或尺寸非法时返回 null，表示无需调整。
+ * 上下限钳制时反算另一维，保证钳制后框体比例仍与媒体一致（不会二次触发）。
+ */
+export function fitNodeToMedia(
+  frameWidth: number,
+  frameHeight: number,
+  naturalWidth: number,
+  naturalHeight: number,
+  maxHeight: number,
+  minHeight: number,
+): NodeFitSize | null {
+  if (!frameWidth || !frameHeight || !naturalWidth || !naturalHeight) return null
+  const mediaRatio = naturalWidth / naturalHeight
+  const frameRatio = frameWidth / frameHeight
+  if (Math.abs(frameRatio - mediaRatio) / mediaRatio < 0.01) return null
+  let width = frameWidth
+  let height = width / mediaRatio
+  if (height > maxHeight) {
+    height = maxHeight
+    width = height * mediaRatio
+  }
+  if (height < minHeight) {
+    height = minHeight
+    width = height * mediaRatio
+  }
+  return { width: Math.round(width), height: Math.round(height) }
+}
 
 /** SRT 时间 "00:00:01,500" → 秒 */
 function srtTimeToSeconds(value: string): number {

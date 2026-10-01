@@ -419,6 +419,7 @@ import PresetQuickPanel from '@/components/presets/PresetQuickPanel.vue'
 import ScriptNodeContent from '@/components/canvas/nodes/ScriptNodeContent.vue'
 import { readLineage, getShotLineageInfo } from '@/lib/canvas-storyboard'
 import { registerVideoTime } from '@/lib/canvas-image-ops'
+import { fitNodeToMedia } from '@/lib/canvas-media'
 
 /* ---------- i18n ---------- */
 const { t } = useI18n()
@@ -468,6 +469,7 @@ const emit = defineEmits([
 /* ---------- 常量 ---------- */
 const MIN_WIDTH = 220 // 最小宽度
 const MIN_HEIGHT = 160 // 最小高度
+const MAX_FIT_HEIGHT = 560 // 媒体比例适配的高度上限（竖版素材锁高反算宽）
 
 /* ---------- Store 实例（供 config 节点直接更新面板内容） ---------- */
 const store = useCanvasStore()
@@ -907,6 +909,7 @@ function handleConnectStart(event: MouseEvent, anchorType: string) {
 function onImageLoad(e: Event) {
   const img = e.target as HTMLImageElement
   if (!img?.naturalWidth || !img?.naturalHeight) return
+  applyMediaFit(img.naturalWidth, img.naturalHeight)
   const panel = props.panel
   // 如果已经有正确的元数据就不用重复写，避免无意义的 store 更新
   if (
@@ -929,6 +932,7 @@ function onVideoTimeUpdate(e: Event) {
 function onVideoMetadataLoaded(e: Event) {
   const video = e.target as HTMLVideoElement
   if (!video?.videoWidth || !video?.videoHeight) return
+  applyMediaFit(video.videoWidth, video.videoHeight)
   const panel = props.panel
   if (
     panel.content?.naturalWidth === video.videoWidth
@@ -939,6 +943,15 @@ function onVideoMetadataLoaded(e: Event) {
   store.updatePanel(panel.id, {
     content: { naturalWidth: video.videoWidth, naturalHeight: video.videoHeight },
   })
+}
+
+/** 媒体比例适配：框体比例与素材不一致时按"保宽定高"重算（freeResize 视为用户接管，跳过）。
+ *  每次媒体加载都检查而非只在尺寸首次写入时触发，旧节点/默认框也能自愈；适配后比例一致，不会反复触发 */
+function applyMediaFit(naturalWidth: number, naturalHeight: number) {
+  const panel = props.panel
+  if (panel.type === 'image' && metadata.value.freeResize) return
+  const size = fitNodeToMedia(panel.width, panel.height, naturalWidth, naturalHeight, MAX_FIT_HEIGHT, MIN_HEIGHT)
+  if (size) store.updatePanel(panel.id, { width: size.width, height: size.height })
 }
 
 /* ---------- 交互：双击 ---------- */
@@ -1265,6 +1278,12 @@ onUnmounted(() => {
   box-sizing: border-box;
 }
 .image-content {
+  width: 100%;
+  height: 100%;
+}
+
+/* 水印容器默认 inline-block 自动高，会让 img 的 height:100% 解析失败（高图按原比例溢出被节点裁剪），强制撑满内容区 */
+.image-content :deep(.img-with-watermark) {
   width: 100%;
   height: 100%;
 }
