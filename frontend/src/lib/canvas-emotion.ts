@@ -72,6 +72,14 @@ export interface EmotionGeneratePayload {
   characters: EmotionCharacterPayload[]
   imageWidth: number
   imageHeight: number
+  /** 微调模式：对上一轮表情结果单独重抽部分脸（基准回原始图重建，旧伪影不带入） */
+  fixContext?: EmotionJobRecord
+}
+
+/** 结果节点上持久化的逐脸生成信息（sourcePanelId 恒指向原始源图节点） */
+export interface EmotionJobRecord {
+  sourcePanelId: string
+  allFaces: EmotionCharacterPayload[]
 }
 
 /* ---------- 5×5 情绪预设 ---------- */
@@ -309,6 +317,8 @@ export interface EmotionBlendFace {
   faceBox: EmotionFaceBox
   /** 生成图中检测到的人脸框；缺省退化为居中覆盖 */
   generatedFaceBox?: EmotionFaceBox
+  /** 生成图与源图同坐标系（微调重建：从上一轮结果按椭圆取回已生成的表情），1:1 平移贴回不做任何校正 */
+  sameCoords?: boolean
 }
 
 // 模型只负责局部重绘；最终结果始终以源图为底，仅在羽化人脸椭圆内混合生成像素。
@@ -335,6 +345,19 @@ export async function compositeEmotionFaces(sourceDataUrl: string, generatedData
       generatedContext.imageSmoothingQuality = 'high'
       // 先垫源图区域像素：对齐变换覆盖不到的地方合成结果等于源图，混合后无缝
       generatedContext.drawImage(source, normalizedRegion.x, normalizedRegion.y, normalizedRegion.width, normalizedRegion.height, 0, 0, normalizedRegion.width, normalizedRegion.height)
+      if (face.sameCoords) {
+        // 同坐标系整图 1:1 贴回（微调重建：从上一轮结果按椭圆取回已生成的表情），几何零偏移不做校正
+        generatedContext.setTransform(1, 0, 0, 1, -normalizedRegion.x, -normalizedRegion.y)
+        generatedContext.drawImage(generated, 0, 0)
+        generatedContext.setTransform(1, 0, 0, 1, 0, 0)
+        const sourcePixels = context.getImageData(normalizedRegion.x, normalizedRegion.y, normalizedRegion.width, normalizedRegion.height)
+        const generatedPixels = generatedContext.getImageData(0, 0, normalizedRegion.width, normalizedRegion.height)
+        const ellipse = emotionEditEllipse(normalizedFace, normalizedRegion)
+        const gains = sampleEdgeColorGains(sourcePixels.data, generatedPixels.data, normalizedRegion.width, normalizedRegion.height, ellipse)
+        blendEmotionPixels(sourcePixels.data, generatedPixels.data, normalizedRegion.width, normalizedRegion.height, ellipse, gains)
+        context.putImageData(sourcePixels, normalizedRegion.x, normalizedRegion.y)
+        continue
+      }
       // 软校正：检测测量噪声（±3-5%）与模型真实漂移（0-20% 随机）同量级——
       // 偏差在噪声底内不修（噪声不再变成大小偏差），超过死区线性增强到全量（真实漂移修得掉）。
       // 缩放锚 = 覆盖缩放（区域/生成图尺寸，跨图量纲稳定），双眼关键点：中心=中点、缩放=眼距比、旋转=连线角差。

@@ -2111,6 +2111,9 @@ const enUS = {
       closeLighting: 'Close lighting panel',
       // Emotion control dialog
       emotionTitle: 'Expression Control',
+      emotionFixTitle: 'Refine Expressions',
+      emotionFixHint: 'Click faces to re-roll (multi-select)',
+      emotionFixSourceMissing: 'Source image node was deleted, cannot re-roll',
       emotionDetecting: 'Detecting faces…',
       emotionSelectFace: '{n} faces detected, select a character',
       emotionNoFace: 'No clear face detected, draw a box manually',

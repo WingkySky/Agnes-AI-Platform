@@ -346,6 +346,7 @@
         :visible="imageOpsState.emotion.visible"
         :image-url="imageOpsState.emotion.imageUrl"
         :theme="store.canvasTheme"
+        :fix-jobs="imageOpsState.emotion.fixJobs"
         @confirm="handleEmotionConfirm"
         @cancel="imageOpsState.emotion.visible = false"
       />
@@ -572,7 +573,7 @@ import { computeArrangedLayout } from '@/lib/canvas-layout'
 import { generateCanvasTts, generateCanvasSubtitles, composeCanvasVideos, type CanvasSubtitleSegment } from '@/api/canvas'
 import { parseSrt } from '@/lib/canvas-media'
 import { planDropLayout } from '@/lib/canvas-drop'
-import { emotionGenerationSize, compositeEmotionFaces, emotionResultToFile, type EmotionFaceBox, type EmotionGeneratePayload } from '@/lib/canvas-emotion'
+import { emotionGenerationSize, compositeEmotionFaces, emotionResultToFile, type EmotionFaceBox, type EmotionGeneratePayload, type EmotionJobRecord } from '@/lib/canvas-emotion'
 import { detectFaces } from '@/lib/canvas-face-detection'
 import { getErrorMessage } from '@/lib/type-helpers'
 import type { ImageGenerationRequest } from '@/types'
@@ -2202,7 +2203,7 @@ const imageOpsState = reactive({
   upscale: { visible: false, panelId: null as string | null, imageUrl: '' },
   angle: { visible: false, panelId: null as string | null, imageUrl: '' },
   lighting: { visible: false, panelId: null as string | null, imageUrl: '' },
-  emotion: { visible: false, panelId: null as string | null, imageUrl: '' },
+  emotion: { visible: false, panelId: null as string | null, imageUrl: '', fixJobs: null as EmotionJobRecord | null },
 })
 
 // ============ 画布模板功能 ============
@@ -2969,7 +2970,7 @@ function handleHoverLighting() {
   imageOpsState.lighting.imageUrl = imageUrl
 }
 
-// 表情控制：打开情绪调节弹窗
+// 表情控制：打开情绪调节弹窗（节点携带逐脸任务记录时进入微调模式）
 function handleHoverEmotion() {
   const panel = hoveredPanel.value
   if (!panel?.content?.content) return
@@ -2977,6 +2978,7 @@ function handleHoverEmotion() {
   imageOpsState.emotion.visible = true
   imageOpsState.emotion.panelId = panel.id
   imageOpsState.emotion.imageUrl = imageUrl
+  imageOpsState.emotion.fixJobs = (panel.meta?.emotionJobs as EmotionJobRecord | undefined) ?? null
 }
 
 // 轮询图片任务直至完成并返回结果图 URL（进度同步任务队列）；失败/无图/超时抛错
@@ -3111,26 +3113,44 @@ async function handleLightingConfirm({ prompt, label }: { prompt: string, label:
 
 // 表情控制确认：逐脸「紧裁切 → 图生图 → 椭圆羽化合成」。上游是重合成模型，
 // 只有紧裁切任务才能保证表情局部生效；各脸任务并发、合成串行，宫格等
-// 椭圆外像素始终以源图为底零改动，失败的脸保留原表情
+// 椭圆外像素始终以源图为底零改动，失败的脸保留原表情。
+// 微调模式（fixContext）：基准回原始源图重建——未重抽的脸从上一轮结果按椭圆取回，
+// 重抽的脸对原始图重新生成，上一轮的白圈/接缝等伪影在椭圆外不会被带入
 async function handleEmotionConfirm(payload: EmotionGeneratePayload) {
   imageOpsState.emotion.visible = false
   const panel = store.panels.find(p => p.id === imageOpsState.emotion.panelId)
   if (!panel) return
+  const fixContext = payload.fixContext
+  const sourcePanel = fixContext ? store.panels.find(p => p.id === fixContext.sourcePanelId) : null
+  const fixSourceUrl = fixContext ? ((sourcePanel?.content?.content as string) || '') : ''
+  if (fixContext && !fixSourceUrl) {
+    ElMessage.error(t('canvas.imageOps.emotionFixSourceMissing'))
+    return
+  }
 
   // 积分预检（每张脸一个图生图任务，费用随角色数增加）
   const canGenerate = await checkCreditsBeforeGenerate({ type: 'image', mode: 'image2image', size: '1024x1024' })
   if (!canGenerate) return
 
   const summary = payload.characters.map(c => `${c.name}·${c.label}`).join('，')
+  const labels = [...new Set(payload.characters.map(c => c.label))].join('+')
+  // 逐脸任务记录持久化到结果节点（微调模式的下一轮沿用；sourcePanelId 恒指原始源图节点）
+  const allFaces = fixContext
+    ? fixContext.allFaces.map(f => payload.characters.find(c => c.faceBox.id === f.faceBox.id) ?? f)
+    : payload.characters
+  const emotionJobs = {
+    sourcePanelId: fixContext ? fixContext.sourcePanelId : String(imageOpsState.emotion.panelId),
+    allFaces,
+  }
   const newId = store.addPanel({
     type: 'image',
-    name: (panel.name || '') + ' · ' + [...new Set(payload.characters.map(c => c.label))].join('+'),
+    name: (panel.name || '') + ' · ' + (fixContext ? `${t('canvas.imageOps.emotionFixTitle')}·${labels}` : labels),
     x: panel.x + panel.width + 60,
     y: panel.y,
     width: panel.width,
     height: panel.height,
     content: { content: '', status: 'loading', prompt: `${t('canvas.imageOps.emotionTitle')}：${summary}` },
-    meta: {},
+    meta: { emotionJobs },
     is_locked: false,
     is_hidden: false,
   })
@@ -3139,9 +3159,27 @@ async function handleEmotionConfirm(payload: EmotionGeneratePayload) {
   try {
     const { createImageTask } = await import('@/api/images')
     const { toBase64IfNeeded } = await import('@/lib/canvas-image-ops')
-    const { buildEmotionArtifacts, buildEmotionPrompt, compositeEmotionFaces, emotionGenerationSize, emotionDriftScore, findEmotionPreset } = await import('@/lib/canvas-emotion')
+    const { buildEmotionArtifacts, buildEmotionPrompt, compositeEmotionFaces, emotionGenerationSize, emotionDriftScore, findEmotionPreset, resolveEmotionEditRegion } = await import('@/lib/canvas-emotion')
 
-    const sourceBase64 = await toBase64IfNeeded(imageOpsState.emotion.imageUrl)
+    // 重建基准：微调模式用原始源图（干净底），否则用当前图
+    const sourceBase64 = await toBase64IfNeeded(fixContext ? fixSourceUrl : imageOpsState.emotion.imageUrl)
+    let accumulated = sourceBase64
+
+    // 微调模式：未重抽的脸从上一轮结果按椭圆取回（保持已生成的表情，椭圆外旧伪影不带入）
+    if (fixContext) {
+      const rerollIds = new Set(payload.characters.map(c => c.faceBox.id))
+      const rebuildBase64 = await toBase64IfNeeded(imageOpsState.emotion.imageUrl)
+      for (const face of allFaces) {
+        if (rerollIds.has(face.faceBox.id)) continue
+        accumulated = await compositeEmotionFaces(
+          accumulated,
+          rebuildBase64,
+          resolveEmotionEditRegion(face.faceBox, payload.imageWidth, payload.imageHeight),
+          [{ faceBox: face.faceBox, sameCoords: true }],
+        )
+      }
+    }
+
     // 每张脸独立紧裁切与提示词，各自一个图生图任务并发执行
     const jobs = await Promise.all(payload.characters.map(async (character) => {
       const artifacts = await buildEmotionArtifacts(sourceBase64, [character.faceBox], payload.imageWidth, payload.imageHeight)
@@ -3216,7 +3254,6 @@ async function handleEmotionConfirm(payload: EmotionGeneratePayload) {
 
     // 各脸并发生成择优；合成必须串行，避免并发读改同一底图
     const results = await Promise.allSettled(jobs.map((_, jobIndex) => generateFaceBest(jobIndex)))
-    let accumulated = sourceBase64
     const failedRoles: string[] = []
     for (let i = 0; i < jobs.length; i++) {
       const result = results[i]

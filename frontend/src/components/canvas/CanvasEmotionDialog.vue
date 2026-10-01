@@ -12,7 +12,7 @@
       <div class="emotion-dialog" :style="dialogStyle">
         <!-- 标题栏 -->
         <div class="emotion-header">
-          <span class="emotion-title">{{ t('canvas.imageOps.emotionTitle') }}</span>
+          <span class="emotion-title">{{ t(fixJobs ? 'canvas.imageOps.emotionFixTitle' : 'canvas.imageOps.emotionTitle') }}</span>
           <button class="emotion-close" :aria-label="t('canvas.imageOps.cancel')" @click="$emit('cancel')">
             <X :size="18" />
           </button>
@@ -129,12 +129,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type PropType } from 'vue'
 import { X, ScanFace, Loader2 } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
 import {
-  EMOTION_PRESETS, NEUTRAL_EMOTION_PRESET, emotionBlendshapes, emotionPresetLabel,
-  type EmotionFaceBox, type EmotionPreset, type EmotionGeneratePayload,
+  EMOTION_PRESETS, NEUTRAL_EMOTION_PRESET, emotionBlendshapes, emotionPresetLabel, findEmotionPreset,
+  type EmotionFaceBox, type EmotionJobRecord, type EmotionPreset, type EmotionGeneratePayload,
 } from '@/lib/canvas-emotion'
 import { detectFaces } from '@/lib/canvas-face-detection'
 import { createEmotionFacePreview, type EmotionFacePreview } from '@/lib/canvas-emotion-preview'
@@ -146,6 +146,8 @@ const props = defineProps({
   visible: { type: Boolean, default: false },
   imageUrl: { type: String, default: '' },
   theme: { type: Object, required: true },
+  /** 微调模式：当前节点是表情结果（携带上一轮逐脸任务记录），预置脸框与情绪、免重检 */
+  fixJobs: { type: Object as PropType<EmotionJobRecord | null>, default: null },
 })
 
 const emit = defineEmits(['confirm', 'cancel'])
@@ -189,6 +191,7 @@ const statusText = computed(() => {
   if (stage.value === 'detecting') return t('canvas.imageOps.emotionDetecting')
   if (stage.value === 'manual') return t('canvas.imageOps.emotionManualHint')
   if (stage.value === 'selecting') {
+    if (props.fixJobs?.allFaces?.length) return t('canvas.imageOps.emotionFixHint')
     return error.value || (faces.value.length
       ? t('canvas.imageOps.emotionSelectFace', { n: faces.value.length })
       : t('canvas.imageOps.emotionNoFace'))
@@ -247,6 +250,12 @@ async function initDialog() {
   try {
     sourceDataUrl.value = await toBase64IfNeeded(props.imageUrl)
     imageSize.value = await readImageSize(sourceDataUrl.value)
+    if (props.fixJobs?.allFaces?.length) {
+      // 微调模式：沿用上一轮脸框与情绪（几何已被蒙版锁定，无需重检，也避免结果图重检配错人）
+      faces.value = props.fixJobs.allFaces.map(f => f.faceBox)
+      stage.value = 'selecting'
+      return
+    }
     const result = await detectFaces(sourceDataUrl.value)
     imageSize.value = { width: result.imageWidth, height: result.imageHeight }
     faces.value = result.faces
@@ -276,11 +285,13 @@ function selectFace(face: EmotionFaceBox) {
   if (existing) {
     activeCharacterId.value = existing.id
   } else {
+    // 微调模式沿用上一轮的角色名与情绪（保持情绪重抽/微调都无需重新设置）
+    const stored = props.fixJobs?.allFaces?.find(f => f.faceBox.id === face.id)
     const character: EmotionCharacter = {
       id: `character-${face.id}`,
-      name: t('canvas.imageOps.emotionCharacterN', { n: characters.value.length + 1 }),
+      name: stored?.name ?? t('canvas.imageOps.emotionCharacterN', { n: characters.value.length + 1 }),
       faceBox: face,
-      preset: NEUTRAL_EMOTION_PRESET,
+      preset: stored ? findEmotionPreset(stored.intimacy, stored.arousal) : NEUTRAL_EMOTION_PRESET,
     }
     characters.value = [...characters.value, character]
     activeCharacterId.value = character.id
@@ -419,6 +430,9 @@ function confirmGeneration() {
     })),
     imageWidth: imageSize.value.width,
     imageHeight: imageSize.value.height,
+    fixContext: props.fixJobs?.allFaces?.length
+      ? { sourcePanelId: props.fixJobs.sourcePanelId, allFaces: props.fixJobs.allFaces }
+      : undefined,
   }
   emit('confirm', payload)
 }

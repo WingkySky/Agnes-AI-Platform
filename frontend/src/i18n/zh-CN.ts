@@ -2094,6 +2094,9 @@ const zhCN = {
       closeLighting: '关闭打光面板',
       // 表情控制弹窗
       emotionTitle: '表情控制',
+      emotionFixTitle: '微调表情',
+      emotionFixHint: '点击选择需要重抽的表情（可多选）',
+      emotionFixSourceMissing: '原始图片节点已删除，无法单独重抽',
       emotionDetecting: '正在识别人脸…',
       emotionSelectFace: '识别到 {n} 张人脸，请选择人物',
       emotionNoFace: '未识别到清晰人脸，请手动框选',
