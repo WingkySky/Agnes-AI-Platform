@@ -15,7 +15,7 @@ import pytest
 from app.models.user_preference import UserPreference
 from app.schemas.common import ModelInfo
 from app.services import model_registry
-from app.services.provider_registry import provider_registry
+from app.services.provider_registry import _detect_gen_params, provider_registry
 
 _MODELS = [
     ModelInfo(id="agnes-video-2.5", name="Agnes Video 2.5", type="video"),
@@ -69,3 +69,19 @@ async def test_no_user_uses_first(memory_db):
 async def test_no_user_and_explicit_invalid_falls_to_first(memory_db):
     model_id = await model_registry.resolve_user_media_model_id(memory_db, 0, "image", explicit="not-exist")
     assert model_id == "agnes-image-2.1"
+
+
+# =====================================================
+# 模型生成能力画像（_detect_gen_params）锁死
+# 背景：Agnes Image 2.x 上游参考图上限 6 张（超出 HTTP 400 "too many input
+# images: N provided, at most 6 allowed"），官方文档均未标注，靠画像预检拦截。
+# =====================================================
+
+
+def test_agnes_image_2x_ref_limit_is_six():
+    assert _detect_gen_params("agnes-image-2.1-flash").max_ref_images == 6
+    assert _detect_gen_params("agnes-image-2.5-flash").max_ref_images == 6
+
+
+def test_gen_params_profile_returns_none_for_unknown_family():
+    assert _detect_gen_params("some-other-image-model") is None

@@ -244,6 +244,7 @@
           @super-resolution="handleHoverSuperResolution"
           @angle="handleHoverAngle"
           @lighting="handleHoverLighting"
+          @emotion="handleHoverEmotion"
           @view-large="handleHoverViewLarge"
           @derive-video="handleHoverDeriveVideo"
           @derive-tail="handleHoverDeriveTail"
@@ -338,6 +339,15 @@
         :theme="store.canvasTheme"
         @confirm="handleLightingConfirm"
         @cancel="imageOpsState.lighting.visible = false"
+      />
+      <!-- 表情控制弹窗 -->
+      <CanvasEmotionDialog
+        v-if="imageOpsState.emotion.visible"
+        :visible="imageOpsState.emotion.visible"
+        :image-url="imageOpsState.emotion.imageUrl"
+        :theme="store.canvasTheme"
+        @confirm="handleEmotionConfirm"
+        @cancel="imageOpsState.emotion.visible = false"
       />
       <!-- ============ 分类分组模式选择弹窗 ============ -->
       <el-dialog
@@ -463,11 +473,13 @@
         <button class="preview-download" @click.stop="downloadPreviewImage" :title="t('history.download')">
           <el-icon><Download /></el-icon>
         </button>
-        <!-- 使用带水印的图片组件，自带防右键另存保护 -->
+        <!-- 使用带水印的图片组件，自带防右键另存保护；
+             max 约束必须同时落在内层 img 上（外层 inline-block 包装不会把高度传下去，高图会被 overflow 裁掉） -->
         <ImageWithWatermark
           :src="previewImage"
           fit="contain"
           class="preview-img"
+          :img-style="{ maxWidth: '90vw', maxHeight: '90vh' }"
           @click.stop
         />
       </div>
@@ -533,6 +545,7 @@ import CanvasImageSplitDialog from '@/components/canvas/CanvasImageSplitDialog.v
 import CanvasImageUpscaleDialog from '@/components/canvas/CanvasImageUpscaleDialog.vue'
 import CanvasImageAngleDialog from '@/components/canvas/CanvasImageAngleDialog.vue'
 import CanvasLightingDialog from '@/components/canvas/CanvasLightingDialog.vue'
+import CanvasEmotionDialog from '@/components/canvas/CanvasEmotionDialog.vue'
 // 画布分组层组件（成员制分组，替代旧流程模式步骤）
 import CanvasGroupLayer from '@/components/canvas/CanvasGroupLayer.vue'
 // 带水印的图片组件（预览大图时显示水印）
@@ -559,6 +572,8 @@ import { computeArrangedLayout } from '@/lib/canvas-layout'
 import { generateCanvasTts, generateCanvasSubtitles, composeCanvasVideos, type CanvasSubtitleSegment } from '@/api/canvas'
 import { parseSrt } from '@/lib/canvas-media'
 import { planDropLayout } from '@/lib/canvas-drop'
+import { emotionGenerationSize, compositeEmotionFaces, emotionResultToFile, type EmotionFaceBox, type EmotionGeneratePayload } from '@/lib/canvas-emotion'
+import { detectFaces } from '@/lib/canvas-face-detection'
 import { getErrorMessage } from '@/lib/type-helpers'
 import type { ImageGenerationRequest } from '@/types'
 
@@ -2187,6 +2202,7 @@ const imageOpsState = reactive({
   upscale: { visible: false, panelId: null as string | null, imageUrl: '' },
   angle: { visible: false, panelId: null as string | null, imageUrl: '' },
   lighting: { visible: false, panelId: null as string | null, imageUrl: '' },
+  emotion: { visible: false, panelId: null as string | null, imageUrl: '' },
 })
 
 // ============ 画布模板功能 ============
@@ -2953,6 +2969,35 @@ function handleHoverLighting() {
   imageOpsState.lighting.imageUrl = imageUrl
 }
 
+// 表情控制：打开情绪调节弹窗
+function handleHoverEmotion() {
+  const panel = hoveredPanel.value
+  if (!panel?.content?.content) return
+  const imageUrl = panel.content.content as string
+  imageOpsState.emotion.visible = true
+  imageOpsState.emotion.panelId = panel.id
+  imageOpsState.emotion.imageUrl = imageUrl
+}
+
+// 轮询图片任务直至完成并返回结果图 URL（进度同步任务队列）；失败/无图/超时抛错
+async function waitForImageTask(taskId: string): Promise<string> {
+  const { getImageTaskStatus } = await import('@/api/images')
+  for (let i = 0; i < 150; i++) {
+    await new Promise(r => setTimeout(r, 2000))
+    const status: ImageTaskPollStatus = await getImageTaskStatus(taskId)
+    if (['completed', 'succeeded', 'success', 'done'].includes(status.status)) {
+      const resultUrl = status.result_url || status.image_url || status.url || status.data?.[0]?.url
+      if (!resultUrl) throw new Error(t('canvas.messages.generateFailed'))
+      return resultUrl
+    }
+    if (['failed', 'error'].includes(status.status)) {
+      throw new Error(status.message || status.error || t('canvas.messages.generateFailed'))
+    }
+    taskQueue.updateCanvasTask(taskId, { status: 'processing', progress: typeof status.progress === 'number' ? status.progress : undefined })
+  }
+  throw new Error(t('canvas.messages.generateTimeout'))
+}
+
 // 派生图生成共享链路（多角度/打光等）：积分预检 → 建 loading 子节点并连线 → 图生图任务 → 轮询更新
 async function generateDerivedImage(opts: {
   panelId: string | null
@@ -2961,12 +3006,16 @@ async function generateDerivedImage(opts: {
   nameSuffix: string
   doneMessage: string
   failedMessage: string
+  size?: string
+  base64Images?: string[]
 }): Promise<void> {
   const panel = store.panels.find(p => p.id === opts.panelId)
   if (!panel) return
 
+  const size = opts.size || '1024x1024'
+
   // 积分预检：派生图走 image2image 模式
-  const canGenerate = await checkCreditsBeforeGenerate({ type: 'image', mode: 'image2image', size: '1024x1024' })
+  const canGenerate = await checkCreditsBeforeGenerate({ type: 'image', mode: 'image2image', size })
   if (!canGenerate) return
 
   // 先创建 loading 状态的子节点
@@ -2988,25 +3037,25 @@ async function generateDerivedImage(opts: {
     type: 'flow',
   })
 
+  let taskId = ''
   try {
-    const { createImageTask, getImageTaskStatus } = await import('@/api/images')
+    const { createImageTask } = await import('@/api/images')
     const { toBase64IfNeeded } = await import('@/lib/canvas-image-ops')
     // 参考图转 base64（远程 URL 会自动走后端代理下载后再转）
-    const base64Image = await toBase64IfNeeded(opts.imageUrl)
+    const base64Images = opts.base64Images ?? [await toBase64IfNeeded(opts.imageUrl)]
 
     const resp = await createImageTask({
       prompt: opts.prompt,
       model: useModelsStore().defaultImageModel,
-      size: '1024x1024',
+      size,
       response_format: 'url',
       mode: 'image2image',
       // 用数组形式传参，与当前后端 schema 对齐；旧字段也保留一份兜底
-      base64_images: [base64Image],
-      base64_image: base64Image,
+      base64_images: base64Images,
+      base64_image: base64Images[0],
       context: buildCanvasContext(panel, store),
     })
-
-    const taskId = resp.task_id
+    taskId = resp.task_id
     taskQueue.registerCanvasTask({
       taskId,
       type: 'image',
@@ -3015,42 +3064,20 @@ async function generateDerivedImage(opts: {
       panelId: newId,
     })
 
-    // 轮询任务状态
-    for (let i = 0; i < 150; i++) {
-      await new Promise(r => setTimeout(r, 2000))
-      const status: ImageTaskPollStatus = await getImageTaskStatus(taskId)
-      const isSuccess = ['completed', 'succeeded', 'success', 'done'].includes(status.status)
-      const isFailed = ['failed', 'error'].includes(status.status)
-
-      if (isSuccess) {
-        const resultUrl = status.result_url || status.image_url || status.url || status.data?.[0]?.url
-        store.updatePanel(newId, { content: { content: resultUrl, status: 'success' } })
-        store.pushSnapshot()
-        taskQueue.updateCanvasTask(taskId, { status: 'success', resultUrl, progress: 100 })
-        showCostConsumedMessage({ type: 'image', mode: 'image2image', size: '1024x1024' }, opts.doneMessage)
-        // 【用户偏好】自动下载 + 完成通知
-        const prefsStore = usePreferencesStore()
-        if (resultUrl) {
-          prefsStore.autoDownload(resultUrl, 'image', { modelId: useModelsStore().defaultImageModel })
-        }
-        prefsStore.notifyComplete('image', { prompt: opts.prompt, modelId: useModelsStore().defaultImageModel })
-        return
-      }
-      if (isFailed) {
-        const errMsg = status.message || status.error || opts.failedMessage
-        store.updatePanel(newId, { content: { status: 'error', errorDetails: errMsg } })
-        taskQueue.updateCanvasTask(taskId, { status: 'failed' })
-        ElMessage.error(`${opts.failedMessage}: ${errMsg}`)
-        return
-      }
-      const progress = typeof status.progress === 'number' ? status.progress : undefined
-      taskQueue.updateCanvasTask(taskId, { status: 'processing', progress })
+    const resultUrl = await waitForImageTask(taskId)
+    store.updatePanel(newId, { content: { content: resultUrl, status: 'success' } })
+    store.pushSnapshot()
+    taskQueue.updateCanvasTask(taskId, { status: 'success', resultUrl, progress: 100 })
+    showCostConsumedMessage({ type: 'image', mode: 'image2image', size }, opts.doneMessage)
+    // 【用户偏好】自动下载 + 完成通知
+    const prefsStore = usePreferencesStore()
+    if (resultUrl) {
+      prefsStore.autoDownload(resultUrl, 'image', { modelId: useModelsStore().defaultImageModel })
     }
-    ElMessage.warning(t('canvas.messages.generateTimeout'))
-    store.updatePanel(newId, { content: { status: 'error', errorDetails: t('canvas.messages.generateTimeout') } })
-    taskQueue.updateCanvasTask(taskId, { status: 'failed' })
+    prefsStore.notifyComplete('image', { prompt: opts.prompt, modelId: useModelsStore().defaultImageModel })
   } catch (err) {
     console.error('[canvas] derived image error:', err)
+    if (taskId) taskQueue.updateCanvasTask(taskId, { status: 'failed' })
     store.updatePanel(newId, { content: { status: 'error', errorDetails: getErrorMessage(err) } })
     ElMessage.error(`${opts.failedMessage}: ${getErrorMessage(err)}`)
   }
@@ -3080,6 +3107,149 @@ async function handleLightingConfirm({ prompt, label }: { prompt: string, label:
     doneMessage: t('canvas.messages.lightingDone'),
     failedMessage: t('canvas.messages.lightingFailed'),
   })
+}
+
+// 表情控制确认：逐脸「紧裁切 → 图生图 → 椭圆羽化合成」。上游是重合成模型，
+// 只有紧裁切任务才能保证表情局部生效；各脸任务并发、合成串行，宫格等
+// 椭圆外像素始终以源图为底零改动，失败的脸保留原表情
+async function handleEmotionConfirm(payload: EmotionGeneratePayload) {
+  imageOpsState.emotion.visible = false
+  const panel = store.panels.find(p => p.id === imageOpsState.emotion.panelId)
+  if (!panel) return
+
+  // 积分预检（每张脸一个图生图任务，费用随角色数增加）
+  const canGenerate = await checkCreditsBeforeGenerate({ type: 'image', mode: 'image2image', size: '1024x1024' })
+  if (!canGenerate) return
+
+  const summary = payload.characters.map(c => `${c.name}·${c.label}`).join('，')
+  const newId = store.addPanel({
+    type: 'image',
+    name: (panel.name || '') + ' · ' + [...new Set(payload.characters.map(c => c.label))].join('+'),
+    x: panel.x + panel.width + 60,
+    y: panel.y,
+    width: panel.width,
+    height: panel.height,
+    content: { content: '', status: 'loading', prompt: `${t('canvas.imageOps.emotionTitle')}：${summary}` },
+    meta: {},
+    is_locked: false,
+    is_hidden: false,
+  })
+  store.addConnection({ source_panel_id: panel.id, target_panel_id: newId, type: 'flow' })
+
+  try {
+    const { createImageTask } = await import('@/api/images')
+    const { toBase64IfNeeded } = await import('@/lib/canvas-image-ops')
+    const { buildEmotionArtifacts, buildEmotionPrompt, compositeEmotionFaces, emotionGenerationSize, emotionDriftScore, findEmotionPreset } = await import('@/lib/canvas-emotion')
+
+    const sourceBase64 = await toBase64IfNeeded(imageOpsState.emotion.imageUrl)
+    // 每张脸独立紧裁切与提示词，各自一个图生图任务并发执行
+    const jobs = await Promise.all(payload.characters.map(async (character) => {
+      const artifacts = await buildEmotionArtifacts(sourceBase64, [character.faceBox], payload.imageWidth, payload.imageHeight)
+      const preset = findEmotionPreset(character.intimacy, character.arousal)
+      const prompt = buildEmotionPrompt([{ name: character.name, preset, faceBox: character.faceBox }], artifacts.editRegion)
+      return { character, prompt, editRegion: artifacts.editRegion, sourceDataUrl: artifacts.sourceDataUrl, characterDataUrl: artifacts.characterDataUrls[0], maskDataUrl: artifacts.maskDataUrl }
+    }))
+
+    const taskIds = jobs.map(() => [] as string[])
+    const createFaceTask = async (jobIndex: number, useMask: boolean): Promise<string> => {
+      const job = jobs[jobIndex]
+      const resp = await createImageTask({
+        prompt: job.prompt,
+        model: useModelsStore().defaultImageModel,
+        size: emotionGenerationSize(job.editRegion),
+        response_format: 'url',
+        mode: 'image2image',
+        base64_images: [job.sourceDataUrl, job.characterDataUrl],
+        base64_image: job.sourceDataUrl,
+        // 蒙版（白色=可编辑）把上游重绘范围锁死在人脸椭圆内，取景想漂都没空间
+        mask: useMask ? job.maskDataUrl : undefined,
+        context: buildCanvasContext(panel, store),
+      })
+      taskIds[jobIndex].push(resp.task_id)
+      taskQueue.registerCanvasTask({ taskId: resp.task_id, type: 'image', prompt: job.prompt, backendTaskId: resp.task_id, panelId: newId })
+      return resp.task_id
+    }
+
+    // 单脸生成 + 人脸检测 + 几何漂移评分（生成质量有随机性，评分为择优依据）
+    const attemptFace = async (jobIndex: number, useMask: boolean) => {
+      const job = jobs[jobIndex]
+      const url = await waitForImageTask(await createFaceTask(jobIndex, useMask))
+      const generatedBase64 = await toBase64IfNeeded(url)
+      let generatedFaceBox: EmotionFaceBox | undefined
+      let generatedWidth = 0
+      let generatedHeight = 0
+      try {
+        const detection = await detectFaces(generatedBase64)
+        generatedWidth = detection.imageWidth
+        generatedHeight = detection.imageHeight
+        generatedFaceBox = [...detection.faces].sort((a, b) => b.width * b.height - a.width * a.height)[0]
+      } catch (reason) {
+        console.warn('[canvas] emotion align detect failed:', reason)
+      }
+      const score = emotionDriftScore({ faceBox: job.character.faceBox, generatedFaceBox }, job.editRegion, generatedWidth, generatedHeight)
+      return { url, generatedBase64, generatedFaceBox, score }
+    }
+
+    // 单脸完整流程：首选带 mask；渠道不认 mask 时自动去 mask；
+    // 首次结果几何漂移超标（该次重绘跑偏）自动再roll一次，取分低者
+    const generateFaceBest = async (jobIndex: number) => {
+      const job = jobs[jobIndex]
+      let useMask = true
+      let best: Awaited<ReturnType<typeof attemptFace>> | null = null
+      try {
+        best = await attemptFace(jobIndex, useMask)
+      } catch (error) {
+        console.warn('[canvas] emotion masked task failed, retry without mask:', job.character.name, error)
+        useMask = false
+        best = await attemptFace(jobIndex, useMask)
+      }
+      if (best.score > 0.08) {
+        try {
+          const second = await attemptFace(jobIndex, useMask)
+          if (second.score < best.score) best = second
+        } catch (error) {
+          console.warn('[canvas] emotion face reroll failed:', job.character.name, error)
+        }
+      }
+      return best
+    }
+
+    // 各脸并发生成择优；合成必须串行，避免并发读改同一底图
+    const results = await Promise.allSettled(jobs.map((_, jobIndex) => generateFaceBest(jobIndex)))
+    let accumulated = sourceBase64
+    const failedRoles: string[] = []
+    for (let i = 0; i < jobs.length; i++) {
+      const result = results[i]
+      const ids = taskIds[i]
+      if (result.status === 'fulfilled') {
+        // 合成按"生成图人脸 → 源图人脸"做带死区的软校正（偏差在检测噪声底内不修，超过死区线性增强到全量）
+        accumulated = await compositeEmotionFaces(accumulated, result.value.generatedBase64, jobs[i].editRegion, [{ faceBox: jobs[i].character.faceBox, generatedFaceBox: result.value.generatedFaceBox }])
+        // 重试链上只有最后一个任务成功，其余标 failed
+        ids.forEach(id => taskQueue.updateCanvasTask(id, { status: 'failed' }))
+        taskQueue.updateCanvasTask(ids[ids.length - 1], { status: 'success', resultUrl: result.value.url, progress: 100 })
+      } else {
+        failedRoles.push(`${jobs[i].character.name}·${jobs[i].character.label}`)
+        ids.forEach(id => taskQueue.updateCanvasTask(id, { status: 'failed' }))
+        console.error('[canvas] emotion face failed:', jobs[i].character.name, result.reason)
+      }
+    }
+    if (failedRoles.length === jobs.length) throw new Error(t('canvas.messages.generateFailed'))
+
+    const { uploadImage } = await import('@/api/uploads')
+    const file = await emotionResultToFile(accumulated, 'emotion-composite.png')
+    const finalUrl = (await uploadImage(file)).url
+    store.updatePanel(newId, { content: { content: finalUrl, status: 'success' } })
+    store.pushSnapshot()
+    showCostConsumedMessage({ type: 'image', mode: 'image2image', size: '1024x1024' }, t('canvas.messages.emotionDone'))
+    const prefsStore = usePreferencesStore()
+    prefsStore.autoDownload(finalUrl, 'image', { modelId: useModelsStore().defaultImageModel })
+    prefsStore.notifyComplete('image', { prompt: summary, modelId: useModelsStore().defaultImageModel })
+    if (failedRoles.length) ElMessage.warning(t('canvas.messages.emotionPartialFailed', { roles: failedRoles.join('、') }))
+  } catch (err) {
+    console.error('[canvas] emotion error:', err)
+    store.updatePanel(newId, { content: { status: 'error', errorDetails: getErrorMessage(err) } })
+    ElMessage.error(`${t('canvas.messages.emotionFailed')}: ${getErrorMessage(err)}`)
+  }
 }
 
 // 辅助：为图片节点创建子节点（加工结果），并连线

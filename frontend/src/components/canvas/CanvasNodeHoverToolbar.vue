@@ -52,7 +52,7 @@ import {
   Info, Trash2, RefreshCw, FolderPlus, Download, MessageSquare,
   Image as ImageIcon, ImagePlus, Minus, Plus, Upload, Video, Music2, Play,
   Copy, FileText, Lock, LockOpen, Brush, Scissors, Grid2x2,
-  ZoomIn, Sparkles, Camera, Maximize2, History, Film, SkipBack, SkipForward, Sun,
+  ZoomIn, Sparkles, Camera, Maximize2, History, Film, SkipBack, SkipForward, Sun, ScanFace,
 } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
 import { useCanvasStore } from '@/stores/canvas'
@@ -72,7 +72,7 @@ const emit = defineEmits([
   'generate-image', 'quick-generate', 'font-size-down', 'font-size-up',
   'upload-image', 'upload-video', 'upload-audio',
   'copy-prompt', 'describe', 'replace-image', 'toggle-ratio',
-  'mask-edit', 'crop', 'split', 'upscale', 'super-resolution', 'angle', 'lighting', 'view-large',
+  'mask-edit', 'crop', 'split', 'upscale', 'super-resolution', 'angle', 'lighting', 'emotion', 'view-large',
   'derive-video', 'derive-tail', 'derive-prev', 'derive-chain', 'reshoot', 'run-node',
   'capture-frame',
 ])
@@ -415,6 +415,12 @@ const tools = computed(() => {
       title: t('canvas.hoverToolbar.lighting'),
       icon: Sun,
       onClick: () => emit('lighting', props.panel),
+    })
+    list.push({
+      id: 'emotion',
+      title: t('canvas.hoverToolbar.emotion'),
+      icon: ScanFace,
+      onClick: () => emit('emotion', props.panel),
     })
     list.push({
       id: 'view-large',

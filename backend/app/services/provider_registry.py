@@ -107,8 +107,9 @@ def _detect_gen_params(model_id: str) -> Optional[ModelGenParams]:
     if "seedream" in lower:
         # 火山 Seedream 系：官方 watermark 参数可关「AI生成」显式水印；尺寸需归一化到合法档（≥2K）
         return ModelGenParams(watermark_param_off=True, size_rule="seedream")
-    if lower.startswith("agnes-image-2.1"):
-        # Agnes Image 2.1 家族：上游参考图上限 6 张（超出 HTTP 400）
+    if lower.startswith("agnes-image-2"):
+        # Agnes Image 2.x 家族（2.1/2.5 实测一致）：上游参考图上限 6 张，超出返回
+        # HTTP 400 "too many input images: N provided, at most 6 allowed"（官方文档均未标注该限制）
         return ModelGenParams(max_ref_images=6)
     return None
 
