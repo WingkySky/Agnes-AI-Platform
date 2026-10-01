@@ -10,6 +10,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useCanvasStore } from '@/stores/canvas'
+import { useI18n } from '@/i18n'
 import CanvasConnectionsLayer from './CanvasConnectionsLayer.vue'
 
 // ---------- Props ----------
@@ -30,12 +31,14 @@ const emit = defineEmits([
   'zoom',             // 缩放时触发，payload: { x, y, zoom }
   'background-click', // 点击背景时触发（用于取消选中）
   'drop-asset',       // 从素材库拖拽素材到画布时触发，payload: { asset, worldX, worldY }
+  'drop-files',       // 系统文件拖入画布时触发，payload: { files: File[], worldX, worldY }
   // 以下为兼容 CanvasView 旧接口声明，本组件不主动触发
   'panel-edit',
   'panel-action',
 ])
 
 const store = useCanvasStore()
+const { t } = useI18n()
 
 // ---------- 容器引用 ----------
 const containerRef = ref<HTMLElement | null>(null)
@@ -289,11 +292,32 @@ onBeforeUnmount(() => {
   store._isSpacePressed = false
 })
 
-// ---------- 拖拽素材到画布 ----------
-// 接收从素材库拖出的素材，转换为世界坐标后 emit 给父组件创建节点
+// ---------- 拖拽到画布 ----------
+// 接收素材库拖拽（application/x-asset）与系统文件拖拽（Files），转换为世界坐标后 emit 给父组件
+const fileDragDepth = ref(0)
+const isFileDragOver = computed(() => fileDragDepth.value > 0)
+
+// dragenter/leave 会在子元素间反复触发，用计数器判断文件拖拽是否仍悬停在画布上
+function isFileDrag(e: DragEvent): boolean {
+  return !!e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')
+}
+
+function handleDragEnter(e: DragEvent) {
+  if (isFileDrag(e)) fileDragDepth.value++
+}
+
+function handleDragLeave(e: DragEvent) {
+  if (isFileDrag(e) && fileDragDepth.value > 0) fileDragDepth.value--
+}
+
 function handleDragOver(e: DragEvent) {
-  // 仅接收素材拖拽（application/x-asset），不干扰文件拖拽上传
   if (e.dataTransfer && e.dataTransfer.types.includes('application/x-asset')) {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+    return
+  }
+  // 系统文件拖入：必须 preventDefault，否则松手会被浏览器默认打开文件
+  if (e.dataTransfer && e.dataTransfer.types.includes('Files')) {
     e.preventDefault()
     e.dataTransfer.dropEffect = 'copy'
   }
@@ -301,16 +325,25 @@ function handleDragOver(e: DragEvent) {
 
 function handleDrop(e: DragEvent) {
   const assetData = e.dataTransfer?.getData('application/x-asset')
-  if (!assetData) return
-  e.preventDefault()
-  try {
-    const asset = JSON.parse(assetData)
-    // 屏幕坐标转世界坐标
-    const world = store.screenToWorld(e.clientX, e.clientY)
-    emit('drop-asset', { asset, worldX: world.x, worldY: world.y })
-  } catch (err) {
-    console.warn('[infinite-canvas] 素材 drop 解析失败:', err)
+  if (assetData) {
+    e.preventDefault()
+    try {
+      const asset = JSON.parse(assetData)
+      // 屏幕坐标转世界坐标
+      const world = store.screenToWorld(e.clientX, e.clientY)
+      emit('drop-asset', { asset, worldX: world.x, worldY: world.y })
+    } catch (err) {
+      console.warn('[infinite-canvas] 素材 drop 解析失败:', err)
+    }
+    fileDragDepth.value = 0
+    return
   }
+  if (isFileDrag(e) && e.dataTransfer && e.dataTransfer.files.length > 0) {
+    e.preventDefault()
+    const world = store.screenToWorld(e.clientX, e.clientY)
+    emit('drop-files', { files: Array.from(e.dataTransfer.files), worldX: world.x, worldY: world.y })
+  }
+  fileDragDepth.value = 0
 }
 </script>
 
@@ -321,11 +354,18 @@ function handleDrop(e: DragEvent) {
     :style="{ background: currentTheme.canvas.background, cursor: cursorStyle }"
     @pointerdown="handlePointerDown"
     @dragover="handleDragOver"
+    @dragenter="handleDragEnter"
+    @dragleave="handleDragLeave"
     @drop="handleDrop"
     @contextmenu.prevent
   >
     <!-- 背景网格层（dots / lines / blank），pointer-events none，透明度 0.4 -->
     <div class="infinite-canvas-grid" :style="gridStyle" />
+
+    <!-- 文件拖入提示遮罩（pointer-events none，不拦截 drop） -->
+    <div v-if="isFileDragOver" class="infinite-canvas-drop-hint">
+      <span>{{ t('canvas.messages.dropHint') }}</span>
+    </div>
 
     <!-- 世界坐标系层（通过 transform 应用视口变换）-->
     <div class="infinite-canvas-world" :style="{ transform: worldTransform }">
@@ -359,5 +399,20 @@ function handleDrop(e: DragEvent) {
   left: 0;
   top: 0;
   transform-origin: 0 0;
+}
+
+.infinite-canvas-drop-hint {
+  position: absolute;
+  inset: 12px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--el-color-primary, #409eff);
+  border-radius: 12px;
+  background: rgba(64, 158, 255, 0.08);
+  color: var(--el-color-primary, #409eff);
+  font-size: 15px;
+  pointer-events: none;
 }
 </style>

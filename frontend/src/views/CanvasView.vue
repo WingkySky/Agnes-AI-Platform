@@ -79,6 +79,7 @@
         @background-click="handleBackgroundClick"
         @pointerdown="handleCanvasPointerDown"
         @drop-asset="handleCanvasDropAsset"
+        @drop-files="(p) => createMediaNodesFromFiles(p.files, p.worldX, p.worldY)"
       >
         <!-- 分组层（组框在连线/节点层之下；折叠组成员由 v-show 隐藏） -->
         <CanvasGroupLayer
@@ -557,6 +558,7 @@ import { computeArrangedLayout } from '@/lib/canvas-layout'
 // 画布三节点执行（spec M3：配音/字幕/成片合成）
 import { generateCanvasTts, generateCanvasSubtitles, composeCanvasVideos, type CanvasSubtitleSegment } from '@/api/canvas'
 import { parseSrt } from '@/lib/canvas-media'
+import { planDropLayout } from '@/lib/canvas-drop'
 import { getErrorMessage } from '@/lib/type-helpers'
 import type { ImageGenerationRequest } from '@/types'
 
@@ -3243,6 +3245,7 @@ async function handleUseAsset(asset: Record<string, any>) {
       content: nodeUrl,
       status: 'success',
       prompt: asset.prompt || '',
+      assetId: asset.id || '',
     },
   }
   if (asset.name) {
@@ -3275,9 +3278,88 @@ function handleCanvasDropAsset({ asset, worldX, worldY }: { asset: Record<string
       content: nodeUrl,
       status: 'success',
       prompt: asset.prompt || '',
+      assetId: asset.id || '',
     },
   })
   ElMessage.success(t('canvas.messages.nodeCreated'))
+}
+
+// ==================== 系统文件拖入 / 粘贴 ====================
+
+// 文件注册进素材库（Blob 持久化到 IndexedDB，刷新后不失效）并在落点批量创建媒体节点
+async function createMediaNodesFromFiles(files: File[], worldX: number, worldY: number) {
+  const media: { file: File; type: 'image' | 'video' }[] = []
+  for (const file of files) {
+    if (file.type.startsWith('image/')) media.push({ file, type: 'image' })
+    else if (file.type.startsWith('video/')) media.push({ file, type: 'video' })
+  }
+  const skipped = files.length - media.length
+  if (media.length === 0) {
+    ElMessage.warning(t('canvas.messages.filesSkipped', { n: skipped }))
+    return
+  }
+  store.pushSnapshot()
+  const { useAssetStore } = await import('@/stores/canvasAsset')
+  const assetStore = useAssetStore()
+  // 素材面板是 v-if 懒挂载，注册前必须先加载既有索引，否则 _persist 会用空索引覆盖旧素材
+  await assetStore.hydrate()
+  const positions = planDropLayout(media.map((item) => NODE_DEFAULT_SIZES[item.type]), worldX, worldY)
+  let created = 0
+  for (const [i, item] of media.entries()) {
+    try {
+      const asset = await assetStore.registerAsset({ type: item.type, blob: item.file, name: item.file.name, prompt: '' })
+      if (!asset) continue
+      const size = NODE_DEFAULT_SIZES[item.type]
+      const id = store.addPanel({
+        type: item.type,
+        name: item.file.name || getNodeName(item.type),
+        x: positions[i].x,
+        y: positions[i].y,
+        width: size.width,
+        height: size.height,
+        content: {},
+      })
+      store.updatePanel(id, { content: { content: asset.url, status: 'success', bytes: item.file.size, assetId: asset.id } })
+      store.selectPanel(id, { append: true })
+      created++
+    } catch (err) {
+      console.warn('[canvas] 文件建节点失败:', err)
+    }
+  }
+  if (created > 0) ElMessage.success(t('canvas.messages.nodesAdded', { n: created }))
+  if (skipped > 0) ElMessage.warning(t('canvas.messages.filesSkipped', { n: skipped }))
+}
+
+// 刷新后 blob object URL 失效：按 content.assetId 从素材库重建节点媒体地址（hydrate 幂等）
+async function remapAssetUrls() {
+  const { useAssetStore } = await import('@/stores/canvasAsset')
+  const assetStore = useAssetStore()
+  await assetStore.hydrate()
+  for (const panel of store.panels) {
+    const assetId = panel.content?.assetId
+    const url = panel.content?.content
+    if (typeof assetId !== 'string' || typeof url !== 'string' || !url.startsWith('blob:')) continue
+    const asset = assetStore.getAssetById(assetId)
+    if (asset?.url && asset.url !== url) {
+      store.updatePanel(panel.id, { content: { content: asset.url } })
+    }
+  }
+}
+
+// Ctrl/Cmd+V 粘贴截图或复制的图片，落到当前视口中心（输入框聚焦时不拦截）
+function handleCanvasPaste(e: ClipboardEvent) {
+  const active = document.activeElement
+  if (active instanceof HTMLElement && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) return
+  const imageFiles: File[] = []
+  for (const item of Array.from(e.clipboardData?.items ?? [])) {
+    if (item.kind !== 'file' || !item.type.startsWith('image/')) continue
+    const file = item.getAsFile()
+    if (file) imageFiles.push(file)
+  }
+  if (imageFiles.length === 0) return
+  e.preventDefault()
+  const world = store.screenToWorld(window.innerWidth / 2, window.innerHeight / 2)
+  createMediaNodesFromFiles(imageFiles, world.x, world.y)
 }
 
 // 删除素材：从素材库移除
@@ -3437,7 +3519,7 @@ function triggerFileUpload(panelId: string | null, accept = '*') {
 }
 
 // 文件选择回调
-function handleFileSelect(event: Event) {
+async function handleFileSelect(event: Event) {
   const file = (event.target as HTMLInputElement)?.files?.[0]
   if (!file) return
 
@@ -3447,6 +3529,7 @@ function handleFileSelect(event: Event) {
     reader.onload = (e) => {
       try {
         store.importJSON((e.target as FileReader)?.result as string)
+        remapAssetUrls()
         ElMessage.success(t('canvas.messages.jsonLoadedToNode'))
       } catch (err) {
         ElMessage.error(`${t('canvas.messages.jsonExported')}: ${getErrorMessage(err)}`)
@@ -3456,10 +3539,31 @@ function handleFileSelect(event: Event) {
     return
   }
 
-  // 文件上传到节点（图片/视频元数据由 CanvasNode 的 @load 自动读取并回填）
-  const url = URL.createObjectURL(file)
   const targetId = uploadTargetPanelId.value
+  uploadTargetPanelId.value = null
 
+  // 图片/视频先注册进素材库（Blob 持久化到 IndexedDB），节点记录 assetId，刷新后按 id 重建地址
+  if (file.type.startsWith('image/') || file.type.startsWith('video/')) {
+    const type = file.type.startsWith('image/') ? 'image' : 'video'
+    const { useAssetStore } = await import('@/stores/canvasAsset')
+    const assetStore = useAssetStore()
+    await assetStore.hydrate()
+    const asset = await assetStore.registerAsset({ type, blob: file, name: file.name, prompt: '' })
+    if (asset) {
+      const content = { content: asset.url, status: 'success', bytes: file.size, assetId: asset.id }
+      if (targetId) {
+        store.pushSnapshot()
+        store.updatePanel(targetId, { content })
+      } else {
+        const id = createNodeAtCenter(type)
+        store.updatePanel(id, { content })
+      }
+      return
+    }
+  }
+
+  // 音频/其他类型或素材注册失败：退回运行时 object URL（刷新后失效，维持旧行为）
+  const url = URL.createObjectURL(file)
   if (targetId) {
     store.pushSnapshot()
     store.updatePanel(targetId, { content: { content: url, status: 'success', bytes: file.size } })
@@ -3471,8 +3575,6 @@ function handleFileSelect(event: Event) {
     const id = createNodeAtCenter(type)
     store.updatePanel(id, { content: { content: url, status: 'success', bytes: file.size } })
   }
-
-  uploadTargetPanelId.value = null
 }
 
 // ==================== 图片预览弹窗 ====================
@@ -3624,11 +3726,14 @@ function handleGlobalClick(event: MouseEvent) {
 // 切换工作区时恢复该工作区中断的生成任务（含生成中切走又切回的场景）
 watch(() => store.activeWorkspaceId, () => {
   resumeLoadingCanvasNodes(store)
+  remapAssetUrls()
 })
 
 onMounted(async () => {
   // 从 localforage 加载持久化数据
   await store._hydrateFromStorage()
+  // 刷新后节点里的 blob object URL 已失效，按 assetId 从素材库重建
+  await remapAssetUrls()
   // 如果没有工作区，创建默认画布
   if (!store.activeWorkspaceId && store.workspaces.length === 0) {
     store.createWorkspace(`${t('canvas.canvas')} 1`)
@@ -3641,6 +3746,7 @@ onMounted(async () => {
   window.addEventListener('keydown', handleKeyDown)
   window.addEventListener('keyup', handleKeyUp)
   window.addEventListener('click', handleGlobalClick)
+  window.addEventListener('paste', handleCanvasPaste)
   // 监听用户登录/退出，切换画布数据空间
   window.addEventListener('agnes:user-login', handleUserSwitch)
   window.addEventListener('agnes:user-logout', handleUserLogout)
@@ -3651,6 +3757,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeyDown)
   window.removeEventListener('keyup', handleKeyUp)
   window.removeEventListener('click', handleGlobalClick)
+  window.removeEventListener('paste', handleCanvasPaste)
   window.removeEventListener('pointermove', handleSelectionMove)
   window.removeEventListener('pointerup', handleSelectionUp)
   window.removeEventListener('pointermove', handleConnectingMove)
@@ -3668,6 +3775,7 @@ async function handleUserSwitch(e: Event) {
   const detail = e instanceof CustomEvent ? e.detail : undefined
   const userId: number | null = typeof detail?.id === 'number' ? detail.id : null
   await store._switchUserStorage(userId)
+  await remapAssetUrls()
   if (!store.activeWorkspaceId && store.workspaces.length === 0) {
     store.createWorkspace(`${t('canvas.canvas')} 1`)
   }
@@ -3676,6 +3784,7 @@ async function handleUserSwitch(e: Event) {
 /** 退出登录：切换到匿名数据空间 */
 async function handleUserLogout() {
   await store._switchUserStorage(null)
+  await remapAssetUrls()
   if (!store.activeWorkspaceId && store.workspaces.length === 0) {
     store.createWorkspace(`${t('canvas.canvas')} 1`)
   }

@@ -2312,6 +2312,8 @@ const zhCN = {
       downloadFailed: '下载失败',
       downloadStarted: '已开始下载',
       exportJsonTip: '导出画布 JSON',
+      dropHint: '松开鼠标，添加到画布',
+      filesSkipped: '{n} 个文件类型不支持，已跳过',
       generateFailed: '生成失败',
       generateTimeout: '生成超时',
       // 画布三节点执行（spec M3）
@@ -2334,6 +2336,7 @@ const zhCN = {
       noImageContent: '没有图片内容',
       noSaveContent: '没有可保存的内容',
       nodeCreated: '节点已创建',
+      nodesAdded: '已添加 {n} 个节点',
       promptCopied: '提示词已复制',
       promptEmpty: '提示词为空',
       promptGenerated: '提示词已生成',

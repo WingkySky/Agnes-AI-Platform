@@ -2329,6 +2329,8 @@ const enUS = {
       downloadFailed: 'Download failed',
       downloadStarted: 'Download started',
       exportJsonTip: 'Export canvas as JSON',
+      dropHint: 'Release to add to canvas',
+      filesSkipped: '{n} file(s) of unsupported type skipped',
       generateFailed: 'Generation failed',
       generateTimeout: 'Generation timed out',
       // Canvas run nodes (spec M3)
@@ -2351,6 +2353,7 @@ const enUS = {
       noImageContent: 'No image content',
       noSaveContent: 'Nothing to save',
       nodeCreated: 'Node created',
+      nodesAdded: '{n} node(s) added',
       promptCopied: 'Prompt copied',
       promptEmpty: 'Prompt is empty',
       promptGenerated: 'Prompt generated',
