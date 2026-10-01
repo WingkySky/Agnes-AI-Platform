@@ -242,6 +242,7 @@
           @upscale="handleHoverUpscale"
           @super-resolution="handleHoverSuperResolution"
           @angle="handleHoverAngle"
+          @lighting="handleHoverLighting"
           @view-large="handleHoverViewLarge"
           @derive-video="handleHoverDeriveVideo"
           @derive-tail="handleHoverDeriveTail"
@@ -327,6 +328,15 @@
         :theme="store.canvasTheme"
         @confirm="handleAngleConfirm"
         @cancel="imageOpsState.angle.visible = false"
+      />
+      <!-- AI 打光弹窗 -->
+      <CanvasLightingDialog
+        v-if="imageOpsState.lighting.visible"
+        :visible="imageOpsState.lighting.visible"
+        :image-url="imageOpsState.lighting.imageUrl"
+        :theme="store.canvasTheme"
+        @confirm="handleLightingConfirm"
+        @cancel="imageOpsState.lighting.visible = false"
       />
       <!-- ============ 分类分组模式选择弹窗 ============ -->
       <el-dialog
@@ -521,6 +531,7 @@ import CanvasImageCropDialog from '@/components/canvas/CanvasImageCropDialog.vue
 import CanvasImageSplitDialog from '@/components/canvas/CanvasImageSplitDialog.vue'
 import CanvasImageUpscaleDialog from '@/components/canvas/CanvasImageUpscaleDialog.vue'
 import CanvasImageAngleDialog from '@/components/canvas/CanvasImageAngleDialog.vue'
+import CanvasLightingDialog from '@/components/canvas/CanvasLightingDialog.vue'
 // 画布分组层组件（成员制分组，替代旧流程模式步骤）
 import CanvasGroupLayer from '@/components/canvas/CanvasGroupLayer.vue'
 // 带水印的图片组件（预览大图时显示水印）
@@ -2167,12 +2178,13 @@ const maskEditState = reactive({
   imageUrl: '' as string,
 })
 
-// 图片加工弹窗状态（裁剪/拆分/放大/AI多角度）
+// 图片加工弹窗状态（裁剪/拆分/放大/AI多角度/打光）
 const imageOpsState = reactive({
   crop: { visible: false, panelId: null as string | null, imageUrl: '' },
   split: { visible: false, panelId: null as string | null, imageUrl: '' },
   upscale: { visible: false, panelId: null as string | null, imageUrl: '' },
   angle: { visible: false, panelId: null as string | null, imageUrl: '' },
+  lighting: { visible: false, panelId: null as string | null, imageUrl: '' },
 })
 
 // ============ 画布模板功能 ============
@@ -2929,27 +2941,41 @@ function handleHoverAngle() {
   imageOpsState.angle.imageUrl = imageUrl
 }
 
-// AI 多角度确认：调用图生图 API，新建子节点并连线
-async function handleAngleConfirm({ prompt }: { prompt: string }) {
-  const panelId = imageOpsState.angle.panelId
-  const panel = store.panels.find(p => p.id === panelId)
-  if (!panel) return
-  const imageUrl = imageOpsState.angle.imageUrl
-  imageOpsState.angle.visible = false
+// AI 打光：打开打光配置弹窗
+function handleHoverLighting() {
+  const panel = hoveredPanel.value
+  if (!panel?.content?.content) return
+  const imageUrl = panel.content.content as string
+  imageOpsState.lighting.visible = true
+  imageOpsState.lighting.panelId = panel.id
+  imageOpsState.lighting.imageUrl = imageUrl
+}
 
-  // 积分预检：AI 多角度走 image2image 模式
+// 派生图生成共享链路（多角度/打光等）：积分预检 → 建 loading 子节点并连线 → 图生图任务 → 轮询更新
+async function generateDerivedImage(opts: {
+  panelId: string | null
+  imageUrl: string
+  prompt: string
+  nameSuffix: string
+  doneMessage: string
+  failedMessage: string
+}): Promise<void> {
+  const panel = store.panels.find(p => p.id === opts.panelId)
+  if (!panel) return
+
+  // 积分预检：派生图走 image2image 模式
   const canGenerate = await checkCreditsBeforeGenerate({ type: 'image', mode: 'image2image', size: '1024x1024' })
   if (!canGenerate) return
 
   // 先创建 loading 状态的子节点
   const newId = store.addPanel({
     type: 'image',
-    name: (panel.name || '') + ' · ' + t('canvas.imageOps.angleSuffix'),
+    name: (panel.name || '') + ' · ' + opts.nameSuffix,
     x: panel.x + panel.width + 60,
     y: panel.y,
     width: panel.width,
     height: panel.height,
-    content: { content: '', status: 'loading', prompt },
+    content: { content: '', status: 'loading', prompt: opts.prompt },
     meta: {},
     is_locked: false,
     is_hidden: false,
@@ -2964,10 +2990,10 @@ async function handleAngleConfirm({ prompt }: { prompt: string }) {
     const { createImageTask, getImageTaskStatus } = await import('@/api/images')
     const { toBase64IfNeeded } = await import('@/lib/canvas-image-ops')
     // 参考图转 base64（远程 URL 会自动走后端代理下载后再转）
-    const base64Image = await toBase64IfNeeded(imageUrl)
+    const base64Image = await toBase64IfNeeded(opts.imageUrl)
 
     const resp = await createImageTask({
-      prompt,
+      prompt: opts.prompt,
       model: useModelsStore().defaultImageModel,
       size: '1024x1024',
       response_format: 'url',
@@ -2982,7 +3008,7 @@ async function handleAngleConfirm({ prompt }: { prompt: string }) {
     taskQueue.registerCanvasTask({
       taskId,
       type: 'image',
-      prompt,
+      prompt: opts.prompt,
       backendTaskId: taskId,
       panelId: newId,
     })
@@ -2999,20 +3025,20 @@ async function handleAngleConfirm({ prompt }: { prompt: string }) {
         store.updatePanel(newId, { content: { content: resultUrl, status: 'success' } })
         store.pushSnapshot()
         taskQueue.updateCanvasTask(taskId, { status: 'success', resultUrl, progress: 100 })
-        showCostConsumedMessage({ type: 'image', mode: 'image2image', size: '1024x1024' }, t('canvas.messages.angleDone'))
+        showCostConsumedMessage({ type: 'image', mode: 'image2image', size: '1024x1024' }, opts.doneMessage)
         // 【用户偏好】自动下载 + 完成通知
         const prefsStore = usePreferencesStore()
         if (resultUrl) {
           prefsStore.autoDownload(resultUrl, 'image', { modelId: useModelsStore().defaultImageModel })
         }
-        prefsStore.notifyComplete('image', { prompt, modelId: useModelsStore().defaultImageModel })
+        prefsStore.notifyComplete('image', { prompt: opts.prompt, modelId: useModelsStore().defaultImageModel })
         return
       }
       if (isFailed) {
-        const errMsg = status.message || status.error || t('canvas.messages.angleFailed')
+        const errMsg = status.message || status.error || opts.failedMessage
         store.updatePanel(newId, { content: { status: 'error', errorDetails: errMsg } })
         taskQueue.updateCanvasTask(taskId, { status: 'failed' })
-        ElMessage.error(`${t('canvas.messages.angleFailed')}: ${errMsg}`)
+        ElMessage.error(`${opts.failedMessage}: ${errMsg}`)
         return
       }
       const progress = typeof status.progress === 'number' ? status.progress : undefined
@@ -3022,10 +3048,36 @@ async function handleAngleConfirm({ prompt }: { prompt: string }) {
     store.updatePanel(newId, { content: { status: 'error', errorDetails: t('canvas.messages.generateTimeout') } })
     taskQueue.updateCanvasTask(taskId, { status: 'failed' })
   } catch (err) {
-    console.error('[canvas] angle error:', err)
+    console.error('[canvas] derived image error:', err)
     store.updatePanel(newId, { content: { status: 'error', errorDetails: getErrorMessage(err) } })
-    ElMessage.error(`${t('canvas.messages.angleFailed')}: ${getErrorMessage(err)}`)
+    ElMessage.error(`${opts.failedMessage}: ${getErrorMessage(err)}`)
   }
+}
+
+// AI 多角度确认
+async function handleAngleConfirm({ prompt }: { prompt: string }) {
+  imageOpsState.angle.visible = false
+  await generateDerivedImage({
+    panelId: imageOpsState.angle.panelId,
+    imageUrl: imageOpsState.angle.imageUrl,
+    prompt,
+    nameSuffix: t('canvas.imageOps.angleSuffix'),
+    doneMessage: t('canvas.messages.angleDone'),
+    failedMessage: t('canvas.messages.angleFailed'),
+  })
+}
+
+// AI 打光确认
+async function handleLightingConfirm({ prompt, label }: { prompt: string, label: string }) {
+  imageOpsState.lighting.visible = false
+  await generateDerivedImage({
+    panelId: imageOpsState.lighting.panelId,
+    imageUrl: imageOpsState.lighting.imageUrl,
+    prompt,
+    nameSuffix: label,
+    doneMessage: t('canvas.messages.lightingDone'),
+    failedMessage: t('canvas.messages.lightingFailed'),
+  })
 }
 
 // 辅助：为图片节点创建子节点（加工结果），并连线

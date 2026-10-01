@@ -10,7 +10,7 @@
        · image 空图：上传图片
        · video：上传视频
        · audio：上传音频
-       · image 有图：复制提示词、反推、替换、锁比例、局部编辑、裁剪、拆分、放大、超分、角度、查看大图
+       · image 有图：复制提示词、反推、替换、锁比例、局部编辑、裁剪、拆分、放大、超分、角度、打光、查看大图
      - 每个按钮 32×32px，hover 显示中文 tooltip
      ===================================================== -->
 
@@ -52,7 +52,7 @@ import {
   Info, Trash2, RefreshCw, FolderPlus, Download, MessageSquare,
   Image as ImageIcon, ImagePlus, Minus, Plus, Upload, Video, Music2, Play,
   Copy, FileText, Lock, LockOpen, Brush, Scissors, Grid2x2,
-  ZoomIn, Sparkles, Camera, Maximize2, History, Film, SkipBack, SkipForward,
+  ZoomIn, Sparkles, Camera, Maximize2, History, Film, SkipBack, SkipForward, Sun,
 } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
 import { useCanvasStore } from '@/stores/canvas'
@@ -72,7 +72,7 @@ const emit = defineEmits([
   'generate-image', 'quick-generate', 'font-size-down', 'font-size-up',
   'upload-image', 'upload-video', 'upload-audio',
   'copy-prompt', 'describe', 'replace-image', 'toggle-ratio',
-  'mask-edit', 'crop', 'split', 'upscale', 'super-resolution', 'angle', 'view-large',
+  'mask-edit', 'crop', 'split', 'upscale', 'super-resolution', 'angle', 'lighting', 'view-large',
   'derive-video', 'derive-tail', 'derive-prev', 'derive-chain', 'reshoot', 'run-node',
   'capture-frame',
 ])
@@ -409,6 +409,12 @@ const tools = computed(() => {
       title: t('canvas.hoverToolbar.angle'),
       icon: Camera,
       onClick: () => emit('angle', props.panel),
+    })
+    list.push({
+      id: 'lighting',
+      title: t('canvas.hoverToolbar.lighting'),
+      icon: Sun,
+      onClick: () => emit('lighting', props.panel),
     })
     list.push({
       id: 'view-large',
