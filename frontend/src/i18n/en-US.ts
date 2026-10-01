@@ -2120,7 +2120,6 @@ const enUS = {
       emotionCancelManual: 'Cancel Boxing',
       emotionSelectThisFace: 'Select this face',
       emotionCharacterN: 'Character {n}',
-      emotionAddCharacter: 'Add Character',
       emotionRemoveCharacter: 'Remove character',
       emotionApplyAll: 'Apply to All',
       emotionPadUp: 'Agitated',

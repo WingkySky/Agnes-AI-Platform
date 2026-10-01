@@ -2103,7 +2103,6 @@ const zhCN = {
       emotionCancelManual: '取消框选',
       emotionSelectThisFace: '选择此人脸',
       emotionCharacterN: '角色{n}',
-      emotionAddCharacter: '添加角色',
       emotionRemoveCharacter: '移除该角色',
       emotionApplyAll: '应用到全部',
       emotionPadUp: '激动',

@@ -1,9 +1,9 @@
 <!-- =====================================================
      表情控制对话框（多角色一次生成）
-     - 阶段：识别人脸 → 选择人脸（可连续选多个；识别失败/补充可手动框选）→ 编辑情绪 → 生成
-     - 每个选中人脸=一个角色，角色各自持有情绪预设；情绪盘编辑当前激活角色
-     - 「应用到全部」把当前情绪套到所有角色；「添加角色」回到选择阶段继续加人
-     - 确认时裁切联合编辑区+各角色脸部参考图并组装多角色提示词（由 CanvasView 一次图生图 + 逐脸椭圆羽化合成）
+     - 识别出的人脸始终可见可点：点击即加入角色（已加入则激活），无需切换"添加模式"
+     - 每个角色各自持有情绪预设，情绪盘编辑当前激活角色；「应用到全部」统一调整
+     - 手动框选补充漏检人脸；编辑区在首个角色加入后常驻，不再随阶段开关
+     - 确认时逐脸紧裁切生成+羽化合成（由 CanvasView 一次编排，宫格等背景像素零改动）
      ===================================================== -->
 
 <template>
@@ -34,13 +34,13 @@
               <defs>
                 <mask :id="`emotion-face-mask-${uid}`">
                   <rect width="100%" height="100%" fill="white" />
-                  <rect v-for="face in displayFaces" :key="face.id" :x="face.x" :y="face.y" :width="face.width" :height="face.height" :rx="Math.min(face.width, face.height) * 0.16" fill="black" />
+                  <rect v-for="face in faces" :key="face.id" :x="face.x" :y="face.y" :width="face.width" :height="face.height" :rx="Math.min(face.width, face.height) * 0.16" fill="black" />
                 </mask>
               </defs>
               <rect width="100%" height="100%" fill="rgba(0,0,0,.38)" :mask="`url(#emotion-face-mask-${uid})`" />
             </svg>
             <button
-              v-for="face in displayFaces"
+              v-for="face in faces"
               :key="face.id"
               type="button"
               class="face-box"
@@ -48,7 +48,7 @@
               :style="faceBoxStyle(face)"
               :aria-label="t('canvas.imageOps.emotionSelectThisFace')"
               @pointerdown.stop
-              @click.stop="onFaceClick(face)"
+              @click.stop="selectFace(face)"
             >
               <span v-if="characterOfFace(face)" class="face-tag">{{ characterOfFace(face)!.name }}</span>
             </button>
@@ -66,8 +66,8 @@
           <button v-if="stage === 'manual'" class="mini-btn" @click="cancelManual">{{ t('canvas.imageOps.emotionCancelManual') }}</button>
         </div>
 
-        <!-- 编辑区：角色切换 + 实时预览 + 情绪盘 -->
-        <div v-if="stage === 'editing' && characters.length" class="editing-area">
+        <!-- 编辑区：角色切换 + 实时预览 + 情绪盘（首个角色加入后常驻，加人不再隐藏） -->
+        <div v-if="characters.length" class="editing-area">
           <div class="character-row">
             <button
               v-for="character in characters"
@@ -83,7 +83,7 @@
                 <X :size="12" />
               </span>
             </button>
-            <button class="mini-btn" @click="stage = 'selecting'">{{ t('canvas.imageOps.emotionAddCharacter') }}</button>
+            <button class="mini-btn" @click="beginManual">{{ t('canvas.imageOps.emotionManualSelect') }}</button>
             <button v-if="characters.length > 1" class="mini-btn" @click="applyToAll">{{ t('canvas.imageOps.emotionApplyAll') }}</button>
           </div>
 
@@ -185,12 +185,6 @@ const preset = computed<EmotionPreset>({
   },
 })
 
-/** 编辑阶段展示全部已选角色人脸框（高亮当前），选择/框选阶段展示全部识别框 */
-const displayFaces = computed(() => {
-  if (stage.value === 'editing') return characters.value.map(c => c.faceBox)
-  return faces.value
-})
-
 const statusText = computed(() => {
   if (stage.value === 'detecting') return t('canvas.imageOps.emotionDetecting')
   if (stage.value === 'manual') return t('canvas.imageOps.emotionManualHint')
@@ -233,16 +227,6 @@ function characterOfFace(face: EmotionFaceBox) {
 
 function isActiveFace(face: EmotionFaceBox) {
   return characterOfFace(face)?.id === activeCharacterId.value
-}
-
-/** 编辑阶段点击人脸框=切换激活角色，选择阶段=加入/激活角色 */
-function onFaceClick(face: EmotionFaceBox) {
-  if (stage.value === 'editing') {
-    const character = characterOfFace(face)
-    if (character) activeCharacterId.value = character.id
-    return
-  }
-  selectFace(face)
 }
 
 /* ---------- 初始化：图片转 dataURL → 读取尺寸 → 人脸检测 ---------- */
@@ -501,6 +485,8 @@ onBeforeUnmount(() => {
   background: var(--agnes-bg-dark-surface);
 }
 .image-box.is-manual { cursor: crosshair; touch-action: none; }
+/* 手动框选时人脸框让位于拖拽，避免想框的区域被点选拦截 */
+.image-box.is-manual .face-box { pointer-events: none; }
 
 .stage-image {
   display: block;
