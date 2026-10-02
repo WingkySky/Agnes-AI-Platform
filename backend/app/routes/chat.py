@@ -292,6 +292,7 @@ class AgentSessionMessageIn(BaseModel):
     content: str = Field(default="")
     attachments: Optional[List[Dict[str, Any]]] = Field(default=None, description="输入附件（图片 base64_image 等）")
     steps: Optional[List[Dict[str, Any]]] = Field(default=None, description="工具步骤时间线")
+    media_items: Optional[List[Dict[str, Any]]] = Field(default=None, description="生成产物（type/url/task_id/status），刷新后回读展示")
 
 
 class AgentSessionCreateRequest(BaseModel):
@@ -360,7 +361,9 @@ async def sync_agent_session(
     session.title = (body.title or session.title or "新对话")[:200]
     if body.workspace_id is not None:
         session.workspace_id = body.workspace_id
-    session.context = body.context
+    # context 为 None（前端内核不在池中时的补存）不覆盖已存上下文，防止抹掉
+    if body.context is not None:
+        session.context = body.context
 
     # 消息行全量替换（幂等）：同步量小，无增量协议
     await db.execute(delete(ChatMessage).where(ChatMessage.session_id == session.id))
@@ -371,6 +374,7 @@ async def sync_agent_session(
             content=m.content or "",
             attachments=m.attachments or [],
             steps=m.steps or [],
+            media_items=m.media_items or [],
         ))
     await db.commit()
     await db.refresh(session)

@@ -124,3 +124,50 @@ async def test_chat_session_create_accepts_workspace_id(auth_client):
 
     detail = (await auth_client.get(f"/api/chat/agent-sessions/{body['id']}")).json()["data"]
     assert detail["workspace_id"] == "ws-ops-9"
+
+
+@pytest.mark.asyncio
+async def test_agent_session_context_null_does_not_wipe(auth_client):
+    """context 防抹除：内核不在池中时的补存（context=null / 缺省）不得清掉已存上下文，
+    否则下轮只能从消息行文本重建，工具轮全丢（模型会持续模仿自己的文字回复不调工具）"""
+    create = await auth_client.post("/api/chat/sessions", json={})
+    sid = create.json()["data"]["id"]
+
+    synced = await auth_client.put(f"/api/chat/agent-sessions/{sid}", json=SYNC_PAYLOAD)
+    assert synced.status_code == 200
+    before = (await auth_client.get(f"/api/chat/agent-sessions/{sid}")).json()["data"]["context"]
+    assert before == SYNC_PAYLOAD["context"]
+
+    # 补存 1：显式 context=null
+    wiped = await auth_client.put(f"/api/chat/agent-sessions/{sid}", json={"title": "t", "messages": []})
+    assert wiped.status_code == 200
+    # 补存 2：消息照常全量替换
+    wiped2 = await auth_client.put(f"/api/chat/agent-sessions/{sid}", json={
+        "title": "t", "context": None,
+        "messages": [{"role": "user", "content": "hi"}],
+    })
+    assert wiped2.status_code == 200
+
+    after = (await auth_client.get(f"/api/chat/agent-sessions/{sid}")).json()["data"]
+    assert after["context"] == SYNC_PAYLOAD["context"]
+    assert [m["content"] for m in after["messages"]] == ["hi"]
+
+
+@pytest.mark.asyncio
+async def test_agent_session_sync_persists_media_items(auth_client):
+    """生成产物（媒体）必须随消息行落库：否则浏览器刷新后对话里的生成结果全部消失"""
+    create = await auth_client.post("/api/chat/sessions", json={})
+    sid = create.json()["data"]["id"]
+
+    media_msg = {
+        "role": "user", "content": "画一只猫",
+        "media_items": [{"type": "image", "url": "http://x/a.png", "task_id": "img_1", "status": "pending"}],
+    }
+    synced = await auth_client.put(f"/api/chat/agent-sessions/{sid}", json={
+        "title": "t", "messages": [media_msg],
+    })
+    assert synced.status_code == 200
+
+    detail = (await auth_client.get(f"/api/chat/agent-sessions/{sid}")).json()["data"]
+    items = detail["messages"][0]["media_items"]
+    assert items == [{"type": "image", "url": "http://x/a.png", "task_id": "img_1", "status": "pending"}]
