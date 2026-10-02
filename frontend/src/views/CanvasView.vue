@@ -174,6 +174,7 @@
         :theme-mode="store.themeMode"
         :background-mode="store.backgroundMode"
         :show-image-info="store.showImageInfo"
+        :auto-place-media="store.autoPlaceMedia"
         :active-tool="activeTool"
         :show-agent-panel="agentPanelOpen"
         @select-tool="handleSelectTool"
@@ -190,6 +191,7 @@
         @set-theme="(mode) => store.setThemeMode(mode)"
         @set-background="(mode) => store.setBackgroundMode(mode)"
         @toggle-image-info="(val) => handleToggleImageInfo(val)"
+        @toggle-auto-place="(val) => handleToggleAutoPlace(val)"
         @show-shortcuts="handleShowShortcuts"
         @smart-group="handleSmartGroup"
         @arrange-layout="handleArrangeLayout"
@@ -3767,6 +3769,11 @@ async function handleClearCanvas() {
 // 切换图片信息显示
 function handleToggleImageInfo(val: boolean) {
   if (val !== store.showImageInfo) store.toggleImageInfo()
+}
+
+// 切换「生成后自动放入画布」（Agent 落画布默认行为，随偏好持久化）
+function handleToggleAutoPlace(val: boolean) {
+  if (val !== store.autoPlaceMedia) store.toggleAutoPlaceMedia()
 }
 
 // ==================== 缩放控件 + 小地图 ====================

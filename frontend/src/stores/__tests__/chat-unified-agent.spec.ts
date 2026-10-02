@@ -8,6 +8,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 const mocks = vi.hoisted(() => {
+  const canvasState = {
+    activeWorkspaceId: null as string | null,
+    workspaces: [] as { id: string; name: string }[],
+    _storageReady: false,
+    createWorkspace: (name: string) => {
+      canvasState.workspaces.push({ id: 'ws_new', name })
+      canvasState.activeWorkspaceId = 'ws_new'
+    },
+  }
   const kernels: FakeKernel[] = []
   class FakeKernel {
     setModel = vi.fn()
@@ -20,7 +29,16 @@ const mocks = vi.hoisted(() => {
     requestStop = vi.fn()
     constructor() { kernels.push(this) }
   }
-  return { kernels, FakeKernel }
+  return {
+    kernels, FakeKernel, canvasState,
+    applyCanvasOps: vi.fn(async () => ({ results: [], new_panel_ids: [], failed: 0, revision: 2 })),
+    isCloudChannel: vi.fn(() => true),
+    getPreferences: vi.fn(async () => ({ preferences: { ui: { canvas_active_workspace_id: '' } } })),
+    patchPreferences: vi.fn(async () => ({})),
+    getWorkspaceRevision: vi.fn(async () => ({ revision: 1 })),
+    listWorkspaces: vi.fn(async () => [] as { id: string; name: string; updated_at: string }[]),
+    createWorkspaceApi: vi.fn(async () => ({ id: 'ws_api_created', name: 'Chat Canvas', revision: 1 })),
+  }
 })
 
 vi.mock('@/lib/agent/kernel', () => ({
@@ -82,10 +100,6 @@ vi.mock('@/api/chat', () => ({
   getMediaStatus: vi.fn(),
 }))
 
-vi.mock('@/api/canvasWorkspace', () => ({
-  applyCanvasOps: vi.fn(),
-}))
-
 vi.mock('@/api/mcp', () => ({
   deleteMemoryPreference: vi.fn(),
   clearMemoryPreferences: vi.fn(),
@@ -99,7 +113,27 @@ vi.mock('@/stores/preferences', () => ({
   usePreferencesStore: () => ({ ui: { canvas_active_workspace_id: 'ws_active' } }),
 }))
 
-import { useChatStore } from '../chat'
+vi.mock('@/stores/canvas', () => ({
+  useCanvasStore: () => mocks.canvasState,
+}))
+
+vi.mock('@/lib/canvas-storage', () => ({
+  isCloudChannel: mocks.isCloudChannel,
+}))
+
+vi.mock('@/api/preferences', () => ({
+  getPreferences: mocks.getPreferences,
+  patchPreferences: mocks.patchPreferences,
+}))
+
+vi.mock('@/api/canvasWorkspace', () => ({
+  applyCanvasOps: mocks.applyCanvasOps,
+  getWorkspaceRevision: mocks.getWorkspaceRevision,
+  listWorkspaces: mocks.listWorkspaces,
+  createWorkspace: mocks.createWorkspaceApi,
+}))
+
+import { useChatStore, chatContextFromRows } from '../chat'
 
 // node 测试环境无 localStorage：内存实现打桩（chat store 与档位记忆共用）
 const lsMap = new Map<string, string>()
@@ -115,6 +149,15 @@ beforeEach(() => {
   lsMap.set('agnes_agent_mode', 'auto')
   setActivePinia(createPinia())
   mocks.kernels.length = 0
+  mocks.canvasState.activeWorkspaceId = null
+  mocks.canvasState.workspaces = []
+  mocks.canvasState._storageReady = false
+  vi.mocked(mocks.isCloudChannel).mockReturnValue(true)
+  vi.mocked(mocks.getPreferences).mockReset().mockResolvedValue({ preferences: { ui: { canvas_active_workspace_id: '' } } })
+  vi.mocked(mocks.patchPreferences).mockReset().mockResolvedValue({})
+  vi.mocked(mocks.getWorkspaceRevision).mockReset().mockResolvedValue({ revision: 1 })
+  vi.mocked(mocks.listWorkspaces).mockReset().mockResolvedValue([])
+  vi.mocked(mocks.createWorkspaceApi).mockReset().mockResolvedValue({ id: 'ws_api_created', name: 'Chat Canvas', revision: 1 })
 })
 
 describe('Agent 统一宿主：全局档位', () => {
@@ -186,5 +229,122 @@ describe('Agent 统一宿主：确认卡链路', () => {
     expect(store.pendingConfirm?.sessionId).toBe(2)
     store._onKernelEvent(2, { type: 'done', stopped: false, error: null })
     expect(store.pendingConfirm).toBeNull()
+  })
+})
+
+describe('Agent 统一宿主：画布目标解析链', () => {
+  it('显式参数直通（不做任何解析调用）', async () => {
+    const store = useChatStore()
+    const target = await store._resolveCanvasTarget('ws_explicit')
+    expect(target).toEqual({ workspaceId: 'ws_explicit', workspaceName: '' })
+    expect(mocks.getPreferences).not.toHaveBeenCalled()
+    expect(mocks.listWorkspaces).not.toHaveBeenCalled()
+  })
+
+  it('画布页实时激活优先（store 内存在该工作区）', async () => {
+    mocks.canvasState.activeWorkspaceId = 'ws_live'
+    mocks.canvasState.workspaces = [{ id: 'ws_live', name: '实况画布' }]
+    const store = useChatStore()
+    const target = await store._resolveCanvasTarget()
+    expect(target).toEqual({ workspaceId: 'ws_live', workspaceName: '实况画布' })
+    expect(mocks.getPreferences).not.toHaveBeenCalled()
+  })
+
+  it('偏好有效：revision 验证通过即采用（现拉现读，不信旧快照）', async () => {
+    vi.mocked(mocks.getPreferences).mockResolvedValue({ preferences: { ui: { canvas_active_workspace_id: 'ws_pref' } } })
+    const store = useChatStore()
+    const target = await store._resolveCanvasTarget()
+    expect(target).toEqual({ workspaceId: 'ws_pref', workspaceName: '' })
+    expect(mocks.getWorkspaceRevision).toHaveBeenCalledWith('ws_pref')
+    expect(mocks.patchPreferences).not.toHaveBeenCalled()
+  })
+
+  it('偏好失效（已删除）：清除旧值并回退到最近使用的画布', async () => {
+    vi.mocked(mocks.getPreferences).mockResolvedValue({ preferences: { ui: { canvas_active_workspace_id: 'ws_dead' } } })
+    vi.mocked(mocks.getWorkspaceRevision).mockRejectedValue(new Error('404'))
+    vi.mocked(mocks.listWorkspaces).mockResolvedValue([
+      { id: 'ws_latest', name: '最近的画布', updated_at: '2026-10-02' },
+    ])
+    const store = useChatStore()
+    const target = await store._resolveCanvasTarget()
+    expect(target).toEqual({ workspaceId: 'ws_latest', workspaceName: '最近的画布' })
+    expect(mocks.patchPreferences).toHaveBeenCalledWith({ ui: { canvas_active_workspace_id: '' } })
+  })
+
+  it('一个画布都没有且画布 store 已 hydrate：走 store 自动建「对话画布」', async () => {
+    mocks.canvasState._storageReady = true
+    const store = useChatStore()
+    const target = await store._resolveCanvasTarget()
+    expect(target?.created).toBe(true)
+    expect(target?.workspaceId).toBe('ws_new')
+    expect(mocks.canvasState.workspaces.some((w) => w.name === 'Chat Canvas')).toBe(true)
+  })
+
+  it('画布 store 未 hydrate：走 API 自动建并写偏好激活', async () => {
+    const store = useChatStore()
+    const target = await store._resolveCanvasTarget()
+    expect(target?.created).toBe(true)
+    expect(target?.workspaceId).toBe('ws_api_created')
+    expect(mocks.createWorkspaceApi).toHaveBeenCalled()
+    expect(mocks.patchPreferences).toHaveBeenCalledWith({ ui: { canvas_active_workspace_id: 'ws_api_created' } })
+  })
+
+  it('未登录（非云通道）：返回 null（唯一报错场景）', async () => {
+    vi.mocked(mocks.isCloudChannel).mockReturnValue(false)
+    const store = useChatStore()
+    expect(await store._resolveCanvasTarget()).toBeNull()
+  })
+})
+
+describe('chatContextFromRows：上下文重建保真', () => {
+  const baseRow = {
+    id: 1, session_id: 1, created_at: '',
+    attachments: [], media_items: [],
+  }
+
+  it('assistant 带 steps：重建 toolCall 块 + 成对 toolResult（含 isError 映射）', () => {
+    const ctx = chatContextFromRows([
+      { ...baseRow, role: 'user', content: '画只猫' } as never,
+      {
+        ...baseRow, role: 'assistant', content: '', steps: [
+          { callId: 'c1', tool: 'generate_image', args: { prompt: 'a cat' }, status: 'done', result: '{"ok":true}' },
+          { callId: 'c2', tool: 'canvas_add_panels', args: {}, status: 'error', result: null },
+        ],
+      } as never,
+      { ...baseRow, role: 'assistant', content: '图片生成好了', steps: [] } as never,
+    ]) as { messages: Array<Record<string, unknown>> }
+
+    const msgs = ctx.messages
+    // user → assistant(toolUse) → toolResult ×2 → assistant(stop)
+    expect(msgs.map((m) => m.role)).toEqual(['user', 'assistant', 'toolResult', 'toolResult', 'assistant'])
+
+    const toolRound = msgs[1] as { stopReason: string; content: Array<Record<string, unknown>> }
+    expect(toolRound.stopReason).toBe('toolUse')
+    // 空文本不生成占位 text 块，content[0] 直接是 toolCall
+    expect(toolRound.content[0]).toEqual({ type: 'toolCall', id: 'c1', name: 'generate_image', arguments: { prompt: 'a cat' } })
+    expect(toolRound.content[1]).toMatchObject({ type: 'toolCall', id: 'c2', name: 'canvas_add_panels' })
+
+    const r1 = msgs[2] as { toolCallId: string; isError: boolean; content: Array<Record<string, unknown>> }
+    expect(r1).toMatchObject({ toolCallId: 'c1', isError: false })
+    expect(r1.content[0]).toEqual({ type: 'text', text: '{"ok":true}' })
+    const r2 = msgs[3] as { toolCallId: string; isError: boolean; content: Array<Record<string, unknown>> }
+    expect(r2.isError).toBe(true)
+    expect((r2.content[0] as { text: string }).text).toContain('无结果记录')
+
+    const final = msgs[4] as { stopReason: string; content: Array<Record<string, unknown>> }
+    expect(final.stopReason).toBe('stop')
+    expect(final.content).toEqual([{ type: 'text', text: '图片生成好了' }])
+  })
+
+  it('user 附图块保留（base64 → image 块）', () => {
+    const ctx = chatContextFromRows([
+      {
+        ...baseRow, role: 'user', content: '看这张图',
+        attachments: [{ name: 'a.png', base64_image: 'data:image/png;base64,QQ==', mime_type: 'image/png' }],
+      } as never,
+    ]) as { messages: Array<{ content: Array<Record<string, unknown>> }> }
+    const content = ctx.messages[0].content
+    expect(content).toHaveLength(2)
+    expect(content[1]).toMatchObject({ type: 'image', mimeType: 'image/png' })
   })
 })

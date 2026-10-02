@@ -1326,7 +1326,8 @@ const enUS = {
     canvasPlacement: {
       imageName: 'Image from chat',
       videoName: 'Video from chat',
-      done: 'Generated media placed on canvas automatically',
+      doneTo: 'Generated media placed on canvas "{name}"',
+      doneAutoCreated: 'Created canvas "{name}" and placed the generated media',
     },
     mediaLoading: 'Loading media...',
     mediaFailed: 'Generation failed, please retry',
@@ -1364,6 +1365,7 @@ const enUS = {
 
   // ------ Infinite Canvas ------
   canvas: {
+    autoWorkspaceName: 'Chat Canvas',
     sidebarTitle: 'Canvas Management',
     newCanvas: 'New Canvas',
     noCanvas: 'No canvas yet, click + to create one',
@@ -2241,6 +2243,8 @@ const enUS = {
       lines: 'Lines',
       blank: 'Blank',
       imageInfo: 'Image Info',
+      autoPlace: 'Auto-place generated media on canvas',
+      autoPlaceHint: 'Agent-generated images/videos default to the current canvas (say "don\'t place on canvas" in chat to skip once)',
       themeLightHint: 'Switch to light theme',
       themeDarkHint: 'Switch to dark theme',
     },
@@ -3369,6 +3373,8 @@ const enUS = {
       canvasGridVisibleHint: 'Display dot-grid overlay on the infinite canvas for alignment',
       canvasSnapToGrid: 'Snap to Grid',
       canvasSnapToGridHint: 'Automatically align dragged nodes to the nearest grid point',
+      canvasAutoPlace: 'Auto-place generated media on canvas',
+      canvasAutoPlaceHint: 'Agent-generated images/videos default to the current canvas; say "don\'t place on canvas" in chat to skip once',
       canvasGridSize: 'Grid Size',
       canvasGridSizeHint: 'Grid spacing in pixels — larger values produce a sparser grid',
     },

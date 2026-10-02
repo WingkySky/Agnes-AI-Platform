@@ -1310,7 +1310,8 @@ const zhCN = {
     canvasPlacement: {
       imageName: '对话生成图片',
       videoName: '对话生成视频',
-      done: '生成结果已自动放入画布',
+      doneTo: '生成结果已放入画布「{name}」',
+      doneAutoCreated: '已新建画布「{name}」并放入生成结果',
     },
     mediaLoading: '媒体加载中...',
     mediaFailed: '生成失败，请重试',
@@ -1348,6 +1349,7 @@ const zhCN = {
 
   // ------ 无限画布 ------
   canvas: {
+    autoWorkspaceName: '对话画布',
     sidebarTitle: '画布管理',
     newCanvas: '新建画布',
     noCanvas: '还没有画布，点击上方 + 创建',
@@ -2224,6 +2226,8 @@ const zhCN = {
       lines: '线',
       blank: '空白',
       imageInfo: '图片信息',
+      autoPlace: '生成后自动放入画布',
+      autoPlaceHint: 'Agent 生成的图片/视频默认放入当前画布（对话里说"不放画布"可单次跳过）',
       themeLightHint: '切换到浅色主题',
       themeDarkHint: '切换到深色主题',
     },
@@ -3361,6 +3365,8 @@ const zhCN = {
       canvasGridVisibleHint: '无限画布中显示点阵网格辅助对齐',
       canvasSnapToGrid: '吸附到网格',
       canvasSnapToGridHint: '拖拽节点时自动对齐到最近的网格点',
+      canvasAutoPlace: '生成后自动放入画布',
+      canvasAutoPlaceHint: 'Agent 生成的图片/视频默认放入当前画布，对话里说"不放画布"可单次跳过',
       canvasGridSize: '网格大小',
       canvasGridSizeHint: '网格间距（像素），值越大网格越稀疏',
     },

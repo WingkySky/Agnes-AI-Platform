@@ -47,11 +47,16 @@ const canvasOverviewTool = CHAT_TOOLS[7]
 const canvasAddPanelsTool = CHAT_TOOLS[8]
 const canvasConnectTool = CHAT_TOOLS[9]
 
-/** 带激活画布工作区的 ctx（画布工具组/落画布用） */
-function canvasCtx(workspaceId = 'ws_active') {
+/** 带画布目标解析的 ctx（画布工具组/落画布用）；autoPlace 控制偏好开关默认值 */
+function canvasCtx(workspaceId = 'ws_active', opts: { autoPlace?: boolean; created?: boolean } = {}) {
   return {
     getRecentMediaUrl: () => null,
-    getActiveCanvasWorkspaceId: () => workspaceId,
+    resolveCanvasTarget: vi.fn(async (explicit?: string) => ({
+      workspaceId: explicit || workspaceId,
+      workspaceName: '主画布',
+      created: opts.created === true,
+    })),
+    isAutoPlaceMedia: vi.fn(async () => opts.autoPlace === true),
     registerCanvasPlacement: vi.fn(),
   }
 }
@@ -291,28 +296,50 @@ describe('canvas_* 画布工具组', () => {
 })
 
 describe('generate_image place_on_canvas（落画布计划）', () => {
-  it('place_on_canvas=true：任务提交后注册计划，结果提示自动落画布', async () => {
+  it('place_on_canvas=true：任务提交后注册计划，结果提示带落点画布名', async () => {
     const ctx = canvasCtx()
     const r = await imageTool.execute({ prompt: 'a cat', place_on_canvas: true }, ctx)
     expect(r.ok).toBe(true)
     expect(vi.mocked(createImageTask)).toHaveBeenCalled()
     expect(ctx.registerCanvasPlacement).toHaveBeenCalledWith({
-      taskId: 'img_1', workspaceId: 'ws_active', mediaType: 'image', prompt: 'a cat',
+      taskId: 'img_1', workspaceId: 'ws_active', workspaceName: '主画布', created: false,
+      mediaType: 'image', prompt: 'a cat',
     })
-    expect(String((r.data as { message: string }).message)).toContain('自动放入画布')
+    expect(String((r.data as { message: string }).message)).toContain('画布「主画布」')
   })
 
-  it('place_on_canvas=true 但无可用工作区：先报错，不提交生成任务', async () => {
+  it('自动新建画布：结果提示「已新建画布」', async () => {
+    const ctx = canvasCtx('ws_active', { created: true })
+    const r = await imageTool.execute({ prompt: 'a cat', place_on_canvas: true }, ctx)
+    expect(r.ok).toBe(true)
+    expect(String((r.data as { message: string }).message)).toContain('已新建画布')
+  })
+
+  it('place_on_canvas=true 但解析不到目标（anon）：先报错，不提交生成任务', async () => {
     const r = await imageTool.execute({ prompt: 'a cat', place_on_canvas: true }, null)
     expect(r.ok).toBe(false)
     expect(r.error).toContain('没有可用的云端画布工作区')
     expect(vi.mocked(createImageTask)).not.toHaveBeenCalled()
   })
 
-  it('canvas_workspace_id 显式指定优先于激活偏好', async () => {
+  it('canvas_workspace_id 显式指定直通（工具层短路，不触发兜底链）', async () => {
     const ctx = canvasCtx()
     await imageTool.execute({ prompt: 'a cat', place_on_canvas: true, canvas_workspace_id: 'ws_explicit' }, ctx)
+    expect(ctx.resolveCanvasTarget).not.toHaveBeenCalled()
     expect(ctx.registerCanvasPlacement).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: 'ws_explicit' }))
+  })
+
+  it('偏好开关开启：place_on_canvas 未传时默认落画布', async () => {
+    const ctx = canvasCtx('ws_active', { autoPlace: true })
+    await imageTool.execute({ prompt: 'a cat' }, ctx)
+    expect(ctx.isAutoPlaceMedia).toHaveBeenCalled()
+    expect(ctx.registerCanvasPlacement).toHaveBeenCalledWith(expect.objectContaining({ taskId: 'img_1', mediaType: 'image' }))
+  })
+
+  it('偏好开启但显式 place_on_canvas=false：尊重单次覆盖，不落画布', async () => {
+    const ctx = canvasCtx('ws_active', { autoPlace: true })
+    await imageTool.execute({ prompt: 'a cat', place_on_canvas: false }, ctx)
+    expect(ctx.registerCanvasPlacement).not.toHaveBeenCalled()
   })
 
   it('generate_video place_on_canvas=true：同样注册计划（mediaType=video）', async () => {
@@ -320,7 +347,8 @@ describe('generate_image place_on_canvas（落画布计划）', () => {
     const r = await videoTool.execute({ prompt: 'a dog runs', place_on_canvas: true }, ctx)
     expect(r.ok).toBe(true)
     expect(ctx.registerCanvasPlacement).toHaveBeenCalledWith({
-      taskId: 'vid_1', workspaceId: 'ws_active', mediaType: 'video', prompt: 'a dog runs',
+      taskId: 'vid_1', workspaceId: 'ws_active', workspaceName: '主画布', created: false,
+      mediaType: 'video', prompt: 'a dog runs',
     })
   })
 })

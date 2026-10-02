@@ -475,6 +475,7 @@ export interface UIPreferences {
   canvas_active_workspace_id: string      // 云端激活工作区 id（空串=无）
   canvas_background_mode: string          // 画布背景模式（与 canvas.ts isBackgroundMode 取值一致）
   canvas_show_image_info: boolean         // 图片节点信息开关
+  canvas_auto_place_media: boolean        // Agent 生成图片/视频后自动放入画布（显式说"不放画布"可单次覆盖）
 }
 
 /** 通知偏好 */

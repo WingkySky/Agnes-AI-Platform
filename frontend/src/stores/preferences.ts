@@ -474,6 +474,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
       canvas_active_workspace_id: '',
       canvas_background_mode: '',
       canvas_show_image_info: false,
+      canvas_auto_place_media: false,
     },
   )
 

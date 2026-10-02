@@ -30,6 +30,7 @@ interface CanvasStorageData {
   themeMode?: string
   backgroundMode?: string
   showImageInfo?: boolean
+  autoPlaceMedia?: boolean
   viewport?: Record<string, any>
   panels?: any[]
   connections?: any[]
@@ -155,6 +156,7 @@ export async function loadCanvasData(): Promise<CanvasStorageData | null> {
       if (ui?.canvas_active_workspace_id) data.activeWorkspaceId = ui.canvas_active_workspace_id
       if (ui?.canvas_background_mode) data.backgroundMode = ui.canvas_background_mode
       if (typeof ui?.canvas_show_image_info === 'boolean') data.showImageInfo = ui.canvas_show_image_info
+      if (typeof ui?.canvas_auto_place_media === 'boolean') data.autoPlaceMedia = ui.canvas_auto_place_media
     } catch {
       // 偏好读取失败不阻塞画布加载
     }
@@ -218,6 +220,7 @@ async function saveCanvasPrefsCloud(state: CanvasStorageData): Promise<void> {
         canvas_active_workspace_id: String(state.activeWorkspaceId ?? ''),
         canvas_background_mode: String(state.backgroundMode ?? ''),
         canvas_show_image_info: !!state.showImageInfo,
+        canvas_auto_place_media: !!state.autoPlaceMedia,
       },
     })
   } catch (err) {
@@ -481,6 +484,7 @@ async function performLocalSave(state: CanvasStorageData): Promise<void> {
       themeMode: state.themeMode,
       backgroundMode: state.backgroundMode,
       showImageInfo: state.showImageInfo,
+      autoPlaceMedia: state.autoPlaceMedia,
       viewport: state.viewport,
       panels: state.panels,
       connections: state.connections,

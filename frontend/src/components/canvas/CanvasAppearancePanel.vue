@@ -85,13 +85,26 @@
         @update:model-value="(val) => $emit('toggle-image-info', val)"
       />
     </div>
+
+    <!-- 生成后自动放入画布（Agent 落画布默认行为） -->
+    <div class="image-info-row">
+      <span class="image-info-label" :title="t('canvas.appearance.autoPlaceHint')">
+        <ImagePlus :size="14" />
+        {{ t('canvas.appearance.autoPlace') }}
+      </span>
+      <el-switch
+        :model-value="autoPlaceMedia"
+        size="small"
+        @update:model-value="(val) => $emit('toggle-auto-place', val)"
+      />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from '@/i18n'
-import { Sun, Moon, CircleDot, Grid2x2, Square, Info } from 'lucide-vue-next'
+import { Sun, Moon, CircleDot, Grid2x2, Square, Info, ImagePlus } from 'lucide-vue-next'
 import { ElSwitch } from 'element-plus'
 
 const { t } = useI18n()
@@ -101,9 +114,10 @@ const props = defineProps({
   themeMode: { type: String, default: 'dark' },
   backgroundMode: { type: String, default: 'dots' },
   showImageInfo: { type: Boolean, default: false },
+  autoPlaceMedia: { type: Boolean, default: false },
 })
 
-defineEmits(['set-theme', 'set-background', 'toggle-image-info'])
+defineEmits(['set-theme', 'set-background', 'toggle-image-info', 'toggle-auto-place'])
 
 // 面板容器样式：背景/边框/文字色由主题 token 控制
 const panelStyle = computed(() => ({

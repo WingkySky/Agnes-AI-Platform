@@ -30,16 +30,27 @@ import { loadAgentSkillFull, readSkillResource, saveAgentSkill, SKILL_CONTENT_MA
 export interface CanvasPlacementPlan {
   taskId: string
   workspaceId: string
+  workspaceName: string
+  created: boolean
   mediaType: 'image' | 'video'
   prompt: string
+}
+
+/** 画布落点解析结果（created=true 表示本次自动新建） */
+export interface CanvasTarget {
+  workspaceId: string
+  workspaceName: string
+  created?: boolean
 }
 
 /** chat 工具执行上下文（chat store 提供）：会话连续性所需的媒体状态 */
 export interface ChatToolContext {
   /** 最近一次成功生成的媒体 URL（图生图/图生视频默认参考） */
   getRecentMediaUrl(type: 'image' | 'video'): string | null
-  /** 默认画布工作区 id（激活工作区偏好；anon/未选时 null）——画布工具组用 */
-  getActiveCanvasWorkspaceId?(): string | null
+  /** 画布目标解析（多级兜底：显式 → 画布页实时激活 → 偏好 → 最近使用 → 自动建；anon 返回 null） */
+  resolveCanvasTarget?(explicitId?: string): Promise<CanvasTarget | null>
+  /** 「生成后自动放入画布」偏好开关（place_on_canvas 未传时的默认值） */
+  isAutoPlaceMedia?(): Promise<boolean>
   /** 注册「媒体完成后落画布」计划（媒体轮询成功时由 chat store 消费） */
   registerCanvasPlacement?(plan: CanvasPlacementPlan): void
 }
@@ -55,13 +66,18 @@ function recentMediaUrl(ctx: unknown, type: 'image' | 'video'): string | null {
   return isChatCtx(ctx) ? ctx.getRecentMediaUrl(type) : null
 }
 
-/** 目标工作区解析：显式参数优先，缺省走 ctx 的激活工作区偏好 */
-function resolveCanvasWorkspaceId(ctx: unknown, explicit: unknown): string | null {
-  if (typeof explicit === 'string' && explicit.trim()) return explicit.trim()
-  if (isChatCtx(ctx) && typeof ctx.getActiveCanvasWorkspaceId === 'function') {
-    return ctx.getActiveCanvasWorkspaceId()
-  }
+/** 目标工作区解析：显式参数优先，缺省走 ctx 的多级兜底链（画布页实时态 → 偏好 → 最近 → 自动建） */
+async function resolveTarget(ctx: unknown, explicit: unknown): Promise<CanvasTarget | null> {
+  if (typeof explicit === 'string' && explicit.trim()) return { workspaceId: explicit.trim(), workspaceName: '' }
+  if (isChatCtx(ctx) && typeof ctx.resolveCanvasTarget === 'function') return ctx.resolveCanvasTarget()
   return null
+}
+
+/** 落点告知文案：自动建与已有画布措辞区分 */
+function targetWhere(target: CanvasTarget): string {
+  return target.created
+    ? `已新建画布「${target.workspaceName || target.workspaceId}」`
+    : `画布「${target.workspaceName || target.workspaceId}」`
 }
 
 function registerCanvasPlacement(ctx: unknown, plan: CanvasPlacementPlan): void {
@@ -82,24 +98,25 @@ function canvasOpsErrorMessage(e: unknown): string {
   return err?.message || String(e)
 }
 
-/** 解析目标工作区并执行批量 ops（画布工具组共用） */
+/** 解析目标工作区并执行批量 ops（画布工具组共用；结果带落点画布名） */
 async function runCanvasOps(
   ctx: unknown,
   workspaceIdArg: unknown,
   ops: Record<string, unknown>[],
   okMessage: string,
 ): Promise<AgentToolResult> {
-  const wsId = resolveCanvasWorkspaceId(ctx, workspaceIdArg)
-  if (!wsId) return { ok: false, error: NO_CANVAS_WORKSPACE_HINT }
+  const target = await resolveTarget(ctx, workspaceIdArg)
+  if (!target) return { ok: false, error: NO_CANVAS_WORKSPACE_HINT }
   try {
-    const r = await applyCanvasOps(wsId, ops)
+    const r = await applyCanvasOps(target.workspaceId, ops)
+    const where = targetWhere(target)
     return {
       ok: true,
       data: {
-        workspace_id: wsId,
+        workspace_id: target.workspaceId,
         results: r.results,
         new_panel_ids: r.new_panel_ids,
-        message: r.failed ? `${okMessage}（${r.failed} 条失败，详见 results）` : okMessage,
+        message: r.failed ? `${okMessage}（${where}，${r.failed} 条失败详见 results）` : `${okMessage}（${where}）`,
       },
     }
   } catch (e) {
@@ -186,17 +203,19 @@ const imageTool = {
       visual_style: Type.Optional(Type.String()),
     }, { description: '摄像机参数（可选），用户提到镜头/运镜/画幅相关描述时填充' })),
     preset_ref: Type.Optional(Type.Number({ description: '预设 ID（用户按名称引用预设时传入；不确定则省略）' })),
-    place_on_canvas: Type.Optional(Type.Boolean({ description: '生成完成后自动放入云端画布工作区（用户说"画到画布上/放到画布"等时传 true）' })),
-    canvas_workspace_id: Type.Optional(Type.String({ description: '落画布的目标工作区 id（缺省用当前激活工作区）' })),
+    place_on_canvas: Type.Optional(Type.Boolean({ description: '是否自动放入云端画布：用户说"画到画布上/放到画布"传 true；说"不放画布/只发在对话里"传 false；不传时按用户偏好「生成后自动放入画布」的开关决定' })),
+    canvas_workspace_id: Type.Optional(Type.String({ description: '落画布的目标工作区 id（缺省由系统自动解析为当前画布，一般无需传）' })),
   }),
   execute: async (args: Record<string, unknown>, ctx: unknown): Promise<AgentToolResult> => {
     const rawPrompt = typeof args.prompt === 'string' ? args.prompt.trim() : ''
     if (!rawPrompt) return { ok: false, error: '缺少图片生成提示词' }
-    const placeOnCanvas = args.place_on_canvas === true
-    let canvasWsId: string | null = null
+    // 落画布默认值：显式参数优先（false 可覆盖偏好开启），未传按偏好开关
+    const autoPlace = isChatCtx(ctx) && typeof ctx.isAutoPlaceMedia === 'function' ? await ctx.isAutoPlaceMedia() : false
+    const placeOnCanvas = typeof args.place_on_canvas === 'boolean' ? args.place_on_canvas : autoPlace
+    let canvasTarget: CanvasTarget | null = null
     if (placeOnCanvas) {
-      canvasWsId = resolveCanvasWorkspaceId(ctx, args.canvas_workspace_id)
-      if (!canvasWsId) return { ok: false, error: NO_CANVAS_WORKSPACE_HINT }
+      canvasTarget = await resolveTarget(ctx, args.canvas_workspace_id)
+      if (!canvasTarget) return { ok: false, error: NO_CANVAS_WORKSPACE_HINT }
     }
     const prompt = await promptWithPreset(rawPrompt, args)
     const size = typeof args.size === 'string' ? args.size : '1024x1024'
@@ -218,8 +237,12 @@ const imageTool = {
     try {
       const resp = await createImageTask(params)
       registerGenerationTask(resp.task_id, 'image', prompt)
-      if (canvasWsId) {
-        registerCanvasPlacement(ctx, { taskId: resp.task_id, workspaceId: canvasWsId, mediaType: 'image', prompt })
+      if (canvasTarget) {
+        registerCanvasPlacement(ctx, {
+          taskId: resp.task_id, workspaceId: canvasTarget.workspaceId,
+          workspaceName: canvasTarget.workspaceName, created: canvasTarget.created === true,
+          mediaType: 'image', prompt,
+        })
       }
       return {
         ok: true,
@@ -228,7 +251,7 @@ const imageTool = {
           media_type: 'image',
           status: 'pending',
           message: '图片生成任务已提交，完成后会自动展示给用户'
-            + (canvasWsId ? '，并自动放入画布工作区（无需再调用画布工具）' : '')
+            + (canvasTarget ? `，并自动放入${targetWhere(canvasTarget)}（无需再调用画布工具）` : '')
             + '，不要在回复中输出任何图片链接',
         },
       }
@@ -270,17 +293,18 @@ const videoTool = {
       enabled: Type.Boolean({ description: '是否启用摄像机参数' }),
     }, { description: '摄像机参数（可选），用户提到镜头/运镜相关描述时填充' })),
     preset_ref: Type.Optional(Type.Number({ description: '预设 ID（用户按名称引用预设时传入；不确定则省略）' })),
-    place_on_canvas: Type.Optional(Type.Boolean({ description: '生成完成后自动放入云端画布工作区（用户说"放到画布上"等时传 true）' })),
-    canvas_workspace_id: Type.Optional(Type.String({ description: '落画布的目标工作区 id（缺省用当前激活工作区）' })),
+    place_on_canvas: Type.Optional(Type.Boolean({ description: '是否自动放入云端画布：用户说"放到画布上"传 true；说"不放画布"传 false；不传时按用户偏好「生成后自动放入画布」的开关决定' })),
+    canvas_workspace_id: Type.Optional(Type.String({ description: '落画布的目标工作区 id（缺省由系统自动解析为当前画布，一般无需传）' })),
   }),
   execute: async (args: Record<string, unknown>, ctx: unknown): Promise<AgentToolResult> => {
     const rawPrompt = typeof args.prompt === 'string' ? args.prompt.trim() : ''
     if (!rawPrompt) return { ok: false, error: '缺少视频生成提示词' }
-    const placeOnCanvas = args.place_on_canvas === true
-    let canvasWsId: string | null = null
+    const autoPlace = isChatCtx(ctx) && typeof ctx.isAutoPlaceMedia === 'function' ? await ctx.isAutoPlaceMedia() : false
+    const placeOnCanvas = typeof args.place_on_canvas === 'boolean' ? args.place_on_canvas : autoPlace
+    let canvasTarget: CanvasTarget | null = null
     if (placeOnCanvas) {
-      canvasWsId = resolveCanvasWorkspaceId(ctx, args.canvas_workspace_id)
-      if (!canvasWsId) return { ok: false, error: NO_CANVAS_WORKSPACE_HINT }
+      canvasTarget = await resolveTarget(ctx, args.canvas_workspace_id)
+      if (!canvasTarget) return { ok: false, error: NO_CANVAS_WORKSPACE_HINT }
     }
     const prompt = await promptWithPreset(rawPrompt, args)
     const numFrames = typeof args.num_frames === 'number' ? args.num_frames : 81
@@ -320,8 +344,12 @@ const videoTool = {
       const taskId = resp.task_id || resp.video_id || ''
       if (!taskId) return { ok: false, error: '视频任务创建失败：服务端未返回任务 ID' }
       registerGenerationTask(taskId, 'video', prompt)
-      if (canvasWsId) {
-        registerCanvasPlacement(ctx, { taskId, workspaceId: canvasWsId, mediaType: 'video', prompt })
+      if (canvasTarget) {
+        registerCanvasPlacement(ctx, {
+          taskId, workspaceId: canvasTarget.workspaceId,
+          workspaceName: canvasTarget.workspaceName, created: canvasTarget.created === true,
+          mediaType: 'video', prompt,
+        })
       }
       return {
         ok: true,
@@ -330,7 +358,7 @@ const videoTool = {
           media_type: 'video',
           status: 'pending',
           message: '视频生成任务已提交（通常需要 1-3 分钟），完成后自动展示'
-            + (canvasWsId ? '，并自动放入画布工作区（无需再调用画布工具）' : '')
+            + (canvasTarget ? `，并自动放入${targetWhere(canvasTarget)}（无需再调用画布工具）` : '')
             + '，不要在回复中输出任何视频链接',
         },
       }
@@ -481,10 +509,10 @@ const canvasGetOverviewTool = {
     canvas_workspace_id: Type.Optional(Type.String({ description: '工作区 id（缺省用当前激活工作区）' })),
   }),
   execute: async (args: Record<string, unknown>, ctx: unknown): Promise<AgentToolResult> => {
-    const wsId = resolveCanvasWorkspaceId(ctx, args.canvas_workspace_id)
-    if (!wsId) return { ok: false, error: NO_CANVAS_WORKSPACE_HINT }
+    const target = await resolveTarget(ctx, args.canvas_workspace_id)
+    if (!target) return { ok: false, error: NO_CANVAS_WORKSPACE_HINT }
     try {
-      const detail = await getWorkspace(wsId)
+      const detail = await getWorkspace(target.workspaceId)
       const data = (detail.data ?? {}) as Record<string, unknown>
       const panels = Array.isArray(data.panels) ? (data.panels as Record<string, unknown>[]) : []
       const connections = Array.isArray(data.connections) ? (data.connections as Record<string, unknown>[]) : []
@@ -496,7 +524,7 @@ const canvasGetOverviewTool = {
       return {
         ok: true,
         data: {
-          workspace_id: wsId,
+          workspace_id: target.workspaceId,
           name: detail.name,
           panel_count: panels.length,
           panels: panels.slice(0, OVERVIEW_LIMIT).map((p) => ({

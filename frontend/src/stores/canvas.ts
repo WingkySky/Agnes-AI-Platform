@@ -293,6 +293,9 @@ interface CanvasState {
   // ---------- 显示图片信息 ----------
   showImageInfo: boolean
 
+  // ---------- 生成后自动放入画布（Agent 落画布默认开关，画布外观面板切换） ----------
+  autoPlaceMedia: boolean
+
   // ---------- 历史 ----------
   history: History
 
@@ -362,6 +365,9 @@ export const useCanvasStore = defineStore('canvas', {
 
     // ---------- 显示图片信息 ----------
     showImageInfo: false,
+
+    // ---------- 生成后自动放入画布 ----------
+    autoPlaceMedia: false,
 
     // ---------- 历史 ----------
     history: { past: [], future: [] },
@@ -486,6 +492,12 @@ export const useCanvasStore = defineStore('canvas', {
     /** 切换图片信息显示开关 */
     toggleImageInfo(): void {
       this.showImageInfo = !this.showImageInfo
+      this._save()
+    },
+
+    /** 切换「生成后自动放入画布」开关（Agent 落画布默认行为，随偏好持久化） */
+    toggleAutoPlaceMedia(): void {
+      this.autoPlaceMedia = !this.autoPlaceMedia
       this._save()
     },
 
@@ -1212,6 +1224,9 @@ export const useCanvasStore = defineStore('canvas', {
           }
           if (typeof rawData.showImageInfo === 'boolean') {
             this.showImageInfo = rawData.showImageInfo
+          }
+          if (typeof rawData.autoPlaceMedia === 'boolean') {
+            this.autoPlaceMedia = rawData.autoPlaceMedia
           }
           if (rawData.viewport && typeof rawData.viewport === 'object') {
             this.viewport = { ...this.viewport, ...(rawData.viewport as Viewport) }

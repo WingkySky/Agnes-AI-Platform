@@ -50,9 +50,11 @@
       :theme-mode="themeMode"
       :background-mode="backgroundMode"
       :show-image-info="showImageInfo"
+      :auto-place-media="autoPlaceMedia"
       @set-theme="(mode) => $emit('set-theme', mode)"
       @set-background="(mode) => $emit('set-background', mode)"
       @toggle-image-info="(val) => $emit('toggle-image-info', val)"
+      @toggle-auto-place="(val) => $emit('toggle-auto-place', val)"
     />
   </div>
 </template>
@@ -78,6 +80,7 @@ const props = defineProps({
   themeMode: { type: String, default: 'dark' },
   backgroundMode: { type: String, default: 'dots' },
   showImageInfo: { type: Boolean, default: false },
+  autoPlaceMedia: { type: Boolean, default: false },
   // 当前激活的工具：hand（移动）/ select（选择框选）
   activeTool: { type: String, default: 'hand' },
   // Agent 面板是否打开
@@ -98,6 +101,7 @@ const emit = defineEmits([
   'set-theme',
   'set-background',
   'toggle-image-info',
+  'toggle-auto-place',
   'show-shortcuts',
   'smart-group',
   'arrange-layout',

@@ -29,9 +29,11 @@ import { AgentKernel } from '@/lib/agent/kernel'
 import type { KernelEvent, AgentImageAttachment, HostTool } from '@/lib/agent/kernel'
 import { createAgentModel } from '@/lib/agent/provider'
 import { CHAT_TOOLS, canvasHostTools } from '@/lib/agent/chat-tools'
-import type { CanvasPlacementPlan } from '@/lib/agent/chat-tools'
-import { applyCanvasOps } from '@/api/canvasWorkspace'
-import { usePreferencesStore } from '@/stores/preferences'
+import type { CanvasPlacementPlan, CanvasTarget } from '@/lib/agent/chat-tools'
+import { applyCanvasOps, createWorkspace, getWorkspaceRevision, listWorkspaces } from '@/api/canvasWorkspace'
+import { getPreferences, patchPreferences } from '@/api/preferences'
+import { useCanvasStore } from '@/stores/canvas'
+import { isCloudChannel } from '@/lib/canvas-storage'
 import { CHAT_SYSTEM_PROMPT_BASE, buildChatSystemPrompt } from '@/lib/agent/chat-system-prompt'
 import { CANVAS_CONTEXT_SECTION } from '@/lib/agent/system-prompt'
 import { listAgentSkills } from '@/lib/agent/skills'
@@ -50,6 +52,7 @@ import type {
   ChatStepView,
 } from '@/components/chat/types'
 import type {
+  AgentSessionSyncPayload,
   ChatSession,
   ChatMessage,
   MediaItem,
@@ -251,7 +254,17 @@ function messagesFromRows(rows: ChatMessage[]): ChatKernelMessage[] {
   return out
 }
 
-/** 存量会话上下文重建：消息行 → 内核消息数组（文本 + 用户附图块） */
+/** 空 usage 块（重建的历史消息不计费，仅满足 pi 消息形状） */
+const REBUILT_USAGE = {
+  input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+}
+
+/**
+ * 存量会话上下文重建：消息行 → 内核消息数组。
+ * 除文本与用户附图块外，**从 steps 重建工具轮**（assistant 的 toolCall 块 + 成对的 toolResult 消息）——
+ * 若只回填文本，模型看不到自己历史上真实调过工具，偶发漏调工具后会模仿自己的文字回复持续不调（实测事故 2026-10-02）。
+ */
 export function chatContextFromRows(rows: ChatMessage[]): unknown {
   const msgs: Array<Record<string, unknown>> = []
   for (const r of rows) {
@@ -267,14 +280,38 @@ export function chatContextFromRows(rows: ChatMessage[]): unknown {
         }
       }
       msgs.push({ role: 'user', content: content.length ? content : '', timestamp: Date.now() })
-    } else {
-      // assistant 必须是 pi 内部消息形状：content 为块数组 + stopReason + usage，
-      // 缺任一都会让机制层的上下文估算/消息转换在下一回合抛错（历史版本曾落库过字符串内容的坏形状）
+      continue
+    }
+    // assistant 必须是 pi 内部消息形状：content 为块数组 + stopReason + usage，
+    // 缺任一都会让机制层的上下文估算/消息转换在下一回合抛错（历史版本曾落库过字符串内容的坏形状）
+    const steps = Array.isArray(r.steps) ? r.steps.filter((s) => s && typeof s.callId === 'string' && typeof s.tool === 'string') : []
+    const content: Array<Record<string, unknown>> = []
+    if (r.content) content.push({ type: 'text', text: r.content })
+    for (const st of steps) {
+      content.push({ type: 'toolCall', id: st.callId, name: st.tool, arguments: (st.args && typeof st.args === 'object') ? st.args : {} })
+    }
+    if (!content.length) content.push({ type: 'text', text: r.content || '' })
+    msgs.push({
+      role: 'assistant',
+      content,
+      stopReason: steps.length ? 'toolUse' : 'stop',
+      api: 'openai-completions',
+      provider: 'agnes',
+      model: '',
+      usage: { ...REBUILT_USAGE, cost: { ...REBUILT_USAGE.cost } },
+      timestamp: Date.now(),
+    })
+    // pi 约定每个 toolCall 必须有成对的 toolResult（OpenAI 转换要求 tool_calls 与 role:'tool' 消息成对）
+    for (const st of steps) {
+      const resultText = typeof st.result === 'string' && st.result
+        ? st.result
+        : JSON.stringify({ ok: false, message: st.status === 'rejected' ? '用户拒绝该工具调用' : '（无结果记录）' })
       msgs.push({
-        role: 'assistant',
-        content: [{ type: 'text', text: r.content || '' }],
-        stopReason: 'stop',
-        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+        role: 'toolResult',
+        toolCallId: st.callId,
+        toolName: st.tool,
+        content: [{ type: 'text', text: resultText }],
+        isError: st.status === 'error' || st.status === 'rejected',
         timestamp: Date.now(),
       })
     }
@@ -397,14 +434,8 @@ export const useChatStore = defineStore('chat', {
         getMode: () => this.agentMode,
         toolContext: {
           getRecentMediaUrl: (type: 'image' | 'video') => this.recentMediaUrl(sessionId, type),
-          getActiveCanvasWorkspaceId: (): string | null => {
-            try {
-              const id = usePreferencesStore().ui?.canvas_active_workspace_id
-              return id ? String(id) : null
-            } catch {
-              return null
-            }
-          },
+          resolveCanvasTarget: (explicitId?: string) => this._resolveCanvasTarget(explicitId),
+          isAutoPlaceMedia: () => this._isAutoPlaceMedia(),
           registerCanvasPlacement: (plan: CanvasPlacementPlan) => {
             this.canvasPlacements[plan.taskId] = plan
           },
@@ -514,6 +545,72 @@ export const useChatStore = defineStore('chat', {
     /** extraTools 装配：MCP 工具 + 画布页激活时的画布深度工具（统一注入通道） */
     _extraTools(): HostTool[] {
       return this.canvasToolsActive ? [...mcpToolsCache, ...canvasHostTools()] : [...mcpToolsCache]
+    },
+
+    /**
+     * 画布目标解析链（落画布工具/生成落画布共用）：
+     * 显式参数 → 画布页实时激活 → 偏好（现拉现读+revision 验证，失效即清除）→ 最近使用 → 自动建「对话画布」。
+     * 仅未登录（非云通道）返回 null；永不因"找不到画布"直接失败。
+     */
+    async _resolveCanvasTarget(explicitId?: string): Promise<CanvasTarget | null> {
+      if (!isCloudChannel()) return null
+      const canvas = useCanvasStore()
+      // 1) 模型显式指定
+      if (explicitId && explicitId.trim()) return { workspaceId: explicitId.trim(), workspaceName: '' }
+      // 2) 画布页实时激活（本会话最强信号；须在 workspaces 列表内）
+      if (canvas.activeWorkspaceId && canvas.workspaces.some((w) => w.id === canvas.activeWorkspaceId)) {
+        const ws = canvas.workspaces.find((w) => w.id === canvas.activeWorkspaceId)
+        return { workspaceId: canvas.activeWorkspaceId, workspaceName: ws?.name || '' }
+      }
+      // 3) 偏好现拉现读（画布页 patchPreferences 不回写本端 Pinia，旧快照不可信）
+      try {
+        const prefs = await getPreferences()
+        const prefId = prefs?.preferences?.ui?.canvas_active_workspace_id
+        if (typeof prefId === 'string' && prefId) {
+          const alive = await getWorkspaceRevision(prefId).then(() => true).catch(() => false)
+          if (alive) return { workspaceId: prefId, workspaceName: '' }
+          try {
+            await patchPreferences({ ui: { canvas_active_workspace_id: '' } })
+          } catch {
+            // 清理失败不阻断兜底链
+          }
+        }
+      } catch {
+        // 偏好不可用继续兜底
+      }
+      // 4) 最近使用的画布（后端按 updated_at 倒序）
+      try {
+        const items = await listWorkspaces()
+        if (items.length) return { workspaceId: items[0].id, workspaceName: items[0].name }
+      } catch {
+        // 列表失败继续自动建
+      }
+      // 5) 一个画布都没有：自动建「对话画布」（画布 store 已 hydrate 则走 store 保证两边一致）
+      const name = t('canvas.autoWorkspaceName')
+      if (canvas._storageReady) {
+        canvas.createWorkspace(name)
+        if (canvas.activeWorkspaceId) {
+          const ws = canvas.workspaces.find((w) => w.id === canvas.activeWorkspaceId)
+          return { workspaceId: canvas.activeWorkspaceId, workspaceName: ws?.name || name, created: true }
+        }
+      }
+      const created = await createWorkspace({ name })
+      try {
+        await patchPreferences({ ui: { canvas_active_workspace_id: created.id } })
+      } catch {
+        // 偏好写入失败不阻断落点
+      }
+      return { workspaceId: created.id, workspaceName: created.name || name, created: true }
+    },
+
+    /** 「生成后自动放入画布」偏好（现拉现读，设置/画布页切换即时生效） */
+    async _isAutoPlaceMedia(): Promise<boolean> {
+      try {
+        const prefs = await getPreferences()
+        return prefs?.preferences?.ui?.canvas_auto_place_media === true
+      } catch {
+        return false
+      }
     },
 
     /** 指定会话最近一次成功生成的媒体 URL（会话连续性：图生图/图生视频默认参考） */
@@ -999,11 +1096,14 @@ export const useChatStore = defineStore('chat', {
             ...(plan.prompt ? { prompt: plan.prompt } : {}),
           },
         }])
+        const where = plan.created
+          ? t('chat.canvasPlacement.doneAutoCreated', { name: plan.workspaceName })
+          : t('chat.canvasPlacement.doneTo', { name: plan.workspaceName || plan.workspaceId })
         msg.steps.push({
           ...step,
           status: 'done',
           result: JSON.stringify({
-            message: t('chat.canvasPlacement.done'),
+            message: where,
             workspace_id: plan.workspaceId,
             panel_id: r.new_panel_ids[0] ?? null,
           }),
@@ -1057,12 +1157,16 @@ export const useChatStore = defineStore('chat', {
         createdAt: m.createdAt,
       }))
       try {
-        await syncAgentSession(sid, {
+        // 内核不在池中（页面刷新后媒体补存等场景）时省略 context——
+        // 发 null 会把后端已存上下文抹掉，下轮只能从消息行重建
+        const payload: AgentSessionSyncPayload = {
           title: this.sessions.find((s) => s.id === sid)?.title || '新对话',
           workspace_id: null,
-          context: poolOf(this).get(String(sid))?.serializeState() ?? null,
           messages: toBackendMessages(projectable),
-        })
+        }
+        const kernel = poolOf(this).get(String(sid))
+        if (kernel) payload.context = kernel.serializeState()
+        await syncAgentSession(sid, payload)
       } catch (e: unknown) {
         // 同步失败不阻断对话（后端异常时提示排查，下一轮再试）
         console.warn('[Chat] 会话同步失败:', e instanceof Error ? e.message : e)

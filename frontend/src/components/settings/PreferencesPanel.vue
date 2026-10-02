@@ -397,6 +397,18 @@
         />
       </div>
 
+      <!-- 生成后自动放入画布（Agent 落画布默认行为） -->
+      <div class="pref-row">
+        <div class="pref-info">
+          <span class="pref-label">{{ t('prefs.ui.canvasAutoPlace') }}</span>
+          <span class="pref-hint">{{ t('prefs.ui.canvasAutoPlaceHint') }}</span>
+        </div>
+        <el-switch
+          v-model="form.ui.canvas_auto_place_media"
+          @change="markDirty"
+        />
+      </div>
+
       <!-- 网格大小 -->
       <div v-if="form.ui.canvas_grid_visible" class="pref-row sub">
         <div class="pref-info">
@@ -480,6 +492,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { FolderOpened, Close } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { usePreferencesStore } from '@/stores/preferences'
+import { useCanvasStore } from '@/stores/canvas'
 import { useModelsStore } from '@/stores/models'
 
 const { t } = useI18n()
@@ -517,6 +530,7 @@ const form = reactive({
     canvas_grid_visible: true,
     canvas_grid_size: 20,
     canvas_snap_to_grid: false,
+    canvas_auto_place_media: false,
   },
   notification: {
     sound_on_complete: true,
@@ -665,6 +679,7 @@ function syncFormFromStore() {
   form.ui.canvas_grid_visible = u.canvas_grid_visible
   form.ui.canvas_grid_size = u.canvas_grid_size
   form.ui.canvas_snap_to_grid = u.canvas_snap_to_grid
+  form.ui.canvas_auto_place_media = u.canvas_auto_place_media
 
   const n = prefsStore.notification
   form.notification.sound_on_complete = n.sound_on_complete
@@ -710,6 +725,8 @@ async function handleSave() {
       ui: { ...form.ui },
       notification: { ...form.notification },
     })
+    // 同步画布 store 的自动落画布开关（外观面板显示一致；后端已由上方统一保存）
+    useCanvasStore().autoPlaceMedia = form.ui.canvas_auto_place_media
     // 2. 单独保存 autoRetry 到本地 localStorage（立即生效，关闭时通知 taskQueue 重置）
     await prefsStore.setAutoRetry(form.generation.autoRetry)
     dirty.value = false
