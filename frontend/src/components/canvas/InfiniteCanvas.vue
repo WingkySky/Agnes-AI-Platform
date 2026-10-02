@@ -30,6 +30,8 @@ const emit = defineEmits([
   'pan',              // 平移时触发，payload: { x, y, zoom }
   'zoom',             // 缩放时触发，payload: { x, y, zoom }
   'background-click', // 点击背景时触发（用于取消选中）
+  'pane-dblclick',    // 空白处双击，payload: { clientX, clientY, worldX, worldY }
+  'pane-contextmenu', // 空白处右键，payload: { clientX, clientY, worldX, worldY }
   'drop-asset',       // 从素材库拖拽素材到画布时触发，payload: { asset, worldX, worldY }
   'drop-files',       // 系统文件拖入画布时触发，payload: { files: File[], worldX, worldY }
   // 以下为兼容 CanvasView 旧接口声明，本组件不主动触发
@@ -121,6 +123,29 @@ function startPan(event: MouseEvent) {
   panState.initialY = currentViewport.value.y
   panState.hasMoved = false
   document.body.style.cursor = 'grabbing'
+}
+
+// ---------- 空白双击 / 空白右键（节点/连线/分组有自己的处理，此处只透出空白事件） ----------
+function isCanvasBackground(target: Element | null): boolean {
+  return !target?.closest?.('[data-node-id],[data-connection-id],[data-group-id]')
+}
+
+function panePointPayload(clientX: number, clientY: number) {
+  const world = store.screenToWorld(clientX, clientY)
+  return { clientX, clientY, worldX: world.x, worldY: world.y }
+}
+
+function handlePaneDblClick(event: MouseEvent) {
+  const target = event.target instanceof Element ? event.target : null
+  if (!isCanvasBackground(target)) return
+  emit('pane-dblclick', panePointPayload(event.clientX, event.clientY))
+}
+
+function handlePaneContextMenu(event: MouseEvent) {
+  event.preventDefault()
+  const target = event.target instanceof Element ? event.target : null
+  if (!isCanvasBackground(target)) return
+  emit('pane-contextmenu', panePointPayload(event.clientX, event.clientY))
 }
 
 // ---------- 指针按下 ----------
@@ -357,7 +382,8 @@ function handleDrop(e: DragEvent) {
     @dragenter="handleDragEnter"
     @dragleave="handleDragLeave"
     @drop="handleDrop"
-    @contextmenu.prevent
+    @dblclick="handlePaneDblClick"
+    @contextmenu="handlePaneContextMenu"
   >
     <!-- 背景网格层（dots / lines / blank），pointer-events none，透明度 0.4 -->
     <div class="infinite-canvas-grid" :style="gridStyle" />

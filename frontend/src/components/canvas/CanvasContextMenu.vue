@@ -91,6 +91,37 @@
         <span>{{ t('canvas.contextMenu.delete') }}</span>
       </button>
     </template>
+
+    <!-- 画布空白右键：新建节点 / 全选 / 缩放适配 -->
+    <template v-else-if="targetType === 'canvas'">
+      <button
+        type="button"
+        class="menu-item"
+        :style="itemStyle"
+        @click="handleEmit('canvas-create')"
+      >
+        <Plus :size="16" />
+        <span>{{ t('canvas.contextMenu.createNode') }}</span>
+      </button>
+      <button
+        type="button"
+        class="menu-item"
+        :style="itemStyle"
+        @click="handleEmit('canvas-select-all')"
+      >
+        <BoxSelect :size="16" />
+        <span>{{ t('canvas.contextMenu.selectAll') }}</span>
+      </button>
+      <button
+        type="button"
+        class="menu-item"
+        :style="itemStyle"
+        @click="handleEmit('canvas-fit')"
+      >
+        <Maximize2 :size="16" />
+        <span>{{ t('canvas.contextMenu.fitContent') }}</span>
+      </button>
+    </template>
   </div>
 </template>
 
@@ -107,7 +138,7 @@
  * ===================================================== */
 
 import { onMounted, onUnmounted, computed } from 'vue'
-import { Boxes, Plus, Trash2, Ungroup } from 'lucide-vue-next'
+import { Boxes, BoxSelect, Maximize2, Plus, Trash2, Ungroup } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
 
 const { t } = useI18n()
@@ -116,7 +147,7 @@ const { t } = useI18n()
 const props = defineProps({
   x: { type: Number, required: true },
   y: { type: Number, required: true },
-  targetType: { type: String, required: true }, // 'node' | 'connection' | 'group'
+  targetType: { type: String, required: true }, // 'node' | 'connection' | 'group' | 'canvas'
   theme: { type: Object, required: true },
   // 多选节点数（>1 时节点菜单显示"成组"）
   selectionCount: { type: Number, default: 1 },
@@ -132,6 +163,9 @@ const emit = defineEmits([
   'group-remove-panel',
   'group-dissolve',
   'group-delete-with-nodes',
+  'canvas-create',
+  'canvas-select-all',
+  'canvas-fit',
   'close',
 ])
 
@@ -160,7 +194,7 @@ const dangerItemStyle = computed(() => ({
 /* ---------- 菜单项点击处理 ---------- */
 
 /** 触发菜单动作并关闭菜单 */
-function handleEmit(action: 'duplicate' | 'delete' | 'group-create' | 'group-remove-panel' | 'group-dissolve' | 'group-delete-with-nodes') {
+function handleEmit(action: 'duplicate' | 'delete' | 'group-create' | 'group-remove-panel' | 'group-dissolve' | 'group-delete-with-nodes' | 'canvas-create' | 'canvas-select-all' | 'canvas-fit') {
   emit(action)
   emit('close')
 }
