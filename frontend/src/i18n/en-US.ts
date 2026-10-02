@@ -1759,8 +1759,12 @@ const enUS = {
       duplicate: 'Duplicate',
       delete: 'Delete',
     },
-    // Task 8: Hover toolbar (aligned with reference project)
+    // Task 8: Node toolbar
     hoverToolbar: {
+      // Group titles of the category dropdowns (node toolbar)
+      groupGenerate: 'Generate',
+      groupEdit: 'Edit',
+      groupManage: 'Manage',
       info: 'Info',
       delete: 'Delete',
       retry: 'Retry',

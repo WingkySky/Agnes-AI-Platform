@@ -456,8 +456,6 @@ const emit = defineEmits([
   'resize-end',
   'start-connecting', // (anchorType: 'source' | 'target')
   'context-menu', // (event)
-  'hover-enter',
-  'hover-leave',
   'view-image', // (imageUrl)
   'edit-text', // (text)
   'generate-image', // 从 text 节点生图（保留用于 retry 等场景）
@@ -1064,16 +1062,14 @@ watch(
 
 /* ---------- 交互：hover / 右键菜单 ---------- */
 
-/** 鼠标进入：触发 hover-enter */
+/** 鼠标进入：标记悬浮态（节点视觉反馈） */
 function handleMouseEnter() {
   hovered.value = true
-  emit('hover-enter', props.panel.id)
 }
 
-/** 鼠标离开：触发 hover-leave */
+/** 鼠标离开：清除悬浮态 */
 function handleMouseLeave() {
   hovered.value = false
-  emit('hover-leave', props.panel.id)
 }
 
 /** 右键菜单 */

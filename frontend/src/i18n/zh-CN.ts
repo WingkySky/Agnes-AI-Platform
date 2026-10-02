@@ -1742,8 +1742,12 @@ const zhCN = {
       duplicate: '复制',
       delete: '删除',
     },
-    // 任务 8：节点悬浮工具栏
+    // 任务 8：节点工具栏
     hoverToolbar: {
+      // 分类下拉分组标题（节点工具栏）
+      groupGenerate: '生成',
+      groupEdit: '编辑',
+      groupManage: '管理',
       info: '信息',
       delete: '删除',
       retry: '重试',

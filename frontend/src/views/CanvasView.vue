@@ -122,8 +122,6 @@
           @resize-end="handleNodeResizeEnd"
           @start-connecting="(anchorType) => handleNodeStartConnecting(panel.id, anchorType)"
           @context-menu="handleNodeContextMenu"
-          @hover-enter="handleNodeHoverEnter"
-          @hover-leave="handleNodeHoverLeave"
           @view-image="handleViewImage"
           @edit-text="(text) => handleNodeEditText(panel.id, text)"
           @generate-image="handleNodeGenerateImage"
@@ -209,50 +207,16 @@
       <!-- ============ 画布 Agent 面板（右侧抽屉） ============ -->
       <CanvasAgentPanel v-if="agentStore.open" :theme="store.canvasTheme" />
 
-      <!-- ============ 节点悬停工具栏（浮动定位在节点上方） ============ -->
+      <!-- ============ 节点工具栏（选中节点后常驻显示在节点上方） ============ -->
       <div
-        v-if="hoveredPanel && showHoverToolbar"
-        class="hover-toolbar-wrap"
-        :style="hoverToolbarStyle"
-        @mouseenter="cancelHoverHide"
-        @mouseleave="scheduleHoverHide"
+        v-if="toolbarPanel"
+        class="node-toolbar-wrap"
+        :style="nodeToolbarStyle"
       >
-        <CanvasNodeHoverToolbar
-          :panel="hoveredPanel"
+        <CanvasNodeToolbar
+          :panel="toolbarPanel"
           :theme="store.canvasTheme"
-          @info="handleHoverInfo"
-          @delete="handleHoverDelete"
-          @retry="handleHoverRetry"
-          @save-asset="handleHoverSaveAsset"
-          @download="handleHoverDownload"
-          @edit="handleHoverEdit"
-          @generate-image="handleHoverGenerateImage"
-          @quick-generate="handleQuickGenerate"
-          @font-size-down="handleHoverFontSizeDown"
-          @font-size-up="handleHoverFontSizeUp"
-          @upload-image="handleHoverUploadImage"
-          @upload-video="handleHoverUploadVideo"
-          @upload-audio="handleHoverUploadAudio"
-          @copy-prompt="handleHoverCopyPrompt"
-          @describe="handleHoverDescribe"
-          @replace-image="handleHoverReplaceImage"
-          @toggle-ratio="handleHoverToggleRatio"
-          @mask-edit="handleHoverMaskEdit"
-          @crop="handleHoverCrop"
-          @split="handleHoverSplit"
-          @upscale="handleHoverUpscale"
-          @super-resolution="handleHoverSuperResolution"
-          @angle="handleHoverAngle"
-          @lighting="handleHoverLighting"
-          @emotion="handleHoverEmotion"
-          @view-large="handleHoverViewLarge"
-          @derive-video="handleHoverDeriveVideo"
-          @derive-tail="handleHoverDeriveTail"
-          @derive-prev="handleHoverDerivePrev"
-          @derive-chain="handleHoverDeriveChain"
-          @reshoot="handleHoverReshoot"
-          @run-node="handleHoverRunNode"
-          @capture-frame="handleHoverCaptureFrame"
+          @action="handleToolAction"
         />
       </div>
 
@@ -510,7 +474,7 @@
  * CanvasView 无限画布主视图
  * - 整合 9 个子组件：InfiniteCanvas / CanvasConnectionsLayer /
  *   CanvasNode / CanvasToolbar / CanvasZoomControls / CanvasMinimap /
- *   CanvasNodeHoverToolbar / CanvasContextMenu / CanvasAppearancePanel（内嵌于 Toolbar）
+ *   CanvasNodeToolbar / CanvasContextMenu / CanvasAppearancePanel（内嵌于 Toolbar）
  * - 接入 useCanvasStore：panels / connections / viewport / history
  * - 处理节点创建/拖拽/缩放/删除、连线创建/删除、框选、撤销/重做、快捷键
  * ===================================================== */
@@ -535,7 +499,7 @@ import CanvasNode from '@/components/canvas/CanvasNode.vue'
 import CanvasToolbar from '@/components/canvas/CanvasToolbar.vue'
 import CanvasZoomControls from '@/components/canvas/CanvasZoomControls.vue'
 import CanvasMinimap from '@/components/canvas/CanvasMinimap.vue'
-import CanvasNodeHoverToolbar from '@/components/canvas/CanvasNodeHoverToolbar.vue'
+import CanvasNodeToolbar from '@/components/canvas/CanvasNodeToolbar.vue'
 import CanvasContextMenu from '@/components/canvas/CanvasContextMenu.vue'
 import CanvasAssetLibrary from '@/components/canvas/CanvasAssetLibrary.vue'
 import CanvasAgentPanel from '@/components/canvas/CanvasAgentPanel.vue'
@@ -1987,7 +1951,7 @@ async function handleNodeRun(panel: CanvasPanel) {
 
 // 悬停工具栏：三节点「生成」
 async function handleHoverRunNode() {
-  const panel = hoveredPanel.value
+  const panel = toolbarPanel.value
   if (!panel) return
   await handleNodeRun(panel)
 }
@@ -2183,12 +2147,6 @@ async function handleConfigGenerate(panel: typeof store.panels[number]) {
   }
 }
 
-// ==================== 悬停工具栏 ====================
-
-const hoveredPanelId = ref<string | null>(null)
-const showHoverToolbar = ref(false)
-let hoverHideTimer: ReturnType<typeof setTimeout> | null = null
-
 // 蒙版编辑对话框状态
 const maskEditState = reactive({
   visible: false,
@@ -2277,14 +2235,16 @@ function handleUseTemplate(template: CanvasTemplate) {
   }
 }
 
-const hoveredPanel = computed(() => {
-  if (!hoveredPanelId.value) return null
-  return store.panels.find((p) => p.id === hoveredPanelId.value) ?? null
+// ==================== 节点工具栏（选中驱动） ====================
+
+// 单选节点即工具栏目标；多选/无选中不显示（成组等操作走右键菜单）
+const toolbarPanel = computed(() => {
+  return store.selectedPanels.length === 1 ? store.selectedPanels[0] : null
 })
 
-// 悬停工具栏定位：节点上方居中
-const hoverToolbarStyle = computed(() => {
-  const panel = hoveredPanel.value
+// 节点工具栏定位：节点上方居中
+const nodeToolbarStyle = computed(() => {
+  const panel = toolbarPanel.value
   if (!panel) return { display: 'none' }
   // worldToScreen 返回屏幕坐标，减去画布偏移转为相对于 canvas-main 的坐标
   const screen = store.worldToScreen(panel.x + panel.width / 2, panel.y)
@@ -2294,33 +2254,6 @@ const hoverToolbarStyle = computed(() => {
     transform: 'translate(-50%, -100%)',
   }
 })
-
-// 节点 hover 进入
-function handleNodeHoverEnter(panelId: string) {
-  cancelHoverHide()
-  hoveredPanelId.value = panelId
-  showHoverToolbar.value = true
-}
-
-// 节点 hover 离开：延迟隐藏（允许鼠标移到工具栏上）
-function handleNodeHoverLeave() {
-  scheduleHoverHide()
-}
-
-function scheduleHoverHide() {
-  cancelHoverHide()
-  hoverHideTimer = setTimeout(() => {
-    showHoverToolbar.value = false
-    hoveredPanelId.value = null
-  }, 200)
-}
-
-function cancelHoverHide() {
-  if (hoverHideTimer) {
-    clearTimeout(hoverHideTimer)
-    hoverHideTimer = null
-  }
-}
 
 // ---- 悬停工具栏事件处理（复杂功能简化为 ElMessage 提示） ----
 
@@ -2332,7 +2265,7 @@ const nodeInfoVisible = computed({
 })
 
 function handleHoverInfo() {
-  nodeInfoPanel.value = hoveredPanel.value
+  nodeInfoPanel.value = toolbarPanel.value
 }
 
 /* ---------- 节点信息弹窗 ---------- */
@@ -2387,24 +2320,22 @@ async function handleInfoCopyPrompt() {
 }
 
 function handleHoverDelete() {
-  if (hoveredPanelId.value) {
-    store.pushSnapshot()
-    store.deletePanel(hoveredPanelId.value)
-  }
-  showHoverToolbar.value = false
-  hoveredPanelId.value = null
+  const panel = toolbarPanel.value
+  if (!panel) return
+  store.pushSnapshot()
+  store.deletePanel(panel.id)
 }
 
 // 悬停工具栏：重试
 async function handleHoverRetry() {
-  const panel = hoveredPanel.value
+  const panel = toolbarPanel.value
   if (!panel) return
   await retryGeneration(panel)
 }
 
 // 悬停工具栏：存素材到素材库
 async function handleHoverSaveAsset() {
-  const panel = hoveredPanel.value
+  const panel = toolbarPanel.value
   if (!panel) return
 
   const content: Record<string, unknown> = panel.content || {}
@@ -2436,7 +2367,7 @@ async function handleHoverSaveAsset() {
  * - 视频：直接代理下载（视频水印暂未实现）
  */
 async function handleHoverDownload() {
-  const p = hoveredPanel.value
+  const p = toolbarPanel.value
   if (!p?.content?.content) {
     ElMessage.warning(t('canvas.messages.noDownloadContent'))
     return
@@ -2467,7 +2398,7 @@ async function handleHoverDownload() {
 
 // 悬停工具栏：通用编辑（按节点类型分发）
 function handleHoverEdit() {
-  const panel = hoveredPanel.value
+  const panel = toolbarPanel.value
   if (!panel) return
 
   switch (panel.type) {
@@ -2496,7 +2427,7 @@ function handleHoverEdit() {
 
 // 悬停工具栏：编辑文字（通过 store.editingPanelId 触发 CanvasNode 进入编辑模式）
 function handleHoverEditText() {
-  const panel = hoveredPanel.value
+  const panel = toolbarPanel.value
   if (!panel || panel.type !== 'text') return
 
   store.selectPanel(panel.id, { append: false })
@@ -2506,52 +2437,34 @@ function handleHoverEditText() {
   })
 }
 
-// 悬停工具栏：生图
-// - 生成前预检积分，余额不足时中止并提示
-async function handleHoverGenerateImage() {
-  const panel = hoveredPanel.value
-  if (!panel) return
-  const prompt = (panel.content?.content || panel.content?.prompt || '') as string
-  if (!prompt.trim()) {
-    ElMessage.warning(t('canvas.messages.textContentEmpty'))
-    return
-  }
-  // 积分预检
-  const canGenerate = await checkCreditsBeforeGenerate({ type: 'image', mode: 'text2image', size: '1024x1024' })
-  if (!canGenerate) return
-  await generateImageFromPrompt(panel, prompt)
-}
-
 function handleHoverFontSizeDown() {
-  if (!hoveredPanelId.value) return
-  const p = store.panels.find((pp) => pp.id === hoveredPanelId.value)
-  const cur = (p?.content?.fontSize ?? 16) as number
-  store.updatePanel(hoveredPanelId.value, { content: { fontSize: Math.max(10, cur - 2) } })
+  const panel = toolbarPanel.value
+  if (!panel) return
+  const cur = (panel.content?.fontSize ?? 16) as number
+  store.updatePanel(panel.id, { content: { fontSize: Math.max(10, cur - 2) } })
 }
 
 function handleHoverFontSizeUp() {
-  if (!hoveredPanelId.value) return
-  const p = store.panels.find((pp) => pp.id === hoveredPanelId.value)
-  const cur = (p?.content?.fontSize ?? 16) as number
-  store.updatePanel(hoveredPanelId.value, { content: { fontSize: Math.min(48, cur + 2) } })
+  const panel = toolbarPanel.value
+  if (!panel) return
+  const cur = (panel.content?.fontSize ?? 16) as number
+  store.updatePanel(panel.id, { content: { fontSize: Math.min(48, cur + 2) } })
 }
 
 function handleHoverUploadImage() {
-  triggerFileUpload(hoveredPanelId.value, 'image/*')
+  triggerFileUpload(toolbarPanel.value?.id ?? null, 'image/*')
 }
 
 function handleHoverUploadVideo() {
-  triggerFileUpload(hoveredPanelId.value, 'video/*')
+  triggerFileUpload(toolbarPanel.value?.id ?? null, 'video/*')
 }
 
 function handleHoverUploadAudio() {
-  triggerFileUpload(hoveredPanelId.value, 'audio/*')
+  triggerFileUpload(toolbarPanel.value?.id ?? null, 'audio/*')
 }
 
 function handleHoverCopyPrompt() {
-  if (!hoveredPanelId.value) return
-  const p = store.panels.find((pp) => pp.id === hoveredPanelId.value)
-  const prompt = (p?.content?.prompt ?? '') as string
+  const prompt = (toolbarPanel.value?.content?.prompt ?? '') as string
 
   void copyText(prompt, t('canvas.messages.promptCopied')).then((ok) => {
     if (!ok) ElMessage.warning(t('canvas.messages.copyFailed'))
@@ -2563,7 +2476,7 @@ function handleHoverCopyPrompt() {
 //   1. 写入图片节点的 content.prompt 字段（供 Copy Prompt 使用）
 //   2. 在图片右侧自动创建一个文字节点，把 prompt 作为可见文本展示，并用连线关联
 async function handleHoverDescribe() {
-  const panel = hoveredPanel.value
+  const panel = toolbarPanel.value
   if (!panel) return
 
   // 取图片地址：优先 content.content，兼容 content.url
@@ -2688,12 +2601,11 @@ async function handleHoverDescribe() {
 }
 
 function handleHoverReplaceImage() {
-  triggerFileUpload(hoveredPanelId.value, 'image/*')
+  triggerFileUpload(toolbarPanel.value?.id ?? null, 'image/*')
 }
 
 function handleHoverToggleRatio() {
-  if (!hoveredPanelId.value) return
-  const p = store.panels.find((pp) => pp.id === hoveredPanelId.value)
+  const p = toolbarPanel.value
   if (!p) return
   const cur = (p.content?.freeResize ?? false) as boolean
   // 从自由比例 → 锁比例：根据当前宽高强制调整高度，保持中心不动
@@ -2701,19 +2613,19 @@ function handleHoverToggleRatio() {
     const ratio = p.width / p.height
     const newH = p.width / ratio
     const dy = (newH - p.height) / 2
-    store.updatePanel(hoveredPanelId.value, {
+    store.updatePanel(p.id, {
       content: { freeResize: false },
       height: newH,
       y: p.y - dy,
     })
   } else {
-    store.updatePanel(hoveredPanelId.value, { content: { freeResize: true } })
+    store.updatePanel(p.id, { content: { freeResize: true } })
   }
   ElMessage.success(cur ? t('canvas.hoverToolbar.lockRatio') : t('canvas.hoverToolbar.unlockRatio'))
 }
 
 function handleHoverMaskEdit() {
-  const panel = hoveredPanel.value
+  const panel = toolbarPanel.value
   if (!panel) return
   const imageUrl = (panel.content?.content || panel.content?.url) as string
   if (!imageUrl) {
@@ -2821,7 +2733,7 @@ async function handleMaskConfirm(
 
 // 图片裁剪：打开可视化裁剪弹窗
 function handleHoverCrop() {
-  const panel = hoveredPanel.value
+  const panel = toolbarPanel.value
   if (!panel?.content?.content) return
   const imageUrl = panel.content.content as string
   imageOpsState.crop.visible = true
@@ -2859,7 +2771,7 @@ async function handleCropConfirm(rect: { x: number; y: number; w: number; h: num
 
 // 图片拆分：打开行列选择弹窗
 function handleHoverSplit() {
-  const panel = hoveredPanel.value
+  const panel = toolbarPanel.value
   if (!panel?.content?.content) return
   const imageUrl = panel.content.content as string
   imageOpsState.split.visible = true
@@ -2912,7 +2824,7 @@ async function handleSplitConfirm({ rows, cols }: { rows: number; cols: number }
 
 // 图片放大：打开目标尺寸选择弹窗
 function handleHoverUpscale() {
-  const panel = hoveredPanel.value
+  const panel = toolbarPanel.value
   if (!panel?.content?.content) return
   const imageUrl = panel.content.content as string
   imageOpsState.upscale.visible = true
@@ -2942,7 +2854,7 @@ async function handleUpscaleConfirm({ targetLongEdge, algorithm }: { targetLongE
 
 // 图片超分：复用放大弹窗，默认 4K + 高清算法
 function handleHoverSuperResolution() {
-  const panel = hoveredPanel.value
+  const panel = toolbarPanel.value
   if (!panel?.content?.content) return
   const imageUrl = panel.content.content as string
   imageOpsState.upscale.visible = true
@@ -2952,7 +2864,7 @@ function handleHoverSuperResolution() {
 
 // AI 多角度：打开角度配置弹窗
 function handleHoverAngle() {
-  const panel = hoveredPanel.value
+  const panel = toolbarPanel.value
   if (!panel?.content?.content) return
   const imageUrl = panel.content.content as string
   imageOpsState.angle.visible = true
@@ -2962,7 +2874,7 @@ function handleHoverAngle() {
 
 // AI 打光：打开打光配置弹窗
 function handleHoverLighting() {
-  const panel = hoveredPanel.value
+  const panel = toolbarPanel.value
   if (!panel?.content?.content) return
   const imageUrl = panel.content.content as string
   imageOpsState.lighting.visible = true
@@ -2972,7 +2884,7 @@ function handleHoverLighting() {
 
 // 表情控制：打开情绪调节弹窗（节点携带逐脸任务记录时进入微调模式）
 function handleHoverEmotion() {
-  const panel = hoveredPanel.value
+  const panel = toolbarPanel.value
   if (!panel?.content?.content) return
   const imageUrl = panel.content.content as string
   imageOpsState.emotion.visible = true
@@ -3311,6 +3223,50 @@ function createImageChildNode(parentPanel: any, imageContent: string, name: stri
 }
 
 // 视频节点截帧（首帧/当前帧/尾帧）：新建图片子节点并连线（衔接连续镜头）
+// 工具栏统一分发：注册表工具 id → 既有处理器（处理器内部读 toolbarPanel）
+function handleToolAction(toolId: string, payload?: Record<string, unknown>) {
+  const panel = toolbarPanel.value
+  if (!panel) return
+  const actions: Record<string, () => void> = {
+    info: handleHoverInfo,
+    delete: handleHoverDelete,
+    retry: handleHoverRetry,
+    'run-node': handleHoverRunNode,
+    'save-asset': handleHoverSaveAsset,
+    download: handleHoverDownload,
+    edit: handleHoverEdit,
+    'quick-generate-image': () => handleQuickGenerate({ panel, mode: String(payload?.mode ?? 'image2image') }),
+    'quick-generate-video': () => handleQuickGenerate({ panel, mode: String(payload?.mode ?? 'image2video') }),
+    'font-size-down': handleHoverFontSizeDown,
+    'font-size-up': handleHoverFontSizeUp,
+    'upload-image': handleHoverUploadImage,
+    'upload-video': handleHoverUploadVideo,
+    'upload-audio': handleHoverUploadAudio,
+    'copy-prompt': handleHoverCopyPrompt,
+    describe: handleHoverDescribe,
+    'replace-image': handleHoverReplaceImage,
+    'toggle-ratio': handleHoverToggleRatio,
+    'mask-edit': handleHoverMaskEdit,
+    crop: handleHoverCrop,
+    split: handleHoverSplit,
+    upscale: handleHoverUpscale,
+    'super-resolution': handleHoverSuperResolution,
+    angle: handleHoverAngle,
+    lighting: handleHoverLighting,
+    emotion: handleHoverEmotion,
+    'view-large': handleHoverViewLarge,
+    'derive-video': handleHoverDeriveVideo,
+    'derive-tail': handleHoverDeriveTail,
+    'derive-prev': handleHoverDerivePrev,
+    'derive-chain': handleHoverDeriveChain,
+    reshoot: handleHoverReshoot,
+    'capture-frame-first': () => handleHoverCaptureFrame({ panel, position: 'first' }),
+    'capture-frame': () => handleHoverCaptureFrame({ panel, position: 'current' }),
+    'capture-frame-last': () => handleHoverCaptureFrame({ panel, position: 'last' }),
+  }
+  actions[toolId]?.()
+}
+
 async function handleHoverCaptureFrame(payload: { panel: typeof store.panels[number]; position: 'first' | 'current' | 'last' }) {
   const panel = payload.panel
   if (!panel?.content?.content) return
@@ -3334,13 +3290,13 @@ async function handleHoverCaptureFrame(payload: { panel: typeof store.panels[num
 }
 
 function handleHoverViewLarge() {
-  const p = hoveredPanel.value
+  const p = toolbarPanel.value
   if (p?.content?.content) previewImage.value = p.content.content as string
 }
 
 // 分镜图节点一键派生视频节点（单镜头图生视频）
 async function handleHoverDeriveVideo() {
-  const panel = hoveredPanel.value
+  const panel = toolbarPanel.value
   if (!panel) return
   try {
     await deriveVideoForShot(panel)
@@ -3351,7 +3307,7 @@ async function handleHoverDeriveVideo() {
 
 // 分镜图节点一键生成尾帧（keyframes 结束帧 + 跨镜头衔接底图）
 async function handleHoverDeriveTail() {
-  const panel = hoveredPanel.value
+  const panel = toolbarPanel.value
   if (!panel) return
   try {
     await deriveTailFrameFromImageNode(panel)
@@ -3362,7 +3318,7 @@ async function handleHoverDeriveTail() {
 
 // 分镜图节点一键推演前段画面（画面时间推演，向前延展）
 async function handleHoverDerivePrev() {
-  const panel = hoveredPanel.value
+  const panel = toolbarPanel.value
   if (!panel) return
   try {
     await derivePrevFrameFromImageNode(panel)
@@ -3373,7 +3329,7 @@ async function handleHoverDerivePrev() {
 
 // 分镜图节点一键生成分段视频（画面链长视频：补帧 + 分段 + compose）
 async function handleHoverDeriveChain() {
-  const panel = hoveredPanel.value
+  const panel = toolbarPanel.value
   if (!panel) return
   try {
     await deriveChainVideosFromImageNode(panel)
@@ -3384,7 +3340,7 @@ async function handleHoverDeriveChain() {
 
 // 重拍此镜头：找到来源 config 节点，重新执行生成
 async function handleHoverReshoot() {
-  const panel = hoveredPanel.value
+  const panel = toolbarPanel.value
   if (!panel) return
   // 直出分镜节点（自带 lineage）：就地重拍（保留模型/参数/参考图/源图），与重试同链路
   if (readLineage(panel) && (panel.type === 'image' || panel.type === 'video')) {
@@ -3973,8 +3929,6 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointerup', handleGroupDragUp)
   window.removeEventListener('agnes:user-login', handleUserSwitch)
   window.removeEventListener('agnes:user-logout', handleUserLogout)
-  // 清理 hover 定时器
-  cancelHoverHide()
 })
 
 /** 登录/切换用户后，切换到对应的数据空间 */
@@ -4164,8 +4118,8 @@ async function handleUserLogout() {
   z-index: 40;
 }
 
-/* ==================== 节点悬停工具栏 ==================== */
-.hover-toolbar-wrap {
+/* ==================== 节点工具栏 ==================== */
+.node-toolbar-wrap {
   position: absolute;
   z-index: 45;
 }
