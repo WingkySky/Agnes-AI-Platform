@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### 画布云端落库 + 版本历史 + 冲突保护
+- **工作区云端落库**：新增 `canvas_workspaces`（前端 uid 直作主键，`data` JSON 存 panels/connections/groups/viewport/styleConfig，`revision` 乐观锁）与 `canvas_snapshots`（`auto`/`manual`/`pre_danger` 三类快照）两表；前端 canvas-storage 改双通道——登录态走云端 API（400ms 防抖 + 串行单飞保存队列，404 懒创建同 id 透传），anon 保持纯本地 localforage 零改动；画布全局小设置（激活工作区/背景模式/图片信息）进 `/api/preferences` ui 组新键；撤销历史维持内存 80 条不持久化
+- **保存冲突保护**：PUT 带 base_revision，服务端版本不符返回 409+current_revision；前端不弹窗打断——拉取云端版本落地为「`原名 · 冲突副本`」新工作区（cloud 版本保底）后按新 revision 续推本地内容（本地胜出），toast 提示；client 拦截器错误对象补 `status`/`detail` 字段供分支处理，saveWorkspace 静默避免双重 toast
+- **版本历史**：自动快照内嵌在 PUT（内容有变化且距上次 ≥5 分钟才拍，sha256 内容指纹比较，零定时任务），auto 类滚动保留 20 份；手动「存一版」可命名、危险操作（还原/清空等）前 pre_danger 快照不占额度；底栏工具栏新增「历史版本」弹窗（两段列表 + 还原/删除/存一版），还原流程=确认→pre_danger 兜底→拉快照 data→store.applyWorkspaceData 覆盖当前工作区→正常保存链路（清空选中与撤销历史）；顶栏标题旁新增同步状态指示器（保存中/已保存·时间/失败红字），Ctrl+S 改立即强制保存
+- **素材上云**：拖入/粘贴/本地上传建图节点时 registerAsset 先传 `POST /api/uploads/canvas`（复用 upload_service，图片+视频白名单、100MB），节点直接引用远程 URL——换设备打开画布完整可用；上传失败降级本地 blob（行为同旧版）；素材库 blob 保留作本地缓存
+- **存量自动迁移**：登录态加载画布时云端列表为空且本地有数据 → 逐工作区上传 blob 素材替换 URL 后以原 id 创建（幂等：云端非空永不迁移，防跨设备删除被旧数据复活）；单工作区失败跳过继续并汇总提示，本地数据保留不删
+- **测试**：后端 pytest 新增 25 例（CRUD+每端点 401/403/200 三态、409 冲突、快照节流窗口/内容指纹/超 20 滚动、级联删除、上传白名单/超限/落盘）；前端 vitest 新增 18 例（双通道路由、队列串行单飞合并、404 懒创建、409 冲突副本流程、云端加载与偏好回填、迁移幂等与 URL 替换、applyWorkspaceData 还原）；全量 vitest 374 绿、vue-tsc/build 通过
+- **文档**：API.md 新增第 16 章
+
 ### 安全收尾：验证码 CSPRNG + 依赖升级
 - **验证码随机源**：captcha_service 全部随机数从 `random` 换成 `secrets`（CSPRNG）——图形验证码字符、**邮箱重置密码验证码**（可预测源等于账号接管入口）、干扰线/点/颜色装饰性随机一并切换（新增 `_randint` 封装 `secrets.randbelow`）
 - **依赖升级**（pip-audit 全清，0 已知漏洞通告）：pillow 12.2→12.3（7 条通告）、starlette 1.2.1→1.3.1、pydantic-settings 2.14.1→2.14.2、cryptography 49→50、aiohttp 3.14.1→3.14.3、h2 4.3→4.4.1；requirements.txt 地板同步（Pillow>=12.3.0 / pydantic-settings>=2.14.2 / cryptography>=50.0.0）

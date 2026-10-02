@@ -13,6 +13,7 @@ from app.core.response import ok
 
 from app.core.security import get_current_user
 from app.models.user import User
+from app.services.upload_service import save_upload_file
 
 router = APIRouter(prefix="/uploads", tags=["上传"])
 
@@ -47,3 +48,18 @@ async def upload_image(
     Path(filepath).write_bytes(content)
 
     return ok(data={"url": f"/uploads/preset-covers/{filename}"})
+
+
+@router.post("/canvas", summary="上传画布素材（拖入/粘贴的本地图片/视频）")
+async def upload_canvas_asset(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    画布本地图素材上云：存 uploads/canvas/assets/，返回可直接访问的 URL。
+
+    - 复用 upload_service：图片+视频白名单、单文件 100MB
+    - 上传后节点直接引用返回 URL，换设备打开不依赖浏览器本地数据
+    """
+    url = await save_upload_file(file, folder="canvas/assets")
+    return ok(data={"url": url})

@@ -147,7 +147,15 @@ client.interceptors.response.use(
       }
     }
 
-    return Promise.reject(new Error(message))
+    // 归一化错误保留 HTTP 状态与后端 detail（如画布工作区 409 冲突的 current_revision），
+    // 供调用方按状态分支处理；message 仍为人读文本
+    const normalized = new Error(message) as Error & { status?: number; detail?: unknown }
+    if (error?.response) {
+      normalized.status = error.response.status
+      normalized.detail = error.response?.data?.detail
+    }
+
+    return Promise.reject(normalized)
   }
 )
 

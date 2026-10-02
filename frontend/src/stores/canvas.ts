@@ -8,8 +8,21 @@
  * ===================================================== */
 
 import { defineStore } from 'pinia'
+import { ElMessage } from 'element-plus'
 import { canvasThemes } from '@/lib/canvas-theme'
-import { loadCanvas, saveCanvas, switchCanvasUser, cancelSaveCanvas } from '@/lib/canvas-storage'
+import {
+  loadCanvasData,
+  saveCanvas,
+  switchCanvasUser,
+  cancelSaveCanvas,
+  isCloudChannel,
+  setCanvasConflictHandler,
+  createWorkspaceCloud,
+  deleteWorkspaceCloud,
+  renameWorkspaceCloud,
+} from '@/lib/canvas-storage'
+import { t } from '@/i18n'
+import { migrateLocalToCloudIfNeeded } from '@/lib/canvas-migration'
 import { useThemeStore } from './theme'
 import { getUpstreamNodesWithIndex } from '@/lib/canvas-generation'
 import type { StyleConfig } from '@/lib/storyboard/schemas'
@@ -529,6 +542,7 @@ export const useCanvasStore = defineStore('canvas', {
       const idx = this.workspaces.findIndex((w) => w.id === id)
       if (idx === -1) return
       this.workspaces.splice(idx, 1)
+      void deleteWorkspaceCloud(id)
       if (id === this.activeWorkspaceId) {
         if (this.workspaces.length > 0) {
           this.switchWorkspace(this.workspaces[0].id)
@@ -554,6 +568,8 @@ export const useCanvasStore = defineStore('canvas', {
       if (!trimmed) return
       ws.name = trimmed
       ws.updated_at = new Date().toISOString()
+      // 非激活工作区改名无法经 _save 覆盖，显式同步云端
+      void renameWorkspaceCloud(ws)
       this._save()
     },
 
@@ -1120,8 +1136,38 @@ export const useCanvasStore = defineStore('canvas', {
     /** 从存储加载数据填充 state（幂等，_storageReady 标记避免重复加载） */
     async _hydrateFromStorage(): Promise<void> {
       if (this._storageReady) return
+      // 冲突副本处理器（云端 409 时由 canvas-storage 回调）：云端版本落地为新工作区保底
+      setCanvasConflictHandler((cloud) => {
+        const data = (cloud.data ?? {}) as Record<string, any>
+        const now = new Date().toISOString()
+        const copy = {
+          id: uid(),
+          name: `${cloud.name} · 冲突副本`,
+          created_at: now,
+          updated_at: now,
+          viewport: data.viewport ?? { x: 0, y: 0, zoom: 1 },
+          panels: JSON.parse(JSON.stringify(data.panels ?? [])),
+          connections: JSON.parse(JSON.stringify(data.connections ?? [])),
+          groups: JSON.parse(JSON.stringify(data.groups ?? [])),
+          styleConfig: data.styleConfig ?? null,
+        }
+        this.workspaces.push(copy as CanvasWorkspace)
+        void createWorkspaceCloud(copy)
+        ElMessage.warning(t('canvas.messages.cloudConflictCopy'))
+      })
       try {
-        const rawData = await loadCanvas()
+        // 登录态先把本地存量画布一次性迁上云端（幂等：云端非空直接跳过）
+        if (isCloudChannel()) {
+          const migration = await migrateLocalToCloudIfNeeded()
+          if (migration.total > 0) {
+            if (migration.failed === 0) {
+              ElMessage.success(t('canvas.messages.cloudMigrateDone'))
+            } else {
+              ElMessage.warning(t('canvas.messages.cloudMigratePartial', { n: migration.failed }))
+            }
+          }
+        }
+        const rawData = await loadCanvasData()
         if (rawData && typeof rawData === 'object') {
           const data = rawData as unknown as Record<string, unknown>
           if (Array.isArray(data.workspaces)) this.workspaces = data.workspaces as CanvasWorkspace[]
@@ -1156,12 +1202,34 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /**
+     * 用快照 data 覆盖当前工作区内容（版本历史还原）
+     * - 清空选中与历史（旧历史对新内容无效），走 _save 正常保存链路
+     */
+    applyWorkspaceData(data: Record<string, unknown>): void {
+      this.panels = JSON.parse(JSON.stringify((data as Record<string, any>).panels ?? []))
+      this.connections = JSON.parse(JSON.stringify((data as Record<string, any>).connections ?? []))
+      this.groups = JSON.parse(JSON.stringify((data as Record<string, any>).groups ?? []))
+      const vp = (data as Record<string, any>).viewport
+      if (vp && typeof vp === 'object') {
+        this.viewport = { ...this.viewport, ...vp }
+      }
+      const ws = this.workspaces.find((w) => w.id === this.activeWorkspaceId)
+      if (ws) {
+        ws.styleConfig = ((data as Record<string, any>).styleConfig ?? null) as CanvasWorkspace['styleConfig']
+        ws.updated_at = new Date().toISOString()
+      }
+      this.selectedPanelIds = []
+      this.selectedPanelId = null
+      this.history = { past: [], future: [] }
+      this._save()
+    },
+
+    /**
      * 将顶层的 panels/connections/viewport 同步到 workspaces 中的当前工作区
      * - 日常操作只修改顶层数据，保存前调用此函数确保 workspaces 数据同步
      * - 避免切换工作区时丢失数据
      */
-    _syncCurrentWorkspace(): void {
-      const current = this.workspaces.find((w) => w.id === this.activeWorkspaceId)
+    _syncCurrentWorkspace(): void {      const current = this.workspaces.find((w) => w.id === this.activeWorkspaceId)
       if (!current) return
       current.viewport = { ...this.viewport }
       current.panels = JSON.parse(JSON.stringify(this.panels))

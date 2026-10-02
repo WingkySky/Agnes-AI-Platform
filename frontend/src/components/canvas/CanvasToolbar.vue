@@ -62,7 +62,7 @@ import { ref, computed } from 'vue'
 import {
   Hand, MousePointer2, Undo2, Redo2, Type, Image, Video, Music2, Settings2, Upload,
   FolderOpen, Palette, Trash2, Eraser, Keyboard, Wand2, LayoutDashboard,
-  Mic, FileText, Puzzle, Clapperboard, Bot,
+  Mic, FileText, Puzzle, Clapperboard, Bot, History,
 } from 'lucide-vue-next'
 import CanvasAppearancePanel from './CanvasAppearancePanel.vue'
 import { useI18n } from '@/i18n'
@@ -90,6 +90,7 @@ const emit = defineEmits([
   'add-node',
   'upload-asset',
   'open-asset-library',
+  'show-history',
   'toggle-appearance-panel',
   'toggle-agent-panel',
   'delete-selected',
@@ -141,6 +142,7 @@ const buttonGroups = computed<any[][]>(() => [
     { id: 'tool-smart-group', label: t('canvas.toolbar.toolSmartGroup'), icon: Wand2, emit: 'smart-group' },
     { id: 'tool-arrange', label: t('canvas.toolbar.toolArrange'), icon: LayoutDashboard, emit: 'arrange-layout' },
     { id: 'tool-assets', label: t('canvas.toolbar.toolAssets'), icon: FolderOpen, emit: 'open-asset-library' },
+    { id: 'tool-history', label: t('canvas.toolbar.toolHistory'), icon: History, emit: 'show-history' },
     { id: 'tool-style', label: t('canvas.toolbar.toolStyle'), icon: Palette, active: props.showAppearancePanel, emit: 'toggle-appearance-panel' },
   ],
   // 组7：画布 Agent（右侧对话面板）

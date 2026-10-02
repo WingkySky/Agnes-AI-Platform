@@ -14,6 +14,8 @@
  * ===================================================== */
 
 import { defineStore } from 'pinia'
+import { uploadCanvasAsset } from '@/api/canvasWorkspace'
+import { isCloudChannel } from '@/lib/canvas-storage'
 
 // ---------- 本地类型定义 ----------
 
@@ -163,12 +165,22 @@ export const useAssetStore = defineStore('asset', {
       let url = data.url ?? ''
       let hasBlob = false
 
-      // 本地上传的文件：Blob 持久化到 IndexedDB，创建运行时 object URL
+      // 本地上传的文件：Blob 持久化到 IndexedDB；登录态先传云端拿持久 URL
+      // （节点直接引用远程 URL，换设备不依赖本地数据；上传失败降级 objectURL，行为同旧版）
       if (data.blob) {
         const store = await getAssetStore()
         await store.setItem(blobKey(id), data.blob)
-        url = URL.createObjectURL(data.blob)
         hasBlob = true
+        if (isCloudChannel()) {
+          try {
+            const resp = await uploadCanvasAsset(data.blob, data.name || `${data.type ?? 'image'}.png`)
+            url = resp.url
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.warn('[asset] 云端上传失败，降级为本地 blob', err)
+          }
+        }
+        if (!url) url = URL.createObjectURL(data.blob)
       }
 
       const asset: AssetItem = {
@@ -219,6 +231,14 @@ export const useAssetStore = defineStore('asset', {
       }
       this.assets = []
       await this._persist()
+    },
+
+    /** 按 id 取本地缓存的 Blob（无 blob 或数据丢失返回 null；迁移时上传用） */
+    async getAssetBlob(id: string): Promise<Blob | null> {
+      const asset = this.getAssetById(id)
+      if (!asset?.hasBlob) return null
+      const store = await getAssetStore()
+      return await store.getItem<Blob>(blobKey(id))
     },
 
     /** 从 localforage 加载资源到 state（仅执行一次；组件 onMounted 时调用） */

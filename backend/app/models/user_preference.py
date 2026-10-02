@@ -46,6 +46,10 @@ DEFAULT_PREFERENCES = {
         "canvas_grid_visible": True,
         "canvas_grid_size": 20,
         "canvas_snap_to_grid": False,
+        # 画布工作区云端落库的全局小设置（activeWorkspaceId / backgroundMode / showImageInfo）
+        "canvas_active_workspace_id": "",
+        "canvas_background_mode": "",
+        "canvas_show_image_info": False,
     },
     # 通知偏好
     "notification": {

@@ -51,6 +51,12 @@
           >
             {{ activeWorkspaceName }}
           </span>
+          <!-- 云端同步状态指示器（登录态落库后显示；anon 纯本地不显示） -->
+          <span
+            v-if="cloudSyncEnabled && saveStatusText"
+            class="save-status"
+            :class="{ 'save-status-error': canvasSaveStatus.error }"
+          >{{ saveStatusText }}</span>
         </div>
 
         <!-- 画布管理按钮组 -->
@@ -167,6 +173,7 @@
         @add-node="handleAddNode"
         @upload-asset="handleUploadAsset"
         @open-asset-library="handleOpenAssetLibrary"
+        @show-history="historyVisible = true"
         @toggle-appearance-panel="showAppearancePanel = !showAppearancePanel"
         @toggle-agent-panel="agentStore.open = !agentStore.open"
         @delete-selected="handleDeleteSelected"
@@ -343,6 +350,9 @@
         @use-template="handleUseTemplate"
       />
 
+      <!-- ============ 版本历史弹窗（自动快照 / 手动版本 / 还原） ============ -->
+      <CanvasHistoryDialog v-model="historyVisible" />
+
       <!-- ============ 保存为模板对话框 ============ -->
       <el-dialog
         v-model="saveTemplateVisible"
@@ -488,6 +498,8 @@ import { Download, Pencil, Plus, LayoutGrid } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
 import { useDownload } from '@/composables/useDownload'
 import { useCanvasStore } from '@/stores/canvas'
+import { useUserStore } from '@/stores/user'
+import { canvasSaveStatus, flushSaveCanvas } from '@/lib/canvas-storage'
 import { useAgentStore } from '@/stores/agent'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useModelsStore } from '@/stores/models'
@@ -517,6 +529,8 @@ import CanvasGroupLayer from '@/components/canvas/CanvasGroupLayer.vue'
 import ImageWithWatermark from '@/components/ImageWithWatermark.vue'
 // 画布模板库组件
 import CanvasManagerPopover from '@/components/canvas/CanvasManagerPopover.vue'
+// 版本历史弹窗（自动快照 / 手动版本 / 还原）
+import CanvasHistoryDialog from '@/components/canvas/CanvasHistoryDialog.vue'
 // 画布积分预估与校验（生图/生视频/局部编辑前预检积分）
 import { CANVAS_GROUP_COLORS, type CanvasPanel, type CanvasConnection } from '@/stores/canvas'
 import { checkCreditsBeforeGenerate, showCostConsumedMessage } from '@/lib/canvas-credits'
@@ -2167,6 +2181,22 @@ const imageOpsState = reactive({
 // ============ 画布模板功能 ============
 // 画布管理弹窗显示状态（批量操作、模板库）
 const managerVisible = ref(false)
+// 版本历史弹窗显示状态
+const historyVisible = ref(false)
+// 云端同步状态指示器（登录态落库后显示）
+const cloudSyncEnabled = computed(() => {
+  try {
+    return !!useUserStore().isAuthenticated
+  } catch {
+    return false
+  }
+})
+const saveStatusText = computed(() => {
+  if (canvasSaveStatus.saving) return t('canvas.saveStatus.saving')
+  if (canvasSaveStatus.error) return t('canvas.saveStatus.error')
+  if (canvasSaveStatus.lastSavedAt) return t('canvas.saveStatus.saved', { time: canvasSaveStatus.lastSavedAt })
+  return ''
+})
 // 标题栏 hover 状态（控制微缩态/展开态切换）
 const titleHovered = ref(false)
 // 保存为模板对话框状态
@@ -3852,9 +3882,10 @@ function handleKeyDown(event: KeyboardEvent) {
     return
   }
 
-  // Ctrl+S：保存（阻止浏览器默认保存，提示已自动保存）
+  // Ctrl+S：立即强制保存（云端直推保存队列 / anon 立即落盘）
   if (ctrl && event.key === 's') {
     event.preventDefault()
+    flushSaveCanvas()
     ElMessage.success(t('canvas.messages.autoSaved'))
     return
   }
@@ -4041,6 +4072,17 @@ async function handleUserLogout() {
 
 .canvas-selector:hover {
   background: var(--agnes-bg-hover);
+}
+
+/* 云端同步状态指示器（标题旁，登录态落库后显示） */
+.save-status {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+}
+.save-status-error {
+  color: var(--el-color-danger);
 }
 
 .title-input {

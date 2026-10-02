@@ -788,3 +788,36 @@ manifest 格式：`{ "name": "...", "items": [{ "slug", "name", "description", "
 | POST | `/api/setup/complete` | 仅管理员（401/403/200 三态） | 写入实例级完成标记，幂等。前端向导走完（Provider 步可跳过）后调用，之后不再拦截 |
 
 前端拦截条件：`password_pending || (provider_pending && !setup_completed)`；改密走既有 `POST /api/auth/change-password`（成功后清除 `must_change_password`）。
+
+## 16. 画布工作区云端落库（画布持久化 + 版本历史）
+
+无限画布工作区数据云端落库：登录态画布经 400ms 防抖 + 串行单飞队列保存到 `canvas_workspaces`（每工作区一行，`data` JSON 存 panels/connections/groups/viewport/styleConfig，前端 uid 直作主键），`revision` 乐观锁冲突返回 409（前端自动把云端版本落地为「冲突副本」工作区后按新 revision 续推）。版本快照存 `canvas_snapshots`（`kind`: `auto` 保存节流自动 / `manual` 手动命名 / `pre_danger` 危险操作前；auto 每 5 分钟且内容有变化才拍、滚动保留 20 份，manual/pre_danger 不占额度）。拖入/粘贴的本地图素材经 `POST /api/uploads/canvas` 上云，节点直接引用远程 URL。未登录（anon）画布仍纯浏览器本地存储。前端入口：底栏工具栏「历史版本」弹窗（存一版/还原/删除），顶栏标题旁同步状态指示器，Ctrl+S 立即强制保存。
+
+### 工作区 CRUD（全部登录态，非本人 403）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/canvas/workspaces` | 当前用户工作区列表（不含 data，按 updated_at 倒序） |
+| POST | `/api/canvas/workspaces` | 创建 `{ id?, name, data }`；id 可透传前端 uid（迁移/懒创建用），同 id 重复创建幂等返回已有，id 被其他用户占用 409 |
+| GET | `/api/canvas/workspaces/{id}` | 全量 `{ id, name, revision, data, created_at, updated_at }` |
+| PUT | `/api/canvas/workspaces/{id}` | 保存 `{ data, base_revision, name? }` → `{ revision }`；`base_revision` 不符返回 409 `{ detail: { current_revision } }`。PUT 内嵌自动快照节流（见上） |
+| DELETE | `/api/canvas/workspaces/{id}` | 删除工作区并连带删除其全部快照 |
+
+### 快照
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/canvas/workspaces/{id}/snapshots` | 创建快照 `{ kind: 'manual'\|'pre_danger', name? }`（`auto` 仅由保存链路内嵌生成，传 auto 返回 400）→ 快照摘要（含当时 revision） |
+| GET | `/api/canvas/workspaces/{id}/snapshots` | 快照列表（不含 data，created_at 倒序） |
+| GET | `/api/canvas/workspaces/{id}/snapshots/{sid}` | 快照全量（含 data；前端还原=先 POST 一份 pre_danger 快照再拉 data 走 PUT 写回） |
+| DELETE | `/api/canvas/workspaces/{id}/snapshots/{sid}` | 删除单份快照 |
+
+### 画布素材上传
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/uploads/canvas` | 上传画布素材（拖入/粘贴的本地图片/视频），复用通用上传服务（图片+视频白名单、单文件 100MB），存 `uploads/canvas/assets/`，返回 `{ url }`（`/uploads/canvas/assets/<filename>`） |
+
+### 偏好扩展
+
+`/api/preferences` 的 `ui` 组新增画布全局小设置键：`canvas_active_workspace_id`（云端激活工作区 id）、`canvas_background_mode`、`canvas_show_image_info`（登录态经 `/api/preferences` 读写；anon 仍走浏览器本地）。

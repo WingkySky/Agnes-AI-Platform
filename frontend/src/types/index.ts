@@ -471,6 +471,10 @@ export interface UIPreferences {
   canvas_grid_visible: boolean
   canvas_grid_size: number
   canvas_snap_to_grid: boolean
+  // 画布工作区云端落库的全局小设置（登录态走 /api/preferences，anon 仍走 localforage）
+  canvas_active_workspace_id: string      // 云端激活工作区 id（空串=无）
+  canvas_background_mode: string          // 画布背景模式（与 canvas.ts isBackgroundMode 取值一致）
+  canvas_show_image_info: boolean         // 图片节点信息开关
 }
 
 /** 通知偏好 */
