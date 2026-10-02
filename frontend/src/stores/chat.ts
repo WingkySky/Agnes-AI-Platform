@@ -26,15 +26,22 @@ import { isMediaSuccess, isMediaFailed } from '@/lib/media-status'
 import { t } from '@/i18n'
 import { toolStepLabel } from '@/lib/agent/tool-labels'
 import { AgentKernel } from '@/lib/agent/kernel'
-import type { KernelEvent, AgentImageAttachment } from '@/lib/agent/kernel'
+import type { KernelEvent, AgentImageAttachment, HostTool } from '@/lib/agent/kernel'
 import { createAgentModel } from '@/lib/agent/provider'
-import { CHAT_TOOLS } from '@/lib/agent/chat-tools'
+import { CHAT_TOOLS, canvasHostTools } from '@/lib/agent/chat-tools'
+import type { CanvasPlacementPlan } from '@/lib/agent/chat-tools'
+import { applyCanvasOps } from '@/api/canvasWorkspace'
+import { usePreferencesStore } from '@/stores/preferences'
 import { CHAT_SYSTEM_PROMPT_BASE, buildChatSystemPrompt } from '@/lib/agent/chat-system-prompt'
+import { CANVAS_CONTEXT_SECTION } from '@/lib/agent/system-prompt'
 import { listAgentSkills } from '@/lib/agent/skills'
 import { toBackendMessages } from '@/lib/agent/session-store'
 import { setDelegateProgressSink } from '@/lib/agent/subagent'
 import { fetchMcpBundle } from '@/lib/agent/mcp'
+import type { McpCapability } from '@/lib/agent/mcp'
 import { fetchMemoryState } from '@/lib/agent/memory'
+import { deleteMemoryPreference, clearMemoryPreferences } from '@/api/mcp'
+import type { AgentMode } from '@/lib/agent/policy'
 import type {
   ProjectableMessage,
 } from '@/lib/agent/session-store'
@@ -66,6 +73,17 @@ export interface ChatKernelMessage {
   createdAt: string
 }
 
+/** 等待确认的门请求（原画布 Agent store 定义并入；stage=画布管线阶段门 / tool=MCP 工具门） */
+export interface AgentPendingConfirm {
+  kind: 'stage' | 'tool'
+  tool: string
+  args: Record<string, unknown>
+  stage: string
+  summary: string
+  /** 子代理门请求的来源标签（确认卡展示"来自子任务"） */
+  source?: string
+}
+
 // 媒体轮询间隔
 const MEDIA_POLL_INTERVAL = 3000
 // 轮询最大连续失败次数（超过后停止轮询）
@@ -79,6 +97,18 @@ let skillsCache: Awaited<ReturnType<typeof listAgentSkills>> | null = null
 // MCP 能力摘要 + 用户偏好记忆段（会话建立时刷新；_applySkillsPrompt 单点组合进系统提示）
 let mcpSummaryCache = ''
 let memorySectionCache = ''
+// MCP 宿主工具缓存（setExtraTools 装配源：与画布深度工具合并注入）
+let mcpToolsCache: HostTool[] = []
+
+/** 全局档位记忆（统一 Agent：readonly/confirm/auto，三档全局生效） */
+function readAgentMode(): AgentMode {
+  try {
+    const raw = localStorage.getItem('agnes_agent_mode')
+    return raw === 'readonly' || raw === 'auto' ? raw : 'confirm'
+  } catch {
+    return 'confirm'
+  }
+}
 // per-session 内核池（按 store 实例分池；类实例不进响应式 state，避免 Vue 类型解包破坏其私有结构）
 const kernelPools = new WeakMap<object, Map<string, AgentKernel>>()
 function poolOf(store: object): Map<string, AgentKernel> {
@@ -131,7 +161,7 @@ function delegateProgressText(s: AgentStepRecord): string | undefined {
   return `${t('agent.delegateProgress', { n: round })}${tool ? ` · ${toolStepLabel(tool)}` : ''}`
 }
 
-function toStepStatus(status: string): ChatStepView['status'] {
+export function toStepStatus(status: string): ChatStepView['status'] {
   switch (status) {
     case 'running':
     case 'pending':
@@ -277,6 +307,20 @@ export const useChatStore = defineStore('chat', {
     mediaTaskToMessageId: Record<string, string>
     // taskId -> 归属会话 id（后台轮询终端态按归属落库）
     mediaTaskSession: Record<string, number>
+    // taskId -> 落画布计划（generate_* place_on_canvas 注册，媒体成功时消费）
+    canvasPlacements: Record<string, CanvasPlacementPlan>
+    // ---------- Agent 统一宿主（原画布 Agent store 并入） ----------
+    /** 全局权限档位（readonly/confirm/auto；authorizeTool 实时读取） */
+    agentMode: AgentMode
+    /** 等待用户确认的门请求（stage=画布管线阶段门 / tool=MCP 工具门），带归属会话 */
+    pendingConfirm: (AgentPendingConfirm & { sessionId: number }) | null
+    /** 已接入的 MCP 能力清单（面板能力入口展示） */
+    mcpCapabilities: McpCapability[]
+    /** 用户偏好记忆（面板记忆入口展示与删除） */
+    memoryAvailable: boolean
+    memoryPreferences: string[]
+    /** 画布深度工具是否挂载（仅画布页 true，由 CanvasView 挂载/卸载驱动） */
+    canvasToolsActive: boolean
     // 是否已完成初始化（配合 keep-alive）
     _initialized: boolean
   } => ({
@@ -293,6 +337,13 @@ export const useChatStore = defineStore('chat', {
     mediaPollFailCounts: {},
     mediaTaskToMessageId: {},
     mediaTaskSession: {},
+    canvasPlacements: {},
+    agentMode: readAgentMode(),
+    pendingConfirm: null,
+    mcpCapabilities: [],
+    memoryAvailable: false,
+    memoryPreferences: [],
+    canvasToolsActive: false,
     _initialized: false,
   }),
 
@@ -342,12 +393,27 @@ export const useChatStore = defineStore('chat', {
           return typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice(7) : null
         },
         tools: CHAT_TOOLS,
+        // 全局三档档位（authorizeTool 实时读取；readonly/confirm 下画布管线阶段门与 MCP 门生效）
+        getMode: () => this.agentMode,
         toolContext: {
           getRecentMediaUrl: (type: 'image' | 'video') => this.recentMediaUrl(sessionId, type),
+          getActiveCanvasWorkspaceId: (): string | null => {
+            try {
+              const id = usePreferencesStore().ui?.canvas_active_workspace_id
+              return id ? String(id) : null
+            } catch {
+              return null
+            }
+          },
+          registerCanvasPlacement: (plan: CanvasPlacementPlan) => {
+            this.canvasPlacements[plan.taskId] = plan
+          },
         },
       })
       // 恢复用户选定的对话模型（与画布共用同一偏好）
       if (this.chatModelId) k.setModel(createAgentModel(this.chatModelId))
+      // 画布深度工具（画布页激活时）与 MCP 工具统一经 extraTools 注入
+      k.setExtraTools(this._extraTools())
       // 技能清单快照（已取过则直接套用；失败沿用基础提示，不阻断内核创建）
       if (skillsCache) {
         try {
@@ -384,13 +450,17 @@ export const useChatStore = defineStore('chat', {
       const k = this._createKernel(sessionId)
       pool.set(key, k)
       // MCP 工具/能力摘要 + 用户偏好记忆：会话建立时后台刷新（失败降级；流式中内核侧跳过，下次刷新生效）
-      void fetchMcpBundle().then(({ tools, summary }) => {
+      void fetchMcpBundle().then(({ tools, summary, capabilities }) => {
+        mcpToolsCache = tools
         mcpSummaryCache = summary
-        k.setExtraTools(tools)
+        this.mcpCapabilities = capabilities
+        k.setExtraTools(this._extraTools())
         void this._applySkillsPrompt(k)
       })
       void fetchMemoryState().then((memory) => {
         memorySectionCache = memory.section
+        this.memoryAvailable = memory.available
+        this.memoryPreferences = memory.preferences
         void this._applySkillsPrompt(k)
       })
       try {
@@ -429,11 +499,21 @@ export const useChatStore = defineStore('chat', {
         if (!skillsCache) {
           skillsCache = await listAgentSkills()
         }
-        const prompt = [buildChatSystemPrompt(skillsCache), memorySectionCache, mcpSummaryCache].filter(Boolean).join('\n\n')
+        const prompt = [
+          buildChatSystemPrompt(skillsCache),
+          ...(this.canvasToolsActive ? [CANVAS_CONTEXT_SECTION] : []),
+          memorySectionCache,
+          mcpSummaryCache,
+        ].filter(Boolean).join('\n\n')
         k.setSystemPrompt(prompt)
       } catch {
         // 技能库不可用沿用基础提示
       }
+    },
+
+    /** extraTools 装配：MCP 工具 + 画布页激活时的画布深度工具（统一注入通道） */
+    _extraTools(): HostTool[] {
+      return this.canvasToolsActive ? [...mcpToolsCache, ...canvasHostTools()] : [...mcpToolsCache]
     },
 
     /** 指定会话最近一次成功生成的媒体 URL（会话连续性：图生图/图生视频默认参考） */
@@ -494,7 +574,11 @@ export const useChatStore = defineStore('chat', {
           break
         }
         case 'confirm_request': {
-          // chat 宿主无阶段门，不应出现；忽略
+          // 统一宿主：阶段门/工具门确认卡接通（带归属会话，切走再切回仍可见）
+          this.pendingConfirm = {
+            kind: e.kind, tool: e.tool, args: e.args, stage: e.stage, summary: e.summary,
+            source: e.source, sessionId,
+          }
           break
         }
         case 'done': {
@@ -503,6 +587,7 @@ export const useChatStore = defineStore('chat', {
           if (last && last.role === 'assistant' && !last.content && last.steps.length === 0 && last.media.length === 0) arr.pop()
           delete this.runningSessions[String(sessionId)]
           if (e.error) this.errors[String(sessionId)] = e.error
+          if (this.pendingConfirm?.sessionId === sessionId) this.pendingConfirm = null
           void this._persist(sessionId, arr)
           // 自动总结标题：首轮回复后标题仍为默认时调一次（读已落库消息行）
           if (!e.error) {
@@ -631,6 +716,64 @@ export const useChatStore = defineStore('chat', {
     },
 
     // =====================================================
+    // Agent 统一宿主（原画布 Agent store 并入）
+    // =====================================================
+
+    /** 切全局档位（readonly/confirm/auto；authorizeTool 实时读，下一判定立即生效） */
+    setAgentMode(mode: AgentMode): void {
+      this.agentMode = mode
+      try {
+        localStorage.setItem('agnes_agent_mode', mode)
+      } catch {
+        // 记忆失败不影响切档
+      }
+    },
+
+    /** 画布深度工具挂载开关（CanvasView 挂载/卸载驱动）：热更池内全部内核的工具与系统提示 */
+    setCanvasToolsActive(active: boolean): void {
+      if (this.canvasToolsActive === active) return
+      this.canvasToolsActive = active
+      const extras = this._extraTools()
+      for (const [, k] of poolOf(this)) {
+        k.setExtraTools(extras)
+        void this._applySkillsPrompt(k)
+      }
+    },
+
+    /** 确认卡放行/拒绝（阶段门与 MCP 工具门共用；归属会话的内核解析等待中的门） */
+    confirmPending(approved: boolean): void {
+      const p = this.pendingConfirm
+      this.pendingConfirm = null
+      if (!p) return
+      poolOf(this).get(String(p.sessionId))?.confirm(approved)
+    },
+
+    /** 删除单条偏好记忆（管理胶囊） */
+    async removeMemoryPreference(observation: string): Promise<void> {
+      await deleteMemoryPreference(observation)
+      this.memoryPreferences = this.memoryPreferences.filter((p) => p !== observation)
+    },
+
+    /** 清空偏好记忆（保留图谱其他记忆） */
+    async clearMemory(): Promise<void> {
+      await clearMemoryPreferences()
+      this.memoryPreferences = []
+    },
+
+    /** 清空当前会话内容（保留会话身份，等价于重新开始本轮对话） */
+    async clearActiveSession(): Promise<void> {
+      const sid = this.activeSessionId
+      if (sid === null) return
+      poolOf(this).get(String(sid))?.reset()
+      this.sessionMessages[String(sid)] = []
+      this.messages = this.sessionMessages[String(sid)]
+      delete this.errors[String(sid)]
+      this.pendingConfirm = null
+      this._saveToStorage()
+      await this._persist(sid, this.messages)
+    },
+
+    // =====================================================
     // 会话管理（CRUD 沿用现有端点；消息存储走全量同步）
     // =====================================================
 
@@ -644,9 +787,9 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    async newSession(title?: string): Promise<ChatSession> {
+    async newSession(title?: string, workspaceId?: string): Promise<ChatSession> {
       try {
-        const session = await createChatSession({ title }) as ChatSession
+        const session = await createChatSession({ title, workspace_id: workspaceId }) as ChatSession
         this.sessions.unshift(session)
         this.activeSessionId = session.id
         const arr: ChatKernelMessage[] = []
@@ -791,6 +934,8 @@ export const useChatStore = defineStore('chat', {
             item.url = data.result_url || data.video_url || data.url || data.image_url || ''
             this._stopMediaPoll(taskId)
             this._updateTaskQueueItem(taskId, 'success', item.url)
+            // 「落画布」计划：媒体成功后自动在云端画布建节点（异步，不影响媒体展示）
+            void this._placeOnCanvasIfNeeded(taskId, msg, item.url)
             // 终端态落库（全量同步消息行，按归属会话）
             this._persistMediaOwner(taskId, msg)
           } else if (isMediaFailed(rawStatus)) {
@@ -824,6 +969,53 @@ export const useChatStore = defineStore('chat', {
     _persistMediaOwner(taskId: string, msg: ChatKernelMessage | null): void {
       const owner = this.mediaTaskSession[taskId] ?? this.activeSessionId
       if (owner !== null && owner !== undefined) void this._persist(owner, this._messagesOf(owner))
+    },
+
+    /**
+     * 「落画布」计划消费：媒体生成成功后在目标云端工作区建媒体节点（status=success 直接可用）。
+     * 结果/失败以步骤行回显到媒体所属消息并补一次落库；失败不影响媒体本身。
+     */
+    async _placeOnCanvasIfNeeded(taskId: string, msg: ChatKernelMessage | null, url: string): Promise<void> {
+      const plan = this.canvasPlacements[taskId]
+      if (!plan || !msg || !url) {
+        delete this.canvasPlacements[taskId]
+        return
+      }
+      delete this.canvasPlacements[taskId]
+      const step = {
+        callId: `canvas_${taskId}`,
+        tool: 'canvas_add_panels',
+        args: {},
+        result: null as string | null,
+      }
+      try {
+        const r = await applyCanvasOps(plan.workspaceId, [{
+          op: 'add_panel',
+          type: plan.mediaType,
+          name: plan.mediaType === 'image' ? t('chat.canvasPlacement.imageName') : t('chat.canvasPlacement.videoName'),
+          content: {
+            status: 'success',
+            content: url,
+            ...(plan.prompt ? { prompt: plan.prompt } : {}),
+          },
+        }])
+        msg.steps.push({
+          ...step,
+          status: 'done',
+          result: JSON.stringify({
+            message: t('chat.canvasPlacement.done'),
+            workspace_id: plan.workspaceId,
+            panel_id: r.new_panel_ids[0] ?? null,
+          }),
+        })
+      } catch (e) {
+        msg.steps.push({
+          ...step,
+          status: 'error',
+          result: e instanceof Error ? e.message : String(e),
+        })
+      }
+      this._persistMediaOwner(taskId, msg)
     },
 
     _stopMediaPoll(taskId: string): void {

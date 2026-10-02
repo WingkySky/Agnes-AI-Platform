@@ -91,6 +91,7 @@ async def require_agnes_api_key() -> None:
 class CreateSessionRequest(BaseModel):
     """创建会话请求"""
     title: Optional[str] = Field(default=None, description="会话标题（可选，默认取首条消息前 30 字）")
+    workspace_id: Optional[str] = Field(default=None, max_length=64, description="画布工作区 id（可选，画布面板创建时标记上下文）")
 
 
 class UpdateSessionRequest(BaseModel):
@@ -142,6 +143,7 @@ async def create_session(
     session = ChatSession(
         title=req.title if req and req.title else "新对话",
         user_id=current_user.id if current_user else None,
+        workspace_id=req.workspace_id if req else None,
     )
     db.add(session)
     await db.commit()

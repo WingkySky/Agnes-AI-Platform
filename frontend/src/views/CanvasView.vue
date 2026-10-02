@@ -57,6 +57,13 @@
             class="save-status"
             :class="{ 'save-status-error': canvasSaveStatus.error }"
           >{{ saveStatusText }}</span>
+          <!-- 远端有更新（对话 Agent/CLI 等外部写入）：点击手动同步 -->
+          <span
+            v-if="store.remoteUpdateAvailable"
+            class="save-status remote-update"
+            :title="t('canvas.saveStatus.remoteUpdate')"
+            @click="handleRemoteSync"
+          >{{ t('canvas.saveStatus.remoteUpdate') }}</span>
         </div>
 
         <!-- 画布管理按钮组 -->
@@ -84,6 +91,8 @@
         :pan-enabled="activeTool !== 'select'"
         @background-click="handleBackgroundClick"
         @pointerdown="handleCanvasPointerDown"
+        @pane-dblclick="handlePaneDblClick"
+        @pane-contextmenu="handlePaneContextMenu"
         @drop-asset="handleCanvasDropAsset"
         @drop-files="(p) => createMediaNodesFromFiles(p.files, p.worldX, p.worldY)"
       >
@@ -166,7 +175,7 @@
         :background-mode="store.backgroundMode"
         :show-image-info="store.showImageInfo"
         :active-tool="activeTool"
-        :show-agent-panel="agentStore.open"
+        :show-agent-panel="agentPanelOpen"
         @select-tool="handleSelectTool"
         @undo="store.undo()"
         @redo="store.redo()"
@@ -175,7 +184,7 @@
         @open-asset-library="handleOpenAssetLibrary"
         @show-history="historyVisible = true"
         @toggle-appearance-panel="showAppearancePanel = !showAppearancePanel"
-        @toggle-agent-panel="agentStore.open = !agentStore.open"
+        @toggle-agent-panel="agentPanelOpen = !agentPanelOpen"
         @delete-selected="handleDeleteSelected"
         @clear-canvas="handleClearCanvas"
         @set-theme="(mode) => store.setThemeMode(mode)"
@@ -212,7 +221,7 @@
       />
 
       <!-- ============ 画布 Agent 面板（右侧抽屉） ============ -->
-      <CanvasAgentPanel v-if="agentStore.open" :theme="store.canvasTheme" />
+      <CanvasAgentPanel v-if="agentPanelOpen" :theme="store.canvasTheme" @close="agentPanelOpen = false" />
 
       <!-- ============ 节点工具栏（选中节点后常驻显示在节点上方） ============ -->
       <div
@@ -227,7 +236,7 @@
         />
       </div>
 
-      <!-- ============ 右键菜单（节点 / 分组 / 连线） ============ -->
+      <!-- ============ 右键菜单（节点 / 分组 / 连线 / 空白画布） ============ -->
       <CanvasContextMenu
         v-if="contextMenu.open"
         :x="contextMenu.x"
@@ -242,7 +251,23 @@
         @group-remove-panel="handleContextRemoveFromGroup"
         @group-dissolve="handleGroupDissolve(contextMenu.targetId)"
         @group-delete-with-nodes="handleGroupDeleteWithNodes(contextMenu.targetId)"
+        @canvas-create="handleContextCanvasCreate"
+        @canvas-select-all="selectAllVisible"
+        @canvas-fit="store.fitContent()"
         @close="contextMenu.open = false"
+      />
+
+      <!-- ============ 快速创建菜单（双击空白 / 拖线松手落点） ============ -->
+      <CanvasQuickMenu
+        v-if="quickMenu.open"
+        :x="quickMenu.x"
+        :y="quickMenu.y"
+        :mode="quickMenu.mode"
+        :source-type="quickMenu.sourceType"
+        :anchor-type="quickMenu.anchorType"
+        :theme="store.canvasTheme"
+        @select="handleQuickMenuSelect"
+        @close="closeQuickMenu"
       />
 
       <!-- ============ 素材库浮动面板 ============ -->
@@ -499,8 +524,8 @@ import { useI18n } from '@/i18n'
 import { useDownload } from '@/composables/useDownload'
 import { useCanvasStore } from '@/stores/canvas'
 import { useUserStore } from '@/stores/user'
+import { useChatStore } from '@/stores/chat'
 import { canvasSaveStatus, flushSaveCanvas } from '@/lib/canvas-storage'
-import { useAgentStore } from '@/stores/agent'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useModelsStore } from '@/stores/models'
 import { usePreferencesStore } from '@/stores/preferences'
@@ -513,6 +538,8 @@ import CanvasZoomControls from '@/components/canvas/CanvasZoomControls.vue'
 import CanvasMinimap from '@/components/canvas/CanvasMinimap.vue'
 import CanvasNodeToolbar from '@/components/canvas/CanvasNodeToolbar.vue'
 import CanvasContextMenu from '@/components/canvas/CanvasContextMenu.vue'
+import CanvasQuickMenu from '@/components/canvas/CanvasQuickMenu.vue'
+import type { QuickMenuItem } from '@/lib/canvas-quick-menu'
 import CanvasAssetLibrary from '@/components/canvas/CanvasAssetLibrary.vue'
 import CanvasAgentPanel from '@/components/canvas/CanvasAgentPanel.vue'
 import GenerationQuickPanel from '@/components/canvas/GenerationQuickPanel.vue'
@@ -590,7 +617,8 @@ const { copyText } = useCopyText()
 const { downloadViaProxy, downloadWatermarkedImage } = useDownload()
 
 const store = useCanvasStore()
-const agentStore = useAgentStore()
+const agentPanelOpen = ref(false)
+const chatStore = useChatStore()
 const taskQueue = useTaskQueueStore()
 const route = useRoute()
 
@@ -606,8 +634,11 @@ async function handleSessionJumpQuery(): Promise<void> {
   if (typeof session === 'string' && session) {
     const backendId = Number(session)
     if (Number.isFinite(backendId) && backendId > 0) {
-      agentStore.open = true
-      await agentStore.openSessionByBackendId(backendId)
+      agentPanelOpen.value = true
+      await chatStore.init()
+      if (chatStore.sessions.some((x) => x.id === backendId)) {
+        await chatStore.switchSession(backendId)
+      }
     }
   }
 }
@@ -1224,7 +1255,14 @@ function handleConnectingUp(event: PointerEvent) {
       }
     }
   } else {
-    store.cancelConnecting()
+    // 拖线松手在空白：落点弹快速创建菜单（临时虚线保留，选择后建节点并自动连线，取消才清线）
+    const sourcePanel = store.panels.find((p) => p.id === connectingState.sourcePanelId)
+    openQuickMenu('connect', store.screenToWorld(event.clientX, event.clientY), {
+      sourceId: connectingState.sourcePanelId,
+      sourceType: sourcePanel?.type || 'text',
+      anchorType: connectingState.sourceAnchorType,
+      extraSourceIds: [...(connectingState.extraSourceIds ?? [])],
+    })
   }
 }
 
@@ -1234,9 +1272,116 @@ const contextMenu = reactive({
   open: false,
   x: 0,
   y: 0,
-  targetType: 'node' as 'node' | 'connection' | 'group',
+  targetType: 'node' as 'node' | 'connection' | 'group' | 'canvas',
   targetId: null as string | null,
 })
+
+// 空白右键的位置（世界坐标，「新建节点…」在此打开快速创建菜单）
+const paneContextMenuWorld = ref({ x: 0, y: 0 })
+
+// ==================== 快速创建菜单（双击空白 / 拖线落点） ====================
+
+const quickMenu = reactive({
+  open: false,
+  x: 0,
+  y: 0,
+  worldX: 0,
+  worldY: 0,
+  mode: 'create' as 'create' | 'connect',
+  // connect 模式：拖线源节点 id / 类型 / 锚点方向（'source' 右锚出 | 'target' 左锚出）
+  sourceId: '',
+  sourceType: '',
+  anchorType: '',
+  extraSourceIds: [] as string[],
+})
+
+/** 打开快速创建菜单：锚定世界坐标点（屏幕坐标按现有菜单惯例换算） */
+function openQuickMenu(
+  mode: 'create' | 'connect',
+  world: { x: number; y: number },
+  connect?: { sourceId: string; sourceType: string; anchorType: string; extraSourceIds: string[] },
+) {
+  const screen = store.worldToScreen(world.x, world.y)
+  quickMenu.open = true
+  quickMenu.x = screen.x - store.canvasRect.left
+  quickMenu.y = screen.y - store.canvasRect.top
+  quickMenu.worldX = world.x
+  quickMenu.worldY = world.y
+  quickMenu.mode = mode
+  quickMenu.sourceId = connect?.sourceId ?? ''
+  quickMenu.sourceType = connect?.sourceType ?? ''
+  quickMenu.anchorType = connect?.anchorType ?? ''
+  quickMenu.extraSourceIds = connect?.extraSourceIds ?? []
+}
+
+/** 关闭菜单；connect 模式同时取消临时连线 */
+function closeQuickMenu() {
+  quickMenu.open = false
+  store.cancelConnecting()
+}
+
+// 空白双击：打开快速创建菜单
+function handlePaneDblClick(payload: { worldX: number; worldY: number }) {
+  openQuickMenu('create', { x: payload.worldX, y: payload.worldY })
+}
+
+// 空白右键：画布级右键菜单（新建节点 / 全选 / 缩放适配）
+function handlePaneContextMenu(payload: { clientX: number; clientY: number; worldX: number; worldY: number }) {
+  contextMenu.open = true
+  contextMenu.x = payload.clientX - store.canvasRect.left
+  contextMenu.y = payload.clientY - store.canvasRect.top
+  contextMenu.targetType = 'canvas'
+  contextMenu.targetId = null
+  paneContextMenuWorld.value = { x: payload.worldX, y: payload.worldY }
+}
+
+// 右键菜单「新建节点…」：在右键点打开快速创建菜单
+function handleContextCanvasCreate() {
+  contextMenu.open = false
+  openQuickMenu('create', { x: paneContextMenuWorld.value.x, y: paneContextMenuWorld.value.y })
+}
+
+// 全选可见节点（排除折叠分组隐藏成员；Ctrl+A 与右键菜单共用）
+function selectAllVisible() {
+  store.selectedPanelIds = store.panels
+    .filter((p) => !hiddenPanelIds.value.has(p.id))
+    .map((p) => p.id)
+  store.selectedPanelId = store.selectedPanelIds[0] ?? null
+}
+
+// 快速创建菜单选择：create 原地建节点；connect 建节点并自动连线
+function handleQuickMenuSelect(item: QuickMenuItem) {
+  const world = { x: quickMenu.worldX, y: quickMenu.worldY }
+  if (item.kind === 'upload') {
+    closeQuickMenu()
+    triggerFileUpload(null, 'image/*', world)
+    return
+  }
+  const newId = createNodeAt(item.type || 'text', world.x, world.y, item.content)
+  if (quickMenu.mode === 'connect') connectCreatedNode(newId)
+  closeQuickMenu()
+}
+
+// 拖线落点新建节点的自动连线：右锚出=新节点为接收方（多选拖出批量接入），左锚入=新节点为上游
+function connectCreatedNode(newId: string) {
+  const anchor = quickMenu.anchorType
+  const sourceId = quickMenu.sourceId
+  if (anchor === 'source') {
+    store.addConnection({ source_panel_id: sourceId, target_panel_id: newId, type: 'flow' })
+    for (const extraId of quickMenu.extraSourceIds) {
+      const exists = store.connections.some(
+        (c) => c.source_panel_id === extraId && c.target_panel_id === newId,
+      )
+      if (!exists) store.addConnection({ source_panel_id: extraId, target_panel_id: newId, type: 'flow' })
+    }
+  } else {
+    store.addConnection({ source_panel_id: newId, target_panel_id: sourceId, type: 'flow' })
+  }
+  if (store.lastConnectionError) {
+    ElMessage.warning(store.lastConnectionError)
+    store.lastConnectionError = null
+  }
+}
 
 // 目标节点是否已在分组中（控制"移出分组"菜单项）
 const canRemoveFromGroup = computed(() =>
@@ -2197,6 +2342,10 @@ const saveStatusText = computed(() => {
   if (canvasSaveStatus.lastSavedAt) return t('canvas.saveStatus.saved', { time: canvasSaveStatus.lastSavedAt })
   return ''
 })
+/** 手动同步远端更新（内部自带保存队列空闲约束，忙碌时只提示） */
+async function handleRemoteSync() {
+  await store.pullRemoteWorkspace()
+}
 // 标题栏 hover 状态（控制微缩态/展开态切换）
 const titleHovered = ref(false)
 // 保存为模板对话框状态
@@ -3644,11 +3793,9 @@ function handleMinimapLocate(worldX: number, worldY: number) {
 
 // ==================== 节点创建 ====================
 
-// 在视口中心创建节点
-function createNodeAtCenter(type: string) {
+// 在指定世界坐标（节点中心）创建节点；extraContent 由推荐动作预填（如 config 的生成模式）
+function createNodeAt(type: string, cx: number, cy: number, extraContent?: Record<string, unknown>) {
   const size = NODE_DEFAULT_SIZES[type as keyof typeof NODE_DEFAULT_SIZES] ?? NODE_DEFAULT_SIZES.text
-  const cx = (window.innerWidth / 2 - store.viewport.x) / store.viewport.zoom
-  const cy = (window.innerHeight / 2 - store.viewport.y) / store.viewport.zoom
   store.pushSnapshot()
   // 新增 3 种节点类型使用预设默认 content（spec 5.4.4）
   // 其他类型保持空 content，由用户后续填充
@@ -3682,6 +3829,7 @@ function createNodeAtCenter(type: string) {
       assets: { characters: [], scenes: [] },
     }
   }
+  if (extraContent) initialContent = { ...initialContent, ...extraContent }
   const id = store.addPanel({
     type,
     name: getNodeName(type),
@@ -3695,15 +3843,25 @@ function createNodeAtCenter(type: string) {
   return id
 }
 
+// 在视口中心创建节点
+function createNodeAtCenter(type: string) {
+  const cx = (window.innerWidth / 2 - store.viewport.x) / store.viewport.zoom
+  const cy = (window.innerHeight / 2 - store.viewport.y) / store.viewport.zoom
+  return createNodeAt(type, cx, cy)
+}
+
 // ==================== 文件上传 / 导入 ====================
 
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const uploadTargetPanelId = ref<string | null>(null)
+// 快速创建菜单「上传本地图片」指定的落点（世界坐标，节点中心）；普通上传为 null → 视口中心
+const uploadTargetPoint = ref<{ x: number; y: number } | null>(null)
 const fileAccept = ref('*')
 
 // 触发文件选择对话框
-function triggerFileUpload(panelId: string | null, accept = '*') {
+function triggerFileUpload(panelId: string | null, accept = '*', point?: { x: number; y: number }) {
   uploadTargetPanelId.value = panelId
+  uploadTargetPoint.value = point ? { ...point } : null
   fileAccept.value = accept
   if (fileInputRef.value) {
     fileInputRef.value.value = ''
@@ -3734,6 +3892,8 @@ async function handleFileSelect(event: Event) {
 
   const targetId = uploadTargetPanelId.value
   uploadTargetPanelId.value = null
+  const uploadPoint = uploadTargetPoint.value
+  uploadTargetPoint.value = null
 
   // 图片/视频先注册进素材库（Blob 持久化到 IndexedDB），节点记录 assetId，刷新后按 id 重建地址
   if (file.type.startsWith('image/') || file.type.startsWith('video/')) {
@@ -3748,7 +3908,7 @@ async function handleFileSelect(event: Event) {
         store.pushSnapshot()
         store.updatePanel(targetId, { content })
       } else {
-        const id = createNodeAtCenter(type)
+        const id = uploadPoint ? createNodeAt(type, uploadPoint.x, uploadPoint.y) : createNodeAtCenter(type)
         store.updatePanel(id, { content })
       }
       return
@@ -3765,7 +3925,7 @@ async function handleFileSelect(event: Event) {
       : file.type.startsWith('video/') ? 'video'
       : file.type.startsWith('audio/') ? 'audio'
       : 'text'
-    const id = createNodeAtCenter(type)
+    const id = uploadPoint ? createNodeAt(type, uploadPoint.x, uploadPoint.y) : createNodeAtCenter(type)
     store.updatePanel(id, { content: { content: url, status: 'success', bytes: file.size } })
   }
 }
@@ -3875,10 +4035,7 @@ function handleKeyDown(event: KeyboardEvent) {
   // Ctrl+A：全选（排除折叠分组的隐藏成员）
   if (ctrl && event.key === 'a') {
     event.preventDefault()
-    store.selectedPanelIds = store.panels
-      .filter((p) => !hiddenPanelIds.value.has(p.id))
-      .map((p) => p.id)
-    store.selectedPanelId = store.selectedPanelIds[0] ?? null
+    selectAllVisible()
     return
   }
 
@@ -3926,6 +4083,10 @@ watch(() => store.activeWorkspaceId, () => {
 onMounted(async () => {
   // 从 localforage 加载持久化数据
   await store._hydrateFromStorage()
+  // 启动远端 revision 轻轮询（外部宿主增量写入感知：对话 Agent/CLI 落画布等）
+  store.startRemotePoll()
+  // 画布页激活：统一 Agent 挂载画布深度工具（离开画布页自动移除）
+  chatStore.setCanvasToolsActive(true)
   // 刷新后节点里的 blob object URL 已失效，按 assetId 从素材库重建
   await remapAssetUrls()
   // 如果没有工作区，创建默认画布
@@ -3947,6 +4108,9 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  // 停止远端 revision 轻轮询；移除画布深度工具挂载
+  store.stopRemotePoll()
+  chatStore.setCanvasToolsActive(false)
   // 移除全局事件监听
   window.removeEventListener('keydown', handleKeyDown)
   window.removeEventListener('keyup', handleKeyUp)
@@ -4083,6 +4247,11 @@ async function handleUserLogout() {
 }
 .save-status-error {
   color: var(--el-color-danger);
+}
+/* 远端有更新提示：可点击同步 */
+.save-status.remote-update {
+  color: var(--el-color-warning);
+  cursor: pointer;
 }
 
 .title-input {

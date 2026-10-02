@@ -83,6 +83,11 @@ export const TOOL_LABELS: Record<string, ToolLabelEntry> = {
   // 对话宿主（chat-tools.ts CHAT_TOOLS）
   generate_image: { key: 'agent.actGenImage' },
   generate_video: { key: 'agent.actGenVideo' },
+  // 对话宿主画布工具组（云端 ops 增量写入）
+  canvas_list_workspaces: { key: 'agent.actCanvasListWorkspaces' },
+  canvas_get_overview: { key: 'agent.actCanvasOverview' },
+  canvas_add_panels: { key: 'agent.actCanvasAddPanels', detail: (a) => `${t('agent.actCanvasAddPanels')} ×${Array.isArray(a.panels) ? a.panels.length : 0}` },
+  canvas_connect: { key: 'agent.actCanvasConnect', detail: (a) => `${t('agent.actCanvasConnect')} ×${Array.isArray(a.connections) ? a.connections.length : 0}` },
 }
 
 /** mcp__{serverId}__{tool} 的短名（末段；非 mcp 工具原样返回） */

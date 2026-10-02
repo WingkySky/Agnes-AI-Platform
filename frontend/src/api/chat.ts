@@ -43,9 +43,9 @@ export async function getAuthHeaders(): Promise<Record<string, string>> {
 // =====================================================
 
 /**
- * 创建新聊天会话
+ * 创建新聊天会话（workspace_id 可选：画布面板创建时标记上下文）
  */
-export function createChatSession(params: { title?: string } = {}): Promise<ChatSession> {
+export function createChatSession(params: { title?: string; workspace_id?: string } = {}): Promise<ChatSession> {
   return client.post('/api/chat/sessions', params)
 }
 

@@ -4,7 +4,9 @@
  * - generate_image / generate_video：前端提交生成任务（images/videos tasks
  *   端点自带积分扣减，画布生成同链路已验证）→ 注册 taskQueue → 立即返回
  *   pending（不阻塞回合）；媒体占位/轮询/media-callback 回写由 chat store
- *   沿用既有机制，工具不等待
+ *   沿用既有机制，工具不等待；place_on_canvas 走「完成后落画布」计划
+ * - 画布工具组（canvas_*）：全部走云端 canvas_workspaces ops 端点增量写入，
+ *   与前端内存态画布互不干扰（CLI/MCP 化同一地基，见 .zcode/plans 设计文档）
  * - 参考图解析经 ChatToolContext（chat store 提供最近成功生成的媒体）
  * - agent_load_skill 复用 skills 模块缓存（与画布同款渐进披露）
  * ===================================================== */
@@ -13,19 +15,37 @@ import { Type } from 'typebox'
 import { createImageTask } from '@/api/images'
 import { createVideoTask } from '@/api/videos'
 import { getPreset } from '@/api/presets'
+import { applyCanvasOps, getWorkspace, listWorkspaces } from '@/api/canvasWorkspace'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useModelsStore } from '@/stores/models'
+import { useCanvasStore } from '@/stores/canvas'
 import type { ImageGenerationRequest, VideoGenerationRequest } from '@/types'
 import type { AgentToolResult } from './tools'
-import type { AgentKernel } from './kernel'
+import { AGENT_TOOLS } from './tools'
+import type { AgentKernel, HostTool } from './kernel'
 import { runSubagent, subagentHostFromParent } from './subagent'
 import { loadAgentSkillFull, readSkillResource, saveAgentSkill, SKILL_CONTENT_MAX_CHARS } from './skills'
+
+/** 媒体完成后落画布的计划（工具注册 → chat store 媒体轮询成功时消费） */
+export interface CanvasPlacementPlan {
+  taskId: string
+  workspaceId: string
+  mediaType: 'image' | 'video'
+  prompt: string
+}
 
 /** chat 工具执行上下文（chat store 提供）：会话连续性所需的媒体状态 */
 export interface ChatToolContext {
   /** 最近一次成功生成的媒体 URL（图生图/图生视频默认参考） */
   getRecentMediaUrl(type: 'image' | 'video'): string | null
+  /** 默认画布工作区 id（激活工作区偏好；anon/未选时 null）——画布工具组用 */
+  getActiveCanvasWorkspaceId?(): string | null
+  /** 注册「媒体完成后落画布」计划（媒体轮询成功时由 chat store 消费） */
+  registerCanvasPlacement?(plan: CanvasPlacementPlan): void
 }
+
+const NO_CANVAS_WORKSPACE_HINT =
+  '没有可用的云端画布工作区：请先让用户在画布页登录并选择工作区，或不指定落画布直接生成'
 
 function isChatCtx(ctx: unknown): ctx is ChatToolContext {
   return typeof ctx === 'object' && ctx !== null && 'getRecentMediaUrl' in ctx
@@ -33,6 +53,58 @@ function isChatCtx(ctx: unknown): ctx is ChatToolContext {
 
 function recentMediaUrl(ctx: unknown, type: 'image' | 'video'): string | null {
   return isChatCtx(ctx) ? ctx.getRecentMediaUrl(type) : null
+}
+
+/** 目标工作区解析：显式参数优先，缺省走 ctx 的激活工作区偏好 */
+function resolveCanvasWorkspaceId(ctx: unknown, explicit: unknown): string | null {
+  if (typeof explicit === 'string' && explicit.trim()) return explicit.trim()
+  if (isChatCtx(ctx) && typeof ctx.getActiveCanvasWorkspaceId === 'function') {
+    return ctx.getActiveCanvasWorkspaceId()
+  }
+  return null
+}
+
+function registerCanvasPlacement(ctx: unknown, plan: CanvasPlacementPlan): void {
+  if (isChatCtx(ctx) && typeof ctx.registerCanvasPlacement === 'function') ctx.registerCanvasPlacement(plan)
+}
+
+/** 画布 ops 失败信息：优先取后端逐条错误（400 detail.results），否则退回 Error message */
+function canvasOpsErrorMessage(e: unknown): string {
+  const err = e as Error & { detail?: unknown }
+  const d = err?.detail
+  if (isRecord(d) && Array.isArray(d.results)) {
+    const errs = d.results
+      .filter((r): r is Record<string, unknown> => isRecord(r) && r.ok === false && typeof r.error === 'string')
+      .map((r) => r.error as string)
+    if (errs.length) return errs.slice(0, 3).join('；')
+  }
+  if (isRecord(d) && typeof d.message === 'string') return d.message
+  return err?.message || String(e)
+}
+
+/** 解析目标工作区并执行批量 ops（画布工具组共用） */
+async function runCanvasOps(
+  ctx: unknown,
+  workspaceIdArg: unknown,
+  ops: Record<string, unknown>[],
+  okMessage: string,
+): Promise<AgentToolResult> {
+  const wsId = resolveCanvasWorkspaceId(ctx, workspaceIdArg)
+  if (!wsId) return { ok: false, error: NO_CANVAS_WORKSPACE_HINT }
+  try {
+    const r = await applyCanvasOps(wsId, ops)
+    return {
+      ok: true,
+      data: {
+        workspace_id: wsId,
+        results: r.results,
+        new_panel_ids: r.new_panel_ids,
+        message: r.failed ? `${okMessage}（${r.failed} 条失败，详见 results）` : okMessage,
+      },
+    }
+  } catch (e) {
+    return { ok: false, error: canvasOpsErrorMessage(e) }
+  }
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -114,10 +186,18 @@ const imageTool = {
       visual_style: Type.Optional(Type.String()),
     }, { description: '摄像机参数（可选），用户提到镜头/运镜/画幅相关描述时填充' })),
     preset_ref: Type.Optional(Type.Number({ description: '预设 ID（用户按名称引用预设时传入；不确定则省略）' })),
+    place_on_canvas: Type.Optional(Type.Boolean({ description: '生成完成后自动放入云端画布工作区（用户说"画到画布上/放到画布"等时传 true）' })),
+    canvas_workspace_id: Type.Optional(Type.String({ description: '落画布的目标工作区 id（缺省用当前激活工作区）' })),
   }),
   execute: async (args: Record<string, unknown>, ctx: unknown): Promise<AgentToolResult> => {
     const rawPrompt = typeof args.prompt === 'string' ? args.prompt.trim() : ''
     if (!rawPrompt) return { ok: false, error: '缺少图片生成提示词' }
+    const placeOnCanvas = args.place_on_canvas === true
+    let canvasWsId: string | null = null
+    if (placeOnCanvas) {
+      canvasWsId = resolveCanvasWorkspaceId(ctx, args.canvas_workspace_id)
+      if (!canvasWsId) return { ok: false, error: NO_CANVAS_WORKSPACE_HINT }
+    }
     const prompt = await promptWithPreset(rawPrompt, args)
     const size = typeof args.size === 'string' ? args.size : '1024x1024'
     const mode = args.mode === 'image2image' ? 'image2image' : 'text2image'
@@ -138,13 +218,18 @@ const imageTool = {
     try {
       const resp = await createImageTask(params)
       registerGenerationTask(resp.task_id, 'image', prompt)
+      if (canvasWsId) {
+        registerCanvasPlacement(ctx, { taskId: resp.task_id, workspaceId: canvasWsId, mediaType: 'image', prompt })
+      }
       return {
         ok: true,
         data: {
           task_id: resp.task_id,
           media_type: 'image',
           status: 'pending',
-          message: '图片生成任务已提交，完成后会自动展示给用户，不要在回复中输出任何图片链接',
+          message: '图片生成任务已提交，完成后会自动展示给用户'
+            + (canvasWsId ? '，并自动放入画布工作区（无需再调用画布工具）' : '')
+            + '，不要在回复中输出任何图片链接',
         },
       }
     } catch (e) {
@@ -185,10 +270,18 @@ const videoTool = {
       enabled: Type.Boolean({ description: '是否启用摄像机参数' }),
     }, { description: '摄像机参数（可选），用户提到镜头/运镜相关描述时填充' })),
     preset_ref: Type.Optional(Type.Number({ description: '预设 ID（用户按名称引用预设时传入；不确定则省略）' })),
+    place_on_canvas: Type.Optional(Type.Boolean({ description: '生成完成后自动放入云端画布工作区（用户说"放到画布上"等时传 true）' })),
+    canvas_workspace_id: Type.Optional(Type.String({ description: '落画布的目标工作区 id（缺省用当前激活工作区）' })),
   }),
   execute: async (args: Record<string, unknown>, ctx: unknown): Promise<AgentToolResult> => {
     const rawPrompt = typeof args.prompt === 'string' ? args.prompt.trim() : ''
     if (!rawPrompt) return { ok: false, error: '缺少视频生成提示词' }
+    const placeOnCanvas = args.place_on_canvas === true
+    let canvasWsId: string | null = null
+    if (placeOnCanvas) {
+      canvasWsId = resolveCanvasWorkspaceId(ctx, args.canvas_workspace_id)
+      if (!canvasWsId) return { ok: false, error: NO_CANVAS_WORKSPACE_HINT }
+    }
     const prompt = await promptWithPreset(rawPrompt, args)
     const numFrames = typeof args.num_frames === 'number' ? args.num_frames : 81
     let mode: VideoGenerationRequest['mode'] = 'text2video'
@@ -227,13 +320,18 @@ const videoTool = {
       const taskId = resp.task_id || resp.video_id || ''
       if (!taskId) return { ok: false, error: '视频任务创建失败：服务端未返回任务 ID' }
       registerGenerationTask(taskId, 'video', prompt)
+      if (canvasWsId) {
+        registerCanvasPlacement(ctx, { taskId, workspaceId: canvasWsId, mediaType: 'video', prompt })
+      }
       return {
         ok: true,
         data: {
           task_id: taskId,
           media_type: 'video',
           status: 'pending',
-          message: '视频生成任务已提交（通常需要 1-3 分钟），完成后自动展示，不要在回复中输出任何视频链接',
+          message: '视频生成任务已提交（通常需要 1-3 分钟），完成后自动展示'
+            + (canvasWsId ? '，并自动放入画布工作区（无需再调用画布工具）' : '')
+            + '，不要在回复中输出任何视频链接',
         },
       }
     } catch (e) {
@@ -335,8 +433,190 @@ const delegateTool = {
   },
 }
 
+// ---------- canvas_* 画布工具组（云端 ops 增量写入，CLI/MCP 化同一地基） ----------
+
+/** 节点内容摘要（overview 用）：文本取正文，媒体取状态+prompt，其余截断 JSON */
+function panelContentSummary(p: Record<string, unknown>): string {
+  const content = isRecord(p.content) ? p.content : {}
+  const truncate = (s: string, n = 120) => (s.length > n ? `${s.slice(0, n)}…` : s)
+  const type = typeof p.type === 'string' ? p.type : 'text'
+  if (type === 'text') return typeof content.content === 'string' ? truncate(content.content) : ''
+  const parts: string[] = []
+  if (typeof content.status === 'string') parts.push(`status=${content.status}`)
+  if (typeof content.prompt === 'string' && content.prompt) parts.push(`prompt=${truncate(content.prompt, 60)}`)
+  if (typeof content.content === 'string' && content.content) parts.push('有媒体内容')
+  return parts.join(' ')
+}
+
+const canvasListWorkspacesTool = {
+  name: 'canvas_list_workspaces',
+  description:
+    '列出用户的云端画布工作区（id/名称/更新时间）。用户提到"画布"但不确定操作哪个工作区时，' +
+    '或画布工具报"没有可用工作区"需要列出供用户选择时调用。',
+  parameters: Type.Object({}),
+  execute: async (): Promise<AgentToolResult> => {
+    try {
+      const items = await listWorkspaces()
+      return {
+        ok: true,
+        data: {
+          workspaces: items.map((w) => ({ id: w.id, name: w.name, updated_at: w.updated_at })),
+          message: items.length
+            ? '共 ' + items.length + ' 个工作区；canvas_get_overview / canvas_add_panels 的 canvas_workspace_id 可传其中的 id'
+            : '还没有云端画布工作区（需在画布页登录并保存过一次）',
+        },
+      }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  },
+}
+
+const canvasGetOverviewTool = {
+  name: 'canvas_get_overview',
+  description:
+    '读取云端画布工作区概要：节点（id/类型/名称/坐标/内容摘要）与连线关系（按名称标注上下游）。' +
+    '在引用已有节点、连线或回答画布内容问题前先调用；不返回图片/视频的二进制内容。',
+  parameters: Type.Object({
+    canvas_workspace_id: Type.Optional(Type.String({ description: '工作区 id（缺省用当前激活工作区）' })),
+  }),
+  execute: async (args: Record<string, unknown>, ctx: unknown): Promise<AgentToolResult> => {
+    const wsId = resolveCanvasWorkspaceId(ctx, args.canvas_workspace_id)
+    if (!wsId) return { ok: false, error: NO_CANVAS_WORKSPACE_HINT }
+    try {
+      const detail = await getWorkspace(wsId)
+      const data = (detail.data ?? {}) as Record<string, unknown>
+      const panels = Array.isArray(data.panels) ? (data.panels as Record<string, unknown>[]) : []
+      const connections = Array.isArray(data.connections) ? (data.connections as Record<string, unknown>[]) : []
+      const nameOf = (id: unknown): string => {
+        const found = panels.find((p) => p.id === id)
+        return found ? String(found.name || found.id) : String(id ?? '')
+      }
+      const OVERVIEW_LIMIT = 80
+      return {
+        ok: true,
+        data: {
+          workspace_id: wsId,
+          name: detail.name,
+          panel_count: panels.length,
+          panels: panels.slice(0, OVERVIEW_LIMIT).map((p) => ({
+            id: p.id,
+            type: typeof p.type === 'string' ? p.type : 'text',
+            name: typeof p.name === 'string' ? p.name : '',
+            x: p.x,
+            y: p.y,
+            summary: panelContentSummary(p),
+          })),
+          ...(panels.length > OVERVIEW_LIMIT ? { note: `仅列前 ${OVERVIEW_LIMIT} 个节点，共 ${panels.length} 个` } : {}),
+          connections: connections.map((c) => ({
+            id: c.id,
+            source: nameOf(c.source_panel_id),
+            target: nameOf(c.target_panel_id),
+          })),
+        },
+      }
+    } catch (e) {
+      return { ok: false, error: canvasOpsErrorMessage(e) }
+    }
+  },
+}
+
+const canvasAddPanelsTool = {
+  name: 'canvas_add_panels',
+  description:
+    '在云端画布工作区批量新建节点（只增不改不删）。panels 每项：type（text/image/video/audio/config 等，缺省 text）、' +
+    'name（建议命名，后续连线可按名引用）、content（文本节点写 {"content":"文字"}；媒体节点也可直接给 url）、' +
+    'x/y/width/height 可选（缺省自动排布）。' +
+    '注意：要把对话生成的图片/视频放入画布，请用 generate_image / generate_video 的 place_on_canvas 参数（完成后自动落画布），' +
+    '本工具适合已有 URL 的素材或纯文本节点。',
+  parameters: Type.Object({
+    canvas_workspace_id: Type.Optional(Type.String({ description: '工作区 id（缺省用当前激活工作区）' })),
+    panels: Type.Array(Type.Object({
+      type: Type.Optional(Type.String({ description: '节点类型，缺省 text；给 url 的图片/视频请对应写 image/video' })),
+      name: Type.Optional(Type.String({ description: '节点名称' })),
+      content: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: '初始内容（文本节点 {"content":"文字"}）' })),
+      url: Type.Optional(Type.String({ description: '图片/视频直链（传入后按已就绪媒体内容写入）' })),
+      x: Type.Optional(Type.Number()),
+      y: Type.Optional(Type.Number()),
+      width: Type.Optional(Type.Number()),
+      height: Type.Optional(Type.Number()),
+    }), { minItems: 1, maxItems: 20, description: '要新建的节点列表' }),
+  }),
+  execute: async (args: Record<string, unknown>, ctx: unknown): Promise<AgentToolResult> => {
+    const arr = Array.isArray(args.panels) ? args.panels.filter(isRecord) : []
+    if (!arr.length) return { ok: false, error: '缺少 panels 参数' }
+    const ops = arr.map((p) => {
+      const url = typeof p.url === 'string' && p.url.trim() ? p.url.trim() : ''
+      const content: Record<string, unknown> = { ...(isRecord(p.content) ? p.content : {}) }
+      if (url) {
+        content.status = 'success'
+        content.content = url
+      }
+      return {
+        op: 'add_panel',
+        type: typeof p.type === 'string' && p.type ? p.type : url ? 'image' : 'text',
+        name: typeof p.name === 'string' ? p.name : undefined,
+        content: Object.keys(content).length ? content : undefined,
+        x: typeof p.x === 'number' ? p.x : undefined,
+        y: typeof p.y === 'number' ? p.y : undefined,
+        width: typeof p.width === 'number' ? p.width : undefined,
+        height: typeof p.height === 'number' ? p.height : undefined,
+      }
+    })
+    return runCanvasOps(ctx, args.canvas_workspace_id, ops, '节点已添加到画布')
+  },
+}
+
+const canvasConnectTool = {
+  name: 'canvas_connect',
+  description:
+    '在云端画布工作区批量创建连线（方向=数据流向，从上游资源指向下游生成节点）。' +
+    'source_panel_id / target_panel_id 可传节点 id 或节点名称（先 canvas_get_overview 获取）。' +
+    '类型规则：tts/subtitle 只接受文本入边；compose 只接受 video/tts/subtitle 入边；脚本节点只能连到配置节点，违规会被拒绝。',
+  parameters: Type.Object({
+    canvas_workspace_id: Type.Optional(Type.String({ description: '工作区 id（缺省用当前激活工作区）' })),
+    connections: Type.Array(Type.Object({
+      source_panel_id: Type.String({ description: '上游节点 id 或名称' }),
+      target_panel_id: Type.String({ description: '下游节点 id 或名称' }),
+    }), { minItems: 1, maxItems: 20, description: '要创建的连线列表' }),
+  }),
+  execute: async (args: Record<string, unknown>, ctx: unknown): Promise<AgentToolResult> => {
+    const arr = Array.isArray(args.connections) ? args.connections.filter(isRecord) : []
+    if (!arr.length) return { ok: false, error: '缺少 connections 参数' }
+    const ops = arr.map((c) => ({
+      op: 'add_connection',
+      source_panel_id: typeof c.source_panel_id === 'string' ? c.source_panel_id : '',
+      target_panel_id: typeof c.target_panel_id === 'string' ? c.target_panel_id : '',
+    }))
+    return runCanvasOps(ctx, args.canvas_workspace_id, ops, '连线已创建')
+  },
+}
+
 /** chat 宿主工具组（经内核 HostTool 包装后挂载；追加新工具放末尾，测试按索引取用） */
-export const CHAT_TOOLS = [imageTool, videoTool, loadSkillTool, saveSkillTool, readSkillFileTool, delegateTool]
+export const CHAT_TOOLS = [
+  imageTool,
+  videoTool,
+  loadSkillTool,
+  saveSkillTool,
+  readSkillFileTool,
+  delegateTool,
+  canvasListWorkspacesTool,
+  canvasGetOverviewTool,
+  canvasAddPanelsTool,
+  canvasConnectTool,
+]
 
 /** 工具名清单（allowed-tools 白名单映射目标） */
 export const CHAT_TOOL_NAMES = CHAT_TOOLS.map((t) => t.name)
+
+/** 画布深度工具 → 宿主工具适配（Agent 统一宿主：仅画布页挂载）。
+ *  AGENT_TOOLS 的 execute 第二参吃画布 store，而 chat 内核传 toolContext，故在此改写；
+ *  剔除与 CHAT_TOOLS 重名的四个通用工具，避免内核按名冲突；callId/parent 透传（delegate/子代理进度用）。 */
+export function canvasHostTools(): HostTool[] {
+  return AGENT_TOOLS.filter((t) => !CHAT_TOOL_NAMES.includes(t.name)).map((t) => ({
+    name: t.name,
+    description: t.description,
+    parameters: t.parameters,
+    execute: (args, _ctx, callId, parent) => t.execute(args, useCanvasStore(), callId, parent),
+  }))
+}

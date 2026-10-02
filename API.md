@@ -821,3 +821,24 @@ manifest 格式：`{ "name": "...", "items": [{ "slug", "name", "description", "
 ### 偏好扩展
 
 `/api/preferences` 的 `ui` 组新增画布全局小设置键：`canvas_active_workspace_id`（云端激活工作区 id）、`canvas_background_mode`、`canvas_show_image_info`（登录态经 `/api/preferences` 读写；anon 仍走浏览器本地）。
+
+## 17. 画布远程操作（外部宿主增量写入）
+
+无限画布操作服务端化：对话页 Agent（及将来的 MCP/CLI 宿主）经 ops 端点对 `canvas_workspaces.data` 做结构化增量写入，画布页以轻轮询感知远端变更。领域语义在 `app/services/canvas_ops.py`（连线类型规则与前端 `validateConnectionTypes` 对齐，pytest 锁死）。
+
+### 端点（登录态，非本人 403）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/canvas/workspaces/{id}/ops` | 批量应用操作 `{ ops: [...] }`（1-50 条），整批一个 revision；逐条返回 `results`（`{ index, op, ok, panel_id?/connection_id?, error? }`）+ `new_panel_ids` + `revision`。全部失败返回 400（detail 含逐条 results），部分失败整批落库。op 仅 `add_panel` / `add_connection`（v1 只读+增量，不做改删） |
+| GET | `/api/canvas/workspaces/{id}/revision` | `{ revision, updated_at }`，画布页轻轮询用（不拉 data） |
+
+### op 语义
+
+- `add_panel`：`type`（text/image/video/audio/config/tts/subtitle/compose/script，缺省 text）、`name`、`content`（dict）、`x/y/width/height`（缺省 120+(n%8)*40 排布、240×180，对齐画布 Agent 同款默认）；服务端生成 id（uuid hex）/`zIndex`（max+1）/时间戳，并写入 `workspace_id`。
+- `add_connection`：`source_panel_id`/`target_panel_id` 支持**节点 id 或节点名称**（服务端全量解析，同批新建节点可按名引用）；连线类型规则：script 只出向 config、tts/subtitle 只受 text、compose 只受 video/tts/subtitle，违规该条返回 ok=false。
+
+### 前端联动
+
+- 对话页工具组：`canvas_list_workspaces` / `canvas_get_overview` / `canvas_add_panels` / `canvas_connect`（目标工作区缺省取偏好 `canvas_active_workspace_id`）；`generate_image` / `generate_video` 新增 `place_on_canvas` + `canvas_workspace_id` 参数——媒体轮询成功后自动调 ops 建媒体节点（content 带 prompt+URL，status=success），结果以步骤行回显。
+- 画布页：每 10s（仅页面可见、云通道时）拉激活工作区 revision；有变化且本地保存队列空闲 → 自动拉取远端 data 合入（复用版本还原的 `applyWorkspaceData` 链路）+ 轻提示；队列忙碌 → 顶栏「云端有更新」指示器等待手动同步。空闲即本地无未保存内容，合入零丢失，无需快照兜底。

@@ -4,7 +4,7 @@
   - 小面板：360px 右侧浮层；展开态：居中大界面 + 会话列表侧栏（画布不被遮罩仍可点选）
   - 消息渲染/输入框/会话侧栏由 components/chat 共享组件承担（dense 形态 + --cb-* 主题注入）
   - Agent 特有 UI 留在面板：三档权限切换、阶段确认卡片、"/" 技能清单、风格卡片
-  对话状态全部来自 agent store，主题 token 由 CanvasView 传入（与本目录其他面板一致）
+  对话状态全部来自统一 chat store（Agent 统一宿主），主题 token 由 CanvasView 传入（与本目录其他面板一致）
 -->
 <template>
   <div ref="rootRef" class="canvas-agent-panel" :class="{ 'is-expanded': isExpanded }" :style="[rootVars, panelPosStyle]">
@@ -20,7 +20,7 @@
         <span>{{ t('agent.title') }}</span>
       </div>
       <div class="header-btns">
-        <div v-if="agent.mcpCapabilities.length || agent.memoryAvailable" class="cap-anchor">
+        <div v-if="chat.mcpCapabilities.length || chat.memoryAvailable" class="cap-anchor">
           <button
             type="button"
             class="icon-btn cap-trigger"
@@ -30,20 +30,20 @@
             @click="toolsOpen = !toolsOpen"
           >
             <Zap :size="14" />
-            <span v-if="agent.memoryPreferences.length" class="cap-dot">{{ agent.memoryPreferences.length }}</span>
+            <span v-if="chat.memoryPreferences.length" class="cap-dot">{{ chat.memoryPreferences.length }}</span>
           </button>
           <div v-if="toolsOpen" class="cap-dropdown cap-dropdown-down" :style="{ borderColor: theme.toolbar.border, background: theme.toolbar.panel }" @click.stop @pointerdown.stop>
-            <template v-if="agent.mcpCapabilities.length">
+            <template v-if="chat.mcpCapabilities.length">
               <div class="cap-section-title" :style="{ color: theme.node.muted }">{{ t('agent.capabilities') }}</div>
-              <div v-for="c in agent.mcpCapabilities" :key="c.name" class="cap-item">
+              <div v-for="c in chat.mcpCapabilities" :key="c.name" class="cap-item">
                 <div class="cap-item-name" :style="{ color: theme.node.text }">{{ c.name }}</div>
                 <div class="cap-item-tools" :style="{ color: theme.node.muted }">{{ c.tools.slice(0, 6).join('、') }}{{ c.tools.length > 6 ? ' …' : '' }}</div>
               </div>
             </template>
-            <template v-if="agent.memoryAvailable">
+            <template v-if="chat.memoryAvailable">
               <div class="cap-section-title" :style="{ color: theme.node.muted }">{{ t('agent.memoryPill') }}</div>
-              <template v-if="agent.memoryPreferences.length">
-                <div v-for="p in agent.memoryPreferences" :key="p" class="cap-item mem-row">
+              <template v-if="chat.memoryPreferences.length">
+                <div v-for="p in chat.memoryPreferences" :key="p" class="cap-item mem-row">
                   <span class="cap-item-name" :style="{ color: theme.node.text }">{{ p }}</span>
                   <button type="button" class="mem-del" :style="{ color: theme.node.muted }" :title="t('common.delete')" @click="removePreference(p)">×</button>
                 </div>
@@ -63,10 +63,10 @@
           <Minimize2 v-if="isExpanded" :size="14" />
           <Maximize2 v-else :size="14" />
         </button>
-        <button type="button" class="icon-btn" :aria-label="t('agent.clear')" :title="t('agent.clear')" @click="agent.clearSession()">
+        <button type="button" class="icon-btn" :aria-label="t('agent.clear')" :title="t('agent.clear')" @click="clearActiveSession">
           <Trash2 :size="14" />
         </button>
-        <button type="button" class="icon-btn" :aria-label="t('common.close')" :title="t('common.close')" @click="agent.open = false">
+        <button type="button" class="icon-btn" :aria-label="t('common.close')" :title="t('common.close')" @click="emit('close')">
           <X :size="14" />
         </button>
       </div>
@@ -78,10 +78,10 @@
         v-if="isExpanded"
         :title="t('chat.title')"
         :sessions="sessionViews"
-        :active-id="agent.activeSessionId"
+        :active-id="chat.activeSessionId"
         :extra-commands="sessionExtraCommands"
         @select="onSelectSession"
-        @create="agent.createSession()"
+        @create="onCreateSession"
         @rename="onRenameSession"
         @delete="onDeleteSession"
         @extra="onSessionExtra"
@@ -102,7 +102,7 @@
                 type="button"
                 class="style-card"
                 :style="{ borderColor: theme.toolbar.border }"
-                :disabled="agent.busy"
+                :disabled="chat.busy"
                 :title="s.description"
                 @click="pickStyle(s)"
               >
@@ -114,75 +114,75 @@
                 type="button"
                 class="style-card style-card-custom"
                 :style="{ borderColor: theme.toolbar.border, color: theme.node.muted }"
-                :disabled="agent.busy"
+                :disabled="chat.busy"
                 @click="customStyle()"
               >+ {{ t('agent.styleCustom') }}</button>
             </div>
           </template>
           <template #footer>
             <!-- 工作指示：模型思考/调用期 -->
-            <div v-if="agent.busy && agent.thinking" class="thinking-row" :style="{ color: theme.node.muted }">
+            <div v-if="chat.busy && chat.thinking" class="thinking-row" :style="{ color: theme.node.muted }">
               <Loader2 :size="12" class="spin" />
               <span>{{ t('agent.thinking') }}</span>
             </div>
 
             <!-- 阶段门确认卡片：阶段成果审阅 -->
-            <div v-if="agent.pendingConfirm?.kind === 'stage'" class="confirm-card" :style="confirmCardStyle">
-              <div class="confirm-title" :style="{ color: theme.node.text }">{{ t('agent.stageTitle') }}：{{ agent.pendingConfirm.stage }}</div>
-              <div v-if="agent.pendingConfirm.source" class="confirm-source" :style="{ color: theme.node.muted }">{{ t('agent.confirmSource') }}：{{ agent.pendingConfirm.source }}</div>
-              <div class="confirm-summary" :style="{ color: theme.node.text }">{{ agent.pendingConfirm.summary }}</div>
+            <div v-if="chat.pendingConfirm?.kind === 'stage'" class="confirm-card" :style="confirmCardStyle">
+              <div class="confirm-title" :style="{ color: theme.node.text }">{{ t('agent.stageTitle') }}：{{ chat.pendingConfirm.stage }}</div>
+              <div v-if="chat.pendingConfirm.source" class="confirm-source" :style="{ color: theme.node.muted }">{{ t('agent.confirmSource') }}：{{ chat.pendingConfirm.source }}</div>
+              <div class="confirm-summary" :style="{ color: theme.node.text }">{{ chat.pendingConfirm.summary }}</div>
               <div class="confirm-btns">
                 <button
                   type="button"
                   class="confirm-btn"
                   :style="{ color: theme.toolbar.item, borderColor: theme.toolbar.border }"
-                  @click="agent.confirmPending(false)"
+                  @click="chat.confirmPending(false)"
                 >{{ t('agent.stagePause') }}</button>
                 <button
                   type="button"
                   class="confirm-btn primary"
                   :style="confirmPrimaryStyle"
-                  @click="agent.confirmPending(true)"
+                  @click="chat.confirmPending(true)"
                 >{{ t('agent.stageContinue') }}</button>
               </div>
             </div>
 
             <!-- 写操作确认卡片 -->
-            <div v-else-if="agent.pendingConfirm" class="confirm-card" :style="confirmCardStyle">
+            <div v-else-if="chat.pendingConfirm" class="confirm-card" :style="confirmCardStyle">
               <div class="confirm-title" :style="{ color: theme.node.text }">{{ t('agent.confirmTitle') }}</div>
-              <div class="confirm-tool" :style="{ color: theme.toolbar.activeText }" :title="agent.pendingConfirm.tool">{{ toolStepLabel(agent.pendingConfirm.tool) }}</div>
+              <div class="confirm-tool" :style="{ color: theme.toolbar.activeText }" :title="chat.pendingConfirm.tool">{{ toolStepLabel(chat.pendingConfirm.tool) }}</div>
               <pre class="confirm-args" :style="{ background: theme.toolbar.itemHover, color: theme.node.muted }">{{ prettyArgs }}</pre>
               <div class="confirm-btns">
                 <button
                   type="button"
                   class="confirm-btn"
                   :style="{ color: theme.toolbar.item, borderColor: theme.toolbar.border }"
-                  @click="agent.confirmPending(false)"
+                  @click="chat.confirmPending(false)"
                 >{{ t('common.cancel') }}</button>
                 <button
                   type="button"
                   class="confirm-btn primary"
                   :style="confirmPrimaryStyle"
-                  @click="agent.confirmPending(true)"
+                  @click="chat.confirmPending(true)"
                 >{{ t('common.confirm') }}</button>
               </div>
             </div>
 
-            <div v-if="agent.error" class="error-line">{{ agent.error }}</div>
+            <div v-if="chat.activeError" class="error-line">{{ chat.activeError }}</div>
           </template>
         </ChatMessageList>
 
         <!-- 输入区（共享输入条；"/" 技能清单与附件预览经插槽注入） -->
         <ChatInputBar
           v-model="draft"
-          :sending="agent.busy"
+          :sending="chat.busy"
           stoppable
           :placeholder="t('agent.inputPlaceholder')"
           :has-attachments="pendingAttaches.length > 0"
           :accept="ATTACH_ACCEPT"
           @keydown="onDraftKeydown"
           @send="handleSend"
-          @stop="agent.requestStop()"
+          @stop="chat.requestStop()"
           @pick-files="addFiles"
           @paste-image="onPasteImage"
           @drop-files="addFiles"
@@ -206,7 +206,7 @@
                   :key="m.value"
                   type="button"
                   class="pill-menu-item"
-                  :class="{ active: agent.mode === m.value }"
+                  :class="{ active: chat.agentMode === m.value }"
                   @click="pickMode(m.value)"
                 >
                   <component :is="m.icon" :size="14" class="pill-menu-icon" />
@@ -214,7 +214,7 @@
                     <span class="pill-menu-name" :style="{ color: theme.node.text }">{{ m.label }}</span>
                     <span class="pill-menu-desc" :style="{ color: theme.node.muted }">{{ m.hint }}</span>
                   </span>
-                  <Check v-if="agent.mode === m.value" :size="14" class="pill-menu-check" :style="{ color: theme.node.text }" />
+                  <Check v-if="chat.agentMode === m.value" :size="14" class="pill-menu-check" :style="{ color: theme.node.text }" />
                 </button>
               </div>
             </div>
@@ -272,11 +272,12 @@ import {
 import type { CSSProperties } from 'vue'
 import { useI18n } from '@/i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { useAgentStore } from '@/stores/agent'
-import type { AgentMessage, AgentToolStep, AgentMode } from '@/stores/agent'
+import { useChatStore, toStepStatus } from '@/stores/chat'
+import type { ChatKernelMessage, AgentPendingConfirm } from '@/stores/chat'
+import type { AgentStepRecord } from '@/types'
+import type { AgentMode } from '@/lib/agent/policy'
 import { useCanvasStore } from '@/stores/canvas'
 import { useModelsStore } from '@/stores/models'
-import { summarizeChatSession } from '@/api/chat'
 import { useConfirm } from '@/composables/useConfirm'
 import { useSlashSkills } from '@/composables/useSlashSkills'
 import {
@@ -284,6 +285,7 @@ import {
   attachmentErrorKey, MAX_IMAGES_PER_MESSAGE,
 } from '@/lib/agent/attachments'
 import type { AgentImageAttachment } from '@/lib/agent/kernel'
+import type { MessageAttachment } from '@/types'
 import { toolStepLabel } from '@/lib/agent/tool-labels'
 import ChatMessageList from '@/components/chat/ChatMessageList.vue'
 import ChatSkillMenu from '@/components/chat/ChatSkillMenu.vue'
@@ -296,9 +298,11 @@ const props = defineProps({
   theme: { type: Object, required: true },
 })
 
+const emit = defineEmits<{ close: [] }> ()
+
 const { t } = useI18n()
 const { confirm } = useConfirm()
-const agent = useAgentStore()
+const chat = useChatStore()
 const canvasStore = useCanvasStore()
 
 const draft = ref('')
@@ -523,30 +527,33 @@ function nodeNameOf(ref: unknown): string {
   return panel?.name || ref
 }
 
-function stepToView(step: AgentToolStep): ChatStepView {
+function stepToView(step: AgentStepRecord): ChatStepView {
   return {
     callId: step.callId,
     label: toolStepLabel(step.tool, step.args, { nodeNameOf }),
     tooltip: step.tool,
-    status: step.status,
+    status: toStepStatus(step.status),
     result: step.result,
     progress: delegateProgressText(step),
   }
 }
 
 /** agent_delegate 步骤的实时进度文本（running 态渲染） */
-function delegateProgressText(step: AgentToolStep): string | undefined {
+function delegateProgressText(step: AgentStepRecord): string | undefined {
   if (step.status !== 'running' || !step.delegateProgress) return undefined
   const { round, tool } = step.delegateProgress
   return `${t('agent.delegateProgress', { n: round })}${tool ? ` · ${toolStepLabel(tool)}` : ''}`
 }
 
 const items = computed<ChatBubbleItem[]>(() =>
-  agent.messages.map((m: AgentMessage) => ({
+  chat.messages.map((m: ChatKernelMessage) => ({
     id: m.id,
     role: m.role,
     content: m.content,
     images: m.images?.length ? m.images.map((img) => ({ src: attachmentSrc(img) })) : undefined,
+    media: m.media?.length
+      ? m.media.filter((x) => x.url).map((x) => ({ type: x.type, url: x.url, status: x.status }))
+      : undefined,
     steps: m.steps.length ? m.steps.map(stepToView) : undefined,
     createdAt: m.createdAt,
   })),
@@ -554,7 +561,7 @@ const items = computed<ChatBubbleItem[]>(() =>
 
 // ---------- 会话侧栏（展开态） ----------
 const sessionViews = computed<ChatSessionView[]>(() =>
-  agent.sessions.map((s) => ({ id: s.id, title: s.title, updatedAt: s.updatedAt })),
+  chat.sessions.map((s) => ({ id: s.id, title: s.title, updatedAt: s.updated_at || '' })),
 )
 
 const sessionExtraCommands = computed<ChatSessionCommand[]>(() => [
@@ -562,30 +569,32 @@ const sessionExtraCommands = computed<ChatSessionCommand[]>(() => [
 ])
 
 function onSelectSession(id: number | string): void {
-  void agent.switchSession(String(id))
+  void chat.switchSession(Number(id))
+}
+
+/** 画布面板新建会话：打上当前工作区上下文标记 */
+function onCreateSession(): void {
+  void chat.newSession(undefined, canvasStore.activeWorkspaceId ?? undefined)
+}
+
+function clearActiveSession(): void {
+  void chat.clearActiveSession()
 }
 
 function onRenameSession(id: number | string, title: string): void {
-  void agent.renameSession(String(id), title)
+  void chat.updateSessionTitle(Number(id), title)
 }
 
 function onSessionExtra(id: number | string, command: string): void {
   if (command === 'summarize') void summarizeSessionTitle(String(id))
 }
 
-/** AI 总结会话标题：复用对话页 summarize 端点（读已落库的消息行生成） */
-async function summarizeSessionTitle(sessionId: string): Promise<void> {
-  const s = agent.sessions.find((x) => x.id === sessionId)
-  if (!s) return
-  if (s.backendId == null) {
-    ElMessage.warning(t('agent.sessionNotSynced'))
-    return
-  }
+/** AI 总结会话标题（统一会话即后端会话，直接按 id 总结） */
+async function summarizeSessionTitle(sessionId: number | string): Promise<void> {
   try {
     ElMessage.info(t('chat.summarizing'))
-    const updated = await summarizeChatSession(s.backendId)
-    agent.applyTitle(sessionId, updated.title)
-    ElMessage.success(t('chat.summarizeSuccess') + ': ' + updated.title)
+    await chat.autoSummarizeSession(Number(sessionId))
+    ElMessage.success(t('chat.summarizeSuccess'))
   } catch (e: unknown) {
     ElMessage.error((e instanceof Error ? e.message : '') || t('chat.summarizeFailed'))
   }
@@ -594,7 +603,7 @@ async function summarizeSessionTitle(sessionId: string): Promise<void> {
 async function onDeleteSession(id: number | string): Promise<void> {
   try {
     await confirm(t('chat.confirmDelete'), t('common.confirm'))
-    await agent.deleteSession(String(id))
+    await chat.removeSession(Number(id))
   } catch {
     // 取消删除
   }
@@ -612,7 +621,7 @@ let attachSeq = 0
 
 async function addFiles(files: File[]): Promise<void> {
   for (const f of files) {
-    if (agent.busy) break
+    if (chat.busy) break
     try {
       if (isImageFile(f)) {
         const imageCount = pendingAttaches.value.filter((a) => a.kind === 'image').length
@@ -643,14 +652,14 @@ function removeAttach(idx: number): void {
 }
 
 // ---------- "/" 技能快速清单（共享组合式；菜单渲染用共享 ChatSkillMenu） ----------
-const { skillMenuVisible, filteredSkills, skillHighlight, pickSkill, handleMenuKeydown } = useSlashSkills(draft, () => !agent.busy)
+const { skillMenuVisible, filteredSkills, skillHighlight, pickSkill, handleMenuKeydown } = useSlashSkills(draft, () => !chat.busy)
 
 // 能力与记忆统一入口（头部下拉）+ 用户偏好记忆管理
 const toolsOpen = ref(false)
 
 async function removePreference(p: string) {
   try {
-    await agent.removeMemoryPreference(p)
+    await chat.removeMemoryPreference(p)
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : String(e))
   }
@@ -659,7 +668,7 @@ async function removePreference(p: string) {
 async function clearAllPreferences() {
   await confirm(t('agent.memoryClearConfirm'), t('common.confirm'))
   try {
-    await agent.clearMemory()
+    await chat.clearMemory()
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : String(e))
   }
@@ -676,7 +685,7 @@ const modeOptions = computed(() => [
   { value: 'auto' as AgentMode, icon: Zap, label: t('agent.modeAuto'), hint: t('agent.modeAutoHint') },
 ])
 
-const currentMode = computed(() => modeOptions.value.find((m) => m.value === agent.mode))
+const currentMode = computed(() => modeOptions.value.find((m) => m.value === chat.agentMode))
 
 // ---------- 输入行模式胶囊（模型胶囊为共享 ChatModelPill） ----------
 const openMenu = ref<'mode' | null>(null)
@@ -690,7 +699,7 @@ function closeMenu(): void {
 }
 
 function pickMode(value: AgentMode): void {
-  agent.mode = value
+  chat.setAgentMode(value)
   closeMenu()
 }
 
@@ -698,10 +707,10 @@ const modelsStore = useModelsStore()
 
 const chatModelChoices = computed(() => modelsStore.chatModels)
 /** 当前生效模型：用户选择优先，否则跟随后端默认解析链（偏好 default_chat_model_id > 列表第一个） */
-const currentChatModelId = computed(() => agent.chatModelId || modelsStore.getDefaultModel('chat'))
+const currentChatModelId = computed(() => chat.chatModelId || modelsStore.getDefaultModel('chat'))
 
 function pickChatModel(id: string): void {
-  agent.setChatModel(id)
+  chat.setChatModel(id)
   closeMenu()
 }
 
@@ -726,8 +735,8 @@ const confirmPrimaryStyle = computed(() => ({
 
 // 确认卡片参数预览（截断防超长）
 const prettyArgs = computed(() => {
-  if (!agent.pendingConfirm) return ''
-  const text = JSON.stringify(agent.pendingConfirm.args, null, 2)
+  if (!chat.pendingConfirm) return ''
+  const text = JSON.stringify(chat.pendingConfirm.args, null, 2)
   return text.length > 600 ? `${text.slice(0, 600)}\n…` : text
 })
 
@@ -761,7 +770,7 @@ function styleEntriesOf(step: ChatStepView): AgentStyleEntry[] {
 
 /** 点选风格卡片：以用户口吻发消息，Agent 走 storyboard_set_style 落库并继续管线 */
 function pickStyle(entry: AgentStyleEntry) {
-  void agent.send(t('agent.stylePickedMsg', { name: entry.name, id: entry.id }))
+  void chat.send(t('agent.stylePickedMsg', { name: entry.name, id: entry.id }))
 }
 
 /** 自定义风格：弹窗输入描述，经 storyboard_set_style 走正路（所有提示词统一带此风格段） */
@@ -772,7 +781,7 @@ async function customStyle() {
       t('agent.stylePromptTitle'),
       { confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel'), inputPattern: /\S/, inputErrorMessage: t('agent.stylePromptEmpty') },
     )
-    if (value && value.trim()) void agent.send(t('agent.styleCustomMsg', { text: value.trim() }))
+    if (value && value.trim()) void chat.send(t('agent.styleCustomMsg', { text: value.trim() }))
   } catch {
     // 用户取消
   }
@@ -780,19 +789,27 @@ async function customStyle() {
 
 // ---------- 发送 ----------
 function handleSend() {
-  if (agent.busy) return
+  if (chat.busy) return
   const text = draft.value.trim()
-  const images: AgentImageAttachment[] = []
+  const images: MessageAttachment[] = []
   const fileParts: string[] = []
   for (const a of pendingAttaches.value) {
-    if (a.kind === 'image') images.push(a.attachment)
-    else fileParts.push(`【文件：${a.name}】\n${a.text}`)
+    if (a.kind === 'image') {
+      images.push({
+        name: a.name,
+        base64: `data:${a.attachment.mimeType};base64,${a.attachment.data}`,
+        mime_type: a.attachment.mimeType,
+        size: 0,
+      })
+    } else {
+      fileParts.push(`【文件：${a.name}】\n${a.text}`)
+    }
   }
   if (!text && images.length === 0) return
   const fullText = fileParts.length ? (text ? text + '\n\n' : '') + fileParts.join('\n\n') : text
   draft.value = ''
   pendingAttaches.value = []
-  void agent.send(fullText, images)
+  void chat.send(fullText, images)
 }
 
 // ---------- 生命周期 ----------
@@ -810,7 +827,7 @@ function onWindowKeydown(e: KeyboardEvent): void {
 // 面板打开/工作区切换时恢复会话
 onMounted(() => {
   void modelsStore.fetchConfig()
-  agent.ensureSession()
+  void chat.init()
   window.addEventListener('keydown', onWindowKeydown)
   window.addEventListener('pointerdown', onPointerDown)
   // 记忆的几何按当前容器钳位一次（窗口可能变小过）
@@ -822,11 +839,9 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointerdown', onPointerDown)
 })
 
-watch(() => canvasStore.activeWorkspaceId, () => agent.ensureSession())
-
 // 确认卡出现/思考指示/错误行：滚动到底部（消息增长由 ChatMessageList 自锚定）
 watch(
-  () => [agent.pendingConfirm, agent.thinking, agent.error],
+  () => [chat.pendingConfirm, chat.thinking, chat.activeError],
   () => {
     void listRef.value?.scrollToBottom(true)
   },

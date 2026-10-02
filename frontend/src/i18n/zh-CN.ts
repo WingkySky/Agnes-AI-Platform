@@ -119,7 +119,7 @@ const zhCN = {
 
   // ------ 顶部导航 ------
   nav: {
-    chat: 'AI 对话',
+    chat: 'Agent',
     images: '图片生成',
     videos: '视频生成',
     history: '生成历史',
@@ -912,7 +912,7 @@ const zhCN = {
     home: '首页',
     login: '登录',
     setup: '首次初始化',
-    chat: 'AI 对话',
+    chat: 'Agent',
     images: '图片生成',
     videos: '视频生成',
     history: '生成历史',
@@ -1307,6 +1307,11 @@ const zhCN = {
     generatingVideo: '正在生成视频...',
     imageGenerating: '图片生成中，请稍候...',
     videoGenerating: '视频生成中，通常需要 1-3 分钟...',
+    canvasPlacement: {
+      imageName: '对话生成图片',
+      videoName: '对话生成视频',
+      done: '生成结果已自动放入画布',
+    },
     mediaLoading: '媒体加载中...',
     mediaFailed: '生成失败，请重试',
     videoNotSupported: '您的浏览器不支持视频播放',
@@ -1742,6 +1747,25 @@ const zhCN = {
     contextMenu: {
       duplicate: '复制',
       delete: '删除',
+      createNode: '新建节点…',
+      selectAll: '全选',
+      fitContent: '缩放适配',
+    },
+    // 快速创建菜单（双击空白 / 空白右键新建 / 拖线落点）
+    quickMenu: {
+      searchPlaceholder: '搜索节点…',
+      groupRecommend: '推荐',
+      groupAi: 'AI 生成',
+      groupMedia: '媒体节点',
+      groupAssist: '辅助节点',
+      groupAction: '快捷操作',
+      uploadImage: '上传本地图片',
+      recGenerateImage: '生成图片',
+      recGenerateVideo: '生成视频',
+      recCreateConfig: '创建生成配置',
+      recCreateText: '创建文本节点',
+      recCreateVideo: '创建视频节点',
+      empty: '无匹配节点',
     },
     // 任务 8：节点工具栏
     hoverToolbar: {
@@ -1823,6 +1847,9 @@ const zhCN = {
       audio: '音频节点',
       config: '配置节点',
       script: '脚本节点',
+      tts: '配音节点',
+      subtitle: '字幕节点',
+      compose: '合成节点',
       prompt: '提示词',
       referenceImage: '参考图',
       referenceImage1: '参考图1',
@@ -2338,6 +2365,7 @@ const zhCN = {
       saving: '保存中…',
       saved: '已保存 · {time}',
       error: '保存失败',
+      remoteUpdate: '云端有更新，点击同步',
     },
     // 画布消息提示
     messages: {
@@ -2393,6 +2421,8 @@ const zhCN = {
       cloudConflictCopy: '检测到其他设备的修改，云端版本已保留为冲突副本',
       cloudMigrateProgress: '正在同步本地画布到云端 ({n}/{m})',
       cloudMigrateDone: '本地画布已同步到云端',
+      remoteSynced: '已同步云端画布更新',
+      remoteSyncDeferred: '本地还在保存中，稍后会自动同步云端更新',
       cloudMigratePartial: '{n} 个画布同步失败，可稍后重试或导出 JSON 备份',
       cloudSaveFailed: '画布云端保存失败',
       captureFrameDone: '截帧完成',
@@ -3633,6 +3663,10 @@ const zhCN = {
     opsJoiner: '、',
     actGenImage: '生成图片',
     actGenVideo: '生成视频',
+    actCanvasListWorkspaces: '查询画布工作区',
+    actCanvasOverview: '读取画布概要',
+    actCanvasAddPanels: '添加画布节点',
+    actCanvasConnect: '添加画布连线',
     actCompose: '合成连续成片',
     actReadImage: '查看图片',
     actLoadSkill: '加载技能',

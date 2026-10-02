@@ -5,6 +5,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 vi.mock('@/api/images', () => ({ createImageTask: vi.fn() }))
 vi.mock('@/api/videos', () => ({ createVideoTask: vi.fn() }))
 vi.mock('@/api/presets', () => ({ getPreset: vi.fn() }))
+vi.mock('@/api/canvasWorkspace', () => ({
+  applyCanvasOps: vi.fn(),
+  getWorkspace: vi.fn(),
+  listWorkspaces: vi.fn(),
+}))
 vi.mock('@/stores/taskQueue', () => ({
   useTaskQueueStore: () => ({ registerChatTask: mocks.registerChatTask }),
 }))
@@ -26,6 +31,7 @@ const mocks = vi.hoisted(() => ({
 import { createImageTask } from '@/api/images'
 import { createVideoTask } from '@/api/videos'
 import { getPreset } from '@/api/presets'
+import { applyCanvasOps, getWorkspace, listWorkspaces } from '@/api/canvasWorkspace'
 import { CHAT_TOOLS } from '../chat-tools'
 import { AgentKernel } from '../kernel'
 import { createFakeStreamFn, fakeModel } from './fake-llm'
@@ -34,6 +40,21 @@ const imageTool = CHAT_TOOLS[0]
 const videoTool = CHAT_TOOLS[1]
 const skillTool = CHAT_TOOLS[2]
 const saveSkillTool = CHAT_TOOLS[3]
+
+/** 画布工具组（追加在 CHAT_TOOLS 末尾） */
+const canvasListWsTool = CHAT_TOOLS[6]
+const canvasOverviewTool = CHAT_TOOLS[7]
+const canvasAddPanelsTool = CHAT_TOOLS[8]
+const canvasConnectTool = CHAT_TOOLS[9]
+
+/** 带激活画布工作区的 ctx（画布工具组/落画布用） */
+function canvasCtx(workspaceId = 'ws_active') {
+  return {
+    getRecentMediaUrl: () => null,
+    getActiveCanvasWorkspaceId: () => workspaceId,
+    registerCanvasPlacement: vi.fn(),
+  }
+}
 
 function imageResp(taskId = 'img_1') {
   return { task_id: taskId, status: 'pending' }
@@ -45,6 +66,14 @@ beforeEach(() => {
     task_id: 'vid_1', video_id: null, status: 'pending', prompt: '',
   } as never)
   vi.mocked(getPreset).mockReset()
+  vi.mocked(applyCanvasOps).mockReset().mockResolvedValue({
+    results: [{ index: 0, op: 'add_panel', ok: true, panel_id: 'srv_1' }],
+    new_panel_ids: ['srv_1'],
+    failed: 0,
+    revision: 2,
+  })
+  vi.mocked(getWorkspace).mockReset()
+  vi.mocked(listWorkspaces).mockReset()
   mocks.registerChatTask.mockReset()
 })
 
@@ -187,5 +216,111 @@ describe('agent_save_skill', () => {
     const bad = await saveSkillTool.execute({ name: 'X', description: 'd', content: 'c' }, null)
     expect(bad.ok).toBe(false)
     expect(bad.error).toContain('同名技能已存在')
+  })
+})
+
+describe('canvas_* 画布工具组', () => {
+  it('canvas_list_workspaces：列表透传', async () => {
+    vi.mocked(listWorkspaces).mockResolvedValueOnce([
+      { id: 'ws1', name: '主画布', revision: 3, created_at: '', updated_at: '2026-10-02' },
+    ] as never)
+    const r = await canvasListWsTool.execute({}, null)
+    expect(r.ok).toBe(true)
+    expect((r.data as { workspaces: { id: string }[] }).workspaces[0].id).toBe('ws1')
+  })
+
+  it('canvas_get_overview：data 摘要成节点/连线，缺省工作区取 ctx 激活偏好', async () => {
+    vi.mocked(getWorkspace).mockResolvedValueOnce({
+      id: 'ws_active', name: '主画布', revision: 1, created_at: '', updated_at: '',
+      data: {
+        panels: [
+          { id: 'p1', type: 'text', name: '剧本', content: { content: '开场白' } },
+          { id: 'p2', type: 'image', name: '主角图', content: { status: 'success', content: 'http://x/a.png' } },
+        ],
+        connections: [{ id: 'c1', source_panel_id: 'p1', target_panel_id: 'p2' }],
+      },
+    } as never)
+    const r = await canvasOverviewTool.execute({}, canvasCtx())
+    expect(r.ok).toBe(true)
+    const data = r.data as { workspace_id: string; panels: { summary: string }[]; connections: { source: string; target: string }[] }
+    expect(data.workspace_id).toBe('ws_active')
+    expect(data.panels[0].summary).toBe('开场白')
+    expect(data.panels[1].summary).toContain('status=success')
+    expect(data.connections[0]).toMatchObject({ source: '剧本', target: '主角图' })
+    expect(vi.mocked(getWorkspace)).toHaveBeenCalledWith('ws_active')
+  })
+
+  it('canvas_add_panels：url 组装为就绪媒体内容；无工作区报错不调接口', async () => {
+    const r = await canvasAddPanelsTool.execute({
+      panels: [{ type: 'image', name: '配图', url: 'http://x/a.png' }],
+    }, canvasCtx())
+    expect(r.ok).toBe(true)
+    expect(vi.mocked(applyCanvasOps)).toHaveBeenCalledWith('ws_active', [
+      expect.objectContaining({
+        op: 'add_panel',
+        type: 'image',
+        name: '配图',
+        content: { status: 'success', content: 'http://x/a.png' },
+      }),
+    ])
+
+    const noWs = await canvasAddPanelsTool.execute({ panels: [{ name: 'x' }] }, null)
+    expect(noWs.ok).toBe(false)
+    expect(noWs.error).toContain('没有可用的云端画布工作区')
+    expect(vi.mocked(applyCanvasOps)).toHaveBeenCalledTimes(1)
+  })
+
+  it('canvas_connect：连线按名称透传；服务端逐条错误提取', async () => {
+    await canvasConnectTool.execute({
+      connections: [{ source_panel_id: '剧本', target_panel_id: '配图' }],
+    }, canvasCtx('ws9'))
+    expect(vi.mocked(applyCanvasOps)).toHaveBeenCalledWith('ws9', [
+      expect.objectContaining({ op: 'add_connection', source_panel_id: '剧本', target_panel_id: '配图' }),
+    ])
+
+    const err = Object.assign(new Error('Request failed'), {
+      detail: { message: '全部操作失败', results: [{ index: 0, op: 'add_connection', ok: false, error: '配音节点不接受 图片 类型输入' }] },
+    })
+    vi.mocked(applyCanvasOps).mockRejectedValueOnce(err)
+    const bad = await canvasConnectTool.execute({
+      connections: [{ source_panel_id: 'a', target_panel_id: 'b' }],
+    }, canvasCtx())
+    expect(bad.ok).toBe(false)
+    expect(bad.error).toContain('配音节点不接受')
+  })
+})
+
+describe('generate_image place_on_canvas（落画布计划）', () => {
+  it('place_on_canvas=true：任务提交后注册计划，结果提示自动落画布', async () => {
+    const ctx = canvasCtx()
+    const r = await imageTool.execute({ prompt: 'a cat', place_on_canvas: true }, ctx)
+    expect(r.ok).toBe(true)
+    expect(vi.mocked(createImageTask)).toHaveBeenCalled()
+    expect(ctx.registerCanvasPlacement).toHaveBeenCalledWith({
+      taskId: 'img_1', workspaceId: 'ws_active', mediaType: 'image', prompt: 'a cat',
+    })
+    expect(String((r.data as { message: string }).message)).toContain('自动放入画布')
+  })
+
+  it('place_on_canvas=true 但无可用工作区：先报错，不提交生成任务', async () => {
+    const r = await imageTool.execute({ prompt: 'a cat', place_on_canvas: true }, null)
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('没有可用的云端画布工作区')
+    expect(vi.mocked(createImageTask)).not.toHaveBeenCalled()
+  })
+
+  it('canvas_workspace_id 显式指定优先于激活偏好', async () => {
+    const ctx = canvasCtx()
+    await imageTool.execute({ prompt: 'a cat', place_on_canvas: true, canvas_workspace_id: 'ws_explicit' }, ctx)
+    expect(ctx.registerCanvasPlacement).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: 'ws_explicit' }))
+  })
+
+  it('generate_video place_on_canvas=true：同样注册计划（mediaType=video）', async () => {
+    const ctx = canvasCtx()
+    const r = await videoTool.execute({ prompt: 'a dog runs', place_on_canvas: true }, ctx)
+    expect(r.ok).toBe(true)
+    expect(ctx.registerCanvasPlacement).toHaveBeenCalledWith({
+      taskId: 'vid_1', workspaceId: 'ws_active', mediaType: 'video', prompt: 'a dog runs',
+    })
   })
 })

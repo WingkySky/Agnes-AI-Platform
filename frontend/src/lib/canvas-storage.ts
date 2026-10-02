@@ -16,6 +16,7 @@ import {
   createWorkspace as createWorkspaceApi,
   deleteWorkspace as deleteWorkspaceApi,
   getWorkspace,
+  getWorkspaceRevision,
   listWorkspaces,
   saveWorkspace,
 } from '@/api/canvasWorkspace'
@@ -306,6 +307,39 @@ export async function renameWorkspaceCloud(ws: Record<string, any>): Promise<voi
     // 404 由下次 _save 懒创建兜底；409 由下次 _save 冲突流程兜底
     // eslint-disable-next-line no-console
     console.warn('[canvas-storage] 云端重命名失败', err)
+  }
+}
+
+// ---------- 远端变更感知（外部宿主增量写入的轻轮询） ----------
+
+/** 云端保存队列是否空闲（无在途保存且无防抖挂起；空闲=本地无未保存内容） */
+export function isCloudQueueIdle(): boolean {
+  return !cloudInFlight && !cloudSaveTimer && cloudPendingIds.size === 0
+}
+
+/** 查询云端最新 revision 并与本地已知版本比对（未知版本/接口失败都视为无变化） */
+export async function checkRemoteRevision(wsId: string): Promise<{ changed: boolean; revision: number } | null> {
+  if (!isCloudChannel()) return null
+  try {
+    const remote = await getWorkspaceRevision(String(wsId))
+    const known = cloudRevisions.get(String(wsId))
+    return { changed: known !== undefined && remote.revision !== known, revision: remote.revision }
+  } catch {
+    return null
+  }
+}
+
+/** 拉取云端工作区全量 data 并同步本地已知 revision（画布页合入远端变更用） */
+export async function pullRemoteWorkspaceCloud(wsId: string): Promise<Record<string, unknown> | null> {
+  if (!isCloudChannel()) return null
+  try {
+    const detail = await getWorkspace(String(wsId))
+    cloudRevisions.set(String(wsId), detail.revision)
+    return detail.data ?? {}
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[canvas-storage] 拉取云端工作区失败', err)
+    return null
   }
 }
 

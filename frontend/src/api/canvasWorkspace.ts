@@ -85,3 +85,21 @@ export function uploadCanvasAsset(file: Blob, name: string): Promise<{ url: stri
   form.append('file', file, name)
   return client.post('/api/uploads/canvas', form)
 }
+
+/** 批量画布操作结果（对齐后端 apply_canvas_ops 的 outcome） */
+export interface CanvasOpsResult {
+  results: { index: number; op: string; ok: boolean; panel_id?: string; connection_id?: string; error?: string }[]
+  new_panel_ids: string[]
+  failed: number
+  revision: number
+}
+
+/** 批量应用画布操作（add_panel / add_connection，支持按节点名引用；对话 Agent / 外部宿主增量写入） */
+export function applyCanvasOps(id: string, ops: Record<string, unknown>[]): Promise<CanvasOpsResult> {
+  return client.post(`/api/canvas/workspaces/${id}/ops`, { ops })
+}
+
+/** 工作区当前版本号（轻轮询用，不拉 data） */
+export function getWorkspaceRevision(id: string): Promise<{ revision: number; updated_at: string }> {
+  return client.get(`/api/canvas/workspaces/${id}/revision`)
+}

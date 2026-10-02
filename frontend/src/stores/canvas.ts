@@ -20,6 +20,9 @@ import {
   createWorkspaceCloud,
   deleteWorkspaceCloud,
   renameWorkspaceCloud,
+  checkRemoteRevision,
+  isCloudQueueIdle,
+  pullRemoteWorkspaceCloud,
 } from '@/lib/canvas-storage'
 import { t } from '@/i18n'
 import { migrateLocalToCloudIfNeeded } from '@/lib/canvas-migration'
@@ -48,7 +51,7 @@ export interface CanvasStyleSelection {
  *   - compose  必须有且仅有一个 video 入边；可选 tts 和 subtitle 入边各最多一个
  *   - text/image/video/audio/config 保持现有行为（不限制）
  */
-function validateConnectionTypes(sourceType: string, targetType: string): string | null {
+export function validateConnectionTypes(sourceType: string, targetType: string): string | null {
   // script（脚本节点）只允许出边到 config（批量派生生成配置）
   if (sourceType === 'script' && targetType !== 'config') {
     return '脚本节点只能连接到生成配置节点'
@@ -182,6 +185,8 @@ interface ThemeTokens {
 
 // ---------- 常量 ----------
 const MAX_HISTORY = 80
+// 远端 revision 轻轮询间隔（外部宿主写入感知）
+const REMOTE_POLL_INTERVAL_MS = 10000
 
 // ---------- 工具函数 ----------
 
@@ -312,6 +317,10 @@ interface CanvasState {
 
   // ---------- 防递归标记 ----------
   _isSaving: boolean
+
+  // ---------- 远端变更感知（外部宿主增量写入的轻轮询） ----------
+  remotePollTimer: ReturnType<typeof setInterval> | null
+  remoteUpdateAvailable: boolean
 }
 
 export const useCanvasStore = defineStore('canvas', {
@@ -378,6 +387,10 @@ export const useCanvasStore = defineStore('canvas', {
 
     // ---------- 防递归标记 ----------
     _isSaving: false,
+
+    // ---------- 远端变更感知（外部宿主增量写入的轻轮询） ----------
+    remotePollTimer: null,
+    remoteUpdateAvailable: false,
   }),
 
   getters: {
@@ -702,6 +715,22 @@ export const useCanvasStore = defineStore('canvas', {
     /** 重置视口 */
     resetView(): void {
       this.viewport = { x: 0, y: 0, zoom: 1 }
+    },
+
+    /** 缩放适配：全部可见节点（排除折叠分组成员）包围盒缩放居中；空画布 no-op，zoom 上限 100% */
+    fitContent(): void {
+      const visible = this.panels.filter((p) => !this.getGroupOfPanel(p.id)?.collapsed)
+      if (visible.length === 0) return
+      const pad = 60
+      const left = Math.min(...visible.map((p) => p.x)) - pad
+      const top = Math.min(...visible.map((p) => p.y)) - pad
+      const right = Math.max(...visible.map((p) => p.x + p.width)) + pad
+      const bottom = Math.max(...visible.map((p) => p.y + p.height)) + pad
+      const cx = (left + right) / 2
+      const cy = (top + bottom) / 2
+      this.setZoom(Math.min(1, window.innerWidth / (right - left), window.innerHeight / (bottom - top)))
+      this.viewport.x = window.innerWidth / 2 - cx * this.viewport.zoom
+      this.viewport.y = window.innerHeight / 2 - cy * this.viewport.zoom
     },
 
     /** 屏幕坐标 → 世界坐标 */
@@ -1222,6 +1251,58 @@ export const useCanvasStore = defineStore('canvas', {
       this.selectedPanelId = null
       this.history = { past: [], future: [] }
       this._save()
+    },
+
+    // ==================== 远端变更感知（外部宿主增量写入的轻轮询） ====================
+
+    /** 启动远端 revision 轻轮询（画布页挂载时调用；每次 tick 跳过不可见/非云通道状态） */
+    startRemotePoll(): void {
+      if (this.remotePollTimer) return
+      this.remotePollTimer = setInterval(() => {
+        void this._checkRemoteUpdate()
+      }, REMOTE_POLL_INTERVAL_MS)
+    },
+
+    stopRemotePoll(): void {
+      if (this.remotePollTimer) {
+        clearInterval(this.remotePollTimer)
+        this.remotePollTimer = null
+      }
+    },
+
+    /** 比对云端 revision：有变化且队列空闲→自动合入；忙碌→点亮提示等待手动/稍后同步 */
+    async _checkRemoteUpdate(): Promise<void> {
+      const wsId = this.activeWorkspaceId
+      // 非 DOM 环境（单测/node）跳过可见性检查，浏览器里仅在页面可见时轮询
+      const visible = typeof document === 'undefined' || document.visibilityState === 'visible'
+      if (!wsId || !visible || !isCloudChannel()) return
+      const r = await checkRemoteRevision(String(wsId))
+      if (!r || !r.changed) return
+      if (!isCloudQueueIdle()) {
+        this.remoteUpdateAvailable = true
+        return
+      }
+      await this.pullRemoteWorkspace()
+    },
+
+    /**
+     * 拉取云端工作区合入本地（复用版本还原的 applyWorkspaceData 链路）。
+     * 只在保存队列空闲时执行——空闲即本地无未保存内容，合入零丢失、无需快照兜底；
+     * 忙碌时点亮「云端有更新」由用户手动触发（仍受空闲约束）。
+     */
+    async pullRemoteWorkspace(): Promise<void> {
+      const wsId = this.activeWorkspaceId
+      if (!wsId || !isCloudChannel()) return
+      if (!isCloudQueueIdle()) {
+        this.remoteUpdateAvailable = true
+        ElMessage.info(t('canvas.messages.remoteSyncDeferred'))
+        return
+      }
+      const data = await pullRemoteWorkspaceCloud(String(wsId))
+      if (!data) return
+      this.remoteUpdateAvailable = false
+      this.applyWorkspaceData(data)
+      ElMessage.success(t('canvas.messages.remoteSynced'))
     },
 
     /**

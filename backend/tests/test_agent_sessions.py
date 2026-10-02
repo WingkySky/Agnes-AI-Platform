@@ -111,3 +111,16 @@ async def test_chat_type_session_sync_via_agent_channel(auth_client):
     assert detail["context"] == SYNC_PAYLOAD["context"]
     assert [m["role"] for m in detail["messages"]] == ["user", "assistant"]
     assert detail["messages"][1]["steps"][0]["tool"] == "agent_create_text_node"
+
+
+@pytest.mark.asyncio
+async def test_chat_session_create_accepts_workspace_id(auth_client):
+    """宿主统一：画布面板经 chat/sessions 建会话时打 workspace_id 上下文标记（session_type 仍为 chat）"""
+    create = await auth_client.post("/api/chat/sessions", json={"workspace_id": "ws-ops-9"})
+    assert create.status_code == 200
+    body = create.json()["data"]
+    assert body["session_type"] == "chat"
+    assert body["workspace_id"] == "ws-ops-9"
+
+    detail = (await auth_client.get(f"/api/chat/agent-sessions/{body['id']}")).json()["data"]
+    assert detail["workspace_id"] == "ws-ops-9"

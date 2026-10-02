@@ -48,6 +48,12 @@ class ConflictResponse(BaseModel):
     current_revision: int
 
 
+class WorkspaceOpsCreate(BaseModel):
+    """批量画布操作（外部宿主增量写入：对话 Agent / MCP / CLI 共用）"""
+    ops: List[Dict[str, Any]] = Field(..., min_length=1, max_length=50,
+                                      description="op 列表：add_panel / add_connection（支持按节点名引用）")
+
+
 class SnapshotCreate(BaseModel):
     """创建快照（auto 由保存链路内嵌生成，此端点仅接受 manual/pre_danger）"""
     kind: str = Field("manual", description="manual=手动命名 / pre_danger=危险操作前")

@@ -36,8 +36,10 @@ from app.schemas.canvas_workspace import (
     WorkspaceBrief,
     WorkspaceCreate,
     WorkspaceDetail,
+    WorkspaceOpsCreate,
     WorkspaceSave,
 )
+from app.services.canvas_ops import apply_canvas_ops
 
 router = APIRouter(prefix="/canvas/workspaces", tags=["画布工作区"])
 
@@ -183,6 +185,34 @@ async def save_workspace(
     await db.commit()
     await db.refresh(ws)
     return ok(data={"revision": ws.revision})
+
+
+@router.post("/{workspace_id}/ops", summary="批量应用画布操作（对话 Agent / 外部宿主增量写入）")
+async def apply_workspace_ops(
+    workspace_id: str,
+    payload: WorkspaceOpsCreate,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    ws = await _get_owned_workspace(db, workspace_id, current_user)
+    new_data, outcome = apply_canvas_ops(ws.data or {}, payload.ops, workspace_id=ws.id)
+    if outcome["failed"] and outcome["failed"] == len(outcome["results"]):
+        raise HTTPException(status_code=400, detail={"message": "全部操作失败", "results": outcome["results"]})
+    # 全量赋值新对象：SQLAlchemy JSON 列需重新赋值才会被变更跟踪
+    ws.data = new_data
+    ws.revision += 1
+    await db.commit()
+    return ok(data={**outcome, "revision": ws.revision})
+
+
+@router.get("/{workspace_id}/revision", summary="工作区当前版本号（轻轮询用）")
+async def get_workspace_revision(
+    workspace_id: str,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    ws = await _get_owned_workspace(db, workspace_id, current_user)
+    return ok(data={"revision": ws.revision, "updated_at": ws.updated_at})
 
 
 @router.delete("/{workspace_id}", summary="删除画布工作区（连带删快照）")

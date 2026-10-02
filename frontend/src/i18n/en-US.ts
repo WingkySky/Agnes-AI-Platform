@@ -118,7 +118,7 @@ const enUS = {
 
   // ------ Top navigation ------
   nav: {
-    chat: 'AI Chat',
+    chat: 'Agent',
     images: 'Image Generation',
     videos: 'Video Generation',
     history: 'Generation History',
@@ -928,7 +928,7 @@ const enUS = {
     home: 'Home',
     login: 'Login',
     setup: 'Initial Setup',
-    chat: 'AI Chat',
+    chat: 'Agent',
     images: 'Image Generation',
     videos: 'Video Generation',
     history: 'Generation History',
@@ -1323,6 +1323,11 @@ const enUS = {
     generatingVideo: 'Generating video...',
     imageGenerating: 'Image generating, please wait...',
     videoGenerating: 'Video generating, usually takes 1-3 minutes...',
+    canvasPlacement: {
+      imageName: 'Image from chat',
+      videoName: 'Video from chat',
+      done: 'Generated media placed on canvas automatically',
+    },
     mediaLoading: 'Loading media...',
     mediaFailed: 'Generation failed, please retry',
     videoNotSupported: 'Your browser does not support video playback',
@@ -1759,6 +1764,25 @@ const enUS = {
     contextMenu: {
       duplicate: 'Duplicate',
       delete: 'Delete',
+      createNode: 'New Node…',
+      selectAll: 'Select All',
+      fitContent: 'Zoom to Fit',
+    },
+    // Quick create menu (canvas double-click / right-click new / connection drop)
+    quickMenu: {
+      searchPlaceholder: 'Search nodes…',
+      groupRecommend: 'Recommended',
+      groupAi: 'AI Generation',
+      groupMedia: 'Media Nodes',
+      groupAssist: 'Assistant Nodes',
+      groupAction: 'Quick Actions',
+      uploadImage: 'Upload Local Image',
+      recGenerateImage: 'Generate Image',
+      recGenerateVideo: 'Generate Video',
+      recCreateConfig: 'Create Config Node',
+      recCreateText: 'Create Text Node',
+      recCreateVideo: 'Create Video Node',
+      empty: 'No matching nodes',
     },
     // Task 8: Node toolbar
     hoverToolbar: {
@@ -1840,6 +1864,9 @@ const enUS = {
       audio: 'Audio Node',
       config: 'Config Node',
       script: 'Script Node',
+      tts: 'TTS Node',
+      subtitle: 'Subtitle Node',
+      compose: 'Compose Node',
       prompt: 'Prompt',
       referenceImage: 'Reference Image',
       referenceImage1: 'Reference Image 1',
@@ -2355,6 +2382,7 @@ const enUS = {
       saving: 'Saving…',
       saved: 'Saved · {time}',
       error: 'Save failed',
+      remoteUpdate: 'Cloud update — click to sync',
     },
     // Canvas messages
     messages: {
@@ -2410,6 +2438,8 @@ const enUS = {
       cloudConflictCopy: 'Changes from another device detected; the cloud version is kept as a conflict copy',
       cloudMigrateProgress: 'Syncing local canvases to cloud ({n}/{m})',
       cloudMigrateDone: 'Local canvases synced to cloud',
+      remoteSynced: 'Cloud canvas update synced',
+      remoteSyncDeferred: 'Still saving locally; the cloud update will sync automatically shortly',
       cloudMigratePartial: '{n} canvas(es) failed to sync; retry later or export JSON as backup',
       cloudSaveFailed: 'Failed to save canvas to cloud',
       captureFrameDone: 'Frame captured',
@@ -3642,6 +3672,10 @@ const enUS = {
     opsJoiner: ', ',
     actGenImage: 'Generate image',
     actGenVideo: 'Generate video',
+    actCanvasListWorkspaces: 'List canvas workspaces',
+    actCanvasOverview: 'Read canvas overview',
+    actCanvasAddPanels: 'Add canvas nodes',
+    actCanvasConnect: 'Connect canvas nodes',
     actCompose: 'Compose final film',
     actReadImage: 'View image',
     actLoadSkill: 'Load skill',
