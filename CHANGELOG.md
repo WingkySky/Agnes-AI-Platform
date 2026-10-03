@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-10-03
+
 ### Docker 部署与自动化发版
 - **单镜像部署**：多阶段 Dockerfile（node 构建前端 → python:3.12-slim 同源托管前后端），`docker run -d -p 8080:8000 -v agnes-data:/app/data ...` 一条命令即可用；docker-compose.yml 提供单服务编排（含注释掉的可选 PostgreSQL 段落）；.dockerignore 严格隔离用户产物（uploads/data/logs/数据库/.env 一律不进镜像）
 - **数据卷收敛**：容器入口脚本把 uploads/logs/data 软链进单一数据卷 `/app/data`，后端代码路径零改动；JWT_SECRET/ENCRYPTION_KEY 首启自动生成并持久化到卷内 secrets.env（升级镜像登录态与已加密 Provider Key 不失效；环境变量注入优先）
@@ -11,6 +13,13 @@
 - **自动化发版**：`.github/workflows/release.yml`——tag 推送（v*）即触发 buildx 双架构（amd64+arm64）构建推 GHCR（vX.Y.Z + latest）+ 按 CHANGELOG 版本段落自动创建 GitHub Release；AGENTS.md 发版本流程补充说明；首次使用需把 GHCR 包可见性手动改为 public
 - **文档**：README（中英）快速开始改为 Docker 优先，源码启动降为无 Docker 备选；新增 `docs/deployment.md`（服务器反代 nginx/Caddy 示例含 SSE 关缓冲、数据备份、升级流程、PostgreSQL 可选段）
 - **测试**：新增 test_spa_static.py 6 例（根路径 HTML / 深链 fallback / dist 静态文件 / API 404 不被吞 / 路径穿越 / 无 dist 不注册），实施中逮到并修复 catch-all 吞 `/api` 未知路径的缺陷
+
+### 画布 config 节点退役 + @引用标签化 + 提及弹窗共用组件
+- **config 类型彻底删除**：用户动线已由快捷生成/就地生成完全替代，配置节点退役，数量/首尾帧/@编排三项独有能力下沉节点级——生成弹窗数量选择器 1-4（选择回写偏好记忆）、image2video 首尾帧开关 + video 节点双图自动 keyframes、@提及下沉到媒体节点 prompt
+- **@引用标签化**：引用从 `@[node:xxx]` token 改为节点级可读标签 `@图片1/@文本2`——`buildGenerationContext` 改以源节点为主体（媒体节点就地生成），引用解析基于节点自身 prompt，无标签走简单合并路径；新弹窗 ComposerMentionPopup 由 CanvasNode Composer 与 GenerationQuickPanel 共用，CanvasView 净减 330+ 行内联逻辑
+- **兼容过滤**：画布加载/hydrate/JSON 导入/版本还原/冲突副本 5 处 `stripLegacyConfigPanels` 过滤存量 config 节点
+- **连线规则与存量 bug**：脚本节点出边改为「脚本→图片/视频」（前后端 canvas_ops 同步）；顺带修 `findDerivedPanels` video 分支仍匹配 config 的存量幂等 bug（曾致批量派生视频重跑重复建节点）
+- **测试**：vitest 392 全绿、后端 160 绿（1 例存量失败无关）
 
 ### 画布云端落库 + 版本历史 + 冲突保护
 - **工作区云端落库**：新增 `canvas_workspaces`（前端 uid 直作主键，`data` JSON 存 panels/connections/groups/viewport/styleConfig，`revision` 乐观锁）与 `canvas_snapshots`（`auto`/`manual`/`pre_danger` 三类快照）两表；前端 canvas-storage 改双通道——登录态走云端 API（400ms 防抖 + 串行单飞保存队列，404 懒创建同 id 透传），anon 保持纯本地 localforage 零改动；画布全局小设置（激活工作区/背景模式/图片信息）进 `/api/preferences` ui 组新键；撤销历史维持内存 80 条不持久化
@@ -58,7 +67,6 @@
 - **取舍**：自动沉淀 v1 为提示词引导（Agent 自觉记），漏记率高时二期补自动提炼——提炼器写同一个库，架构不动
 
 ### MCP 市场：能力发现与一键安装（对齐插件市场心智）
-### MCP 市场：能力发现与一键安装（对齐插件市场心智）
 - **市场双来源**：官方内置目录（后端常量幂等 seed：本地文件系统/网页抓取/知识记忆库三个经典 MCP 服务器，标注所需运行环境）+ 管理员自建源（URL 指向 manifest JSON，对齐"添加插件市场"交互；仅 http(s)、超时 15s、≤2MB、≤100 条、整源替换）
 - **一键安装**：市场项预填 command/args/url 可编辑，按 `env_fields/headers_fields` 声明生成密钥输入框；安装即创建 `mcp_servers` 记录并写 `market_slug` 溯源列——市场列表标「已安装」，删除源不影响已安装服务器
 - **管理页市场标签**：`/admin/mcp` 改「已安装 | 市场」双标签——市场标签含源管理条（添加/刷新/删除，条目数展示）+ 分类分组卡片（传输 tag/工具数预览/emoji 图标/已安装标记）+ 安装弹窗
@@ -67,7 +75,6 @@
 - **测试**：后端 pytest 5 例（官方 seed 幂等/源刷新整源替换/manifest 校验拒绝/install 密钥合成与查重/非 http 源拒绝），前端 vitest 245 例全绿
 - **范围分期**：用户投稿与审核上架二期（复用预设广场审核管线）；全员市场页、源定时刷新不做
 
-### MCP 桥：Agent 外部工具生态（stdio / streamable HTTP 双传输）
 ### 工具步骤文案统一 i18n（工具标签注册表）
 - **单一注册表**：新增 `lib/agent/tool-labels.ts`——`toolStepLabel()` 统一「工具原始名 → 用户可读文案」，带参富文案（节点名/技能名/生成类型/操作计数）内聚 detail；画布面板 `stepAction` 与对话 store `toolLabel` 两套手写 switch 收敛删除，步骤行/确认卡/子任务进度行同源取词
 - **MCP 外部工具可读化**：`mcp__{serverId}__{tool}` 在步骤行与确认卡显示「外部工具 · {短名}」，完整名收进悬停提示；未注册工具兜底显示原始名
@@ -85,7 +92,6 @@
 - **文档**：API.md 新增第 13 章；技能编写指南更新"脚本边界"——管理员可配本地 MCP 服务器提供脚本类能力，`allowed-tools` 可列 `mcp__` 工具
 - **测试**：后端 pytest 11 例（脱敏/CRUD 语义/transport 校验/鉴权/连接缓存指纹），前端 vitest 240 例全绿（转译 6 例 + policy mcp 组 2 例）
 
-### 子代理（agent_delegate）：任务拆解 / 多视角评审 / 批量子流程
 ### 子代理（agent_delegate）：任务拆解 / 多视角评审 / 批量子流程
 - **agent_delegate 工具**（画布 write 组 + 对话工具组）：把可独立完成的子任务委派给子代理执行——长任务上下文隔离（过程细节不进主对话，父只收结论摘要）、多视角并行评审（不同角色视角各派一个）、批量子流程（逐分镜生成→自检→修正）；参数 task / context / tools_allowed（只能收窄）
 - **子运行时复用 AgentKernel**（`lib/agent/subagent.ts`）：子内核继承父的 LLM 通道/当前模型/鉴权/工具上下文；硬上限并发 ≤3（信号量排队）、子回合 ≤20、摘要 ≤4000 字符截断；禁递归（子工具清单剔除自身，tools_allowed 白名单亦禁止）
