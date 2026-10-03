@@ -13,6 +13,28 @@
     <h2 class="page-title">{{ t('view.videoTitle') }}</h2>
     <p class="page-desc">{{ t('view.videoDesc') }}</p>
 
+    <!-- 模型服务未配置引导：管理员可直达配置页 -->
+    <el-alert
+      v-if="modelsStore.loaded && modelsStore.videoModels.length === 0"
+      type="warning"
+      :closable="false"
+      class="no-models-alert"
+    >
+      <template #title>
+        <span>{{ t('models.noModelsHint') }}</span>
+        <el-button
+          v-if="userStore.isAdmin"
+          size="small"
+          type="primary"
+          link
+          class="no-models-link"
+          @click="router.push('/admin/models')"
+        >
+          {{ t('models.goConfigure') }}
+        </el-button>
+      </template>
+    </el-alert>
+
     <el-row :gutter="24">
       <!-- 左侧：参数 -->
       <el-col :xs="24" :md="11">
@@ -354,6 +376,7 @@ import { useModelsStore } from '@/stores/models'
 import { useUserStore } from '@/stores/user'
 import { usePreferencesStore } from '@/stores/preferences'
 import { useI18n } from '@/i18n'
+import { useRouter } from 'vue-router'
 import { useCreditEstimate } from '@/composables/useCreditEstimate'
 import { useDownload } from '@/composables/useDownload'
 import { useCopyText } from '@/composables/useCopyText'
@@ -363,6 +386,7 @@ import { matchVideoAspectRatio, autoMatchImageSize, AUTO_RATIO_VALUE } from '@/c
 import type { FileInfo } from '@/types'
 
 const { t } = useI18n()
+const router = useRouter()
 const userStore = useUserStore()
 const prefsStore = usePreferencesStore()
 const { downloadViaProxy } = useDownload()
@@ -821,6 +845,8 @@ function handleVideoError(e: Event) {
 .video-view { color: var(--agnes-text-primary); }
 .page-title { margin: 0 0 4px 0; }
 .page-desc { color: var(--agnes-text-muted); font-size: 14px; margin-bottom: 20px; line-height: 1.6; }
+.no-models-alert { margin-bottom: 20px; }
+.no-models-link { margin-left: 12px; }
 .card-header {
   display: flex;
   justify-content: space-between;

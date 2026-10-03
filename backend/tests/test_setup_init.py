@@ -1,8 +1,9 @@
 # =====================================================
 # 首启初始化测试
+#   - /api/setup/bootstrap：免登录查询 admin_exists / 创建首个管理员（无管理员 200、已有 409、用户名冲突 409、校验 422）
 #   - /api/setup/status：未登录 401 / 登录 200（provider_pending 仅管理员且无 Provider 时 true）
 #   - /api/setup/complete：未登录 401 / 普通用户 403 / admin 200，幂等
-#   - ensure 链路：空库灌入 / 重复执行幂等 / 官方卡刷新字段 / 积分规则不覆盖
+#   - ensure 链路：env 种子条件化 / 重复执行幂等 / 官方卡刷新字段 / 积分规则不覆盖
 # =====================================================
 
 import pytest
@@ -16,6 +17,7 @@ from app.main import app
 from app.models.credit_rule import DEFAULT_CREDIT_RULES, CreditRule
 from app.models.prompt_preset import PromptPreset
 from app.models.user import ROLE_ADMIN, User
+from app.seed import admin_config
 from app.seed.ensure import (
     ensure_default_admin,
     ensure_default_credit_rules,
@@ -60,14 +62,91 @@ async def _build_client(memory_db, user=None):
     app.dependency_overrides.clear()
 
 
-async def _seed_user(memory_db, username: str, role: str = "user", is_admin: bool = False,
-                     must_change_password: bool = False):
+async def _seed_user(memory_db, username: str, role: str = "user", is_admin: bool = False):
     user = User(username=username, email=f"{username}@example.com", password_hash="x",
-                role=role, is_admin=is_admin, credits=0, must_change_password=must_change_password)
+                role=role, is_admin=is_admin, credits=0)
     memory_db.add(user)
     await memory_db.commit()
     await memory_db.refresh(user)
     return user
+
+
+@pytest.fixture
+def _seed_creds(monkeypatch):
+    """种子凭据打桩：模拟部署者显式设置 ADMIN_USERNAME/ADMIN_PASSWORD"""
+    monkeypatch.setattr(admin_config, "seed_credentials", lambda: ("admin", "adm12345"))
+
+
+# ---------- /api/setup/bootstrap（免登录） ----------
+
+@pytest.mark.asyncio
+async def test_bootstrap_status_empty_db(memory_db):
+    async for client in _build_client(memory_db):
+        resp = await client.get("/api/setup/bootstrap")
+    assert resp.status_code == 200
+    assert resp.json()["data"]["admin_exists"] is False
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_status_with_admin(memory_db):
+    await _seed_user(memory_db, "root", role="admin", is_admin=True)
+    async for client in _build_client(memory_db):
+        resp = await client.get("/api/setup/bootstrap")
+    assert resp.status_code == 200
+    assert resp.json()["data"]["admin_exists"] is True
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_create_admin_and_token_works(memory_db):
+    async for client in _build_client(memory_db):
+        resp = await client.post("/api/setup/bootstrap", json={
+            "username": "root", "password": "secret123",
+        })
+    assert resp.status_code == 200
+    token = resp.json()["data"]["access_token"]
+    assert token
+
+    # 签发的 token 可直接通过鉴权且身份为管理员
+    async for client in _build_client(memory_db):
+        me = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me.status_code == 200
+    me_body = me.json()["data"]
+    assert me_body["username"] == "root"
+    assert me_body["is_admin"] is True
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_conflict_when_admin_exists(memory_db):
+    await _seed_user(memory_db, "root", role="admin", is_admin=True)
+    async for client in _build_client(memory_db):
+        resp = await client.post("/api/setup/bootstrap", json={
+            "username": "another", "password": "secret123",
+        })
+    assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_username_taken_by_normal_user(memory_db):
+    await _seed_user(memory_db, "taken")
+    async for client in _build_client(memory_db):
+        resp = await client.post("/api/setup/bootstrap", json={
+            "username": "taken", "password": "secret123",
+        })
+    assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_validation_400(memory_db):
+    """校验失败走全局 RequestValidationError 处理器（项目惯例返回 400 中文提示）"""
+    async for client in _build_client(memory_db):
+        short_pw = await client.post("/api/setup/bootstrap", json={
+            "username": "root", "password": "123",
+        })
+        bad_name = await client.post("/api/setup/bootstrap", json={
+            "username": "bad name!", "password": "secret123",
+        })
+    assert short_pw.status_code == 400
+    assert bad_name.status_code == 400
 
 
 # ---------- /api/setup/status ----------
@@ -98,15 +177,7 @@ async def test_status_normal_user_provider_pending_false(memory_db):
     body = resp.json()["data"]
     # 非管理员不探测 Provider 状态
     assert body["provider_pending"] is False
-    assert body["password_pending"] is False
-
-
-@pytest.mark.asyncio
-async def test_status_password_pending_flag(memory_db):
-    admin = await _seed_user(memory_db, "root", role="admin", is_admin=True, must_change_password=True)
-    async for client in _build_client(memory_db, admin):
-        resp = await client.get("/api/setup/status")
-    assert resp.json()["data"]["password_pending"] is True
+    assert body["setup_completed"] is False
 
 
 # ---------- /api/setup/complete ----------
@@ -141,18 +212,25 @@ async def test_complete_admin_200_and_idempotent(memory_db):
 # ---------- ensure 链路 ----------
 
 @pytest.mark.asyncio
-async def test_ensure_default_admin_creates_on_empty(memory_db):
+async def test_ensure_default_admin_creates_on_empty(memory_db, _seed_creds):
     await ensure_default_admin(memory_db)
     admin = (await memory_db.scalars(
         select(User).filter(User.username == "admin")
     )).first()
     assert admin is not None
     assert admin.is_admin is True
-    assert admin.must_change_password is True
 
 
 @pytest.mark.asyncio
-async def test_ensure_default_admin_skips_when_exists(memory_db):
+async def test_ensure_default_admin_skips_without_env(memory_db, monkeypatch):
+    """未显式设置 ADMIN_USERNAME/ADMIN_PASSWORD 时不种任何账号（首启走向导）"""
+    monkeypatch.setattr(admin_config, "seed_credentials", lambda: None)
+    await ensure_default_admin(memory_db)
+    assert (await memory_db.scalars(select(User))).first() is None
+
+
+@pytest.mark.asyncio
+async def test_ensure_default_admin_skips_when_exists(memory_db, _seed_creds):
     await _seed_user(memory_db, "existing_admin", role="admin", is_admin=True)
     await ensure_default_admin(memory_db)
     admins = (await memory_db.scalars(

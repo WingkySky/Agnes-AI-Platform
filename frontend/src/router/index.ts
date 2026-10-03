@@ -21,12 +21,12 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/HomeView.vue'),
     meta: { titleKey: 'router.home', requiresAuth: false }
   },
-  // 首启初始化向导 — 强制全屏，完成/跳过前拦截其他页面（见守卫）
+  // 首启初始化向导 — 强制全屏：实例无管理员时免登录创建（见守卫），有管理员时登录态下完成 Provider 配置
   {
     path: '/setup',
     name: 'setup',
     component: () => import('@/views/SetupView.vue'),
-    meta: { titleKey: 'router.setup', requiresAuth: true }
+    meta: { titleKey: 'router.setup', requiresAuth: false }
   },
   // 登录 / 注册页 — 未登录时可达，已登录访问则直接跳转到业务页
   {
@@ -243,6 +243,15 @@ router.beforeEach(async (to, _from, next) => {
     return next('/images')
   }
 
+  // 首启引导拦截（未登录态）：实例尚无管理员时所有页面强制送入向导创建管理员，
+  // 置于 requiresAuth 跳转之前，避免新实例闪现登录页
+  const setupStore = useSetupStore()
+  if (!userStore.isAuthenticated && to.name !== 'setup') {
+    if (await setupStore.isBootstrapPending()) {
+      return next({ name: 'setup' })
+    }
+  }
+
   // 需要登录但未登录 — 跳转到登录页，带上 redirect
   if (requiresAuth && !userStore.isAuthenticated) {
     const query = to.fullPath !== '/login' && to.fullPath !== '/'
@@ -252,9 +261,8 @@ router.beforeEach(async (to, _from, next) => {
   }
 
   // 首启初始化向导拦截（登录态下判定）：
-  //   - 有待办（待改密 / 管理员待配 Provider 且未完成向导）→ 强制跳 /setup
+  //   - 有待办（管理员待配 Provider 且未完成向导）→ 强制跳 /setup
   //   - 已无待办却直接访问 /setup → 送回业务页
-  const setupStore = useSetupStore()
   if (userStore.isAuthenticated && to.name !== 'setup') {
     if (await setupStore.shouldIntercept()) {
       return next({ name: 'setup' })

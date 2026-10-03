@@ -11,6 +11,28 @@
     <h2 class="page-title">{{ t('view.imageTitle') }}</h2>
     <p class="page-desc">{{ t('view.imageDesc') }}</p>
 
+    <!-- 模型服务未配置引导：管理员可直达配置页 -->
+    <el-alert
+      v-if="modelsStore.loaded && modelsStore.imageModels.length === 0"
+      type="warning"
+      :closable="false"
+      class="no-models-alert"
+    >
+      <template #title>
+        <span>{{ t('models.noModelsHint') }}</span>
+        <el-button
+          v-if="userStore.isAdmin"
+          size="small"
+          type="primary"
+          link
+          class="no-models-link"
+          @click="router.push('/admin/models')"
+        >
+          {{ t('models.goConfigure') }}
+        </el-button>
+      </template>
+    </el-alert>
+
     <el-row :gutter="24">
       <!-- 左侧：参数区 -->
       <el-col :xs="24" :md="11">
@@ -342,6 +364,7 @@ import { usePromptLength } from '@/composables/usePromptLength'
 import type { PromptPreset } from '@/types/preset'
 import { useAsset } from '@/api/pipeline'
 import { useI18n } from '@/i18n'
+import { useRouter } from 'vue-router'
 import { useCreditEstimate } from '@/composables/useCreditEstimate'
 import { useDownload } from '@/composables/useDownload'
 import { matchImageSize, matchSizeByRatio, getImageSizeLabel, autoMatchImageSize, AUTO_RATIO_VALUE } from '@/config/model-params'
@@ -350,6 +373,7 @@ import type { FileInfo } from '@/types'
 import type { Scene3D, SceneData } from '@/types/scene'
 
 const { t } = useI18n()
+const router = useRouter()
 const { copyText } = useCopyText()
 const userStore = useUserStore()
 const prefsStore = usePreferencesStore()
@@ -718,6 +742,8 @@ async function copyImageUrl() {
 .image-view { color: var(--agnes-text-primary); }
 .page-title { margin: 0 0 4px 0; }
 .page-desc { color: var(--agnes-text-muted); font-size: 14px; margin-bottom: 20px; line-height: 1.6; }
+.no-models-alert { margin-bottom: 20px; }
+.no-models-link { margin-left: 12px; }
 .card-header {
   display: flex;
   justify-content: space-between;

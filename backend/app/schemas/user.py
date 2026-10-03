@@ -102,8 +102,6 @@ class TokenResponse(BaseModel):
     access_token: str = Field(..., description="JWT access token（前端需存入 localStorage，并以 Authorization: Bearer <token> 发送）")
     token_type: str = Field(default="bearer", description="token 类型，固定为 bearer")
     expires_in: int = Field(..., description="token 有效期（秒）")
-    # 是否需要在登录后强制修改密码（默认管理员账号、首位注册管理员为 True）
-    must_change_password: bool = Field(default=False, description="是否需要强制修改密码")
 
 
 class UserInfoResponse(BaseModel):
@@ -119,7 +117,6 @@ class UserInfoResponse(BaseModel):
     is_admin: bool      # 向后兼容：等价于 role == 'admin'
     watermark_enabled: bool = False
     content_safety_strict: bool = False
-    must_change_password: bool = False
     created_at: Optional[datetime] = None
     last_login_at: Optional[datetime] = None
 

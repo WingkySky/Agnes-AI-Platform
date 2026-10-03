@@ -1,7 +1,8 @@
 <!-- =====================================================
   首启初始化向导（强制全屏）
-  步骤按待办动态生成：改默认密码（不可跳过）→ 配 AI Provider（管理员可跳过）→ 完成
-  由路由守卫在有待办时强制送入；全部待办处理完才能进入业务页
+  步骤按待办动态生成：实例无管理员时免登录创建管理员（守卫保证未登录
+  到此页即无管理员）→ 配模型服务（建 Provider 后自动拉取模型列表，
+  失败可重试、可跳过）→ 完成。全部待办处理完才能进入业务页
 ====================================================== -->
 
 <script setup lang="ts">
@@ -11,29 +12,27 @@ import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { useI18n } from '@/i18n'
 import { useUserStore } from '@/stores/user'
 import { useSetupStore } from '@/stores/setup'
-import { changePassword } from '@/api/auth'
-import { createProvider } from '@/api/providers'
+import { createProvider, syncProviderModels, listAllModels } from '@/api/providers'
 
 const router = useRouter()
 const { t } = useI18n()
 const userStore = useUserStore()
 const setupStore = useSetupStore()
 
-type StepKey = 'password' | 'provider' | 'done'
+type StepKey = 'account' | 'provider' | 'done'
 
-/** el-steps 标签文案（step_password 键名会触发安全门禁"硬编码凭据"误报，故用 step_pw） */
+/** 步骤标签文案（i18n 键名避免 password 字样，规避安全门禁"硬编码凭据"误报） */
 const STEP_LABEL_KEYS: Record<StepKey, string> = {
-  password: 'setup.step_pw',
-  provider: 'setup.step_provider',
-  done: 'setup.step_done',
+  account: 'setup.stepAccount',
+  provider: 'setup.stepProvider',
+  done: 'setup.stepDone',
 }
 
-/** 待办决定步骤序列；done 恒在末尾 */
+/** 待办决定步骤序列：未登录（=实例无管理员）先创建账号；done 恒在末尾 */
 const steps = computed<StepKey[]>(() => {
-  const s = setupStore.status
   const list: StepKey[] = []
-  if (s?.password_pending) list.push('password')
-  if (s?.provider_pending) list.push('provider')
+  if (!userStore.isAuthenticated) list.push('account')
+  if (setupStore.status?.provider_pending) list.push('provider')
   list.push('done')
   return list
 })
@@ -46,22 +45,26 @@ function nextStep() {
   activeIndex.value = Math.min(activeIndex.value + 1, steps.value.length - 1)
 }
 
-// ---------- 第一步：修改默认密码 ----------
-const pwFormRef = ref<FormInstance>()
-const pwSubmitting = ref(false)
-const pwForm = reactive({ old_password: '', new_password: '', confirm: '' })
+// ---------- 第一步：创建管理员（免登录） ----------
+const accFormRef = ref<FormInstance>()
+const accSubmitting = ref(false)
+const accForm = reactive({ username: '', password: '', confirm: '' })
 
-const pwRules: FormRules = {
-  old_password: [{ required: true, message: () => t('setup.pwOldRequired'), trigger: 'blur' }],
-  new_password: [
-    { required: true, message: () => t('setup.pwNewRequired'), trigger: 'blur' },
-    { min: 6, max: 64, message: () => t('setup.pwLength'), trigger: 'blur' },
+const accRules: FormRules = {
+  username: [
+    { required: true, message: () => t('setup.accUsernameRequired'), trigger: 'blur' },
+    { min: 3, max: 32, message: () => t('setup.accUsernameRule'), trigger: 'blur' },
+    { pattern: /^[\w\u4e00-\u9fa5]+$/, message: () => t('setup.accUsernameRule'), trigger: 'blur' },
+  ],
+  password: [
+    { required: true, message: () => t('setup.accPwRequired'), trigger: 'blur' },
+    { min: 6, max: 64, message: () => t('setup.accPwLength'), trigger: 'blur' },
   ],
   confirm: [
-    { required: true, message: () => t('setup.pwConfirmRequired'), trigger: 'blur' },
+    { required: true, message: () => t('setup.accPwConfirmRequired'), trigger: 'blur' },
     {
       validator: (_rule, value: string, callback) => {
-        if (value !== pwForm.new_password) callback(new Error(t('setup.pwMismatch')))
+        if (value !== accForm.password) callback(new Error(t('setup.accPwMismatch')))
         else callback()
       },
       trigger: 'blur',
@@ -69,60 +72,128 @@ const pwRules: FormRules = {
   ],
 }
 
-async function submitPassword() {
-  await pwFormRef.value?.validate()
-  pwSubmitting.value = true
+async function submitAccount() {
+  await accFormRef.value?.validate()
+  accSubmitting.value = true
   try {
-    await changePassword({ old_password: pwForm.old_password, new_password: pwForm.new_password })
-    setupStore.markPasswordChanged()
-    await userStore.fetchMe()
-    ElMessage.success(t('setup.pwChanged'))
-    nextStep()
+    await userStore.bootstrapLogin({ username: accForm.username, password: accForm.password })
+    // 创建成功即有登录态，重新拉取向导待办并落到下一步（原 account 步骤从序列中消失）
+    await setupStore.fetchStatus(true)
+    activeIndex.value = 0
+    ElMessage.success(t('setup.accCreated'))
   } finally {
-    pwSubmitting.value = false
+    accSubmitting.value = false
   }
 }
 
-// ---------- 第二步：配置 AI Provider ----------
+// ---------- 第二步：配置模型服务 ----------
+type PresetKey = 'agnes' | 'openai'
+const AGNES_BASE_URL = 'https://apihub.agnes-ai.com/v1'
+
+const preset = ref<PresetKey>('agnes')
 const providerFormRef = ref<FormInstance>()
 const providerSubmitting = ref(false)
 const providerForm = reactive({
   name: 'Agnes AI',
-  base_url: 'https://apihub.agnes-ai.com/v1',
+  base_url: AGNES_BASE_URL,
   api_key: '',
 })
 
-const providerRules: FormRules = {
-  name: [{ required: true, message: () => t('setup.providerNameRequired'), trigger: 'blur' }],
-  base_url: [{ required: true, message: () => t('setup.providerBaseUrlRequired'), trigger: 'blur' }],
-  api_key: [{ required: true, message: () => t('setup.providerApiKeyRequired'), trigger: 'blur' }],
+function switchPreset(value: PresetKey) {
+  preset.value = value
+  if (value === 'agnes') {
+    providerForm.name = 'Agnes AI'
+    providerForm.base_url = AGNES_BASE_URL
+  } else {
+    providerForm.name = t('setup.presetOpenai')
+    providerForm.base_url = ''
+  }
 }
+
+const providerRules = computed<FormRules>(() => ({
+  name: [{ required: true, message: () => t('setup.providerNameRequired'), trigger: 'blur' }],
+  base_url: preset.value === 'openai'
+    ? [{ required: true, message: () => t('setup.providerBaseUrlRequired'), trigger: 'blur' }]
+    : [],
+  api_key: [{ required: true, message: () => t('setup.providerApiKeyRequired'), trigger: 'blur' }],
+}))
+
+/** 同步状态：idle=未提交；syncing=拉取中；success=成功（已自动进入完成页）；failed=失败可重试 */
+const syncState = ref<'idle' | 'syncing' | 'success' | 'failed'>('idle')
+const createdProviderId = ref<number | null>(null)
+const syncSummary = reactive({ total: 0, image: 0, video: 0, chat: 0 })
+const syncError = ref('')
 
 async function submitProvider() {
   await providerFormRef.value?.validate()
   providerSubmitting.value = true
+  syncState.value = 'syncing'
   try {
-    await createProvider({ ...providerForm, is_active: true, is_default: true })
-    setupStore.markProviderConfigured()
-    ElMessage.success(t('setup.providerCreated'))
-    nextStep()
+    if (createdProviderId.value === null) {
+      const provider = await createProvider({
+        name: providerForm.name,
+        provider_type: preset.value,
+        base_url: providerForm.base_url,
+        api_key: providerForm.api_key,
+        is_active: true,
+        is_default: true,
+      })
+      createdProviderId.value = provider.id
+    }
+    await syncModels(createdProviderId.value)
+  } catch (e) {
+    // createProvider 失败（校验不通过等）：拦截器已 toast，回 idle 供修改重提
+    if (createdProviderId.value === null) syncState.value = 'idle'
+    else {
+      syncState.value = 'failed'
+      syncError.value = e instanceof Error ? e.message : String(e)
+    }
   } finally {
     providerSubmitting.value = false
   }
 }
 
-/** 跳过配置 Provider（知情选择：生成功能在配置前不可用） */
+async function syncModels(providerId: number) {
+  syncError.value = ''
+  await syncProviderModels(providerId)
+  const models = (await listAllModels()).items.filter((m) => m.provider_id === providerId)
+  syncSummary.total = models.length
+  syncSummary.image = models.filter((m) => m.type === 'image').length
+  syncSummary.video = models.filter((m) => m.type === 'video').length
+  syncSummary.chat = models.filter((m) => m.type === 'chat').length
+  syncState.value = 'success'
+  // 置 provider_pending=false 后步骤序列自动收敛到完成页
+  setupStore.markProviderConfigured()
+}
+
+/** 同步失败后重试（Provider 已创建成功，仅重拉模型列表） */
+async function retrySync() {
+  if (createdProviderId.value === null) return
+  providerSubmitting.value = true
+  try {
+    await syncModels(createdProviderId.value)
+  } catch (e) {
+    syncState.value = 'failed'
+    syncError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    providerSubmitting.value = false
+  }
+}
+
+/** 跳过配置（知情选择：生成功能在配置前不可用，完成页与生成页空态会继续指引） */
 function skipProvider() {
   nextStep()
 }
 
 // ---------- 第三步：完成 ----------
 const finishing = ref(false)
+/** 跳过/失败时 provider_pending 仍为 true，完成页给出明确警示 */
+const providerMissing = computed(() => !!setupStore.status?.provider_pending)
 
 async function finish() {
   finishing.value = true
   try {
-    // 实例级完成标记仅管理员可写；普通用户（仅改密场景）直接进入
+    // 实例级完成标记仅管理员可写；本向导产生的用户均为管理员
     if (userStore.isAdmin) {
       await setupStore.complete()
     }
@@ -150,40 +221,40 @@ async function finish() {
         />
       </el-steps>
 
-      <!-- 步骤一：修改默认密码 -->
-      <section v-if="currentStep === 'password'" class="step-body">
-        <h2>{{ t('setup.pwTitle') }}</h2>
-        <p class="step-desc">{{ t('setup.pwDesc') }}</p>
+      <!-- 步骤一：创建管理员（免登录） -->
+      <section v-if="currentStep === 'account'" class="step-body">
+        <h2>{{ t('setup.accTitle') }}</h2>
+        <p class="step-desc">{{ t('setup.accDesc') }}</p>
         <el-form
-          ref="pwFormRef"
-          :model="pwForm"
-          :rules="pwRules"
+          ref="accFormRef"
+          :model="accForm"
+          :rules="accRules"
           label-position="top"
           class="step-form"
           @submit.prevent
         >
-          <el-form-item :label="t('setup.pwOld')" prop="old_password">
-            <el-input v-model="pwForm.old_password" type="password" show-password />
+          <el-form-item :label="t('setup.accUsername')" prop="username">
+            <el-input v-model="accForm.username" :placeholder="t('setup.accUsernameRequired')" />
           </el-form-item>
-          <el-form-item :label="t('setup.pwNew')" prop="new_password">
-            <el-input v-model="pwForm.new_password" type="password" show-password />
+          <el-form-item :label="t('setup.accPw')" prop="password">
+            <el-input v-model="accForm.password" type="password" show-password />
           </el-form-item>
-          <el-form-item :label="t('setup.pwConfirm')" prop="confirm">
-            <el-input v-model="pwForm.confirm" type="password" show-password />
+          <el-form-item :label="t('setup.accPwConfirm')" prop="confirm">
+            <el-input v-model="accForm.confirm" type="password" show-password />
           </el-form-item>
           <el-button
             type="primary"
             size="large"
             class="step-action"
-            :loading="pwSubmitting"
-            @click="submitPassword"
+            :loading="accSubmitting"
+            @click="submitAccount"
           >
-            {{ t('setup.pwSubmit') }}
+            {{ t('setup.accSubmit') }}
           </el-button>
         </el-form>
       </section>
 
-      <!-- 步骤二：配置 AI Provider -->
+      <!-- 步骤二：配置模型服务 -->
       <section v-else-if="currentStep === 'provider'" class="step-body">
         <h2>{{ t('setup.providerTitle') }}</h2>
         <p class="step-desc">{{ t('setup.providerDesc') }}</p>
@@ -195,25 +266,50 @@ async function finish() {
           class="step-form"
           @submit.prevent
         >
+          <el-form-item :label="t('setup.providerPreset')">
+            <div class="preset-row">
+              <div
+                v-for="p in (['agnes', 'openai'] as PresetKey[])"
+                :key="p"
+                class="preset-card"
+                :class="{ active: preset === p }"
+                @click="switchPreset(p)"
+              >
+                <div class="preset-name">{{ t(p === 'agnes' ? 'setup.presetAgnes' : 'setup.presetOpenai') }}</div>
+                <div class="preset-desc">{{ t(p === 'agnes' ? 'setup.presetAgnesDesc' : 'setup.presetOpenaiDesc') }}</div>
+              </div>
+            </div>
+          </el-form-item>
           <el-form-item :label="t('setup.providerName')" prop="name">
             <el-input v-model="providerForm.name" />
           </el-form-item>
-          <el-form-item :label="t('setup.providerBaseUrl')" prop="base_url">
-            <el-input v-model="providerForm.base_url" />
+          <el-form-item v-if="preset === 'openai'" :label="t('setup.providerBaseUrl')" prop="base_url">
+            <el-input v-model="providerForm.base_url" placeholder="https://..." />
           </el-form-item>
           <el-form-item :label="t('setup.providerApiKey')" prop="api_key">
             <el-input v-model="providerForm.api_key" type="password" show-password placeholder="sk-..." />
           </el-form-item>
           <p class="step-hint">{{ t('setup.providerHint') }}</p>
+
+          <el-alert
+            v-if="syncState === 'failed'"
+            type="error"
+            :title="t('setup.syncFailed', { error: syncError })"
+            :closable="false"
+            class="sync-alert"
+          />
+
           <div class="step-actions">
-            <el-button size="large" @click="skipProvider">{{ t('setup.providerSkip') }}</el-button>
+            <el-button size="large" :disabled="providerSubmitting" @click="skipProvider">
+              {{ t('setup.providerSkip') }}
+            </el-button>
             <el-button
               type="primary"
               size="large"
               :loading="providerSubmitting"
-              @click="submitProvider"
+              @click="syncState === 'failed' ? retrySync() : submitProvider()"
             >
-              {{ t('setup.providerSubmit') }}
+              {{ syncState === 'failed' ? t('setup.syncRetry') : t('setup.providerSubmit') }}
             </el-button>
           </div>
         </el-form>
@@ -222,7 +318,14 @@ async function finish() {
       <!-- 步骤三：完成 -->
       <section v-else class="step-body step-done">
         <h2>{{ t('setup.doneTitle') }}</h2>
-        <p class="step-desc">{{ t('setup.doneDesc') }}</p>
+        <el-alert
+          v-if="syncState === 'success'"
+          type="success"
+          :title="t('setup.syncSuccess', syncSummary)"
+          :closable="false"
+          class="sync-alert"
+        />
+        <p class="step-desc">{{ providerMissing ? t('setup.doneWarnDesc') : t('setup.doneDesc') }}</p>
         <el-button type="primary" size="large" class="step-action" :loading="finishing" @click="finish">
           {{ t('setup.doneAction') }}
         </el-button>
@@ -303,6 +406,42 @@ async function finish() {
   font-size: 12px;
   line-height: 1.6;
   margin: 0 0 12px;
+}
+
+.preset-row {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+}
+
+.preset-card {
+  flex: 1;
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+.preset-card.active {
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
+
+.preset-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.preset-desc {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-top: 4px;
+  line-height: 1.5;
+}
+
+.sync-alert {
+  margin-bottom: 12px;
 }
 
 .step-done {

@@ -1,16 +1,21 @@
 # =====================================================
 # 默认超管环境变量配置读取（与 ensure 逻辑隔离，便于测试打桩）
+#
+# 种子语义：仅当 ADMIN_USERNAME 与 ADMIN_PASSWORD 同时显式设置时才
+# 种子默认超管（自动化部署场景）；未设置时不种任何账号，由首启
+# 向导引导用户免登录创建管理员（见 routes/setup.py /bootstrap）。
 # =====================================================
 
 import os
 
 
-def admin_username() -> str:
-    return os.environ.get("ADMIN_USERNAME", "admin").strip()
-
-
-def admin_password() -> str:
-    return os.environ.get("ADMIN_PASSWORD", "admin123").strip()
+def seed_credentials() -> tuple[str, str] | None:
+    """ADMIN_USERNAME + ADMIN_PASSWORD 同时显式设置时返回 (用户名, 密码)，否则 None"""
+    username = os.environ.get("ADMIN_USERNAME", "").strip()
+    password = os.environ.get("ADMIN_PASSWORD", "").strip()
+    if not username or not password:
+        return None
+    return username, password
 
 
 def admin_email() -> str | None:

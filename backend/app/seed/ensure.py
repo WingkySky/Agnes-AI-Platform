@@ -45,21 +45,26 @@ SEED_ASSETS_PREFIX = "/seed-assets"
 # 1. 默认超级管理员
 # =====================================================
 async def ensure_default_admin(db: AsyncSession) -> None:
-    """无超级管理员时创建默认超管（用户名/密码/邮箱可用 ADMIN_* 环境变量覆盖）"""
+    """仅当 ADMIN_USERNAME/ADMIN_PASSWORD 同时显式设置时创建默认超管（自动化部署场景）；
+    未设置时不种任何账号，由首启向导引导免登录创建管理员"""
+    creds = admin_config.seed_credentials()
+    if creds is None:
+        logger.info("未设置 ADMIN_USERNAME/ADMIN_PASSWORD，跳过默认超管种子（请通过首启向导创建管理员）")
+        return
+
     existing_admin = (await db.scalars(select(User).filter(User.role == ROLE_ADMIN).limit(1))).first()
     if existing_admin:
         return
 
+    username, password = creds
     admin = User(
-        username=admin_config.admin_username(),
+        username=username,
         email=admin_config.admin_email(),
-        password_hash=hash_password(admin_config.admin_password()),
+        password_hash=hash_password(password),
         credits=admin_config.admin_credits(),
         role=ROLE_ADMIN,
         is_admin=True,
         is_active=True,
-        # 默认管理员使用弱密码，首次登录强制修改
-        must_change_password=True,
     )
     db.add(admin)
     try:

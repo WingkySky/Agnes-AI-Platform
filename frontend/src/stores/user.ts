@@ -17,6 +17,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { login as apiLogin, register as apiRegister, getMe, getCredits, updateMyProfile, uploadAvatar, getCaptcha } from '@/api/auth'
+import { bootstrapAdmin as apiBootstrapAdmin } from '@/api/setup'
 import { usePreferencesStore } from '@/stores/preferences'
 import { usePermissionStore } from '@/stores/permission'
 import { useSetupStore } from '@/stores/setup'
@@ -162,6 +163,24 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
+  /** 首启引导：创建首个管理员并直接登录（免登录向导第一步） */
+  async function bootstrapLogin(payload: { username: string; password: string }) {
+    loading.value = true
+    try {
+      const data = await apiBootstrapAdmin(payload)
+      if (!data?.access_token) {
+        throw new Error('初始化失败：服务端未返回有效 token')
+      }
+      token.value = data.access_token
+      localStorage.setItem(TOKEN_STORAGE_KEY, data.access_token)
+      await fetchMe()
+      usePreferencesStore().fetchPreferences()
+      return user.value
+    } finally {
+      loading.value = false
+    }
+  }
+
   /** 登出：清空本地状态 + JWT，并跳转至登录页 */
   function logout(showMessage: boolean = true) {
     const wasLoggedIn = isAuthenticated.value
@@ -221,6 +240,7 @@ export const useUserStore = defineStore('user', () => {
     uploadUserAvatar,
     login,
     register,
+    bootstrapLogin,
     logout,
     clearAll,
   }

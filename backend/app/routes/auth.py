@@ -180,8 +180,6 @@ async def reset_password(req: ResetPasswordRequest, db: AsyncSession = Depends(g
 
     # 更新密码
     user.password_hash = hash_password(req.new_password)
-    # 通过邮箱验证码重置密码视为用户主动行为，清除强制改密标记
-    user.must_change_password = False
     await db.commit()
 
     logger.info("[重置密码] 成功 user=%s id=%d", user.username, user.id)
@@ -254,8 +252,6 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_async_db
     if total_users == 0:
         user.role = ROLE_ADMIN
         user.is_admin = True
-        # 首位注册管理员同样需要强制修改密码（避免长期使用注册时的弱密码）
-        user.must_change_password = True
         logger.info("[首个用户] 第一个注册用户自动提升为超级管理员")
 
     # 保持 role / is_admin 一致
@@ -272,7 +268,6 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_async_db
         access_token=token,
         token_type="bearer",
         expires_in=settings.jwt_access_token_expire_minutes * 60,
-        must_change_password=bool(user.must_change_password),
     ))
 
 
@@ -326,7 +321,6 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_async_db)):
         access_token=token,
         token_type="bearer",
         expires_in=settings.jwt_access_token_expire_minutes * 60,
-        must_change_password=bool(user.must_change_password),
     ))
 
 
@@ -354,7 +348,6 @@ async def get_me(current_user: User = Depends(get_current_user)):
         is_admin=is_admin,
         watermark_enabled=current_user.watermark_enabled or False,
         content_safety_strict=current_user.content_safety_strict or False,
-        must_change_password=bool(current_user.must_change_password),
         created_at=current_user.created_at,
         last_login_at=current_user.last_login_at,
     ))
@@ -374,8 +367,6 @@ async def change_password(
     修改当前登录用户的密码：
     - 需要提供当前密码（old_password）验证身份
     - 新密码不能与旧密码相同
-    - 修改成功后清除 must_change_password 标记
-    - 前端在收到登录响应的 must_change_password=true 时应引导用户来此接口修改
     """
     # 验证旧密码
     if not verify_password(req.old_password, current_user.password_hash):
@@ -385,9 +376,8 @@ async def change_password(
     if req.old_password == req.new_password:
         raise HTTPException(status_code=400, detail="新密码不能与当前密码相同")
 
-    # 更新密码哈希并清除强制改密标记
+    # 更新密码哈希
     current_user.password_hash = hash_password(req.new_password)
-    current_user.must_change_password = False
     await db.commit()
 
     logger.info("[修改密码] 成功 user=%s id=%d", current_user.username, current_user.id)

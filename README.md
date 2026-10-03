@@ -80,7 +80,7 @@ Download the zip for your platform from [Releases](https://github.com/WingkySky/
 - One-time prompts for unsigned apps are expected: on Windows click "More info → Run anyway" at SmartScreen; on macOS run `xattr -cr <extracted-folder>` in Terminal first (Apple Silicon only — Intel Macs should use Docker or run from source)
 - All data lives inside the extracted folder (backup = copy the folder); to upgrade, download the new package and copy your old `backend/` folder over it
 
-Then open http://localhost:8080 and follow the first-run wizard (admin password + AI provider) — that's it.
+Then open http://localhost:8080 and follow the first-run wizard — that's it.
 
 - All data (database / uploads / logs / auto-generated secrets) lives in the `agnes-data` volume. Upgrading = pull the new image and recreate the container, nothing is lost.
 - For public server deployment (reverse proxy / HTTPS / backups), see [docs/deployment.md](docs/deployment.md).
@@ -109,11 +109,9 @@ python start.py
 
 This automatically starts both the backend and frontend in one command. On first run it will create `.env` from the example (auto-generating random `JWT_SECRET` / `ENCRYPTION_KEY` if missing), initialize the database with all official seed data, and open the browser.
 
-> **Default Admin Account**: The backend auto-initializes on startup (tables + seeds) and creates a super admin:
-> - Username: `admin`
-> - Password: `admin123`
+> **First-Run Wizard**: No default account exists. The first time you open the app you'll be guided to create your own admin account (pick your username and password) and connect an AI model service — generation works as soon as that's done. You can complete the same setup later from Admin → Model Config if you skip it.
 >
-> You can customize these via environment variables `ADMIN_USERNAME` / `ADMIN_PASSWORD` / `ADMIN_EMAIL` / `ADMIN_CREDITS` before first run. On first login a mandatory setup wizard walks you through changing the default password and (optionally) adding an AI provider.
+> **Automated deployments**: set both `ADMIN_USERNAME` and `ADMIN_PASSWORD` before first start to pre-provision the admin instead (optional `ADMIN_EMAIL` / `ADMIN_CREDITS`). When these are set, the account-creation step is skipped.
 
 ### 3. Manual Start
 

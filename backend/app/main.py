@@ -152,7 +152,7 @@ async def lifespan(app: FastAPI):
         await ensure_default_configs(db)
     logger.info("✓ 系统配置已初始化")
 
-    # 首启初始化：默认超管 / 积分规则 / 流水线内置种子 / 官方预设卡（全部幂等）
+    # 首启初始化：超管（仅 ADMIN_USERNAME+ADMIN_PASSWORD 显式设置时种子）/ 积分规则 / 流水线内置种子 / 官方预设卡（全部幂等）
     # 注意 ensure_official_presets 依赖 StylePreset 内置行，必须在 ensure_pipeline_seed 之后
     async with async_session() as db:
         await ensure_default_admin(db)

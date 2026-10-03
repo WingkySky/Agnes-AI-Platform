@@ -789,16 +789,24 @@ export interface UserInfoResponse {
   is_admin: boolean
   watermark_enabled: boolean
   content_safety_strict: boolean
-  /** 首登强制改密标记（默认超管 admin 首次登录为 true） */
-  must_change_password?: boolean
   created_at?: string | null
   last_login_at?: string | null
 }
 
+/** 首启引导状态（GET /api/setup/bootstrap，免登录） */
+export interface SetupBootstrapStatus {
+  /** 实例是否已存在管理员；false 时所有路由强制引导至首启向导创建管理员 */
+  admin_exists: boolean
+}
+
+/** 首启创建首个管理员请求体（POST /api/setup/bootstrap） */
+export interface SetupBootstrapRequest {
+  username: string
+  password: string
+}
+
 /** 首启初始化状态（GET /api/setup/status） */
 export interface SetupStatus {
-  /** 当前用户需要修改默认密码 */
-  password_pending: boolean
   /** 当前用户是管理员且实例未配置任何 AI Provider */
   provider_pending: boolean
   /** 实例级标记：管理员已完成首启向导 */

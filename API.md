@@ -780,14 +780,16 @@ manifest 格式：`{ "name": "...", "items": [{ "slug", "name", "description", "
 
 ## 15. 首启初始化
 
-数据库建表、默认超管、积分规则、内置角色/敏感词/系统配置、流水线内置模板与官方预设卡（含随仓库分发的封面静态资源 `/seed-assets/*`）均由后端 lifespan 启动时自动幂等灌入，无手动初始化脚本。前端在有待办时由路由守卫强制进入 `/setup` 向导。
+数据库建表、积分规则、内置角色/敏感词/系统配置、流水线内置模板与官方预设卡（含随仓库分发的封面静态资源 `/seed-assets/*`）均由后端 lifespan 启动时自动幂等灌入，无手动初始化脚本。默认超管仅当 `ADMIN_USERNAME` + `ADMIN_PASSWORD` 同时显式设置时种子（自动化部署）；否则不种任何账号，由首启向导引导免登录创建。
 
 | 方法 | 路径 | 鉴权 | 说明 |
 |---|---|---|---|
-| GET | `/api/setup/status` | 登录用户 | 返回 `{ password_pending, provider_pending, setup_completed }`。`password_pending` 为当前用户 `must_change_password`（默认超管首登为 true）；`provider_pending` 仅在当前用户是管理员且实例未配置任何 Provider 时为 true（非管理员恒 false，不泄露配置状态）；`setup_completed` 为实例级标记（`system_config` 的 `setup.completed`） |
+| GET | `/api/setup/bootstrap` | 免登录 | 返回 `{ admin_exists }`。实例无管理员时前端将所有路由强制引导至 `/setup` 向导创建管理员 |
+| POST | `/api/setup/bootstrap` | 免登录（仅实例管理员数为 0 时可用，否则 409） | 创建首个管理员，body `{ username, password }`（用户名 3~32 位字母/数字/下划线/中文，密码 6~64；校验失败按全局惯例返回 400）。用户名冲突 409。成功签发 JWT（`TokenResponse`），前端免登录进入向导下一步。此窗口同时是管理员被全删后的恢复路径 |
+| GET | `/api/setup/status` | 登录用户 | 返回 `{ provider_pending, setup_completed }`。`provider_pending` 仅在当前用户是管理员且实例未配置任何 Provider 时为 true（非管理员恒 false，不泄露配置状态）；`setup_completed` 为实例级标记（`system_config` 的 `setup.completed`） |
 | POST | `/api/setup/complete` | 仅管理员（401/403/200 三态） | 写入实例级完成标记，幂等。前端向导走完（Provider 步可跳过）后调用，之后不再拦截 |
 
-前端拦截条件：`password_pending || (provider_pending && !setup_completed)`；改密走既有 `POST /api/auth/change-password`（成功后清除 `must_change_password`）。
+前端拦截条件：未登录且 `admin_exists=false` → 强制 `/setup` 创建管理员；登录态 `provider_pending && !setup_completed` → 强制 `/setup` 配置 Provider。向导 Provider 步提交后自动调用 `POST /api/providers/{id}/sync-models` 拉取模型列表（失败可重试/跳过）；跳过或失败时完成页警示且生成页显示空态引导。
 
 ## 16. 画布工作区云端落库（画布持久化 + 版本历史）
 
