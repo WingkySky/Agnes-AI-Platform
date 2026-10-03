@@ -24,7 +24,7 @@ _ALLOWED_INPUTS: Dict[str, List[str]] = {
 }
 _TARGET_LABELS = {"tts": "配音", "subtitle": "字幕", "compose": "成片合成"}
 _SOURCE_LABELS = {
-    "text": "文本", "image": "图片", "video": "视频", "audio": "音频", "config": "配置",
+    "text": "文本", "image": "图片", "video": "视频", "audio": "音频",
     "tts": "配音", "subtitle": "字幕", "compose": "合成", "script": "脚本",
 }
 
@@ -47,8 +47,8 @@ def panel_type(panel: Dict[str, Any]) -> str:
 
 def validate_connection_types(source_type: str, target_type: str) -> Optional[str]:
     """连线类型级校验（复刻前端 validateConnectionTypes；返回 None 表示通过）"""
-    if source_type == "script" and target_type != "config":
-        return "脚本节点只能连接到生成配置节点"
+    if source_type == "script" and target_type not in ("image", "video"):
+        return "脚本节点只能连接到图片/视频节点"
     allowed = _ALLOWED_INPUTS.get(target_type)
     if not allowed:
         return None

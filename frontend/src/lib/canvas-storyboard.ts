@@ -1,6 +1,6 @@
 /* =====================================================
  * 分镜批量派生编排（无限画布 script 节点）
- * - prompt 拼装 / config 节点派生 / 网格布局 / lineage 记录
+ * - prompt 拼装 / 直出节点派生 / 网格布局 / lineage 记录
  * - 生成复用 canvas-generation 执行器（waitFor + 并发池限流）
  * - 数据全部存画布节点 content（localforage），后端无状态
  * ===================================================== */
@@ -56,7 +56,7 @@ export interface ScriptAssets {
   props: ShotAsset[]
 }
 
-/** 派生节点出处（存于派生出的节点自身 content.lineage：分镜图为直出 image 节点，视频为 config 节点） */
+/** 派生节点出处（存于派生出的节点自身 content.lineage：分镜图为 image 节点，视频为 video 节点） */
 export interface ShotLineage {
   kind: 'image' | 'video'
   scriptPanelId: string
@@ -103,7 +103,7 @@ function readString(content: Record<string, unknown> | undefined, key: string): 
   return typeof v === 'string' ? v : ''
 }
 
-/** 读取派生 config 节点的 lineage，结构不符返回 null（非法 role/chainSeq 忽略） */
+/** 读取派生节点的 lineage，结构不符返回 null（非法 role/chainSeq 忽略） */
 export function readLineage(panel: { content?: Record<string, unknown> }): ShotLineage | null {
   const v = panel.content?.lineage
   if (!isRecord(v)) return null
@@ -282,18 +282,14 @@ const segmentPromptLine = (i: number, total: number) => `本段为该动作的�
 /* ---------- 派生节点查找 ---------- */
 
 /**
- * 某脚本节点指定 kind 的全部派生节点（自身带 lineage）
- * - image：直出的分镜图节点（type === 'image'）与存量/手搭场景的 config 派生节点并存，两者都识别
- * - video：config 节点（本期视频派生仍走 config，第二阶段再变）
+ * 某脚本节点指定 kind 的全部派生节点（自身带 lineage，直出节点）
+ * - image：分镜图节点；video：视频节点
  */
 export function findDerivedPanels(scriptPanelId: string, kind: 'image' | 'video'): Array<{ panel: CanvasPanel; lineage: ShotLineage }> {
   const store = useCanvasStore()
   const result: Array<{ panel: CanvasPanel; lineage: ShotLineage }> = []
   for (const p of store.panels) {
-    const matches = kind === 'image'
-      ? p.type === 'image' || p.type === 'config'
-      : p.type === 'config'
-    if (!matches) continue
+    if (p.type !== kind) continue
     const lineage = readLineage(p)
     if (lineage && lineage.scriptPanelId === scriptPanelId && lineage.kind === kind) {
       result.push({ panel: p, lineage })
@@ -350,34 +346,18 @@ export function getDerivedShotIds(scriptPanelId: string): { image: Set<string>; 
   }
 }
 
-/** 派生 config 节点已生成成功的结果媒体节点 */
-function findResultNode(configPanelId: string, type: 'image' | 'video'): CanvasPanel | null {
-  const store = useCanvasStore()
-  return store.panels.find(
-    (p) => p.type === type && p.content?.sourceFrom === configPanelId && p.content?.status === 'success',
-  ) || null
-}
-
 /**
  * 节点 -> 其分镜 lineage 信息（供工具栏/视图识别分镜派生节点）
- * - 直出节点（分镜图/视频自身带 lineage）：configPanel 即节点自身
- * - 其余：按 content.sourceFrom 反查来源 config 节点
+ * - 派生节点（分镜图/视频自身带 lineage）：configPanel 即节点自身
  */
 export function getShotLineageInfo(
   panel: { id?: string; content?: Record<string, unknown> },
 ): { configPanel: CanvasPanel; lineage: ShotLineage } | null {
   const store = useCanvasStore()
-  const own = readLineage(panel)
-  if (own) {
-    const self = panel.id ? store.panels.find((p) => p.id === panel.id) : undefined
-    return self ? { configPanel: self, lineage: own } : null
-  }
-  const sourceFrom = panel.content?.sourceFrom
-  if (typeof sourceFrom !== 'string') return null
-  const configPanel = store.panels.find((p) => p.id === sourceFrom)
-  if (!configPanel || configPanel.type !== 'config') return null
-  const lineage = readLineage(configPanel)
-  return lineage ? { configPanel, lineage } : null
+  const lineage = readLineage(panel)
+  if (!lineage) return null
+  const self = panel.id ? store.panels.find((p) => p.id === panel.id) : undefined
+  return self ? { configPanel: self, lineage } : null
 }
 
 /* ---------- 工具 ---------- */
@@ -907,12 +887,8 @@ export async function deriveStoryboardVideos(scriptPanel: CanvasPanel): Promise<
     const entry = derivedImages.find(
       (d) => d.lineage.shotId === shot.id && (d.lineage.role === undefined || d.lineage.role === 'first'),
     )
-    // 直出节点：源图即节点自身（结果写在自己的 content.content）；存量/手搭 config：反查其结果节点
-    const resultNode = entry
-      ? (entry.panel.type === 'image'
-          ? (entry.panel.content?.status === 'success' ? entry.panel : null)
-          : findResultNode(entry.panel.id, 'image'))
-      : null
+    // 直出节点：源图即节点自身（结果写在自己的 content.content）
+    const resultNode = entry && entry.panel.content?.status === 'success' ? entry.panel : null
     const imageUrl = resultNode ? readString(resultNode.content, 'content') : ''
     if (!entry || !resultNode || !imageUrl) {
       notReady++

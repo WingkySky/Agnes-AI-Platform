@@ -552,7 +552,7 @@ const canvasGetOverviewTool = {
 const canvasAddPanelsTool = {
   name: 'canvas_add_panels',
   description:
-    '在云端画布工作区批量新建节点（只增不改不删）。panels 每项：type（text/image/video/audio/config 等，缺省 text）、' +
+    '在云端画布工作区批量新建节点（只增不改不删）。panels 每项：type（text/image/video/audio 等，缺省 text）、' +
     'name（建议命名，后续连线可按名引用）、content（文本节点写 {"content":"文字"}；媒体节点也可直接给 url）、' +
     'x/y/width/height 可选（缺省自动排布）。' +
     '注意：要把对话生成的图片/视频放入画布，请用 generate_image / generate_video 的 place_on_canvas 参数（完成后自动落画布），' +

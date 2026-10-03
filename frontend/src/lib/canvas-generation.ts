@@ -1,15 +1,15 @@
 /* =====================================================
- * 画布多元素合并生成核心逻辑
- * - Config 节点 + @[node:xxx] 引用模式
- * - 收集 Config 节点的上游资源（根据连线查找）
- * - 解析 composerContent 中的 @[node:xxx] 引用 token
+ * 画布多元素生成核心逻辑
+ * - 节点级生成：媒体节点就地生成（prompt 支持 @图片1/@文本2 引用）
+ * - 收集节点的上游资源（根据连线查找）
+ * - 解析提示词中的 @图片1/@文本2 引用标签
  * - 文本资源拼到 prompt 末尾，图片资源作为 referenceImages 数组
  * - 调用 /api/images/tasks 创建异步生成任务
  * - 轮询任务状态，完成后回填结果到画布新节点
  * - 同步注册到任务队列（TaskQueue），让画布任务在队列面板中可见
  *
  * 核心数据流：
- *   Config 节点 + 上游资源 + composerContent
+ *   源节点（自身 prompt + 上游资源）
  *     → buildGenerationContext() 合并为 { prompt, referenceImages }
  *     → createImageTask() 创建任务
  *     → pollImageTask() 轮询状态（同步更新 TaskQueue）
@@ -54,7 +54,7 @@ interface ReferenceVideo {
 }
 
 /** 生成上下文 */
-interface GenerationContext {
+export interface GenerationContext {
   prompt: string
   referenceImages: string[]
   /** 上游视频节点（连线收集）；video2video 能力协商与降级抽帧在任务创建层处理 */
@@ -162,7 +162,6 @@ export function buildCanvasContext(node: GenerationPanel, store: CanvasGeneratio
 /**
  * 判断面板是否为资源节点（可作为生成输入）
  * - image / text / video / audio 类型都是资源节点
- * - config / frame / quick-generate 不是资源节点
  */
 export function isResourceNode(panel: GenerationPanel | null | undefined): boolean {
   if (!panel) return false
@@ -277,25 +276,24 @@ function withUpstreamVideos(ctx: GenerationContext, videos: ReferenceVideo[]): G
 }
 
 /**
- * 构建生成上下文：解析 @[node:xxx] 引用，合并多资源
+ * 构建生成上下文：解析 @图片1/@文本2 引用，合并多资源
  *
  * 合并策略（composer 上下文聚合）：
- * - 如果 configNode 有 composerContent（组装提示词），走引用解析路径：
- *   · 解析 @[node:xxx] token，把引用替换为标签（图片1、文本2...，序号与节点显示一致）
- *   · 文本资源：在 prompt 末尾追加 【文本1】\n内容 块
- *   · 图片资源：作为 referenceImages 数组传给 AI
- * - 如果没有 composerContent，走简单合并路径：
+ * - 传入节点为生成主体（媒体节点就地生成 / 任意来源节点）
+ * - 如果节点提示词含 @图片1/@文本2 等可读标签引用，走引用解析路径：
+ *   · 解析引用标签，把文本引用替换为【文本N】（末尾追加内容块）
+ *   · 图片引用：作为 referenceImages 数组传给 AI
+ * - 如果没有引用标签，走简单合并路径：
  *   · 节点自身无提示词：上游文本充当提示词来源（拼到 prompt）
  *   · 节点自身有提示词：上游文本不再自动拼接（典型场景：分镜图连剧本节点仅作派生溯源，
- *     剧本全文混入会把单帧提示词污染成叙事多格构图）；需要引用走 @[文本N] 显式引用
+ *     剧本全文混入会把单帧提示词污染成叙事多格构图）；需要引用走 @文本N 显式引用
  *   · 上游图片始终作为 referenceImages、上游视频作为 video2video 输入
- * - 注意：prompt字段也会走引用解析（不一定非要composerContent）
  */
-export function buildGenerationContext(configNode: GenerationPanel, panels: GenerationPanel[], connections: GenerationConnection[]): GenerationContext | null {
-  if (!configNode) return null
+export function buildGenerationContext(node: GenerationPanel, panels: GenerationPanel[], connections: GenerationConnection[]): GenerationContext | null {
+  if (!node) return null
 
   // 收集上游资源（带统一序号）
-  const upstreamWithIndex = getUpstreamNodesWithIndex(configNode.id, panels, connections)
+  const upstreamWithIndex = getUpstreamNodesWithIndex(node.id, panels, connections)
   const inputs: Array<ResourceContent & { index: number; label: string }> = upstreamWithIndex
     .map(({ panel, index, label }) => {
       const res = extractResourceContent(panel)
@@ -307,11 +305,8 @@ export function buildGenerationContext(configNode: GenerationPanel, panels: Gene
   // 兼容旧的ResourceContent格式（不带index的）
   const plainInputs: ResourceContent[] = inputs.map(({ index, label, ...rest }) => rest)
 
-  // 获取提示词：优先用 composerContent，其次用 prompt
-  const composerContent = configNode.content?.composerContent?.trim()
-  const promptContent = configNode.content?.prompt?.trim()
-  const hasComposer = !!composerContent
-  const contentToParse = composerContent || promptContent || ''
+  // 提示词：节点自身 content.prompt
+  const contentToParse = node.content?.prompt?.trim() || ''
 
   // 输入摘要（供 UI 显示）
   const inputSummary: InputSummary = {
@@ -321,9 +316,9 @@ export function buildGenerationContext(configNode: GenerationPanel, panels: Gene
     total: plainInputs.length,
   }
 
-  // 分镜派生 config 的参考图快照（见 canvas-storyboard.ts，随 content 持久化）
-  const snapshotImages = Array.isArray(configNode.content?.referenceImages)
-    ? configNode.content.referenceImages.filter((u): u is string => typeof u === 'string')
+  // 节点自带的参考图快照（分镜派生节点随 content 持久化，见 canvas-storyboard.ts）
+  const snapshotImages = Array.isArray(node.content?.referenceImages)
+    ? node.content.referenceImages.filter((u): u is string => typeof u === 'string')
     : []
 
   // 上游视频节点（video2video 能力协商 / 降级抽帧在任务创建层处理）
@@ -336,10 +331,10 @@ export function buildGenerationContext(configNode: GenerationPanel, panels: Gene
     return withUpstreamVideos(withSnapshotImages(buildSimpleContext(plainInputs, '', inputSummary), snapshotImages), upstreamVideos)
   }
 
-  // 如果有 @图片1/@文本2 等可读标签引用，或使用了composerContent，走引用解析路径
+  // 有 @图片1/@文本2 等可读标签引用时走引用解析路径
   const hasMention = MENTION_PATTERN.test(contentToParse)
   MENTION_PATTERN.lastIndex = 0 // 重置正则lastIndex
-  if (!hasMention && !hasComposer) {
+  if (!hasMention) {
     // 节点自身已有提示词：上游文本不自动拼接（防剧本全文污染单帧提示词），图片/视频参考照常收集
     const nonTextInputs = plainInputs.filter((i) => i.type !== 'text')
     return withUpstreamVideos(withSnapshotImages(buildSimpleContext(nonTextInputs, contentToParse, inputSummary), snapshotImages), upstreamVideos)
@@ -454,6 +449,29 @@ function buildComposerContext(
     referenceTexts: textBlocks,
     inputSummary,
   }
+}
+
+/**
+ * 解析提示词中的 @图片1/@文本2 引用（快捷生成弹窗辅助提示词用）
+ * - 文本引用替换为【文本N】并在末尾追加内容块，图片引用按序并入参考图
+ * - 无引用标签时返回 null，调用方走原有拼装路径
+ * - upstream：源节点的上游资源（getUpstreamNodesWithIndex 输出，label 与节点序号标记同源）
+ */
+export function resolvePromptMentions(
+  prompt: string,
+  upstream: Array<{ panel: GenerationPanel; label: string }>,
+): { prompt: string; referenceImages: string[] } | null {
+  const hasMention = MENTION_PATTERN.test(prompt)
+  MENTION_PATTERN.lastIndex = 0
+  if (!hasMention) return null
+  const inputs = upstream
+    .map(({ panel, label }, i) => {
+      const res = extractResourceContent(panel)
+      return res ? { ...res, index: i + 1, label } : null
+    })
+    .filter((r): r is ResourceContent & { index: number; label: string } => r !== null)
+  const ctx = buildComposerContext(inputs, prompt, { textCount: 0, imageCount: 0, videoCount: 0, total: inputs.length })
+  return { prompt: ctx.prompt, referenceImages: ctx.referenceImages }
 }
 
 // ---------- API 调用与轮询 ----------
@@ -701,10 +719,10 @@ export async function pollVideoTask(
 // ---------- 完整生成流程 ----------
 
 /**
- * 计算新结果节点的位置（Config 节点右侧，自动排列）
+ * 计算新结果节点的位置（源节点右侧，4 列网格自动排列）
  * - 返回 { x, y, width, height }
  */
-function calcResultNodePosition(configNode: GenerationPanel, isVideo: boolean, index: number) {
+function calcResultNodePosition(sourceNode: GenerationPanel, isVideo: boolean, index: number) {
   const cols = 4
   const nodeWidth = isVideo ? 320 : 200
   const nodeHeight = isVideo ? 200 : 200
@@ -712,20 +730,21 @@ function calcResultNodePosition(configNode: GenerationPanel, isVideo: boolean, i
   const gapY = 240
 
   return {
-    x: (configNode.x ?? 0) + (configNode.width ?? 240) + 40 + (index % cols) * gapX,
-    y: (configNode.y ?? 0) + Math.floor(index / cols) * gapY,
+    x: (sourceNode.x ?? 0) + (sourceNode.width ?? 240) + 40 + (index % cols) * gapX,
+    y: (sourceNode.y ?? 0) + Math.floor(index / cols) * gapY,
     width: nodeWidth,
     height: nodeHeight,
   }
 }
 
 /**
- * 在 Config 节点右侧创建一个 loading 状态的结果节点并连线
+ * 在源节点右侧创建一个 loading 状态的结果节点并连线
+ * - extraContent：写入结果节点的生成参数（prompt/model/size/seconds 等），供失败后就地重试复用
  * - 返回新节点 ID
  */
-export function createLoadingResultNode(store: CanvasGenerationStore, configNode: GenerationPanel, isVideo: boolean, index: number = 0): string {
-  const pos = calcResultNodePosition(configNode, isVideo, index)
-  const prompt = configNode.content?.prompt || ''
+export function createLoadingResultNode(store: CanvasGenerationStore, sourceNode: GenerationPanel, isVideo: boolean, index: number = 0, extraContent: Record<string, any> = {}): string {
+  const pos = calcResultNodePosition(sourceNode, isVideo, index)
+  const prompt = extraContent.prompt ?? sourceNode.content?.prompt ?? ''
 
   const newPanel = {
     type: isVideo ? 'video' : 'image',
@@ -737,16 +756,16 @@ export function createLoadingResultNode(store: CanvasGenerationStore, configNode
       content: '',
       status: 'loading',
       prompt,
-      sourceFrom: configNode.id,
+      ...extraContent,
     },
   }
 
   const newId = store.addPanel(newPanel)
 
-  // 创建连线：Config → 新节点
+  // 创建连线：源节点 → 新节点
   if (newId) {
     store.addConnection({
-      source_panel_id: configNode.id,
+      source_panel_id: sourceNode.id,
       target_panel_id: newId,
       type: 'auto',
       source_anchor: 'right-middle',
@@ -758,69 +777,94 @@ export function createLoadingResultNode(store: CanvasGenerationStore, configNode
 }
 
 /**
- * 执行完整的合并生成流程（异步，不阻塞配置面板）
- * 1. 构建生成上下文（收集上游资源 + 解析 @[node:xxx]）
- * 2. 创建 loading 状态的结果节点（立刻显示在画布上）
- * 3. 创建生成任务 + 注册到任务队列
- * 4. 异步轮询任务状态
- * 5. 轮询完成后回填结果到结果节点（成功/失败都有反馈）
- *
- * @returns 新创建的结果节点 ID（loading 状态）
+ * 源节点批量图生成（快捷生成弹窗）：以给定上下文创建 N 个 loading 结果节点（网格排布）并生成
+ * - 数量由调用方传入（跟随偏好默认张数或弹窗选择），进度经聚合后回调
+ * - 异步执行：立刻返回首个结果节点 ID，轮询回填在后台进行
  */
-export async function executeMergeGeneration(configId: string, store: CanvasGenerationStore, options: GenerationOptions = {}): Promise<string> {
-  const { onProgress } = options
-
-  // 1. 查找 Config 节点
-  const configNode = store.panels.find((p) => p.id === configId)
-  if (!configNode || configNode.type !== 'config') {
-    throw new Error('未找到 Config 节点')
-  }
-
-  // 2. 构建生成上下文
-  const ctx = buildGenerationContext(configNode, store.panels, store.connections)
-  if (!ctx) {
-    throw new Error('构建生成上下文失败')
-  }
-
-  if (!ctx.prompt || !ctx.prompt.trim()) {
-    throw new Error('提示词为空，请填写 composerContent 或 prompt')
-  }
-
-  if (onProgress) onProgress('building', { inputSummary: ctx.inputSummary })
-
+export async function executeSourceImageGeneration(
+  sourcePanel: GenerationPanel,
+  ctx: GenerationContext,
+  store: CanvasGenerationStore,
+  params: { model?: string; size?: string; count?: number; onProgress?: GenerationOptions['onProgress'] } = {},
+): Promise<string> {
+  const count = Math.max(1, params.count || 1)
   const config: GenerationConfig = {
-    model: configNode.content?.model || useModelsStore().defaultImageModel,
-    size: normalizeSize(configNode.content?.size),
+    model: params.model || useModelsStore().defaultImageModel,
+    size: normalizeSize(params.size),
     response_format: 'url',
   }
 
-  // 3. 立刻创建 loading 状态的结果节点：数量跟随偏好"默认生成张数"，右侧 4 列网格排布
-  const count = Math.max(1, Number(usePreferencesStore().generation?.default_image_count) || 1)
-  const aggregated = aggregateProgress(onProgress, count)
+  const aggregated = aggregateProgress(params.onProgress, count)
   const newNodeIds: string[] = []
-  const runs: Promise<boolean>[] = []
   for (let i = 0; i < count; i++) {
-    const nodeId = createLoadingResultNode(store, configNode, false, i)
+    const nodeId = createLoadingResultNode(store, sourcePanel, false, i, {
+      prompt: ctx.prompt,
+      model: config.model,
+      size: config.size,
+    })
     newNodeIds.push(nodeId)
-    runs.push(runMediaTask(
+    void runMediaTask(
       store,
       nodeId,
       false,
-      () => createGenerationTask(ctx, config, buildCanvasContext(configNode, store)),
+      () => createGenerationTask(ctx, config, buildCanvasContext(sourcePanel, store)),
       (taskId, cb) => pollImageTask(taskId, cb),
       ctx.prompt,
       config.model,
       aggregated,
-    ))
-  }
-
-  // 4. 异步执行生成 + 轮询 + 回填（默认不阻塞调用方；waitFor=true 时等待全部完成，供批量编排限流）
-  if (options.waitFor) {
-    await Promise.all(runs)
+    )
   }
 
   // 返回首个新节点 ID（loading 状态）
   return newNodeIds[0]!
+}
+
+/**
+ * 源节点视频生成（快捷生成弹窗）：以给定上下文创建 loading 视频节点并生成
+ * - useKeyframes=true 走首尾帧模式（参考图 = [首帧, 尾帧]，最多 2 张，由任务创建层强制）
+ * - 异步执行：立刻返回新节点 ID，轮询回填在后台进行
+ */
+export async function executeSourceVideoGeneration(
+  sourcePanel: GenerationPanel,
+  ctx: GenerationContext,
+  store: CanvasGenerationStore,
+  params: { model?: string; seconds?: number; aspectRatio?: string; resolution?: number; frameRate?: number; useKeyframes?: boolean; onProgress?: GenerationOptions['onProgress'] } = {},
+): Promise<string> {
+  const modelsStore = useModelsStore()
+  const config: GenerationConfig = {
+    model: params.model || modelsStore.defaultVideoModel,
+    seconds: params.seconds || 5,
+    aspect_ratio: params.aspectRatio || '16:9',
+    resolution: params.resolution || modelsStore.defaultVideoResolution,
+    frame_rate: params.frameRate || modelsStore.defaultFrameRate,
+    use_keyframes: params.useKeyframes || false,
+  }
+
+  // 结果节点持久化参数：失败后就地重试走 executeInNodeVideoGeneration 复用
+  const newNodeId = createLoadingResultNode(store, sourcePanel, true, 0, {
+    prompt: ctx.prompt,
+    model: config.model,
+    mode: 'image2video',
+    seconds: config.seconds,
+    aspect_ratio: config.aspect_ratio,
+    resolution: config.resolution,
+    frame_rate: config.frame_rate,
+    referenceImages: ctx.referenceImages,
+    ...(config.use_keyframes ? { use_keyframes: true } : {}),
+  })
+
+  const run = () => runMediaTask(
+    store,
+    newNodeId,
+    true,
+    () => createVideoGenerationTask(ctx, config, buildCanvasContext(sourcePanel, store)),
+    (taskId, cb) => pollVideoTask(taskId, cb),
+    ctx.prompt,
+    config.model,
+    params.onProgress,
+  )
+  void run()
+  return newNodeId
 }
 
 /**
@@ -941,8 +985,13 @@ export async function executeInNodeVideoGeneration(
 ): Promise<string | null> {
   const { onProgress } = options
 
-  const useKeyframes = panel.content?.use_keyframes === true
-  const ctx = buildMediaNodeContext(panel, store, !useKeyframes)
+  const ownKeyframes = panel.content?.use_keyframes === true
+  // 双图自动首尾帧：未显式开启时，上游连线恰好 2 张图按 keyframes 生成（>2 张走多图参考，宁多勿错）
+  const autoKeyframes = !ownKeyframes &&
+    getUpstreamNodes(panel.id, store.panels, store.connections)
+      .filter((p) => p.type === 'image' && String(p.content?.content || '').trim()).length === 2
+  const useKeyframes = ownKeyframes || autoKeyframes
+  const ctx = buildMediaNodeContext(panel, store, !ownKeyframes)
   if (!ctx.prompt.trim() && ctx.referenceImages.length === 0 && ctx.referenceVideos.length === 0) {
     throw new Error('提示词为空且无参考图/参考视频，无法生成视频')
   }
@@ -1131,9 +1180,13 @@ export async function executeImageReferenceGeneration(
     referenceTexts: [],
     inputSummary: { textCount: 0, imageCount: 1, videoCount: 0, total: 1 },
   }
-  const newNodeId = createLoadingResultNode(store, sourcePanel, false)
   const modelId = params?.model || modelsStore.defaultImageModel
   const size = params?.size || modelsStore.defaultImageSize
+  const newNodeId = createLoadingResultNode(store, sourcePanel, false, 0, {
+    prompt,
+    model: modelId,
+    size,
+  })
   // 后台执行，不阻塞对话框
   void runMediaTask(
     store,
@@ -1168,7 +1221,6 @@ export async function executeVideoFromFrameGeneration(
     referenceTexts: [],
     inputSummary: { textCount: 0, imageCount: 1, videoCount: 0, total: 1 },
   }
-  const newNodeId = createLoadingResultNode(store, sourcePanel, true)
   const modelId = params?.model || modelsStore.defaultVideoModel
   const config: GenerationConfig = {
     model: modelId,
@@ -1177,6 +1229,14 @@ export async function executeVideoFromFrameGeneration(
     resolution: params?.resolution || modelsStore.defaultVideoResolution,
     frame_rate: params?.frame_rate || modelsStore.defaultFrameRate,
   }
+  const newNodeId = createLoadingResultNode(store, sourcePanel, true, 0, {
+    prompt,
+    model: modelId,
+    seconds: config.seconds,
+    aspect_ratio: config.aspect_ratio,
+    resolution: config.resolution,
+    frame_rate: config.frame_rate,
+  })
   // 后台执行，不阻塞对话框
   void runMediaTask(
     store,
@@ -1322,77 +1382,6 @@ export async function createVideoGenerationTask(
     throw new Error('创建视频任务失败：未返回 task_id')
   }
   return { task_id: resp.task_id }
-}
-
-/**
- * 执行完整的视频合并生成流程（异步，不阻塞配置面板）
- * 1. 构建生成上下文（收集上游资源 + 解析 @[node:xxx]）
- * 2. 创建 loading 状态的结果节点（立刻显示在画布上）
- * 3. 创建视频任务 + 注册到任务队列
- * 4. 异步轮询任务状态
- * 5. 轮询完成后回填结果到结果节点（成功/失败都有反馈）
- *
- * @returns 新创建的结果节点 ID（loading 状态）
- */
-export async function executeMergeVideoGeneration(configId: string, store: CanvasGenerationStore, options: GenerationOptions = {}): Promise<string> {
-  const { onProgress } = options
-
-  // 1. 查找 Config 节点
-  const configNode = store.panels.find((p) => p.id === configId)
-  if (!configNode || configNode.type !== 'config') {
-    throw new Error('未找到 Config 节点')
-  }
-
-  // 2. 构建生成上下文（复用图片生成的上下文构建逻辑）
-  const ctx = buildGenerationContext(configNode, store.panels, store.connections)
-  if (!ctx) {
-    throw new Error('构建生成上下文失败')
-  }
-
-  if (!ctx.prompt || !ctx.prompt.trim()) {
-    throw new Error('提示词为空，请填写 composerContent 或 prompt')
-  }
-
-  // 关键帧模式校验：最多只能有2张参考图
-  const useKeyframes = configNode.content?.use_keyframes || false
-  if (useKeyframes && ctx.referenceImages && ctx.referenceImages.length > 2) {
-    throw new Error('关键帧模式最多只能连接 2 张图片（起始帧 + 结束帧）')
-  }
-
-  if (onProgress) onProgress('building', { inputSummary: ctx.inputSummary })
-
-  // 3. 立刻创建 loading 状态的结果节点
-  const newNodeId = createLoadingResultNode(store, configNode, true)
-
-  const config: GenerationConfig = {
-    model: configNode.content?.model || useModelsStore().defaultVideoModel,
-    seconds: configNode.content?.seconds || 5,
-    aspect_ratio: configNode.content?.aspect_ratio || '16:9',
-    resolution: configNode.content?.resolution || useModelsStore().defaultVideoResolution,
-    frame_rate: configNode.content?.frame_rate || useModelsStore().defaultFrameRate,
-    use_keyframes: useKeyframes,  // 是否使用关键帧模式
-  }
-
-  // 4. 异步执行生成 + 轮询 + 回填（默认不阻塞调用方；waitFor=true 时等待完成，供批量编排限流）
-  const run = () => runMediaTask(
-    store,
-    newNodeId,
-    true,
-    () => createVideoGenerationTask(ctx, config, buildCanvasContext(configNode, store)),
-    (taskId, cb) => pollVideoTask(taskId, cb),
-    ctx.prompt,
-    config.model,
-    onProgress,
-  )
-
-  if (options.waitFor) {
-    await run()
-  } else {
-    void run()
-  }
-
-  // 返回新节点 ID（loading 状态）
-  return newNodeId
 }
 
 // ---------- 中断任务恢复 ----------

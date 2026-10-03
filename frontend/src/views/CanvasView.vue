@@ -153,13 +153,12 @@
         :style="selectionBoxStyle"
       />
 
-      <!-- 节点悬浮 AI 对话框：单选 script/text/config 节点时显示在节点正下方 -->
+      <!-- 节点悬浮 AI 对话框：单选 script/text/image/video 节点时显示在节点正下方 -->
       <CanvasNodeComposer
         v-if="composerPanelId"
         :key="composerPanelId"
         :panel-id="composerPanelId"
         :style="composerStyle"
-        @generate="generateComposerConfig"
         @regenerate="generateComposerRegenerate"
       />
 
@@ -569,9 +568,9 @@ import {
   createWorkspaceFromTemplate,
 } from '@/lib/canvas-templates'
 // 画布生成：上游节点查找（用于配置节点 prompt 为空时检查上游文本）+ 生成归档上下文
-import { getUpstreamNodes, buildCanvasContext, resumeLoadingCanvasNodes, type CanvasGenerationStore } from '@/lib/canvas-generation'
+import { getUpstreamNodes, buildCanvasContext, resumeLoadingCanvasNodes, resolvePromptMentions, executeSourceImageGeneration, executeSourceVideoGeneration, type CanvasGenerationStore, type GenerationContext } from '@/lib/canvas-generation'
 // 分镜派生：单镜头图生视频 + 整组重跑的批量积分确认
-import { confirmGroupedCost, deriveVideoForShot, deriveTailFrameFromImageNode, derivePrevFrameFromImageNode, deriveChainVideosFromImageNode, readLineage, getShotLineageInfo } from '@/lib/canvas-storyboard'
+import { confirmGroupedCost, deriveVideoForShot, deriveTailFrameFromImageNode, derivePrevFrameFromImageNode, deriveChainVideosFromImageNode, getShotLineageInfo } from '@/lib/canvas-storyboard'
 // 分组包络计算与智能建议分组（按连线连通分量）
 import { calculateGroupBounds, suggestGroups } from '@/lib/canvas-groups'
 // 一键整理布局（面板摆放位置优化，按类别分块平铺）
@@ -651,7 +650,6 @@ const NODE_DEFAULT_SIZES = {
   image: { width: 340, height: 240 },
   video: { width: 420, height: 236 },
   audio: { width: 340, height: 120 },
-  config: { width: 360, height: 380 },
   // 新增 3 种节点类型（spec 5.4.1）
   tts: { width: 340, height: 180 },
   subtitle: { width: 340, height: 180 },
@@ -798,7 +796,7 @@ function handleGroupReference(groupId: string, type: 'image' | 'video') {
     height: size.height,
     content: {},
   })
-  // 资源成员（文本并入提示词、图片/视频/音频作参考输入）连到新节点；config/script 等不参与
+  // 资源成员（文本并入提示词、图片/视频/音频作参考输入）连到新节点；script 等不参与
   for (const m of members) {
     if (!['text', 'image', 'video', 'audio'].includes(m.type || 'text')) continue
     const exists = store.connections.some((c) => c.source_panel_id === m.id && c.target_panel_id === panelId)
@@ -1153,7 +1151,7 @@ function handleNodeStartConnecting(panelId: string, anchorType: string) {
     extraSourceIds = store.selectedPanelIds.filter((id) => {
       if (id === panelId) return false
       const p = store.panels.find((x) => x.id === id)
-      return !!p && p.type !== 'config'
+      return !!p
     })
   }
   store.startConnecting(panelId, anchorType, extraSourceIds)
@@ -1191,9 +1189,9 @@ function handleConnectingUp(event: PointerEvent) {
       realTarget = sourceId
     }
 
-    // 判断目标节点是否为"接收多输入"类型（config 生成配置、compose 成片合成）
+    // 判断目标节点是否为"接收多输入"类型（媒体节点多参考输入、compose 成片合成）
     const targetPanel = store.panels.find(p => p.id === realTarget)
-    const isReceiverNode = ['config', 'compose'].includes(targetPanel?.type || '')
+    const isReceiverNode = ['image', 'video', 'compose'].includes(targetPanel?.type || '')
     const hasMultipleSelection = store.selectedPanelIds.length > 1
     const isBatchConnect = isReceiverNode && hasMultipleSelection
 
@@ -1209,7 +1207,7 @@ function handleConnectingUp(event: PointerEvent) {
       for (const selectedId of store.selectedPanelIds) {
         const selectedPanel = store.panels.find(p => p.id === selectedId)
         // 跳过接收节点本身，跳过非资源节点
-        if (!selectedPanel || selectedPanel.type === 'config') continue
+        if (!selectedPanel) continue
         if (selectedId === realTarget) continue
         // 防止重复连接
         const exists = store.connections.some(
@@ -1230,8 +1228,7 @@ function handleConnectingUp(event: PointerEvent) {
 
       // 如果拖拽起始节点本身不在选中列表中，也单独连接
       if (!connectedIds.has(dragSourceId) && dragSourceId !== realTarget) {
-        const dragSourcePanel = store.panels.find(p => p.id === dragSourceId)
-        if (dragSourcePanel?.type !== 'config') {
+        {
           const exists = store.connections.some(
             c => c.source_panel_id === dragSourceId && c.target_panel_id === realTarget
           )
@@ -1357,6 +1354,13 @@ function handleQuickMenuSelect(item: QuickMenuItem) {
   if (item.kind === 'upload') {
     closeQuickMenu()
     triggerFileUpload(null, 'image/*', world)
+    return
+  }
+  if (item.kind === 'action') {
+    // 快捷生成：在拖线源节点上打开快捷生成弹窗（结果节点自动连回源节点）
+    closeQuickMenu()
+    const sourcePanel = store.panels.find((p) => p.id === quickMenu.sourceId)
+    if (sourcePanel) handleQuickGenerate({ panel: sourcePanel, mode: String(item.content?.mode || 'image2image') })
     return
   }
   const newId = createNodeAt(item.type || 'text', world.x, world.y, item.content)
@@ -1523,11 +1527,11 @@ function handleNodeEditText(panelId: string, text: string) {
 
 // ==================== 节点悬浮 AI 对话框 ====================
 
-/** 对话框目标节点：单选且类型支持（script/text/config/image/video）时显示 */
+/** 对话框目标节点：单选且类型支持（script/text/image/video）时显示 */
 const composerPanelId = computed(() => {
   if (store.selectedPanelIds.length !== 1) return null
   const p = store.panels.find((x) => x.id === store.selectedPanelIds[0])
-  if (!p || !['script', 'text', 'config', 'image', 'video'].includes(p.type || '')) return null
+  if (!p || !['script', 'text', 'image', 'video'].includes(p.type || '')) return null
   return p.id
 })
 
@@ -1551,12 +1555,6 @@ const composerStyle = computed(() => {
 function generateComposerRegenerate() {
   const p = store.panels.find((x) => x.id === composerPanelId.value)
   if (p) void retryGeneration(p)
-}
-
-/** 对话框生成（config 节点）：prompt/参数已写回 content，走现有配置节点生成流程 */
-function generateComposerConfig() {
-  const p = store.panels.find((x) => x.id === composerPanelId.value)
-  if (p) void handleConfigGenerate(p)
 }
 
 // 从文本节点生图：读取文本内容作为 prompt，在源节点旁创建 image 节点并连线
@@ -1599,35 +1597,86 @@ function handleQuickGenerate({ panel, mode }: { panel: typeof store.panels[numbe
   quickGenerateState.visible = true
 }
 
-// 弹窗确认生成：根据模式拼装 prompt 和参考图，调用图片/视频生成 API
+// 弹窗确认生成：拼装提示词与参考图（@ 引用解析 + 首尾帧），走源节点批量生成链路
 async function handleQuickGenerateConfirm(payload: any) {
-  const { mode, prompt: auxPrompt, model, size, aspect_ratio, seconds } = payload
+  const { mode, prompt: auxPrompt, model, size, aspect_ratio, seconds, count, use_keyframes, tail_frame_id } = payload
   const sourcePanel = quickGenerateState.sourcePanel
   if (!sourcePanel) return
 
+  // @ 引用解析：辅助提示词引用源节点上游资源（文本替换为【文本N】块、图片并入参考图）
+  const mentionHit = resolvePromptMentions(auxPrompt, store.getInputNodesWithIndex(sourcePanel.id))
+  const resolvedAux = mentionHit ? mentionHit.prompt : auxPrompt
+
   // 拼装最终 prompt 和参考图
   let finalPrompt = ''
-  let referenceImages: string[] = []
-
+  const referenceImages: string[] = []
   if (mode.startsWith('text')) {
     // 文本源：主提示词 = 文本内容 + 辅助提示词（可选）
     const textContent = contentString(sourcePanel.content?.content).trim()
-    finalPrompt = auxPrompt.trim() ? `${textContent}\n\n${auxPrompt.trim()}` : textContent
+    finalPrompt = resolvedAux.trim() ? `${textContent}\n\n${resolvedAux.trim()}` : textContent
   } else {
     // 图片源：参考图 = 图片内容，prompt = 辅助提示词
-    referenceImages = [contentString(sourcePanel.content?.content)]
-    finalPrompt = auxPrompt.trim()
+    referenceImages.push(contentString(sourcePanel.content?.content))
+    finalPrompt = resolvedAux.trim()
+  }
+  // @ 引用到的图片并入参考图（按 URL 去重）
+  for (const u of mentionHit?.referenceImages || []) {
+    if (u && !referenceImages.includes(u)) referenceImages.push(u)
+  }
+  // 首尾帧模式：尾帧图排参考图末位（首帧在前）
+  if (mode.includes('video') && use_keyframes && tail_frame_id) {
+    const tail = store.panels.find(p => p.id === tail_frame_id)
+    const tailUrl = tail ? contentString(tail.content?.content) : ''
+    if (tailUrl && !referenceImages.includes(tailUrl)) referenceImages.push(tailUrl)
   }
 
-  // 根据模式调用对应的生成函数
-  if (mode.includes('video')) {
-    await generateVideoFromSource(sourcePanel, finalPrompt, model, aspect_ratio, seconds, referenceImages)
+  const ctx: GenerationContext = {
+    prompt: finalPrompt,
+    referenceImages,
+    referenceVideos: [],
+    referenceTexts: [],
+    inputSummary: { textCount: 0, imageCount: referenceImages.length, videoCount: 0, total: referenceImages.length },
+  }
+
+  // 积分预检：多张走批量确认（一次确认总消耗），单张静默预检
+  const isVideo = mode.includes('video')
+  const n = isVideo ? 1 : Math.max(1, Number(count) || 1)
+  const estimateParams = isVideo
+    ? { type: 'video' as const, mode: use_keyframes ? 'keyframes' : referenceImages.length > 0 ? 'image2video' : 'text2video', seconds: seconds || 5 }
+    : { type: 'image' as const, mode: referenceImages.length > 0 ? 'image2image' : 'text2image', size: size || '1024x1024' }
+  const canGenerate = n > 1
+    ? await confirmGroupedCost([{ ...estimateParams, count: n }])
+    : await checkCreditsBeforeGenerate(estimateParams)
+  if (!canGenerate) return
+
+  const onProgress = (stage: string, data: any) => {
+    if (stage === 'done') {
+      showCostConsumedMessage(estimateParams, isVideo ? t('canvas.messages.videoGenerationDone') : t('canvas.messages.imageGenerationDone'))
+      // 选中新节点并定位视口
+      const ids: string[] = data?.resultNodeIds || []
+      if (ids.length > 0) {
+        store.selectPanel(ids[0], { append: false })
+        store.centerOnPanel(ids[0])
+      }
+    } else if (stage === 'error') {
+      ElMessage.error(`${isVideo ? t('canvas.messages.videoGenerationFailed') : t('canvas.messages.imageGenerationFailed')}: ${data?.error || ''}`)
+    }
+  }
+
+  if (isVideo) {
+    await executeSourceVideoGeneration(sourcePanel, ctx, store, {
+      model,
+      aspectRatio: aspect_ratio,
+      seconds,
+      useKeyframes: !!use_keyframes,
+      onProgress,
+    })
   } else {
-    await generateImageFromSource(sourcePanel, finalPrompt, model, size, referenceImages)
+    await executeSourceImageGeneration(sourcePanel, ctx, store, { model, size, count: n, onProgress })
   }
 }
 
-// 重试生成：查找上游 config 节点重新生成，或用节点自身 prompt 重新生成
+// 重试生成：媒体节点就地重生成，其余用节点自身 prompt 重新生成
 async function handleNodeRetry(panel: typeof store.panels[number]) {
   await retryGeneration(panel)
 }
@@ -1728,235 +1777,6 @@ async function generateImageFromPrompt(sourcePanel: typeof store.panels[number],
   } catch (err) {
     console.error('[canvas] generate image error:', err)
     store.updatePanel(newPanelId!, { content: { status: 'error', errorDetails: getErrorMessage(err) } })
-    ElMessage.error(`${t('canvas.messages.generateFailed')}: ${getErrorMessage(err)}`)
-  }
-}
-
-// 快捷生成图片：支持自定义模型/尺寸/参考图（从快捷生成弹窗触发）
-// - sourcePanel: 源节点（文本/图片）
-// - prompt: 最终提示词（已合并辅助提示词）
-// - model/size: 自定义参数
-// - referenceImages: 参考图 URL 列表（图生图模式）
-async function generateImageFromSource(
-  sourcePanel: typeof store.panels[number],
-  prompt: string,
-  model: string,
-  size: string,
-  referenceImages: string[] = [],
-) {
-  const mode = referenceImages.length > 0 ? 'image2image' : 'text2image'
-  // 积分预检
-  const canGenerate = await checkCreditsBeforeGenerate({ type: 'image', mode, size })
-  if (!canGenerate) return
-
-  // 在源节点右侧创建 image 节点（loading 状态）
-  const newPanelId = store.addPanel({
-    type: 'image',
-    x: sourcePanel.x + sourcePanel.width + 60,
-    y: sourcePanel.y,
-    width: 340,
-    height: 240,
-    content: { content: '', status: 'loading', prompt },
-  })
-  store.addConnection({ source_panel_id: sourcePanel.id, target_panel_id: newPanelId })
-  store.pushSnapshot()
-
-  try {
-    // 处理参考图：blob URL 转 base64，data URI 直接用，公网 URL 直接用
-    let base64Images: string[] = []
-    let imageUrls: string[] = []
-    if (referenceImages.length > 0) {
-      const { toBase64IfNeeded } = await import('@/lib/canvas-image-ops')
-      for (const img of referenceImages) {
-        const processed = await toBase64IfNeeded(img)
-        if (processed.startsWith('data:')) {
-          base64Images.push(processed)
-        } else if (processed.startsWith('http')) {
-          imageUrls.push(processed)
-        } else {
-          base64Images.push(processed)
-        }
-      }
-    }
-
-    // 调用图片生成 API
-    const { createImageTask, getImageTaskStatus } = await import('@/api/images')
-    const resp = await createImageTask({
-      prompt,
-      model: model || useModelsStore().defaultImageModel,
-      size,
-      response_format: 'url',
-      mode: mode as 'text2image' | 'image2image',
-      base64_images: base64Images.length > 0 ? base64Images : null,
-      image_urls: imageUrls.length > 0 ? imageUrls : null,
-      context: buildCanvasContext(sourcePanel, store),
-    })
-    const taskId = resp.task_id
-
-    // 注册到任务队列
-    taskQueue.registerCanvasTask({
-      taskId,
-      type: 'image',
-      prompt,
-      backendTaskId: taskId,
-      panelId: newPanelId,
-    })
-
-    // 轮询任务状态（间隔 2 秒，最多 150 次 ≈ 5 分钟）
-    const maxAttempts = 150
-    for (let i = 0; i < maxAttempts; i++) {
-      await new Promise((r) => setTimeout(r, 2000))
-      const status: ImageTaskPollStatus = await getImageTaskStatus(taskId)
-      const isSuccess = ['completed', 'succeeded', 'success', 'done'].includes(status.status)
-      const isFailed = ['failed', 'error'].includes(status.status)
-
-      if (isSuccess) {
-        const imageUrl = status.result_url || status.image_url || status.url || status.data?.[0]?.url
-        store.updatePanel(newPanelId, { content: { content: imageUrl, status: 'success' } })
-        store.pushSnapshot()
-        taskQueue.updateCanvasTask(taskId, { status: 'success', resultUrl: imageUrl, progress: 100 })
-        showCostConsumedMessage({ type: 'image', mode, size }, t('canvas.messages.imageGenerationDone'))
-        // 【用户偏好】自动下载 + 完成通知
-        const prefsStore = usePreferencesStore()
-        if (imageUrl) {
-          prefsStore.autoDownload(imageUrl, 'image', { modelId: model || useModelsStore().defaultImageModel })
-        }
-        prefsStore.notifyComplete('image', { prompt, modelId: model || useModelsStore().defaultImageModel })
-        return
-      }
-      if (isFailed) {
-        const errMsg = status.message || status.error || t('canvas.messages.generateFailed')
-        store.updatePanel(newPanelId, { content: { status: 'error', errorDetails: errMsg } })
-        taskQueue.updateCanvasTask(taskId, { status: 'failed' })
-        ElMessage.error(`${t('canvas.messages.imageGenerationFailed')}: ${errMsg}`)
-        return
-      }
-      const progress = typeof status.progress === 'number' ? status.progress : undefined
-      taskQueue.updateCanvasTask(taskId, { status: 'processing', progress })
-    }
-    // 超时
-    store.updatePanel(newPanelId, { content: { status: 'error', errorDetails: t('canvas.messages.generateTimeout') } })
-    taskQueue.updateCanvasTask(taskId, { status: 'failed' })
-    ElMessage.warning(t('canvas.messages.generateTimeout'))
-  } catch (err) {
-    console.error('[canvas] quick generate image error:', err)
-    store.updatePanel(newPanelId, { content: { status: 'error', errorDetails: getErrorMessage(err) } })
-    ElMessage.error(`${t('canvas.messages.generateFailed')}: ${getErrorMessage(err)}`)
-  }
-}
-
-// 快捷生成视频：支持文生视频/图生视频（从快捷生成弹窗触发）
-// - sourcePanel: 源节点（文本/图片）
-// - prompt: 最终提示词
-// - model/aspect_ratio/seconds: 视频参数
-// - referenceImages: 参考图（图生视频模式，取第一张）
-async function generateVideoFromSource(
-  sourcePanel: typeof store.panels[number],
-  prompt: string,
-  model: string,
-  aspectRatio: string,
-  seconds: number,
-  referenceImages: string[] = [],
-) {
-  const mode = referenceImages.length > 0 ? 'image2video' : 'text2video'
-  // 积分预检
-  const canGenerate = await checkCreditsBeforeGenerate({ type: 'video', mode, seconds })
-  if (!canGenerate) return
-
-  // 在源节点右侧创建 video 节点（loading 状态）
-  // 持久化参考图与生成参数：失败重试走 executeInNodeVideoGeneration，就地按 image2video 重跑
-  const newPanelId = store.addPanel({
-    type: 'video',
-    x: sourcePanel.x + sourcePanel.width + 60,
-    y: sourcePanel.y,
-    width: 360,
-    height: 240,
-    content: {
-      content: '',
-      status: 'loading',
-      prompt,
-      mode: 'image2video',
-      model: model || useModelsStore().defaultVideoModel,
-      aspect_ratio: aspectRatio,
-      seconds,
-      referenceImages,
-    },
-  })
-  store.addConnection({ source_panel_id: sourcePanel.id, target_panel_id: newPanelId })
-  store.pushSnapshot()
-
-  try {
-    // 处理参考图（图生视频）：blob URL 转 base64
-    let imageBase64: string | null = null
-    if (referenceImages.length > 0) {
-      const { toBase64IfNeeded } = await import('@/lib/canvas-image-ops')
-      imageBase64 = await toBase64IfNeeded(referenceImages[0])
-    }
-
-    // 调用视频生成 API
-    const { createVideoTask, getVideoStatus } = await import('@/api/videos')
-    const resp = await createVideoTask({
-      prompt,
-      model: model || useModelsStore().defaultVideoModel,
-      aspect_ratio: aspectRatio,
-      seconds,
-      mode: mode as 'text2video' | 'image2video',
-      image: imageBase64,
-      context: buildCanvasContext(sourcePanel, store),
-    })
-    const taskId = resp.task_id
-    if (!taskId) {
-      throw new Error('视频生成 API 未返回任务 ID')
-    }
-
-    // 注册到任务队列
-    taskQueue.registerCanvasTask({
-      taskId,
-      type: 'video',
-      prompt,
-      backendTaskId: taskId,
-      panelId: newPanelId,
-    })
-
-    // 轮询任务状态（间隔 3 秒，最多 100 次 ≈ 5 分钟）
-    const maxAttempts = 100
-    for (let i = 0; i < maxAttempts; i++) {
-      await new Promise((r) => setTimeout(r, 3000))
-      const status: VideoTaskPollStatus = await getVideoStatus(taskId)
-      const isSuccess = ['completed', 'succeeded', 'success', 'done'].includes(status.status)
-      const isFailed = ['failed', 'error'].includes(status.status)
-
-      if (isSuccess) {
-        const videoUrl = status.video_url || ''
-        if (!videoUrl) {
-          throw new Error('视频生成成功但未返回视频 URL')
-        }
-        store.updatePanel(newPanelId, { content: { content: videoUrl, status: 'success' } })
-        store.pushSnapshot()
-        taskQueue.updateCanvasTask(taskId, { status: 'success', resultUrl: videoUrl, progress: 100 })
-        showCostConsumedMessage({ type: 'video', mode, seconds }, t('canvas.messages.videoGenerationDone'))
-        const prefsStore = usePreferencesStore()
-        prefsStore.autoDownload(videoUrl, 'video', { modelId: model || useModelsStore().defaultVideoModel })
-        prefsStore.notifyComplete('video', { prompt, modelId: model || useModelsStore().defaultVideoModel })
-        return
-      }
-      if (isFailed) {
-        const errMsg = status.message || status.error || t('canvas.messages.generateFailed')
-        store.updatePanel(newPanelId, { content: { status: 'error', errorDetails: errMsg } })
-        taskQueue.updateCanvasTask(taskId, { status: 'failed' })
-        ElMessage.error(`${t('canvas.messages.videoGenerationFailed')}: ${errMsg}`)
-        return
-      }
-      const progress = typeof status.progress === 'number' ? status.progress : undefined
-      taskQueue.updateCanvasTask(taskId, { status: 'processing', progress })
-    }
-    // 超时
-    store.updatePanel(newPanelId, { content: { status: 'error', errorDetails: t('canvas.messages.generateTimeout') } })
-    taskQueue.updateCanvasTask(taskId, { status: 'failed' })
-    ElMessage.warning(t('canvas.messages.generateTimeout'))
-  } catch (err) {
-    console.error('[canvas] quick generate video error:', err)
-    store.updatePanel(newPanelId, { content: { status: 'error', errorDetails: getErrorMessage(err) } })
     ElMessage.error(`${t('canvas.messages.generateFailed')}: ${getErrorMessage(err)}`)
   }
 }
@@ -2118,8 +1938,8 @@ async function handleHoverRunNode() {
 }
 
 // 通用：重试生成
-// - 查找上游 config 节点，重新执行合并生成（创建新的 loading 结果节点）
-// - 没有上游 config 节点时，用节点自身 prompt 重新生成（直接更新当前节点）
+// - 图片/视频节点就地重生成（自身内容 + 上游连线资源合并，保留模型/参数/参考图）
+// - 其余类型用节点自身 prompt 重新生成
 async function retryGeneration(panel: typeof store.panels[number]) {
   // 画布三节点（spec M3）：执行节点本身重跑；其产物节点回溯到执行节点重跑
   if (panel.type === 'tts' || panel.type === 'subtitle' || panel.type === 'compose') {
@@ -2133,178 +1953,40 @@ async function retryGeneration(panel: typeof store.panels[number]) {
     return
   }
 
-  // 直出分镜节点（自带 lineage）：就地重试，保留节点上的模型/参数/角色参考图/源图
-  if (readLineage(panel) && (panel.type === 'image' || panel.type === 'video')) {
-    const isVideoNode = panel.type === 'video'
-    const canGenerate = isVideoNode
-      ? await checkCreditsBeforeGenerate({ type: 'video', mode: 'image2video', seconds: (panel.content?.seconds as number) || 5 })
-      : await checkCreditsBeforeGenerate({
-          type: 'image',
-          mode: Array.isArray(panel.content?.referenceImages) && (panel.content?.referenceImages as unknown[]).length > 0 ? 'image2image' : 'text2image',
-          size: (panel.content?.size as string) || '1024x1024',
-        })
-    if (!canGenerate) return
+  if (panel.type === 'image') {
     ElMessage.info(t('canvas.messages.regenerate'))
-    const { executeInNodeGeneration, executeInNodeVideoGeneration } = await import('@/lib/canvas-generation')
-    if (isVideoNode) await executeInNodeVideoGeneration(panel, store)
-    else await executeInNodeGeneration(panel, store)
-    return
-  }
-
-  // 查找上游 config 节点
-  const upstreamConnections = store.connections.filter((c) => c.target_panel_id === panel.id)
-  const configConn = upstreamConnections.find((c) => {
-    const source = store.panels.find((p) => p.id === c.source_panel_id)
-    return source?.type === 'config'
-  })
-
-  if (configConn) {
-    // 有上游 config 节点，重新执行合并生成（会创建新的 loading 结果节点）
-    const configNode = store.panels.find((p) => p.id === configConn.source_panel_id)
-    if (!configNode) return
     try {
-      const { executeMergeGeneration, executeMergeVideoGeneration } = await import('@/lib/canvas-generation')
-      const isVideo = panel.type === 'video'
-      const fn = isVideo ? executeMergeVideoGeneration : executeMergeGeneration
-
-      // 积分预检：根据 config 节点模式构造预估参数
-      const mode = (configNode.content?.mode || 'text2image') as string
-      const estimateParams = isVideo
-        ? { type: 'video' as const, mode, seconds: (configNode.content?.seconds as number) || 5 }
-        : { type: 'image' as const, mode, size: (configNode.content?.size as string) || '1024x1024' }
-      const canGenerate = await checkCreditsBeforeGenerate(estimateParams)
-      if (!canGenerate) return
-
-      // 先把当前失败的节点设为 loading
-      store.updatePanel(panel.id, { content: { status: 'loading', errorDetails: null } })
-      ElMessage.info(t('canvas.messages.regenerate'))
-      // 异步执行，不阻塞
-      fn(configNode.id, store, {
-        onProgress: (stage, data) => {
-          if (stage === 'done') {
-            // 成功提示附带消耗积分数量
-            showCostConsumedMessage(estimateParams, t('canvas.messages.regenerateDone'))
-            const ids: string[] = data?.resultNodeIds || []
-            if (ids.length > 0) {
-              store.selectPanel(ids[0], { append: false })
-              store.centerOnPanel(ids[0])
-            }
-          } else if (stage === 'error') {
-            ElMessage.error(`${t('canvas.messages.regenerateFailed')}: ${data?.error || ''}`)
-          }
-        },
-      })
+      const { executeInNodeGeneration } = await import('@/lib/canvas-generation')
+      await executeInNodeGeneration(panel, store)
     } catch (err) {
       ElMessage.error(`${t('canvas.messages.retryFailed')}: ${getErrorMessage(err)}`)
     }
-  } else {
-    // 没有上游 config 节点：图片/视频节点走就地重生成（自身内容 + 上游连线资源合并，
-    // 空提示词允许由上游文本补齐，函数内自行校验）；其余类型用节点自身 prompt 重新生成
-    if (panel.type === 'image') {
-      ElMessage.info(t('canvas.messages.regenerate'))
-      try {
-        const { executeInNodeGeneration } = await import('@/lib/canvas-generation')
-        await executeInNodeGeneration(panel, store)
-      } catch (err) {
-        ElMessage.error(`${t('canvas.messages.retryFailed')}: ${getErrorMessage(err)}`)
-      }
-      return
-    }
-    if (panel.type === 'video') {
-      const canGenerate = await checkCreditsBeforeGenerate({ type: 'video', mode: 'image2video', seconds: (panel.content?.seconds as number) || 5 })
-      if (!canGenerate) return
-      ElMessage.info(t('canvas.messages.regenerate'))
-      try {
-        const { executeInNodeVideoGeneration } = await import('@/lib/canvas-generation')
-        await executeInNodeVideoGeneration(panel, store)
-      } catch (err) {
-        ElMessage.error(`${t('canvas.messages.retryFailed')}: ${getErrorMessage(err)}`)
-      }
-      return
-    }
-    const prompt = (panel.content?.prompt || panel.content?.content || '') as string
-    if (!prompt.trim()) {
-      ElMessage.warning(t('canvas.messages.retryNoPrompt'))
-      return
-    }
-    await generateImageFromPrompt(panel, prompt, panel.id)
+    return
   }
+  if (panel.type === 'video') {
+    const canGenerate = await checkCreditsBeforeGenerate({ type: 'video', mode: 'image2video', seconds: (panel.content?.seconds as number) || 5 })
+    if (!canGenerate) return
+    ElMessage.info(t('canvas.messages.regenerate'))
+    try {
+      const { executeInNodeVideoGeneration } = await import('@/lib/canvas-generation')
+      await executeInNodeVideoGeneration(panel, store)
+    } catch (err) {
+      ElMessage.error(`${t('canvas.messages.retryFailed')}: ${getErrorMessage(err)}`)
+    }
+    return
+  }
+  const prompt = (panel.content?.prompt || panel.content?.content || '') as string
+  if (!prompt.trim()) {
+    ElMessage.warning(t('canvas.messages.retryNoPrompt'))
+    return
+  }
+  await generateImageFromPrompt(panel, prompt, panel.id)
 }
 
 // 节点上传文件
 function handleNodeUpload(panel: typeof store.panels[number]) {
   if (panel) {
     triggerFileUpload(panel.id)
-  }
-}
-
-// 配置节点：点击生成按钮，根据模式调用图片或视频合并生成流程
-// - 点击后立刻创建 loading 状态的结果节点，异步执行生成
-// - 不阻塞配置面板，可连续点击生成多次
-// - 生成前预检积分，余额不足时中止并提示
-async function handleConfigGenerate(panel: typeof store.panels[number]) {
-  const mode = (panel.content?.mode || 'text2image') as string
-  const isVideo = mode.includes('video')
-
-  // 校验提示词：prompt 为空时检查上游文本节点（配置节点 prompt 为可选补充）
-  const prompt = (panel.content?.prompt || panel.content?.composerContent || '') as string
-  if (!prompt.trim()) {
-    // prompt 为空时，检查上游是否有文本节点（buildSimpleContext 会自动拼接上游文本）
-    const upstreamNodes = getUpstreamNodes(panel.id, store.panels, store.connections)
-    const hasUpstreamText = upstreamNodes.some(
-      (p) => p.type === 'text' && ((p.content?.content as string) || '').trim(),
-    )
-    if (!hasUpstreamText) {
-      ElMessage.warning(t('canvas.messages.promptOrUpstreamEmpty'))
-      return
-    }
-  }
-
-  // 积分预检：根据模式构造预估参数
-  const estimateParams = isVideo
-    ? {
-        type: 'video' as const,
-        mode,
-        seconds: (panel.content?.seconds as number) || 5,
-      }
-    : {
-        type: 'image' as const,
-        mode,
-        size: (panel.content?.size as string) || '1024x1024',
-      }
-  const canGenerate = await checkCreditsBeforeGenerate(estimateParams)
-  if (!canGenerate) return
-
-  try {
-    const { executeMergeGeneration, executeMergeVideoGeneration } = await import('@/lib/canvas-generation')
-    const fn = isVideo ? executeMergeVideoGeneration : executeMergeGeneration
-
-    // 异步执行：立刻创建 loading 结果节点，后台轮询
-    const newNodeId = await fn(panel.id, store, {
-      onProgress: (stage, data) => {
-        if (stage === 'done') {
-          // 成功提示附带消耗积分数量
-          showCostConsumedMessage(estimateParams, isVideo ? t('canvas.messages.videoGenerationDone') : t('canvas.messages.imageGenerationDone'))
-          // 选中新节点并定位视口
-          const ids: string[] = data?.resultNodeIds || []
-          if (ids.length > 0) {
-            store.selectPanel(ids[0], { append: false })
-            store.centerOnPanel(ids[0])
-          }
-        } else if (stage === 'error') {
-          ElMessage.error(isVideo ? `${t('canvas.messages.videoGenerationFailed')}: ${data?.error || ''}` : `${t('canvas.messages.imageGenerationFailed')}: ${data?.error || ''}`)
-        }
-      },
-    })
-
-    // 立刻选中新创建的 loading 节点并定位视口
-    if (newNodeId) {
-      store.selectPanel(newNodeId, { append: false })
-      store.centerOnPanel(newNodeId)
-    }
-  } catch (err) {
-    console.error('[canvas] config generate error:', err)
-    ElMessage.error(`${t('canvas.messages.generateFailed')}: ${getErrorMessage(err)}`)
   }
 }
 
@@ -2586,20 +2268,13 @@ function handleHoverEdit() {
     case 'text':
       handleHoverEditText()
       break
-    case 'image':
-      // 触发替换图片
-      triggerFileUpload(panel.id, 'image/*')
-      break
-    case 'video':
-      triggerFileUpload(panel.id, 'video/*')
-      break
     case 'audio':
       triggerFileUpload(panel.id, 'audio/*')
       break
-    case 'config':
-      // 聚焦到配置节点，提示用户在节点内编辑
+    case 'image':
+    case 'video':
+      // 聚焦编辑：选中即打开悬浮 AI 对话框（提示词支持 @ 引用上游）
       store.selectPanel(panel.id, { append: false })
-      ElMessage.info(`${getNodeName('config')} - ${t('canvas.messages.promptEmpty')}`)
       break
     default:
       ElMessage.info(`${getNodeName(panel.type ?? '')} - ${t('canvas.messages.saveFailed')}`)
@@ -3519,19 +3194,11 @@ async function handleHoverDeriveChain() {
   }
 }
 
-// 重拍此镜头：找到来源 config 节点，重新执行生成
+// 重拍此镜头：就地重拍（保留模型/参数/参考图/源图），与重试同链路
 async function handleHoverReshoot() {
   const panel = toolbarPanel.value
   if (!panel) return
-  // 直出分镜节点（自带 lineage）：就地重拍（保留模型/参数/参考图/源图），与重试同链路
-  if (readLineage(panel) && (panel.type === 'image' || panel.type === 'video')) {
-    await retryGeneration(panel)
-    return
-  }
-  const sourceFrom = panel?.content?.sourceFrom
-  if (typeof sourceFrom !== 'string') return
-  const configPanel = store.panels.find(p => p.id === sourceFrom)
-  if (configPanel) await handleConfigGenerate(configPanel)
+  await retryGeneration(panel)
 }
 
 /**
@@ -3800,7 +3467,7 @@ function handleMinimapLocate(worldX: number, worldY: number) {
 
 // ==================== 节点创建 ====================
 
-// 在指定世界坐标（节点中心）创建节点；extraContent 由推荐动作预填（如 config 的生成模式）
+// 在指定世界坐标（节点中心）创建节点；extraContent 由菜单项预填
 function createNodeAt(type: string, cx: number, cy: number, extraContent?: Record<string, unknown>) {
   const size = NODE_DEFAULT_SIZES[type as keyof typeof NODE_DEFAULT_SIZES] ?? NODE_DEFAULT_SIZES.text
   store.pushSnapshot()

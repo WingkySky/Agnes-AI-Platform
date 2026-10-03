@@ -31,10 +31,10 @@ describe('注册表卫生', () => {
 describe('图片节点·有图', () => {
   const m = resolveToolbarTools(ctx())
 
-  it('一级只留 图生图/图生视频/替换图片/删除，其余全部分组收纳（去重后共 20 工具）', () => {
-    expect(ids(m)).toEqual(['quick-generate-image', 'quick-generate-video', 'replace-image', 'delete'])
+  it('一级只留 图生图/图生视频/替换图片/编辑/删除，其余全部分组收纳（去重后共 21 工具）', () => {
+    expect(ids(m)).toEqual(['quick-generate-image', 'quick-generate-video', 'replace-image', 'edit', 'delete'])
     const total = m.primary.length + m.groups.reduce((n, g) => n + g.tools.length, 0)
-    expect(total).toBe(20)
+    expect(total).toBe(21)
   })
 
   it('生成组=重新生成+反推，编辑组 9 项按序，管理组 5 项按序', () => {
@@ -75,9 +75,9 @@ describe('图片节点·分镜派生', () => {
     isLineage: true, lineageIsImage: true, lineageIsFirst: true, chainSegments: 2,
   }
 
-  it('首帧且无尾帧/前段：生成组=图生图+四派生+重拍+反推（无重新生成），一级只剩替换图片+删除', () => {
+  it('首帧且无尾帧/前段：生成组=图生图+四派生+重拍+反推（无重新生成），一级只剩替换图片/编辑/删除', () => {
     const m = resolveToolbarTools(ctx(lineage))
-    expect(ids(m)).toEqual(['replace-image', 'delete'])
+    expect(ids(m)).toEqual(['replace-image', 'edit', 'delete'])
     expect(groupIds(m, 'generate')).toEqual([
       'quick-generate-image', 'derive-video', 'derive-tail', 'derive-prev', 'derive-chain', 'reshoot', 'describe',
     ])
@@ -101,9 +101,9 @@ describe('图片节点·分镜派生', () => {
 })
 
 describe('视频节点', () => {
-  it('有内容：一级=替换视频/删除，生成组=重新生成+三截帧', () => {
+  it('有内容：一级=编辑/替换视频/删除，生成组=重新生成+三截帧', () => {
     const m = resolveToolbarTools(ctx({ type: 'video' }))
-    expect(ids(m)).toEqual(['upload-video', 'delete'])
+    expect(ids(m)).toEqual(['edit', 'upload-video', 'delete'])
     expect(groupIds(m, 'generate')).toEqual([
       'regenerate', 'capture-frame-first', 'capture-frame', 'capture-frame-last',
     ])
@@ -164,9 +164,9 @@ describe('简单形态全平铺（无分组）', () => {
     expect(m.groups).toEqual([])
   })
 
-  it('配置节点：编辑（聚焦）/存素材/下载/节点信息/删除 平铺', () => {
+  it('config 类型已随配置节点下线：仅剩存素材/下载/节点信息/删除', () => {
     const m = resolveToolbarTools(ctx({ type: 'config' }))
-    expect(ids(m)).toEqual(['edit', 'save-asset', 'download', 'info', 'delete'])
+    expect(ids(m)).toEqual(['save-asset', 'download', 'info', 'delete'])
     expect(m.groups).toEqual([])
   })
 

@@ -104,25 +104,8 @@ const PRESET_TEMPLATES: CanvasTemplate[] = [
           x: 100, y: 200, width: 340, height: 240,
           content: { content: '一只可爱的橘猫，坐在窗台上，阳光明媚，写实风格，高清细节', status: 'idle', fontSize: 14 },
         },
-        {
-          id: 'preset-config-1',
-          type: 'config',
-          name: 'canvas.nodeNames.generateConfig',
-          x: 520, y: 200, width: 340, height: 240,
-          content: {
-            mode: 'text2image',
-            model: '',
-            size: '1024x1024',
-            prompt: '',
-            composerContent: '',
-            generating: false,
-            progress: 0,
-          },
-        },
       ],
-      connections: [
-        { id: 'preset-conn-1', source_panel_id: 'preset-text-1', target_panel_id: 'preset-config-1', type: 'auto' },
-      ],
+      connections: [],
     },
   },
   {
@@ -148,26 +131,8 @@ const PRESET_TEMPLATES: CanvasTemplate[] = [
           x: 100, y: 500, width: 340, height: 180,
           content: { content: '把这张图片转换为水彩画风格，保持构图不变', status: 'idle', fontSize: 14 },
         },
-        {
-          id: 'preset-config-1',
-          type: 'config',
-          name: 'canvas.nodeNames.generateConfig',
-          x: 520, y: 300, width: 340, height: 240,
-          content: {
-            mode: 'image2image',
-            model: '',
-            size: '1024x1024',
-            prompt: '',
-            composerContent: '',
-            generating: false,
-            progress: 0,
-          },
-        },
       ],
-      connections: [
-        { id: 'preset-conn-1', source_panel_id: 'preset-image-1', target_panel_id: 'preset-config-1', type: 'auto' },
-        { id: 'preset-conn-2', source_panel_id: 'preset-text-1', target_panel_id: 'preset-config-1', type: 'auto' },
-      ],
+      connections: [],
     },
   },
   {
@@ -193,27 +158,8 @@ const PRESET_TEMPLATES: CanvasTemplate[] = [
           x: 100, y: 500, width: 340, height: 180,
           content: { content: '镜头缓慢推进，画面中的元素随风轻轻摆动', status: 'idle', fontSize: 14 },
         },
-        {
-          id: 'preset-config-1',
-          type: 'config',
-          name: 'canvas.nodeNames.videoConfig',
-          x: 520, y: 300, width: 340, height: 240,
-          content: {
-            mode: 'image2video',
-            model: '',
-            aspect_ratio: '16:9',
-            seconds: 5,
-            prompt: '',
-            composerContent: '',
-            generating: false,
-            progress: 0,
-          },
-        },
       ],
-      connections: [
-        { id: 'preset-conn-1', source_panel_id: 'preset-image-1', target_panel_id: 'preset-config-1', type: 'auto' },
-        { id: 'preset-conn-2', source_panel_id: 'preset-text-1', target_panel_id: 'preset-config-1', type: 'auto' },
-      ],
+      connections: [],
     },
   },
   {
@@ -246,27 +192,8 @@ const PRESET_TEMPLATES: CanvasTemplate[] = [
           x: 100, y: 660, width: 300, height: 160,
           content: { content: '融合两张图片的风格，生成一张新图片', status: 'idle', fontSize: 14 },
         },
-        {
-          id: 'preset-config-1',
-          type: 'config',
-          name: 'canvas.nodeNames.blendConfig',
-          x: 480, y: 320, width: 340, height: 240,
-          content: {
-            mode: 'image2image',
-            model: '',
-            size: '1024x1024',
-            prompt: '',
-            composerContent: '',
-            generating: false,
-            progress: 0,
-          },
-        },
       ],
-      connections: [
-        { id: 'preset-conn-1', source_panel_id: 'preset-image-1', target_panel_id: 'preset-config-1', type: 'auto' },
-        { id: 'preset-conn-2', source_panel_id: 'preset-image-2', target_panel_id: 'preset-config-1', type: 'auto' },
-        { id: 'preset-conn-3', source_panel_id: 'preset-text-1', target_panel_id: 'preset-config-1', type: 'auto' },
-      ],
+      connections: [],
     },
   },
   {
@@ -292,28 +219,8 @@ const PRESET_TEMPLATES: CanvasTemplate[] = [
           x: 520, y: 200, width: 340, height: 240,
           content: { content: '（点击图片工具栏的"反推"按钮，AI 会自动填充此处）', status: 'idle', fontSize: 14 },
         },
-        {
-          id: 'preset-config-1',
-          type: 'config',
-          name: 'canvas.nodeNames.generateConfig',
-          x: 940, y: 200, width: 340, height: 240,
-          content: {
-            mode: 'text2image',
-            model: '',
-            size: '1024x1024',
-            prompt: '',
-            composerContent: '',
-            generating: false,
-            progress: 0,
-          },
-        },
       ],
-      connections: [
-        // 图片节点连到 config：默认 text2image 模式下不使用图片，用户可切换为 image2image 模式把原图作为参考
-        { id: 'preset-conn-1', source_panel_id: 'preset-image-1', target_panel_id: 'preset-config-1', type: 'auto' },
-        // 文本节点连到 config：反推出的提示词作为生成输入
-        { id: 'preset-conn-2', source_panel_id: 'preset-text-1', target_panel_id: 'preset-config-1', type: 'auto' },
-      ],
+      connections: [],
     },
   },
 ]
@@ -435,7 +342,6 @@ export async function renameUserTemplate(templateId: string, newName: string): P
  * - 深拷贝模板的 panels/connections/viewport
  * - 重新生成所有 panel id 和 connection id（避免多画布 id 冲突）
  * - 同步更新 connections 中的 source_panel_id / target_panel_id 引用
- * - 同步更新 config 节点 composerContent 中的 @[node:xxx] 引用
  *
  * @param template 画布模板
  * @returns { panels, connections, viewport } 可直接用于创建新 workspace
@@ -474,27 +380,7 @@ export function createWorkspaceFromTemplate(template: CanvasTemplate): {
     return newConn
   })
 
-  // 3. 更新 config 节点 composerContent / prompt 中的 @[node:xxx] 引用
-  const nodeRefPattern = /@\[node:([^\]]+)\]/g
-  newPanels.forEach(panel => {
-    if (panel.type === 'config' && panel.content) {
-      const updateRef = (text: string): string => {
-        if (!text) return text
-        return text.replace(nodeRefPattern, (match, oldNodeId) => {
-          const newNodeId = idMap.get(oldNodeId)
-          return newNodeId ? `@[node:${newNodeId}]` : match
-        })
-      }
-      if (panel.content.composerContent) {
-        panel.content.composerContent = updateRef(panel.content.composerContent)
-      }
-      if (panel.content.prompt) {
-        panel.content.prompt = updateRef(panel.content.prompt)
-      }
-    }
-  })
-
-  // 4. 深拷贝 viewport
+  // 3. 深拷贝 viewport
   const newViewport = deepClone(template.workspace_data.viewport || { x: 0, y: 0, zoom: 1 })
 
   return { panels: newPanels, connections: newConnections, viewport: newViewport }

@@ -8,7 +8,7 @@
 
 import type { Component } from 'vue'
 import {
-  Image as ImageIcon, Video, Music2, FileText, Settings2, Mic, Captions,
+  Image as ImageIcon, Video, Music2, FileText, Mic, Captions,
   Clapperboard, ClipboardList, Upload,
 } from 'lucide-vue-next'
 import { t } from '@/i18n'
@@ -16,10 +16,10 @@ import { validateConnectionTypes } from '@/stores/canvas'
 
 /* ---------- 类型定义 ---------- */
 
-/** 菜单项：节点类型项 / 上传动作项；推荐动作通过 content 预填区分（如 config 的生成模式） */
+/** 菜单项：节点类型项 / 上传动作项 / 快捷生成动作项（content 预填生成模式） */
 export interface QuickMenuItem {
   id: string
-  kind: 'node' | 'upload'
+  kind: 'node' | 'upload' | 'action'
   /** kind='node' 时的节点类型 */
   type?: string
   icon: Component
@@ -44,10 +44,9 @@ export interface ConnectMenuModel {
 
 /* ---------- 节点类型注册表（组内顺序即展示顺序） ---------- */
 
-const GROUP_KEYS = ['ai', 'media', 'assist', 'action'] as const
+const GROUP_KEYS = ['media', 'assist', 'action'] as const
 
 const GROUP_LABEL_KEYS: Record<string, string> = {
-  ai: 'canvas.quickMenu.groupAi',
   media: 'canvas.quickMenu.groupMedia',
   assist: 'canvas.quickMenu.groupAssist',
   action: 'canvas.quickMenu.groupAction',
@@ -60,7 +59,6 @@ interface NodeEntry {
 }
 
 const NODE_ITEMS: NodeEntry[] = [
-  { type: 'config', icon: Settings2, group: 'ai' },
   { type: 'image', icon: ImageIcon, group: 'media' },
   { type: 'video', icon: Video, group: 'media' },
   { type: 'audio', icon: Music2, group: 'media' },
@@ -85,16 +83,14 @@ function nodeMenuItem(entry: NodeEntry): QuickMenuItem {
 
 /* ---------- 推荐动作（connect 模式） ---------- */
 
-const REC_CONFIG_IMAGE: QuickMenuItem = {
-  id: 'rec:gen-image', kind: 'node', type: 'config', icon: ImageIcon,
-  labelKey: 'canvas.quickMenu.recGenerateImage', content: { mode: 'text2image' },
-}
-const REC_CONFIG_VIDEO: QuickMenuItem = {
-  id: 'rec:gen-video', kind: 'node', type: 'config', icon: Video,
-  labelKey: 'canvas.quickMenu.recGenerateVideo', content: { mode: 'text2video' },
-}
-const REC_CONFIG_PLAIN: QuickMenuItem = {
-  id: 'rec:config', kind: 'node', type: 'config', icon: Settings2, labelKey: 'canvas.quickMenu.recCreateConfig',
+/** 快捷生成动作：不建节点，在拖线源节点上打开快捷生成弹窗（结果节点自动连回源节点）；模式随源类型（文本源 text2*、图片源 image2*） */
+function recGenerateItems(sourceType: string): QuickMenuItem[] {
+  const imageMode = sourceType === 'text' ? 'text2image' : 'image2image'
+  const videoMode = sourceType === 'text' ? 'text2video' : 'image2video'
+  return [
+    { id: 'rec:gen-image', kind: 'action', icon: ImageIcon, labelKey: 'canvas.quickMenu.recGenerateImage', content: { mode: imageMode } },
+    { id: 'rec:gen-video', kind: 'action', icon: Video, labelKey: 'canvas.quickMenu.recGenerateVideo', content: { mode: videoMode } },
+  ]
 }
 const REC_TEXT: QuickMenuItem = {
   id: 'rec:text', kind: 'node', type: 'text', icon: FileText, labelKey: 'canvas.quickMenu.recCreateText',
@@ -109,9 +105,9 @@ function resolveRecommendations(sourceType: string, anchorType: 'source' | 'targ
     // 左锚（输入）拖出：新节点为上游。compose 只收视频/配音/字幕，推荐视频节点；其余推荐文本节点
     return sourceType === 'compose' ? [REC_VIDEO] : [REC_TEXT]
   }
-  // 右锚（输出）拖出：新节点为接收方。script 出边只允许 config；其余可连源推荐生成图/视频配置
-  if (sourceType === 'script') return [REC_CONFIG_PLAIN]
-  if (['text', 'image', 'video', 'audio'].includes(sourceType)) return [REC_CONFIG_IMAGE, REC_CONFIG_VIDEO]
+  // 右锚（输出）拖出：文本/图片源推荐快捷生成（弹窗确认后结果节点自动连回源）；script 出边推荐视频节点
+  if (sourceType === 'script') return [REC_VIDEO]
+  if (sourceType === 'text' || sourceType === 'image') return recGenerateItems(sourceType)
   return []
 }
 

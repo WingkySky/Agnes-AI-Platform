@@ -145,8 +145,6 @@ function nodeColor(type: string) {
       return '#f97316'
     case 'audio':
       return '#a855f7'
-    case 'config':
-      return '#60a5fa'
     case 'text':
     default:
       return props.theme.node.muted

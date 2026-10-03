@@ -186,7 +186,9 @@ async def test_connection_by_existing_panel_name(owner_client, seed_user, memory
 @pytest.mark.parametrize("source_type,target_type,expect_ok", [
     ("text", "image", True),
     ("image", "video", True),
-    ("script", "config", True),
+    ("script", "video", True),
+    ("script", "image", True),
+    ("script", "config", False),
     ("script", "text", False),
     ("image", "tts", False),
     ("text", "tts", True),

@@ -52,9 +52,9 @@ export interface CanvasStyleSelection {
  *   - text/image/video/audio/config 保持现有行为（不限制）
  */
 export function validateConnectionTypes(sourceType: string, targetType: string): string | null {
-  // script（脚本节点）只允许出边到 config（批量派生生成配置）
-  if (sourceType === 'script' && targetType !== 'config') {
-    return '脚本节点只能连接到生成配置节点'
+  // script（脚本节点）出边仅允许图片/视频（分镜血缘的可视连线）
+  if (sourceType === 'script' && !['image', 'video'].includes(targetType)) {
+    return '脚本节点只能连接到图片/视频节点'
   }
   const ALLOWED_INPUTS: Record<string, string[]> = {
     tts: ['text'],
@@ -66,10 +66,15 @@ export function validateConnectionTypes(sourceType: string, targetType: string):
 
   if (!allowed.includes(sourceType)) {
     const targetLabel = { tts: '配音', subtitle: '字幕', compose: '成片合成' }[targetType] || targetType
-    const sourceLabel = { text: '文本', image: '图片', video: '视频', audio: '音频', config: '配置', tts: '配音', subtitle: '字幕', compose: '合成', script: '脚本' }[sourceType] || sourceType
+    const sourceLabel = { text: '文本', image: '图片', video: '视频', audio: '音频', tts: '配音', subtitle: '字幕', compose: '合成', script: '脚本' }[sourceType] || sourceType
     return `${targetLabel}节点不接受 ${sourceLabel} 类型输入`
   }
   return null
+}
+
+/** 过滤已下线的 config 节点类型（历史持久化数据兜底，防止渲染分支缺失） */
+function stripLegacyConfigPanels(panels: CanvasPanel[]): CanvasPanel[] {
+  return panels.filter((p) => p.type !== 'config')
 }
 
 // ---------- 本地类型定义 ----------
@@ -602,7 +607,6 @@ export const useCanvasStore = defineStore('canvas', {
      * 复制工作区（深拷贝当前画布的所有 panels/connections/viewport）
      * - 重新生成所有 panel id 和 connection id，避免 id 冲突
      * - 同步更新 connections 中的 source_panel_id / target_panel_id 引用
-     * - 同步更新 config 节点 composerContent / prompt 中的 @[node:xxx] 引用
      * - 新画布追加到列表末尾并切换过去
      * @param name 新画布名称（由调用方拼好后缀，避免 store 依赖 i18n）
      */
@@ -628,24 +632,6 @@ export const useCanvasStore = defineStore('canvas', {
         c.source_panel_id = idMap.get(c.source_panel_id) || c.source_panel_id
         c.target_panel_id = idMap.get(c.target_panel_id) || c.target_panel_id
       })
-      // 更新 config 节点中的 @[node:xxx] 引用
-      const nodeRefPattern = /@\[node:([^\]]+)\]/g
-      newPanels.forEach(panel => {
-        if (panel.type === 'config' && panel.content) {
-          const updateRef = (text: string): string => {
-            if (!text) return text
-            return text.replace(nodeRefPattern, (match, oldNodeId: string) => {
-              const newNodeId = idMap.get(oldNodeId)
-              return newNodeId ? `@[node:${newNodeId}]` : match
-            })
-          }
-          const cc = panel.content.composerContent
-          if (typeof cc === 'string') panel.content.composerContent = updateRef(cc)
-          const pp = panel.content.prompt
-          if (typeof pp === 'string') panel.content.prompt = updateRef(pp)
-        }
-      })
-
       const newWs: CanvasWorkspace = {
         id: uid(),
         name: name || ws.name,
@@ -1160,7 +1146,7 @@ export const useCanvasStore = defineStore('canvas', {
       if (wsObj.viewport && typeof wsObj.viewport === 'object') {
         this.viewport = { ...this.viewport, ...(wsObj.viewport as Viewport) }
       }
-      this.panels = JSON.parse(JSON.stringify(wsObj.panels))
+      this.panels = stripLegacyConfigPanels(JSON.parse(JSON.stringify(wsObj.panels)))
       this.connections = JSON.parse(JSON.stringify(wsObj.connections))
       this.groups = Array.isArray(wsObj.groups) ? JSON.parse(JSON.stringify(wsObj.groups)) : []
       this.selectedPanelIds = []
@@ -1187,7 +1173,7 @@ export const useCanvasStore = defineStore('canvas', {
           created_at: now,
           updated_at: now,
           viewport: data.viewport ?? { x: 0, y: 0, zoom: 1 },
-          panels: JSON.parse(JSON.stringify(data.panels ?? [])),
+          panels: stripLegacyConfigPanels(JSON.parse(JSON.stringify(data.panels ?? []))),
           connections: JSON.parse(JSON.stringify(data.connections ?? [])),
           groups: JSON.parse(JSON.stringify(data.groups ?? [])),
           styleConfig: data.styleConfig ?? null,
@@ -1211,7 +1197,12 @@ export const useCanvasStore = defineStore('canvas', {
         const rawData = await loadCanvasData()
         if (rawData && typeof rawData === 'object') {
           const data = rawData as unknown as Record<string, unknown>
-          if (Array.isArray(data.workspaces)) this.workspaces = data.workspaces as CanvasWorkspace[]
+          if (Array.isArray(data.workspaces)) {
+            this.workspaces = (data.workspaces as CanvasWorkspace[]).map((w) => ({
+              ...w,
+              panels: stripLegacyConfigPanels(w.panels ?? []),
+            }))
+          }
           if ('activeWorkspaceId' in rawData) {
             const id = rawData.activeWorkspaceId
             this.activeWorkspaceId = typeof id === 'string' || typeof id === 'number' ? String(id) : null
@@ -1231,7 +1222,7 @@ export const useCanvasStore = defineStore('canvas', {
           if (rawData.viewport && typeof rawData.viewport === 'object') {
             this.viewport = { ...this.viewport, ...(rawData.viewport as Viewport) }
           }
-          if (Array.isArray(rawData.panels)) this.panels = rawData.panels as CanvasPanel[]
+          if (Array.isArray(rawData.panels)) this.panels = stripLegacyConfigPanels(rawData.panels as CanvasPanel[])
           if (Array.isArray(rawData.connections)) this.connections = rawData.connections as CanvasConnection[]
           if (Array.isArray(rawData.groups)) this.groups = rawData.groups as CanvasGroup[]
           // 加载完成后同步一次：确保 workspaces 中当前工作区数据与顶层一致
@@ -1250,7 +1241,7 @@ export const useCanvasStore = defineStore('canvas', {
      * - 清空选中与历史（旧历史对新内容无效），走 _save 正常保存链路
      */
     applyWorkspaceData(data: Record<string, unknown>): void {
-      this.panels = JSON.parse(JSON.stringify((data as Record<string, any>).panels ?? []))
+      this.panels = stripLegacyConfigPanels(JSON.parse(JSON.stringify((data as Record<string, any>).panels ?? [])))
       this.connections = JSON.parse(JSON.stringify((data as Record<string, any>).connections ?? []))
       this.groups = JSON.parse(JSON.stringify((data as Record<string, any>).groups ?? []))
       const vp = (data as Record<string, any>).viewport

@@ -2,8 +2,8 @@
   GenerationQuickPanel.vue
   轻量级生成配置弹窗：从文本/图片节点快速触发生图/生视频
   - 源内容预览（文本内容或图片缩略图）
-  - 辅助提示词输入（文本源可选，图片源必填）
-  - 模型/尺寸/比例/时长等简单参数选择
+  - 辅助提示词输入（支持 @图片1/@文本2 引用源节点的上游节点）
+  - 模型/尺寸/比例/时长/数量等简单参数选择；图生视频支持首尾帧模式
   - 点击生成后 emit generate(payload)，由父组件执行实际生成
 -->
 <template>
@@ -26,10 +26,22 @@
     <div class="field">
       <label class="field-label">{{ t('canvas.quickGenerate.auxPrompt') }}</label>
       <textarea
+        ref="auxInputRef"
         v-model="auxPrompt"
         class="field-textarea"
         :placeholder="promptPlaceholder"
         rows="3"
+        @input="handleMentionInput"
+        @keydown="handleMentionKeyDown"
+        @blur="handleMentionBlur"
+      />
+      <ComposerMentionPopup
+        :visible="mentionPopupVisible"
+        :candidates="mentionCandidates"
+        :active-index="mentionActiveIndex"
+        :position="mentionPopupPosition"
+        @select="selectMention"
+        @shield-blur="handlePopupMouseDown"
       />
     </div>
 
@@ -41,15 +53,23 @@
       </select>
     </div>
 
-    <!-- 图片模式：尺寸选择 -->
-    <div v-if="isImageMode" class="field">
-      <label class="field-label">{{ t('canvas.quickGenerate.size') }}</label>
-      <select v-model="selectedSize" class="field-select">
-        <option v-for="s in imageSizeOptions" :key="s.value" :value="s.value">{{ s.label }}</option>
-      </select>
-    </div>
+    <!-- 图片模式：尺寸 + 生成数量 -->
+    <template v-if="isImageMode">
+      <div class="field">
+        <label class="field-label">{{ t('canvas.quickGenerate.size') }}</label>
+        <select v-model="selectedSize" class="field-select">
+          <option v-for="s in imageSizeOptions" :key="s.value" :value="s.value">{{ s.label }}</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="field-label">{{ t('canvas.quickGenerate.count') }}</label>
+        <select v-model.number="selectedCount" class="field-select">
+          <option v-for="n in 4" :key="n" :value="n">{{ n }}</option>
+        </select>
+      </div>
+    </template>
 
-    <!-- 视频模式：比例 + 时长 -->
+    <!-- 视频模式：比例 + 时长 + 首尾帧 -->
     <template v-if="isVideoMode">
       <div class="field">
         <label class="field-label">{{ t('canvas.quickGenerate.aspectRatio') }}</label>
@@ -63,6 +83,20 @@
           <option v-for="s in availableDurations" :key="s" :value="s">{{ s }}{{ t('canvas.node.secondsSuffix') }}</option>
         </select>
       </div>
+      <!-- 首尾帧模式（仅图生视频）：源图为首帧，可选画布图片节点作尾帧 -->
+      <template v-if="isImageSource">
+        <div class="field field-inline">
+          <el-switch v-model="useKeyframes" size="small" />
+          <span class="field-inline-label">{{ t('canvas.quickGenerate.keyframesMode') }}</span>
+        </div>
+        <div v-if="useKeyframes" class="field">
+          <label class="field-label">{{ t('canvas.quickGenerate.tailFrame') }}</label>
+          <select v-model="tailFrameId" class="field-select">
+            <option value="" disabled>{{ t('canvas.quickGenerate.tailFramePlaceholder') }}</option>
+            <option v-for="p in imageNodeOptions" :key="p.id" :value="p.id">{{ p.name }}</option>
+          </select>
+        </div>
+      </template>
     </template>
 
     <template #footer>
@@ -79,10 +113,16 @@ import { ref, computed, watch, type PropType } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useI18n } from '@/i18n'
 import { useModelsStore } from '@/stores/models'
+import { useCanvasStore } from '@/stores/canvas'
+import { usePreferencesStore } from '@/stores/preferences'
+import ComposerMentionPopup from '@/components/canvas/ComposerMentionPopup.vue'
+import { useNodeMention } from '@/composables/useNodeMention'
 import type { CanvasPanel } from '@/stores/canvas'
 
 const { t } = useI18n()
 const modelsStore = useModelsStore()
+const canvasStore = useCanvasStore()
+const prefsStore = usePreferencesStore()
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -124,12 +164,22 @@ const videoAspectRatioOptions = computed(() => modelsStore.getModelParamsConfig(
 // 可用视频时长（按当前所选模型的 gen_params 档位，未配置用全局）
 const availableDurations = computed(() => modelsStore.getModelVideoDurations(selectedModel.value))
 
+// 画布图片节点候选（首尾帧尾帧选择，排除源节点自身）
+const imageNodeOptions = computed(() =>
+  canvasStore.panels
+    .filter(p => p.type === 'image' && p.id !== props.sourcePanel?.id && p.content?.content)
+    .map(p => ({ id: p.id, name: p.name || t('canvas.quickGenerate.sourceImage') }))
+)
+
 // 表单状态
 const auxPrompt = ref('')
 const selectedModel = ref('')
 const selectedSize = ref('1024x1024')
+const selectedCount = ref(1)
 const selectedAspectRatio = ref('16:9')
 const selectedSeconds = ref(5)
+const useKeyframes = ref(false)
+const tailFrameId = ref('')
 
 // 辅助提示词 placeholder（文本源可选，图片源必填）
 const promptPlaceholder = computed(() =>
@@ -138,15 +188,38 @@ const promptPlaceholder = computed(() =>
     : t('canvas.quickGenerate.auxPromptPlaceholderImage')
 )
 
+/* ---------- @ 提及（引用源节点的上游节点，与生成时的序号解析同源） ---------- */
+const auxInputRef = ref<HTMLTextAreaElement | null>(null)
+const {
+  mentionPopupVisible,
+  mentionActiveIndex,
+  mentionCandidates,
+  mentionPopupPosition,
+  handleInput: handleMentionInput,
+  handleKeyDown: handleMentionKeyDown,
+  handleBlur: handleMentionBlur,
+  handlePopupMouseDown,
+  selectMention,
+  setCurrentPanel,
+} = useNodeMention(auxInputRef)
+
 // 弹窗打开时初始化默认值
 watch(() => props.modelValue, (val) => {
-  if (val) initDefaults()
+  if (val) {
+    initDefaults()
+    setCurrentPanel(props.sourcePanel?.id || null)
+  } else {
+    setCurrentPanel(null)
+  }
 })
 
-// 初始化表单默认值：模型用默认模型，尺寸/比例/时长用第一项
+// 初始化表单默认值：模型用默认模型，尺寸/比例/时长用第一项，数量跟随偏好
 function initDefaults() {
   auxPrompt.value = ''
   selectedModel.value = modelsStore.getDefaultModelByMode(props.mode) || ''
+  selectedCount.value = Math.max(1, Number(prefsStore.generation?.default_image_count) || 1)
+  useKeyframes.value = false
+  tailFrameId.value = ''
   if (isImageMode.value) {
     selectedSize.value = imageSizeOptions.value[0]?.value || '1024x1024'
   }
@@ -157,10 +230,15 @@ function initDefaults() {
 }
 
 // 生成按钮点击：校验后 emit generate 并关闭弹窗
-function handleGenerate() {
+async function handleGenerate() {
   // 图片源时辅助提示词必填（图生图/图生视频都需要 prompt）
   if (isImageSource.value && !auxPrompt.value.trim()) {
     ElMessage.warning(t('canvas.quickGenerate.promptRequired'))
+    return
+  }
+  // 首尾帧模式必须选尾帧
+  if (isVideoMode.value && useKeyframes.value && !tailFrameId.value) {
+    ElMessage.warning(t('canvas.quickGenerate.tailFrameRequired'))
     return
   }
 
@@ -171,10 +249,19 @@ function handleGenerate() {
   }
   if (isImageMode.value) {
     payload.size = selectedSize.value
+    payload.count = selectedCount.value
+    // 数量选择回写偏好（下次打开记住）
+    if (selectedCount.value !== (Number(prefsStore.generation?.default_image_count) || 1)) {
+      void prefsStore.updatePreferences({ generation: { default_image_count: selectedCount.value } })
+    }
   }
   if (isVideoMode.value) {
     payload.aspect_ratio = selectedAspectRatio.value
     payload.seconds = Number(selectedSeconds.value)
+    if (isImageSource.value && useKeyframes.value) {
+      payload.use_keyframes = true
+      payload.tail_frame_id = tailFrameId.value
+    }
   }
 
   emit('generate', payload)
@@ -217,6 +304,17 @@ function handleGenerate() {
 /* 表单字段 */
 .field {
   margin-bottom: 16px;
+}
+
+.field-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.field-inline-label {
+  font-size: 13px;
+  font-weight: 500;
 }
 
 .field-label {

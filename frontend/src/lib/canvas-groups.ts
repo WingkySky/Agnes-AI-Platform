@@ -67,12 +67,12 @@ export function groupStatus(
 /** 资产类别 */
 export type AssetCategory =
   | 'script' | 'character' | 'prop' | 'scene' | 'storyboard' | 'video'
-  | 'audio' | 'subtitle' | 'compose' | 'config' | 'image'
+  | 'audio' | 'subtitle' | 'compose' | 'image'
 
 /** 资产类别规范排序（整理布局按此顺序分堆：脚本 → 人物 → 物品 → 场景 → 分镜 → 视频 → 兜底类 → 合成最后） */
 export const ASSET_CATEGORY_ORDER: AssetCategory[] = [
   'script', 'character', 'prop', 'scene', 'storyboard', 'video',
-  'audio', 'subtitle', 'config', 'image', 'compose',
+  'audio', 'subtitle', 'image', 'compose',
 ]
 
 /** 图片提示词 → 类别的关键词推断（按序首个命中生效；镜头单帧约束与设定图标签是强特征，先于通用词） */
@@ -100,7 +100,6 @@ export function detectAssetCategory(panel: CanvasPanel): AssetCategory {
   if (panel.type === 'audio' || panel.type === 'tts') return 'audio'
   if (panel.type === 'subtitle') return 'subtitle'
   if (panel.type === 'compose') return 'compose'
-  if (panel.type === 'config') return 'config'
 
   const content = isRecord(panel.content) ? panel.content : undefined
   const meta = isRecord(panel.meta) ? panel.meta : undefined

@@ -159,18 +159,6 @@ export function useNodeMention(textareaRef: { value: HTMLTextAreaElement | null 
       })
   })
 
-  // ---------- 工具函数：获取节点类型图标 ----------
-  function getTypeIcon(type: string): string {
-    const icons: Record<string, string> = {
-      text: '📝',
-      image: '🖼️',
-      video: '🎬',
-      audio: '🎵',
-      config: '⚙️',
-    }
-    return icons[type] || '📦'
-  }
-
   // ---------- 更新弹窗位置（fixed 定位，基于光标像素坐标） ----------
   function updatePopupPosition() {
     const textarea = textareaRef.value
@@ -306,6 +294,5 @@ export function useNodeMention(textareaRef: { value: HTMLTextAreaElement | null 
     selectMention,
     closeMentionPopup,
     setCurrentPanel,
-    getTypeIcon,
   }
 }

@@ -281,7 +281,7 @@
               {{ t('canvas.script.wizard.nextGen') }}
             </button>
           </template>
-          <!-- 步骤3：批量生成（参数作为派生 config 节点的初值，派生后逐镜头可再改） -->
+          <!-- 步骤3：批量生成（参数作为派生分镜/视频节点的初值，派生后逐镜头可再改） -->
           <template v-else>
             <div class="gen-params">
               <span class="gen-params-label" :style="accentStyle">{{ t('canvas.script.wizard.imageParams') }}</span>

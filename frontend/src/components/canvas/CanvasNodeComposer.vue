@@ -1,28 +1,16 @@
 <!-- =====================================================
   CanvasNodeComposer 节点悬浮 AI 对话框
   - 选中节点时悬浮在节点正下方，所有可 AI 生成的节点共用此输入条
-  - 支持：script（剧情→生分镜）/ text（提示词→AI 生成回填）/ config（生图/视频提示词生成）
+  - 支持：script（剧情→生分镜）/ text（提示词→AI 生成回填）
   - image / video：输入框即节点提示词本体（打开回填 content.prompt，输入即保存），
-    Enter 保存并就地重新生成（"从当前图派生新节点"走工具栏图生图/图生视频快捷面板）
-  - config 模式切换/模型/参数全部在条内，写回节点 content，发送复用现有生成链路
+    Enter 保存并就地重新生成（"从当前图派生新节点"走工具栏图生图/图生视频快捷面板）；
+    提示词支持 @图片1/@文本2 引用上游节点（就地生成时解析）
   - 文本节点走会话 SSE 流式回填（会话 id 存节点 content 复用）
   - 定位由父组件（CanvasView）按视口变换计算，本组件只管交互
 ===================================================== -->
 
 <template>
   <div v-if="panel" class="node-composer" :style="boxStyle">
-    <!-- 生成模式切换（仅 config 节点） -->
-    <div v-if="isConfig" class="composer-tabs">
-      <button
-        v-for="m in configModes"
-        :key="m.value"
-        type="button"
-        :class="['composer-tab', { active: configContent.mode === m.value }]"
-        :style="tabStyle(configContent.mode === m.value)"
-        @click="updateContent({ mode: m.value })"
-      >{{ m.label }}</button>
-    </div>
-
     <!-- 上游接入输入 chips（连线接入的模块缩略图在输入区可见，序号与生成引用一致） -->
     <div v-if="isMedia && upstreamInputs.length > 0" class="composer-inputs" :style="chipBorderStyle">
       <div v-for="u in upstreamInputs" :key="u.panel.id" class="composer-input-chip" :style="chipBorderStyle" :title="u.label">
@@ -60,19 +48,6 @@
       </template>
       <!-- image / video 节点：模型与参数写回节点 content，随画布持久化 -->
       <ComposerParamBar v-if="isMedia" :panel="panel" :mode="panelType === 'video' ? 'video' : 'image'" />
-      <template v-if="isConfig">
-        <!-- 参数栏：模式决定取图参数还是视频参数，字段名与合并生成链路共用 -->
-        <ComposerParamBar :panel="panel" :mode="isVideoMode ? 'video' : 'image'" />
-        <!-- 关键帧开关（仅图生视频） -->
-        <label v-if="configContent.mode === 'image2video'" class="composer-kf">
-          <el-switch
-            :model-value="configContent.use_keyframes || false"
-            size="small"
-            @update:model-value="updateContent({ use_keyframes: $event })"
-          />
-          <span class="composer-kf-label">{{ t('canvas.node.keyframesMode') }}</span>
-        </label>
-      </template>
 
       <!-- 状态提示 -->
       <span class="composer-tip" :style="mutedStyle">
@@ -89,27 +64,15 @@
       >↑</button>
     </div>
 
-    <!-- @ 提及弹窗（config 节点） -->
-    <Teleport to="body">
-      <div
-        v-if="mentionVisible && mentionCandidates.length > 0"
-        class="composer-mention"
-        :style="{ top: mentionPosition.top + 'px', left: mentionPosition.left + 'px' }"
-        @mousedown="handlePopupMouseDown"
-      >
-        <div
-          v-for="(candidate, idx) in mentionCandidates"
-          :key="candidate.id"
-          class="composer-mention-item"
-          :class="{ active: idx === mentionActiveIndex }"
-          @mousedown.prevent.stop="selectMention(candidate)"
-        >
-          <span class="mention-index">{{ candidate.index }}</span>
-          <span class="mention-name">{{ candidate.label }}</span>
-          <span v-if="candidate.preview" class="mention-preview">{{ candidate.preview }}</span>
-        </div>
-      </div>
-    </Teleport>
+    <!-- @ 提及弹窗（image/video 节点，引用上游节点） -->
+    <ComposerMentionPopup
+      :visible="mentionVisible"
+      :candidates="mentionCandidates"
+      :active-index="mentionActiveIndex"
+      :position="mentionPosition"
+      @select="selectMention"
+      @shield-blur="handlePopupMouseDown"
+    />
   </div>
 </template>
 
@@ -131,7 +94,7 @@ import type { EntityKind } from '@/lib/storyboard/schemas'
 import { useNodeMention } from '@/composables/useNodeMention'
 
 const props = defineProps<{ panelId: string }>()
-const emit = defineEmits<{ (e: 'generate'): void; (e: 'regenerate'): void }>()
+const emit = defineEmits<{ (e: 'regenerate'): void }>()
 
 const { t } = useI18n()
 const store = useCanvasStore()
@@ -141,33 +104,8 @@ const modelsStore = useModelsStore()
 const panel = computed(() => store.panels.find((p) => p.id === props.panelId) || null)
 const panelType = computed(() => panel.value?.type || '')
 
-/** 是否 config（生图/视频配置节点） */
-const isConfig = computed(() => panelType.value === 'config')
-
 /** 是否媒体节点（图片=图生图，视频=首帧生视频） */
 const isMedia = computed(() => panelType.value === 'image' || panelType.value === 'video')
-
-/* ---------- config 节点内容与参数选项 ---------- */
-const configContent = computed<Record<string, any>>(() => ({
-  mode: 'text2image',
-  model: modelsStore.defaultImageModel,
-  size: '1024x1024',
-  prompt: '',
-  aspect_ratio: modelsStore.defaultVideoAspectRatio,
-  resolution: modelsStore.defaultVideoResolution,
-  frame_rate: modelsStore.defaultFrameRate,
-  seconds: modelsStore.defaultVideoDuration,
-  ...(panel.value?.content || {}),
-}))
-
-const isVideoMode = computed(() => configContent.value.mode?.includes('video'))
-
-const configModes = computed(() => [
-  { value: 'text2image', label: t('canvas.node.configMode.text2image') },
-  { value: 'image2image', label: t('canvas.node.configMode.image2image') },
-  { value: 'text2video', label: t('canvas.node.configMode.text2video') },
-  { value: 'image2video', label: t('canvas.node.configMode.image2video') },
-])
 
 /* ---------- 输入状态（按节点类型读写不同字段） ---------- */
 const text = ref('')
@@ -183,11 +121,10 @@ const placeholder = computed(() => {
   return t('canvas.composer.placeholderGenerate')
 })
 
-/** 输入写回：config→prompt，script→story，image/video→prompt（即节点重生成的实际依据），text→仅本地 */
+/** 输入写回：script→story，image/video→prompt（即节点重生成的实际依据），text→仅本地 */
 function persistText() {
   if (!panel.value) return
-  if (panelType.value === 'config') store.updatePanel(panel.value.id, { content: { prompt: text.value } })
-  else if (panelType.value === 'script') store.updatePanel(panel.value.id, { content: { story: text.value } })
+  if (panelType.value === 'script') store.updatePanel(panel.value.id, { content: { story: text.value } })
   else if (isMedia.value) store.updatePanel(panel.value.id, { content: { prompt: text.value } })
 }
 
@@ -210,8 +147,7 @@ const scriptChatModel = computed({
 // 切换目标节点时重新载入输入内容
 watch(() => props.panelId, () => {
   busy.value = false
-  if (panelType.value === 'config') text.value = configContent.value.prompt || ''
-  else if (panelType.value === 'script') {
+  if (panelType.value === 'script') {
     text.value = typeof panel.value?.content?.story === 'string' ? panel.value.content.story : ''
     scriptShotMin.value = typeof panel.value?.content?.shotMin === 'number' ? panel.value.content.shotMin : 6
     scriptShotMax.value = typeof panel.value?.content?.shotMax === 'number' ? panel.value.content.shotMax : 12
@@ -234,7 +170,7 @@ function persistScriptParams() {
   updateContent({ shotMin: scriptShotMin.value, shotMax: scriptShotMax.value })
 }
 
-/* ---------- @ 提及（config 节点） ---------- */
+/* ---------- @ 提及（image/video 节点，引用上游节点） ---------- */
 const {
   mentionPopupVisible: mentionVisible,
   mentionActiveIndex,
@@ -248,11 +184,11 @@ const {
   setCurrentPanel,
 } = useNodeMention(inputRef)
 
-watch(() => props.panelId, (id) => setCurrentPanel(isConfig.value ? id : null), { immediate: true })
+watch(() => props.panelId, (id) => setCurrentPanel(isMedia.value ? id : null), { immediate: true })
 
 /** 输入事件：v-model 之外做 @ 提及处理 + 自适应高度 */
 function onInput() {
-  if (isConfig.value) handleMentionInput()
+  if (isMedia.value) handleMentionInput()
   persistText()
   autosize()
 }
@@ -267,7 +203,7 @@ function autosize() {
 
 /** 键盘：Enter 发送（@ 弹窗打开时交给提及导航），Shift+Enter 换行 */
 function onKeyDown(event: KeyboardEvent) {
-  if (isConfig.value && mentionVisible.value) {
+  if (isMedia.value && mentionVisible.value) {
     handleMentionKeyDown(event)
     if (mentionVisible.value) return
   }
@@ -282,17 +218,10 @@ const canSend = computed(() => text.value.trim().length > 0 && !busy.value)
 /* ---------- 发送：按节点类型分发 ---------- */
 function onSend() {
   if (!canSend.value || !panel.value) return
-  if (panelType.value === 'config') sendConfig()
-  else if (panelType.value === 'script') void sendScript()
+  if (panelType.value === 'script') void sendScript()
   else if (panelType.value === 'text') void sendText()
   else if (isMedia.value) sendMediaRegenerate()
   else ElMessage.info(t('canvas.composer.unsupported'))
-}
-
-/** config：写入 prompt 后交由父组件走现有合并生成流程 */
-function sendConfig() {
-  persistText()
-  emit('generate')
 }
 
 /** image / video：输入即节点提示词，保存后交由父组件就地重新生成（保留模型/参数/参考图） */
@@ -429,12 +358,6 @@ const selectStyle = computed(() => ({
 }))
 const mutedStyle = computed(() => ({ color: theme.value.node.muted }))
 
-function tabStyle(active: boolean) {
-  return active
-    ? { background: theme.value.node.activeStroke, color: '#fff', borderColor: theme.value.node.activeStroke }
-    : { background: 'transparent', color: theme.value.node.muted, borderColor: theme.value.node.stroke }
-}
-
 const sendStyle = computed(() => {
   if (canSend.value) {
     return { background: theme.value.node.activeStroke, borderColor: theme.value.node.activeStroke, color: '#fff' }
@@ -456,23 +379,6 @@ const sendStyle = computed(() => {
   border-radius: 14px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
   box-sizing: border-box;
-}
-
-/* 模式切换 tabs */
-.composer-tabs {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.composer-tab {
-  border: 1px solid;
-  border-radius: 8px;
-  padding: 3px 10px;
-  font-size: 11px;
-  cursor: pointer;
-}
-.composer-tab.active {
-  font-weight: 600;
 }
 
 /* 输入区 */
@@ -541,15 +447,6 @@ const sendStyle = computed(() => {
   outline: none;
   cursor: pointer;
   max-width: 150px;
-}
-.composer-kf {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.composer-kf-label {
-  font-size: 11px;
-  white-space: nowrap;
 }
 /* script 参数：镜头数/风格 */
 .composer-param-label {

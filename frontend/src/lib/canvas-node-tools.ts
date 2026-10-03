@@ -159,8 +159,8 @@ export const TOOL_DEFS: ToolDef[] = [
     visible: (c) => isImage(c) && c.hasContent,
   },
 
-  // —— 对话编辑（配置节点的聚焦编辑入口；媒体节点替换走上方替换钮） ——
-  { id: 'edit', icon: MessageSquare, labelKey: 'edit', visible: (c) => c.type === 'config' && c.hasContent },
+  // —— 对话编辑（媒体节点聚焦编辑：选中打开悬浮 AI 对话框，提示词支持 @ 引用上游） ——
+  { id: 'edit', icon: MessageSquare, labelKey: 'edit', visible: (c) => (isImage(c) || isVideo(c)) && c.hasContent },
 
   // —— 素材上传 / 替换 ——
   {

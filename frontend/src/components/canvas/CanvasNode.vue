@@ -4,7 +4,7 @@
      - 选中态：边框 #2f80ff + 0 0 0 1px #2f80ff55 阴影
      - 四角缩放手柄：size-7（28px）透明热区，外侧 14px
      - 左右连线锚点：size-12（48px）热区 + size-3（12px）圆形锚点
-     - 按类型渲染内容：text/image/video/audio/config
+     - 按类型渲染内容：text/image/video/audio
      - 交互：拖拽移动、双击编辑/查看、右键菜单、hover、缩放、连线
      ===================================================== -->
 
@@ -187,38 +187,6 @@
           </div>
         </div>
 
-        <!-- 配置节点：提示词/模型/参数与生成入口在悬浮 AI 对话框（CanvasNodeComposer）中，
-             节点内仅保留摄像机参数与预设入口 -->
-        <div v-else-if="panel.type === 'config'" class="config-content">
-          <div class="config-scroll-area">
-            <!-- 摄像机参数面板 -->
-            <CanvasCameraPanel
-              v-if="isImageMode || isVideoMode"
-              v-model="configCameraParams"
-              class="config-camera-panel"
-            />
-
-            <!-- 预设快捷入口 -->
-            <el-popover
-              v-if="isImageMode || isVideoMode"
-              placement="bottom-start"
-              :width="320"
-              trigger="click"
-              :teleported="true"
-            >
-              <template #reference>
-                <button type="button" class="preset-trigger-btn">
-                  预设
-                </button>
-              </template>
-              <PresetQuickPanel
-                @select="onQuickPanelSelect"
-                :exclude-types="[]"
-              />
-            </el-popover>
-          </div>
-        </div>
-
         <!-- 脚本节点：紧凑卡片 + 全屏分镜向导入口 -->
         <div v-else-if="panel.type === 'script'" class="script-content">
           <ScriptNodeContent :panel-id="panel.id" />
@@ -362,9 +330,8 @@
       <div class="connection-dot" :style="connectionDotStyle"></div>
     </div>
 
-    <!-- 右侧连线锚点（source）：config 节点不显示 -->
+    <!-- 右侧连线锚点（source） -->
     <div
-      v-if="panel.type !== 'config'"
       class="connection-handle connection-right"
       :class="{ 'is-visible': isRightAnchorVisible }"
       @mousedown.stop="handleConnectStart($event, 'source')"
@@ -372,7 +339,7 @@
       <div class="connection-dot" :style="connectionDotStyle"></div>
     </div>
 
-    <!-- 输入序号标记：当节点作为输入连接到 config/multi-text 等节点时，显示接入序号（1,2,3...） -->
+    <!-- 输入序号标记：当节点作为输入接入下游节点时，显示接入序号（1,2,3...） -->
     <div
       v-for="badge in inputBadges"
       :key="badge.targetId"
@@ -383,7 +350,7 @@
       {{ badge.index }}
     </div>
 
-    <!-- 分镜出处标记：script 节点派生的 config/结果节点显示"镜头 N" -->
+    <!-- 分镜出处标记：script 节点派生的分镜图/视频节点显示"镜头 N" -->
     <div
       v-if="shotBadge"
       class="input-index-badge shot-lineage-badge"
@@ -412,12 +379,9 @@ import { computed, ref, nextTick, watch, onMounted, onUnmounted } from 'vue'
 import { Image as ImageIcon, Video, Music2, RefreshCw, Play } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
 import { useCanvasStore } from '@/stores/canvas'
-import { useModelsStore } from '@/stores/models'
 import ImageWithWatermark from '@/components/ImageWithWatermark.vue'
-import CanvasCameraPanel from '@/components/CanvasCameraPanel.vue'
-import PresetQuickPanel from '@/components/presets/PresetQuickPanel.vue'
 import ScriptNodeContent from '@/components/canvas/nodes/ScriptNodeContent.vue'
-import { readLineage, getShotLineageInfo } from '@/lib/canvas-storyboard'
+import { readLineage } from '@/lib/canvas-storyboard'
 import { registerVideoTime } from '@/lib/canvas-image-ops'
 import { fitNodeToMedia } from '@/lib/canvas-media'
 
@@ -469,16 +433,13 @@ const MIN_WIDTH = 220 // 最小宽度
 const MIN_HEIGHT = 160 // 最小高度
 const MAX_FIT_HEIGHT = 560 // 媒体比例适配的高度上限（竖版素材锁高反算宽）
 
-/* ---------- Store 实例（供 config 节点直接更新面板内容） ---------- */
+/* ---------- Store 实例 ---------- */
 const store = useCanvasStore()
-const modelsStore = useModelsStore()
 
 /* ---------- 响应式状态 ---------- */
 const hovered = ref(false) // 是否悬停
 const isEditingContent = ref(false) // 是否正在编辑文本
 const textareaRef = ref<HTMLTextAreaElement | null>(null) // 文本节点编辑区引用
-
-// config 节点的 @ 提及已随提示词输入迁移至悬浮 AI 对话框（CanvasNodeComposer）
 
 /* ---------- 四角缩放手柄配置 ---------- */
 const resizeCorners = [
@@ -614,22 +575,10 @@ const inputBadges = computed(() => {
   return badges
 })
 
-/** 分镜出处标记：script 派生的 config 节点及其结果节点显示"镜头 N" */
+/** 分镜出处标记：script 派生的分镜图/视频节点（lineage 挂在节点自身）显示"镜头 N" */
 const shotBadge = computed<string | null>(() => {
-  if (props.panel.type === 'config') {
-    const lineage = readLineage(props.panel)
-    return lineage ? t('canvas.node.shotBadge', { no: lineage.shotNo }) : null
-  }
-  // 分镜图为直出 image 节点，lineage 挂在自身
-  if (props.panel.type === 'image') {
-    const lineage = readLineage(props.panel)
-    return lineage ? t('canvas.node.shotBadge', { no: lineage.shotNo }) : null
-  }
-  if (props.panel.type === 'video') {
-    const info = getShotLineageInfo(props.panel)
-    return info ? t('canvas.node.shotBadge', { no: info.lineage.shotNo }) : null
-  }
-  return null
+  const lineage = readLineage(props.panel)
+  return lineage ? t('canvas.node.shotBadge', { no: lineage.shotNo }) : null
 })
 
 /** 序号标记样式（固定在节点左上角，蓝色圆形徽章） */
@@ -646,7 +595,6 @@ function getNodeTypeName(type: string): string {
     image: '图片',
     video: '视频',
     audio: '音频',
-    config: '配置',
   }
   return names[type] || type
 }
@@ -656,11 +604,9 @@ const isLeftAnchorVisible = computed(
   () => hovered.value || props.selected || props.isConnecting,
 )
 
-/** 右侧锚点是否可见：config 节点不显示 */
+/** 右侧锚点是否可见：hover/选中/连线中 */
 const isRightAnchorVisible = computed(
-  () =>
-    props.panel.type !== 'config' &&
-    (hovered.value || props.selected || props.isConnecting),
+  () => hovered.value || props.selected || props.isConnecting,
 )
 
 /** 图片信息：宽度 */
@@ -676,32 +622,6 @@ const imageInfoHeight = computed(
 /** 图片信息：文件大小（格式化） */
 const imageInfoSize = computed(() => formatBytes(metadata.value.bytes || 0))
 
-/* ---------- 配置节点计算属性 ---------- */
-
-/** 配置节点内容（从 panel.content 读取，带默认值） */
-const configContent = computed(() => ({
-  mode: 'text2image',
-  model: modelsStore.defaultImageModel,
-  size: '1024x1024',
-  prompt: '',
-  generating: false,
-  progress: 0,
-  // 视频参数默认值
-  aspect_ratio: modelsStore.defaultVideoAspectRatio,
-  resolution: modelsStore.defaultVideoResolution,
-  frame_rate: modelsStore.defaultFrameRate,
-  seconds: modelsStore.defaultVideoDuration,
-  ...(props.panel.content || {}),
-}))
-
-/** 是否为图片模式（含 text2image / image2image，且非视频） */
-const isImageMode = computed(
-  () => configContent.value.mode?.includes('image') && !configContent.value.mode?.includes('video'),
-)
-
-/** 是否为视频模式（text2video / image2video，关键帧由接入图片数量自动触发） */
-const isVideoMode = computed(() => configContent.value.mode?.includes('video'))
-
 /** 实体设定卡（image 节点 content.kind 标记）：非空即为实体卡，徽标/编辑小窗展示 */
 const entityKind = computed(() => {
   const k = props.panel.content?.kind
@@ -713,55 +633,6 @@ const entityKindLabel = computed(() =>
     : entityKind.value === 'scene' ? t('canvas.node.entityScene')
       : t('canvas.node.entityProp'),
 )
-
-/** 提示词双向绑定：get 读 configContent.prompt，set 调 updateConfigContent */
-const configPrompt = computed({
-  get: () => configContent.value.prompt || '',
-  set: (val) => updateConfigContent('prompt', val),
-})
-
-/** 摄像机参数 — 与 CanvasCameraPanel 双向绑定（初值回读已保存的 camera_params，变更即时持久化） */
-const configCameraParams = ref<Record<string, any>>({
-  enabled: false,
-  camera_model: undefined,
-  focal_length: undefined,
-  aperture: undefined,
-  depth_of_field: undefined,
-  shutter_speed: undefined,
-  shutter_angle: undefined,
-  camera_movement: undefined,
-  camera_angle: undefined,
-  aspect_ratio: undefined,
-  visual_style: undefined,
-  ...((props.panel.content?.camera_params as Record<string, any>) || {}),
-})
-
-/** 预设快捷面板选中回调 — 将 preset 内容填入当前节点 */
-function onQuickPanelSelect(preset: PromptPreset) {
-  // 填充提示词文本
-  if (preset.prompt_text) {
-    configPrompt.value = preset.prompt_text
-  }
-  // 填充摄像机参数
-  if (preset.camera_params && typeof preset.camera_params === 'object') {
-    const cp = preset.camera_params as Record<string, any>
-    configCameraParams.value = {
-      enabled: true,
-      camera_model: cp.camera_model || undefined,
-      focal_length: cp.focal_length || undefined,
-      aperture: cp.aperture || undefined,
-      depth_of_field: cp.depth_of_field || undefined,
-      shutter_speed: cp.shutter_speed || undefined,
-      shutter_angle: cp.shutter_angle || undefined,
-      camera_movement: cp.camera_movement || undefined,
-      camera_angle: cp.camera_angle || undefined,
-      aspect_ratio: cp.aspect_ratio || undefined,
-      visual_style: cp.visual_style || undefined,
-    }
-  }
-}
-
-import type { PromptPreset } from '@/types/preset'
 
 /* ---------- 工具函数 ---------- */
 
@@ -1022,27 +893,8 @@ function handleRunNode() {
   emit('run-node', props.panel)
 }
 
-/* ---------- 交互：配置节点 ---------- */
-
-/** 更新配置节点内容，切换模式时自动切换对应类型的默认模型 */
-function updateConfigContent(key: string, value: any) {
-  const updates: Record<string, any> = { [key]: value }
-  // 切换模式时自动切换模型
-  if (key === 'mode') {
-    const currentModel = configContent.value.model
-    const targetModels = modelsStore.getModelsByMode(value)
-    const targetIds = targetModels.map((m) => m.id)
-    // 当前模型不在目标列表中时，自动切到该类型默认模型
-    if (!targetIds.includes(currentModel)) {
-      updates.model = modelsStore.getDefaultModelByMode(value)
-    }
-  }
-  store.updatePanel(props.panel.id, { content: updates })
-}
-
 /**
- * 更新节点 content 的单个字段（用于 tts/subtitle/compose 新节点类型）
- * 与 updateConfigContent 类似但不处理模式切换逻辑
+ * 更新节点 content 的单个字段（用于 tts/subtitle/compose 执行节点）
  */
 function updatePanelContent(key: string, value: any) {
   const currentContent = (props.panel.content || {}) as Record<string, any>
@@ -1050,15 +902,6 @@ function updatePanelContent(key: string, value: any) {
     content: { ...currentContent, [key]: value },
   })
 }
-
-/** 摄像机参数变更即时持久化（生成入口在悬浮 AI 对话框，读取 content.camera_params） */
-watch(
-  configCameraParams,
-  (val) => {
-    store.updatePanel(props.panel.id, { content: { camera_params: { ...val } } })
-  },
-  { deep: true },
-)
 
 /* ---------- 交互：hover / 右键菜单 ---------- */
 
@@ -1370,44 +1213,6 @@ onUnmounted(() => {
 
 .audio-player {
   width: 100%;
-}
-
-/* ===== 配置节点：生成配置面板 ===== */
-.config-content {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  width: 100%;
-  height: 100%;
-  padding: 12px;
-  box-sizing: border-box;
-}
-
-/* 上半部分可滚动区域：参数 + 提示词 */
-.config-scroll-area {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding-right: 2px;
-}
-
-/* 自定义滚动条：更细更淡，不干扰视觉 */
-.config-scroll-area::-webkit-scrollbar {
-  width: 4px;
-}
-.config-scroll-area::-webkit-scrollbar-track {
-  background: transparent;
-}
-.config-scroll-area::-webkit-scrollbar-thumb {
-  background: var(--agnes-border);
-  border-radius: 2px;
-}
-.config-scroll-area::-webkit-scrollbar-thumb:hover {
-  background: var(--agnes-text-faint);
 }
 
 /* ===== 未知节点 ===== */
