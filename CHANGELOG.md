@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-10-03
+
 ### Windows/macOS 便携包（免 Docker 运行）+ 打包链路修复
 - **便携包**：release 工作流新增 package job（matrix：windows-x64 / macos-arm64）——python-build-standalone 3.12.15 可重定位运行时 + 全量依赖预装（pip --target site-packages）+ 前端构建产物 + 双击启动脚本（`start-windows.bat` / `start-macos.command`），zip 自动挂 Release Assets；免安装免 Docker，数据全在包内 `backend/` 目录（备份 = 拷文件夹）；Release notes 的「安装运行」段同步补充便携包下载指引
 - **未签名分发说明**：无开发者账号属预期——Windows 首次运行 SmartScreen 点「仍要运行」；macOS 首次终端执行 `xattr -cr <解压目录>`（仅 Apple Silicon，Intel Mac 用 Docker/源码）；包内 README-PORTABLE.txt 附完整说明
