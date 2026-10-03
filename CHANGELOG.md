@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-10-03
+
+### 便携包 macOS 启动器可执行位修复
+- `start-macos.command` 在 git 中丢失可执行位（100644），解包后双击报「文件无法执行，因为你没有正确的访问权限」；git index 补 100755 + CI 组装显式 `chmod +x` 兜底 + 包内 README-PORTABLE 补 chmod 步骤（v0.0.3 便携包受影响；已解包用户就地执行 `chmod +x start-macos.command && xattr -cr .` 即可修复，无需重下）
+
 ## [0.0.3] - 2026-10-03
 
 ### Windows/macOS 便携包（免 Docker 运行）+ 打包链路修复

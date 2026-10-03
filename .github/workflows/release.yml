@@ -96,6 +96,7 @@ jobs:
           else
             PYEXE="$PKG/runtime/python/bin/python3"
             cp package/start-macos.command "$PKG/"
+            chmod +x "$PKG/start-macos.command"
           fi
           "$PYEXE" -m pip install --quiet --no-cache-dir --target "$PKG/site-packages" -r backend/requirements.txt
 

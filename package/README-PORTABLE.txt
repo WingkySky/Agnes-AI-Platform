@@ -8,10 +8,12 @@ Windows：双击 start-windows.bat
     点「更多信息」->「仍要运行」即可。
 
 macOS（Apple Silicon）：双击 start-macos.command
-  - 首次运行先打开「终端」，执行下面这行命令去除下载标记
+  - 首次运行先打开「终端」，依次执行下面两行命令
     （把目录换成你实际解压的路径）：
       xattr -cr ~/Downloads/agnes-platform
+      chmod +x ~/Downloads/agnes-platform/start-macos.command
   - 之后双击 start-macos.command 即可，浏览器会自动打开。
+  - 若双击仍提示「没有正确的访问权限」，重新执行上面第二行 chmod 命令。
   - 仅支持 Apple Silicon（M1 及以后）；Intel Mac 请用 Docker 或源码运行。
 
 启动后浏览器自动打开 http://localhost:8000 ，
