@@ -53,10 +53,32 @@ Agnes AI Platform 最初只是一个简单的图片和视频生成工具，逐�
 
 | 工具 | 版本 | 用途 |
 |---|---|---|
-| **Python** | 3.10+（推荐 3.11+） | 后端运行时 |
-| **Node.js** | 18+（推荐 20+ LTS） | 前端构建 |
+| **Docker**（推荐） | 20+ | 容器化部署，无需以下两项 |
+| **Python** | 3.10+（推荐 3.11+） | 后端运行时（源码启动） |
+| **Node.js** | 18+（推荐 20+ LTS） | 前端构建（源码启动） |
 
-### 1. 一键启动
+### 1. Docker 部署（推荐）
+
+前置条件只有一个：安装 [Docker](https://docs.docker.com/get-docker/)。
+
+**方式一：docker run**
+
+```bash
+docker run -d --name agnes-platform -p 8080:8000 -v agnes-data:/app/data ghcr.io/wingkysky/agnes-ai-platform:latest
+```
+
+**方式二：docker compose**（克隆仓库后，在仓库根目录执行）
+
+```bash
+docker compose up -d
+```
+
+启动后访问 http://localhost:8080，按首启向导完成管理员密码与 AI 服务配置即可使用。
+
+- 数据（数据库 / 上传素材 / 日志 / 自动生成的密钥）全部保存在 `agnes-data` 卷中，升级只需拉取新镜像并重建容器，数据不丢失
+- 公网服务器部署（反向代理 / HTTPS / 数据备份）见 [docs/deployment.md](docs/deployment.md)
+
+### 2. 一键启动（无 Docker 时）
 
 在项目根目录下打开终端，运行：
 
@@ -86,7 +108,7 @@ python start.py
 >
 > 可在首次运行前通过环境变量 `ADMIN_USERNAME` / `ADMIN_PASSWORD` / `ADMIN_EMAIL` / `ADMIN_CREDITS` 自定义。首次登录后请及时修改默认密码。
 
-### 2. 手动启动
+### 3. 手动启动
 
 #### 后端
 
@@ -143,7 +165,7 @@ npm run dev
 
 访问 http://localhost:5174 即可使用。
 
-### 3. 首次配置
+### 4. 首次配置
 
 1. 打开**设置**页面（`/settings`）。
 2. `.env` 中的 API Key 会自动加载为默认 Provider。

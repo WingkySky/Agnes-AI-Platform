@@ -53,10 +53,32 @@ The platform continues to grow, but the core principle remains the same: **a sel
 
 | Tool | Version | Why |
 |---|---|---|
-| **Python** | 3.10+ (3.11+ recommended) | Backend runtime |
-| **Node.js** | 18+ (20+ LTS recommended) | Frontend build |
+| **Docker** (recommended) | 20+ | Container deployment, no Python/Node needed |
+| **Python** | 3.10+ (3.11+ recommended) | Backend runtime (source start) |
+| **Node.js** | 18+ (20+ LTS recommended) | Frontend build (source start) |
 
-### 1. One-Click Start
+### 1. Docker Deployment (Recommended)
+
+The only prerequisite: [Docker](https://docs.docker.com/get-docker/).
+
+**Option A: docker run**
+
+```bash
+docker run -d --name agnes-platform -p 8080:8000 -v agnes-data:/app/data ghcr.io/wingkysky/agnes-ai-platform:latest
+```
+
+**Option B: docker compose** (after cloning the repo, from the repo root)
+
+```bash
+docker compose up -d
+```
+
+Then open http://localhost:8080 and follow the first-run wizard (admin password + AI provider) — that's it.
+
+- All data (database / uploads / logs / auto-generated secrets) lives in the `agnes-data` volume. Upgrading = pull the new image and recreate the container, nothing is lost.
+- For public server deployment (reverse proxy / HTTPS / backups), see [docs/deployment.md](docs/deployment.md).
+
+### 2. One-Click Start (Without Docker)
 
 Open a terminal in the project root and run:
 
@@ -86,7 +108,7 @@ This automatically starts both the backend and frontend in one command. On first
 >
 > You can customize these via environment variables `ADMIN_USERNAME` / `ADMIN_PASSWORD` / `ADMIN_EMAIL` / `ADMIN_CREDITS` before first run. On first login a mandatory setup wizard walks you through changing the default password and (optionally) adding an AI provider.
 
-### 2. Manual Start
+### 3. Manual Start
 
 #### Backend
 
@@ -146,7 +168,7 @@ npm run dev
 
 Visit http://localhost:5174 — you're ready to go.
 
-### 3. First-Time Setup
+### 4. First-Time Setup
 
 1. Log in and the **setup wizard** opens automatically — change the default password, and add an AI provider if none exists (skippable).
 2. Your `.env` API key (if set) is automatically loaded as the default provider on first launch.

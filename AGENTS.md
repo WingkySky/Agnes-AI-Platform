@@ -70,6 +70,7 @@
 - 按当前版本号提升一个版本，更新根目录 `VERSION`。
 - 将当前未提交的代码全部提交到 Git。
 - 提交完成后，给当前提交打最新版本号对应的 tag，例如 `v0.0.5`。
+- 推送 tag 后 GitHub Actions 自动构建 amd64/arm64 双架构镜像推 GHCR（`ghcr.io/wingkysky/agnes-ai-platform`），并按 CHANGELOG 对应版本段落创建 GitHub Release（`.github/workflows/release.yml`），无需手动构建或发布镜像。
 - 发版本流程中不要执行编译、测试或构建，除非用户明确要求。
 
 ## 项目注意事项

@@ -1,0 +1,71 @@
+# =====================================================
+# 发版工作流：tag 推送（vX.Y.Z）即发版
+# 1. 多架构（amd64 + arm64）构建镜像推 GHCR（vX.Y.Z + latest 双标签）
+# 2. 按 CHANGELOG 对应版本段落创建 GitHub Release
+# 发版人工流程见 AGENTS.md「发版本流程」：整理 CHANGELOG → VERSION +1 → 提交 → 打 tag → 推送
+# =====================================================
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  IMAGE: ghcr.io/wingkysky/agnes-ai-platform
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: APP_VERSION=${{ github.ref_name }}
+          tags: |
+            ${{ env.IMAGE }}:${{ github.ref_name }}
+            ${{ env.IMAGE }}:latest
+          labels: org.opencontainers.image.version=${{ github.ref_name }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  release:
+    runs-on: ubuntu-latest
+    needs: docker
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 提取 CHANGELOG 对应版本段落
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          python3 - "$VERSION" > release-notes.md <<'PYEOF'
+          import re, sys
+          version = sys.argv[1].lstrip("v")
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          match = re.search(rf"^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=^## |\Z)", text, re.S | re.M)
+          if not match or not match.group(1).strip():
+              raise SystemExit(f"CHANGELOG.md 中未找到版本 [{version}] 的段落，请先整理 CHANGELOG")
+          print(match.group(1).strip())
+          PYEOF
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md

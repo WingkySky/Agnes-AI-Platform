@@ -1,0 +1,49 @@
+# =====================================================
+# Agnes AI Platform 单容器部署
+# 用法：docker compose up -d
+# 访问：http://localhost:8080（首次打开进入首启向导：改管理员密码 → 配 AI 服务）
+# 数据（数据库 / 上传素材 / 日志 / 密钥）全部落在 named volume agnes-data，升级镜像不丢失
+# =====================================================
+services:
+  agnes:
+    image: ghcr.io/wingkysky/agnes-ai-platform:latest
+    container_name: agnes-platform
+    ports:
+      - "8080:8000"
+    volumes:
+      - agnes-data:/app/data
+    restart: unless-stopped
+    # 可选：容器时区（默认 UTC，影响日志时间戳）
+    # environment:
+    #   TZ: Asia/Shanghai
+
+    # ------------------------------------------------------------
+    # 可选：改用 PostgreSQL（后端原生支持，默认 SQLite 已够自托管场景）
+    # 1) 取消下方 db 服务与 agnes 的 depends_on、DATABASE_URL 注释
+    # 2) 取消底部 volumes 下 pgdata 注释
+    # ------------------------------------------------------------
+    # depends_on:
+    #   db:
+    #     condition: service_healthy
+    # environment:
+    #   DATABASE_URL: postgresql://agnes:agnes-secret@db:5432/agnes_platform
+
+  # db:
+  #   image: postgres:16-alpine
+  #   container_name: agnes-postgres
+  #   environment:
+  #     POSTGRES_USER: agnes
+  #     POSTGRES_PASSWORD: agnes-secret
+  #     POSTGRES_DB: agnes_platform
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U agnes -d agnes_platform"]
+  #     interval: 5s
+  #     timeout: 3s
+  #     retries: 10
+
+volumes:
+  agnes-data:
+  # pgdata:

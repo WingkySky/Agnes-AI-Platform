@@ -33,10 +33,10 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
@@ -330,7 +330,7 @@ app.include_router(canvas_workspace_route.router, prefix="/api", tags=["画布�
 # ---------- 健康检查 ----------
 @app.get("/health", summary="健康检查")
 async def health_check():
-    return {"status": "ok", "service": "agnes-ai-platform"}
+    return {"status": "ok", "service": "agnes-ai-platform", "version": _app_version()}
 
 
 # ---------- 静态文件：用户上传的头像、水印图片等 ----------
@@ -348,12 +348,64 @@ SEED_ASSETS_DIR = os.path.join(
 app.mount("/seed-assets", StaticFiles(directory=SEED_ASSETS_DIR), name="seed-assets")
 
 
-@app.get("/", summary="根路径 — 返回服务信息")
+@app.get("/", summary="根路径 — 前端入口（无 dist 时返回服务信息）")
 async def root():
+    # dist 存在（生产/Docker 部署）时由后端同源托管前端
+    if os.path.isfile(SPA_INDEX_FILE):
+        return FileResponse(SPA_INDEX_FILE)
     return {
         "name": "Agnes AI Platform BFF",
-        "version": "2.0.0",
+        "version": _app_version(),
         "architecture": "async (FastAPI + httpx.AsyncClient + SQLAlchemy async)",
         "docs": "/docs",
         "health": "/health",
     }
+
+
+# ---------- 前端同源托管（生产 / Docker 部署） ----------
+# dist 存在时后端托管前端并做 history 路由 fallback；dev 模式无 dist，行为与旧版完全一致。
+# 路径解析：backend/app/main.py → 仓库根/frontend/dist；容器内布局 /app/backend + /app/frontend/dist 同构。
+REPO_ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+FRONTEND_DIST_DIR = os.path.join(REPO_ROOT_DIR, "frontend", "dist")
+SPA_INDEX_FILE = os.path.join(FRONTEND_DIST_DIR, "index.html")
+
+
+def _app_version() -> str:
+    """镜像版本：env APP_VERSION（CI 构建时注入）优先，兜底读仓库根 VERSION 文件（dev）。"""
+    env_version = os.environ.get("APP_VERSION", "").strip()
+    if env_version:
+        return env_version
+    try:
+        with open(os.path.join(REPO_ROOT_DIR, "VERSION"), encoding="utf-8") as f:
+            return f.readline().strip() or "dev"
+    except OSError:
+        return "dev"
+
+
+def register_spa_fallback(target_app: FastAPI, dist_dir: str) -> bool:
+    """为前端 dist 注册 SPA fallback：未知路径返回 index.html（history 路由刷新），
+    dist 内真实存在的文件按原样返回；后端保留前缀（/api 等）不 fallback，维持 JSON 404。
+    返回是否注册（dist 不存在 = dev 模式，不注册）。"""
+    index_file = os.path.join(dist_dir, "index.html")
+    if not os.path.isfile(index_file):
+        return False
+
+    # {full_path:path} 参数不含前导斜杠，统一补上后做精确段匹配（避免误伤 dist 内 apix.png 类文件名）
+    reserved_segments = ("/api", "/uploads", "/seed-assets", "/docs", "/redoc", "/health", "/openapi.json")
+
+    @target_app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str):
+        path = "/" + full_path
+        if any(path == seg or path.startswith(seg + "/") for seg in reserved_segments):
+            raise HTTPException(status_code=404)
+        candidate = os.path.normpath(os.path.join(dist_dir, full_path))
+        if (
+            candidate == dist_dir or candidate.startswith(dist_dir + os.sep)
+        ) and os.path.isfile(candidate):
+            return FileResponse(candidate)
+        return FileResponse(index_file)
+
+    return True
+
+
+register_spa_fallback(app, FRONTEND_DIST_DIR)

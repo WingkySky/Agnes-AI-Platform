@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Docker 部署与自动化发版
+- **单镜像部署**：多阶段 Dockerfile（node 构建前端 → python:3.12-slim 同源托管前后端），`docker run -d -p 8080:8000 -v agnes-data:/app/data ...` 一条命令即可用；docker-compose.yml 提供单服务编排（含注释掉的可选 PostgreSQL 段落）；.dockerignore 严格隔离用户产物（uploads/data/logs/数据库/.env 一律不进镜像）
+- **数据卷收敛**：容器入口脚本把 uploads/logs/data 软链进单一数据卷 `/app/data`，后端代码路径零改动；JWT_SECRET/ENCRYPTION_KEY 首启自动生成并持久化到卷内 secrets.env（升级镜像登录态与已加密 Provider Key 不失效；环境变量注入优先）
+- **SPA 同源托管**：main.py 检测到 `frontend/dist` 时自动托管前端并做 history 路由 fallback（保留前缀 `/api` 等 404 不被吞，路径穿越防护）；dev 模式无 dist 行为完全不变；`/health` 与根路径暴露版本号（CI 注入 APP_VERSION，dev 兜底读 VERSION 文件）
+- **自动化发版**：`.github/workflows/release.yml`——tag 推送（v*）即触发 buildx 双架构（amd64+arm64）构建推 GHCR（vX.Y.Z + latest）+ 按 CHANGELOG 版本段落自动创建 GitHub Release；AGENTS.md 发版本流程补充说明；首次使用需把 GHCR 包可见性手动改为 public
+- **文档**：README（中英）快速开始改为 Docker 优先，源码启动降为无 Docker 备选；新增 `docs/deployment.md`（服务器反代 nginx/Caddy 示例含 SSE 关缓冲、数据备份、升级流程、PostgreSQL 可选段）
+- **测试**：新增 test_spa_static.py 6 例（根路径 HTML / 深链 fallback / dist 静态文件 / API 404 不被吞 / 路径穿越 / 无 dist 不注册），实施中逮到并修复 catch-all 吞 `/api` 未知路径的缺陷
+
 ### 画布云端落库 + 版本历史 + 冲突保护
 - **工作区云端落库**：新增 `canvas_workspaces`（前端 uid 直作主键，`data` JSON 存 panels/connections/groups/viewport/styleConfig，`revision` 乐观锁）与 `canvas_snapshots`（`auto`/`manual`/`pre_danger` 三类快照）两表；前端 canvas-storage 改双通道——登录态走云端 API（400ms 防抖 + 串行单飞保存队列，404 懒创建同 id 透传），anon 保持纯本地 localforage 零改动；画布全局小设置（激活工作区/背景模式/图片信息）进 `/api/preferences` ui 组新键；撤销历史维持内存 80 条不持久化
 - **保存冲突保护**：PUT 带 base_revision，服务端版本不符返回 409+current_revision；前端不弹窗打断——拉取云端版本落地为「`原名 · 冲突副本`」新工作区（cloud 版本保底）后按新 revision 续推本地内容（本地胜出），toast 提示；client 拦截器错误对象补 `status`/`detail` 字段供分支处理，saveWorkspace 静默避免双重 toast

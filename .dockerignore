@@ -1,0 +1,61 @@
+# =====================================================
+# Docker 构建上下文排除清单
+# 用户运行时产物一律不进镜像（运行时由 entrypoint 软链到 /app/data 数据卷）
+# =====================================================
+
+# 版本控制与本地工具目录
+.git
+.github
+.zcode
+.mimosa
+.claude
+.trae
+.v2c
+.video_agent
+.vite
+.workbuddy
+.superpowers
+.superpowers
+.pytest_cache
+
+# Python 运行时产物与本地环境
+backend/.venv
+backend/uploads
+backend/data
+backend/logs
+backend/*.db
+backend/.env
+backend/tests
+**/__pycache__
+
+# 前端本地构建产物与依赖（镜像内多阶段重新构建）
+frontend/node_modules
+frontend/dist
+frontend/tsconfig.tsbuildinfo
+frontend/vite.config.ts.timestamp-*.mjs
+
+# 通用依赖与系统文件
+node_modules
+**/node_modules
+**/.DS_Store
+
+# 仓库内非运行时内容
+mobile
+docs
+README.md
+README_zh.md
+CHANGELOG.md
+LICENSE
+API.md
+AGENTS.md
+findings.md
+progress.md
+task_plan.md
+skills-lock.json
+check_db.py
+start.py
+start.sh
+start.bat
+stop.sh
+Dockerfile
+docker-compose.yml
