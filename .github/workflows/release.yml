@@ -46,11 +46,85 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  release:
-    runs-on: ubuntu-latest
-    needs: docker
+  # 免 Docker 便携包：自包含 Python 运行时 + 预装依赖 + 前端产物 + 双击启动脚本
+  # 未签名（无开发者账号）：Windows 首次运行过一次 SmartScreen，macOS 首次需 xattr -cr（包内 README-PORTABLE 说明）
+  package:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: windows-x64
+            runner: windows-latest
+            pbs_asset: cpython-3.12.15+20261001-x86_64-pc-windows-msvc-install_only.tar.gz
+          - id: macos-arm64
+            runner: macos-latest
+            pbs_asset: cpython-3.12.15+20261001-aarch64-apple-darwin-install_only.tar.gz
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 构建前端
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: 组装便携包
+        shell: bash
+        env:
+          PBS_ASSET: ${{ matrix.pbs_asset }}
+        run: |
+          PKG="pkg/agnes-platform"
+          mkdir -p "$PKG/backend" "$PKG/frontend" "$PKG/runtime"
+          cp -r backend/app "$PKG/backend/app"
+          find "$PKG/backend" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+          cp backend/requirements.txt backend/ensure_secrets.py backend/.env.example "$PKG/backend/"
+          cp -r frontend/dist "$PKG/frontend/dist"
+          cp package/README-PORTABLE.txt "$PKG/"
+
+          curl -sSL -o /tmp/pbs.tar.gz "https://github.com/astral-sh/python-build-standalone/releases/download/20261001/${PBS_ASSET}"
+          tar -xzf /tmp/pbs.tar.gz -C "$PKG/runtime"
+
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            PYEXE="$PKG/runtime/python/python.exe"
+            sed -i 's/\r\?$/\r/' package/start-windows.bat
+            cp package/start-windows.bat "$PKG/"
+          else
+            PYEXE="$PKG/runtime/python/bin/python3"
+            cp package/start-macos.command "$PKG/"
+          fi
+          "$PYEXE" -m pip install --quiet --no-cache-dir --target "$PKG/site-packages" -r backend/requirements.txt
+
+      - name: 打 zip（Windows）
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path pkg/agnes-platform -DestinationPath "agnes-platform-${{ github.ref_name }}-windows-x64.zip"
+
+      - name: 打 zip（macOS）
+        if: runner.os == 'macOS'
+        run: zip -r -y -q "agnes-platform-${{ github.ref_name }}-macos-arm64.zip" pkg/agnes-platform
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: portable-${{ matrix.id }}
+          path: agnes-platform-*.zip
+          retention-days: 3
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [docker, package]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: portable-*
+          path: portable
+          merge-multiple: true
 
       - name: 提取 CHANGELOG 对应版本段落并生成 Release notes
         env:
@@ -67,13 +141,20 @@ jobs:
           PYEOF
 
           cat > install.md <<'MDEOF'
-          ## 安装运行（Docker，推荐）
+          ## 安装运行
+
+          **Docker（推荐）**
 
           ```bash
           docker run -d --name agnes-platform -p 8080:8000 -v agnes-data:/app/data ghcr.io/wingkysky/agnes-ai-platform:__VERSION__
           ```
 
-          打开 http://localhost:8080 ，按首启向导完成管理员密码与 AI 服务配置即可使用。
+          **免 Docker 便携包（Windows / macOS Apple Silicon）**
+
+          从下方 Assets 下载对应平台的 zip，解压后双击 `start-windows.bat`（或 macOS 的 `start-macos.command`）。
+          macOS 首次运行先在终端执行 `xattr -cr <解压目录>` 去除下载标记；详见包内 README-PORTABLE.txt。
+
+          打开 http://localhost:8080 （便携包为 8000），按首启向导完成管理员密码与 AI 服务配置即可使用。
           更多方式（docker compose / 公网服务器反代与 HTTPS / 数据备份）见 [docs/deployment.md](https://github.com/WingkySky/Agnes-AI-Platform/blob/main/docs/deployment.md)。
 
           ---
@@ -85,3 +166,4 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           body_path: body.md
+          files: portable/*.zip

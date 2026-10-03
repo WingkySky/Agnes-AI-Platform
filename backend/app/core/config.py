@@ -219,10 +219,19 @@ class Settings(BaseSettings):
     @classmethod
     def parse_origins(cls, v):
         """
-        支持以逗号分隔的字符串形式配置多个来源
-        例如："http://localhost:5173,http://127.0.0.1:5173"
+        兼容多种配置格式：
+        - JSON 数组字符串（pydantic-settings 对 dotenv 复杂字段按 JSON 解析）：
+          '["http://localhost:5173", "http://127.0.0.1:5173"]'
+        - 逗号分隔字符串："http://localhost:5173,http://127.0.0.1:5173"
         """
         if isinstance(v, str):
+            try:
+                import json
+                parsed = json.loads(v)
+                if isinstance(parsed, list):
+                    return parsed
+            except ValueError:
+                pass
             return [item.strip() for item in v.split(",") if item.strip()]
         return v
 

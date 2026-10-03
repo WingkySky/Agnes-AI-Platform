@@ -1,6 +1,34 @@
 # =====================================================
-# 形象图认领 / 上传
+# 形象图认领 / 上传 + 道具服务 — 道具 CRUD + 单/批量生图 + 版本管理
+#
+# 与 character_service 同构，仅表名和字段不同（visual_desc）
 # =====================================================
+
+import logging
+from typing import List, Optional
+
+from fastapi import HTTPException
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.project import ProjectProp, ProjectScript
+from app.schemas.project import EntityCreate, EntityUpdate
+from app.services.project._entity_versions import (
+    create_version,
+    list_versions,
+    set_active_version,
+    delete_version,
+    attach_active_image,
+    attach_active_image_batch,
+)
+from app.services.project._async_gen import claim_generation
+from app.services.project._generation_history import record_manual_upload
+from app.services.project.sse_manager import project_sse_manager
+
+logger = logging.getLogger("agnes_platform.project.prop")
+
+ENTITY_TYPE = "prop"
+
 
 async def claim_prop_image(
     db: AsyncSession, prop_id: int, task_id: str
@@ -82,38 +110,6 @@ async def upload_prop_image(
     await attach_active_image(db, ENTITY_TYPE, prop)
     return prop
 
-
-
-# =====================================================
-# 道具服务 — 道具 CRUD + 单/批量生图 + 版本管理
-#
-# 与 character_service 同构，仅表名和字段不同（visual_desc）
-# =====================================================
-
-import logging
-from typing import List, Optional
-
-from fastapi import HTTPException
-from sqlalchemy import select, func
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.models.project import ProjectProp, ProjectScript
-from app.schemas.project import EntityCreate, EntityUpdate
-from app.services.project._entity_versions import (
-    create_version,
-    list_versions,
-    set_active_version,
-    delete_version,
-    attach_active_image,
-    attach_active_image_batch,
-)
-from app.services.project._async_gen import claim_generation
-from app.services.project._generation_history import record_manual_upload
-from app.services.project.sse_manager import project_sse_manager
-
-logger = logging.getLogger("agnes_platform.project.prop")
-
-ENTITY_TYPE = "prop"
 
 
 # =====================================================

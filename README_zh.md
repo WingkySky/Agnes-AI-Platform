@@ -57,9 +57,9 @@ Agnes AI Platform 最初只是一个简单的图片和视频生成工具，逐�
 | **Python** | 3.10+（推荐 3.11+） | 后端运行时（源码启动） |
 | **Node.js** | 18+（推荐 20+ LTS） | 前端构建（源码启动） |
 
-### 1. Docker 部署（推荐）
+### 1. Docker / 便携包部署（推荐）
 
-前置条件只有一个：安装 [Docker](https://docs.docker.com/get-docker/)。
+前置条件只有一个：安装 [Docker](https://docs.docker.com/get-docker/)（便携包方式连 Docker 都不需要）。
 
 **方式一：docker run**
 
@@ -72,6 +72,13 @@ docker run -d --name agnes-platform -p 8080:8000 -v agnes-data:/app/data ghcr.io
 ```bash
 docker compose up -d
 ```
+
+**方式三：便携包（免 Docker，Windows / macOS）**
+
+从 [Releases](https://github.com/WingkySky/Agnes-AI-Platform/releases) 下载对应平台 zip，解压后双击 `start-windows.bat`（Windows）或 `start-macos.command`（macOS），浏览器自动打开。
+
+- 未签名应用的一次性提示属正常：Windows 首次运行遇 SmartScreen 点「更多信息 → 仍要运行」；macOS 首次先在终端执行 `xattr -cr <解压目录>`（仅支持 Apple Silicon，Intel Mac 请用 Docker 或源码）
+- 数据全部在解压目录内（备份 = 复制文件夹）；升级 = 下载新包解压后，把旧包的 `backend/` 目录整个拷入覆盖
 
 启动后访问 http://localhost:8080，按首启向导完成管理员密码与 AI 服务配置即可使用。
 

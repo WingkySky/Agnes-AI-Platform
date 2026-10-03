@@ -1,6 +1,6 @@
 # 部署指南
 
-本文覆盖 Docker 部署的完整流程：本地快速跑通、公网服务器部署（反向代理 / HTTPS）、数据备份与升级。
+本文覆盖 Docker 部署的完整流程：本地快速跑通、公网服务器部署（反向代理 / HTTPS）、数据备份与升级，以及免 Docker 的便携包方案。
 
 ## 快速开始（本地 / NAS）
 
@@ -13,6 +13,21 @@ docker compose up -d
 ```
 
 访问 `http://localhost:8080`，按首启向导完成管理员密码与 AI 服务配置即可使用。
+
+## 便携包（免 Docker，Windows / macOS）
+
+不想装 Docker 的桌面用户直接从 [Releases](https://github.com/WingkySky/Agnes-AI-Platform/releases) 页面下载便携包（Assets 里的 zip），解压即用：
+
+| 平台 | 启动方式 |
+|---|---|
+| Windows x64 | 双击 `start-windows.bat`（首次遇 SmartScreen 点「更多信息 → 仍要运行」） |
+| macOS Apple Silicon | 终端先执行 `xattr -cr <解压目录>` 去除下载标记，再双击 `start-macos.command` |
+
+- 便携包为未签名分发（无开发者账号），上述一次性提示属正常现象
+- macOS 仅支持 Apple Silicon（M1 及以后）；Intel Mac 请用 Docker 或源码运行
+- 包内自带 Python 运行时与全部依赖，无需任何环境配置；端口默认 8000，浏览器自动打开
+- 数据全部在解压目录内：`backend/agnes_platform.db`（数据库）、`backend/uploads/`（素材）、`backend/logs/`（日志）、`backend/.env`（配置与密钥）——备份 = 复制整个文件夹
+- 升级：下载新版本解压后，把旧包的 `backend/` 目录整个拷入新包覆盖（保留数据库、素材与密钥）
 
 ## 数据卷说明
 

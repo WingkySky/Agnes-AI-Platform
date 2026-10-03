@@ -1,6 +1,40 @@
 # =====================================================
-# 形象图认领 / 上传
+# 形象图认领 / 上传 + 角色服务 — 角色 CRUD + 单/批量生图 + 版本管理
+#
+# 角色是项目的核心实体之一，对应 project_characters 表。
+# 通过 ProjectEntityAsset 表实现多版本形象图管理（F1 + G1）。
 # =====================================================
+
+import json
+import logging
+from typing import List, Optional
+
+from fastapi import HTTPException
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.project import (
+    Project,
+    ProjectCharacter,
+    ProjectScript,
+)
+from app.schemas.project import EntityCreate, EntityUpdate
+from app.services.project._entity_versions import (
+    create_version,
+    list_versions,
+    set_active_version,
+    delete_version,
+    attach_active_image,
+    attach_active_image_batch,
+)
+from app.services.project._async_gen import claim_generation
+from app.services.project._generation_history import record_manual_upload
+from app.services.project.sse_manager import project_sse_manager
+
+logger = logging.getLogger("agnes_platform.project.character")
+
+ENTITY_TYPE = "character"
+
 
 async def claim_character_image(
     db: AsyncSession, character_id: int, task_id: str
@@ -83,44 +117,6 @@ async def upload_character_image(
     await attach_active_image(db, ENTITY_TYPE, character)
     return character
 
-
-
-# =====================================================
-# 角色服务 — 角色 CRUD + 单/批量生图 + 版本管理
-#
-# 角色是项目的核心实体之一，对应 project_characters 表。
-# 通过 ProjectEntityAsset 表实现多版本形象图管理（F1 + G1）。
-# =====================================================
-
-import json
-import logging
-from typing import List, Optional
-
-from fastapi import HTTPException
-from sqlalchemy import select, func
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.models.project import (
-    Project,
-    ProjectCharacter,
-    ProjectScript,
-)
-from app.schemas.project import EntityCreate, EntityUpdate
-from app.services.project._entity_versions import (
-    create_version,
-    list_versions,
-    set_active_version,
-    delete_version,
-    attach_active_image,
-    attach_active_image_batch,
-)
-from app.services.project._async_gen import claim_generation
-from app.services.project._generation_history import record_manual_upload
-from app.services.project.sse_manager import project_sse_manager
-
-logger = logging.getLogger("agnes_platform.project.character")
-
-ENTITY_TYPE = "character"
 
 
 # =====================================================

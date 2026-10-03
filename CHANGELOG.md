@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### Windows/macOS 便携包（免 Docker 运行）+ 打包链路修复
+- **便携包**：release 工作流新增 package job（matrix：windows-x64 / macos-arm64）——python-build-standalone 3.12.15 可重定位运行时 + 全量依赖预装（pip --target site-packages）+ 前端构建产物 + 双击启动脚本（`start-windows.bat` / `start-macos.command`），zip 自动挂 Release Assets；免安装免 Docker，数据全在包内 `backend/` 目录（备份 = 拷文件夹）；Release notes 的「安装运行」段同步补充便携包下载指引
+- **未签名分发说明**：无开发者账号属预期——Windows 首次运行 SmartScreen 点「仍要运行」；macOS 首次终端执行 `xattr -cr <解压目录>`（仅 Apple Silicon，Intel Mac 用 Docker/源码）；包内 README-PORTABLE.txt 附完整说明
+- **关键修复：三个 service 文件 import 块位于文件中部（v0.0.2 Docker 镜像受影响）**：character/prop/scene_service 的函数注解引用 AsyncSession 等名字在 import 之前——Python 3.14 惰性注解（PEP 649）掩盖为可运行，3.12（Docker/便携包运行时）导入即 NameError；三处 import 块规整到文件顶部，并以 3.12 全量 143 模块导入扫描验证
+- **启动修复**：`.env.example` 的 `FRONTEND_ORIGINS` 改 JSON 数组格式（pydantic-settings 2.15 对 dotenv 复杂字段严格 JSON 解析，逗号串全新环境启动即崩）；`config.py` 的 parse_origins 兼容 JSON/逗号两种格式；requirements.txt 显式声明 `edge-tts`（aibridge-sdk 2.x 元数据未声明依赖，此前全新环境 TTS 模块缺失）
+- **测试**：本机 macOS arm64 便携包全链路实测（组装→密钥生成→启动→SPA 托管→深链 fallback→API 404 不被吞→数据落位）；dev pytest 160 绿（存量失败无关）
+
 ### Release notes 附安装指引
 - release 工作流生成的 Release notes 现在以「安装运行」段开头（docker run 一行 + 首启向导入口 + docs/deployment.md 链接），CHANGELOG 版本段落紧随其后；v0.0.2 已补改生效
 

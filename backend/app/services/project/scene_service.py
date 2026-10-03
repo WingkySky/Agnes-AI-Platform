@@ -1,6 +1,35 @@
 # =====================================================
-# 形象图认领 / 上传
+# 形象图认领 / 上传 + 场景服务 — 场景 CRUD + 单/批量生图 + 版本管理
+#
+# 与 character_service 同构，仅表名和字段不同
+# （location / time_of_day / atmosphere）
 # =====================================================
+
+import logging
+from typing import List, Optional
+
+from fastapi import HTTPException
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.project import ProjectScene, ProjectScript
+from app.schemas.project import EntityCreate, EntityUpdate
+from app.services.project._entity_versions import (
+    create_version,
+    list_versions,
+    set_active_version,
+    delete_version,
+    attach_active_image,
+    attach_active_image_batch,
+)
+from app.services.project._async_gen import claim_generation
+from app.services.project._generation_history import record_manual_upload
+from app.services.project.sse_manager import project_sse_manager
+
+logger = logging.getLogger("agnes_platform.project.scene")
+
+ENTITY_TYPE = "scene"
+
 
 async def claim_scene_image(
     db: AsyncSession, scene_id: int, task_id: str
@@ -82,39 +111,6 @@ async def upload_scene_image(
     await attach_active_image(db, ENTITY_TYPE, scene)
     return scene
 
-
-
-# =====================================================
-# 场景服务 — 场景 CRUD + 单/批量生图 + 版本管理
-#
-# 与 character_service 同构，仅表名和字段不同
-# （location / time_of_day / atmosphere）
-# =====================================================
-
-import logging
-from typing import List, Optional
-
-from fastapi import HTTPException
-from sqlalchemy import select, func
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.models.project import ProjectScene, ProjectScript
-from app.schemas.project import EntityCreate, EntityUpdate
-from app.services.project._entity_versions import (
-    create_version,
-    list_versions,
-    set_active_version,
-    delete_version,
-    attach_active_image,
-    attach_active_image_batch,
-)
-from app.services.project._async_gen import claim_generation
-from app.services.project._generation_history import record_manual_upload
-from app.services.project.sse_manager import project_sse_manager
-
-logger = logging.getLogger("agnes_platform.project.scene")
-
-ENTITY_TYPE = "scene"
 
 
 # =====================================================

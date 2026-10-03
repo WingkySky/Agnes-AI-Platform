@@ -57,9 +57,9 @@ The platform continues to grow, but the core principle remains the same: **a sel
 | **Python** | 3.10+ (3.11+ recommended) | Backend runtime (source start) |
 | **Node.js** | 18+ (20+ LTS recommended) | Frontend build (source start) |
 
-### 1. Docker Deployment (Recommended)
+### 1. Docker / Portable Deployment (Recommended)
 
-The only prerequisite: [Docker](https://docs.docker.com/get-docker/).
+The only prerequisite: [Docker](https://docs.docker.com/get-docker/) (the portable packages don't even need Docker).
 
 **Option A: docker run**
 
@@ -72,6 +72,13 @@ docker run -d --name agnes-platform -p 8080:8000 -v agnes-data:/app/data ghcr.io
 ```bash
 docker compose up -d
 ```
+
+**Option C: Portable packages (no Docker, Windows / macOS)**
+
+Download the zip for your platform from [Releases](https://github.com/WingkySky/Agnes-AI-Platform/releases), extract, and double-click `start-windows.bat` (Windows) or `start-macos.command` (macOS) — the browser opens automatically.
+
+- One-time prompts for unsigned apps are expected: on Windows click "More info → Run anyway" at SmartScreen; on macOS run `xattr -cr <extracted-folder>` in Terminal first (Apple Silicon only — Intel Macs should use Docker or run from source)
+- All data lives inside the extracted folder (backup = copy the folder); to upgrade, download the new package and copy your old `backend/` folder over it
 
 Then open http://localhost:8080 and follow the first-run wizard (admin password + AI provider) — that's it.
 
