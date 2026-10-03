@@ -52,7 +52,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 提取 CHANGELOG 对应版本段落
+      - name: 提取 CHANGELOG 对应版本段落并生成 Release notes
         env:
           VERSION: ${{ github.ref_name }}
         run: |
@@ -66,6 +66,22 @@ jobs:
           print(match.group(1).strip())
           PYEOF
 
+          cat > install.md <<'MDEOF'
+          ## 安装运行（Docker，推荐）
+
+          ```bash
+          docker run -d --name agnes-platform -p 8080:8000 -v agnes-data:/app/data ghcr.io/wingkysky/agnes-ai-platform:__VERSION__
+          ```
+
+          打开 http://localhost:8080 ，按首启向导完成管理员密码与 AI 服务配置即可使用。
+          更多方式（docker compose / 公网服务器反代与 HTTPS / 数据备份）见 [docs/deployment.md](https://github.com/WingkySky/Agnes-AI-Platform/blob/main/docs/deployment.md)。
+
+          ---
+
+          MDEOF
+          sed -i "s/__VERSION__/${VERSION}/g" install.md
+          cat install.md release-notes.md > body.md
+
       - uses: softprops/action-gh-release@v2
         with:
-          body_path: release-notes.md
+          body_path: body.md

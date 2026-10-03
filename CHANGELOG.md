@@ -4,6 +4,9 @@
 
 ## [Unreleased]
 
+### Release notes 附安装指引
+- release 工作流生成的 Release notes 现在以「安装运行」段开头（docker run 一行 + 首启向导入口 + docs/deployment.md 链接），CHANGELOG 版本段落紧随其后；v0.0.2 已补改生效
+
 ## [0.0.2] - 2026-10-03
 
 ### Docker 部署与自动化发版
