@@ -81,6 +81,11 @@ async function submitAccount() {
     await setupStore.fetchStatus(true)
     activeIndex.value = 0
     ElMessage.success(t('setup.accCreated'))
+  } catch (e) {
+    // 竞态：停留期间管理员已被其他会话创建（409）——转登录页，别把用户锁死在创建表单
+    if ((e as Error & { status?: number }).status === 409) {
+      router.push('/login')
+    }
   } finally {
     accSubmitting.value = false
   }
