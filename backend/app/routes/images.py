@@ -22,6 +22,7 @@ from typing import Optional
 
 import httpx
 from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -33,7 +34,8 @@ from app.models.user import User
 from app.schemas.images import ImageGenerationRequest, ImageGenerationResponse, ImageRecordResponse
 from app.services.agnes_client import agnes_client
 from app.services.provider_registry import provider_registry
-from app.services.credits_service import consume_credits, get_image_cost_async
+from app.services.credits_service import confirm_credits, consume_credits, get_image_cost_async, refund_credits
+from app.services.error_taxonomy import classify, classify_message
 from app.services.image_poller import image_poller_manager
 
 logger = logging.getLogger("agnes_platform")
@@ -86,7 +88,7 @@ async def create_image_task_async(
             )
 
     # --- 计算本次任务需要消耗的积分 ---
-    cost = await get_image_cost_async(db, mode=mode, size=size)
+    cost = await get_image_cost_async(db, mode=mode, size=size, model=req.model)
 
     # --- 必须登录：先预扣积分再发起生成（积分不足会抛 402）---
     # 预先生成 task_id，作为积分流水的 ref_id，确保后续 confirm/refund 能匹配到
@@ -198,6 +200,8 @@ async def get_image_task_status(
                     "progress": 100 if record.status == "success" else 0,
                     "result_url": record.result_url,
                     "url": record.result_url,
+                    "message": record.error_message if record.status == "failed" else None,
+                    "error_category": record.error_category,
                     "credits_consumed": record.credits_consumed,
                     "elapsed_sec": 0,
                 })
@@ -279,8 +283,15 @@ async def create_image_generation(
                 detail=f"内容包含敏感词，无法生成：{', '.join(hit_words[:5])}",
             )
 
-    cost = await get_image_cost_async(db, mode=mode, size=size)
-    await consume_credits(db, current_user, cost, description=f"image/{mode}/{size}")
+    cost = await get_image_cost_async(db, mode=mode, size=size, model=req.model)
+    # 同步端点同样先扣后退：失败时按 pending ref 退还（与视频端点同构）
+    _pending_ref_id = f"pending_{uuid.uuid4().hex}"
+    await consume_credits(
+        db, current_user, cost,
+        description=f"image/{mode}/{size}",
+        ref_type="image",
+        ref_id=_pending_ref_id,
+    )
 
     # 摄像机参数拼接
     prompt = req.prompt or ""
@@ -311,7 +322,17 @@ async def create_image_generation(
         )
     except Exception as e:
         logger.error("[图片生成] Provider 调用失败: %s", e)
-        raise HTTPException(status_code=502, detail=str(e))
+        # 失败退还预扣积分 + 归类透出（图片为同步调用无回执，网络类可安全重试）
+        try:
+            async with new_async_session() as session:
+                await refund_credits(
+                    session, current_user.id, _pending_ref_id,
+                    reason=f"图片生成失败：{str(e)[:200]}",
+                )
+        except Exception as refund_err:
+            logger.error("[图片生成] 退还预扣积分失败: %s", refund_err)
+        category, message = classify(e, submitted=False, receipt=False)
+        return JSONResponse(status_code=502, content={"detail": message, "category": category})
 
     # 解析结果
     output_url = None
@@ -329,10 +350,15 @@ async def create_image_generation(
         logger.error("[图片生成] 结果解析异常: %s", e)
 
     if not output_url and not output_b64:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Agnes AI 返回异常，未找到图片数据: {str(result)[:200]}",
-        )
+        detail = f"Agnes AI 返回异常，未找到图片数据: {str(result)[:200]}"
+        category = classify_message(detail, submitted=True)
+        return JSONResponse(status_code=502, content={"detail": detail, "category": category})
+
+    # 生成成功：把预扣流水从 pending 改为 confirmed（积分不变，仅流水状态）
+    try:
+        await confirm_credits(db, current_user.id, _pending_ref_id)
+    except Exception as confirm_err:
+        logger.warning("[图片生成] 确认预扣流水失败（不影响结果）: %s", confirm_err)
 
     # 写入数据库
     try:

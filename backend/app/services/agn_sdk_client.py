@@ -25,7 +25,11 @@
 # =====================================================
 
 import logging
+import time
 from typing import Any, Dict, List, Optional
+
+from app.services.agnes_client import UpstreamError
+from app.services.error_taxonomy import classify
 
 from aibridge import Client as AIBridgeClient
 from aibridge import (
@@ -42,22 +46,28 @@ from aibridge import (
 logger = logging.getLogger("agnes_platform")
 
 
-# ---------- aibridge SDK 错误到 RuntimeError 的统一翻译 ----------
-# 与 AgnesAIClient._human_readable_error 行为一致：把底层异常翻译成中文可读消息
-def _build_translated_error(exc: Exception, action: str = "调用") -> RuntimeError:
+# ---------- aibridge SDK 错误到 UpstreamError 的统一翻译 ----------
+# 与 AgnesAIClient._human_readable_error 行为一致：把底层异常翻译成中文可读消息，
+# 并携带结构化事实（状态码/错误体摘要/网络标记）供 error_taxonomy 归类与调用记账
+def _build_translated_error(exc: Exception, action: str = "调用") -> "UpstreamError":
     """
-    根据 aibridge 抛出的标准错误构造中文 RuntimeError 实例。
+    根据 aibridge 抛出的标准错误构造中文 UpstreamError 实例。
     调用方应使用 `raise _build_translated_error(e, ...) from e` 抛出，
     保留原始异常链（__cause__）便于排查。
     """
+    status = getattr(exc, "status_code", None)
+    kind = "http"
     if isinstance(exc, AuthenticationError):
         msg = f"API Key 无效或已过期（{action}失败）"
+        status = status or 401
     elif isinstance(exc, RateLimitError):
         msg = f"请求被限流，请稍后重试（{action}失败）"
+        status = status or 429
     elif isinstance(exc, TimeoutError):
         msg = f"上游响应超时，可稍后重试（{action}失败）"
     elif isinstance(exc, NetworkError):
         msg = f"网络异常，无法访问上游服务（{action}失败）"
+        kind = "network"
     elif isinstance(exc, ValidationError):
         msg = f"参数校验失败：{exc}（{action}失败）"
     elif isinstance(exc, UnsupportedCapabilityError):
@@ -69,7 +79,7 @@ def _build_translated_error(exc: Exception, action: str = "调用") -> RuntimeEr
         msg = f"aibridge SDK 错误（{action}失败）：{exc}"
     else:
         msg = f"{action}失败：{exc.__class__.__name__}: {exc}"
-    return RuntimeError(msg)
+    return UpstreamError(msg, status_code=status, upstream_body=str(exc)[:300], error_kind=kind)
 
 
 class AGNSDKClientWrapper:
@@ -230,6 +240,22 @@ class AGNSDKClientWrapper:
         best = min(cls._SEEDREAM_2K_PRESETS, key=lambda p: abs(ratio - p[0]))
         return f"{best[1]}x{best[2]}"
 
+    async def _record_call(self, call_type: str, model: str, started: float, status: str, error: Optional[BaseException] = None) -> None:
+        """出口记账 best-effort（绝不抛错）"""
+        try:
+            from app.services.api_call_log_service import record_api_call
+            await record_api_call(
+                provider_name=self.provider_type,
+                model=model or None,
+                call_type=call_type,
+                status=status,
+                error_category=classify(error, submitted=False, receipt=False)[0] if error else None,
+                error_message=str(error) if error else None,
+                latency_ms=int((time.time() - started) * 1000),
+            )
+        except Exception:
+            pass
+
     async def create_image(
         self,
         prompt: str,
@@ -277,6 +303,7 @@ class AGNSDKClientWrapper:
         sdk_kwargs = {}
         if self.provider_type == "volcengine_cv" or gen.watermark_param_off:
             sdk_kwargs["watermark"] = False
+        _started = time.time()
         try:
             result = await client.image_generate(
                 model=model,
@@ -289,7 +316,9 @@ class AGNSDKClientWrapper:
                 **sdk_kwargs,
             )
         except Exception as e:
+            await self._record_call("image_create", model, _started, "failed", error=e)
             raise _build_translated_error(e, action="图片生成") from e
+        await self._record_call("image_create", model, _started, "success")
 
         # 转成 OpenAI 风格 dict（与 AgnesAIClient._post 返回的原始 JSON 结构对齐）
         return {
@@ -358,6 +387,7 @@ class AGNSDKClientWrapper:
         if _num_frames is None and seconds and seconds > 0:
             _num_frames = int(round(seconds * _frame_rate))
 
+        _started = time.time()
         try:
             task = await client.video_create(
                 model=model,
@@ -374,7 +404,9 @@ class AGNSDKClientWrapper:
                 seed=seed,
             )
         except Exception as e:
+            await self._record_call("video_create", model, _started, "failed", error=e)
             raise _build_translated_error(e, action="视频任务创建") from e
+        await self._record_call("video_create", model, _started, "success")
 
         # 转成与 AgnesAIClient._post 返回兼容的 dict
         # AgnesAIClient 返回的是原始 HTTP response JSON，包含 id / video_id / status / created 等字段
@@ -409,13 +441,16 @@ class AGNSDKClientWrapper:
         if not poll_task_id:
             raise RuntimeError("缺少 video_id 和 task_id，无法轮询视频状态")
 
+        _started = time.time()
         try:
             status = await client.video_poll(
                 task_id=poll_task_id,
                 model=model_name,
             )
         except Exception as e:
+            await self._record_call("video_poll", model_name, _started, "failed", error=e)
             raise _build_translated_error(e, action="视频状态查询") from e
+        await self._record_call("video_poll", model_name, _started, "success")
 
         # 转成与 AgnesAIClient._normalize_video_status 兼容的 dict
         # AgnesAIClient 返回的 status 字段使用 success/processing/failed/pending 标准化值

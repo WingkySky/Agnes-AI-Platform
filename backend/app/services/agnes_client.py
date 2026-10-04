@@ -15,6 +15,7 @@
 
 import asyncio
 import base64
+import json
 import logging
 import re
 import struct
@@ -24,6 +25,7 @@ from typing import List, Optional, Dict, Any
 import httpx
 
 from app.core.config import settings
+from app.services.error_taxonomy import classify
 
 logger = logging.getLogger("agnes_platform")
 
@@ -47,6 +49,28 @@ RETRYABLE_EXCEPTIONS = (
     # 下面这些其实是上游返回了错误响应，需要更细判断，由 _post 内部单独判断
 )
 RETRYABLE_STATUS_CODES = (502, 503, 504, 520, 521, 522, 523, 524)
+
+
+class UpstreamError(RuntimeError):
+    """
+    上游调用的结构化错误：归类（error_taxonomy.classify）与调用记账需要
+    状态码 / 上游响应体摘要 / 请求标识。中文 message 保持与原 RuntimeError 一致。
+    error_kind: "http"（收到了响应）| "network"（连接层异常，无状态码）。
+    """
+
+    def __init__(
+        self,
+        message: str,
+        status_code: Optional[int] = None,
+        upstream_body: str = "",
+        request_id: str = "",
+        error_kind: str = "http",
+    ):
+        super().__init__(message)
+        self.status_code = status_code
+        self.upstream_body = upstream_body
+        self.request_id = request_id
+        self.error_kind = error_kind
 
 
 # =====================================================
@@ -199,11 +223,66 @@ class AgnesAIClient:
     # =====================================================
     # 【第一层：基础 HTTP 工具】
     # =====================================================
+    @staticmethod
+    def _infer_call_type(method: str, url: str) -> str:
+        """按方法+路径推断调用类型（ApiCallLog.call_type）"""
+        lower = (url or "").lower()
+        if "/chat/completions" in lower:
+            return "chat"
+        if "agnesapi" in lower or "/videos" in lower:
+            return "video_poll" if method.upper() == "GET" else "video_create"
+        if "/images/generations" in lower or "/images/edits" in lower:
+            return "image_create"
+        return "other"
+
+    async def _record_call(
+        self,
+        method: str,
+        url: str,
+        started: float,
+        status: str,
+        data: Optional[Dict[str, Any]] = None,
+        error: Optional[BaseException] = None,
+    ) -> None:
+        """出口记账 best-effort（绝不抛错）"""
+        try:
+            from app.services.api_call_log_service import record_api_call
+            usage = data.get("usage") or {} if isinstance(data, dict) else {}
+            await record_api_call(
+                provider_name="Agnes",
+                model=str((data or {}).get("model") or "") or None,
+                call_type=self._infer_call_type(method, url),
+                endpoint=url,
+                status=status,
+                error_category=classify(error, submitted=False, receipt=False)[0] if error else None,
+                error_message=str(error) if error else None,
+                request_id=getattr(error, "request_id", "") or None,
+                latency_ms=int((time.time() - started) * 1000),
+                tokens_in=usage.get("prompt_tokens"),
+                tokens_out=usage.get("completion_tokens"),
+            )
+        except Exception as e:  # 双保险：record_api_call 已兜底，这里防未来改动引入抛错
+            logger.debug("[AgnesAIClient] 调用记账失败（忽略）: %s", e)
+
     async def _request_with_retry(self, method: str, url: str, **kwargs) -> Dict[str, Any]:
         """
         发送 HTTP 请求到 Agnes AI API（使用连接池），带指数退避自动重试。
         对网络异常与 5xx 网关类错误做有限次重试，其余异常直接翻译为中文错误。
+        出口统一记账（ApiCallLog，best-effort）。
         """
+        started = time.time()
+        try:
+            data = await self._send_with_retry(method, url, **kwargs)
+        except UpstreamError as e:
+            await self._record_call(method, url, started, "failed", error=e)
+            raise
+        except Exception as e:
+            await self._record_call(method, url, started, "failed", error=e)
+            raise
+        await self._record_call(method, url, started, "success", data=data)
+        return data
+
+    async def _send_with_retry(self, method: str, url: str, **kwargs) -> Dict[str, Any]:
         last_exc: Optional[BaseException] = None
         for attempt in range(1, MAX_RETRIES + 1):
             try:
@@ -211,7 +290,7 @@ class AgnesAIClient:
             except RETRYABLE_EXCEPTIONS as e:
                 last_exc = e
                 if attempt >= MAX_RETRIES:
-                    raise RuntimeError(self._human_readable_error(e)) from e
+                    raise UpstreamError(self._human_readable_error(e), error_kind="network") from e
                 wait = RETRY_INITIAL_BACKOFF * (2 ** (attempt - 1))
                 logger.warning(
                     "[AgnesAIClient] %s 第 %s/%s 次网络异常: %s, %ss 后重试",
@@ -220,7 +299,7 @@ class AgnesAIClient:
                 await asyncio.sleep(wait)
                 continue
             except Exception as e:  # 其他异常（如参数错误、鉴权失败）不重试
-                raise RuntimeError(self._human_readable_error(e)) from e
+                raise UpstreamError(self._human_readable_error(e), error_kind="network") from e
 
             # 对 5xx 网关类错误也做有限次重试（上游抖动常见）
             if response.status_code in RETRYABLE_STATUS_CODES and attempt < MAX_RETRIES:
@@ -238,8 +317,8 @@ class AgnesAIClient:
 
         # 理论上到不了这里（最后一次要么抛要么返回）
         if last_exc is not None:
-            raise RuntimeError(self._human_readable_error(last_exc)) from last_exc
-        raise RuntimeError("调用 Agnes AI 失败：未知错误")
+            raise UpstreamError(self._human_readable_error(last_exc), error_kind="network") from last_exc
+        raise UpstreamError("调用 Agnes AI 失败：未知错误", error_kind="network")
 
     async def _post(self, url: str, body: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -285,26 +364,41 @@ class AgnesAIClient:
         """
         return await self._request_with_retry("GET", url, params=params or {})
 
+    @staticmethod
+    def _request_id_of(response: httpx.Response, data: Any = None) -> str:
+        """提取上游请求标识（响应头优先，响应体兜底），供错误归类与调用记账"""
+        header_id = (response.headers.get("x-request-id") or "").strip()
+        if header_id:
+            return header_id
+        if isinstance(data, dict):
+            return str(data.get("request_id") or data.get("requestId") or "")
+        return ""
+
     def _parse_response(self, response: httpx.Response) -> Dict[str, Any]:
         """
         统一处理响应：解析 JSON，处理错误（同步解析，不阻塞 I/O）。
-        对 5xx / 非 JSON 响应给出更可读的中文错误。
+        对 5xx / 非 JSON 响应给出更可读的中文错误；异常携带结构化事实
+        （状态码/响应体摘要/请求标识），供 error_taxonomy 归类与调用记账。
         """
         try:
             data = response.json()
         except Exception:
             text = (response.text or "")[:200].strip().replace("\n", " ")
+            request_id = (response.headers.get("x-request-id") or "").strip()
             # 常见 502/504 是 Cloudflare/上游返回 HTML，给用户一个人话
             if response.status_code in (502, 503, 504):
-                raise RuntimeError(
-                    f"Agnes AI 上游暂时不可用（HTTP {response.status_code}），请稍后重试"
+                raise UpstreamError(
+                    f"Agnes AI 上游暂时不可用（HTTP {response.status_code}），请稍后重试",
+                    status_code=response.status_code, upstream_body=text, request_id=request_id,
                 )
             if 400 <= response.status_code < 500:
-                raise RuntimeError(
-                    f"Agnes AI 拒绝了请求（HTTP {response.status_code}）：{text}"
+                raise UpstreamError(
+                    f"Agnes AI 拒绝了请求（HTTP {response.status_code}）：{text}",
+                    status_code=response.status_code, upstream_body=text, request_id=request_id,
                 )
-            raise RuntimeError(
-                f"Agnes AI 返回非 JSON 响应（HTTP {response.status_code}）：{text}"
+            raise UpstreamError(
+                f"Agnes AI 返回非 JSON 响应（HTTP {response.status_code}）：{text}",
+                status_code=response.status_code, upstream_body=text, request_id=request_id,
             )
 
         if not response.is_success:
@@ -314,7 +408,13 @@ class AgnesAIClient:
                 or data.get("detail")
                 or str(data)
             )
-            raise RuntimeError(f"Agnes AI API 错误 (HTTP {response.status_code}): {message}")
+            body_summary = json.dumps(data, ensure_ascii=False)[:300] if isinstance(data, (dict, list)) else str(data)[:300]
+            raise UpstreamError(
+                f"Agnes AI API 错误 (HTTP {response.status_code}): {message}",
+                status_code=response.status_code,
+                upstream_body=body_summary,
+                request_id=self._request_id_of(response, data),
+            )
 
         return data
 

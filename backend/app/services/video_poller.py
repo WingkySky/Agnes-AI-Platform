@@ -26,8 +26,10 @@ from app.services._generation_persist import (
     cleanup_expired_tasks,
     confirm_generation_credits,
     persist_generation,
+    persist_generation_failure,
     refund_generation_credits,
 )
+from app.services.error_taxonomy import classify, classify_message
 
 logger = logging.getLogger("agnes_platform")
 
@@ -65,6 +67,7 @@ class VideoTask:
         self.progress = 0
         self.video_url: Optional[str] = None
         self.error_message: Optional[str] = None
+        self.error_category: Optional[str] = None
         self.created_at = time.time()
         self.last_updated = self.created_at
         self._poll_task: Optional[asyncio.Task] = None
@@ -78,6 +81,7 @@ class VideoTask:
             "progress": self.progress,
             "video_url": self.video_url,
             "message": self.error_message,
+            "error_category": self.error_category,
             "credits_consumed": self.credits_consumed,
             "elapsed_sec": int(time.time() - self.created_at),
         }
@@ -227,13 +231,20 @@ class VideoPollerManager:
                     elif status in ("failed", "error"):
                         task.status = "failed"
                         task.error_message = status_data.get("error") or "生成失败"
+                        # 上游已明确判死：按失败原因文案归类
+                        task.error_category = classify_message(task.error_message, submitted=True)
                         logger.warning(
                             "[视频轮询器] 任务失败: task_id=%s error=%s（不写入历史）",
                             task.task_id,
                             task.error_message,
                         )
-                        # 生成失败：退还预扣的积分
+                        # 生成失败：退还预扣的积分 + 失败归因落库
                         await self._refund_if_needed(task)
+                        await persist_generation_failure(
+                            task, kind="video",
+                            record_params={"model": task.params.get("model", ""), "mode": task.params.get("mode")},
+                            record_task_id=task.task_id or task.video_id, log_prefix=LOG_PREFIX,
+                        )
                         return
 
                     elif status == "cancelled":
@@ -264,16 +275,28 @@ class VideoPollerManager:
 
             task.status = "failed"
             task.error_message = "轮询超时（超过配置时长）"
+            # 提交已完成、结果未知：禁止原地重试（原任务可能仍在途），归 submission_uncertain
+            task.error_category = "submission_uncertain"
             logger.warning("[视频轮询器] 任务超时: task_id=%s", task.task_id)
-            # 超时也视为失败：退还预扣的积分
+            # 超时也视为失败：退还预扣的积分 + 失败归因落库
             await self._refund_if_needed(task)
+            await persist_generation_failure(
+                task, kind="video",
+                record_params={"model": task.params.get("model", ""), "mode": task.params.get("mode")},
+                record_task_id=task.task_id or task.video_id, log_prefix=LOG_PREFIX,
+            )
 
         except Exception as e:
             task.status = "failed"
-            task.error_message = f"轮询器异常: {e}"
+            task.error_category, task.error_message = classify(e, submitted=True, receipt=True)
             logger.error("[视频轮询器] 异常退出: %s", e, exc_info=True)
-            # 异常退出：退还预扣的积分
+            # 异常退出：退还预扣的积分 + 失败归因落库
             await self._refund_if_needed(task)
+            await persist_generation_failure(
+                task, kind="video",
+                record_params={"model": task.params.get("model", ""), "mode": task.params.get("mode")},
+                record_task_id=task.task_id or task.video_id, log_prefix=LOG_PREFIX,
+            )
 
     async def _confirm_if_needed(self, task: VideoTask):
         """生成成功后，把对应的预扣流水状态改为 confirmed（积分不变）"""

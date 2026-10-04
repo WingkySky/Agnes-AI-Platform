@@ -27,6 +27,7 @@ from sqlalchemy.future import select
 
 from app.models.user import User
 from app.models.credit_rule import DEFAULT_CREDIT_RULES, CreditRule
+from app.models.model_definition import ModelDefinition
 from app.models.credit_transaction import CreditTransaction
 
 logger = logging.getLogger("agnes_platform")
@@ -85,15 +86,36 @@ def _parse_size_to_px(size: Optional[str]) -> float:
         return 1024.0 * 1024.0
 
 
+# ---------- 模型积分倍率（动态定价） ----------
+async def get_model_cost_multiplier(db: Optional[AsyncSession], model_id: Optional[str]) -> float:
+    """
+    读取模型积分倍率（model_definitions.cost_multiplier，管理端可改立即生效）。
+    取不到模型/无库上下文按 1.0（行为不变）。
+    """
+    if db is None or not model_id:
+        return 1.0
+    try:
+        value = (await db.scalars(
+            select(ModelDefinition.cost_multiplier).where(ModelDefinition.model_id == model_id)
+        )).first()
+        multiplier = float(value) if value is not None else 1.0
+        return max(0.1, multiplier)
+    except Exception as e:
+        logger.warning("[积分服务] 读取模型 %s 积分倍率失败，按 1.0: %s", model_id, e)
+        return 1.0
+
+
 # ---------- 图片：计算一次任务的成本 ----------
 async def get_image_cost_async(
     db: AsyncSession,
     mode: Optional[str] = "text2image",
     size: Optional[str] = None,
+    model: Optional[str] = None,
 ) -> int:
     """
     异步版本：从数据库读取积分规则，计算一次图片任务的消耗。
     当 db 为 None 时使用默认值（便于在无数据库上下文的单元测试中使用）。
+    传入 model 时按模型积分倍率（cost_multiplier）放大结果。
     """
     if mode and mode.lower() in ("image2image", "img2img"):
         rule_key = "image.image2image.base_cost"
@@ -112,7 +134,10 @@ async def get_image_cost_async(
 
     # 图片尺寸影响（>= 5 积分下限）
     ratio = max(0.5, _parse_size_to_px(size) / (1024.0 * 1024.0))
-    return max(5, int(base_cost * ratio))
+    base = max(5, int(base_cost * ratio))
+    # 模型倍率（动态定价）：实扣 = 基准 × 倍率
+    multiplier = await get_model_cost_multiplier(db, model)
+    return max(5, int(round(base * multiplier)))
 
 
 # ---------- 视频：计算一次任务的成本 ----------
@@ -121,8 +146,9 @@ async def get_video_cost_async(
     mode: Optional[str] = "text2video",
     seconds: int = 5,
     num_frames: Optional[int] = None,
+    model: Optional[str] = None,
 ) -> int:
-    """异步版本：读取数据库中的视频积分规则"""
+    """异步版本：读取数据库中的视频积分规则；传入 model 时按模型积分倍率放大结果"""
     # 每秒消耗基础积分（按模式选择规则与系数）
     if mode and mode.lower() in ("image2video", "keyframes"):
         rule_key, fallback_per_second, mode_factor = "video.image2video.per_second", 6, 1.2
@@ -140,7 +166,10 @@ async def get_video_cost_async(
 
     duration_factor = max(1.0, (seconds or 5) / 5.0)
     frame_factor = max(0.8, (num_frames or 33) / 33.0) if num_frames else 1.0
-    return max(10, int(max(1, per_second) * duration_factor * frame_factor * mode_factor))
+    base = max(10, int(max(1, per_second) * duration_factor * frame_factor * mode_factor))
+    # 模型倍率（动态定价）：实扣 = 基准 × 倍率
+    multiplier = await get_model_cost_multiplier(db, model)
+    return max(10, int(round(base * multiplier)))
 
 
 # ---------- 预扣积分（生成任务创建时调用）----------

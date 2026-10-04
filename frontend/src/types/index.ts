@@ -109,6 +109,14 @@ export interface ConfigResponse {
   default_video_height: number
   max_upload_size_mb: number
   watermark?: WatermarkConfigPublic | null
+  /** 错误类目语义表（error_taxonomy 唯一出处，文案由前端 i18n 渲染） */
+  error_categories?: ErrorCategoryMeta[]
+}
+
+/** 错误类目语义（随 /api/config 下发） */
+export interface ErrorCategoryMeta {
+  code: string
+  can_retry: boolean
 }
 
 /** 公开水印配置（前端 CSS 水印用） */
@@ -652,6 +660,8 @@ export interface ModelDefinition {
   sort_order: number
   /** 资源存储策略：auto(按 provider_type 自动判断) / keep(保留原始 URL) / migrate(强制转存对象存储) */
   asset_storage_mode: string
+  /** 积分倍率（动态定价）：实扣 = credit_rules 基准价 × 倍率 */
+  cost_multiplier?: number
   /** 生成能力配置（null=按模型名自动画像） */
   gen_params?: ModelGenParams | null
 }
@@ -689,6 +699,8 @@ export interface ModelUpdateRequest {
   sort_order?: number
   /** 资源存储策略：auto / keep / migrate */
   asset_storage_mode?: string
+  /** 积分倍率（动态定价）：实扣 = 基准价 × 倍率 */
+  cost_multiplier?: number
   /** 生成能力配置（空对象=清空显式配置回退自动画像；null=不修改） */
   gen_params?: ModelGenParams | null
 }

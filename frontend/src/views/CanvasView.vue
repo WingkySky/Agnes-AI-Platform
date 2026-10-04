@@ -1983,6 +1983,12 @@ async function handleHoverRunNode() {
 // - 图片/视频节点就地重生成（自身内容 + 上游连线资源合并，保留模型/参数/参考图）
 // - 其余类型用节点自身 prompt 重新生成
 async function retryGeneration(panel: typeof store.panels[number]) {
+  // 重试闸门：不可重试类目（如提交结果不确定/审核拒绝）禁止原地重试，防重复扣费
+  const retryCategory = typeof panel.content?.errorCategory === 'string' ? panel.content.errorCategory : ''
+  if (retryCategory && !useModelsStore().canRetryCategory(retryCategory)) {
+    ElMessage.warning(t('canvas.messages.categoryNoRetry', { category: t(`errors.category_${retryCategory}`) }))
+    return
+  }
   // 画布三节点（spec M3）：执行节点本身重跑；其产物节点回溯到执行节点重跑
   if (panel.type === 'tts' || panel.type === 'subtitle' || panel.type === 'compose') {
     await handleNodeRun(panel)

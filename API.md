@@ -890,3 +890,43 @@ AI 提示词优化（登录用户），返回结构化正负提示词。
 ### 批量创作表节点（画布）
 
 画布 `table` 类型节点：N 行 × M 参考图列的矩阵批量生图。节点 content 含 `refSlots`（列数 = min(6, 模型合同 `max_ref_images`)）、`rows`（每行参考图槽位 + 行提示词 + 启用开关 + 状态）、`preset`（批量换装/创意生图/自定义预设模板）、`globalPrompt`（与行提示词追加拼接）。提交时逐行独立走图片生成任务，结果节点连线回表格节点；单行失败可单独重试，不影响其他行。前端纯函数层 `frontend/src/lib/canvas-batch-table.ts`。
+
+---
+
+## 19. 生成错误类目 + 上游调用记账 + 模型倍率定价
+
+### 生成错误类目（error_taxonomy）
+
+上游调用失败统一归类为 13 类类目之一（`backend/app/services/error_taxonomy.py` 唯一出处），每类绑定「能否手动重试」语义：
+
+| 类目 | 说明 | canRetry |
+|---|---|---|
+| network_transient / upstream_server / timeout / rate_limited / result_fetch_failed / unknown | 临时性失败 | true |
+| auth_failed / model_missing / invalid_params / moderation_rejected / upstream_quota / local_storage_failed | 明确判死 | false |
+| submission_uncertain | 提交结果不确定（回执丢失/查询 5xx/超时），禁止原地重试以防重复扣费 | false |
+
+**下发与透出**：
+- `GET /api/config` 新增 `error_categories: [{code, can_retry}]`（语义表；用户文案由前端 i18n `errors.category_<code>` 渲染）。
+- 图片/视频任务状态端点失败时返回 `error_category` + `message`（error_message）；`GET /api/images/tasks/{id}`、`GET /api/videos/tasks/{id}` 均适用。
+- 任务提交失败响应 body 携带 `category` 字段（HTTP 502）。
+- 失败归因落库：`generations` 表新增 `error_category`（VARCHAR 40 索引）与 `error_message`（TEXT）；历史记录接口随 `to_dict` 透出。存量库需手动 ALTER（见模型文件注释）。
+- 前端重试闸门：画布节点重试与批量创作表行级重试在 `can_retry=false` 类目上拦截并提示；无类目行为不变。
+
+### 上游调用记账（管理员）
+
+新表 `api_call_logs`：每次上游调用一行（provider/model/call_type/endpoint/status/error_category/latency_ms/tokens/created_at），由 `agnes_client` 与 aibridge 客户端出口 best-effort 写入（写库失败不影响生成主流程）。表由启动时 `create_all` 自动创建。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/admin/api-calls` | 调用日志列表（分页筛选：`page`/`page_size`/`provider_id`/`model`/`call_type`/`status`/`error_category`/`since`/`before`） |
+| GET | `/api/admin/api-calls/summary` | 聚合摘要（`days` 1-30，默认 7）：total/failed/failure_rate/daily（按日×状态）/by_category/by_provider/by_model（渠道与模型均为 `{success, failed}` 计数） |
+
+均挂管理员鉴权（401/403/200 三态测试锁死）。管理界面：`/admin/logs` 第三 Tab「上游调用」。
+
+### 模型倍率定价（动态定价）
+
+- `model_definitions` 新增 `cost_multiplier`（FLOAT，默认 1.0；存量库手动 ALTER，见模型文件注释）。
+- 计价：**实扣积分 = credit_rules 基准价 × 所选模型 cost_multiplier**（图片按张、视频按秒的既有规则不变；模型不存在按 1.0；倍率下限 0.1）。
+- `GET /api/credits/estimate` 与实际扣费自动一致（同一计价函数）；先扣后退结构不变，退款按实扣原额退。
+- 管理端「配置管理 → 模型编辑」新增「积分倍率」输入，保存立即生效。
+- 批量设置：`PUT /api/models/batch-cost-multiplier`（body `{model_ids, cost_multiplier}`，倍率 0.1~100），管理端模型列表勾选多行后「批量设倍率」一次生效，立即生效。

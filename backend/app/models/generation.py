@@ -22,6 +22,8 @@ class Generation(Base):
     - image_input: base64 图片（可选，图生图/图生视频时使用）
     - result_url: 生成结果的 URL（图片/视频）
     - status: 状态（success / failed / pending / cancelled）
+    - error_category: 失败时的错误类目（error_taxonomy.CATEGORIES，见该模块；成功为 NULL）
+    - error_message: 失败时的原始错误文案（成功为 NULL）
     - task_id: Agnes AI 异步任务 ID（主要用于视频生成）
     - created_at: 创建时间
     - is_public: 是否公开到广场（默认 False）
@@ -44,6 +46,12 @@ class Generation(Base):
     image_input = Column(Text, nullable=True)                    # base64 输入图片（可选）
     result_url = Column(Text, nullable=True)                    # 生成结果 URL
     status = Column(String(20), default="success")                  # 任务状态
+    # 失败归因（error_taxonomy 13 类目之一；成功为 NULL）。
+    # 存量库升级：ALTER TABLE generations ADD COLUMN error_category VARCHAR(40);
+    #            CREATE INDEX ix_generations_error_category ON generations(error_category);
+    #            ALTER TABLE generations ADD COLUMN error_message TEXT;
+    error_category = Column(String(40), nullable=True, index=True)
+    error_message = Column(Text, nullable=True)
     credits_consumed = Column(Integer, default=0, nullable=False)    # 本次任务消耗的积分数
     task_id = Column(String(200), nullable=True, index=True)    # Agnes AI 异步任务 ID（主要用于视频生成）
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
@@ -95,6 +103,8 @@ class Generation(Base):
             "params": self.params,
             "result_url": self.result_url,
             "status": self.status,
+            "error_category": self.error_category,
+            "error_message": self.error_message,
             "credits_consumed": self.credits_consumed,
             "task_id": self.task_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,

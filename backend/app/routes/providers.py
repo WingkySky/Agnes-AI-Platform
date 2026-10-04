@@ -20,6 +20,7 @@ from app.schemas.providers import (
     ModelUpdateRequest,
     ModelBatchUpdateRequest,
     ModelBatchDeleteRequest,
+    ModelBatchCostMultiplierRequest,
     ModelDefinitionResponse,
     ModelListResponse,
     SyncModelsResponse,
@@ -199,6 +200,15 @@ async def batch_delete_models(req: ModelBatchDeleteRequest):
     return ok(data={"deleted": deleted}, message=f"已删除 {deleted} 个模型")
 
 
+@router.put("/models/batch-cost-multiplier", summary="批量设置积分倍率")
+async def batch_cost_multiplier(req: ModelBatchCostMultiplierRequest):
+    """批量设置模型积分倍率（实扣=基准价×倍率，管理端立即生效），须声明在 /models/{model_id} 之前"""
+    if not req.model_ids:
+        raise HTTPException(status_code=400, detail="model_ids 不能为空")
+    updated = await provider_registry.batch_update_cost_multiplier(req.model_ids, req.cost_multiplier)
+    return ok(data={"updated": updated}, message=f"已更新 {updated} 个模型的积分倍率")
+
+
 @router.put("/models/{model_id}", summary="更新模型定义")
 async def update_model(model_id: str, req: ModelUpdateRequest):
     """更新模型定义的展示信息或激活状态"""
@@ -213,6 +223,7 @@ async def update_model(model_id: str, req: ModelUpdateRequest):
         sort_order=req.sort_order,
         asset_storage_mode=req.asset_storage_mode,
         gen_params=req.gen_params.model_dump() if req.gen_params is not None else None,
+        cost_multiplier=req.cost_multiplier,
     )
     if defn is None:
         raise HTTPException(status_code=404, detail=f"模型 {model_id} 不存在")
@@ -231,6 +242,7 @@ async def update_model(model_id: str, req: ModelUpdateRequest):
         is_custom=defn.is_custom,
         sort_order=defn.sort_order,
         asset_storage_mode=defn.asset_storage_mode or "auto",
+        cost_multiplier=defn.cost_multiplier if defn.cost_multiplier is not None else 1.0,
     ))
 
 

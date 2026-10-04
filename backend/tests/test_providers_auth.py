@@ -65,6 +65,50 @@ async def test_normal_user_403_on_read_and_write(memory_db):
 
 
 @pytest.mark.asyncio
+async def test_batch_cost_multiplier_auth_gates(memory_db):
+    body = {"model_ids": ["m1"], "cost_multiplier": 2.0}
+    async for client in _build_client(memory_db):
+        anon = await client.put("/api/models/batch-cost-multiplier", json=body)
+    user = await _seed_user(memory_db, username="u1", role="user")
+    async for client in _build_client(memory_db, user):
+        forbidden = await client.put("/api/models/batch-cost-multiplier", json=body)
+    assert anon.status_code == 401
+    assert forbidden.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_admin_batch_cost_multiplier_200(memory_db, monkeypatch):
+    admin = await _seed_user(memory_db, username="root", role="admin", is_admin=True)
+    seen: dict = {}
+
+    async def _fake_batch(model_ids, cost_multiplier):
+        seen["ids"] = list(model_ids)
+        seen["multiplier"] = cost_multiplier
+        return len(model_ids)
+
+    monkeypatch.setattr(provider_registry, "batch_update_cost_multiplier", _fake_batch)
+    async for client in _build_client(memory_db, admin):
+        resp = await client.put(
+            "/api/models/batch-cost-multiplier",
+            json={"model_ids": ["m1", "m2"], "cost_multiplier": 2.5},
+        )
+        low = await client.put(
+            "/api/models/batch-cost-multiplier",
+            json={"model_ids": ["m1"], "cost_multiplier": 0.05},
+        )
+        empty = await client.put(
+            "/api/models/batch-cost-multiplier",
+            json={"model_ids": [], "cost_multiplier": 2.0},
+        )
+    assert resp.status_code == 200
+    assert resp.json()["data"]["updated"] == 2
+    assert seen["ids"] == ["m1", "m2"]
+    assert seen["multiplier"] == 2.5
+    assert low.status_code == 400  # 倍率低于下限 0.1（校验错误全局统一 400）
+    assert empty.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_admin_get_providers_200(memory_db):
     admin = await _seed_user(memory_db, username="root", role="admin", is_admin=True)
     async for client in _build_client(memory_db, admin):

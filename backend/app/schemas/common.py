@@ -98,6 +98,12 @@ class WatermarkConfigPublic(BaseModel):
     image_width: int = Field(default=120, description="图片水印宽度")
 
 
+class ErrorCategoryMeta(BaseModel):
+    """错误类目语义（随 /api/config 下发；文案由前端 i18n 渲染）"""
+    code: str = Field(description="类目编码（error_taxonomy.CATEGORIES）")
+    can_retry: bool = Field(description="该类目失败后是否允许手动重试")
+
+
 class ConfigResponse(BaseModel):
     """前端可用配置（不含敏感信息）"""
 
@@ -172,6 +178,12 @@ class ConfigResponse(BaseModel):
 
     # 上传限制
     max_upload_size_mb: int = 10
+
+    # 错误类目合同（code + 能否手动重试；文案由前端 i18n 按 errors.category_<code> 渲染）
+    error_categories: List[ErrorCategoryMeta] = Field(
+        default_factory=list,
+        description="生成错误类目语义表（error_taxonomy 唯一出处）",
+    )
 
     # 水印配置（公开，前端 CSS 水印用）
     watermark: Optional[WatermarkConfigPublic] = None

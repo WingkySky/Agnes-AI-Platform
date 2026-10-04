@@ -5,7 +5,7 @@
 # =====================================================
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, JSON, ForeignKey
+from sqlalchemy import Column, Float, Integer, String, Text, DateTime, Boolean, JSON, ForeignKey
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -47,6 +47,9 @@ class ModelDefinition(Base):
     is_custom = Column(Boolean, default=False, nullable=False, comment="是否用户自定义")
     sort_order = Column(Integer, default=0, nullable=False, comment="排序权重")
     asset_storage_mode = Column(String(20), default="auto", nullable=False, comment="资源存储策略: auto(按provider_type自动判断) / keep(保留原URL) / migrate(强制转存对象存储)")
+    # 积分倍率（动态定价）：实扣 = credit_rules 基准价 × 此倍率；1.0 = 不变。
+    # 存量库升级：ALTER TABLE model_definitions ADD COLUMN cost_multiplier FLOAT NOT NULL DEFAULT 1.0;
+    cost_multiplier = Column(Float, default=1.0, nullable=False, server_default="1.0", comment="积分倍率：实扣=基准价×倍率（动态定价，管理端可改，立即生效）")
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -67,6 +70,7 @@ class ModelDefinition(Base):
             "is_custom": self.is_custom,
             "sort_order": self.sort_order,
             "asset_storage_mode": self.asset_storage_mode,
+            "cost_multiplier": self.cost_multiplier,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

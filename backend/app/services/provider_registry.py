@@ -901,6 +901,7 @@ class ProviderRegistry:
         sort_order: Optional[int] = None,
         asset_storage_mode: Optional[str] = None,
         gen_params: Optional[dict] = None,
+        cost_multiplier: Optional[float] = None,
     ) -> Optional[ModelDefinition]:
         """更新模型定义"""
         async with new_async_session() as session:
@@ -929,6 +930,8 @@ class ProviderRegistry:
                 defn.asset_storage_mode = asset_storage_mode
             if gen_params is not None:
                 defn.gen_params = gen_params  # 空 dict = 清空显式配置，回退自动画像
+            if cost_multiplier is not None:
+                defn.cost_multiplier = max(0.1, float(cost_multiplier))
 
             await session.commit()
             await session.refresh(defn)
@@ -970,6 +973,25 @@ class ProviderRegistry:
 
         await self.refresh_models_cache()
         logger.info("[ProviderRegistry] 批量%s模型: %d 个", "停用" if is_disabled else "启用", updated)
+        return updated
+
+    async def batch_update_cost_multiplier(self, model_ids: List[str], cost_multiplier: float) -> int:
+        """批量设置积分倍率（实扣=基准价×倍率），返回实际更新的行数"""
+        if not model_ids:
+            return 0
+        async with new_async_session() as session:
+            defns = (
+                await session.scalars(
+                    select(ModelDefinition).where(ModelDefinition.model_id.in_(model_ids))
+                )
+            ).all()
+            for defn in defns:
+                defn.cost_multiplier = max(0.1, float(cost_multiplier))
+            await session.commit()
+            updated = len(defns)
+
+        await self.refresh_models_cache()
+        logger.info("[ProviderRegistry] 批量设置积分倍率: %d 个 -> %s", updated, cost_multiplier)
         return updated
 
     async def batch_delete_models(self, model_ids: List[str]) -> int:

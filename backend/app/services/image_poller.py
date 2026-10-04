@@ -27,8 +27,10 @@ from app.services._generation_persist import (
     cleanup_expired_tasks,
     confirm_generation_credits,
     persist_generation,
+    persist_generation_failure,
     refund_generation_credits,
 )
+from app.services.error_taxonomy import classify, classify_message
 
 logger = logging.getLogger("agnes_platform")
 
@@ -62,6 +64,7 @@ class ImageTask:
         self.result_url: Optional[str] = None
         self.image_b64: Optional[str] = None
         self.error_message: Optional[str] = None
+        self.error_category: Optional[str] = None
         self.created_at = time.time()
         self.last_updated = self.created_at
         self._gen_task: Optional[asyncio.Task] = None
@@ -76,6 +79,7 @@ class ImageTask:
             "url": self.result_url,
             "image_b64": self.image_b64,
             "message": self.error_message,
+            "error_category": self.error_category,
             "credits_consumed": self.credits_consumed,
             "elapsed_sec": int(time.time() - self.created_at),
         }
@@ -191,9 +195,15 @@ class ImagePollerManager:
             if not output_url and not output_b64:
                 task.status = "failed"
                 task.error_message = "Agnes AI 返回异常，未找到图片数据"
+                task.error_category = classify_message(task.error_message, submitted=True)
                 logger.warning("[图片任务器] 无结果数据: task_id=%s", task_id)
-                # 生成失败：退还预扣的积分
+                # 生成失败：退还预扣的积分 + 失败归因落库
                 await self._refund_if_needed(task)
+                await persist_generation_failure(
+                    task, kind="image",
+                    record_params={"model": task.params.get("model", ""), "size": task.params.get("size", "")},
+                    record_task_id=task.task_id, log_prefix=LOG_PREFIX,
+                )
                 return
 
             task.status = "success"
@@ -218,14 +228,19 @@ class ImagePollerManager:
             await self._refund_if_needed(task)
         except Exception as e:
             task.status = "failed"
-            task.error_message = str(e) or "生成失败，请稍后重试"
+            task.error_category, task.error_message = classify(e, submitted=True, receipt=False)
             task.last_updated = time.time()
             logger.error(
                 "[图片任务器] 任务失败: task_id=%s error=%s",
                 task_id, str(e), exc_info=True,
             )
-            # 生成失败：退还预扣的积分
+            # 生成失败：退还预扣的积分 + 失败归因落库
             await self._refund_if_needed(task)
+            await persist_generation_failure(
+                task, kind="image",
+                record_params={"model": task.params.get("model", ""), "size": task.params.get("size", "")},
+                record_task_id=task.task_id, log_prefix=LOG_PREFIX,
+            )
 
     async def _confirm_if_needed(self, task: ImageTask):
         """生成成功后，把对应的预扣流水状态改为 confirmed（积分不变）"""

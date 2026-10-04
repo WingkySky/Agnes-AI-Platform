@@ -8,7 +8,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getPlatformConfig } from '@/api/history'
 import { usePreferencesStore } from '@/stores/preferences'
-import type { ModelInfo, ConfigResponse, ImageSizeOption, VideoAspectRatioOption, VideoResolutionOption, WatermarkConfigPublic, ModelGenParams } from '@/types'
+import type { ModelInfo, ConfigResponse, ImageSizeOption, VideoAspectRatioOption, VideoResolutionOption, WatermarkConfigPublic, ModelGenParams, ErrorCategoryMeta } from '@/types'
 import {
   getModelParams as getLocalModelParams,
   type ModelParams,
@@ -41,6 +41,8 @@ export const useModelsStore = defineStore('models', () => {
   const defaultFrameRate = ref(24)
   // 水印配置
   const watermark = ref<WatermarkConfigPublic | null>(null)
+  // 错误类目语义表（code → can_retry，后端 error_taxonomy 唯一出处）
+  const errorCategories = ref<Map<string, boolean>>(new Map())
   // 是否已加载
   const loaded = ref(false)
 
@@ -95,6 +97,12 @@ export const useModelsStore = defineStore('models', () => {
       defaultFrameRate.value = resp.default_frame_rate || 24
       // 水印配置
       watermark.value = resp.watermark || null
+      // 错误类目语义
+      const catMap = new Map<string, boolean>()
+      for (const meta of resp.error_categories || []) {
+        catMap.set(meta.code, meta.can_retry)
+      }
+      errorCategories.value = catMap
       loaded.value = true
     } catch (err) {
       console.error('[models store] 加载配置失败:', err)
@@ -103,13 +111,18 @@ export const useModelsStore = defineStore('models', () => {
 
   /** 根据模型 ID 查找模型信息 */
   function getModelById(id: string): ModelInfo | undefined {
-    return models.value.find((m) => m.id === id)
-  }
+    return models.value.find((m) => m.id === id)  }
 
   /** 获取模型生成能力配置（参考图上限/水印/尺寸规则等；无特例返回 null） */
   function getModelGenParams(modelId?: string): ModelGenParams | null {
     if (!modelId) return null
     return models.value.find((m) => m.id === modelId)?.gen_params ?? null
+  }
+
+  /** 错误类目 → 能否手动重试（重试闸门）；无类目/未知编码默认可重试（旧行为不变） */
+  function canRetryCategory(category?: string | null): boolean {
+    if (!category) return true
+    return errorCategories.value.get(category) ?? true
   }
 
   /** 视频时长档位：模型 gen_params.video_durations 优先，未配置用全局档位 */
@@ -182,6 +195,7 @@ export const useModelsStore = defineStore('models', () => {
     videoFrameRates,
     defaultFrameRate,
     watermark,
+    errorCategories,
     loaded,
     imageModels,
     videoModels,
@@ -192,6 +206,7 @@ export const useModelsStore = defineStore('models', () => {
     fetchConfig,
     getModelById,
     getModelGenParams,
+    canRetryCategory,
     getModelVideoDurations,
     supportsVideo2Video,
     getModelsByMode,

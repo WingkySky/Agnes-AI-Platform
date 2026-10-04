@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 from app.core.config import settings
 from app.core.response import ok
 from app.schemas.common import ConfigResponse, ImageSizeOption, VideoAspectRatioOption, VideoResolutionOption, WatermarkConfigPublic
+from app.services.error_taxonomy import CATEGORIES
 from app.services.model_registry import get_all_models
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_async_db
@@ -101,6 +102,11 @@ async def get_config(db: AsyncSession = Depends(get_async_db)):
 
     return ok(data=ConfigResponse(
         models=await get_all_models(),
+        # 错误类目语义表（前端按 code 渲染 i18n 文案、按 can_retry 控制重试闸门）
+        error_categories=[
+            {"code": code, "can_retry": can_retry}
+            for code, can_retry in CATEGORIES.items()
+        ],
         # 图片尺寸（兼容旧版 + 结构化新版）
         image_sizes=[opt.value for opt in IMAGE_SIZE_OPTIONS],
         image_size_options=IMAGE_SIZE_OPTIONS,

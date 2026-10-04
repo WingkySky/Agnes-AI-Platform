@@ -133,6 +133,19 @@
       <!-- 批量操作条（选中行后显示） -->
       <div v-if="selectedModels.length > 0" class="batch-bar">
         <span class="batch-count">{{ t('settings.selectedCount').replace('{count}', String(selectedModels.length)) }}</span>
+        <el-input-number
+          v-model="batchCostMultiplier"
+          size="small"
+          :min="0.1"
+          :max="100"
+          :step="0.1"
+          :precision="2"
+          :title="t('settings.costMultiplierTip')"
+          class="batch-multiplier"
+        />
+        <el-button size="small" type="primary" plain @click="handleBatchCostMultiplier">
+          {{ t('settings.batchMultiplier') }}
+        </el-button>
         <el-button size="small" type="warning" plain @click="handleBatchDisabled(true)">
           {{ t('settings.batchDisable') }}
         </el-button>
@@ -357,6 +370,11 @@
           </el-radio-group>
           <div class="form-item-hint">{{ t('settings.assetStorageModeTip') }}</div>
         </el-form-item>
+        <!-- 积分倍率（动态定价）：实扣 = credit_rules 基准价 × 倍率 -->
+        <el-form-item :label="t('settings.formCostMultiplier')">
+          <el-input-number v-model="modelForm.cost_multiplier" :min="0.1" :max="100" :step="0.1" :precision="2" />
+          <div class="form-item-hint">{{ t('settings.costMultiplierTip') }}</div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="modelDialogVisible = false">{{ t('common.cancel') }}</el-button>
@@ -393,6 +411,7 @@ const showDisabled = ref(false)
 const filterModelType = ref('')
 // 表格多选状态（批量操作用）
 const selectedModels = ref<ModelDefinition[]>([])
+const batchCostMultiplier = ref(1.0)
 const modelTableRef = ref<TableInstance>()
 
 // 按 provider_name 分组的模型列表
@@ -500,6 +519,8 @@ const modelForm = reactive({
   is_disabled: false,
   // 资源存储策略：auto(按 provider_type 自动判断) / keep(保留原始 URL) / migrate(强制转存对象存储)
   asset_storage_mode: 'auto',
+  // 积分倍率（动态定价）：实扣 = credit_rules 基准价 × 倍率
+  cost_multiplier: 1.0,
   // ── 生成能力配置（gen_params；空值=自动，按模型名画像判断）──
   max_ref_images: null as number | null,
   watermark_param_off: null as boolean | null,
@@ -723,6 +744,8 @@ function openModelDialog(model?: ModelDefinition, presetProviderId?: number) {
       is_disabled: !!model.is_disabled,
       // 回填资源存储策略，旧数据缺字段时回退到默认 auto
       asset_storage_mode: model.asset_storage_mode || 'auto',
+      // 回填积分倍率（旧数据缺字段回退 1.0）
+      cost_multiplier: model.cost_multiplier ?? 1.0,
       // 回填生成能力配置（gen_params；缺省=自动）
       max_ref_images: model.gen_params?.max_ref_images ?? null,
       watermark_param_off: model.gen_params?.watermark_param_off ?? null,
@@ -741,6 +764,7 @@ function openModelDialog(model?: ModelDefinition, presetProviderId?: number) {
       capabilities: [],
       is_disabled: false,
       asset_storage_mode: 'auto',
+      cost_multiplier: 1.0,
       video_durations: '',
       max_ref_images: null,
       watermark_param_off: null,
@@ -798,6 +822,13 @@ async function handleBatchDisabled(disabled: boolean) {
   await modelsStore.fetchConfig()
 }
 
+async function handleBatchCostMultiplier() {
+  const ids = selectedModels.value.map((m) => m.model_id)
+  const count = await providersStore.batchSetCostMultiplier(ids, batchCostMultiplier.value)
+  ElMessage.success(t('settings.batchMultiplierDone').replace('{count}', String(count)))
+  clearModelSelection()
+}
+
 async function handleBatchDelete() {
   const ids = selectedModels.value.map((m) => m.model_id)
   await confirm(t('settings.confirmBatchDelete').replace('{count}', String(ids.length)), t('common.delete'))
@@ -822,6 +853,7 @@ async function submitModel() {
           capabilities: modelForm.capabilities,
           is_disabled: modelForm.is_disabled,
           asset_storage_mode: modelForm.asset_storage_mode,
+          cost_multiplier: modelForm.cost_multiplier,
           gen_params: collectGenParams(),
         })
         ElMessage.success(t('settings.modelUpdated'))
@@ -950,6 +982,10 @@ async function handleDeleteModel(model: ModelDefinition) {
   font-size: 13px;
   color: var(--agnes-text-primary);
   margin-right: 4px;
+}
+
+.batch-multiplier {
+  width: 120px;
 }
 
 /* 已停用模型整行弱化显示 */

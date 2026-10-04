@@ -18,6 +18,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -34,6 +35,7 @@ from app.schemas.videos import (
     VideoStatusResponse,
 )
 from app.services.agnes_client import agnes_client
+from app.services.error_taxonomy import classify
 from app.services.provider_registry import provider_registry, _detect_capabilities
 from app.services.credits_service import consume_credits, get_video_cost_async
 from app.services.video_poller import poller_manager
@@ -153,7 +155,7 @@ async def create_video_task(
                 detail=f"内容包含敏感词，无法生成：{', '.join(hit_words[:5])}",
             )
 
-    cost = await get_video_cost_async(db, mode=req.mode, seconds=req.seconds or 5, num_frames=req.num_frames)
+    cost = await get_video_cost_async(db, mode=req.mode, seconds=req.seconds or 5, num_frames=req.num_frames, model=req.model)
     _pending_ref_id = f"pending_{uuid.uuid4().hex}"
     await consume_credits(
         db, current_user, cost,
@@ -208,7 +210,12 @@ async def create_video_task(
                 )
         except Exception as refund_err:
             logger.error("[视频生成] 退还预扣积分失败: %s", refund_err)
-        raise HTTPException(status_code=502, detail=str(e))
+        # 归类：视频是异步任务（receipt=True），提交回执丢失 → submission_uncertain
+        category, message = classify(e, submitted=False, receipt=True)
+        return JSONResponse(
+            status_code=502,
+            content={"detail": message, "category": category},
+        )
 
     result_data = result.get("data")
     if isinstance(result_data, list) and result_data:
@@ -338,6 +345,7 @@ async def get_video_status(
             progress=cached_task.progress,
             video_url=cached_task.video_url,
             message=cached_task.error_message,
+            error_category=getattr(cached_task, "error_category", None),
             elapsed_sec=cached_task.to_dict()["elapsed_sec"],
         ))
 
@@ -358,7 +366,8 @@ async def get_video_status(
             status=record.status,
             progress=100 if record.status == "success" else 0,
             video_url=record.result_url,
-            message=None if record.status == "success" else "任务已完成",
+            message=record.error_message if record.status == "failed" else None,
+            error_category=record.error_category,
             elapsed_sec=0,
         ))
 

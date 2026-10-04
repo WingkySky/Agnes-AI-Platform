@@ -38,6 +38,7 @@ export interface BatchTableRow {
   enabled: boolean
   status: BatchRowStatus
   error?: string
+  errorCategory?: string
 }
 
 /** 操作预设 */
@@ -174,8 +175,10 @@ export function fillCellFromNode(
 }
 
 /** 不可变更新行状态（读-改-写由调用方负责取最新 rows） */
-export function setRowStatus(rows: BatchTableRow[], rowId: string, status: BatchRowStatus, error?: string): BatchTableRow[] {
-  return rows.map((row) => (row.id === rowId ? { ...row, status, error: status === 'failed' ? (error || row.error || '') : undefined } : row))
+export function setRowStatus(rows: BatchTableRow[], rowId: string, status: BatchRowStatus, error?: string, errorCategory?: string): BatchTableRow[] {
+  return rows.map((row) => (row.id === rowId
+    ? { ...row, status, error: status === 'failed' ? (error || row.error || '') : undefined, errorCategory: status === 'failed' ? (errorCategory || row.errorCategory) : undefined }
+    : row))
 }
 
 /** 单元格 → 可用 URL（素材库优先还原，直存 URL 兜底） */
@@ -191,10 +194,13 @@ export function resolveCellUrl(cell: BatchTableCell | null): string {
 /**
  * 批量生成：合格启用行逐行派生图片节点（右侧纵向排布）并连线回表格，行状态经 onProgress 回写。
  * 单行失败不影响其他行；返回 { started, skipped }。
+ * - 默认只提交 idle/failed 的启用行（生成中/已完成行不重复提交）；
+ * - opts.rowIds 指定时只提交这些行（行级重试，仍需通过校验与重试闸门）。
  */
 export async function generateBatchTableRows(
   tablePanel: CanvasPanel,
   store: CanvasGenerationStore,
+  opts: { rowIds?: string[] } = {},
 ): Promise<{ started: number; skipped: number }> {
   const content = readBatchContent(tablePanel.content)
   const modelsStore = useModelsStore()
@@ -205,21 +211,26 @@ export async function generateBatchTableRows(
     hasModel: !!modelId,
     refLimit,
   })
-  const skipped = content.rows.length - valid.length
-  if (valid.length === 0) {
+  const rowIdSet = opts.rowIds ? new Set(opts.rowIds) : null
+  const eligible = valid.filter((row) => {
+    if (rowIdSet) return rowIdSet.has(row.id)
+    return row.status === 'idle' || row.status === 'failed'
+  })
+  const skipped = content.rows.length - eligible.length
+  if (eligible.length === 0) {
     return { started: 0, skipped }
   }
 
   /** 读-改-写当前行状态（避免覆盖生成期间用户的行编辑） */
-  const writeStatus = (rowId: string, status: BatchRowStatus, error?: string) => {
+  const writeStatus = (rowId: string, status: BatchRowStatus, error?: string, errorCategory?: string) => {
     const panel = store.panels.find((p) => p.id === tablePanel.id)
     if (!panel) return
     const current = readBatchContent(panel.content).rows
-    store.updatePanel(tablePanel.id, { content: { rows: setRowStatus(current, rowId, status, error) } })
+    store.updatePanel(tablePanel.id, { content: { rows: setRowStatus(current, rowId, status, error, errorCategory) } })
   }
 
   let started = 0
-  for (const row of valid) {
+  for (const row of eligible) {
     const prompt = resolveRowPrompt(row, content.globalPrompt)
     const referenceImages = row.refs.map(resolveCellUrl).filter(Boolean)
     // index 传 4 的倍数让结果节点在第 0 列纵向堆叠（calcResultNodePosition 为 4 列网格）
@@ -239,7 +250,7 @@ export async function generateBatchTableRows(
         if (phase === 'creating') writeStatus(row.id, 'queued')
         else if (phase === 'polling' || phase === 'generating') writeStatus(row.id, 'running')
         else if (phase === 'done') writeStatus(row.id, 'done')
-        else if (phase === 'error') writeStatus(row.id, 'failed', String(data?.error || ''))
+        else if (phase === 'error') writeStatus(row.id, 'failed', String(data?.error || ''), String(data?.category || ''))
       },
     }).catch(() => writeStatus(row.id, 'failed'))
   }

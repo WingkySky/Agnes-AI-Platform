@@ -12,8 +12,13 @@
     <el-tabs v-model="activeTab" class="logs-tabs">
       <el-tab-pane :label="t('logs.backendTab')" name="backend" />
       <el-tab-pane :label="t('logs.frontendTab')" name="frontend" />
+      <el-tab-pane :label="t('logs.callsTab')" name="calls" />
     </el-tabs>
 
+    <!-- 上游调用记账（第三 Tab）：自持数据，与日志双 Tab 无关 -->
+    <ApiCallsPanel v-if="isCalls" />
+
+    <template v-if="!isCalls">
     <!-- 筛选工具条（绑定当前激活 Tab 的独立状态） -->
     <div class="logs-toolbar">
       <el-select
@@ -125,6 +130,7 @@
         {{ t('logs.loadMore') }}
       </el-button>
     </div>
+    </template>
   </div>
 </template>
 
@@ -135,6 +141,7 @@ import { Delete, Download, Refresh } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { clearLog, getLogStats, queryLogs } from '@/api/logs'
 import type { LogEntry, LogQueryParams } from '@/api/logs'
+import ApiCallsPanel from '@/views/admin/ApiCallsPanel.vue'
 import { useConfirm } from '@/composables/useConfirm'
 import { useCopyText } from '@/composables/useCopyText'
 import { useDownload } from '@/composables/useDownload'
@@ -172,9 +179,10 @@ const tabStates = reactive<Record<'backend' | 'frontend', TabState>>({
   frontend: emptyState('frontend.jsonl'),
 })
 
-const activeTab = ref<'backend' | 'frontend'>('backend')
-const state = computed(() => tabStates[activeTab.value])
+const activeTab = ref<'backend' | 'frontend' | 'calls'>('backend')
+const state = computed(() => tabStates[activeTab.value === 'calls' ? 'backend' : activeTab.value])
 const isBackend = computed(() => activeTab.value === 'backend')
+const isCalls = computed(() => activeTab.value === 'calls')
 const hasMore = computed(() => state.value.lastCount >= PAGE_SIZE && state.value.entries.length > 0)
 
 // ---------- 数据源下拉（后端 Tab：主日志 / 错误日志 / 轮转备份） ----------
@@ -246,7 +254,10 @@ async function loadMore(): Promise<void> {
   await fetchLogs('more')
 }
 
-watch(activeTab, () => reload())
+watch(activeTab, () => {
+  // 上游调用 Tab 自持数据（ApiCallsPanel onMounted 拉取），日志 Tab 才刷新日志
+  if (activeTab.value !== 'calls') reload()
+})
 
 // ---------- 自动刷新（10 秒，作用于当前激活 Tab） ----------
 const autoRefresh = ref(false)

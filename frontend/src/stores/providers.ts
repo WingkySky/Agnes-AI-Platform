@@ -16,6 +16,7 @@ import {
   deleteModel,
   batchUpdateModels,
   batchDeleteModels,
+  batchSetCostMultiplier as batchSetCostMultiplierApi,
   syncProviderModels,
   syncAllProvidersModels,
 } from '@/api/providers'
@@ -124,6 +125,13 @@ export const useProvidersStore = defineStore('providers', () => {
     return resp.deleted
   }
 
+  /** 批量设置积分倍率（单次请求，返回实际更新数量） */
+  async function batchSetCostMultiplier(modelIds: string[], costMultiplier: number) {
+    const resp = await batchSetCostMultiplierApi({ model_ids: modelIds, cost_multiplier: costMultiplier })
+    await fetchModelDefinitions()
+    return resp.updated
+  }
+
   /** 同步指定 Provider 的模型列表 */
   async function syncProvider(providerId: number): Promise<SyncModelsResponse> {
     syncing.value = true
@@ -164,6 +172,7 @@ export const useProvidersStore = defineStore('providers', () => {
     removeModel,
     batchSetModelsDisabled,
     batchRemoveModels,
+    batchSetCostMultiplier,
     syncProvider,
     syncAll,
   }

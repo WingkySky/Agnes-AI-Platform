@@ -147,12 +147,14 @@ client.interceptors.response.use(
       }
     }
 
-    // 归一化错误保留 HTTP 状态与后端 detail（如画布工作区 409 冲突的 current_revision），
+    // 归一化错误保留 HTTP 状态、后端 detail 与错误类目 category（error_taxonomy），
     // 供调用方按状态分支处理；message 仍为人读文本
-    const normalized = new Error(message) as Error & { status?: number; detail?: unknown }
+    const normalized = new Error(message) as Error & { status?: number; detail?: unknown; category?: string }
     if (error?.response) {
       normalized.status = error.response.status
       normalized.detail = error.response?.data?.detail
+      const category = error.response?.data?.category
+      if (typeof category === 'string') normalized.category = category
     }
 
     return Promise.reject(normalized)

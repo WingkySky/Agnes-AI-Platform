@@ -65,6 +65,50 @@ async def refund_generation_credits(
         logger.error("%s 退还积分失败: ref_id=%s error=%s", log_prefix, ref_id, e)
 
 
+async def persist_generation_failure(
+    task,
+    *,
+    kind: str,                       # "image" / "video"（Generation.type）
+    record_params: Dict,             # Generation.params（最小化，避免多模态大字段入库）
+    record_task_id: Optional[str],   # Generation.task_id（视频侧 task.task_id or video_id）
+    log_prefix: str,                 # 日志前缀
+) -> None:
+    """
+    任务失败后把失败归因写入 generations 表（status=failed + error_category/error_message），
+    让历史页与管理端可见失败原因与类目。best-effort：写库失败仅告警，不影响退款等主流程。
+    """
+    if not getattr(task, "error_category", None) and not getattr(task, "error_message", None):
+        return
+    try:
+        async with new_async_session() as session:
+            record = Generation(
+                type=kind,
+                user_id=task.user_id,
+                prompt=task.prompt,
+                model=task.params.get("model", ""),
+                params=record_params,
+                mode=task.params.get("mode"),
+                status="failed",
+                error_category=getattr(task, "error_category", None),
+                error_message=(task.error_message or "")[:2000] or None,
+                credits_consumed=0,  # 失败已退还预扣积分
+                task_id=record_task_id,
+                is_public=False,
+                preset_id=task.preset_id,
+                source=(task.context or {}).get("source") or "independent",
+                container_type=(task.context or {}).get("container_type"),
+                container_id=as_container_id((task.context or {}).get("container_id")),
+            )
+            session.add(record)
+            await session.commit()
+            logger.info(
+                "%s 失败记录已落库: task_id=%s category=%s",
+                log_prefix, task.task_id, record.error_category,
+            )
+    except Exception as e:
+        logger.warning("%s 失败记录落库异常（不影响主流程）: task_id=%s error=%s", log_prefix, task.task_id, e)
+
+
 async def persist_generation(
     task,
     *,

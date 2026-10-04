@@ -104,6 +104,7 @@ class ModelUpdateRequest(BaseModel):
     )
     sort_order: Optional[int] = Field(default=None, description="排序权重")
     asset_storage_mode: Optional[str] = Field(default=None, description="资源存储策略: auto/keep/migrate")
+    cost_multiplier: Optional[float] = Field(default=None, ge=0.1, le=100, description="积分倍率（实扣=基准价×倍率；None=不修改）")
 
 
 class ModelDefinitionResponse(BaseModel):
@@ -121,6 +122,7 @@ class ModelDefinitionResponse(BaseModel):
     is_custom: bool
     sort_order: int
     asset_storage_mode: str = Field(default="auto", description="资源存储策略: auto/keep/migrate")
+    cost_multiplier: float = Field(default=1.0, description="积分倍率：实扣=基准价×倍率")
 
     class Config:
         from_attributes = True
@@ -141,6 +143,12 @@ class ModelBatchUpdateRequest(BaseModel):
 class ModelBatchDeleteRequest(BaseModel):
     """批量删除模型请求体"""
     model_ids: List[str] = Field(..., description="模型 ID 列表")
+
+
+class ModelBatchCostMultiplierRequest(BaseModel):
+    """批量设置模型积分倍率请求体（实扣积分 = 基准价 × 倍率）"""
+    model_ids: List[str] = Field(..., description="模型 ID 列表")
+    cost_multiplier: float = Field(..., ge=0.1, le=100, description="积分倍率")
 
 
 # =====================================================

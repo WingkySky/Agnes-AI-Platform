@@ -184,4 +184,5 @@ class VideoStatusResponse(BaseModel):
     progress: int                               # 0-100，服务端估算的进度
     video_url: Optional[str] = None             # 生成成功时返回的视频 URL
     message: Optional[str] = None               # 状态信息或错误消息
+    error_category: Optional[str] = None        # 失败类目（error_taxonomy.CATEGORIES；成功/旧任务为 NULL）
     elapsed_sec: int = 0                        # 已耗时（秒）

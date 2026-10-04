@@ -25,7 +25,7 @@ import { isMediaSuccess, isMediaFailed } from '@/lib/media-status'
 import { captureVideoFrame, getVideoTime } from '@/lib/canvas-image-ops'
 import type { CanvasPanel, CanvasConnection } from '@/stores/canvas'
 import type { ImageGenerationRequest, VideoGenerationRequest, GenerationContextPayload } from '@/types'
-import { getErrorMessage } from '@/lib/type-helpers'
+import { getErrorMessage, getErrorCategory } from '@/lib/type-helpers'
 
 // ---------- 类型定义 ----------
 
@@ -578,6 +578,7 @@ type MediaPollStatusData = {
   status: string
   progress: number
   message?: string | null
+  error_category?: string | null
   result_url?: string | null
   url?: string | null
   video_url?: string | null
@@ -589,6 +590,8 @@ interface MediaPollPreset {
   fetch: (taskId: string) => Promise<MediaPollStatusData>
   pickUrl: (data: MediaPollStatusData) => string
   messages: { timeout: string; queryFailed: string; noResultUrl: string; failed: string; cancelled: string }
+  /** 前端放弃轮询时原任务结果未知 → 该类目（视频异步任务 = submission_uncertain，禁止原地重试防双扣） */
+  uncertainCategory?: string
 }
 
 const MEDIA_POLL_PRESETS: Record<'image' | 'video', MediaPollPreset> = {
@@ -610,6 +613,7 @@ const MEDIA_POLL_PRESETS: Record<'image' | 'video', MediaPollPreset> = {
     timeout: 600000,
     fetch: (taskId) => getVideoStatus(taskId),
     pickUrl: (data) => data.video_url || '',
+    uncertainCategory: 'submission_uncertain',
     messages: {
       timeout: '视频生成任务超时（超过 10 分钟未完成）',
       queryFailed: '查询视频任务状态失败',
@@ -618,6 +622,13 @@ const MEDIA_POLL_PRESETS: Record<'image' | 'video', MediaPollPreset> = {
       cancelled: '视频任务已取消',
     },
   },
+}
+
+/** 轮询失败异常：携带错误类目（error_taxonomy），供重试闸门与失败归因使用 */
+function pollError(message: string, category?: string): Error & { category?: string } {
+  const err = new Error(message) as Error & { category?: string }
+  if (category) err.category = category
+  return err
 }
 
 async function pollMediaTask(
@@ -634,7 +645,7 @@ async function pollMediaTask(
     if (Date.now() - startTime > timeout) {
       // 超时，更新队列状态
       queueStore.updateCanvasTask(taskId, { status: 'failed' })
-      throw new Error(preset.messages.timeout)
+      throw pollError(preset.messages.timeout, preset.uncertainCategory)
     }
 
     // 单次查询失败静默重试（网络抖动/后端重启），连续多次才判失败
@@ -646,7 +657,7 @@ async function pollMediaTask(
       consecutiveErrors += 1
       if (consecutiveErrors >= MAX_POLL_ERRORS) {
         queueStore.updateCanvasTask(taskId, { status: 'failed' })
-        throw new Error(preset.messages.queryFailed)
+        throw pollError(preset.messages.queryFailed, preset.uncertainCategory)
       }
       await new Promise((resolve) => setTimeout(resolve, preset.interval))
       continue
@@ -661,7 +672,7 @@ async function pollMediaTask(
       const url = preset.pickUrl(data)
       if (!url) {
         queueStore.updateCanvasTask(taskId, { status: 'failed' })
-        throw new Error(preset.messages.noResultUrl)
+        throw pollError(preset.messages.noResultUrl, preset.uncertainCategory)
       }
       queueStore.updateCanvasTask(taskId, { status: 'success', resultUrl: url, progress: 100 })
       return { status: 'success', url }
@@ -669,12 +680,12 @@ async function pollMediaTask(
 
     if (isMediaFailed(status)) {
       queueStore.updateCanvasTask(taskId, { status: 'failed' })
-      throw new Error(data.message || preset.messages.failed)
+      throw pollError(data.message || preset.messages.failed, data.error_category || undefined)
     }
 
     if (status === 'cancelled') {
       queueStore.updateCanvasTask(taskId, { status: 'cancelled' })
-      throw new Error(preset.messages.cancelled)
+      throw pollError(preset.messages.cancelled)
     }
 
     // 更新进度
@@ -1155,8 +1166,9 @@ async function runMediaTask(
     return true
   } catch (err) {
     const errMsg = getErrorMessage(err) || (isVideo ? '视频生成失败' : '生成失败')
-    store.updatePanel(panelId, { content: { status: 'error', errorDetails: errMsg } })
-    if (onProgress) onProgress('error', { resultNodeIds: [panelId], error: errMsg })
+    const errCategory = getErrorCategory(err)
+    store.updatePanel(panelId, { content: { status: 'error', errorDetails: errMsg, errorCategory: errCategory || null } })
+    if (onProgress) onProgress('error', { resultNodeIds: [panelId], error: errMsg, category: errCategory })
     return false
   }
 }

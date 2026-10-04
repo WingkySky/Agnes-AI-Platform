@@ -391,6 +391,7 @@ import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useAssetStore } from '@/stores/asset'
 import { usePresetStore } from '@/stores/presets'
 import { appendPromptText, composeMounted } from '@/utils/presetApply'
+import { getErrorCategory } from '@/lib/type-helpers'
 import type { PromptPreset } from '@/types/preset'
 import { useAsset } from '@/api/pipeline'
 import { useModelsStore } from '@/stores/models'
@@ -784,7 +785,11 @@ async function startGenerate() {
     ElMessage.success(t('generate.videoSubmitted'))
   } catch (e) {
     console.error('[VideoView] 提交任务失败：', e)
-    ElMessage.error(t('generate.createTaskFailed') + (e instanceof Error ? e.message : ''))
+    // 错误类目优先：展示类目文案（含重试建议），无类目回退原始 detail
+    const category = getErrorCategory(e)
+    ElMessage.error(category && !modelsStore.canRetryCategory(category)
+      ? t('errors.category_' + category)
+      : t('generate.createTaskFailed') + (e instanceof Error ? e.message : ''))
   }
 }
 

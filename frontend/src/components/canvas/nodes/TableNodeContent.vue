@@ -100,6 +100,11 @@
             @mousedown.stop @change="onToggle(row.id, ($event.target as HTMLInputElement).checked)"
           >
           <span class="bt-status" :class="`is-${row.status}`" :title="row.error || ''">{{ statusLabel(row.status) }}</span>
+          <button
+            v-if="row.status === 'failed' && canRetryRow(row)"
+            type="button" class="bt-row-retry" :title="t('canvas.batchTable.retryRow')"
+            @mousedown.stop @click.stop="onRetryRow(row)"
+          >↻</button>
           <button type="button" class="bt-row-del" :title="t('canvas.batchTable.removeRow')" @mousedown.stop @click.stop="removeRow(row.id)">×</button>
         </div>
       </div>
@@ -176,7 +181,10 @@ const invalidIds = computed(() => validateBatchRows(rows.value, {
   hasModel: hasModels.value,
   refLimit: refLimit.value,
 }).invalidIds)
-const validCount = computed(() => rows.value.length - invalidIds.value.length)
+/** 待提交行数：合格且未在生成中/未完成的启用行（重复点击不会重提交进行中的行） */
+const validCount = computed(() => rows.value.filter((row) =>
+  !invalidIds.value.includes(row.id) && (row.status === 'idle' || row.status === 'failed'),
+).length)
 const generating = computed(() => rows.value.some((r) => r.status === 'queued' || r.status === 'running'))
 
 /* ---------- 行/单元格编辑（rows 整体替换写回） ---------- */
@@ -295,6 +303,21 @@ async function onGenerate() {
   } else {
     ElMessage.success(t('canvas.batchTable.started', { count: outcome.started }))
   }
+}
+
+/** 行级重试（重试闸门：不可重试类目提示后拦下） */
+function canRetryRow(row: BatchTableRow): boolean {
+  return modelsStore.canRetryCategory(row.errorCategory)
+}
+
+async function onRetryRow(row: BatchTableRow) {
+  if (!panel.value) return
+  if (!canRetryRow(row)) {
+    ElMessage.warning(t('canvas.messages.categoryNoRetry', { category: t(`errors.category_${row.errorCategory}`) }))
+    return
+  }
+  const outcome = await generateBatchTableRows(panel.value, store, { rowIds: [row.id] })
+  if (outcome.started > 0) ElMessage.success(t('canvas.batchTable.started', { count: outcome.started }))
 }
 
 function statusLabel(status: BatchRowStatus): string {
@@ -577,6 +600,20 @@ function cellStyle(cell: BatchTableCell | null) {
   cursor: pointer;
   font-size: 13px;
   padding: 0 2px;
+}
+
+.bt-row-retry {
+  border: none;
+  background: transparent;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 2px;
+}
+
+.bt-row-retry:hover {
+  opacity: 1;
 }
 
 .bt-row-del:hover {

@@ -78,6 +78,11 @@ export function batchDeleteModels(data: ModelBatchDeleteRequest): Promise<{ dele
   return client.post('/api/models/batch-delete', data)
 }
 
+/** 批量设置模型积分倍率（实扣=基准价×倍率） */
+export function batchSetCostMultiplier(data: { model_ids: string[]; cost_multiplier: number }): Promise<{ updated: number }> {
+  return client.put('/api/models/batch-cost-multiplier', data)
+}
+
 // =====================================================
 // 模型同步
 // =====================================================
