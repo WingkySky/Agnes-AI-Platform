@@ -15,7 +15,8 @@ import pytest
 from app.models.user_preference import UserPreference
 from app.schemas.common import ModelInfo
 from app.services import model_registry
-from app.services.provider_registry import _detect_gen_params, provider_registry
+from app.services.capability_service import detect_model_profile, resolve_capabilities
+from app.services.provider_registry import provider_registry
 
 _MODELS = [
     ModelInfo(id="agnes-video-2.5", name="Agnes Video 2.5", type="video"),
@@ -72,16 +73,49 @@ async def test_no_user_and_explicit_invalid_falls_to_first(memory_db):
 
 
 # =====================================================
-# 模型生成能力画像（_detect_gen_params）锁死
+# 模型能力合同（capability_service）锁死
 # 背景：Agnes Image 2.x 上游参考图上限 6 张（超出 HTTP 400 "too many input
 # images: N provided, at most 6 allowed"），官方文档均未标注，靠画像预检拦截。
+# 三级优先：DB 显式 gen_params 逐键覆盖 > 按名画像 > 默认兜底。
 # =====================================================
 
 
 def test_agnes_image_2x_ref_limit_is_six():
-    assert _detect_gen_params("agnes-image-2.1-flash").max_ref_images == 6
-    assert _detect_gen_params("agnes-image-2.5-flash").max_ref_images == 6
+    assert detect_model_profile("agnes-image-2.1-flash").max_ref_images == 6
+    assert detect_model_profile("agnes-image-2.5-flash").max_ref_images == 6
 
 
 def test_gen_params_profile_returns_none_for_unknown_family():
-    assert _detect_gen_params("some-other-image-model") is None
+    assert detect_model_profile("some-other-image-model") is None
+
+
+def test_resolve_profile_applies_without_explicit():
+    resolved = resolve_capabilities("agnes-image-2.1-flash", None)
+    assert resolved.max_ref_images == 6
+
+
+def test_resolve_explicit_overrides_profile_key():
+    resolved = resolve_capabilities("agnes-image-2.1-flash", {"max_ref_images": 3})
+    assert resolved.max_ref_images == 3
+    # 未覆盖的画像键保持画像值
+    resolved_seedream = resolve_capabilities("seedream-4.0", {"max_ref_images": 1})
+    assert resolved_seedream.max_ref_images == 1
+    assert resolved_seedream.size_rule == "seedream"
+    assert resolved_seedream.watermark_param_off is True
+
+
+def test_resolve_explicit_fills_when_no_profile():
+    resolved = resolve_capabilities("some-other-image-model", {"max_ref_images": 2, "video_durations": [5, 10]})
+    assert resolved.max_ref_images == 2
+    assert resolved.video_durations == [5, 10]
+
+
+def test_resolve_invalid_explicit_falls_back_to_profile():
+    resolved = resolve_capabilities("agnes-image-2.1-flash", {"max_ref_images": "many"})
+    assert resolved.max_ref_images == 6
+
+
+def test_resolve_explicit_none_keys_keep_profile_values():
+    resolved = resolve_capabilities("seedream-4.0", {"watermark_param_off": None, "size_rule": None})
+    assert resolved.watermark_param_off is True
+    assert resolved.size_rule == "seedream"

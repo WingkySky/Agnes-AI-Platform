@@ -146,6 +146,17 @@
               {{ t('presets.plaza.effectLibrary') }}
             </el-button>
 
+            <!-- 优化提示词：AI 结构化改写 -->
+            <el-button
+              :icon="EditPen"
+              size="small"
+              plain
+              style="margin-top: 6px; margin-right: 8px"
+              @click="optimizeVisible = true"
+            >
+              {{ t('promptOptimizer.openButton') }}
+            </el-button>
+
             <!-- 已挂载预设（生视频模块独立，风格单选/特效与运镜叠加，提交时自动拼接） -->
             <div v-if="presetStore.mountedFor('video').length" class="mounted-row">
               <el-tag
@@ -351,6 +362,15 @@
 
         <!-- 统一预设广场弹窗（特效库） -->
         <PresetPlazaDialog v-model="plazaVisible" context="video" @apply="onPresetApply" />
+
+        <!-- 优化提示词弹窗 -->
+        <PromptOptimizeDialog
+          v-model:visible="optimizeVisible"
+          :initial-prompt="prompt"
+          target="video"
+          :model-id="videoModel"
+          @apply="onOptimizeApply"
+        />
       </el-col>
     </el-row>
   </div>
@@ -360,10 +380,11 @@
 import { ref, computed, nextTick, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  VideoPlay, Download, CopyDocument, CircleCloseFilled, VideoCameraFilled, Loading, MagicStick,
+  VideoPlay, Download, CopyDocument, CircleCloseFilled, VideoCameraFilled, Loading, MagicStick, EditPen,
   Edit, Film, PictureFilled, Picture, ArrowDownBold, Share, InfoFilled
 } from '@element-plus/icons-vue'
 import PresetPlazaDialog from '@/components/presets/PresetPlazaDialog.vue'
+import PromptOptimizeDialog from '@/components/PromptOptimizeDialog.vue'
 import ImageUploader from '@/components/ImageUploader.vue'
 import ParamSelector from '@/components/ParamSelector.vue'
 import { useTaskQueueStore } from '@/stores/taskQueue'
@@ -582,6 +603,7 @@ const canSubmit = computed(() => {
 
 // ---------- 统一预设广场（特效库） ----------
 const plazaVisible = ref(false)
+const optimizeVisible = ref(false)
 const presetStore = usePresetStore()
 
 /** 广场应用回调：风格/特效/运镜挂载（一键使用，提交时自动拼接）；脚本复制；提示词追加 */
@@ -598,6 +620,13 @@ async function onPresetApply(preset: PromptPreset) {
   }
   prompt.value = appendPromptText(prompt.value, payload.appendText)
   ElMessage.success(t('presets.applied'))
+}
+
+/** 优化结果回填：正向/负向各覆盖对应输入框 */
+function onOptimizeApply({ positive, negative }: { positive: string; negative: string }) {
+  prompt.value = positive
+  if (negative) negativePrompt.value = negative
+  ElMessage.success(t('promptOptimizer.applied'))
 }
 
 /** 挂载标签文案：类型 · 名称 */

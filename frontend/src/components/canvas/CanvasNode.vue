@@ -192,6 +192,11 @@
           <ScriptNodeContent :panel-id="panel.id" />
         </div>
 
+        <!-- 批量创作表节点：N 行 × M 参考图列矩阵生成 -->
+        <div v-else-if="panel.type === 'table'" class="table-content">
+          <TableNodeContent :panel-id="panel.id" @connect-col="handleConnectCol" />
+        </div>
+
         <!-- 配音节点（spec 5.4.1）：音色/语速/来源 -->
         <div v-else-if="panel.type === 'tts'" class="tts-content">
           <div class="tts-row">
@@ -381,6 +386,7 @@ import { useI18n } from '@/i18n'
 import { useCanvasStore } from '@/stores/canvas'
 import ImageWithWatermark from '@/components/ImageWithWatermark.vue'
 import ScriptNodeContent from '@/components/canvas/nodes/ScriptNodeContent.vue'
+import TableNodeContent from '@/components/canvas/nodes/TableNodeContent.vue'
 import { readLineage } from '@/lib/canvas-storyboard'
 import { registerVideoTime } from '@/lib/canvas-image-ops'
 import { fitNodeToMedia } from '@/lib/canvas-media'
@@ -772,6 +778,11 @@ function handleConnectStart(event: MouseEvent, anchorType: string) {
   emit('start-connecting', anchorType)
 }
 
+/** 批量创作表列句柄按下：以自定义锚点 ref-col:N 发起连线（落点填充该列空槽） */
+function handleConnectCol(columnIndex: number) {
+  emit('start-connecting', `ref-col:${columnIndex}`)
+}
+
 /* ---------- 交互：媒体元数据读取 ---------- */
 
 /** 图片加载完成：读取原始像素尺寸写回 store，避免显示 340×240 这种画布缩放尺寸 */
@@ -1119,6 +1130,13 @@ onUnmounted(() => {
 .image-content {
   width: 100%;
   height: 100%;
+}
+
+/* 批量创作表：内容组件撑满节点内容区 */
+.table-content {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
 }
 
 /* 水印容器默认 inline-block 自动高，会让 img 的 height:100% 解析失败（高图按原比例溢出被节点裁剪），强制撑满内容区 */

@@ -59,6 +59,7 @@ from app.routes import menu as menu_route
 from app.routes import pipeline as pipeline_route
 from app.routes import style_elements as style_elements_route
 from app.routes import prompt_presets as prompt_presets_route
+from app.routes import prompts as prompts_route
 from app.routes import uploads as uploads_route
 from app.routes import admin_review as admin_review_route
 from app.routes import asset as asset_route
@@ -316,6 +317,7 @@ app.include_router(menu_route.router, prefix="/api", tags=["菜单配置"])
 app.include_router(pipeline_route.router, prefix="/api", tags=["创意流水线"])
 app.include_router(style_elements_route.router, prefix="/api", tags=["风格元素"])
 app.include_router(prompt_presets_route.router, prefix="/api", tags=["提示词预设"])
+app.include_router(prompts_route.router, prefix="/api", tags=["提示词优化"])
 app.include_router(uploads_route.router, prefix="/api", tags=["上传"])
 app.include_router(admin_review_route.router, prefix="/api", tags=["管理员-统一审核"])
 app.include_router(asset_route.router, prefix="/api", tags=["管理员-资源转存"])

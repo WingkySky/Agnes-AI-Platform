@@ -9,7 +9,7 @@
 import type { Component } from 'vue'
 import {
   Image as ImageIcon, Video, Music2, FileText, Mic, Captions,
-  Clapperboard, ClipboardList, Upload,
+  Clapperboard, ClipboardList, Table2, Upload,
 } from 'lucide-vue-next'
 import { t } from '@/i18n'
 import { validateConnectionTypes } from '@/stores/canvas'
@@ -67,6 +67,7 @@ const NODE_ITEMS: NodeEntry[] = [
   { type: 'tts', icon: Mic, group: 'assist' },
   { type: 'subtitle', icon: Captions, group: 'assist' },
   { type: 'compose', icon: Clapperboard, group: 'assist' },
+  { type: 'table', icon: Table2, group: 'assist' },
 ]
 
 const UPLOAD_ITEM: QuickMenuItem = {

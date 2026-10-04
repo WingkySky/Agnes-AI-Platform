@@ -569,6 +569,7 @@ import {
 } from '@/lib/canvas-templates'
 // 画布生成：上游节点查找（用于配置节点 prompt 为空时检查上游文本）+ 生成归档上下文
 import { getUpstreamNodes, buildCanvasContext, resumeLoadingCanvasNodes, resolvePromptMentions, executeSourceImageGeneration, executeSourceVideoGeneration, type CanvasGenerationStore, type GenerationContext } from '@/lib/canvas-generation'
+import { createBatchContent, fillCellFromNode, readBatchContent } from '@/lib/canvas-batch-table'
 // 分镜派生：单镜头图生视频 + 整组重跑的批量积分确认
 import { confirmGroupedCost, deriveVideoForShot, deriveTailFrameFromImageNode, derivePrevFrameFromImageNode, deriveChainVideosFromImageNode, getShotLineageInfo } from '@/lib/canvas-storyboard'
 // 分组包络计算与智能建议分组（按连线连通分量）
@@ -656,6 +657,8 @@ const NODE_DEFAULT_SIZES = {
   compose: { width: 360, height: 240 },
   // 脚本节点：紧凑卡片 + 全屏分镜向导入口
   script: { width: 340, height: 300 },
+  // 批量创作表：N 行 × M 参考图列矩阵生成
+  table: { width: 780, height: 420 },
 }
 
 // ---------- 节点类型名称（国际化） ----------
@@ -666,6 +669,7 @@ function getNodeName(type: string): string {
     subtitle: '字幕',
     compose: '成片合成',
     script: '脚本',
+    table: '批量创作表',
   }
   const i18nKey = `canvas.nodeNames.${type}`
   const translated = t(i18nKey)
@@ -1172,10 +1176,16 @@ function handleConnectingUp(event: PointerEvent) {
   window.removeEventListener('pointerup', handleConnectingUp)
   if (!store.connecting) return
   const connectingState = store.connecting
+  // 批量创作表列句柄拖线（ref-col:N）：落点是图片节点时填充该列空槽
+  const colMatch = connectingState.sourceAnchorType.match(/^ref-col:(\d+)$/)
   const el = document.elementFromPoint(event.clientX, event.clientY)
   const nodeEl = el?.closest?.('[data-node-id]')
   if (nodeEl) {
     const targetId = nodeEl.getAttribute('data-node-id')!
+    if (colMatch) {
+      handleBatchRefDrop(connectingState.sourcePanelId, targetId, Number(colMatch[1]))
+      return
+    }
     const sourceId = connectingState.sourcePanelId
     const sourceAnchor = connectingState.sourceAnchorType
 
@@ -1255,6 +1265,11 @@ function handleConnectingUp(event: PointerEvent) {
     }
   } else {
     // 拖线松手在空白：落点弹快速创建菜单（临时虚线保留，选择后建节点并自动连线，取消才清线）
+    if (colMatch) {
+      // 列句柄拖线落空白：不做快速创建（填槽语义只对已有图片节点成立）
+      store.cancelConnecting()
+      return
+    }
     const sourcePanel = store.panels.find((p) => p.id === connectingState.sourcePanelId)
     openQuickMenu('connect', store.screenToWorld(event.clientX, event.clientY), {
       sourceId: connectingState.sourcePanelId,
@@ -1263,6 +1278,33 @@ function handleConnectingUp(event: PointerEvent) {
       extraSourceIds: [...(connectingState.extraSourceIds ?? [])],
     })
   }
+}
+
+/**
+ * 批量创作表列句柄落点：图片节点 → 填充表格该列首个空槽 + 建血缘连线
+ */
+function handleBatchRefDrop(tableId: string, targetId: string, colIndex: number) {
+  store.cancelConnecting()
+  const target = store.panels.find((p) => p.id === targetId)
+  const url = String(target?.content?.content || '')
+  if (target?.type !== 'image' || !url) {
+    ElMessage.warning(t('canvas.batchTable.connectNeedsImage'))
+    return
+  }
+  const table = store.panels.find((p) => p.id === tableId)
+  if (!table) return
+  const rows = readBatchContent(table.content).rows
+  const filled = fillCellFromNode(rows, colIndex, {
+    assetId: typeof target.content?.assetId === 'string' ? target.content.assetId : '',
+    url,
+  })
+  if (!filled) {
+    ElMessage.warning(t('canvas.batchTable.columnFull'))
+    return
+  }
+  store.addConnection({ source_panel_id: targetId, target_panel_id: tableId, type: 'ref' })
+  store.updatePanel(tableId, { content: { rows: filled.rows } })
+  ElMessage.success(t('canvas.batchTable.cellFilled', { n: colIndex + 1 }))
 }
 
 // ==================== 节点交互：右键菜单 ====================
@@ -3502,6 +3544,9 @@ function createNodeAt(type: string, cx: number, cy: number, extraContent?: Recor
       shots: [],
       assets: { characters: [], scenes: [] },
     }
+  } else if (type === 'table') {
+    // 批量创作表：默认 3 行 × 按默认图片模型合同收敛的列数
+    initialContent = createBatchContent(useModelsStore().getModelGenParams(useModelsStore().defaultImageModel)?.max_ref_images)
   }
   if (extraContent) initialContent = { ...initialContent, ...extraContent }
   const id = store.addPanel({

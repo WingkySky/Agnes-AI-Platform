@@ -64,7 +64,7 @@ import { ref, computed } from 'vue'
 import {
   Hand, MousePointer2, Undo2, Redo2, Type, Image, Video, Music2, Upload,
   FolderOpen, Palette, Trash2, Eraser, Keyboard, Wand2, LayoutDashboard,
-  Mic, FileText, Puzzle, Clapperboard, Bot, History,
+  Mic, FileText, Puzzle, Clapperboard, Bot, History, Table2,
 } from 'lucide-vue-next'
 import CanvasAppearancePanel from './CanvasAppearancePanel.vue'
 import { useI18n } from '@/i18n'
@@ -138,6 +138,7 @@ const buttonGroups = computed<any[][]>(() => [
     { id: 'tool-tts', label: t('canvas.toolbar.toolTts') || '配音', icon: Mic, emit: 'add-node', payload: 'tts' },
     { id: 'tool-subtitle', label: t('canvas.toolbar.toolSubtitle') || '字幕', icon: FileText, emit: 'add-node', payload: 'subtitle' },
     { id: 'tool-compose', label: t('canvas.toolbar.toolCompose') || '成片合成', icon: Puzzle, emit: 'add-node', payload: 'compose' },
+    { id: 'tool-batch-table', label: t('canvas.toolbar.toolBatchTable'), icon: Table2, emit: 'add-node', payload: 'table' },
     { id: 'tool-upload', label: t('canvas.toolbar.toolUpload'), icon: Upload, emit: 'upload-asset' },
   ],
   // 组4：智能分组 / 整理布局 / 我的素材/画布外观

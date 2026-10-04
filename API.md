@@ -844,3 +844,49 @@ manifest 格式：`{ "name": "...", "items": [{ "slug", "name", "description", "
 
 - 对话页工具组：`canvas_list_workspaces` / `canvas_get_overview` / `canvas_add_panels` / `canvas_connect`（目标工作区缺省取偏好 `canvas_active_workspace_id`）；`generate_image` / `generate_video` 新增 `place_on_canvas` + `canvas_workspace_id` 参数——媒体轮询成功后自动调 ops 建媒体节点（content 带 prompt+URL，status=success），结果以步骤行回显。
 - 画布页：每 10s（仅页面可见、云通道时）拉激活工作区 revision；有变化且本地保存队列空闲 → 自动拉取远端 data 合入（复用版本还原的 `applyWorkspaceData` 链路）+ 轻提示；队列忙碌 → 顶栏「云端有更新」指示器等待手动同步。空闲即本地无未保存内容，合入零丢失，无需快照兜底。
+
+---
+
+## 18. 模型能力合同与提示词优化
+
+### 模型能力合同（gen_params）
+
+模型生成能力（参考图上限/水印/尺寸规则等）由后端合同层统一解析，三级优先：`model_definitions.gen_params` 显式配置（逐键覆盖）> 按模型名自动画像 > 默认兜底。解析结果随模型列表（`GET /api/config` 的 `models[].gen_params`）下发，前端统一经 models store 的 `getModelGenParams(modelId)` 读取。
+
+- 现有画像：`seedream*` → `watermark_param_off=true, size_rule="seedream"`；`agnes-image-2*` → `max_ref_images=6`（上游 400 "too many input images" 实测约束）。
+- 新增画像/调整上限在 `backend/app/services/capability_service.py`，不要在生成代码里写模型特例。
+
+### `POST /api/prompts/optimize`
+
+AI 提示词优化（登录用户），返回结构化正负提示词。
+
+**请求：**
+```json
+{
+  "prompt": "少女在花园",
+  "mode": "refine",
+  "target": "image",
+  "context": { "model_id": "agnes-image-2.1-flash", "reference_asset_names": ["人物.png"] }
+}
+```
+
+- `mode`：`expand`（扩展想法）/ `refine`（精修提示词）/ `style`（强化视觉风格）/ `model-adapt`（适配当前模型方言）/ `reference`（结合参考素材）
+- `target`：`image` / `video`
+- `context` 可选：`model_id` 供 model-adapt 注入方言规则；`reference_asset_names` 供 reference 模式注入参考素材名
+
+**响应 `data`：**
+```json
+{
+  "positive": "可直接用于生成的正向提示词",
+  "negative": "需要规避的内容（可为空串）",
+  "changes": ["关键变化"],
+  "assumptions": ["对模糊需求的假设"],
+  "variants": [{ "label": "电影感", "prompt": "备选版本提示词" }]
+}
+```
+
+- `variants` 最多 2 个；LLM 走系统默认对话模型，解析失败自动重试一次，仍失败返回 502；未登录 401，空提示词 / 非法枚举 400。
+
+### 批量创作表节点（画布）
+
+画布 `table` 类型节点：N 行 × M 参考图列的矩阵批量生图。节点 content 含 `refSlots`（列数 = min(6, 模型合同 `max_ref_images`)）、`rows`（每行参考图槽位 + 行提示词 + 启用开关 + 状态）、`preset`（批量换装/创意生图/自定义预设模板）、`globalPrompt`（与行提示词追加拼接）。提交时逐行独立走图片生成任务，结果节点连线回表格节点；单行失败可单独重试，不影响其他行。前端纯函数层 `frontend/src/lib/canvas-batch-table.ts`。

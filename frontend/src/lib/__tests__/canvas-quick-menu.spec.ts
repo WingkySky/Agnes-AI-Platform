@@ -46,13 +46,13 @@ import {
 // 文案断言固定在中文（测试环境 navigator.language 可能是 en）
 beforeAll(() => setLocale('zh-CN'))
 
-const ALL_TYPES = ['image', 'video', 'audio', 'text', 'script', 'tts', 'subtitle', 'compose'].sort()
+const ALL_TYPES = ['image', 'video', 'audio', 'text', 'script', 'tts', 'subtitle', 'compose', 'table'].sort()
 
 const flatTypes = (groups: QuickMenuGroup[]) =>
   groups.flatMap((g) => g.items).filter((i) => i.kind === 'node').map((i) => i.type)
 
 describe('注册表卫生（create 模式）', () => {
-  it('收录全部 8 种节点类型（config 已下线）且 id 唯一', () => {
+  it('收录全部 9 种节点类型（config 已下线）且 id 唯一', () => {
     const groups = resolveCreateGroups()
     const items = groups.flatMap((g) => g.items)
     expect(flatTypes(groups).sort()).toEqual(ALL_TYPES)

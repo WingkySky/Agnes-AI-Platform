@@ -33,9 +33,9 @@
       @blur="handleMentionBlur"
     ></textarea>
 
-    <!-- 底部：参数 + 状态 + 发送 -->
-    <div class="composer-bottom">
-      <!-- script 参数：镜头数 + 风格 + 分镜聊天模型 -->
+    <!-- 底部：参数行（参数 chips + 优化按钮）与操作行（状态提示 + 发送）固定两行，图片/视频/脚本节点统一 -->
+    <div v-if="panelType === 'script' || isMedia" class="composer-params">
+      <!-- script 参数：镜头数 + 分镜聊天模型 -->
       <template v-if="panelType === 'script'">
         <span class="composer-param-label">{{ t('canvas.script.shotCount') }}</span>
         <input v-model.number="scriptShotMin" type="number" min="1" max="30" class="composer-num" :style="selectStyle" @input="persistScriptParams">
@@ -49,6 +49,14 @@
       <!-- image / video 节点：模型与参数写回节点 content，随画布持久化 -->
       <ComposerParamBar v-if="isMedia" :panel="panel" :mode="panelType === 'video' ? 'video' : 'image'" />
 
+      <!-- 优化提示词 -->
+      <button
+        type="button" class="composer-optimize" :style="selectStyle"
+        :title="t('promptOptimizer.openButton')"
+        @click="optimizeVisible = true"
+      >✦</button>
+    </div>
+    <div class="composer-bottom">
       <!-- 状态提示 -->
       <span class="composer-tip" :style="mutedStyle">
         {{ busy ? t('canvas.composer.busy') : t('canvas.composer.sendTip') }}
@@ -73,6 +81,15 @@
       @select="selectMention"
       @shield-blur="handlePopupMouseDown"
     />
+
+    <!-- 优化提示词弹窗（应用回填 composer 输入框） -->
+    <PromptOptimizeDialog
+      v-model:visible="optimizeVisible"
+      :initial-prompt="text"
+      :target="panelType === 'video' ? 'video' : 'image'"
+      :model-id="isMedia ? String(panel.content?.model || '') : ''"
+      @apply="onOptimizeApply"
+    />
   </div>
 </template>
 
@@ -83,6 +100,7 @@ import { ElMessage } from 'element-plus'
 import { useCanvasStore } from '@/stores/canvas'
 import { useModelsStore } from '@/stores/models'
 import ComposerParamBar from '@/components/canvas/ComposerParamBar.vue'
+import PromptOptimizeDialog from '@/components/PromptOptimizeDialog.vue'
 import { createChatSession, sendMessageStream } from '@/api/chat'
 import { getErrorMessage } from '@/lib/type-helpers'
 import { getUpstreamNodes } from '@/lib/canvas-generation'
@@ -111,6 +129,12 @@ const isMedia = computed(() => panelType.value === 'image' || panelType.value ==
 const text = ref('')
 const busy = ref(false)
 const inputRef = ref<HTMLTextAreaElement | null>(null)
+const optimizeVisible = ref(false)
+
+/** 优化结果回填 composer 输入框（负向提示词无处安放，只取正向） */
+function onOptimizeApply({ positive }: { positive: string; negative: string }) {
+  text.value = positive
+}
 
 /** 占位文案：按节点类型区分 */
 const placeholder = computed(() => {
@@ -432,12 +456,20 @@ const sendStyle = computed(() => {
   white-space: nowrap;
 }
 
-/* 底部参数行 */
-.composer-bottom {
+/* 底部两行：参数行（chips + 优化按钮）+ 操作行（提示 + 发送，固定右对齐）
+   —— 图片节点参数 chip 较宽，单行 flex-wrap 会把发送钮挤到错位，拆成固定两行保证图片/视频一致 */
+.composer-params {
   display: flex;
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.composer-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
 }
 .composer-select {
   border: 1px solid;
@@ -470,11 +502,11 @@ const sendStyle = computed(() => {
   outline: none;
 }
 .composer-tip {
-  margin-left: auto;
   font-size: 11px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
 }
 .composer-send {
   width: 32px;
@@ -487,6 +519,19 @@ const sendStyle = computed(() => {
   flex: none;
   line-height: 1;
   transition: opacity 0.15s, transform 0.15s;
+}
+
+/* 优化提示词按钮：参数条旁的小方钮（边框/文字色继承 selectStyle 内联主题） */
+.composer-optimize {
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  border: 1px solid;
+  font-size: 12px;
+  line-height: 1;
+  background: transparent;
+  cursor: pointer;
+  flex: none;
 }
 .composer-send:disabled {
   opacity: 0.45;

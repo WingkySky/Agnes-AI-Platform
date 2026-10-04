@@ -104,6 +104,17 @@
               {{ t('presets.plaza.styleLibrary') }}
             </el-button>
 
+            <!-- 优化提示词：AI 结构化改写 -->
+            <el-button
+              :icon="EditPen"
+              size="small"
+              plain
+              style="margin-top: 6px; margin-right: 8px"
+              @click="optimizeVisible = true"
+            >
+              {{ t('promptOptimizer.openButton') }}
+            </el-button>
+
             <!-- 已挂载预设（生图模块独立，风格单选/特效叠加，提交时自动拼接） -->
             <div v-if="presetStore.mountedFor('image').length" class="mounted-row">
               <el-tag
@@ -336,6 +347,15 @@
 
         <!-- 统一预设广场弹窗（风格库） -->
         <PresetPlazaDialog v-model="plazaVisible" context="image" @apply="onPresetApply" />
+
+        <!-- 优化提示词弹窗 -->
+        <PromptOptimizeDialog
+          v-model:visible="optimizeVisible"
+          :initial-prompt="prompt"
+          target="image"
+          :model-id="model"
+          @apply="onOptimizeApply"
+        />
       </el-col>
     </el-row>
   </div>
@@ -345,9 +365,10 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  MagicStick, Download, Link, PictureFilled, Edit, Loading, CircleCloseFilled, VideoPlay, Share, InfoFilled, Aim
+  MagicStick, Download, Link, PictureFilled, Edit, EditPen, Loading, CircleCloseFilled, VideoPlay, Share, InfoFilled, Aim
 } from '@element-plus/icons-vue'
 import PresetPlazaDialog from '@/components/presets/PresetPlazaDialog.vue'
+import PromptOptimizeDialog from '@/components/PromptOptimizeDialog.vue'
 import ImageUploader from '@/components/ImageUploader.vue'
 import ImageViewer from '@/components/ImageViewer.vue'
 import ImageWithWatermark from '@/components/ImageWithWatermark.vue'
@@ -398,6 +419,7 @@ function openViewerWithUrl(url: string) {
 
 // ---------- 统一预设广场（风格库） ----------
 const plazaVisible = ref(false)
+const optimizeVisible = ref(false)
 const presetStore = usePresetStore()
 
 /** 广场应用回调：风格/特效挂载（一键使用，提交时自动拼接）；脚本复制；提示词追加 */
@@ -414,6 +436,12 @@ async function onPresetApply(preset: PromptPreset) {
   }
   prompt.value = appendPromptText(prompt.value, payload.appendText)
   ElMessage.success(t('presets.applied'))
+}
+
+/** 优化结果回填：覆盖正向提示词 */
+function onOptimizeApply({ positive }: { positive: string; negative: string }) {
+  prompt.value = positive
+  ElMessage.success(t('promptOptimizer.applied'))
 }
 
 /** 挂载标签文案：类型 · 名称 */
