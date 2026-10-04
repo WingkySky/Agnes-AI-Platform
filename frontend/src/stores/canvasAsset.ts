@@ -15,6 +15,7 @@
 
 import { defineStore } from 'pinia'
 import { uploadCanvasAsset } from '@/api/canvasWorkspace'
+import { createAsset } from '@/api/assets'
 import { isCloudChannel } from '@/lib/canvas-storage'
 
 // ---------- 本地类型定义 ----------
@@ -42,6 +43,8 @@ interface RegisterAssetData {
   prompt?: string
   sourceNodeId?: string | null
   name?: string
+  /** 所属作品标记（统一资产层：入库时写入 assets.work_id） */
+  work_id?: number
 }
 
 /** localforage 实例接口（用于类型标注） */
@@ -160,7 +163,7 @@ export const useAssetStore = defineStore('asset', {
         console.warn('[asset] registerAsset 缺少 url 或 blob')
         return null
       }
-      const id = uid()
+      let id = uid()
       const now = new Date().toISOString()
       let url = data.url ?? ''
       let hasBlob = false
@@ -181,6 +184,22 @@ export const useAssetStore = defineStore('asset', {
           }
         }
         if (!url) url = URL.createObjectURL(data.blob)
+      }
+
+      // 统一资产层：云端素材入库，assetId 退役为数字 id（失败降级旧 uid 流程，懒迁移兜底）
+      if (isCloudChannel() && url.startsWith('/uploads/')) {
+        try {
+          const resp = await createAsset({
+            url,
+            media_type: data.type ?? 'image',
+            name: data.name || undefined,
+            work_id: data.work_id,
+          })
+          id = String(resp.id)
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn('[asset] 资产入库失败，降级为本地 uid', err)
+        }
       }
 
       const asset: AssetItem = {
@@ -239,6 +258,46 @@ export const useAssetStore = defineStore('asset', {
       if (!asset?.hasBlob) return null
       const store = await getAssetStore()
       return await store.getItem<Blob>(blobKey(id))
+    },
+
+    /**
+     * 懒迁移：把旧 uid 素材入库为统一资产行，返回数字 id（失败/无需迁移返回 null）。
+     * - 条目 url 为 /uploads/ 时直接建行（历史上传已落云端）
+     * - 条目仅剩 blob（当年上传失败）时先补传云端再建行
+     * - 幂等：索引中已存在同 url 的数字 id 条目直接复用
+     */
+    async migrateUidAsset(uidId: string): Promise<string | null> {
+      const asset = this.getAssetById(uidId)
+      if (!asset?.url) return null
+
+      // 已迁移过：索引里找到同 url 的数字 id 条目直接复用
+      const existing = this.assets.find((a) => /^\d+$/.test(a.id) && a.url === asset.url)
+      if (existing) return existing.id
+
+      try {
+        let url = asset.url
+        if (url.startsWith('blob:')) {
+          const blob = await this.getAssetBlob(uidId)
+          if (!blob) return null
+          const resp = await uploadCanvasAsset(blob, asset.name || `${asset.type}.png`)
+          url = resp.url
+        }
+        if (!url.startsWith('/uploads/')) return null // 远程 URL 的转收入库由后端 ingest 处理，v1 跳过
+        const resp = await createAsset({
+          url,
+          media_type: asset.type,
+          name: asset.name || undefined,
+        })
+        const numericId = String(resp.id)
+        // 数字 id 条目进索引（remap 离线可用）；旧 uid 条目保留，其他节点可能仍引用
+        this.assets.unshift({ ...asset, id: numericId, url, hasBlob: false })
+        await this._persist()
+        return numericId
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[asset] uid 懒迁移失败（下次重试）:', uidId, err)
+        return null
+      }
     },
 
     /** 从 localforage 加载资源到 state（仅执行一次；组件 onMounted 时调用） */

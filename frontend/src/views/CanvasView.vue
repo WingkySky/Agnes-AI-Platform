@@ -2334,6 +2334,7 @@ async function handleHoverSaveAsset() {
       prompt: (content.prompt || '') as string,
       name: panel.name || `${panel.type}-${panel.id.slice(0, 8)}`,
       sourceNodeId: panel.id,
+      work_id: store.activeWorkspace?.work_id ?? undefined,
     })
     ElMessage.success(t('canvas.messages.savedToAssets'))
   } catch (err) {
@@ -3435,7 +3436,7 @@ async function createMediaNodesFromFiles(files: File[], worldX: number, worldY: 
   let created = 0
   for (const [i, item] of media.entries()) {
     try {
-      const asset = await assetStore.registerAsset({ type: item.type, blob: item.file, name: item.file.name, prompt: '' })
+      const asset = await assetStore.registerAsset({ type: item.type, blob: item.file, name: item.file.name, prompt: '', work_id: store.activeWorkspace?.work_id ?? undefined })
       if (!asset) continue
       const size = NODE_DEFAULT_SIZES[item.type]
       const id = store.addPanel({
@@ -3471,6 +3472,18 @@ async function remapAssetUrls() {
     if (asset?.url && asset.url !== url) {
       store.updatePanel(panel.id, { content: { content: asset.url } })
     }
+  }
+}
+
+// 懒迁移：旧 uid 型 assetId 入库为统一资产行并替换为数字 id（幂等，失败下次重试）
+async function migrateLegacyAssetIds() {
+  const { useAssetStore } = await import('@/stores/canvasAsset')
+  const assetStore = useAssetStore()
+  for (const panel of store.panels) {
+    const assetId = panel.content?.assetId
+    if (typeof assetId !== 'string' || !assetId || /^\d+$/.test(assetId)) continue
+    const numeric = await assetStore.migrateUidAsset(assetId)
+    if (numeric) store.updatePanel(panel.id, { content: { assetId: numeric } })
   }
 }
 
@@ -3522,6 +3535,7 @@ async function handleUploadAssetFiles(files: FileList | File[]) {
         blob: file,
         name: file.name,
         prompt: '',
+        work_id: store.activeWorkspace?.work_id ?? undefined,
       })
       count++
     }
@@ -3695,7 +3709,7 @@ async function handleFileSelect(event: Event) {
     const { useAssetStore } = await import('@/stores/canvasAsset')
     const assetStore = useAssetStore()
     await assetStore.hydrate()
-    const asset = await assetStore.registerAsset({ type, blob: file, name: file.name, prompt: '' })
+    const asset = await assetStore.registerAsset({ type, blob: file, name: file.name, prompt: '', work_id: store.activeWorkspace?.work_id ?? undefined })
     if (asset) {
       const content = { content: asset.url, status: 'success', bytes: file.size, assetId: asset.id }
       if (targetId) {
@@ -3885,6 +3899,8 @@ onMounted(async () => {
   chatStore.setCanvasToolsActive(true)
   // 刷新后节点里的 blob object URL 已失效，按 assetId 从素材库重建
   await remapAssetUrls()
+  // 统一资产层：旧 uid 型 assetId 懒迁移为数字 id（幂等）
+  await migrateLegacyAssetIds()
   // 如果没有工作区，创建默认画布
   if (!store.activeWorkspaceId && store.workspaces.length === 0) {
     store.createWorkspace(`${t('canvas.canvas')} 1`)

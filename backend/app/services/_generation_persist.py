@@ -229,14 +229,13 @@ async def persist_generation(
                         log_prefix, task.task_id, migrate_err, exc_info=True,
                     )
 
-            # ===== 创作归档：画布/项目生成自动归档进资产库（旁路，失败仅记日志）=====
-            # archive_to_asset 内部自带 container 守卫：无 container 上下文直接跳过
+            # ===== 生成结果统一入库（影子转正）：成功生成全部建真资产行（旁路，失败仅记日志）=====
             try:
-                await asset_archive.archive_to_asset(session, record, task.context or {})
-            except Exception as archive_err:
+                await asset_archive.ingest_generation_asset(session, record, task.context or {})
+            except Exception as ingest_err:
                 logger.error(
-                    "%s 创作归档失败（不影响主流程）: task_id=%s error=%s",
-                    log_prefix, task.task_id, archive_err, exc_info=True,
+                    "%s 生成结果入库失败（不影响主流程）: task_id=%s error=%s",
+                    log_prefix, task.task_id, ingest_err, exc_info=True,
                 )
         logger.info(
             "%s 记录已异步写入数据库: task_id=%s moderation=%s",

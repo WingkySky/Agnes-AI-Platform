@@ -76,8 +76,20 @@ class Asset(Base):
     container_id = Column(String(100), nullable=True)       # 项目 ID / 剧本面板 ID / 'canvas'
     container_name = Column(String(200), nullable=True)     # 容器名快照
     source_generation_id = Column(Integer, ForeignKey("generations.id"), nullable=True, index=True)
-    kind = Column(String(20), nullable=True)                # image / video
+    kind = Column(String(20), nullable=True)                # 物理媒体类型：image / video / audio（统一资产层的 media_type）
     asset_url = Column(Text, nullable=True)                 # 单媒体 URL
+
+    # ===== 统一资产层扩展（子批次 2a）=====
+    # 存量库升级（dev 库已执行）：
+    #   ALTER TABLE assets ADD COLUMN storage_key VARCHAR(500);
+    #   ALTER TABLE assets ADD COLUMN thumb_url TEXT;
+    #   ALTER TABLE assets ADD COLUMN source VARCHAR(20);
+    #   ALTER TABLE assets ADD COLUMN work_id INTEGER;
+    #   CREATE INDEX IF NOT EXISTS ix_assets_work_id ON assets(work_id);
+    storage_key = Column(String(500), nullable=True, index=True)  # 统一存储键（本地=uploads 相对路径 / S3=对象 key）
+    thumb_url = Column(Text, nullable=True)                 # 缩略图 URL
+    source = Column(String(20), nullable=True)              # 来源：generation / upload / canvas / compose / archive
+    work_id = Column(Integer, nullable=True, index=True)    # 所属作品标记（用户级资产，可空可改）
 
     # 关联
     style = relationship("StylePreset", back_populates="assets")

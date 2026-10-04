@@ -64,6 +64,7 @@ from app.routes import admin_api_calls as admin_api_calls_route
 from app.routes import uploads as uploads_route
 from app.routes import admin_review as admin_review_route
 from app.routes import asset as asset_route
+from app.routes import assets as assets_route
 from app.routes import scenes as scenes_route
 from app.routes import projects as projects_route
 from app.routes import canvas as canvas_route
@@ -324,6 +325,7 @@ app.include_router(admin_api_calls_route.router, prefix="/api", tags=["管理员
 app.include_router(uploads_route.router, prefix="/api", tags=["上传"])
 app.include_router(admin_review_route.router, prefix="/api", tags=["管理员-统一审核"])
 app.include_router(asset_route.router, prefix="/api", tags=["管理员-资源转存"])
+app.include_router(assets_route.router, prefix="/api", tags=["资产库"])
 app.include_router(scenes_route.router, prefix="/api", tags=["3D 场景（导演台）"])
 app.include_router(mcp_route.router, prefix="/api", tags=["MCP 服务器"])
 app.include_router(setup_route.router, prefix="/api", tags=["首启初始化"])

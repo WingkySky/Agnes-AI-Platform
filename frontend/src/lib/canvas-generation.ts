@@ -75,6 +75,7 @@ type GenerationConnection = CanvasConnection
 export interface CanvasGenerationStore {
   panels: GenerationPanel[]
   connections: GenerationConnection[]
+  activeWorkspace?: { work_id?: number | null } | null
   addPanel(panel: Record<string, any>): string | undefined
   addConnection(conn: Record<string, any>): void
   updatePanel(id: string, updates: Record<string, any>): void
@@ -135,9 +136,11 @@ function resourceLabel(type: string, index: number): string {
  * - 分镜派生节点（content.lineage 含 scriptPanelId）归档到其「剧本」容器，命名 #镜头号
  * - 其余画布节点统一归档到「画布」容器
  * - source=canvas：历史页默认过滤
+ * - work_id：画布所属作品（生成结果自动入库的作品标记）
  */
 export function buildCanvasContext(node: GenerationPanel, store: CanvasGenerationStore): GenerationContextPayload {
   const lineage = node.content?.lineage as { scriptPanelId?: unknown; shotNo?: unknown } | undefined
+  const workId = store.activeWorkspace?.work_id ?? undefined
   if (lineage && typeof lineage.scriptPanelId === 'string' && lineage.scriptPanelId) {
     const scriptPanel = store.panels.find((p) => p.id === lineage.scriptPanelId)
     const shotNo = typeof lineage.shotNo === 'number' ? lineage.shotNo : undefined
@@ -147,6 +150,7 @@ export function buildCanvasContext(node: GenerationPanel, store: CanvasGeneratio
       container_id: lineage.scriptPanelId,
       container_name: (scriptPanel?.name as string) || undefined,
       asset_name: shotNo ? `#${shotNo}` : ((node.name as string) || undefined),
+      work_id: workId,
     }
   }
   return {
@@ -154,6 +158,7 @@ export function buildCanvasContext(node: GenerationPanel, store: CanvasGeneratio
     container_type: 'canvas',
     container_id: 'canvas',
     asset_name: (node.name as string) || undefined,
+    work_id: workId,
   }
 }
 

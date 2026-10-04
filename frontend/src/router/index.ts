@@ -98,7 +98,7 @@ const routes: RouteRecordRaw[] = [
     path: '/assets',
     name: 'assets',
     component: () => import('@/views/AssetsView.vue'),
-    meta: { titleKey: 'router.assets', requiresAuth: true, permission: 'pipeline:save_asset' }
+    meta: { titleKey: 'router.assets', requiresAuth: true }
   },
   // ---------- 提示词预设中心（统一入口，覆盖 camera/prompt/style/script/pipeline 全类型） ----------
   {

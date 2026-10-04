@@ -5,7 +5,7 @@
 from typing import Optional
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.asset import Asset
@@ -102,3 +102,133 @@ async def increment_use_count(db: AsyncSession, asset_id: int) -> None:
     if asset:
         asset.use_count += 1
         await db.commit()
+
+
+# =====================================================
+# 统一资产层（子批次 2a）：画布素材入库 + 资产列表筛选
+# =====================================================
+
+VALID_MEDIA_TYPES = {"image", "video", "audio"}
+
+
+def asset_to_dict(asset: Asset) -> dict:
+    """资产行 → 列表/详情响应 dict（统一资产层字段）"""
+    return {
+        "id": asset.id,
+        "type": asset.type,
+        "name": asset.name,
+        "media_type": asset.kind,
+        "asset_url": asset.asset_url,
+        "thumb_url": asset.thumb_url,
+        "storage_key": asset.storage_key,
+        "source": asset.source,
+        "work_id": asset.work_id,
+        "container_type": asset.container_type,
+        "container_id": asset.container_id,
+        "container_name": asset.container_name,
+        "created_at": asset.created_at.isoformat() if asset.created_at else None,
+        "updated_at": asset.updated_at.isoformat() if asset.updated_at else None,
+    }
+
+
+async def create_asset_from_upload(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    url: str,
+    media_type: str,
+    name: Optional[str] = None,
+    work_id: Optional[int] = None,
+) -> Asset:
+    """
+    画布/上传素材建统一资产行（画布素材 uid 退役的入库通道）。
+
+    - url 必须是 /uploads/ 本地地址（前端先经 /api/uploads/canvas 上传）
+      或公网 http(s) 地址（远程地址入库即下载转存，根治死链）
+    - work_id 需归属当前用户（作品标记），非本人 403
+    """
+    if media_type not in VALID_MEDIA_TYPES:
+        raise HTTPException(status_code=400, detail=f"不支持的媒体类型：{media_type}")
+
+    if work_id is not None:
+        from app.models.work import Work
+        owned = (
+            await db.scalars(
+                select(Work.id).where(Work.id == work_id, Work.user_id == user_id)
+            )
+        ).first()
+        if not owned:
+            raise HTTPException(status_code=403, detail="无权挂靠该作品")
+
+    storage_key: Optional[str] = None
+    final_url = url
+    if url.startswith("/uploads/"):
+        storage_key = url.removeprefix("/uploads/")
+    elif url.startswith(("http://", "https://")):
+        from app.services.media_storage import ingest_url
+        try:
+            ingested = await ingest_url(url, media_type=media_type)
+            final_url, storage_key = ingested["url"], ingested["storage_key"]
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"素材地址收口失败：{e}")
+    else:
+        raise HTTPException(status_code=400, detail="素材地址必须是 /uploads/ 本地路径或公网 http(s) URL")
+
+    asset_type = "clip" if media_type == "video" else "material"
+    asset = Asset(
+        type=asset_type,
+        name=(name or f"素材 {media_type}")[:200],
+        description=None,
+        visual_description=(name or "")[:500],
+        reference_images=[],
+        user_id=user_id,
+        is_public=False,
+        tags=[],
+        version=1,
+        source="upload",
+        storage_key=storage_key,
+        work_id=work_id,
+        kind=media_type,
+        asset_url=final_url,
+    )
+    db.add(asset)
+    await db.commit()
+    await db.refresh(asset)
+    return asset
+
+
+async def list_assets(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    media_type: Optional[str] = None,
+    source: Optional[str] = None,
+    work_id: Optional[int] = None,
+    keyword: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 50,
+) -> dict:
+    """本人资产列表（统一入口：分页 + 类型/来源/作品/关键词筛选，updated_at 倒序）"""
+    stmt = select(Asset).where(Asset.user_id == user_id)
+    if media_type:
+        stmt = stmt.where(Asset.kind == media_type)
+    if source:
+        stmt = stmt.where(Asset.source == source)
+    if work_id is not None:
+        stmt = stmt.where(Asset.work_id == work_id)
+    if keyword:
+        stmt = stmt.where(Asset.name.ilike(f"%{keyword}%"))
+    total = (
+        await db.scalars(select(func.count()).select_from(stmt.subquery()))
+    ).first() or 0
+    rows = (
+        await db.scalars(
+            stmt.order_by(Asset.updated_at.desc()).offset((page - 1) * page_size).limit(page_size)
+        )
+    ).all()
+    return {
+        "total": int(total),
+        "page": page,
+        "page_size": page_size,
+        "items": [asset_to_dict(a) for a in rows],
+    }

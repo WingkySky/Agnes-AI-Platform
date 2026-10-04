@@ -1,19 +1,22 @@
 # =====================================================
-# 创作内容归档服务
+# 创作内容资产入库服务（子批次 2a 影子转正）
 # -------------------------------------------------
-# 把画布 / 项目里的生成结果自动归档进资产库（assets 表），
-# 让历史页只保留独立生成，资产库成为创作产物的统一载体。
+# 把生成结果自动入库进资产库（assets 表真资产行）：
+#   - 画布 / 项目 / 独立生成的成功结果全部入库（不再只归档容器内生成）
+#   - 容器信息（画布/剧本/项目）降级为来源筛选维度，保留在 container_* 字段
+#   - work_id 由前端 context 携带（画布所属作品），素材跨作品复用走用户级资产库
 #
 # 调用时机：
-#   1. 图片/视频 poller 落库成功后（由 task.context 决定是否需要归档）
-#   2. 项目合成成片写入 final_video_url 处（archive_final_video）
+#   1. 图片/视频 poller 落库成功后（ingest_generation_asset）
+#   2. 项目合成成片写入 final_video_url 处（archive_final_video，项目域遗留）
 #
 # 容错约定：
-#   所有归档入口内部 try/except，失败仅记日志，绝不阻塞生成主流程。
-#   归档漏掉的记录可在历史页通过「存为资产」手动补存。
+#   所有入库入口内部 try/except 或由调用方兜住，失败仅记日志，绝不阻塞生成主流程。
+#   漏掉的记录可在历史页通过「存为资产」手动补存（幂等）。
 # =====================================================
 
 import logging
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 from sqlalchemy import select
@@ -62,37 +65,32 @@ def _fallback_name(generation: Generation) -> str:
     return f"素材 {generation.id}"
 
 
-async def archive_to_asset(
+async def ingest_generation_asset(
     db: AsyncSession,
     generation: Generation,
     context: Optional[Dict[str, Any]] = None,
 ) -> Optional[Asset]:
     """
-    把一条生成记录归档为资产库中的一条影子记录。
+    生成结果统一入库（影子转正）：所有成功生成都建真资产行（含独立生成）。
 
-    归档条件（任一不满足则跳过，返回 None）：
-      - context 带 container_type 与 container_id（独立生成不归档）
-      - 生成成功且 result_url 非空（失败/取消不归档）
+    - 去重：按 source_generation_id 查重（poller 重试 / 手动补存安全），已存在返回 None
+    - 存储：/uploads/ 直推导 storage_key；已 S3 迁移按 key 规则推导；
+      上游未迁移 URL 用 media_storage.ingest_url 下载转存并回写 generation.result_url（根治死链）
+    - work_id：画布生成由 context 携带（作品归属标记），其余为空
 
-    去重：按 source_generation_id 查重，已归档直接跳过（poller 重试安全）。
-
-    注意：本函数会 commit，调用方无需再提交；异常由调用方 try/except 兜住。
+    本函数会 commit，调用方无需再提交；异常由调用方 try/except 兜住。
     """
     ctx = context or {}
-    container_type = ctx.get("container_type")
-    container_id = ctx.get("container_id")
-    if not container_type or not container_id:
-        return None
     if generation.status != "success" or not generation.result_url:
         return None
 
-    existing = await db.execute(
-        select(Asset.id).where(Asset.source_generation_id == generation.id).limit(1)
-    )
-    if existing.first():
-        logger.debug(
-            "[创作归档] 已归档，跳过: generation_id=%s", generation.id,
+    existing = (
+        await db.scalars(
+            select(Asset.id).where(Asset.source_generation_id == generation.id).limit(1)
         )
+    ).first()
+    if existing:
+        logger.debug("[资产入库] 已入库，跳过: generation_id=%s", generation.id)
         return None
 
     kind = "video" if generation.type == "video" else "image"
@@ -100,11 +98,35 @@ async def archive_to_asset(
     if asset_type not in ARCHIVE_ASSET_TYPES:
         asset_type = _DEFAULT_TYPE_BY_GENERATION.get(generation.type, "material")
 
+    url = generation.result_url
+    storage_key: Optional[str] = None
+    if url.startswith("/uploads/"):
+        storage_key = url.removeprefix("/uploads/")
+    elif getattr(generation, "migrate_status", None) == "migrated":
+        # S3 转存 key 规则：generated/{type}/{yyyy-mm}/{record_id}.{ext}（asset_storage._build_object_key）
+        ext = (url.rsplit(".", 1)[-1].split("?")[0] or "bin").lower()[:5]
+        created = generation.created_at or datetime.utcnow()
+        storage_key = f"generated/{kind}/{created.strftime('%Y-%m')}/{generation.id}.{ext}"
+    elif url.startswith(("http://", "https://")):
+        # 上游临时 URL：下载转存（失败保留原 URL，仅告警）
+        try:
+            from app.services.media_storage import ingest_url
+            ingested = await ingest_url(url, folder="assets/generated", media_type=kind)
+            url = ingested["url"]
+            storage_key = ingested["storage_key"]
+            generation.result_url = url
+            await db.commit()
+        except Exception as e:
+            logger.warning(
+                "[资产入库] 上游 URL 转存失败（保留原 URL）: generation_id=%s error=%s",
+                generation.id, e,
+            )
+
     asset = Asset(
         type=asset_type,
         name=(ctx.get("asset_name") or _fallback_name(generation))[:200],
         description=None,
-        # visual_description 非空约束：归档记录直接用生成提示词兜底
+        # visual_description 非空约束：入库记录直接用生成提示词兜底
         visual_description=generation.prompt or "",
         reference_images=[],
         user_id=generation.user_id,
@@ -112,21 +134,24 @@ async def archive_to_asset(
         moderation_status="approved",
         tags=[],
         version=1,
-        # ===== 创作归档字段 =====
-        container_type=container_type,
-        container_id=str(container_id),
-        container_name=(ctx.get("container_name") or None),
+        source="generation",
+        storage_key=storage_key,
+        work_id=ctx.get("work_id") if isinstance(ctx.get("work_id"), int) else None,
+        # ===== 创作归属字段（来源/容器降级为筛选维度，保留用于历史分组） =====
+        container_type=ctx.get("container_type"),
+        container_id=str(ctx["container_id"]) if ctx.get("container_id") else None,
+        container_name=ctx.get("container_name") or None,
         source_generation_id=generation.id,
         kind=kind,
-        asset_url=generation.result_url,
+        asset_url=url,
     )
     db.add(asset)
     await db.commit()
     await db.refresh(asset)
 
     logger.info(
-        "[创作归档] 已归档: generation_id=%s asset_id=%s container=%s:%s type=%s",
-        generation.id, asset.id, container_type, container_id, asset_type,
+        "[资产入库] generation_id=%s asset_id=%s work_id=%s type=%s kind=%s",
+        generation.id, asset.id, asset.work_id, asset_type, kind,
     )
     return asset
 

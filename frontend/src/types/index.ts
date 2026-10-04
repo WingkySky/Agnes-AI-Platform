@@ -212,6 +212,8 @@ export interface GenerationContextPayload {
   container_name?: string | null
   asset_type?: string | null
   asset_name?: string | null
+  /** 画布所属作品（生成结果自动入库的作品标记） */
+  work_id?: number | null
 }
 
 /** 图片异步任务创建响应（内联 dict） */
