@@ -1,208 +1,145 @@
 <!-- =====================================================
-     资产库页面 AssetsView（M3 重构）
-     - 一级两区：创作单元（画布/项目自动归档，按容器分组）+ 我的资产（传统手动资产）
-     - 创作单元点击进入详情：按容器内实际存在的类型分 Tab 展示资产卡
-       （预览 / 分享到广场开关 / 删除）
-     - 深链：/assets?container=type:id 直达单元详情
+     资产库页面 AssetsView（子批次 2a 统一入口：单池）
+     - 一个资产池：生成结果（自动入库）/ 上传素材 / 合成产物 / 归档记录 全在此
+     - 筛选：媒体类型 / 来源 / 所属作品 / 关键词；分页加载
+     - 卡片操作：预览 / 用于生成 / 分享到广场 / 编辑 / 删除
+     - 「我的资产 / 创作单元」两池已合并：container 降级为来源维度
      ===================================================== -->
 
 <template>
   <div class="assets-view">
-    <h2 class="page-title">{{ t('assets.title') }}</h2>
+    <div class="page-head">
+      <h2 class="page-title">{{ t('assets.title') }}</h2>
+      <span class="page-total">{{ t('assets.total').replace('{n}', String(total)) }}</span>
+      <el-button
+        v-permission="'pipeline:save_asset'"
+        type="primary"
+        class="head-create"
+        @click="openCreate"
+      >
+        <el-icon><Plus /></el-icon>
+        {{ t('assets.createAsset') }}
+      </el-button>
+    </div>
 
-    <!-- ============ 单元详情视图 ============ -->
-    <template v-if="selectedContainer">
-      <div class="detail-head">
-        <el-button text @click="closeContainer">
-          <el-icon><ArrowLeft /></el-icon>
-          {{ t('assets.back') }}
-        </el-button>
-        <div class="detail-title">
-          <el-tag size="small" type="info">{{ selectedContainer.type_label || selectedContainer.container_type }}</el-tag>
-          <span class="detail-name">{{ selectedContainer.container_name || t('assets.unnamedUnit') }}</span>
-        </div>
-      </div>
+    <!-- 筛选条 -->
+    <div class="filter-bar">
+      <el-radio-group v-model="filters.media_type" class="type-tabs" @change="reload">
+        <el-radio-button value="">{{ t('assets.mediaType.all') }}</el-radio-button>
+        <el-radio-button value="image">{{ t('assets.mediaType.image') }}</el-radio-button>
+        <el-radio-button value="video">{{ t('assets.mediaType.video') }}</el-radio-button>
+        <el-radio-button value="audio">{{ t('assets.mediaType.audio') }}</el-radio-button>
+      </el-radio-group>
+      <el-select v-model="filters.source" clearable :placeholder="t('assets.filter.source')" class="f-item" @change="reload">
+        <el-option v-for="s in SOURCE_OPTIONS" :key="s.value" :label="t(s.labelKey)" :value="s.value" />
+      </el-select>
+      <el-select v-model="filters.work_id" clearable :placeholder="t('assets.filter.work')" class="f-item" @change="reload">
+        <el-option :label="t('assets.filter.allWork')" :value="-1" />
+        <el-option v-for="w in works" :key="w.id" :label="w.title" :value="w.id" />
+      </el-select>
+      <el-input
+        v-model="filters.keyword"
+        :placeholder="t('assets.searchPlaceholder')"
+        class="search-input"
+        clearable
+        @keyup.enter="reload"
+        @clear="reload"
+      >
+        <template #prefix>
+          <el-icon><Search /></el-icon>
+        </template>
+      </el-input>
+    </div>
 
-      <el-tabs v-if="assetGroups.length" v-model="activeTypeTab" class="detail-tabs">
-        <el-tab-pane v-for="grp in assetGroups" :key="grp.type" :label="grp.label" :name="grp.type">
-          <div class="unit-asset-grid">
-            <div v-for="a in grp.items" :key="a.id" class="unit-asset-card">
-              <div class="unit-asset-cover" @click="openPreview(a)">
-                <video
-                  v-if="a.kind === 'video' && coverUrl(a)"
-                  :src="coverUrl(a) || ''"
-                  class="cover-media"
-                  muted
-                  playsinline
-                  preload="metadata"
-                />
-                <ImageWithWatermark
-                  v-else-if="coverUrl(a)"
-                  :src="coverUrl(a) || ''"
-                  :alt="a.name"
-                />
-                <div v-else class="cover-placeholder">
-                  <el-icon><Picture /></el-icon>
-                </div>
-              </div>
-              <div class="unit-asset-meta">
-                <span class="unit-asset-name" :title="a.name">{{ a.name }}</span>
-                <el-tag size="small" type="info">{{ typeLabel(a.type) }}</el-tag>
-              </div>
-              <div class="unit-asset-actions">
-                <el-button size="small" text @click="openPreview(a)">
-                  <el-icon><View /></el-icon>{{ t('assets.preview') }}
-                </el-button>
-                <el-button size="small" text type="primary" @click="useForGeneration(a)">
-                  <el-icon><MagicStick /></el-icon>{{ t('assets.useInGeneration') }}
-                </el-button>
-                <el-tooltip
-                  v-if="a.moderation_status === 'rejected'"
-                  :content="t('assets.blockedTip')"
-                  placement="top"
-                >
-                  <span class="share-switch blocked">
-                    <el-tag size="small" type="danger">{{ t('assets.blocked') }}</el-tag>
-                  </span>
-                </el-tooltip>
-                <span v-else class="share-switch">
-                  <el-switch
-                    :model-value="a.is_public"
-                    :loading="sharingIds.has(a.id)"
-                    :disabled="sharingIds.has(a.id)"
-                    inline-prompt
-                    :active-text="t('assets.shareToPlaza')"
-                    :inactive-text="t('assets.unshare')"
-                    @change="(v: boolean) => toggleShare(a, v)"
-                  />
-                  <el-tag v-if="a.is_public && a.moderation_status === 'pending'" size="small" type="warning">
-                    {{ t('assets.moderating') }}
-                  </el-tag>
-                </span>
-                <el-button size="small" text type="danger" @click="removeAsset(a)">
-                  <el-icon><Delete /></el-icon>{{ t('common.delete') }}
-                </el-button>
-              </div>
+    <!-- 统一资产网格 -->
+    <div v-loading="loading" class="assets-section">
+      <el-empty v-if="!loading && items.length === 0" :description="t('assets.standaloneEmpty')" />
+      <div v-else class="asset-grid">
+        <div v-for="a in items" :key="a.id" class="asset-card">
+          <div class="card-cover" @click="openPreview(a)">
+            <video
+              v-if="a.media_type === 'video' && coverUrl(a)"
+              :src="coverUrl(a) || ''"
+              class="cover-media"
+              muted
+              playsinline
+              preload="metadata"
+            />
+            <ImageWithWatermark v-else-if="coverUrl(a)" :src="coverUrl(a) || ''" :alt="a.name" />
+            <div v-else class="cover-placeholder">
+              <el-icon><Picture /></el-icon>
             </div>
           </div>
-        </el-tab-pane>
-      </el-tabs>
-
-      <el-empty v-else :description="t('assets.unitEmpty')" />
-    </template>
-
-    <!-- ============ 总览视图 ============ -->
-    <template v-else>
-      <!-- 创作单元区 -->
-      <section class="zone">
-        <div class="zone-head">
-          <h3 class="zone-title">{{ t('assets.zones.creationUnits') }}</h3>
-          <span class="zone-desc">{{ t('assets.zones.creationUnitsDesc') }}</span>
-        </div>
-        <div v-if="containersLoading" v-loading="true" class="zone-body" />
-        <div v-else-if="containers.length" class="unit-card-grid">
-          <div
-            v-for="c in containers"
-            :key="containerKey(c)"
-            class="unit-card"
-            @click="openContainer(c)"
-          >
-            <div class="unit-card-cover">
-                <video
-                  v-if="c.cover_kind === 'video' && c.cover_url"
-                  :src="c.cover_url || ''"
-                  class="cover-media"
-                  muted
-                  playsinline
-                  preload="metadata"
-                />
-                <ImageWithWatermark v-else-if="c.cover_url" :src="c.cover_url || ''" :alt="c.container_name || ''" />
-              <div v-else class="cover-placeholder">
-                <el-icon><FolderOpened /></el-icon>
-              </div>
-            </div>
-            <div class="unit-card-meta">
-              <el-tag size="small" type="info">{{ c.type_label }}</el-tag>
-              <span class="unit-card-name" :title="c.container_name || ''">{{ c.container_name || t('assets.unnamedUnit') }}</span>
-              <span class="unit-card-count">{{ c.asset_count }} {{ t('assets.assetsCountUnit') }}</span>
+          <div class="card-meta">
+            <span class="card-name" :title="a.name">{{ a.name }}</span>
+            <div class="card-tags">
+              <el-tag size="small" type="info">{{ typeLabel(a.type) }}</el-tag>
+              <el-tag size="small" type="warning">{{ sourceLabel(a.source) }}</el-tag>
+              <el-tag v-if="workTitleOf(a.work_id)" size="small">{{ workTitleOf(a.work_id) }}</el-tag>
             </div>
           </div>
-        </div>
-        <el-empty v-else :description="t('assets.containerEmpty')" />
-      </section>
-
-      <!-- 我的资产区 -->
-      <section class="zone">
-        <div class="zone-head">
-          <h3 class="zone-title">{{ t('assets.zones.standalone') }}</h3>
-          <span class="zone-desc">{{ t('assets.zones.standaloneDesc') }}</span>
-        </div>
-        <div class="filter-bar">
-          <el-radio-group v-model="activeType" class="type-tabs">
-            <el-radio-button value="">{{ t('assets.type.all') }}</el-radio-button>
-            <el-radio-button value="character">{{ t('assets.type.character') }}</el-radio-button>
-            <el-radio-button value="prop">{{ t('assets.type.prop') }}</el-radio-button>
-            <el-radio-button value="scene">{{ t('assets.type.scene') }}</el-radio-button>
-            <el-radio-button value="brand">{{ t('assets.type.brand') }}</el-radio-button>
-          </el-radio-group>
-          <div class="filter-right">
-            <el-input
-              v-model="searchKeyword"
-              :placeholder="t('assets.searchPlaceholder')"
-              class="search-input"
-              clearable
+          <div class="card-actions">
+            <el-button size="small" text @click="openPreview(a)">
+              <el-icon><View /></el-icon>{{ t('assets.preview') }}
+            </el-button>
+            <el-button size="small" text type="primary" @click="useForGeneration(a)">
+              <el-icon><MagicStick /></el-icon>{{ t('assets.useInGeneration') }}
+            </el-button>
+            <el-button size="small" text @click="openEdit(a)">
+              <el-icon><EditPen /></el-icon>{{ t('common.edit') }}
+            </el-button>
+            <el-tooltip
+              v-if="a.moderation_status === 'rejected'"
+              :content="t('assets.blockedTip')"
+              placement="top"
             >
-              <template #prefix>
-                <el-icon><Search /></el-icon>
-              </template>
-            </el-input>
-            <el-button
-              v-permission="'pipeline:save_asset'"
-              type="primary"
-              @click="openCreate"
-            >
-              <el-icon><Plus /></el-icon>
-              {{ t('assets.createAsset') }}
+              <span class="share-switch blocked">
+                <el-tag size="small" type="danger">{{ t('assets.blocked') }}</el-tag>
+              </span>
+            </el-tooltip>
+            <span v-else class="share-switch">
+              <el-switch
+                :model-value="a.is_public"
+                :loading="sharingIds.has(a.id)"
+                :disabled="sharingIds.has(a.id)"
+                inline-prompt
+                :active-text="t('assets.shareToPlaza')"
+                :inactive-text="t('assets.unshare')"
+                @change="(v: boolean) => toggleShare(a, v)"
+              />
+              <el-tag v-if="a.is_public && a.moderation_status === 'pending'" size="small" type="warning">
+                {{ t('assets.moderating') }}
+              </el-tag>
+            </span>
+            <el-button size="small" text type="danger" @click="removeAsset(a)">
+              <el-icon><Delete /></el-icon>{{ t('common.delete') }}
             </el-button>
           </div>
         </div>
-
-        <div v-loading="standaloneLoading" class="assets-section">
-          <div v-if="!standaloneLoading && filteredStandalone.length === 0" class="empty-state">
-            <el-icon :size="48"><FolderOpened /></el-icon>
-            <p class="empty-text">{{ t('assets.standaloneEmpty') }}</p>
-          </div>
-          <div v-else class="asset-grid">
-            <AssetCard
-              v-for="asset in filteredStandalone"
-              :key="asset.id"
-              :asset="asset"
-              @click="openDetail(asset)"
-              @use="useAsset"
-            />
-          </div>
-        </div>
-      </section>
-    </template>
+      </div>
+      <div v-if="items.length < total" class="load-more">
+        <el-button :loading="loading" @click="loadMore">{{ t('assets.loadMore') }}</el-button>
+      </div>
+    </div>
 
     <!-- 预览弹窗 -->
     <el-dialog
       v-model="previewVisible"
-      :title="previewAsset?.name"
+      :title="previewItem?.name"
       width="min(90vw, 880px)"
       align-center
     >
       <div class="preview-body">
         <video
-          v-if="previewAsset && previewAsset.kind === 'video' && coverUrl(previewAsset)"
-          :src="coverUrl(previewAsset) || ''"
+          v-if="previewItem && previewItem.media_type === 'video' && coverUrl(previewItem)"
+          :src="coverUrl(previewItem) || ''"
           class="preview-video"
           controls
           playsinline
         />
         <el-image
-          v-else-if="previewAsset && coverUrl(previewAsset)"
-          :src="coverUrl(previewAsset) || ''"
+          v-else-if="previewItem && coverUrl(previewItem)"
+          :src="coverUrl(previewItem) || ''"
           fit="contain"
           class="preview-image"
         />
@@ -214,59 +151,59 @@
     <AssetDetailModal
       v-model="modalVisible"
       :asset-id="currentAssetId"
-      @saved="onAssetSaved"
+      @saved="reload"
     />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref, reactive, onMounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useI18n } from '@/i18n'
 import { ElMessage, ElImage } from 'element-plus'
 import { useConfirm } from '@/composables/useConfirm'
 import {
-  Search, FolderOpened, Plus, Picture, ArrowLeft, View, Delete, MagicStick,
+  Search, Plus, Picture, View, Delete, MagicStick, EditPen,
 } from '@element-plus/icons-vue'
 import { useAssetStore } from '@/stores/asset'
-import AssetCard from '@/components/pipeline/AssetCard.vue'
 import AssetDetailModal from '@/components/pipeline/AssetDetailModal.vue'
 import ImageWithWatermark from '@/components/ImageWithWatermark.vue'
-import type { Asset, AssetContainer, AssetContainerDetail } from '@/types'
-import {
-  getAssetContainers,
-  getContainerAssets,
-  updateAssetShare,
-  deleteAsset,
-} from '@/api/pipeline'
+import { listAssets, type UnifiedAsset } from '@/api/assets'
+import { listWorks, type WorkItem } from '@/api/works'
+import { updateAssetShare, deleteAsset } from '@/api/pipeline'
 
 const { t } = useI18n()
 const { confirm } = useConfirm()
 const assetStore = useAssetStore()
-const route = useRoute()
 const router = useRouter()
 
+const SOURCE_OPTIONS = [
+  { value: 'generation', labelKey: 'assets.source.generation' },
+  { value: 'upload', labelKey: 'assets.source.upload' },
+  { value: 'compose', labelKey: 'assets.source.compose' },
+  { value: 'archive', labelKey: 'assets.source.archive' },
+]
+
 // ---------- 状态 ----------
-const containersLoading = ref(false)
-const containers = ref<AssetContainer[]>([])
-const standaloneLoading = ref(false)
-const standaloneAssets = ref<Asset[]>([])
-const searchKeyword = ref('')
-const activeType = ref('')
+const loading = ref(false)
+const items = ref<UnifiedAsset[]>([])
+const total = ref(0)
+const page = ref(1)
+const PAGE_SIZE = 60
+const works = ref<WorkItem[]>([])
+const filters = reactive<{ media_type: string; source: string | null; work_id: number | null; keyword: string }>({
+  media_type: '',
+  source: null,
+  work_id: null,
+  keyword: '',
+})
 const modalVisible = ref(false)
 const currentAssetId = ref<number | null>(null)
-
-const selectedKey = computed(() => (route.query.container as string) || '')
-const selectedContainer = ref<AssetContainer | null>(null)
-const containerAssets = ref<Asset[]>([])
-const activeTypeTab = ref('')
 const sharingIds = ref<Set<number>>(new Set())
-
 const previewVisible = ref(false)
-const previewAsset = ref<Asset | null>(null)
+const previewItem = ref<UnifiedAsset | null>(null)
 
-// ---------- 计算属性 ----------
-const TYPE_TAB_LABELS: Record<string, string> = {
+const TYPE_LABELS: Record<string, string> = {
   character: '角色',
   scene: '场景',
   material: '分镜图',
@@ -277,155 +214,83 @@ const TYPE_TAB_LABELS: Record<string, string> = {
 }
 
 function typeLabel(type: string): string {
-  return TYPE_TAB_LABELS[type] || type
+  return TYPE_LABELS[type] || type
 }
 
-function coverUrl(a: Asset): string | null {
-  return a.asset_url || (a.reference_images && a.reference_images[0]) || null
+function sourceLabel(value: string | null): string {
+  const opt = SOURCE_OPTIONS.find((s) => s.value === value)
+  return opt ? t(opt.labelKey) : (value || '-')
 }
 
-function containerKey(c: AssetContainer): string {
-  return `${c.container_type}:${c.container_id}`
+function coverUrl(a: UnifiedAsset): string | null {
+  return a.asset_url || a.thumb_url || (a.reference_images && a.reference_images[0]) || null
 }
 
-function parseContainerKey(key: string): { type: string; id: string } | null {
-  const idx = key.indexOf(':')
-  if (idx < 0) return null
-  return { type: key.slice(0, idx), id: key.slice(idx + 1) }
+/** 作品标题（作品标记展示） */
+function workTitleOf(workId: number | null): string | null {
+  if (workId == null) return null
+  return works.value.find((w) => w.id === workId)?.title ?? null
 }
-
-// 单元详情：按容器内实际存在的类型分 Tab
-const assetGroups = computed(() => {
-  const map = new Map<string, Asset[]>()
-  for (const a of containerAssets.value) {
-    const arr = map.get(a.type) || []
-    arr.push(a)
-    map.set(a.type, arr)
-  }
-  return Array.from(map.entries()).map(([type, items]) => ({
-    type,
-    label: typeLabel(type),
-    items,
-  }))
-})
-
-watch(assetGroups, (groups) => {
-  if (groups.length && !activeTypeTab.value) activeTypeTab.value = groups[0].type
-})
-
-// 深链：/assets?container=type:id
-watch(
-  selectedKey,
-  async (key) => {
-    if (!key) {
-      selectedContainer.value = null
-      containerAssets.value = []
-      return
-    }
-    const parsed = parseContainerKey(key)
-    if (!parsed) {
-      selectedContainer.value = null
-      return
-    }
-    const meta = containers.value.find((c) => containerKey(c) === key)
-    selectedContainer.value = meta || {
-      container_type: parsed.type,
-      container_id: parsed.id,
-      container_name: null,
-    }
-    await loadContainerDetail(parsed.type, parsed.id)
-  },
-  { immediate: true },
-)
 
 // ---------- 数据加载 ----------
-async function loadContainers() {
-  containersLoading.value = true
+async function load(): Promise<void> {
+  loading.value = true
   try {
-    const data = await getAssetContainers()
-    containers.value = data.containers || []
+    const data = await listAssets({
+      media_type: filters.media_type || undefined,
+      source: filters.source || undefined,
+      work_id: filters.work_id === null ? undefined : (filters.work_id === -1 ? undefined : filters.work_id),
+      keyword: filters.keyword.trim() || undefined,
+      page: page.value,
+      page_size: PAGE_SIZE,
+    })
+    if (page.value === 1) items.value = data.items
+    else items.value = items.value.concat(data.items)
+    total.value = data.total
   } catch (e: unknown) {
     const err = e as { message?: string }
     ElMessage.error(err.message || t('assets.loadFailed'))
   } finally {
-    containersLoading.value = false
+    loading.value = false
   }
 }
 
-async function loadStandalone() {
-  standaloneLoading.value = true
+function reload(): void {
+  page.value = 1
+  void load()
+}
+
+function loadMore(): void {
+  page.value += 1
+  void load()
+}
+
+async function loadWorks(): Promise<void> {
   try {
-    await assetStore.loadAssets({
-      scope: 'my',
-    } as Parameters<typeof assetStore.loadAssets>[0])
-    standaloneAssets.value = assetStore.assets
-  } catch (e: unknown) {
-    const err = e as { message?: string }
-    ElMessage.error(err.message || t('assets.loadFailed'))
-  } finally {
-    standaloneLoading.value = false
-  }
+    works.value = (await listWorks()).items
+  } catch (_e) { /* 筛选项加载失败不阻塞列表 */ }
 }
 
-// 我的资产：本地按类型 + 关键词过滤（避免每次输入打接口）
-const filteredStandalone = computed(() => {
-  const kw = searchKeyword.value.trim().toLowerCase()
-  return standaloneAssets.value.filter((a) => {
-    if (activeType.value && a.type !== activeType.value) return false
-    if (!kw) return true
-    return (
-      a.name.toLowerCase().includes(kw) ||
-      (a.description || '').toLowerCase().includes(kw) ||
-      (a.visual_description || '').toLowerCase().includes(kw) ||
-      (a.tags || []).some((tag) => tag.toLowerCase().includes(kw))
-    )
-  })
+// 关键词防抖（300ms）
+let keywordTimer: ReturnType<typeof setTimeout> | null = null
+watch(() => filters.keyword, () => {
+  if (keywordTimer) clearTimeout(keywordTimer)
+  keywordTimer = setTimeout(reload, 300)
 })
 
-async function loadContainerDetail(type: string, id: string) {
-  try {
-    const detail: AssetContainerDetail = await getContainerAssets(type, id)
-    containerAssets.value = detail.items || []
-    selectedContainer.value = {
-      container_type: type,
-      container_id: id,
-      container_name: detail.container_name,
-      type_label: detail.type_label,
-    }
-    activeTypeTab.value = ''
-  } catch (e: unknown) {
-    const err = e as { message?: string }
-    ElMessage.error(err.message || t('assets.loadFailed'))
-  }
-}
-
 // ---------- 交互 ----------
-function openContainer(c: AssetContainer) {
-  router.push({ query: { ...route.query, container: containerKey(c) } })
-}
-
-function closeContainer() {
-  const q = { ...route.query }
-  delete q.container
-  router.push({ query: q })
-}
-
-function openPreview(a: Asset) {
-  previewAsset.value = a
+function openPreview(a: UnifiedAsset): void {
+  previewItem.value = a
   previewVisible.value = true
 }
 
-async function toggleShare(a: Asset, val: boolean) {
+async function toggleShare(a: UnifiedAsset, val: boolean): Promise<void> {
   sharingIds.value = new Set(sharingIds.value).add(a.id)
   try {
     const res = await updateAssetShare(a.id, val)
     a.is_public = res.is_public
-    if (val) {
-      a.moderation_status = 'pending'
-      ElMessage.success(t('assets.shareSuccess'))
-    } else {
-      ElMessage.success(t('assets.unshareSuccess'))
-    }
+    a.moderation_status = val ? 'pending' : a.moderation_status
+    ElMessage.success(t(val ? 'assets.shareSuccess' : 'assets.unshareSuccess'))
   } catch (e: unknown) {
     const err = e as { message?: string }
     ElMessage.error(err.message || t('assets.shareFailed'))
@@ -436,52 +301,40 @@ async function toggleShare(a: Asset, val: boolean) {
   }
 }
 
-async function removeAsset(a: Asset) {
-  const isArchive = !!a.container_type
-  await confirm(isArchive ? t('assets.deleteArchiveConfirm') : t('assets.deleteConfirm'), t('common.confirm'))
+async function removeAsset(a: UnifiedAsset): Promise<void> {
+  await confirm(t('assets.deleteConfirm'), t('common.confirm'))
   try {
     await deleteAsset(a.id)
     ElMessage.success(t('assets.deleteSuccess'))
-    containerAssets.value = containerAssets.value.filter((x) => x.id !== a.id)
-    await loadContainers()
+    items.value = items.value.filter((x) => x.id !== a.id)
+    total.value = Math.max(0, total.value - 1)
   } catch (e: unknown) {
     const err = e as { message?: string }
     ElMessage.error(err.message || t('assets.deleteFailed'))
   }
 }
 
-// 我的资产区：类型筛选 / 搜索（本地过滤，无需重新请求）
-
-function openCreate() {
+function openCreate(): void {
   currentAssetId.value = null
   modalVisible.value = true
 }
 
-function openDetail(asset: Asset) {
-  currentAssetId.value = asset.id
+function openEdit(a: UnifiedAsset): void {
+  currentAssetId.value = a.id
   modalVisible.value = true
 }
 
-function useAsset(asset: Asset) {
-  useForGeneration(asset)
-}
-
-/** 「用于生成」：写入 pendingUse 并跳转生成页（image kind → 生图页，video kind → 视频页） */
-function useForGeneration(a: Asset) {
-  assetStore.setPendingUse(a)
-  router.push(a.kind === 'video' ? '/videos' : '/images')
+/** 「用于生成」：写入 pendingUse 并跳转生成页（video → 视频页，其余 → 生图页） */
+function useForGeneration(a: UnifiedAsset): void {
+  assetStore.setPendingUse(a as unknown as Parameters<typeof assetStore.setPendingUse>[0])
+  router.push(a.media_type === 'video' ? '/videos' : '/images')
   ElMessage.success(t('assets.useForGenerationTip'))
-}
-
-function onAssetSaved() {
-  loadStandalone()
-  loadContainers()
 }
 
 // ---------- 生命周期 ----------
 onMounted(() => {
-  loadContainers()
-  loadStandalone()
+  void load()
+  void loadWorks()
 })
 </script>
 
@@ -492,214 +345,115 @@ onMounted(() => {
   margin: 0 auto;
 }
 
-.page-title {
-  font-size: 28px;
-  font-weight: 600;
-  margin: 0 0 8px 0;
-  color: var(--agnes-text-primary);
-}
-
-/* 总览：分区 */
-.zone {
-  margin-bottom: 32px;
-}
-.zone-head {
+.page-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 12px;
   margin-bottom: 16px;
 }
-.zone-title {
-  font-size: 18px;
+
+.page-title {
+  font-size: 24px;
   font-weight: 600;
   margin: 0;
   color: var(--agnes-text-primary);
 }
-.zone-desc {
+
+.page-total {
   font-size: 13px;
-  color: var(--agnes-text-secondary);
-}
-.zone-body {
-  min-height: 120px;
+  color: var(--el-text-color-secondary);
 }
 
-/* 创作单元卡片网格 */
-.unit-card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 20px;
-}
-.unit-card {
-  border: 1px solid var(--agnes-border, #2a2a2a);
-  border-radius: 10px;
-  overflow: hidden;
-  cursor: pointer;
-  background: var(--agnes-bg-elevated, #1d1d1f);
-  transition: transform 0.2s, border-color 0.2s;
-}
-.unit-card:hover {
-  transform: translateY(-2px);
-  border-color: var(--el-color-primary);
-}
-.unit-card-cover {
-  aspect-ratio: 16 / 9;
-  background: var(--agnes-bg-page);
-  overflow: hidden;
-}
-.unit-card-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-}
-.unit-card-name {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--agnes-text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-}
-.unit-card-count {
-  font-size: 12px;
-  color: var(--agnes-text-placeholder);
-  white-space: nowrap;
+.head-create {
+  margin-left: auto;
 }
 
-/* 我的资产筛选 */
 .filter-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 24px;
+  gap: 10px;
   flex-wrap: wrap;
-}
-.filter-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.search-input {
-  width: 240px;
-}
-.assets-section {
-  min-height: 200px;
-}
-.asset-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 20px;
-}
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 60px 20px;
-  color: var(--agnes-text-placeholder);
-}
-.empty-text {
-  margin-top: 12px;
-  font-size: 14px;
+  margin-bottom: 20px;
 }
 
-/* 单元详情 */
-.detail-head {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 16px;
+.f-item {
+  width: 150px;
 }
-.detail-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+
+.search-input {
+  width: 220px;
 }
-.detail-name {
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--agnes-text-primary);
-}
-.detail-tabs {
-  margin-top: 8px;
-}
-.unit-asset-grid {
+
+.asset-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 20px;
-  padding-top: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 18px;
 }
-.unit-asset-card {
+
+.asset-card {
   border: 1px solid var(--agnes-border, #2a2a2a);
   border-radius: 10px;
   overflow: hidden;
-  background: var(--agnes-bg-elevated, #1d1d1f);
-}
-.unit-asset-cover {
-  aspect-ratio: 16 / 9;
-  background: var(--agnes-bg-page);
-  overflow: hidden;
-  cursor: pointer;
-}
-.unit-asset-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px 4px;
-}
-.unit-asset-name {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--agnes-text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-}
-.unit-asset-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 4px 12px 12px;
-}
-.share-switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  background: var(--el-bg-color);
 }
 
-/* 封面/预览媒体 */
+.card-cover {
+  height: 150px;
+  background: var(--el-fill-color-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  overflow: hidden;
+}
+
 .cover-media {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  display: block;
 }
+
 .cover-placeholder {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--agnes-text-placeholder);
+  color: var(--el-text-color-placeholder);
   font-size: 32px;
 }
-.preview-body {
+
+.card-meta {
+  padding: 10px 12px 6px;
+}
+
+.card-name {
+  font-weight: 600;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-tags {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.card-actions {
+  padding: 4px 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+
+.share-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.load-more {
   display: flex;
   justify-content: center;
-  align-items: center;
-  min-height: 200px;
-}
-.preview-video {
-  max-width: 100%;
-  max-height: 70vh;
-  border-radius: 6px;
-}
-.preview-image {
-  max-width: 100%;
-  max-height: 70vh;
+  padding: 20px 0;
 }
 </style>

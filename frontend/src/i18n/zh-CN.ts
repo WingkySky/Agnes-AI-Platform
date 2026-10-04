@@ -1326,6 +1326,26 @@ const zhCN = {
     desc: '管理你的创作资产，可重复用于流水线生成',
     subtitle: '管理可复用的角色、场景、风格',
     searchPlaceholder: '搜索资产...',
+    total: '共 {n} 项',
+    loadMore: '加载更多',
+    filter: {
+      source: '来源',
+      work: '所属作品',
+      allWork: '全部作品',
+    },
+    mediaType: {
+      all: '全部',
+      image: '图片',
+      video: '视频',
+      audio: '音频',
+    },
+    source: {
+      generation: '生成',
+      upload: '上传',
+      compose: '合成',
+      archive: '归档',
+      canvas: '画布',
+    },
     emptyTip: '暂无资产，快去流水线生成并保存你的第一个资产吧',
     noDesc: '暂无描述',
     // 资产类型枚举（与后端 AssetType 对齐：character/prop/scene/brand）

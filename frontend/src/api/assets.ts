@@ -10,12 +10,18 @@ export interface UnifiedAsset {
   id: number
   type: string
   name: string
+  description: string | null
+  visual_description: string | null
+  reference_images: string[]
   media_type: string
   asset_url: string
   thumb_url: string | null
   storage_key?: string | null
   source: string | null
   work_id: number | null
+  is_public: boolean
+  moderation_status: string
+  use_count: number
   container_type: string | null
   container_id: string | null
   container_name: string | null

@@ -1341,6 +1341,26 @@ const enUS = {
     desc: 'Manage your creative assets for reuse in pipeline generation',
     subtitle: 'Manage reusable characters, scenes, and styles',
     searchPlaceholder: 'Search assets...',
+    total: '{n} items',
+    loadMore: 'Load more',
+    filter: {
+      source: 'Source',
+      work: 'Work',
+      allWork: 'All works',
+    },
+    mediaType: {
+      all: 'All',
+      image: 'Image',
+      video: 'Video',
+      audio: 'Audio',
+    },
+    source: {
+      generation: 'Generated',
+      upload: 'Uploaded',
+      compose: 'Composed',
+      archive: 'Archived',
+      canvas: 'Canvas',
+    },
     emptyTip: 'No assets yet. Generate in canvas or projects and save your first asset!',
     noDesc: 'No description',
     // 资产类型枚举（与后端 AssetType 对齐：character/prop/scene/brand）
