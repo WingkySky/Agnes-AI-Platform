@@ -799,9 +799,10 @@ manifest 格式：`{ "name": "...", "items": [{ "slug", "name", "description", "
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/canvas/workspaces` | 当前用户工作区列表（不含 data，按 updated_at 倒序） |
-| POST | `/api/canvas/workspaces` | 创建 `{ id?, name, data }`；id 可透传前端 uid（迁移/懒创建用），同 id 重复创建幂等返回已有，id 被其他用户占用 409 |
+| GET | `/api/canvas/workspaces` | 当前用户工作区列表（不含 data，按 updated_at 倒序；支持 `work_id` 筛选作品下集画布） |
+| POST | `/api/canvas/workspaces` | 创建 `{ id?, name, work_id?, data }`；id 可透传前端 uid（迁移/懒创建用），同 id 重复创建幂等返回已有，id 被其他用户占用 409；`work_id` 挂靠作品（非本人作品 403） |
 | GET | `/api/canvas/workspaces/{id}` | 全量 `{ id, name, revision, data, created_at, updated_at }` |
+| PATCH | `/api/canvas/workspaces/{id}` | 挂靠/解绑作品 `{ work_id }`（None=解绑为自由画布；目标作品非本人 403） |
 | PUT | `/api/canvas/workspaces/{id}` | 保存 `{ data, base_revision, name? }` → `{ revision }`；`base_revision` 不符返回 409 `{ detail: { current_revision } }`。PUT 内嵌自动快照节流（见上） |
 | DELETE | `/api/canvas/workspaces/{id}` | 删除工作区并连带删除其全部快照 |
 
@@ -930,3 +931,27 @@ AI 提示词优化（登录用户），返回结构化正负提示词。
 - `GET /api/credits/estimate` 与实际扣费自动一致（同一计价函数）；先扣后退结构不变，退款按实扣原额退。
 - 管理端「配置管理 → 模型编辑」新增「积分倍率」输入，保存立即生效。
 - 批量设置：`PUT /api/models/batch-cost-multiplier`（body `{model_ids, cost_multiplier}`，倍率 0.1~100），管理端模型列表勾选多行后「批量设倍率」一次生效，立即生效。
+
+## 20. 作品容器（轻容器）+ 画布轻成片
+
+### 作品 works（用户自助，登录态；非本人 403 / 不存在 404）
+
+新表 `works`（一部剧一条作品，聚合集画布/剪辑工程/实体库；存量库 create_all 自动建）。`canvas_workspaces` 新增 `work_id` 列（存量库手动 ALTER：`ALTER TABLE canvas_workspaces ADD COLUMN work_id INTEGER`；删除作品时名下画布自动解绑为自由画布）。前端入口：侧边栏「作品」→ `/works` 列表 → `/works/{id}` 详情（集画布管理，「进入画布」经 `/canvas?workspace={id}` 定位）。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/works` | 本人作品列表（updated_at 倒序） |
+| POST | `/api/works` | 创建 `{ title, description?, cover_url? }` |
+| GET/PATCH/DELETE | `/api/works/{id}` | 详情 / 更新 / 删除（删除解绑画布） |
+
+### 画布媒体域与轻成片（/api/canvas）
+
+媒体域公共层抽至 `services/media/`（tts_provider 音色库与 Edge TTS / subtitle_format SRT+ASS / bgm_library 曲库），画布与项目制共用；`media_compose` 新增 `concat_with_xfade`（xfade 转场链公共实现）。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/canvas/voices` | TTS 音色库（内置 8 音色，支持 Edge 音色名透传） |
+| GET | `/api/canvas/bgms` | BGM 曲库（内置 + 用户自定义，含 available 与情绪分类） |
+| POST | `/api/canvas/tts` | `{ text, voice?, speed? }` → `{ audio_url, duration_ms }`（不变） |
+| POST | `/api/canvas/subtitle` | `{ text, max_chars?, prompt? }` → `{ srt, segments, total_duration }`；`prompt` 为拆分补充要求（拼进 LLM 提示词） |
+| POST | `/api/canvas/compose` | `{ video_urls, audios?, subtitles?, with_subtitle?, bgm_id?, aspect_ratio?, transition? }` → `{ video_url, duration_ms }`；`audios` 多段配音按视频段顺序拼接成单轨（旧 `audio_url` 单段入口兼容保留）；`transition` none/fade/dissolve/wipe/slide，非 none 且多段走 xfade 重编码链 |

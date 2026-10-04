@@ -28,6 +28,7 @@ from app.models.asset_like import AssetLike
 from app.models.prompt_preset import PromptPreset, PresetIndex, PresetFavorite, PresetRecentUse
 from app.models.scene3d import Scene3D
 from app.models.canvas_workspace import CanvasWorkspace, CanvasSnapshot, MAX_AUTO_SNAPSHOTS, SNAPSHOT_MIN_INTERVAL_SEC
+from app.models.work import Work
 from app.models.project import (
     Project,
     ProjectScript,

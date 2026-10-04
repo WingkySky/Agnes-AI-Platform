@@ -968,6 +968,29 @@ const zhCN = {
   },
 
   // ------ 路由 / 页面标题 ------
+  works: {
+    title: '我的作品',
+    create: '新建作品',
+    empty: '还没有作品，点击右上角创建',
+    noDesc: '暂无简介',
+    name: '作品名',
+    namePh: '例如：长安异闻录',
+    desc: '简介',
+    createdMsg: '作品已创建',
+    deletedMsg: '作品已删除',
+    deleteConfirm: '确定删除作品《{title}》？名下画布将解绑为自由画布。',
+    newEpisode: '新建一集',
+    episodeN: '第 {n} 集',
+    canvases: '集画布',
+    canvasEmpty: '还没有集画布，点击「新建一集」开始',
+    enterCanvas: '进入画布',
+    episodeCreated: '集画布已创建',
+    backToWorks: '返回作品列表',
+    freeCanvases: '未挂靠画布',
+    bindDone: '已挂到作品',
+    changeCover: '更换封面',
+    coverUpdated: '封面已更新',
+  },
   router: {
     home: '首页',
     login: '登录',
@@ -979,6 +1002,8 @@ const zhCN = {
     plaza: '作品广场',
     credits: '积分明细',
     canvas: '无限画布',
+    works: '作品',
+    workDetail: '作品详情',
     projects: '我的项目',
     projectDetail: '项目详情',
     assets: '资产库',
@@ -1428,6 +1453,11 @@ const zhCN = {
 
   // ------ 无限画布 ------
   canvas: {
+    work: {
+      bindWork: '挂到作品',
+      unbindOption: '不挂靠（自由画布）',
+      bindDone: '已更新作品归属',
+    },
     autoWorkspaceName: '对话画布',
     sidebarTitle: '画布管理',
     newCanvas: '新建画布',
@@ -1805,6 +1835,15 @@ const zhCN = {
       speed: '语速',
       ttsHint: '连接文本节点作为配音来源',
       runTts: '生成配音',
+      transition: '转场',
+      transitionNone: '无',
+      transitionFade: '叠化',
+      transitionDissolve: '溶解',
+      transitionWipe: '擦除',
+      transitionSlide: '推入',
+      aspectRatio: '画幅',
+      bgm: '背景音乐',
+      bgmNone: '不使用',
       // 字幕节点
       subtitleHint: '连接文本节点，自动生成 SRT 字幕',
       runSubtitle: '生成字幕',

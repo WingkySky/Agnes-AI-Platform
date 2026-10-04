@@ -120,6 +120,7 @@ function cloudDetailToLocal(d: WorkspaceDetail): Record<string, any> {
   return {
     id: d.id,
     name: d.name,
+    work_id: d.work_id ?? null,
     created_at: d.created_at,
     updated_at: d.updated_at,
     viewport: data.viewport ?? { x: 0, y: 0, zoom: 1 },
@@ -184,6 +185,7 @@ async function saveWorkspaceWithLock(ws: Record<string, any>): Promise<void> {
       const created = await createWorkspaceApi({
         id: String(ws.id),
         name: ws.name,
+        work_id: ws.work_id ?? undefined,
         data: workspaceToData(ws),
       })
       cloudRevisions.set(String(ws.id), created.revision)
@@ -275,6 +277,7 @@ export async function createWorkspaceCloud(ws: Record<string, any>): Promise<voi
     const created = await createWorkspaceApi({
       id: String(ws.id),
       name: ws.name,
+      work_id: ws.work_id ?? undefined,
       data: workspaceToData(ws),
     })
     cloudRevisions.set(String(ws.id), created.revision)

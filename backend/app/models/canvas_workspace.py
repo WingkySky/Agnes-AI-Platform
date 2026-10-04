@@ -27,6 +27,8 @@ class CanvasWorkspace(Base):
 
     id = Column(String(64), primary_key=True)                        # 前端 uid() 直作主键
     user_id = Column(Integer, nullable=False, index=True)
+    # 存量库升级：ALTER TABLE canvas_workspaces ADD COLUMN work_id INTEGER;
+    work_id = Column(Integer, nullable=True, index=True)             # 所属作品（轻容器），NULL=自由画布
     name = Column(String(255), nullable=False)
     # panels / connections / groups / viewport / styleConfig（结构与前端 CanvasWorkspace 对应字段一致）
     data = Column(JSON, nullable=False, default=dict)

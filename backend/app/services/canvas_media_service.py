@@ -36,11 +36,12 @@ from app.services.media_compose import (
     check_drawtext_filter_available,
     build_drawtext_subtitles_filter,
     concat_normalized_videos,
+    concat_with_xfade,
     ffmpeg_final_composite,
 )
 from app.services.upload_service import UPLOADS_DIR
-from app.services.project.audio_service import _call_tts_provider, _resolve_edge_voice
-from app.services.project.subtitle_service import DEFAULT_SUBTITLE_STYLE, build_ass, build_srt
+from app.services.media.tts_provider import call_tts_provider, resolve_edge_voice
+from app.services.media.subtitle_format import DEFAULT_SUBTITLE_STYLE, build_ass, build_srt
 from app.services.project._llm import parse_json_loose, call_llm
 
 logger = logging.getLogger("agnes_platform.canvas.media")
@@ -65,7 +66,7 @@ async def generate_tts(text: str, voice: str = "default", speed: float = 1.0) ->
     if not (text or "").strip():
         raise ValueError("文本内容为空，无法生成配音")
     voice_id = _CANVAS_VOICE_MAP.get(voice, voice)
-    audio_url, duration_ms, _file_size = await _call_tts_provider(
+    audio_url, duration_ms, _file_size = await call_tts_provider(
         text=text, voice_id=voice_id, speed=speed, save_folder="canvas/tts",
     )
     logger.info("[画布TTS] voice=%s speed=%s duration=%sms url=%s", voice_id, speed, duration_ms, audio_url)
@@ -76,21 +77,23 @@ async def generate_tts(text: str, voice: str = "default", speed: float = 1.0) ->
 # 字幕拆分
 # =====================================================
 
-async def generate_subtitles(text: str, max_chars: int = 20) -> dict:
+async def generate_subtitles(text: str, max_chars: int = 20, style_hint: Optional[str] = None) -> dict:
     """
     画布文案 → LLM 拆分字幕，返回 {srt, segments, total_duration}
 
     segments: [{start_time, duration, text}]，时长按字数估算（0.24s/字，最短 1s）
+    style_hint: 用户补充的拆分要求（风格/节奏/禁用词等），拼进 LLM 提示词
     """
     text = (text or "").strip()
     if not text:
         raise ValueError("文本内容为空，无法生成字幕")
 
+    hint_line = f"\n用户补充要求（尽量满足）：{(style_hint or '').strip()}\n" if (style_hint or "").strip() else ""
     prompt = f"""请将以下文案拆分为字幕片段，每条不超过 {max_chars} 字，保持语序完整。
 输出 JSON 数组，每个元素包含:
 - text: 字幕文本
 - weight: 时长权重（0-1，按朗读时长比例估算）
-
+{hint_line}
 文案:
 {text}
 
@@ -137,23 +140,34 @@ def _resolve_local_media(url: str) -> Optional[str]:
 
 async def compose_videos(
     video_urls: List[str],
-    audio_url: Optional[str] = None,
+    audios: Optional[List[str]] = None,
     subtitles: Optional[List[dict]] = None,
     with_subtitle: bool = True,
     bgm_id: Optional[str] = None,
     aspect_ratio: str = "16:9",
+    transition: str = "none",
+    audio_url: Optional[str] = None,
 ) -> dict:
     """
     多段视频 → 一条成片，返回 {video_url, duration_ms}
 
-    流程: 下载 → 归一化（统一分辨率/帧率/SAR）→ concat → 混音（TTS/BGM）→ 字幕烧录
+    流程: 下载 → 归一化（统一分辨率/帧率/SAR）→ concat/xfade 转场 → 混音（多段配音+BGM）→ 字幕烧录
     产物写入 uploads/canvas/{uuid}.mp4。
+
+    audios: 多段配音 URL（与视频段顺序对应，顺序拼接成单轨）；audio_url 为旧单段入口，等价于单元素 audios。
+    transition: none/fade/dissolve/wipe/slide，非 none 且多段时走 xfade 转场链（重编码）。
     """
     if not video_urls:
         raise ValueError("没有可合成的视频")
+    if transition not in ("none", "fade", "dissolve", "wipe", "slide"):
+        raise ValueError(f"不支持的转场类型：{transition}")
+
+    voice_urls = list(audios or [])
+    if audio_url:
+        voice_urls.append(audio_url)
 
     # SSRF 防护：非本地 /uploads/ 的远程地址必须是公网 http(s)（拒绝内网/环回/非常规协议）
-    remote_urls = [u for u in video_urls if u] + ([audio_url] if audio_url else [])
+    remote_urls = [u for u in video_urls if u] + [u for u in voice_urls if u]
     for u in remote_urls:
         if not u.startswith("/uploads/") and not is_safe_url(u):
             raise HTTPException(status_code=400, detail=f"不允许的素材地址：{u[:80]}")
@@ -181,26 +195,30 @@ async def compose_videos(
             )
             normalized_paths.append(norm_path)
 
-        # 3. 拼接
+        # 3. 拼接（transition≠none 且多段走 xfade 转场链，否则 concat demuxer 直拷）
         composite_video_path = os.path.join(tmp_dir, "composite.mp4")
-        await concat_normalized_videos(normalized_paths, composite_video_path)
+        if transition != "none" and len(normalized_paths) > 1:
+            await concat_with_xfade(normalized_paths, composite_video_path, transition=transition)
+        else:
+            await concat_normalized_videos(normalized_paths, composite_video_path)
         total_duration = (await probe_durations([composite_video_path]))[0]
 
-        # 4. 混音（TTS + 可选 BGM）
+        # 4. 混音（多段配音顺序拼接 + 可选 BGM）
         composite_audio_path: Optional[str] = None
-        tts_path: Optional[str] = None
-        if audio_url:
-            tts_path = _resolve_local_media(audio_url)
-            if not tts_path:
-                tts_path = os.path.join(tmp_dir, "tts_audio")
+        voice_paths: List[str] = []
+        for idx, url in enumerate(voice_urls):
+            p = _resolve_local_media(url)
+            if not p:
+                p = os.path.join(tmp_dir, f"voice_{idx:02d}")
                 async with httpx.AsyncClient(timeout=120) as client:
-                    await stream_download(client, audio_url, tts_path)
+                    await stream_download(client, url, p)
+            voice_paths.append(p)
         bgm_path: Optional[str] = None
         if bgm_id:
-            from app.services.project.bgm_library import get_bgm_path
+            from app.services.media.bgm_library import get_bgm_path
             bgm_path = get_bgm_path(bgm_id)
-        if tts_path or bgm_path:
-            composite_audio_path = await _mix_audio(tts_path, bgm_path, total_duration, tmp_dir)
+        if voice_paths or bgm_path:
+            composite_audio_path = await _mix_audio(voice_paths, bgm_path, total_duration, tmp_dir)
 
         # 5. 字幕（硬烧 ASS → drawtext 直烧 → 软字幕，三级降级）
         subtitle_path: Optional[str] = None
@@ -245,13 +263,31 @@ async def compose_videos(
 
 
 async def _mix_audio(
-    tts_path: Optional[str], bgm_path: Optional[str],
+    voice_paths: List[str], bgm_path: Optional[str],
     total_duration: float, tmp_dir: str,
 ) -> str:
-    """混合 TTS 与 BGM（BGM 音量 0.15 + 首尾淡入淡出），返回混音产物路径"""
-    # 仅 TTS：直接使用原始音频
-    if tts_path and not bgm_path:
-        return tts_path
+    """多段配音顺序拼接后与 BGM 混音（BGM 音量 0.15 + 首尾淡入淡出），返回混音产物路径"""
+    # 多段配音：顺序 concat 成一条音轨（与视频段顺序对应）
+    voice_track: Optional[str] = None
+    if len(voice_paths) == 1:
+        voice_track = voice_paths[0]
+    elif voice_paths:
+        voice_track = os.path.join(tmp_dir, "voice_track.aac")
+        inputs = sum([["-i", p] for p in voice_paths], [])
+        await run_ffmpeg(
+            [
+                "ffmpeg", "-y", *inputs,
+                "-filter_complex", f"concat=n={len(voice_paths)}:v=0:a=1[voice]",
+                "-map", "[voice]",
+                "-c:a", "aac", "-b:a", "128k",
+                voice_track,
+            ],
+            timeout=300, error_label="ffmpeg 多段配音拼接",
+        )
+
+    # 仅配音（无 BGM）：直接使用配音轨
+    if voice_track and not bgm_path:
+        return voice_track
 
     # BGM 预处理：按成片时长截取 + 淡入淡出 + 降音量
     dur = total_duration if total_duration > 0 else 60.0
@@ -266,18 +302,18 @@ async def _mix_audio(
         ],
         timeout=300, error_label="ffmpeg BGM 预处理",
     )
-    if not tts_path:
+    if not voice_track:
         return bgm_processed
 
-    # TTS + BGM amix（以 TTS 时长为准）
+    # 配音 + BGM amix（以配音时长为准）
     mixed = os.path.join(tmp_dir, "mixed.aac")
     await run_ffmpeg(
         [
-            "ffmpeg", "-y", "-i", tts_path, "-i", bgm_processed,
+            "ffmpeg", "-y", "-i", voice_track, "-i", bgm_processed,
             "-filter_complex", "amix=inputs=2:duration=first:dropout_transition=0",
             "-c:a", "aac", "-b:a", "128k",
             mixed,
         ],
-        timeout=300, error_label="ffmpeg TTS+BGM 混音",
+        timeout=300, error_label="ffmpeg 配音+BGM 混音",
     )
     return mixed

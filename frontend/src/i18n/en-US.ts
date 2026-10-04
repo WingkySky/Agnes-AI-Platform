@@ -986,6 +986,29 @@ const enUS = {
   },
 
   // ------ Router / page titles ------
+  works: {
+    title: 'My Works',
+    create: 'New Work',
+    empty: 'No works yet — create one from the top right',
+    noDesc: 'No description',
+    name: 'Title',
+    namePh: 'e.g. My First Series',
+    desc: 'Description',
+    createdMsg: 'Work created',
+    deletedMsg: 'Work deleted',
+    deleteConfirm: 'Delete work "{title}"? Its canvases will be unbound as free canvases.',
+    newEpisode: 'New Episode',
+    episodeN: 'Episode {n}',
+    canvases: 'Episode Canvases',
+    canvasEmpty: 'No episode canvases yet — click "New Episode" to start',
+    enterCanvas: 'Open Canvas',
+    episodeCreated: 'Episode canvas created',
+    backToWorks: 'Back to Works',
+    freeCanvases: 'Unattached Canvases',
+    bindDone: 'Attached to work',
+    changeCover: 'Change Cover',
+    coverUpdated: 'Cover updated',
+  },
   router: {
     home: 'Home',
     login: 'Login',
@@ -997,6 +1020,8 @@ const enUS = {
     plaza: 'Plaza',
     credits: 'Credit Transactions',
     canvas: 'Infinite Canvas',
+    works: 'Works',
+    workDetail: 'Work Detail',
     projects: 'My Projects',
     projectDetail: 'Project Detail',
     assets: 'Asset Library',
@@ -1443,6 +1468,11 @@ const enUS = {
 
   // ------ Infinite Canvas ------
   canvas: {
+    work: {
+      bindWork: 'Attach to Work',
+      unbindOption: 'Unattached (free canvas)',
+      bindDone: 'Work attachment updated',
+    },
     autoWorkspaceName: 'Chat Canvas',
     sidebarTitle: 'Canvas Management',
     newCanvas: 'New Canvas',
@@ -1821,6 +1851,15 @@ const enUS = {
       speed: 'Speed',
       ttsHint: 'Connect a text node as the audio source',
       runTts: 'Generate Voiceover',
+      transition: 'Transition',
+      transitionNone: 'None',
+      transitionFade: 'Fade',
+      transitionDissolve: 'Dissolve',
+      transitionWipe: 'Wipe',
+      transitionSlide: 'Slide',
+      aspectRatio: 'Aspect',
+      bgm: 'BGM',
+      bgmNone: 'None',
       // subtitle node
       subtitleHint: 'Connect a text node to auto-generate SRT subtitles',
       runSubtitle: 'Generate Subtitles',

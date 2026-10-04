@@ -141,8 +141,14 @@ from app.services.project.canvas_bridge import (
 from app.services.project.merge_service import (
     merge_project, get_merge_status,
 )
+from app.services.media.tts_provider import list_builtin_voices as list_builtin_voice_options
+from app.services.media.bgm_library import (
+    list_bgms as list_bgm_library,
+    list_moods as list_bgm_moods,
+    get_bgm_path,
+    save_uploaded_bgm,
+)
 from app.services.project.audio_service import (
-    list_builtin_voices as list_builtin_voice_options,
     generate_audio, batch_generate_audios, upload_audio,
     set_active_audio, list_audios, delete_audio,
     assign_character_voice, list_character_voices,
@@ -161,12 +167,6 @@ from app.services.project.timeline_service import (
     get_timeline_data, save_timeline_data,
     get_subtitle_style, update_subtitle_style,
     get_media_library,
-)
-from app.services.project.bgm_library import (
-    list_bgms as list_bgm_library,
-    list_moods as list_bgm_moods,
-    get_bgm_path,
-    save_uploaded_bgm,
 )
 from app.services.project.marker_service import (
     list_markers as list_project_markers,

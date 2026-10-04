@@ -24,8 +24,22 @@ from app.schemas.canvas import (
     CanvasComposeResponse,
 )
 from app.services import canvas_media_service
+from app.services.media.bgm_library import list_bgms, list_moods
+from app.services.media.tts_provider import list_builtin_voices
 
 router = APIRouter(prefix="/canvas", tags=["无限画布"])
+
+
+@router.get("/voices", summary="TTS 音色库（内置音色清单）")
+async def canvas_voices(current_user: User = Depends(get_current_user)):
+    del current_user
+    return ok(data={"voices": list_builtin_voices()})
+
+
+@router.get("/bgms", summary="BGM 曲库（内置 + 用户自定义）")
+async def canvas_bgms(current_user: User = Depends(get_current_user)):
+    del current_user
+    return ok(data={"bgms": list_bgms(), "moods": list_moods()})
 
 
 @router.post("/tts", summary="画布文本生成配音")
@@ -50,7 +64,7 @@ async def canvas_subtitle(
     current_user: User = Depends(get_current_user),
 ):
     try:
-        result = await canvas_media_service.generate_subtitles(payload.text, payload.max_chars)
+        result = await canvas_media_service.generate_subtitles(payload.text, payload.max_chars, style_hint=payload.prompt)
         return ok(data=CanvasSubtitleResponse(**result))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -67,11 +81,12 @@ async def canvas_compose(
     try:
         result = await canvas_media_service.compose_videos(
             video_urls=payload.video_urls,
-            audio_url=payload.audio_url,
+            audios=payload.audios,
             subtitles=[s.model_dump() for s in payload.subtitles] if payload.subtitles else None,
             with_subtitle=payload.with_subtitle,
             bgm_id=payload.bgm_id,
             aspect_ratio=payload.aspect_ratio,
+            transition=payload.transition,
         )
         return ok(data=CanvasComposeResponse(**result))
     except ValueError as e:

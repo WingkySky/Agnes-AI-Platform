@@ -29,9 +29,9 @@ from app.models.project import (
     ProjectShotFrameImage,
     ProjectTimelineClip,
 )
-from app.services.project.bgm_library import list_bgms, get_bgm_by_id
+from app.services.media.bgm_library import list_bgms, get_bgm_by_id
 from app.services.project.sse_manager import project_sse_manager
-from app.services.project.subtitle_service import DEFAULT_SUBTITLE_STYLE
+from app.services.media.subtitle_format import DEFAULT_SUBTITLE_STYLE
 
 logger = logging.getLogger("agnes_platform.project.timeline")
 

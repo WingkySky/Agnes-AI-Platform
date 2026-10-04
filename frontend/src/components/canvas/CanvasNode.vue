@@ -210,6 +210,7 @@
               <option value="default">{{ t('canvas.node.voiceDefault') || '默认' }}</option>
               <option value="female">{{ t('canvas.node.voiceFemale') || '女声' }}</option>
               <option value="male">{{ t('canvas.node.voiceMale') || '男声' }}</option>
+              <option v-for="v in voiceOptions" :key="v.voice_id" :value="v.voice_id">{{ v.name }}</option>
             </select>
           </div>
           <div class="tts-row">
@@ -264,8 +265,48 @@
           </button>
         </div>
 
-        <!-- 成片合成节点（spec 5.4.1）：拼接视频 + 字幕 + 配音 -->
+        <!-- 成片合成节点（spec 5.4.1）：拼接视频 + 转场/画幅/BGM/字幕 -->
         <div v-else-if="panel.type === 'compose'" class="compose-content">
+          <div class="compose-row">
+            <span class="compose-label">{{ t('canvas.node.transition') || '转场' }}</span>
+            <select
+              class="tts-select"
+              :value="nodeStr(panel.content.transition) || 'none'"
+              @change="updatePanelContent('transition', ($event.target as HTMLSelectElement)?.value)"
+              @mousedown.stop
+            >
+              <option value="none">{{ t('canvas.node.transitionNone') || '无' }}</option>
+              <option value="fade">{{ t('canvas.node.transitionFade') || '叠化' }}</option>
+              <option value="dissolve">{{ t('canvas.node.transitionDissolve') || '溶解' }}</option>
+              <option value="wipe">{{ t('canvas.node.transitionWipe') || '擦除' }}</option>
+              <option value="slide">{{ t('canvas.node.transitionSlide') || '推入' }}</option>
+            </select>
+          </div>
+          <div class="compose-row">
+            <span class="compose-label">{{ t('canvas.node.aspectRatio') || '画幅' }}</span>
+            <select
+              class="tts-select"
+              :value="nodeStr(panel.content.aspect_ratio) || '16:9'"
+              @change="updatePanelContent('aspect_ratio', ($event.target as HTMLSelectElement)?.value)"
+              @mousedown.stop
+            >
+              <option value="16:9">16:9</option>
+              <option value="9:16">9:16</option>
+              <option value="1:1">1:1</option>
+            </select>
+          </div>
+          <div class="compose-row">
+            <span class="compose-label">{{ t('canvas.node.bgm') || '背景音乐' }}</span>
+            <select
+              class="tts-select"
+              :value="nodeStr(panel.content.bgm_id) || ''"
+              @change="updatePanelContent('bgm_id', ($event.target as HTMLSelectElement)?.value || null)"
+              @mousedown.stop
+            >
+              <option value="">{{ t('canvas.node.bgmNone') || '不使用' }}</option>
+              <option v-for="b in bgmOptions" :key="b.id" :value="b.id">{{ b.name }}</option>
+            </select>
+          </div>
           <div class="compose-row">
             <el-switch
               :model-value="nodeBool(panel.content.with_subtitle, true)"
@@ -390,9 +431,16 @@ import TableNodeContent from '@/components/canvas/nodes/TableNodeContent.vue'
 import { readLineage } from '@/lib/canvas-storyboard'
 import { registerVideoTime } from '@/lib/canvas-image-ops'
 import { fitNodeToMedia } from '@/lib/canvas-media'
+import { getCanvasVoicesCached, getCanvasBgmsCached, type CanvasVoice, type CanvasBgm } from '@/api/canvas'
 
 /* ---------- i18n ---------- */
 const { t } = useI18n()
+
+// 音色库 / BGM 曲库（api 层模块级缓存，全部节点共享一次拉取）
+const voiceOptions = ref<CanvasVoice[]>([])
+const bgmOptions = ref<CanvasBgm[]>([])
+void getCanvasVoicesCached().then((r) => { voiceOptions.value = r.voices }).catch(() => {})
+void getCanvasBgmsCached().then((r) => { bgmOptions.value = r.bgms.filter((b) => b.available) }).catch(() => {})
 
 /* ---------- Props 定义 ---------- */
 const props = defineProps({

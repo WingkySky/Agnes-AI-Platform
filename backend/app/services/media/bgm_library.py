@@ -1,5 +1,5 @@
 # =====================================================
-# BGM 内置库 — 按情绪分类的背景音乐管理
+# BGM 内置库 — 按情绪分类的背景音乐管理（媒体域公共层）
 #
 # 设计:
 #   - BGM 文件存放于 backend/assets/bgm/ 目录
@@ -26,7 +26,7 @@ from typing import List, Optional, Dict
 
 from app.core.pathsafe import ensure_within
 
-logger = logging.getLogger("agnes_platform.project.bgm")
+logger = logging.getLogger("agnes_platform.media.bgm")
 
 # backend/assets/bgm/ 绝对路径
 _BGM_DIR = os.path.join(

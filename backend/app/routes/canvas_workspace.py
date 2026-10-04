@@ -28,6 +28,7 @@ from app.models.canvas_workspace import (
     CanvasWorkspace,
 )
 from app.models.user import User
+from app.models.work import Work
 from app.schemas.canvas_workspace import (
     SnapshotBrief,
     SnapshotCreate,
@@ -38,7 +39,9 @@ from app.schemas.canvas_workspace import (
     WorkspaceDetail,
     WorkspaceOpsCreate,
     WorkspaceSave,
+    WorkspaceWorkBind,
 )
+from app.services import work_service
 from app.services.canvas_ops import apply_canvas_ops
 
 router = APIRouter(prefix="/canvas/workspaces", tags=["画布工作区"])
@@ -110,18 +113,20 @@ async def _maybe_auto_snapshot(db: AsyncSession, ws: CanvasWorkspace) -> None:
         await db.delete(stale)
 
 
-@router.get("", summary="画布工作区列表（不含 data）")
+@router.get("", summary="画布工作区列表（不含 data；可按作品筛选）")
 async def list_workspaces(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
+    work_id: Optional[int] = None,
 ):
-    items = (
-        await db.scalars(
-            select(CanvasWorkspace)
-            .where(CanvasWorkspace.user_id == current_user.id)
-            .order_by(CanvasWorkspace.updated_at.desc())
-        )
-    ).all()
+    stmt = (
+        select(CanvasWorkspace)
+        .where(CanvasWorkspace.user_id == current_user.id)
+        .order_by(CanvasWorkspace.updated_at.desc())
+    )
+    if work_id is not None:
+        stmt = stmt.where(CanvasWorkspace.work_id == work_id)
+    items = (await db.scalars(stmt)).all()
     return ok(data=[WorkspaceBrief.model_validate(w).model_dump(mode="json") for w in items])
 
 
@@ -131,6 +136,14 @@ async def create_workspace(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    if payload.work_id is not None:
+        owned = (
+            await db.scalars(
+                select(Work.id).where(Work.id == payload.work_id, Work.user_id == current_user.id)
+            )
+        ).first()
+        if not owned:
+            raise HTTPException(status_code=403, detail="无权挂靠该作品")
     if payload.id:
         existing = (
             await db.scalars(
@@ -146,6 +159,7 @@ async def create_workspace(
         id=payload.id or uuid.uuid4().hex,
         user_id=current_user.id,
         name=payload.name,
+        work_id=payload.work_id,
         data=payload.data,
     )
     db.add(ws)
@@ -162,6 +176,27 @@ async def get_workspace(
 ):
     ws = await _get_owned_workspace(db, workspace_id, current_user)
     return ok(data=WorkspaceDetail.model_validate(ws).model_dump(mode="json"))
+
+
+@router.patch("/{workspace_id}", summary="挂靠/解绑作品（work_id=None 解绑为自由画布）")
+async def bind_workspace_work(
+    workspace_id: str,
+    payload: WorkspaceWorkBind,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    ws = await _get_owned_workspace(db, workspace_id, current_user)
+    if payload.work_id is not None:
+        owned = (
+            await db.scalars(
+                select(Work.id).where(Work.id == payload.work_id, Work.user_id == current_user.id)
+            )
+        ).first()
+        if not owned:
+            raise HTTPException(status_code=403, detail="无权挂靠该作品")
+    ws.work_id = payload.work_id
+    await db.commit()
+    return ok(data={"id": ws.id, "work_id": ws.work_id})
 
 
 @router.put("/{workspace_id}", summary="保存画布工作区（乐观锁，冲突返回 409）")
@@ -184,6 +219,9 @@ async def save_workspace(
     await _maybe_auto_snapshot(db, ws)
     await db.commit()
     await db.refresh(ws)
+    # 作品封面自动回填（首图即封面；cover 已有则跳过，失败不阻塞保存）
+    if ws.work_id is not None:
+        await work_service.maybe_auto_fill_cover(db, ws.work_id, ws.data)
     return ok(data={"revision": ws.revision})
 
 

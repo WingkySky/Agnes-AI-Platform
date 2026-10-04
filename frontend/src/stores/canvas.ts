@@ -133,6 +133,8 @@ export const CANVAS_GROUP_COLORS = ['#409eff', '#67c23a', '#e6a23c', '#f56c6c', 
 interface CanvasWorkspace {
   id: string
   name: string
+  /** 所属作品（轻容器），NULL/undefined=自由画布 */
+  work_id?: number | null
   created_at: string
   updated_at: string
   viewport: Viewport
@@ -517,11 +519,12 @@ export const useCanvasStore = defineStore('canvas', {
       this._save()
     },
 
-    /** 创建并切换到新工作区 */
-    createWorkspace(name?: string): CanvasWorkspace {
+    /** 创建并切换到新工作区（workId 传入则挂靠该作品） */
+    createWorkspace(name?: string, workId: number | null = null): CanvasWorkspace {
       const ws: CanvasWorkspace = {
         id: uid(),
         name: name ?? '未命名工作区',
+        work_id: workId,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         viewport: { x: 0, y: 0, zoom: 1 },

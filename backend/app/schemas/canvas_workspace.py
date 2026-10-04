@@ -11,7 +11,13 @@ class WorkspaceCreate(BaseModel):
     """创建画布工作区（迁移场景可透传前端 uid 作 id，重复创建幂等返回已有）"""
     id: Optional[str] = Field(None, max_length=64, description="工作区 id（不传则后端生成）")
     name: str = Field(..., max_length=255, description="工作区名称")
+    work_id: Optional[int] = Field(None, description="所属作品（轻容器），NULL=自由画布")
     data: Dict[str, Any] = Field(default_factory=dict, description="panels/connections/groups/viewport/styleConfig")
+
+
+class WorkspaceWorkBind(BaseModel):
+    """挂靠/解绑作品（PATCH；work_id=None 解绑为自由画布）"""
+    work_id: Optional[int] = Field(None, description="目标作品 id，None=解绑")
 
 
 class WorkspaceSave(BaseModel):
@@ -25,6 +31,7 @@ class WorkspaceBrief(BaseModel):
     """工作区列表项（不含 data）"""
     id: str
     name: str
+    work_id: Optional[int] = None
     revision: int
     created_at: datetime
     updated_at: datetime

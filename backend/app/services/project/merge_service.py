@@ -369,7 +369,7 @@ async def execute_merge_advanced(
     - bgm_id: 指定 BGM ID，未指定则不混入 BGM（避免误选）
     """
     from app.services.project.timeline_service import list_clips, get_subtitle_style
-    from app.services.project.subtitle_service import build_ass, build_srt
+    from app.services.media.subtitle_format import build_ass, build_srt
 
     project = (
         await db.execute(select(Project).where(Project.id == project_id))
@@ -453,7 +453,7 @@ async def execute_merge_advanced(
                         continue
                     if clip.source_type == "bgm" and clip.source_ref:
                         # BGM：通过 source_ref 取本地文件路径，无需下载
-                        from app.services.project.bgm_library import get_bgm_path
+                        from app.services.media.bgm_library import get_bgm_path
                         bgm_path = get_bgm_path(clip.source_ref)
                         if bgm_path:
                             audio_paths.append(bgm_path)
@@ -857,7 +857,7 @@ async def _mix_audio_tracks(
     # 解析 BGM 文件路径（如果启用）
     bgm_path: Optional[str] = None
     if with_bgm and bgm_id:
-        from app.services.project.bgm_library import get_bgm_path
+        from app.services.media.bgm_library import get_bgm_path
         bgm_path = get_bgm_path(bgm_id)
 
     # 仅 BGM（无 TTS）

@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### 作品容器 + 媒体域独立 + 画布轻成片（融合子批次 1）
+
+- **作品容器**：新表 `works`（一部剧一条作品，聚合集画布/剪辑工程/实体库），端点 `/api/works` 增删改查（用户自助，非本人 403 / 不存在 404）；`canvas_workspaces` 新增 `work_id` 列（存量库需手动 ALTER，见模型文件注释），画布创建可挂靠作品（非本人作品 403）、列表可按作品筛选，删除作品自动解绑名下画布为自由画布；前端新增侧边栏「作品」入口 → 列表页（/works，卡片 + 新建/删除）→ 详情页（/works/{id}，集画布管理：新建一集 / 进入画布 / 删除）
+- **媒体域独立**：TTS provider（内置音色库 + Edge TTS 调用）、字幕格式（SRT/ASS 构建 + 默认样式）、BGM 曲库从 `services/project/` 抽至 `services/media/` 公共域，画布对项目域的反向依赖归位；`media_compose` 新增 `concat_with_xfade` 转场链公共实现
+- **画布轻成片增强**：compose 节点新增「转场」（叠化/溶解/擦除/推入，非 none 多段走 xfade 重编码链）、「画幅」（16:9/9:16/1:1）、「背景音乐」三组参数 UI；多段配音按视频段顺序拼接成单轨后与 BGM 混音（`audios` 多段，旧单段 `audio_url` 兼容保留）；TTS 音色下拉接入音色库（`GET /api/canvas/voices`）；字幕节点「生成提示词」输入接通后端（按风格/节奏等要求拆分）；BGM 曲库端点 `GET /api/canvas/bgms`
+- **测试**：pytest 新增作品端点 401/403/200 三态、画布挂靠作品归属校验、删除解绑用例；全量回归 206 过；vitest 414 绿 + vue-tsc 零错 + build 过
+
 ### 生成错误归类 + 上游调用记账 + 模型倍率定价（可靠性三件套）
 
 - **生成错误归类**：新增 `error_taxonomy` 13 类目唯一出处（每类绑定「能否手动重试」语义；`submission_uncertain` 提交结果不确定，禁止原地重试防重复扣费）；上游错误统一包装为携带状态码/请求 ID 的结构化异常后归类；任务失败落库 `generations.error_category/error_message`（存量库需手动 ALTER，见模型文件升级注释），任务状态与历史接口透出，提交失败响应携带 `category`；`GET /api/config` 下发 `error_categories` 语义表；前端生成页提交失败展示类目文案（可重试类保持原样），画布节点与批量创作表行级重试在不可重试类目上拦截提示，中英文案齐备

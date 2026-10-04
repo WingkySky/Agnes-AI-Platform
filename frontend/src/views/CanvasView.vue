@@ -51,6 +51,11 @@
           >
             {{ activeWorkspaceName }}
           </span>
+          <!-- 层级面包屑：作品 › 画布（作品为家，点作品名回详情） -->
+          <template v-if="activeWorkTitle && activeWorkId">
+            <span class="crumb-work" :title="t('works.workDetail')" @click="router.push(`/works/${activeWorkId}`)">{{ activeWorkTitle }}</span>
+            <span class="crumb-sep">›</span>
+          </template>
           <!-- 云端同步状态指示器（登录态落库后显示；anon 纯本地不显示） -->
           <span
             v-if="cloudSyncEnabled && saveStatusText"
@@ -77,11 +82,27 @@
           <button class="title-btn" :style="titleBtnStyle" :title="t('canvas.messages.exportJsonTip')" @click="handleExportJson">
             <Download :size="16" />
           </button>
+          <!-- 挂到作品（自由画布 → 选择归属） -->
+          <button v-if="!activeWorkId" class="title-btn" :style="titleBtnStyle" :title="t('canvas.work.bindWork')" @click="openBindDialog">
+            <Link2 :size="15" />
+          </button>
           <!-- 管理按钮：打开完整管理弹窗（批量操作、模板库） -->
           <button class="title-btn" :style="titleBtnStyle" :title="t('canvas.manager.title')" @click="managerVisible = true">
             <LayoutGrid :size="16" />
           </button>
         </div>
+
+        <!-- 挂到作品对话框 -->
+        <el-dialog v-model="bindVisible" :title="t('canvas.work.bindWork')" width="380">
+          <el-select v-model="bindWorkId" style="width: 100%">
+            <el-option :label="t('canvas.work.unbindOption')" :value="null" />
+            <el-option v-for="w in worksItems" :key="w.id" :label="w.title" :value="w.id" />
+          </el-select>
+          <template #footer>
+            <el-button @click="bindVisible = false">{{ t('common.cancel') }}</el-button>
+            <el-button type="primary" @click="submitBind">{{ t('common.confirm') }}</el-button>
+          </template>
+        </el-dialog>
         </template>
       </div>
 
@@ -516,17 +537,20 @@
  * ===================================================== */
 
 import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useConfirm } from '@/composables/useConfirm'
 import { useCopyText } from '@/composables/useCopyText'
-import { Download, Pencil, Plus, LayoutGrid } from 'lucide-vue-next'
+import { Download, Pencil, Plus, LayoutGrid, Link2 } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
 import { useDownload } from '@/composables/useDownload'
 import { useCanvasStore } from '@/stores/canvas'
 import { useUserStore } from '@/stores/user'
 import { useChatStore } from '@/stores/chat'
 import { canvasSaveStatus, flushSaveCanvas } from '@/lib/canvas-storage'
+import { listWorks } from '@/api/works'
+import type { WorkItem } from '@/api/works'
+import { setWorkspaceWork } from '@/api/canvasWorkspace'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useModelsStore } from '@/stores/models'
 import { usePreferencesStore } from '@/stores/preferences'
@@ -623,6 +647,42 @@ const agentPanelOpen = ref(false)
 const chatStore = useChatStore()
 const taskQueue = useTaskQueueStore()
 const route = useRoute()
+const router = useRouter()
+
+// ---------- 所属作品（轻容器）：画布页与作品详情互跳 ----------
+const worksMap = ref<Record<number, string>>({})
+const worksItems = ref<WorkItem[]>([])
+const activeWorkId = computed(() => store.activeWorkspace?.work_id ?? null)
+const activeWorkTitle = computed(() => (activeWorkId.value ? worksMap.value[activeWorkId.value] ?? null : null))
+
+function loadWorksMap(): void {
+  void listWorks()
+    .then((r) => {
+      worksItems.value = r.items
+      const m: Record<number, string> = {}
+      for (const w of r.items) m[w.id] = w.title
+      worksMap.value = m
+    })
+    .catch(() => {})
+}
+
+const bindVisible = ref(false)
+const bindWorkId = ref<number | null>(null)
+
+function openBindDialog(): void {
+  bindWorkId.value = activeWorkId.value
+  bindVisible.value = true
+}
+
+async function submitBind(): Promise<void> {
+  if (!store.activeWorkspaceId) return
+  const res = await setWorkspaceWork(store.activeWorkspaceId, bindWorkId.value)
+  const ws = store.workspaces.find((w) => w.id === res.id)
+  if (ws) ws.work_id = res.work_id
+  bindVisible.value = false
+  loadWorksMap()
+  ElMessage.success(t('canvas.work.bindDone'))
+}
 
 // ---------- 全局对话列表跳转进入：?workspace=…&session=<backendId> ----------
 /** 定位工作区并打开对应画布会话；工作区本地不存在（跨设备）时仅打开 Agent 会话 */
@@ -692,7 +752,8 @@ const titleBtnStyle = computed(() => ({
 
 // 画布管理操作
 function newCanvas() {
-  store.createWorkspace(`${t('canvas.canvas')} ${store.workspaces.length + 1}`)
+  // 新画布继承当前画布的作品归属（作品为家：作品内新建即归该作品）
+  store.createWorkspace(`${t('canvas.canvas')} ${store.workspaces.length + 1}`, activeWorkId.value)
   ElMessage.success(t('canvas.messages.canvasCreated'))
 }
 
@@ -1904,7 +1965,11 @@ async function runSubtitleNode(panel: CanvasPanel) {
   }
   const resultId = ensureRunResultNode(panel, 'text', 340, 240)
   try {
-    const res = await generateCanvasSubtitles({ text, max_chars: Number(panel.content?.max_chars) || 20 })
+    const res = await generateCanvasSubtitles({
+      text,
+      max_chars: Number(panel.content?.max_chars) || 20,
+      prompt: contentString(panel.content?.prompt) || undefined,
+    })
     store.updatePanel(resultId, { content: { content: res.srt, status: 'success' } })
     store.pushSnapshot()
     ElMessage.success(t('canvas.messages.subtitleDone'))
@@ -1914,15 +1979,16 @@ async function runSubtitleNode(panel: CanvasPanel) {
   }
 }
 
-/** compose 节点收集上游配音 URL：tts 节点 → 其结果音频节点 */
-function collectComposeAudioUrl(panel: CanvasPanel): string | null {
+/** compose 节点收集上游配音 URL 列表：tts 节点 → 其结果音频节点（按上游顺序，多段） */
+function collectComposeAudioUrls(panel: CanvasPanel): string[] {
+  const urls: string[] = []
   for (const tts of getUpstreamRunNodes(panel.id, ['tts'])) {
     const resultId = contentString(tts.content?.result_panel_id)
     const result = resultId ? store.panels.find((p) => p.id === resultId) : null
     const url = result?.content?.content
-    if (result?.type === 'audio' && url) return String(url)
+    if (result?.type === 'audio' && url) urls.push(String(url))
   }
-  return null
+  return urls
 }
 
 /** compose 节点收集上游字幕：subtitle 节点 → 其 SRT 文本节点 */
@@ -1950,9 +2016,12 @@ async function runComposeNode(panel: CanvasPanel) {
   try {
     const res = await composeCanvasVideos({
       video_urls: videos.map((p) => String(p.content?.content)),
-      audio_url: collectComposeAudioUrl(panel),
+      audios: collectComposeAudioUrls(panel),
       subtitles: withSubtitle ? collectComposeSubtitles(panel) : null,
       with_subtitle: withSubtitle,
+      bgm_id: contentString(panel.content?.bgm_id) || undefined,
+      aspect_ratio: contentString(panel.content?.aspect_ratio) || undefined,
+      transition: contentString(panel.content?.transition) || undefined,
     })
     const resultId = ensureRunResultNode(panel, 'video', 420, 236)
     store.updatePanel(resultId, { content: { content: res.video_url, status: 'success' } })
@@ -3808,6 +3877,8 @@ watch(() => store.activeWorkspaceId, () => {
 onMounted(async () => {
   // 从 localforage 加载持久化数据
   await store._hydrateFromStorage()
+  // 作品名映射（所属作品徽标展示用）
+  loadWorksMap()
   // 启动远端 revision 轻轮询（外部宿主增量写入感知：对话 Agent/CLI 落画布等）
   store.startRemotePoll()
   // 画布页激活：统一 Agent 挂载画布深度工具（离开画布页自动移除）
@@ -3817,6 +3888,11 @@ onMounted(async () => {
   // 如果没有工作区，创建默认画布
   if (!store.activeWorkspaceId && store.workspaces.length === 0) {
     store.createWorkspace(`${t('canvas.canvas')} 1`)
+  }
+  // 作品详情「进入画布」跳转：定位指定工作区
+  const targetWs = route.query.workspace
+  if (typeof targetWs === 'string' && targetWs && store.workspaces.some((w) => w.id === targetWs)) {
+    store.switchWorkspace(targetWs)
   }
   // 全局对话列表跳转进入：定位工作区并打开画布 Agent 会话
   await handleSessionJumpQuery()
@@ -3961,6 +4037,24 @@ async function handleUserLogout() {
 
 .canvas-selector:hover {
   background: var(--agnes-bg-hover);
+}
+
+/* 层级面包屑：作品 › 画布（作品名可点回详情） */
+.crumb-work {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.crumb-work:hover {
+  color: var(--el-color-primary);
+}
+.crumb-sep {
+  margin: 0 6px;
+  color: var(--el-text-color-placeholder);
 }
 
 /* 云端同步状态指示器（标题旁，登录态落库后显示） */

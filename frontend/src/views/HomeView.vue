@@ -37,7 +37,7 @@
         <el-button v-if="!userStore.isAuthenticated" type="primary" @click="router.push('/login')">
           {{ t('home.ctaLogin') }}
         </el-button>
-        <el-button v-else type="primary" @click="router.push('/images')">
+        <el-button v-else type="primary" @click="router.push('/works')">
           {{ t('home.ctaEnter') }}
         </el-button>
       </div>
@@ -122,12 +122,13 @@ const router = useRouter()
 const userStore = useUserStore()
 const themeStore = useThemeStore()
 
-/** 点击功能卡片：未登录跳登录页，已登录跳对应功能页 */
+/** 点击功能卡片：未登录跳登录页，已登录跳对应功能页（画布收敛到作品入口） */
 function goFeature(target: 'images' | 'videos' | 'chat' | 'canvas') {
+  const path = target === 'canvas' ? '/works' : `/${target}`
   if (userStore.isAuthenticated) {
-    router.push(`/${target}`)
+    router.push(path)
   } else {
-    router.push({ path: '/login', query: { redirect: `/${target}` } })
+    router.push({ path: '/login', query: { redirect: path } })
   }
 }
 </script>

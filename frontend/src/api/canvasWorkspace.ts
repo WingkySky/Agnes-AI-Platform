@@ -18,6 +18,7 @@ import client from './client'
 export interface WorkspaceBrief {
   id: string
   name: string
+  work_id: number | null
   revision: number
   created_at: string
   updated_at: string
@@ -42,11 +43,11 @@ export interface SnapshotDetail extends SnapshotBrief {
   data: Record<string, unknown>
 }
 
-export function listWorkspaces(): Promise<WorkspaceBrief[]> {
-  return client.get('/api/canvas/workspaces')
+export function listWorkspaces(params?: { work_id?: number }): Promise<WorkspaceBrief[]> {
+  return client.get('/api/canvas/workspaces', { params })
 }
 
-export function createWorkspace(payload: { id?: string; name: string; data?: Record<string, unknown> }): Promise<WorkspaceDetail> {
+export function createWorkspace(payload: { id?: string; name: string; work_id?: number; data?: Record<string, unknown> }): Promise<WorkspaceDetail> {
   return client.post('/api/canvas/workspaces', payload)
 }
 
@@ -61,6 +62,11 @@ export function saveWorkspace(id: string, payload: { data: Record<string, unknow
 
 export function deleteWorkspace(id: string): Promise<void> {
   return client.delete(`/api/canvas/workspaces/${id}`)
+}
+
+/** 挂靠/解绑作品（work_id=null 解绑为自由画布） */
+export function setWorkspaceWork(id: string, workId: number | null): Promise<{ id: string; work_id: number | null }> {
+  return client.patch(`/api/canvas/workspaces/${id}`, { work_id: workId })
 }
 
 export function createSnapshot(id: string, kind: 'manual' | 'pre_danger', name?: string): Promise<SnapshotBrief> {

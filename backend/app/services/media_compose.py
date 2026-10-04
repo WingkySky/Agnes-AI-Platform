@@ -371,3 +371,50 @@ async def ffmpeg_final_composite(
     cmd.append(output_path)
 
     await run_ffmpeg(cmd, timeout=900, error_label="ffmpeg 最终合成")
+
+
+async def concat_with_xfade(
+    normalized_paths: List[str],
+    output_path: str,
+    transition: str = "fade",
+    transition_duration: float = 0.5,
+) -> None:
+    """
+    已归一化片段的 xfade 转场拼接（泛化自 merge_service._concat_videos_with_xfade 的转场段）。
+
+    输入必须是同分辨率/帧率/SAR 的归一化产物；多段转场类型统一。
+    offset = 累积时长 - 转场时长（转场期间两段重叠，累积时长随之收缩）。
+    """
+    if not normalized_paths:
+        raise ValueError("无视频片段可拼接")
+    if len(normalized_paths) == 1:
+        shutil.copyfile(normalized_paths[0], output_path)
+        return
+
+    durations = await probe_durations(normalized_paths)
+
+    filter_parts: List[str] = []
+    prev_label = "0:v"
+    accumulated = 0.0
+    for i in range(1, len(normalized_paths)):
+        accumulated += durations[i - 1]
+        offset = max(0.0, accumulated - transition_duration)
+        accumulated = offset
+
+        out_label = f"[v{i:02d}]"
+        filter_parts.append(
+            f"[{prev_label}][{i}:v]xfade=transition={transition}"
+            f":duration={transition_duration}:offset={offset}{out_label}"
+        )
+        prev_label = out_label.lstrip("[").rstrip("]")
+
+    cmd = [
+        "ffmpeg", "-y",
+        *sum([["-i", p] for p in normalized_paths], []),
+        "-filter_complex", ";".join(filter_parts),
+        "-map", f"[{prev_label}]",
+        "-c:v", "libx264", "-preset", "medium", "-crf", "23",
+        "-an",
+        output_path,
+    ]
+    await run_ffmpeg(cmd, timeout=900, error_label="ffmpeg 视频拼接（xfade 转场）")

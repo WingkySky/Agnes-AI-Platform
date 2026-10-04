@@ -71,19 +71,22 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/CanvasView.vue'),
     meta: { titleKey: 'router.canvas', requiresAuth: true }
   },
-  // ---------- 项目制创作 ----------
+  // ---------- 作品（轻容器）：集画布 / 剪辑工程 / 实体库 ----------
   {
-    path: '/projects',
-    name: 'projects',
-    component: () => import('@/views/projects/ProjectListView.vue'),
-    meta: { titleKey: 'router.projects', requiresAuth: true }
+    path: '/works',
+    name: 'works',
+    component: () => import('@/views/works/WorksView.vue'),
+    meta: { titleKey: 'router.works', requiresAuth: true }
   },
   {
-    path: '/projects/:id',
-    name: 'project-detail',
-    component: () => import('@/views/projects/ProjectDetailView.vue'),
-    meta: { titleKey: 'router.projectDetail', requiresAuth: true }
+    path: '/works/:id',
+    name: 'work-detail',
+    component: () => import('@/views/works/WorksDetailView.vue'),
+    meta: { titleKey: 'router.workDetail', requiresAuth: true }
   },
+  // ---------- 项目制创作（融合退役：入口下线，路由重定向到作品页；数据表子批次 4 清理） ----------
+  { path: '/projects', redirect: '/works' },
+  { path: '/projects/:id', redirect: '/works' },
   // ---------- 3D 场景导演台：用 3D 空间布局生成可控的镜头语言 prompt ----------
   {
     path: '/scene-editor',
