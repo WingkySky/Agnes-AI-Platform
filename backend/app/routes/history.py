@@ -190,7 +190,24 @@ async def get_history(
     items = result.scalars().all()
 
     # 转换为响应对象
-    records = [GenerationRecord.model_validate(item) for item in items]
+    # 统一资产层：批量解析成功记录对应的资产行 id（「查看资产」跳转）
+    asset_map: dict = {}
+    gen_ids = [i.id for i in items if i.status == "success"]
+    if gen_ids:
+        from app.models.asset import Asset
+        asset_rows = (
+            await db.scalars(
+                select(Asset).where(Asset.source_generation_id.in_(gen_ids))
+            )
+        ).all()
+        for a in asset_rows:
+            if a.source_generation_id and a.source_generation_id not in asset_map:
+                asset_map[a.source_generation_id] = a.id
+    records = []
+    for item in items:
+        rec = GenerationRecord.model_validate(item)
+        rec.asset_id = asset_map.get(item.id)
+        records.append(rec)
 
     return ok(data=HistoryListResponse(
         total=total,

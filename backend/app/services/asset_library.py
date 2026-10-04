@@ -238,3 +238,43 @@ async def list_assets(
         "page_size": page_size,
         "items": [asset_to_dict(a) for a in rows],
     }
+
+
+async def backfill_asset_storage(db: AsyncSession, *, limit: int = 200) -> dict:
+    """
+    存量资产补课（一次性；管理员触发）：
+    - kind（media_type）为空：按 type 推导（clip/final → video，其余 → image）
+    - storage_key 为空：/uploads/ 本地地址直推导；上游 http(s) URL 下载转存（失败跳过留待重试）
+    返回 {processed, migrated, remaining}。幂等：只处理 storage_key 为空的行。
+    """
+    rows = (
+        await db.scalars(
+            select(Asset)
+            .where(Asset.storage_key.is_(None))
+            .order_by(Asset.id.asc())
+            .limit(limit)
+        )
+    ).all()
+    migrated = 0
+    for asset in rows:
+        if not asset.kind:
+            asset.kind = "video" if asset.type in ("clip", "final") else "image"
+        url = asset.asset_url
+        if url and url.startswith("/uploads/"):
+            asset.storage_key = url.removeprefix("/uploads/")
+        elif url and url.startswith(("http://", "https://")):
+            try:
+                from app.services.media_storage import ingest_url
+                ingested = await ingest_url(url, media_type=asset.kind or "image")
+                asset.asset_url = ingested["url"]
+                asset.storage_key = ingested["storage_key"]
+                migrated += 1
+            except Exception:  # noqa: BLE001 — 单条转存失败留待下次重试
+                continue
+    await db.commit()
+    remaining = (
+        await db.scalars(
+            select(func.count()).select_from(Asset).where(Asset.storage_key.is_(None))
+        )
+    ).first() or 0
+    return {"processed": len(rows), "migrated": migrated, "remaining": int(remaining)}

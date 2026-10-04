@@ -245,6 +245,8 @@ class GenerationRecord(BaseModel):
     source: str = "independent"                # independent / canvas / project
     container_type: Optional[str] = None       # project / canvas_script / canvas
     container_id: Optional[str] = None
+    # 统一资产层：成功生成自动入库后的资产行 id（前端「查看资产」跳转）
+    asset_id: Optional[int] = None
 
     class Config:
         from_attributes = True    # Pydantic v2 对应原来的 orm_mode

@@ -69,3 +69,17 @@ async def list_assets(
         page_size=page_size,
     )
     return ok(data=data)
+
+
+@router.post("/backfill", summary="存量资产补课（storage_key/media_type 回填 + 上游 URL 转存；仅管理员）")
+async def backfill_assets(
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+    limit: int = Query(200, ge=1, le=1000, description="单次处理上限"),
+):
+    """一次性补课：为存量资产行回填 media_type 与 storage_key（上游 URL 转存），幂等可重复调用"""
+    if not current_user.is_admin and current_user.role not in ("admin", "moderator"):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="仅管理员/审核员可访问")
+    data = await asset_library.backfill_asset_storage(db, limit=limit)
+    return ok(data=data)

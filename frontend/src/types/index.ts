@@ -157,6 +157,8 @@ export interface GenerationRecord {
   source?: 'independent' | 'canvas' | 'project' | string
   container_type?: string | null
   container_id?: string | null
+  /** 统一资产层：成功生成自动入库后的资产行 id（「查看资产」跳转） */
+  asset_id?: number | null
 }
 
 /** 历史列表响应 — 对齐 HistoryListResponse */

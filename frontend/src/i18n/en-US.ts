@@ -417,6 +417,7 @@ const enUS = {
   history: {
     title: 'Generation History',
     desc: 'Browse all images and videos you have generated on this platform. Filter by type.',
+    viewAsset: 'View asset',
     all: 'All',
     image: 'Images',
     video: 'Videos',

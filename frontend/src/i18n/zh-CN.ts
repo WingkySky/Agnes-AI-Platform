@@ -416,6 +416,7 @@ const zhCN = {
   history: {
     title: '生成历史',
     desc: '查看你在本平台生成过的所有图片与视频。可按类型筛选。',
+    viewAsset: '查看资产',
     all: '全部',
     image: '图片',
     video: '视频',

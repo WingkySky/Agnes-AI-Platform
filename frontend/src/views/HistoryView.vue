@@ -198,6 +198,14 @@
               :title="t('history.download')">
               <el-icon size="16"><Download /></el-icon>
             </div>
+            <!-- 查看资产：成功生成已自动入库（统一资产层），跳转资产库 -->
+            <div
+              v-if="item.asset_id"
+              class="card-action-btn"
+              @click.stop="router.push('/assets')"
+              :title="t('history.viewAsset')">
+              <el-icon size="16"><Collection /></el-icon>
+            </div>
             <!-- 后期处理-调色：仅视频项显示，打开 PostProcessDialog -->
             <div
               v-if="item.type === 'video'"
@@ -530,7 +538,7 @@ const page = ref(1)
 const pageSize = ref(12)
 const filterType = ref('all')
 // 来源筛选：默认仅独立生成（画布/项目生成已自动归档进资产库）
-const filterSource = ref('independent')
+const filterSource = ref('all')
 
 const detailVisible = ref(false)
 const deleteVisible = ref(false)
