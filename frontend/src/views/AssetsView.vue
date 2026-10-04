@@ -1,9 +1,8 @@
 <!-- =====================================================
      资产库页面 AssetsView（子批次 2a 统一入口：单池）
-     - 一个资产池：生成结果（自动入库）/ 上传素材 / 合成产物 / 归档记录 全在此
-     - 筛选：媒体类型 / 来源 / 所属作品 / 关键词；分页加载
-     - 卡片操作：预览 / 用于生成 / 分享到广场 / 编辑 / 删除
-     - 「我的资产 / 创作单元」两池已合并：container 降级为来源维度
+     - 呈现方式复用生成历史页范式：卡片悬浮快捷钮 / 视频悬停播放 / 点击查看窗口 / 分页
+     - 一个资产池：生成结果（自动入库）/ 上传素材 / 合成产物 / 归档记录
+     - 筛选：媒体类型 / 来源 / 所属作品 / 关键词（服务端分页）
      ===================================================== -->
 
 <template>
@@ -24,7 +23,7 @@
 
     <!-- 筛选条 -->
     <div class="filter-bar">
-      <el-radio-group v-model="filters.media_type" class="type-tabs" @change="reload">
+      <el-radio-group v-model="filters.media_type" @change="reload">
         <el-radio-button value="">{{ t('assets.mediaType.all') }}</el-radio-button>
         <el-radio-button value="image">{{ t('assets.mediaType.image') }}</el-radio-button>
         <el-radio-button value="video">{{ t('assets.mediaType.video') }}</el-radio-button>
@@ -34,7 +33,6 @@
         <el-option v-for="s in SOURCE_OPTIONS" :key="s.value" :label="t(s.labelKey)" :value="s.value" />
       </el-select>
       <el-select v-model="filters.work_id" clearable :placeholder="t('assets.filter.work')" class="f-item" @change="reload">
-        <el-option :label="t('assets.filter.allWork')" :value="-1" />
         <el-option v-for="w in works" :key="w.id" :label="w.title" :value="w.id" />
       </el-select>
       <el-input
@@ -56,96 +54,145 @@
       <el-empty v-if="!loading && items.length === 0" :description="t('assets.standaloneEmpty')" />
       <div v-else class="asset-grid">
         <div v-for="a in items" :key="a.id" class="asset-card">
-          <div class="card-cover" @click="openPreview(a)">
+          <div class="card-preview" @click="handleCardClick(a)">
+            <!-- 图片：水印图组件 -->
+            <ImageWithWatermark
+              v-if="a.media_type !== 'video' && a.media_type !== 'audio' && a.asset_url"
+              :src="a.asset_url"
+              :alt="a.name"
+              loading="lazy"
+              fit="cover"
+              class="card-media"
+            />
+            <!-- 视频：原生 video（首帧即缩略图，悬停播放） -->
             <video
-              v-if="a.media_type === 'video' && coverUrl(a)"
-              :src="coverUrl(a) || ''"
-              class="cover-media"
+              v-else-if="a.media_type === 'video' && a.asset_url"
+              :src="a.asset_url"
+              class="card-media"
               muted
               playsinline
               preload="metadata"
+              @mouseenter="playCardVideo($event)"
+              @mouseleave="pauseCardVideo($event)"
+              @click.stop="openDetail(a)"
             />
-            <ImageWithWatermark v-else-if="coverUrl(a)" :src="coverUrl(a) || ''" :alt="a.name" />
-            <div v-else class="cover-placeholder">
-              <el-icon><Picture /></el-icon>
+            <!-- 音频：占位图标 -->
+            <div v-else-if="a.media_type === 'audio'" class="media-placeholder">
+              <el-icon :size="40"><Headset /></el-icon>
             </div>
-          </div>
-          <div class="card-meta">
-            <span class="card-name" :title="a.name">{{ a.name }}</span>
-            <div class="card-tags">
-              <el-tag size="small" type="info">{{ typeLabel(a.type) }}</el-tag>
-              <el-tag size="small" type="warning">{{ sourceLabel(a.source) }}</el-tag>
-              <el-tag v-if="workTitleOf(a.work_id)" size="small">{{ workTitleOf(a.work_id) }}</el-tag>
+            <div v-else class="media-placeholder">
+              <el-icon :size="40"><Picture /></el-icon>
             </div>
-          </div>
-          <div class="card-actions">
-            <el-button size="small" text @click="openPreview(a)">
-              <el-icon><View /></el-icon>{{ t('assets.preview') }}
-            </el-button>
-            <el-button size="small" text type="primary" @click="useForGeneration(a)">
-              <el-icon><MagicStick /></el-icon>{{ t('assets.useInGeneration') }}
-            </el-button>
-            <el-button size="small" text @click="openEdit(a)">
-              <el-icon><EditPen /></el-icon>{{ t('common.edit') }}
-            </el-button>
-            <el-tooltip
-              v-if="a.moderation_status === 'rejected'"
-              :content="t('assets.blockedTip')"
-              placement="top"
-            >
-              <span class="share-switch blocked">
-                <el-tag size="small" type="danger">{{ t('assets.blocked') }}</el-tag>
-              </span>
-            </el-tooltip>
-            <span v-else class="share-switch">
+
+            <!-- 类型 / 来源 / 作品标签 -->
+            <div class="type-badge" :class="a.media_type">
+              {{ mediaLabel(a.media_type) }}
+            </div>
+            <div v-if="a.is_public" class="public-badge">
+              <el-icon size="10"><Share /></el-icon>
+              {{ t('plaza.isPublic') }}
+            </div>
+
+            <!-- 悬浮快捷钮：用于生成 / 编辑 / 下载 / 分享 / 删除 -->
+            <div class="card-actions" @click.stop>
+              <div class="card-action-btn" :title="t('assets.useInGeneration')" @click.stop="useForGeneration(a)">
+                <el-icon size="16"><MagicStick /></el-icon>
+              </div>
+              <div class="card-action-btn" :title="t('common.edit')" @click.stop="openEdit(a)">
+                <el-icon size="16"><EditPen /></el-icon>
+              </div>
+              <div class="card-action-btn" :title="t('history.download')" @click.stop="downloadAsset(a)">
+                <el-icon size="16"><Download /></el-icon>
+              </div>
               <el-switch
                 :model-value="a.is_public"
                 :loading="sharingIds.has(a.id)"
                 :disabled="sharingIds.has(a.id)"
-                inline-prompt
-                :active-text="t('assets.shareToPlaza')"
-                :inactive-text="t('assets.unshare')"
+                size="small"
                 @change="(v: boolean) => toggleShare(a, v)"
               />
-              <el-tag v-if="a.is_public && a.moderation_status === 'pending'" size="small" type="warning">
-                {{ t('assets.moderating') }}
-              </el-tag>
-            </span>
-            <el-button size="small" text type="danger" @click="removeAsset(a)">
+              <div class="card-action-btn" :title="t('common.delete')" @click.stop="removeAsset(a)">
+                <el-icon size="16"><Delete /></el-icon>
+              </div>
+            </div>
+          </div>
+
+          <div class="card-info">
+            <span class="card-name" :title="a.name">{{ a.name }}</span>
+            <span class="card-time">{{ formatTime(a.updated_at) }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 分页 -->
+      <div v-if="total > 0" class="pagination-wrap">
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="pageSize"
+          :page-sizes="[12, 24, 48, 100]"
+          :total="total"
+          layout="total, sizes, prev, pager, next"
+          background
+          @size-change="reload"
+          @current-change="load"
+        />
+      </div>
+    </div>
+
+    <!-- 详情查看窗口（点击卡片进入） -->
+    <el-dialog
+      v-model="detailVisible"
+      :title="detailItem?.name || t('assets.title')"
+      width="70%"
+      top="5vh"
+      destroy-on-close
+    >
+      <div v-if="detailItem" class="detail-content">
+        <div class="detail-media">
+          <ImageWithWatermark
+            v-if="detailItem.media_type !== 'video' && detailItem.media_type !== 'audio' && detailItem.asset_url"
+            :src="detailItem.asset_url"
+            :alt="detailItem.name"
+            :img-class="'detail-image'"
+            fit="contain"
+            style="cursor: zoom-in"
+            @click="openImageViewer(detailItem)"
+          />
+          <video
+            v-else-if="detailItem.media_type === 'video' && detailItem.asset_url"
+            :src="detailItem.asset_url"
+            controls
+            playsinline
+            preload="metadata"
+            class="detail-video"
+          />
+          <audio
+            v-else-if="detailItem.media_type === 'audio' && detailItem.asset_url"
+            :src="detailItem.asset_url"
+            controls
+            class="detail-audio"
+          />
+          <el-empty v-else :description="t('assets.noPreview')" />
+        </div>
+        <div class="detail-meta">
+          <div class="detail-row"><span class="detail-label">{{ t('assets.filter.source') }}</span><span>{{ sourceLabel(detailItem.source) }}</span></div>
+          <div class="detail-row"><span class="detail-label">{{ t('assets.filter.work') }}</span><span>{{ workTitleOf(detailItem.work_id) || '-' }}</span></div>
+          <div class="detail-row"><span class="detail-label">{{ t('assets.type.label') }}</span><span>{{ typeLabel(detailItem.type) }}</span></div>
+          <div class="detail-row">
+            <span class="detail-label">{{ t('common.delete') }}</span>
+            <el-button size="small" type="danger" @click="removeAsset(detailItem); detailVisible = false">
               <el-icon><Delete /></el-icon>{{ t('common.delete') }}
             </el-button>
           </div>
         </div>
       </div>
-      <div v-if="items.length < total" class="load-more">
-        <el-button :loading="loading" @click="loadMore">{{ t('assets.loadMore') }}</el-button>
-      </div>
-    </div>
-
-    <!-- 预览弹窗 -->
-    <el-dialog
-      v-model="previewVisible"
-      :title="previewItem?.name"
-      width="min(90vw, 880px)"
-      align-center
-    >
-      <div class="preview-body">
-        <video
-          v-if="previewItem && previewItem.media_type === 'video' && coverUrl(previewItem)"
-          :src="coverUrl(previewItem) || ''"
-          class="preview-video"
-          controls
-          playsinline
-        />
-        <el-image
-          v-else-if="previewItem && coverUrl(previewItem)"
-          :src="coverUrl(previewItem) || ''"
-          fit="contain"
-          class="preview-image"
-        />
-        <el-empty v-else :description="t('assets.noPreview')" />
-      </div>
     </el-dialog>
+
+    <!-- 图片查看器 -->
+    <ImageViewer
+      v-model:visible="viewerVisible"
+      :url="viewerUrl"
+    />
 
     <!-- 资产创建/编辑弹窗 -->
     <AssetDetailModal
@@ -163,11 +210,12 @@ import { useI18n } from '@/i18n'
 import { ElMessage, ElImage } from 'element-plus'
 import { useConfirm } from '@/composables/useConfirm'
 import {
-  Search, Plus, Picture, View, Delete, MagicStick, EditPen,
+  Search, Plus, Picture, View, Delete, MagicStick, EditPen, Headset, Share,
 } from '@element-plus/icons-vue'
 import { useAssetStore } from '@/stores/asset'
 import AssetDetailModal from '@/components/pipeline/AssetDetailModal.vue'
 import ImageWithWatermark from '@/components/ImageWithWatermark.vue'
+import ImageViewer from '@/components/ImageViewer.vue'
 import { listAssets, type UnifiedAsset } from '@/api/assets'
 import { listWorks, type WorkItem } from '@/api/works'
 import { updateAssetShare, deleteAsset } from '@/api/pipeline'
@@ -189,7 +237,7 @@ const loading = ref(false)
 const items = ref<UnifiedAsset[]>([])
 const total = ref(0)
 const page = ref(1)
-const PAGE_SIZE = 60
+const pageSize = ref(24)
 const works = ref<WorkItem[]>([])
 const filters = reactive<{ media_type: string; source: string | null; work_id: number | null; keyword: string }>({
   media_type: '',
@@ -200,8 +248,10 @@ const filters = reactive<{ media_type: string; source: string | null; work_id: n
 const modalVisible = ref(false)
 const currentAssetId = ref<number | null>(null)
 const sharingIds = ref<Set<number>>(new Set())
-const previewVisible = ref(false)
-const previewItem = ref<UnifiedAsset | null>(null)
+const detailVisible = ref(false)
+const detailItem = ref<UnifiedAsset | null>(null)
+const viewerVisible = ref(false)
+const viewerUrl = ref('')
 
 const TYPE_LABELS: Record<string, string> = {
   character: '角色',
@@ -222,14 +272,22 @@ function sourceLabel(value: string | null): string {
   return opt ? t(opt.labelKey) : (value || '-')
 }
 
-function coverUrl(a: UnifiedAsset): string | null {
-  return a.asset_url || a.thumb_url || (a.reference_images && a.reference_images[0]) || null
+function mediaLabel(mediaType: string | null): string {
+  const map: Record<string, string> = {
+    image: t('assets.mediaType.image'),
+    video: t('assets.mediaType.video'),
+    audio: t('assets.mediaType.audio'),
+  }
+  return map[mediaType ?? ''] || t('assets.mediaType.all')
 }
 
-/** 作品标题（作品标记展示） */
 function workTitleOf(workId: number | null): string | null {
   if (workId == null) return null
   return works.value.find((w) => w.id === workId)?.title ?? null
+}
+
+function formatTime(value: string | null): string {
+  return value ? value.replace('T', ' ').slice(0, 16) : '-'
 }
 
 // ---------- 数据加载 ----------
@@ -239,13 +297,12 @@ async function load(): Promise<void> {
     const data = await listAssets({
       media_type: filters.media_type || undefined,
       source: filters.source || undefined,
-      work_id: filters.work_id === null ? undefined : (filters.work_id === -1 ? undefined : filters.work_id),
+      work_id: filters.work_id ?? undefined,
       keyword: filters.keyword.trim() || undefined,
       page: page.value,
-      page_size: PAGE_SIZE,
+      page_size: pageSize.value,
     })
-    if (page.value === 1) items.value = data.items
-    else items.value = items.value.concat(data.items)
+    items.value = data.items
     total.value = data.total
   } catch (e: unknown) {
     const err = e as { message?: string }
@@ -260,28 +317,49 @@ function reload(): void {
   void load()
 }
 
-function loadMore(): void {
-  page.value += 1
-  void load()
-}
-
 async function loadWorks(): Promise<void> {
   try {
     works.value = (await listWorks()).items
   } catch (_e) { /* 筛选项加载失败不阻塞列表 */ }
 }
 
-// 关键词防抖（300ms）
 let keywordTimer: ReturnType<typeof setTimeout> | null = null
 watch(() => filters.keyword, () => {
   if (keywordTimer) clearTimeout(keywordTimer)
   keywordTimer = setTimeout(reload, 300)
 })
 
-// ---------- 交互 ----------
-function openPreview(a: UnifiedAsset): void {
-  previewItem.value = a
-  previewVisible.value = true
+// ---------- 卡片交互（历史同款） ----------
+function handleCardClick(a: UnifiedAsset): void {
+  if (a.media_type === 'image' && a.asset_url) {
+    openImageViewer(a)
+    return
+  }
+  openDetail(a)
+}
+
+/** 视频卡片悬停播放 / 离开复位 */
+function playCardVideo(e: MouseEvent): void {
+  (e.currentTarget as HTMLVideoElement)?.play().catch(() => {})
+}
+
+function pauseCardVideo(e: MouseEvent): void {
+  const el = e.currentTarget as HTMLVideoElement
+  if (el) {
+    el.pause()
+    try { el.currentTime = 0 } catch (_e) { /* ignore */ }
+  }
+}
+
+function openDetail(a: UnifiedAsset): void {
+  detailItem.value = a
+  detailVisible.value = true
+}
+
+function openImageViewer(a: UnifiedAsset): void {
+  if (!a.asset_url) return
+  viewerUrl.value = a.asset_url
+  viewerVisible.value = true
 }
 
 async function toggleShare(a: UnifiedAsset, val: boolean): Promise<void> {
@@ -311,6 +389,26 @@ async function removeAsset(a: UnifiedAsset): Promise<void> {
   } catch (e: unknown) {
     const err = e as { message?: string }
     ElMessage.error(err.message || t('assets.deleteFailed'))
+  }
+}
+
+/** 下载：fetch 资产地址（/uploads 与公开对象存储均可匿名读）→ blob 触发保存 */
+async function downloadAsset(a: UnifiedAsset): Promise<void> {
+  if (!a.asset_url) return
+  try {
+    const resp = await fetch(a.asset_url)
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    const blob = await resp.blob()
+    const objUrl = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = objUrl
+    link.download = a.name || `asset-${a.id}`
+    link.click()
+    URL.revokeObjectURL(objUrl)
+  } catch (e: unknown) {
+    ElMessage.error(t('assets.loadFailed'))
+    // eslint-disable-next-line no-console
+    console.warn('[assets] 下载失败:', e)
   }
 }
 
@@ -384,6 +482,7 @@ onMounted(() => {
   width: 220px;
 }
 
+/* 资产网格（历史卡片同款结构） */
 .asset-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
@@ -395,65 +494,168 @@ onMounted(() => {
   border-radius: 10px;
   overflow: hidden;
   background: var(--el-bg-color);
+  cursor: pointer;
+  transition: box-shadow 0.2s;
 }
 
-.card-cover {
-  height: 150px;
+.asset-card:hover {
+  box-shadow: var(--el-box-shadow-light);
+}
+
+.card-preview {
+  position: relative;
+  height: 170px;
   background: var(--el-fill-color-light);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
   overflow: hidden;
 }
 
-.cover-media {
+.card-media {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  display: block;
 }
 
-.cover-placeholder {
+.media-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: var(--el-text-color-placeholder);
-  font-size: 32px;
 }
 
-.card-meta {
-  padding: 10px 12px 6px;
+.type-badge {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+}
+
+.public-badge {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  font-size: 11px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  color: var(--el-color-success);
+}
+
+/* 悬浮快捷钮（cover 内，hover 展示） */
+.card-actions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px 8px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.65));
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.asset-card:hover .card-actions {
+  opacity: 1;
+}
+
+.card-action-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: #fff;
+  cursor: pointer;
+}
+
+.card-action-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.card-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px 10px;
 }
 
 .card-name {
   font-weight: 600;
-  display: block;
+  font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.card-tags {
-  display: flex;
-  gap: 6px;
-  margin-top: 6px;
-  flex-wrap: wrap;
+.card-time {
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
+  white-space: nowrap;
 }
 
-.card-actions {
-  padding: 4px 8px 10px;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  flex-wrap: wrap;
-}
-
-.share-switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.load-more {
+.pagination-wrap {
   display: flex;
   justify-content: center;
   padding: 20px 0;
+}
+
+/* 详情查看窗口 */
+.detail-content {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.detail-media {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+}
+
+.detail-image {
+  max-width: 100%;
+  max-height: 65vh;
+}
+
+.detail-video {
+  max-width: 100%;
+  max-height: 65vh;
+}
+
+.detail-audio {
+  width: 100%;
+}
+
+.detail-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.detail-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.detail-label {
+  color: var(--el-text-color-secondary);
+  min-width: 60px;
 }
 </style>
