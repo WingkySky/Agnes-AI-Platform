@@ -294,6 +294,7 @@
 
       <!-- ============ 素材库浮动面板 ============ -->
       <CanvasAssetLibrary
+        :work-id="store.activeWorkspace?.work_id ?? undefined"
         v-if="showAssetLibrary"
         :theme="store.canvasTheme"
         @close="showAssetLibrary = false"

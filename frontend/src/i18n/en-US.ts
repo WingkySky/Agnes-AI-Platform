@@ -2418,6 +2418,8 @@ const enUS = {
     // Asset library panel
     assetLibrary: {
       title: 'Asset Library',
+      scopeWork: 'This Work',
+      scopeAll: 'All Assets',
       historyTab: 'Generation History',
       localTab: 'My Assets',
       filters: {

@@ -2402,6 +2402,8 @@ const zhCN = {
     // 素材库面板
     assetLibrary: {
       title: '素材库',
+      scopeWork: '本作品',
+      scopeAll: '全部素材',
       historyTab: '生成历史',
       localTab: '我的素材',
       filters: {

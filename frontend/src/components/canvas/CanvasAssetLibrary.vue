@@ -25,28 +25,28 @@
     <div class="asset-header">
       <div class="asset-title-wrap">
         <span class="asset-title">{{ t('canvas.assetLibrary.title') }}</span>
-        <span class="asset-subtitle">{{ activeTab === 'history' ? t('canvas.assetLibrary.historyTab') : t('canvas.assetLibrary.localTab') }}</span>
+        <span class="asset-subtitle">{{ scope === 'work' ? t('canvas.assetLibrary.scopeWork') : t('canvas.assetLibrary.scopeAll') }}</span>
       </div>
       <button class="asset-close" @click="$emit('close')">
         <X :size="18" />
       </button>
     </div>
 
-    <!-- 来源 Tab 切换 -->
+    <!-- 范围切换：本作品 / 全部 -->
     <div class="asset-tabs">
       <button
-        :class="['asset-tab', { active: activeTab === 'history' }]"
-        @click="switchTab('history')"
-      >
-        <History :size="14" />
-        <span>{{ t('canvas.assetLibrary.historyTab') }}</span>
-      </button>
-      <button
-        :class="['asset-tab', { active: activeTab === 'local' }]"
-        @click="switchTab('local')"
+        :class="['asset-tab', { active: scope === 'work' }]"
+        @click="setScope('work')"
       >
         <FolderOpen :size="14" />
-        <span>{{ t('canvas.assetLibrary.localTab') }}</span>
+        <span>{{ t('canvas.assetLibrary.scopeWork') }}</span>
+      </button>
+      <button
+        :class="['asset-tab', { active: scope === 'all' }]"
+        @click="setScope('all')"
+      >
+        <History :size="14" />
+        <span>{{ t('canvas.assetLibrary.scopeAll') }}</span>
       </button>
     </div>
 
@@ -62,9 +62,8 @@
           {{ f.label }}
         </button>
       </div>
-      <!-- 本地素材：上传按钮 -->
+      <!-- 素材入库：上传按钮 -->
       <button
-        v-if="activeTab === 'local'"
         class="asset-upload-btn"
         @click="triggerUpload"
       >
@@ -85,7 +84,7 @@
       <div v-else-if="displayItems.length === 0" class="asset-empty">
         <Inbox :size="40" />
         <span>{{ emptyText }}</span>
-        <span v-if="activeTab === 'local'" class="asset-empty-hint">
+        <span v-if="useLocalFallback" class="asset-empty-hint">
           {{ t('canvas.assetLibrary.emptyHint') }}
         </span>
       </div>
@@ -111,21 +110,16 @@
             :alt="item.name"
             loading="lazy"
           />
-          <!-- 视频：首帧缩略图 + hover 时 GIF 动图覆盖 -->
+          <!-- 视频：首帧缩略图（thumb_url 或视频本身） -->
           <template v-else-if="item.type === 'video'">
-            <img
-              v-if="item.thumbUrl"
-              :src="item.thumbUrl"
+            <video
+              v-if="item.url"
+              :src="item.url"
               :alt="item.name"
-              loading="lazy"
               class="video-static-thumb"
-            />
-            <!-- hover 时加载 GIF 动图预览 -->
-            <img
-              v-if="previewItem?.uid === item.uid && videoPreviews[item.id]"
-              :src="videoPreviews[item.id]"
-              :alt="item.name"
-              class="video-gif-preview"
+              muted
+              playsinline
+              preload="metadata"
             />
           </template>
           <span v-else class="card-thumb-icon">
@@ -135,44 +129,43 @@
           <span v-if="item.type === 'video'" class="card-play-icon">
             <Play :size="18" />
           </span>
-          <!-- 来源标签 -->
+          <!-- 来源标签（生成/上传/合成/归档） -->
           <span class="card-source-badge" :class="item.source">
-            {{ item.source === 'history' ? t('canvas.assetLibrary.source.history') : t('canvas.assetLibrary.source.local') }}
+            {{ sourceLabel(item.source) }}
           </span>
           <!-- 类型标签 -->
           <span class="card-type-badge">{{ typeLabel(item.type) }}</span>
         </div>
         <!-- 名称 -->
         <div class="card-name">{{ item.name }}</div>
-        <!-- 删除按钮（仅本地素材） -->
+        <!-- 删除按钮（统一资产：本人皆可删） -->
         <button
-          v-if="item.source === 'local'"
           class="card-delete"
           :title="t('canvas.assetLibrary.delete')"
-          @click.stop="$emit('delete-asset', item.id)"
+          @click.stop="removeUnified(item)"
         >
           <Trash2 :size="14" />
         </button>
       </div>
     </div>
 
-    <!-- 分页栏（仅历史记录） -->
-    <div v-if="activeTab === 'history'" class="asset-pager">
+    <!-- 分页栏 -->
+    <div class="asset-pager">
       <button
         class="pager-btn"
-        :disabled="historyPage <= 1 || loading"
-        @click="goPage(historyPage - 1)"
+        :disabled="assetPage <= 1 || loading"
+        @click="goPage(assetPage - 1)"
       >
         <ChevronLeft :size="16" />
       </button>
       <span class="pager-info">
-        {{ historyTotal > 0 ? `${historyPage} / ${totalPages}` : '0 / 0' }}
-        <span class="pager-total">{{ t('canvas.assetLibrary.pagerTotal', { n: historyTotal }) }}</span>
+        {{ assetTotal > 0 ? `${assetPage} / ${totalPages}` : '0 / 0' }}
+        <span class="pager-total">{{ t('canvas.assetLibrary.pagerTotal', { n: assetTotal }) }}</span>
       </span>
       <button
         class="pager-btn"
-        :disabled="historyPage >= totalPages || loading"
-        @click="goPage(historyPage + 1)"
+        :disabled="assetPage >= totalPages || loading"
+        @click="goPage(assetPage + 1)"
       >
         <ChevronRight :size="16" />
       </button>
@@ -202,24 +195,16 @@
         :src="previewItem.thumbUrl || previewItem.url"
         :alt="previewItem.name"
       />
-      <!-- 视频：GIF 动图预览（可动画面），加载中显示首帧缩略图 -->
+      <!-- 视频：首帧缩略图（thumb_url 或视频本身） -->
       <template v-else-if="previewItem.type === 'video'">
-        <img
-          v-if="previewItem.thumbUrl"
-          :src="previewItem.thumbUrl"
-          :alt="previewItem.name"
+        <video
+          v-if="previewItem.url"
+          :src="previewItem.url"
           class="preview-video-poster"
+          muted
+          playsinline
+          preload="metadata"
         />
-        <img
-          v-if="videoPreviews[previewItem.id]"
-          :src="videoPreviews[previewItem.id]"
-          :alt="previewItem.name"
-          class="preview-video-gif"
-        />
-        <div v-else class="preview-loading">
-          <Loader2 :size="20" class="spin-icon" />
-          <span>{{ t('canvas.assetLibrary.previewLoading') }}</span>
-        </div>
       </template>
       <div v-if="previewItem.name" class="preview-name">{{ previewItem.name }}</div>
     </div>
@@ -228,34 +213,42 @@
 
 <script setup lang="ts">
 /* =====================================================
- * 画布素材库面板（重新设计版）
- * - 双 Tab：生成历史（后端 API 分页） + 我的素材（localforage 本地）
- * - 类型筛选：全部 / 图片 / 视频（切换时重新请求后端历史）
- * - 网格布局，点击素材触发 use-asset 事件
- * - 历史记录用分页（上一页/下一页），每页 20 条
- * - 视频历史记录用后端缩略图接口，避免直接加载完整视频
- * - 本地素材支持删除 + 上传新文件
+ * 画布素材库面板（子批次 2a 同源改造）
+ * - 单池数据源：统一资产端点 /api/assets（与资产库页同源同身份）
+ * - 范围切换：本作品（默认，work_id 筛选）/ 全部素材
+ * - 类型筛选：全部 / 图片 / 视频（切换重新请求）
+ * - 网格布局，点击/拖拽创建画布节点，上传文件即入库
+ * - 分页（上一页/下一页），每页 20 条
  * - 悬浮预览通过 Teleport + position:fixed，避免被面板裁剪
  * ===================================================== */
-import { ref, computed, reactive, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from '@/i18n'
-import { X, Trash2, Music2, Inbox, Loader2, History, FolderOpen, Upload, Play, ChevronLeft, ChevronRight } from 'lucide-vue-next'
+import { X, Trash2, Music2, Inbox, Loader2, Upload, Play, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import { useAssetStore } from '@/stores/canvasAsset'
-import { getHistoryList } from '@/api/history'
-import { fetchBlobAsUrl } from '@/lib/blob'
+import { listAssets } from '@/api/assets'
+import { deleteAsset as deleteAssetApi } from '@/api/pipeline'
 
 const { t } = useI18n()
 
 const props = defineProps({
   theme: { type: Object, required: true },
+  /** 当前画布所属作品（scope=work 时按此筛选） */
+  workId: { type: Number, default: undefined },
 })
 
 const emit = defineEmits(['close', 'use-asset', 'delete-asset', 'upload-asset'])
 
 const assetStore = useAssetStore()
 
-// ---------- Tab 切换 ----------
-const activeTab = ref('history') // 'history' | 'local'
+// ---------- 范围切换 ----------
+const scope = ref<'work' | 'all'>('work')
+
+function setScope(s: 'work' | 'all') {
+  if (scope.value === s) return
+  scope.value = s
+  assetPage.value = 1
+  loadAssets()
+}
 
 // ---------- 类型筛选 ----------
 const filters = computed(() => [
@@ -265,71 +258,58 @@ const filters = computed(() => [
 ])
 const currentFilter = ref('all')
 
-// ---------- 历史记录数据（分页） ----------
-const historyList = ref<any[]>([])
-const historyPage = ref(1)
-const historyPageSize = 20
-const historyTotal = ref(0)
+// ---------- 统一资产数据（分页） ----------
+const assetRows = ref<any[]>([])
+const assetPage = ref(1)
+const assetPageSize = 20
+const assetTotal = ref(0)
 const loading = ref(false)
+const useLocalFallback = ref(false) // 未登录/接口失败时回退本地素材索引
 
 // 总页数
 const totalPages = computed(() => {
-  if (historyTotal.value <= 0) return 0
-  return Math.ceil(historyTotal.value / historyPageSize)
+  if (assetTotal.value <= 0) return 0
+  return Math.ceil(assetTotal.value / assetPageSize)
 })
 
-// ---------- 本地素材数据 ----------
+// ---------- 本地素材数据（仅回退态使用） ----------
 const localAssets = computed(() => assetStore.assets || [])
 
 // ---------- 统一展示列表 ----------
-// 将历史记录和本地素材统一为统一格式
-// { uid, id, type, url, thumbUrl, posterUrl, name, prompt, source, mode, createdAt }
+// { uid, id, type, url, thumbUrl, posterUrl, name, prompt, source, createdAt }
 const displayItems = computed(() => {
-  if (activeTab.value === 'history') {
-    return historyList.value.map((item) => ({
-      uid: 'h-' + item.id,
+  if (useLocalFallback.value) {
+    return localAssets.value.map((item) => ({
+      uid: 'l-' + item.id,
       id: item.id,
       type: item.type,
-      // 创建节点时用流式 URL（视频）或原图 URL（图片）
-      url: item.result_url || '',
-      // 视频缩略图：用异步加载的 blob URL（解决 JWT 鉴权问题，
-      // 浏览器原生 <img src> 无法携带 Authorization 头）
-      thumbUrl:
-        item.type === 'video'
-          ? videoThumbnails[item.id] || ''
-          : item.result_url || '',
-      posterUrl:
-        item.type === 'video'
-          ? videoThumbnails[item.id] || ''
-          : '',
-      name: truncate(item.prompt || `${typeLabel(item.type)}-${item.id}`, 28),
+      url: item.url,
+      thumbUrl: item.type === 'image' ? item.url : item.posterUrl || '',
+      posterUrl: item.posterUrl || '',
+      name: item.name || truncate(item.prompt || `${item.type}-${item.id.slice(0, 8)}`, 28),
       prompt: item.prompt || '',
-      source: 'history',
-      mode: item.mode || '',
-      createdAt: item.created_at,
+      source: 'local',
     }))
   }
-  return localAssets.value.map((item) => ({
-    uid: 'l-' + item.id,
-    id: item.id,
-    type: item.type,
-    url: item.url,
-    thumbUrl: item.type === 'image' ? item.url : item.posterUrl || '',
-    posterUrl: item.posterUrl || '',
-    name: item.name || truncate(item.prompt || `${item.type}-${item.id.slice(0, 8)}`, 28),
-    prompt: item.prompt || '',
-    source: 'local',
+  return assetRows.value.map((a) => ({
+    uid: 'a-' + a.id,
+    id: a.id,
+    type: a.media_type,
+    url: a.asset_url || '',
+    thumbUrl: a.media_type === 'video' ? (a.thumb_url || '') : (a.asset_url || ''),
+    posterUrl: a.thumb_url || '',
+    name: truncate(a.name || `${typeLabel(a.media_type)}-${a.id}`, 28),
+    prompt: '',
+    source: 'asset',
+    createdAt: a.created_at,
   }))
 })
 
 // ---------- 空状态文案 ----------
 const emptyText = computed(() => {
-  if (activeTab.value === 'history') {
-    if (currentFilter.value === 'image') return t('canvas.assetLibrary.empty.noImageHistory')
-    if (currentFilter.value === 'video') return t('canvas.assetLibrary.empty.noVideoHistory')
-    return t('canvas.assetLibrary.empty.noHistory')
-  }
-  return t('canvas.assetLibrary.empty.noLocalAssets')
+  if (currentFilter.value === 'image') return t('canvas.assetLibrary.empty.noImageHistory')
+  if (currentFilter.value === 'video') return t('canvas.assetLibrary.empty.noVideoHistory')
+  return t('canvas.assetLibrary.empty.noHistory')
 })
 
 // ---------- 面板样式 ----------
@@ -354,68 +334,66 @@ function typeLabel(type: string) {
   return labels[type] || type
 }
 
-// ---------- Tab 切换 ----------
-function switchTab(tab: string) {
-  if (activeTab.value === tab) return
-  activeTab.value = tab
+/** 来源标签（生成/上传/合成/归档） */
+function sourceLabel(source: string | null) {
+  const map: Record<string, string> = {
+    generation: t('assets.source.generation'),
+    upload: t('assets.source.upload'),
+    compose: t('assets.source.compose'),
+    archive: t('assets.source.archive'),
+    canvas: t('assets.source.canvas'),
+  }
+  return map[source ?? ''] || source || '-'
+}
+
+/** 删除统一资产（面板内直删 + 列表同步移除） */
+async function removeUnified(item: any) {
+  try {
+    await deleteAssetApi(Number(item.id))
+    assetRows.value = assetRows.value.filter((x) => x.id !== Number(item.id))
+    assetTotal.value = Math.max(0, assetTotal.value - 1)
+  } catch (err) {
+    console.warn('[asset-library] 删除失败:', err)
+  }
 }
 
 // ---------- 类型筛选切换 ----------
 function setFilter(value: string) {
   if (currentFilter.value === value) return
   currentFilter.value = value
-  // 历史记录需要重新请求后端（按类型筛选），回到第 1 页
-  if (activeTab.value === 'history') {
-    historyPage.value = 1
-    loadHistory()
-  }
+  assetPage.value = 1
+  loadAssets()
 }
 
 // ---------- 分页跳转 ----------
 function goPage(page: number) {
   if (loading.value) return
   if (page < 1 || page > totalPages.value) return
-  historyPage.value = page
-  loadHistory()
+  assetPage.value = page
+  loadAssets()
 }
 
-// ---------- 加载历史记录（分页：每次只加载当前页） ----------
-async function loadHistory() {
+// ---------- 加载统一资产（分页：每次只加载当前页） ----------
+async function loadAssets() {
   loading.value = true
   try {
-    const resp = await getHistoryList({
-      type: currentFilter.value,
-      page: historyPage.value,
-      page_size: historyPageSize,
+    const resp = await listAssets({
+      media_type: currentFilter.value === 'all' ? undefined : currentFilter.value,
+      work_id: scope.value === 'work' && props.workId ? props.workId : undefined,
+      page: assetPage.value,
+      page_size: assetPageSize,
     })
-    // client 拦截器已解包，resp 即后端 HistoryListResponse
-    historyList.value = resp.items || []
-    historyTotal.value = resp.total || 0
-    // 异步加载视频缩略图（通过 axios 携带 JWT）
-    historyList.value
-      .filter((item: any) => item.type === 'video')
-      .forEach((item: any) => {
-        loadVideoThumbnail(item.id)
-      })
+    assetRows.value = resp.items || []
+    assetTotal.value = resp.total || 0
+    useLocalFallback.value = false
     // 滚动回顶部
     if (gridRef.value) gridRef.value.scrollTop = 0
   } catch (err) {
-    console.error('[asset-library] 加载历史失败:', err)
+    // 未登录 / 接口失败：回退本地素材索引（匿名画布仍可用）
+    console.warn('[asset-library] 统一资产加载失败，回退本地素材:', err)
+    useLocalFallback.value = true
   } finally {
     loading.value = false
-  }
-}
-
-// 加载视频缩略图（通过 axios 携带 JWT，解决 <img src> 无法鉴权的问题）
-async function loadVideoThumbnail(id: string) {
-  if (videoThumbnails[id] || thumbnailFailed[id]) return
-  try {
-    const url = `/api/history/video/${id}/thumbnail`
-    const blobUrl = await fetchBlobAsUrl(url)
-    videoThumbnails[id] = blobUrl
-  } catch (err) {
-    console.warn('[asset-library] 视频缩略图加载失败 id=' + id, err)
-    thumbnailFailed[id] = true
   }
 }
 
@@ -494,20 +472,7 @@ const previewItem = ref<any>(null)
 const previewX = ref(0)
 const previewY = ref(0)
 const gridRef = ref<HTMLElement | null>(null)
-const videoPreviews = reactive<Record<string, string>>({}) // { [id]: gifUrl } 已加载的视频 GIF 预览
-const previewLoading = reactive<Record<string, boolean>>({}) // { [id]: boolean } GIF 加载状态
-const videoThumbnails = reactive<Record<string, string>>({}) // { [id]: blobUrl } 视频静态缩略图
-const thumbnailFailed = reactive<Record<string, boolean>>({}) // { [id]: boolean } 缩略图加载失败
 
-
-function clearVideoBlobUrls() {
-  Object.values(videoThumbnails).forEach(url => {
-    if (url && url.startsWith('blob:')) URL.revokeObjectURL(url)
-  })
-  Object.values(videoPreviews).forEach(url => {
-    if (url && url.startsWith('blob:')) URL.revokeObjectURL(url)
-  })
-}
 
 function onCardHover(item: any) {
   previewItem.value = item
@@ -515,26 +480,6 @@ function onCardHover(item: any) {
   requestAnimationFrame(() => {
     updatePreviewPosition()
   })
-  // 视频：懒加载 GIF 动图预览
-  if (item.type === 'video' && item.source === 'history') {
-    loadVideoPreview(item.id)
-  }
-}
-
-// 加载视频 GIF 预览（后端 ffmpeg 生成，悬停时可动）
-// 通过 axios 下载 blob URL，解决 <img src> 无法携带 JWT 的问题
-async function loadVideoPreview(id: string) {
-  if (videoPreviews[id] || previewLoading[id]) return
-  previewLoading[id] = true
-  try {
-    const url = `/api/history/video/${id}/preview`
-    const blobUrl = await fetchBlobAsUrl(url)
-    videoPreviews[id] = blobUrl
-  } catch (err) {
-    console.warn('[asset-library] GIF 预览加载失败 id=' + id, err)
-  } finally {
-    previewLoading[id] = false
-  }
 }
 
 function updatePreviewPosition() {
@@ -580,7 +525,7 @@ const handleUserLogoutWrapper: EventListener = () => {
 // ---------- 生命周期 ----------
 onMounted(() => {
   assetStore.hydrate()
-  loadHistory()
+  loadAssets()
   window.addEventListener('resize', onResize)
   // 监听用户登录/退出，切换素材库数据空间
   window.addEventListener('agnes:user-login', handleUserSwitchWrapper)
@@ -588,25 +533,23 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  clearVideoBlobUrls()
   window.removeEventListener('resize', onResize)
   window.removeEventListener('agnes:user-login', handleUserSwitchWrapper)
   window.removeEventListener('agnes:user-logout', handleUserLogoutWrapper)
 })
 
-/** 登录/切换用户后，切换素材库数据空间 */
+/** 登录/切换用户后，重新加载统一资产 */
 async function handleUserSwitch(e: CustomEvent) {
-  clearVideoBlobUrls()
-  const userId: number | null = (e?.detail?.id as number) ?? null
-  await assetStore._switchUserStorage(userId)
-  loadHistory()
+  await assetStore._switchUserStorage((e as CustomEvent).detail?.userId ?? null)
+  assetPage.value = 1
+  loadAssets()
 }
 
-/** 退出登录：切换到匿名素材库空间 */
+/** 退出登录：回退本地素材索引（匿名画布仍可用） */
 async function handleUserLogout() {
-  clearVideoBlobUrls()
   await assetStore._switchUserStorage(null)
-  loadHistory()
+  assetPage.value = 1
+  loadAssets()
 }
 
 // ---------- 暴露刷新方法（供父组件在保存素材后调用） ----------
@@ -616,8 +559,8 @@ defineExpose({
     assetStore.hydrate()
   },
   refreshHistory() {
-    historyPage.value = 1
-    loadHistory()
+    assetPage.value = 1
+    loadAssets()
   },
 })
 </script>
