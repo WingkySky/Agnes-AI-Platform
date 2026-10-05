@@ -1348,6 +1348,8 @@ const zhCN = {
       canvas: '画布',
     },
     emptyTip: '暂无资产，快去流水线生成并保存你的第一个资产吧',
+    backfill: '同步历史资产',
+    backfillDone: '已完成同步：入库 {n} 项历史资产',
     noDesc: '暂无描述',
     // 资产类型枚举（与后端 AssetType 对齐：character/prop/scene/brand）
     type: {

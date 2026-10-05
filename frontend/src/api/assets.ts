@@ -45,3 +45,11 @@ export function listAssets(params: {
 }): Promise<{ total: number; page: number; page_size: number; items: UnifiedAsset[] }> {
   return client.get('/api/assets', { params })
 }
+
+/** 存量补课（管理员）：资产行字段回填 + 历史成功生成批量入库，幂等 */
+export function backfillAssets(limit = 500): Promise<{
+  rows: { processed: number; migrated: number; remaining: number }
+  generations: { processed: number; created: number; remaining: number }
+}> {
+  return client.post('/api/assets/backfill', null, { params: { limit } })
+}
