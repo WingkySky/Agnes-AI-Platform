@@ -9,7 +9,7 @@
  * ===================================================== */
 
 import { computed, ref } from 'vue'
-import { Close, Headset, Mute, QuestionFilled, Switch } from '@element-plus/icons-vue'
+import { Close, Delete, Headset, Mute, QuestionFilled, RefreshLeft, RefreshRight, Scissor, Switch } from '@element-plus/icons-vue'
 
 import { useEditorStore } from '@/stores/editor'
 import { useI18n } from '@/i18n'
@@ -197,6 +197,12 @@ function commitDrag(): void {
 
 function splitSelected(): void {
   store.splitSelectedAtPlayhead()
+}
+
+/** 删除选中片段（时间线工具栏按钮，与 Delete 键同路径） */
+function deleteSelected(): void {
+  if (!store.selectedClipId) return
+  store.applyOrToast({ op: 'removeClip', payload: { clipId: store.selectedClipId } }, t('editor.ops.removeClip'))
 }
 
 // ---------- 素材拖入 ----------
@@ -396,14 +402,16 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
 
 <template>
   <div class="timeline">
+    <!-- 时间线工具栏（剪映式：编辑动作在左，缩放/时间在右） -->
     <div class="timeline-toolbar">
-      <el-button-group>
-        <el-button size="small" @click="PX_PER_SEC = Math.max(PX_PER_SEC_MIN, PX_PER_SEC - 20)">−</el-button>
-        <el-button size="small" @click="PX_PER_SEC = Math.min(PX_PER_SEC_MAX, PX_PER_SEC + 20)">+</el-button>
-      </el-button-group>
-      <el-button size="small" :icon="'Scissor'" :disabled="!store.selectedClipId" @click="splitSelected">
+      <el-button size="small" text :icon="RefreshLeft" :disabled="!store.history.canUndo" :title="t('editor.undo')" @click="store.undo()" />
+      <el-button size="small" text :icon="RefreshRight" :disabled="!store.history.canRedo" :title="t('editor.redo')" @click="store.redo()" />
+      <span class="toolbar-divider" />
+      <el-button size="small" :icon="Scissor" :disabled="!store.selectedClipId" @click="splitSelected">
         {{ t('editor.split') }}
       </el-button>
+      <el-button size="small" :icon="Delete" :disabled="!store.selectedClipId" :title="t('common.delete')" @click="deleteSelected" />
+      <span class="toolbar-divider" />
       <el-checkbox
         class="snap-toggle"
         size="small"
@@ -421,6 +429,11 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
           </div>
         </div>
       </el-popover>
+      <span class="toolbar-spacer" />
+      <el-button-group class="zoom-group">
+        <el-button size="small" @click="PX_PER_SEC = Math.max(PX_PER_SEC_MIN, PX_PER_SEC - 20)">−</el-button>
+        <el-button size="small" @click="PX_PER_SEC = Math.min(PX_PER_SEC_MAX, PX_PER_SEC + 20)">+</el-button>
+      </el-button-group>
       <span class="playhead-time">{{ store.playhead.toFixed(2) }}s</span>
     </div>
 
@@ -590,20 +603,29 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
   border-top: 1px solid var(--el-border-color-lighter);
   display: flex;
   flex-direction: column;
-  height: 300px;
+  height: 380px;
   flex-shrink: 0;
   background: var(--el-fill-color-lighter);
 }
 .timeline-toolbar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   padding: 4px 10px;
 }
+.toolbar-divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--el-border-color);
+}
+.toolbar-spacer { flex: 1; }
 .playhead-time {
   font-size: 12px;
   color: var(--el-text-color-secondary);
   font-variant-numeric: tabular-nums;
+  min-width: 48px;
+  text-align: right;
 }
 .timeline-toolbar :deep(.el-checkbox) { height: 24px; margin-right: 0; }
 .shortcut-list { display: flex; flex-direction: column; gap: 6px; }

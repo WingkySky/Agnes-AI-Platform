@@ -7,7 +7,7 @@
 
 import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Download, RefreshLeft, RefreshRight, VideoPlay } from '@element-plus/icons-vue'
+import { ArrowLeft, Download, VideoPlay } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 
 import EditorAssets from '@/views/editor/EditorAssets.vue'
@@ -118,12 +118,6 @@ onBeforeUnmount(() => {
       <el-button :icon="ArrowLeft" text @click="goBack">{{ t('common.back') }}</el-button>
       <span class="editor-title" :title="store.title">{{ store.title || t('editor.title') }}</span>
       <div class="topbar-actions">
-        <el-tooltip :content="t('editor.undo')">
-          <el-button :icon="RefreshLeft" text :disabled="!store.history.canUndo" @click="store.undo()" />
-        </el-tooltip>
-        <el-tooltip :content="t('editor.redo')">
-          <el-button :icon="RefreshRight" text :disabled="!store.history.canRedo" @click="store.redo()" />
-        </el-tooltip>
         <span class="save-state">{{ saveLabel }}</span>
         <el-tag v-if="store.renderStatus === 'rendering'" type="warning" size="small">
           {{ t('editor.rendering') }} {{ store.renderProgress || '' }}
@@ -192,7 +186,7 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 .editor-assets {
-  width: 240px;
+  width: 224px;
   flex-shrink: 0;
   border-right: 1px solid var(--el-border-color-lighter);
 }
@@ -203,7 +197,7 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 .editor-inspector {
-  width: 264px;
+  width: 248px;
   flex-shrink: 0;
   border-left: 1px solid var(--el-border-color-lighter);
   overflow-y: auto;

@@ -280,9 +280,10 @@ onBeforeUnmount(() => {
 .stage {
   position: relative;
   flex: 1;
-  margin: 12px auto;
+  margin: 8px auto;
   max-width: 100%;
   max-height: 100%;
+  min-height: 0;
   background: #000;
   overflow: hidden;
   border-radius: 4px;
@@ -322,7 +323,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 6px 0 10px;
+  padding: 4px 0 6px;
 }
 .preview-time {
   font-size: 12px;
