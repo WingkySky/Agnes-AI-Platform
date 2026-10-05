@@ -138,7 +138,8 @@ def _download_response_headers(filename: str) -> dict:
 @router.get("/history", summary="获取生成历史列表")
 async def get_history(
     type: Optional[str] = Query(None, description="筛选类型: image / video / all（默认）"),
-    source: Optional[str] = Query("independent", description="来源筛选: independent（默认，独立生成）/ canvas / project / all"),
+    source: Optional[str] = Query("all", description="来源筛选: all（默认，任务视图统一展示）/ independent / canvas / project"),
+    status: Optional[str] = Query(None, description="状态筛选: success / failed / pending（进行中含 pending）"),
     task_id: Optional[str] = Query(None, description="按 task_id 精确匹配（用于从积分明细跳转）"),
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
@@ -150,9 +151,11 @@ async def get_history(
     支持通过 task_id 精确匹配某条记录（用于积分明细跳转）。
 
     来源筛选（source）：
-      - independent：默认，仅独立生成（画布/项目生成已自动归档进资产库，历史页默认隐藏）
-      - canvas / project：仅对应创作容器的生成
-      - all：全部（按 task_id 跳转时忽略 source，确保能定位到任意记录）
+      - all：默认，任务视图统一展示全部来源任务
+      - independent / canvas / project：按来源过滤（成果媒体浏览在资产库）
+      - 按 task_id 跳转时忽略 source，确保能定位到任意记录
+
+    状态筛选（status，任务视图用）：success / failed / pending（pending 视为进行中）。
     """
     stmt = select(Generation)
 
@@ -161,6 +164,10 @@ async def get_history(
 
     if type and type.lower() in ("image", "video"):
         stmt = stmt.filter(Generation.type == type.lower())
+
+    # 状态筛选（任务视图）：库内状态为 success / failed / pending
+    if status and status.lower() in ("success", "failed", "pending"):
+        stmt = stmt.filter(Generation.status == status.lower())
 
     # 按 task_id 精确匹配（用于积分明细跳转到对应历史记录）：忽略 source 筛选
     if task_id:

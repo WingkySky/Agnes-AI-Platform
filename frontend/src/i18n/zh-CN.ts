@@ -415,7 +415,7 @@ const zhCN = {
   // ------ 历史记录 ------
   history: {
     title: '生成历史',
-    desc: '查看你在本平台生成过的所有图片与视频。可按类型筛选。',
+    desc: '生成任务的执行记录：状态、失败原因、积分消耗一目了然；成果媒体已自动归档进资产库',
     viewAsset: '查看资产',
     all: '全部',
     image: '图片',
@@ -454,6 +454,8 @@ const zhCN = {
     requestVideoParamsLabel: '视频参数',
     sizeMismatchHint: '已被服务商降级',
     statusLabel: '状态',
+    // 任务失败归因（任务视图）
+    errorLabel: '失败原因',
     createdAtLabel: '创建时间',
     creditsConsumedLabel: '消耗积分',
     linkLabel: '链接',
@@ -467,12 +469,12 @@ const zhCN = {
     // 卡片快捷复制提示词按钮
     copyPrompt: '复制提示词',
     promptCopied: '提示词已复制到剪贴板',
-    // 来源筛选（历史瘦身：画布/项目生成已自动归档进资产库，默认仅显示独立生成）
-    sourceFilter: {
-      independent: '独立生成',
-      canvas: '画布',
-      project: '项目',
-      all: '全部来源',
+    // 状态筛选（任务视图）
+    statusFilter: {
+      all: '全部状态',
+      success: '已完成',
+      failed: '失败',
+      pending: '进行中',
     },
     // 存为资产（把独立生成记录手动保存进资产库）
     saveAsAsset: '存为资产',
@@ -1333,6 +1335,7 @@ const zhCN = {
       source: '来源',
       work: '所属作品',
       allWork: '全部作品',
+      type: '分类',
     },
     mediaType: {
       all: '全部',
@@ -1349,7 +1352,7 @@ const zhCN = {
     },
     emptyTip: '暂无资产，快去流水线生成并保存你的第一个资产吧',
     noDesc: '暂无描述',
-    // 资产类型枚举（与后端 AssetType 对齐：character/prop/scene/brand）
+    // 资产类型枚举（与后端 ASSET_TYPE_CHOICES 对齐：character/prop/scene/brand/material/clip/final）
     type: {
       all: '全部',
       label: '类型',
@@ -1372,7 +1375,6 @@ const zhCN = {
     useForGenerationTip: '已带入参考素材，开始你的创作吧',
     video2videoUnsupported: '当前模型不支持视频生视频，已为你保留参考视频链接',
     loadFailed: '加载资产失败',
-    createAsset: '创建资产',
     editAsset: '编辑资产',
     deleteConfirm: '确认删除此资产吗？',
     saveFromGeneration: '保存到资产库',
@@ -1400,6 +1402,8 @@ const zhCN = {
     deleteArchiveConfirm: '确认删除该归档记录吗？仅删除资产库影子记录，不影响画布/项目本体。',
     deleteSuccess: '已删除',
     deleteFailed: '删除失败',
+    saveSuccess: '已保存',
+    saveFailed: '保存失败',
     noPreview: '暂无可预览的媒体',
     unitEmpty: '该单元暂无资产',
     // 资产表单字段标签
@@ -1408,8 +1412,6 @@ const zhCN = {
       type: '类型',
       description: '描述',
       visualDescription: '视觉描述',
-      referenceImages: '参考图',
-      tags: '标签',
       version: '版本',
       useCount: '使用次数',
     },
@@ -2410,9 +2412,13 @@ const zhCN = {
         all: '全部',
         image: '图片',
         video: '视频',
+        audio: '音频',
       },
       upload: '上传',
       loading: '加载中...',
+      searchPlaceholder: '搜索名称 / 描述',
+      allTypes: '全部分类',
+      noMatch: '未找到匹配素材',
       empty: {
         noImageHistory: '暂无图片生成历史',
         noVideoHistory: '暂无视频生成历史',

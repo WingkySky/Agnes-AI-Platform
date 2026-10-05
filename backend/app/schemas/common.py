@@ -232,6 +232,9 @@ class GenerationRecord(BaseModel):
     mode: Optional[str] = None     # 'text2image' | 'image2image' | 'text2video' | 'image2video' | 'keyframes'
     result_url: Optional[str] = None
     status: str
+    # 任务失败归因（任务视图：失败原因与类目透出，成功为 NULL）
+    error_category: Optional[str] = None
+    error_message: Optional[str] = None
     task_id: Optional[str] = None
     credits_consumed: int = 0       # 本次任务消耗的积分数（与积分流水 ref_id 对应）
     is_public: bool = False         # 是否公开到广场

@@ -160,6 +160,18 @@ class AssetSaveFromGenerationRequest(BaseModel):
     tags: List[str] = Field(default_factory=list)
 
 
+# 统一资产池的合法类型（实体四类 + 影子归档的行政三类）
+ASSET_TYPE_CHOICES = {"character", "prop", "scene", "brand", "material", "clip", "final"}
+
+
+class AssetUpdateRequest(BaseModel):
+    """编辑资产元数据请求体（全字段可选，仅更新提交的字段）"""
+    name: Optional[str] = Field(None, min_length=1, max_length=200, description="名称")
+    type: Optional[str] = Field(None, description="类型：character / prop / scene / brand / material / clip / final")
+    description: Optional[str] = Field(None, description="详细描述")
+    visual_description: Optional[str] = Field(None, description="外观描述文本（用于生成提示词）")
+
+
 # =====================================================
 # 兼容别名（Out 后缀与路由导入保持一致）
 # =====================================================

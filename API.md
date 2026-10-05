@@ -390,18 +390,18 @@ Swagger UI（交互式文档）：`http://localhost:8000/docs`
 
 ### `GET /api/history`
 
-获取生成历史。支持按类型筛选 + 分页。
+获取生成历史（任务视图）。支持按类型 / 来源 / 状态筛选 + 分页。
 
 **Query 参数：**
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `type` | string | | `all`（默认）\| `image` \| `video` |
-| `source` | string | | 来源筛选：`independent`（默认，独立生成）\| `canvas`（画布创作）\| `project`（项目创作）\| `all` |
+| `source` | string | | 来源筛选：`all`（默认，任务视图统一展示）\| `independent`（独立生成）\| `canvas`（画布创作）\| `project`（项目创作） |
+| `status` | string | | 状态筛选（任务视图）：`success` \| `failed` \| `pending`（进行中） |
+| `task_id` | string | | 按 task_id 精确匹配（积分明细跳转定位用，忽略 source） |
 | `page` | int | | 页码，从 1 开始，默认 1 |
 | `page_size` | int | | 每页数量，默认 20 |
-| `content_id` | string | | 按内容 ID 精确搜索 |
-| `creator` | string | | 按创建者用户名/昵称搜索 |
 
 **响应示例：**
 ```json
@@ -409,24 +409,29 @@ Swagger UI（交互式文档）：`http://localhost:8000/docs`
   "total": 128,
   "page": 1,
   "page_size": 20,
+  "total_image_count": 90,
+  "total_video_count": 38,
   "items": [
     {
       "id": 1,
-      "content_id": "img_abc123",
       "type": "image",
       "prompt": "一只坐在月球上的小猫...",
       "model": "agnes-image-2.1-flash",
       "params": { "size": "1024x1024" },
       "result_url": "https://...",
       "status": "success",
-      "task_id": null,
+      "error_category": null,
+      "error_message": null,
+      "task_id": "task_xxx",
+      "credits_consumed": 10,
       "created_at": "2025-06-08T10:30:00Z",
-      "creator_id": 42,
-      "creator_nickname": "用户昵称"
+      "asset_id": 953
     }
   ]
 }
 ```
+
+> 历史页定位为**任务视图**：任务执行状态、失败归因（`error_category`/`error_message`）、积分消耗；成果媒体的浏览/下载/批量/分享在资产库（`/api/assets`）。
 
 ### `DELETE /api/history/{id}`
 
@@ -510,6 +515,21 @@ Swagger UI（交互式文档）：`http://localhost:8000/docs`
 记录资产被「用于生成」，递增 `use_count`（无需登录，`get_current_user_optional`）。
 
 **响应**：`{ id: int, use_count: int }`
+
+### 统一资产层（`/api/assets`，登录级）
+
+> 全平台媒体唯一身份 `assets.id`；画布节点/剪辑片段只持有 `asset_id` 引用。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/assets` | 画布/上传素材建统一资产行。请求体 `{ url, media_type, name?, work_id? }`；`/uploads/` 地址直推导 storage_key，远程 http(s) URL 下载转存 |
+| GET | `/api/assets` | 本人资产列表。查询参数：`media_type` / `source` / `work_id` / `type`（资产分类）/ `keyword`（匹配名称/描述/视觉描述）/ `page` / `page_size`，按 `updated_at` 倒序 |
+| GET | `/api/assets/{asset_id}` | 本人资产详情。非本人或不存在返回 404 |
+| PATCH | `/api/assets/{asset_id}` | 编辑资产元数据。请求体 `{ name?, type?, description?, visual_description? }`（可选字段，仅更新提交项）；`type` 限 `character/prop/scene/brand/material/clip/final`，空 `name` 或非法 `type` 返回 400，非本人返回 404；不触碰公开/审核状态。响应为更新后的完整资产行 |
+| POST | `/api/assets/backfill` | 存量补课（仅管理员/审核员）：资产行字段回填 + 历史成功生成批量入库，幂等，`?limit=` 控制单次上限 |
+| PATCH | `/api/assets/batch-share` | 批量设置分享状态。请求体 `{ ids, is_public }`；公开复用审核管道（进入 pending、敏感词预检、异步 AI 审核），被屏蔽（rejected）资产自动跳过。响应 `{ updated_count, failed_ids }` |
+| POST | `/api/assets/batch-delete` | 批量删除资产（按用户隔离；归档影子记录仅删资产库记录，不影响画布/项目本体）。请求体 `{ ids }`，响应 `{ deleted_count, failed_ids }` |
+| GET | `/api/assets/batch-download` | 批量下载打包 zip。`?ids=1,2,3`（单次 ≤100）；`/uploads/` 本地文件直读磁盘、远程地址服务端抓取，失败文件跳过 |
 
 ### `GET /api/plaza/creations`
 

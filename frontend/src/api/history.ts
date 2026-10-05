@@ -12,14 +12,16 @@ import type {
 /**
  * 获取历史列表
  * @param params.type   筛选类型：image / video / all（默认）
+ * @param params.source 来源筛选：independent（默认）/ canvas / project / all
+ * @param params.status 状态筛选：success / failed / pending（任务视图用）
  * @param params.task_id 按 task_id 精确匹配（用于从积分明细跳转）
  * @param params.page    页码
  * @param params.page_size 每页数量
  */
 export function getHistoryList(
-  { type = 'all', source = 'independent', task_id, page = 1, page_size = 50 }: { type?: string; source?: string; task_id?: string; page?: number; page_size?: number } = {}
+  { type = 'all', source = 'independent', status, task_id, page = 1, page_size = 50 }: { type?: string; source?: string; status?: string; task_id?: string; page?: number; page_size?: number } = {}
 ): Promise<HistoryListResponse> {
-  return client.get('/api/history', { params: { type, source, task_id, page, page_size } })
+  return client.get('/api/history', { params: { type, source, status, task_id, page, page_size } })
 }
 
 /**

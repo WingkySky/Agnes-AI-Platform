@@ -2,12 +2,11 @@
   CanvasAssetLibrary.vue
   画布素材库面板（重新设计版）
   - 右侧滑出大面板，宽度 420px，高度占满画布
-  - 双 Tab：生成历史（后端 API 分页） + 我的素材（localforage 本地）
-  - 类型筛选：全部 / 图片 / 视频（切换时重新请求后端）
+  - 范围切换：本作品 / 全部；媒体类型筛选：全部 / 图片 / 视频 / 音频
+  - 检索行：关键词搜索（防抖 300ms，搜名称/描述）+ 分类下拉（七类，复用后端 type/keyword 参数）
   - 网格布局展示缩略图（完整显示不裁剪，固定高度），点击创建画布节点
   - 鼠标悬浮卡片时通过 Teleport 到 body 显示放大预览（position: fixed）
-  - 历史记录用分页（上一页/下一页），避免一次性加载过多数据
-  - 视频历史记录用后端缩略图接口，避免直接加载完整视频
+  - 分页（上一页/下一页），避免一次性加载过多数据
   - 本地素材支持删除 + 上传新素材
 -->
 
@@ -70,6 +69,21 @@
         <Upload :size="14" />
         <span>{{ t('canvas.assetLibrary.upload') }}</span>
       </button>
+    </div>
+
+    <!-- 检索行：关键词 + 分类（回退态分类不可用，置灰） -->
+    <div class="asset-search-row">
+      <div class="asset-search-box">
+        <Search :size="14" />
+        <input
+          v-model="searchKeyword"
+          :placeholder="t('canvas.assetLibrary.searchPlaceholder')"
+        />
+      </div>
+      <select v-model="currentType" class="asset-type-select" :disabled="useLocalFallback" @change="onTypeChange">
+        <option value="">{{ t('canvas.assetLibrary.allTypes') }}</option>
+        <option v-for="tp in typeOptions" :key="tp.value" :value="tp.value">{{ tp.label }}</option>
+      </select>
     </div>
 
     <!-- 素材网格 -->
@@ -221,9 +235,9 @@
  * - 分页（上一页/下一页），每页 20 条
  * - 悬浮预览通过 Teleport + position:fixed，避免被面板裁剪
  * ===================================================== */
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from '@/i18n'
-import { X, Trash2, Music2, Inbox, Loader2, Upload, Play, ChevronLeft, ChevronRight } from 'lucide-vue-next'
+import { X, Trash2, Music2, Inbox, Loader2, Upload, Play, ChevronLeft, ChevronRight, Search } from 'lucide-vue-next'
 import { useAssetStore } from '@/stores/canvasAsset'
 import { listAssets } from '@/api/assets'
 import { deleteAsset as deleteAssetApi } from '@/api/pipeline'
@@ -255,8 +269,36 @@ const filters = computed(() => [
   { value: 'all', label: t('canvas.assetLibrary.filters.all') },
   { value: 'image', label: t('canvas.assetLibrary.filters.image') },
   { value: 'video', label: t('canvas.assetLibrary.filters.video') },
+  { value: 'audio', label: t('canvas.assetLibrary.filters.audio') },
 ])
 const currentFilter = ref('all')
+
+// ---------- 检索：关键词 + 分类 ----------
+// 复用统一资产端点现成的 keyword（名称/描述/视觉描述三列）与 type（七类）参数
+const searchKeyword = ref('')
+const currentType = ref('')
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+
+watch(searchKeyword, () => {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    assetPage.value = 1
+    loadAssets()
+  }, 300)
+})
+
+/** 分类下拉选项（实体四类 + 影子归档行政三类，标签与资产库页同源） */
+const typeOptions = computed(() =>
+  ['character', 'prop', 'scene', 'brand', 'material', 'clip', 'final'].map((v) => ({
+    value: v,
+    label: t('assets.type.' + v),
+  }))
+)
+
+function onTypeChange() {
+  assetPage.value = 1
+  loadAssets()
+}
 
 // ---------- 统一资产数据（分页） ----------
 const assetRows = ref<any[]>([])
@@ -279,7 +321,15 @@ const localAssets = computed(() => assetStore.assets || [])
 // { uid, id, type, url, thumbUrl, posterUrl, name, prompt, source, createdAt }
 const displayItems = computed(() => {
   if (useLocalFallback.value) {
-    return localAssets.value.map((item) => ({
+    // 回退态（未登录/接口失败）：本地素材前端过滤（分类字段缺失，下拉已禁用）
+    const kw = searchKeyword.value.trim().toLowerCase()
+    return localAssets.value
+      .filter((item) => {
+        if (currentFilter.value !== 'all' && item.type !== currentFilter.value) return false
+        if (!kw) return true
+        return `${item.name || ''} ${item.prompt || ''}`.toLowerCase().includes(kw)
+      })
+      .map((item) => ({
       uid: 'l-' + item.id,
       id: item.id,
       type: item.type,
@@ -307,6 +357,8 @@ const displayItems = computed(() => {
 
 // ---------- 空状态文案 ----------
 const emptyText = computed(() => {
+  // 检索条件生效时区分「无匹配」与「暂无素材」
+  if (searchKeyword.value.trim() || currentType.value) return t('canvas.assetLibrary.noMatch')
   if (currentFilter.value === 'image') return t('canvas.assetLibrary.empty.noImageHistory')
   if (currentFilter.value === 'video') return t('canvas.assetLibrary.empty.noVideoHistory')
   return t('canvas.assetLibrary.empty.noHistory')
@@ -380,6 +432,8 @@ async function loadAssets() {
     const resp = await listAssets({
       media_type: currentFilter.value === 'all' ? undefined : currentFilter.value,
       work_id: scope.value === 'work' && props.workId ? props.workId : undefined,
+      type: currentType.value || undefined,
+      keyword: searchKeyword.value.trim() || undefined,
       page: assetPage.value,
       page_size: assetPageSize,
     })
@@ -733,6 +787,72 @@ defineExpose({
 
 .asset-upload-btn:hover {
   background: var(--agnes-info-bg);
+}
+
+/* 检索行：关键词搜索 + 分类下拉（原生控件，主题变量适配画布暗色） */
+.asset-search-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px 12px;
+  border-bottom: 1px solid var(--agnes-border);
+  flex-shrink: 0;
+}
+
+.asset-search-box {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--agnes-border);
+  border-radius: 8px;
+  background: var(--agnes-bg-hover);
+  color: inherit;
+  transition: border-color 0.15s;
+}
+
+.asset-search-box:focus-within {
+  border-color: var(--agnes-primary-border);
+}
+
+.asset-search-box input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  padding: 7px 0;
+}
+
+.asset-search-box input::placeholder {
+  color: inherit;
+  opacity: 0.4;
+}
+
+.asset-type-select {
+  max-width: 110px;
+  padding: 6px 8px;
+  border: 1px solid var(--agnes-border);
+  border-radius: 8px;
+  background: var(--agnes-bg-hover);
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+}
+
+.asset-type-select:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.asset-type-select option {
+  background: var(--agnes-bg-elevated);
+  color: var(--agnes-text-primary);
 }
 
 /* 网格区域（可滚动） */

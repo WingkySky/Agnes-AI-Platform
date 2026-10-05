@@ -143,6 +143,9 @@ export interface GenerationRecord {
   mode?: 'text2image' | 'image2image' | 'text2video' | 'image2video' | 'keyframes' | 'video2video' | null
   result_url?: string | null
   status: string
+  // 任务失败归因（任务视图：失败原因与类目透出，成功为空）
+  error_category?: string | null
+  error_message?: string | null
   task_id?: string | null
   credits_consumed?: number       // 本次任务消耗的积分数（与积分流水 ref_id 对应）
   created_at?: string | null

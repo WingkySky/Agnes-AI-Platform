@@ -232,7 +232,7 @@ const router = createRouter({
 // ---------- 全局前置守卫：登录 / 角色权限判断 ----------
 // 异步守卫：等待 userStore.init() 完成后再判断登录状态
 // 否则刷新页面时 token/user 还没从 localStorage 恢复，会被误判为未登录
-router.beforeEach(async (to, _from, next) => {
+router.beforeEach(async (to) => {
   const userStore = useUserStore()
   const permissionStore = usePermissionStore()
   // 等待 init() 完成（首次刷新页面时关键）
@@ -243,7 +243,7 @@ router.beforeEach(async (to, _from, next) => {
 
   // 已登录用户访问登录页 — 直接进入业务页
   if (to.name === 'login' && userStore.isAuthenticated) {
-    return next('/images')
+    return '/images'
   }
 
   // 首启引导拦截（未登录态）：实例尚无管理员时所有页面强制送入向导创建管理员，
@@ -251,7 +251,7 @@ router.beforeEach(async (to, _from, next) => {
   const setupStore = useSetupStore()
   if (!userStore.isAuthenticated && to.name !== 'setup') {
     if (await setupStore.isBootstrapPending()) {
-      return next({ name: 'setup' })
+      return { name: 'setup' }
     }
   }
 
@@ -260,7 +260,7 @@ router.beforeEach(async (to, _from, next) => {
     const query = to.fullPath !== '/login' && to.fullPath !== '/'
       ? { redirect: to.fullPath }
       : undefined
-    return next({ path: '/login', query })
+    return { path: '/login', query }
   }
 
   // 首启初始化向导拦截（登录态下判定）：
@@ -268,25 +268,25 @@ router.beforeEach(async (to, _from, next) => {
   //   - 已无待办却直接访问 /setup → 送回业务页
   if (userStore.isAuthenticated && to.name !== 'setup') {
     if (await setupStore.shouldIntercept()) {
-      return next({ name: 'setup' })
+      return { name: 'setup' }
     }
   } else if (to.name === 'setup' && userStore.isAuthenticated) {
     if (!(await setupStore.shouldIntercept())) {
-      return next('/images')
+      return '/images'
     }
   }
 
   // 需要管理员角色但当前用户不是管理员 — 跳转首页
   if (requiresAdmin && !userStore.isAdmin) {
-    return next('/chat')
+    return '/chat'
   }
 
   // 需要特定权限但当前用户没有 — 跳转首页
   if (requiredPermission && !permissionStore.hasPermission(requiredPermission)) {
-    return next('/chat')
+    return '/chat'
   }
 
-  next()
+  return true
 })
 
 // ---------- 全局后置守卫：动态设置 document.title ----------

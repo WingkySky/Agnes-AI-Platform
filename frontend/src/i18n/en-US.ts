@@ -416,7 +416,7 @@ const enUS = {
   // ------ History ------
   history: {
     title: 'Generation History',
-    desc: 'Browse all images and videos you have generated on this platform. Filter by type.',
+    desc: 'Task execution records: status, failure reasons and credit usage at a glance; result media is auto-archived into Assets',
     viewAsset: 'View asset',
     all: 'All',
     image: 'Images',
@@ -455,6 +455,8 @@ const enUS = {
     requestVideoParamsLabel: 'Video Params',
     sizeMismatchHint: 'downgraded by provider',
     statusLabel: 'Status',
+    // 任务失败归因（任务视图）
+    errorLabel: 'Error',
     createdAtLabel: 'Created At',
     creditsConsumedLabel: 'Credits Consumed',
     linkLabel: 'Link',
@@ -468,12 +470,12 @@ const enUS = {
     // 卡片快捷复制提示词按钮
     copyPrompt: 'Copy Prompt',
     promptCopied: 'Prompt copied to clipboard',
-    // 来源筛选（历史瘦身：画布/项目生成已自动归档进资产库，默认仅显示独立生成）
-    sourceFilter: {
-      independent: 'Independent',
-      canvas: 'Canvas',
-      project: 'Project',
-      all: 'All Sources',
+    // 状态筛选（任务视图）
+    statusFilter: {
+      all: 'All Status',
+      success: 'Completed',
+      failed: 'Failed',
+      pending: 'In Progress',
     },
     // 存为资产（把独立生成记录手动保存进资产库）
     saveAsAsset: 'Save as Asset',
@@ -1348,6 +1350,7 @@ const enUS = {
       source: 'Source',
       work: 'Work',
       allWork: 'All works',
+      type: 'Type',
     },
     mediaType: {
       all: 'All',
@@ -1387,7 +1390,6 @@ const enUS = {
     useForGenerationTip: 'Reference media loaded, start your creation',
     video2videoUnsupported: 'Current model does not support video-to-video; the reference video link is kept',
     loadFailed: 'Failed to load assets',
-    createAsset: 'Create Asset',
     editAsset: 'Edit Asset',
     deleteConfirm: 'Are you sure you want to delete this asset?',
     saveFromGeneration: 'Save to Asset Library',
@@ -1415,6 +1417,8 @@ const enUS = {
     deleteArchiveConfirm: 'Delete this archive record? Only the shadow record in the asset library is removed; the canvas/project itself is unaffected.',
     deleteSuccess: 'Deleted',
     deleteFailed: 'Delete failed',
+    saveSuccess: 'Saved',
+    saveFailed: 'Save failed',
     noPreview: 'No previewable media',
     unitEmpty: 'This unit has no assets',
     // 资产表单字段标签
@@ -1423,8 +1427,6 @@ const enUS = {
       type: 'Type',
       description: 'Description',
       visualDescription: 'Visual Description',
-      referenceImages: 'Reference Images',
-      tags: 'Tags',
       version: 'Version',
       useCount: 'Use Count',
     },
@@ -2426,9 +2428,13 @@ const enUS = {
         all: 'All',
         image: 'Images',
         video: 'Videos',
+        audio: 'Audio',
       },
       upload: 'Upload',
       loading: 'Loading...',
+      searchPlaceholder: 'Search name / description',
+      allTypes: 'All types',
+      noMatch: 'No matching assets',
       empty: {
         noImageHistory: 'No image history',
         noVideoHistory: 'No video history',

@@ -5,8 +5,9 @@
 from typing import Optional
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.models.asset import Asset
 from app.models.generation import Generation
@@ -211,11 +212,12 @@ async def list_assets(
     media_type: Optional[str] = None,
     source: Optional[str] = None,
     work_id: Optional[int] = None,
+    asset_type: Optional[str] = None,
     keyword: Optional[str] = None,
     page: int = 1,
     page_size: int = 50,
 ) -> dict:
-    """本人资产列表（统一入口：分页 + 类型/来源/作品/关键词筛选，updated_at 倒序）"""
+    """本人资产列表（统一入口：分页 + 类型/来源/作品/分类/关键词筛选，updated_at 倒序）"""
     stmt = select(Asset).where(Asset.user_id == user_id)
     if media_type:
         stmt = stmt.where(Asset.kind == media_type)
@@ -223,8 +225,17 @@ async def list_assets(
         stmt = stmt.where(Asset.source == source)
     if work_id is not None:
         stmt = stmt.where(Asset.work_id == work_id)
+    if asset_type:
+        stmt = stmt.where(Asset.type == asset_type)
     if keyword:
-        stmt = stmt.where(Asset.name.ilike(f"%{keyword}%"))
+        pattern = f"%{keyword}%"
+        stmt = stmt.where(
+            or_(
+                Asset.name.ilike(pattern),
+                Asset.description.ilike(pattern),
+                Asset.visual_description.ilike(pattern),
+            )
+        )
     total = (
         await db.scalars(select(func.count()).select_from(stmt.subquery()))
     ).first() or 0
@@ -233,11 +244,30 @@ async def list_assets(
             stmt.order_by(Asset.updated_at.desc()).offset((page - 1) * page_size).limit(page_size)
         )
     ).all()
+
+    # 生成模式回填（卡片徽标：文生图/图生视频…），按 source_generation_id 从来源生成记录批量取
+    gen_ids = [a.source_generation_id for a in rows if a.source_generation_id]
+    mode_map: dict = {}
+    if gen_ids:
+        gen_rows = (
+            await db.scalars(
+                select(Generation)
+                .options(load_only(Generation.id, Generation.mode))
+                .where(or_(Generation.id == i for i in gen_ids))
+            )
+        ).all()
+        mode_map = {g.id: g.mode for g in gen_rows}
+
+    items = []
+    for a in rows:
+        d = asset_to_dict(a)
+        d["mode"] = mode_map.get(a.source_generation_id)
+        items.append(d)
     return {
         "total": int(total),
         "page": page,
         "page_size": page_size,
-        "items": [asset_to_dict(a) for a in rows],
+        "items": items,
     }
 
 

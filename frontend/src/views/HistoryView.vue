@@ -1,8 +1,10 @@
 <!-- =====================================================
-     历史记录视图 HistoryView（已接入 i18n 国际化）
-     - 筛选：全部 / 图片 / 视频
-     - 分页加载
-     - 点击卡片弹出详情（可预览、下载、删除）
+     生成历史视图 HistoryView —— 任务视图定位
+     - 与资产库分工：资产库=成果媒体库（浏览/批量/分享），历史=任务执行记录
+     - 行式任务列表：缩略图 + 提示词 + 模型/模式 + 状态（含失败原因）+ 积分/时间
+     - 筛选：类型 / 来源 / 状态；批量模式下仅保留批量删除（成果类批量操作归资产库）
+     - 保留任务侧独有能力：失败归因透出、后期处理（调色/剪辑）、存为资产兜底、
+     - 积分明细 task_id 跳转定位
      - 所有 UI 文案通过 t() 函数调用
      ===================================================== -->
 
@@ -11,25 +13,26 @@
     <h2 class="page-title"><el-icon><Document /></el-icon> {{ t('history.title') }}</h2>
     <p class="page-desc">{{ t('history.desc') }}</p>
 
-    <!-- 筛选 Tab -->
+    <!-- 筛选 Tab：类型 / 来源 / 状态 -->
     <div class="filter-wrap">
       <el-radio-group v-model="filterType" @change="loadList(true)">
         <el-radio-button value="all">{{ t('history.all') }} ({{ imageCount + videoCount }})</el-radio-button>
         <el-radio-button value="image">{{ t('history.image') }} ({{ imageCount }})</el-radio-button>
         <el-radio-button value="video">{{ t('history.video') }} ({{ videoCount }})</el-radio-button>
       </el-radio-group>
-      <!-- 来源筛选：默认仅独立生成（画布/项目生成已自动归档进资产库） -->
-      <el-radio-group v-model="filterSource" @change="loadList(true)" class="source-filter">
-        <el-radio-button value="independent">{{ t('history.sourceFilter.independent') }}</el-radio-button>
-        <el-radio-button value="canvas">{{ t('history.sourceFilter.canvas') }}</el-radio-button>
-        <el-radio-button value="project">{{ t('history.sourceFilter.project') }}</el-radio-button>
-        <el-radio-button value="all">{{ t('history.sourceFilter.all') }}</el-radio-button>
+      <!-- 来源筛选已随画廊定位退役：任务视图统一展示全部来源任务，成果媒体在资产库按来源筛 -->
+      <!-- 状态筛选（任务视图）：成果浏览去资产库，这里按任务执行状态排查 -->
+      <el-radio-group v-model="filterStatus" @change="loadList(true)" class="source-filter">
+        <el-radio-button value="">{{ t('history.statusFilter.all') }}</el-radio-button>
+        <el-radio-button value="success">{{ t('history.statusFilter.success') }}</el-radio-button>
+        <el-radio-button value="failed">{{ t('history.statusFilter.failed') }}</el-radio-button>
+        <el-radio-button value="pending">{{ t('history.statusFilter.pending') }}</el-radio-button>
       </el-radio-group>
       <div class="filter-actions">
         <el-button type="primary" :icon="Refresh" :loading="loading" @click="loadList(true)">
           {{ t('common.refresh') }}
         </el-button>
-        <!-- 批量处理模式切换按钮 -->
+        <!-- 批量处理模式切换按钮（历史仅保留批量删除，成果批量操作在资产库） -->
         <el-button
           :type="editMode ? 'warning' : 'default'"
           :icon="editMode ? CloseIcon : Edit"
@@ -39,7 +42,7 @@
       </div>
     </div>
 
-    <!-- 批量处理模式操作栏（全选 + 批量下载 + 批量删除） -->
+    <!-- 批量处理模式操作栏（全选 + 批量删除） -->
     <div v-if="editMode && list.length > 0" class="edit-toolbar">
       <div class="edit-left">
         <el-checkbox
@@ -53,32 +56,6 @@
         </span>
       </div>
       <div class="edit-right">
-        <el-button
-          type="primary"
-          :icon="Download"
-          :disabled="selectedIds.length === 0"
-          :loading="batchDownloading"
-          @click="batchDownload">
-          {{ t('history.downloadSelected') }} ({{ selectedIds.length }})
-        </el-button>
-        <!-- 批量设为公开：调用广场批量分享接口 -->
-        <el-button
-          type="success"
-          :icon="Share"
-          :disabled="selectedIds.length === 0"
-          :loading="batchSettingPublic"
-          @click="confirmBatchSetPublic">
-          {{ t('plaza.batchSetPublic') }} ({{ selectedIds.length }})
-        </el-button>
-        <!-- 批量设为私有：调用广场批量分享接口 -->
-        <el-button
-          type="info"
-          :icon="Share"
-          :disabled="selectedIds.length === 0"
-          :loading="batchSettingPrivate"
-          @click="confirmBatchSetPrivate">
-          {{ t('plaza.batchSetPrivate') }} ({{ selectedIds.length }})
-        </el-button>
         <el-button
           type="danger"
           :icon="DeleteIcon"
@@ -102,167 +79,115 @@
       <p class="empty-text">{{ t('history.emptyTip') }}</p>
     </div>
 
-    <!-- 卡片网格 -->
-    <div v-else class="history-grid">
+    <!-- 任务列表（行式） -->
+    <div v-else class="task-list">
       <div
         v-for="item in list"
         :key="item.id"
-        class="history-card"
-        :class="{ 'is-selected': selectedIds.includes(item.id) }"
-        @click="handleCardClick(item)">
-        <!-- 编辑模式下的选择框 -->
-        <div v-if="editMode" class="card-checkbox" @click.stop="toggleSelect(item.id)">
+        class="task-row"
+        :class="{ 'is-selected': editMode && selectedIds.includes(item.id) }"
+        @click="handleRowClick(item)">
+        <!-- 批量模式下的选择框 -->
+        <div v-if="editMode" class="row-checkbox" @click.stop="toggleSelect(item.id)">
           <el-checkbox :model-value="selectedIds.includes(item.id)" />
         </div>
-        <div class="card-preview">
+
+        <!-- 缩略图：图片直接渲染；视频取首帧缩略图；失败/进行中任务显示状态图标 -->
+        <div class="row-thumb">
           <ImageWithWatermark
-            v-if="item.type === 'image'"
-            :src="item.result_url ?? ''"
+            v-if="item.type === 'image' && item.result_url"
+            :src="item.result_url"
             :alt="t('history.thumbnailAlt')"
             loading="lazy"
             fit="cover"
-            class="card-image-wrapper"
+            class="row-thumb-media"
           />
-          <!-- 视频卡片：首帧缩略图 + 悬停 GIF 预览 -->
-          <div
-            v-else-if="item.type === 'video'"
-            class="video-thumb"
-            @mouseenter="onVideoCardHover(item)"
-            @mouseleave="onVideoCardLeave(item)"
-          >
-            <!-- 首帧缩略图（静态） -->
-            <img
-              v-if="videoThumbnails[item.id]"
-              :src="videoThumbnails[item.id]"
-              :alt="t('history.videoThumbAlt')"
-              class="video-thumb-img"
-              loading="lazy"
-            />
-            <!-- 缩略图加载失败时的占位 -->
-            <div v-else class="video-thumb-placeholder">
-              <el-icon :size="44" class="play-icon"><VideoPlay /></el-icon>
-              <span class="video-thumb-label">{{ t('history.clickToPlay') }}</span>
-            </div>
-            <!-- 悬停时的 GIF 预览 -->
-            <img
-              v-if="hoveredVideoId === item.id && videoPreviews[item.id]"
-              :src="videoPreviews[item.id]"
-              :alt="t('history.videoPreviewAlt')"
-              class="video-preview-gif"
-            />
-            <!-- 播放图标蒙层 -->
-            <div class="video-play-overlay">
-              <el-icon :size="32"><VideoPlay /></el-icon>
-            </div>
-          </div>
-          <div class="type-badge" :class="item.type">
-            {{ item.type === 'image' ? t('history.image') : t('history.video') }}
-          </div>
-          <!-- 生成模式标签（文生图 / 图生图 / 文生视频 / 图生视频 / 关键帧） -->
-          <div v-if="item.mode" class="mode-badge" :class="'mode-' + item.type">
-            {{ t('params.mode.' + item.mode) || item.mode }}
-          </div>
-          <!-- 已分享到广场的状态标签：公开时显示（编辑模式下隐藏，避免与选择框重叠） -->
-          <div v-if="item.is_public && !editMode" class="public-badge">
-            <el-icon size="10"><Share /></el-icon>
-            {{ t('plaza.isPublic') }}
-          </div>
-          <!-- 被管理员屏蔽的标签：屏蔽状态显示 -->
-          <div v-if="item.moderation_status === 'rejected' && !editMode" class="rejected-badge">
-            <el-icon size="10"><Warning /></el-icon>
-            {{ t('history.rejected') }}
-          </div>
-          <!-- 快捷操作按钮组（非编辑模式下显示）：复制提示词 / 放大 / 下载 / 分享 / 删除，分别调用不同模块 -->
-          <!-- 放在 card-preview 内，z-index 足够高以确保不被其他蒙层遮挡 -->
-          <div v-if="!editMode" class="card-actions">
-            <!-- 复制提示词：调用剪贴板复制模块 -->
-            <div
-              v-if="item.prompt"
-              class="card-action-btn"
-              @click.stop="copyPrompt(item)"
-              :title="t('history.copyPrompt')">
-              <el-icon size="16"><CopyDocument /></el-icon>
-            </div>
-            <!-- 放大：调用 ImageViewer 图片查看器模块 -->
-            <div
-              v-if="item.type === 'image'"
-              class="card-action-btn"
-              @click.stop="openImageViewer(item)"
-              :title="t('imageViewer.title')">
-              <el-icon size="16"><ZoomIn /></el-icon>
-            </div>
-            <!-- 下载：调用后端代理下载模块 -->
-            <div
-              class="card-action-btn"
-              @click.stop="downloadItem(item)"
-              :title="t('history.download')">
-              <el-icon size="16"><Download /></el-icon>
-            </div>
-            <!-- 查看资产：成功生成已自动入库（统一资产层），跳转资产库 -->
-            <div
-              v-if="item.asset_id"
-              class="card-action-btn"
-              @click.stop="router.push('/assets')"
-              :title="t('history.viewAsset')">
-              <el-icon size="16"><Collection /></el-icon>
-            </div>
-            <!-- 后期处理-调色：仅视频项显示，打开 PostProcessDialog -->
-            <div
-              v-if="item.type === 'video'"
-              class="card-action-btn"
-              @click.stop="openPostProcess(item, 'color_grade')"
-              :title="t('history.postProcess.colorGrade')">
-              <el-icon size="16"><MagicStick /></el-icon>
-            </div>
-            <!-- 后期处理-剪辑：仅视频项显示，打开 PostProcessDialog -->
-            <div
-              v-if="item.type === 'video'"
-              class="card-action-btn"
-              @click.stop="openPostProcess(item, 'video_edit')"
-              :title="t('history.postProcess.videoEdit')">
-              <el-icon size="16"><Scissor /></el-icon>
-            </div>
-            <!-- 分享状态切换：点击切换公开/私有（公开时高亮；被屏蔽时禁用） -->
-            <div
-              class="card-action-btn card-action-share"
-              :class="{
-                'is-public': item.is_public,
-                'is-disabled': item.moderation_status === 'rejected'
-              }"
-              @click.stop="toggleShare(item)"
-              :title="item.moderation_status === 'rejected' ? t('history.rejectedShareWarning') : (item.is_public ? t('plaza.isPublic') : t('plaza.isPrivate'))">
-              <el-icon size="16"><Share /></el-icon>
-            </div>
-            <!-- 存为资产：所有生成记录均可手动保存（自动归档失败时的补存兜底；后端按生成记录幂等去重） -->
-            <div
-              v-if="item.status === 'success'"
-              class="card-action-btn"
-              @click.stop="openSaveAsAsset(item)"
-              :title="t('history.saveAsAsset')">
-              <el-icon size="16"><Collection /></el-icon>
-            </div>
-            <!-- 删除：调用历史记录删除模块（带确认弹窗） -->
-            <div
-              class="card-action-btn card-action-delete"
-              @click.stop="quickDelete(item)"
-              :title="t('history.delete')">
-              <el-icon size="16"><Delete /></el-icon>
-            </div>
+          <img
+            v-else-if="item.type === 'video' && item.result_url && videoThumbnails[item.id]"
+            :src="videoThumbnails[item.id]"
+            :alt="t('history.videoThumbAlt')"
+            class="row-thumb-media"
+            loading="lazy"
+          />
+          <div v-else class="thumb-placeholder">
+            <el-icon v-if="item.status === 'failed'" :size="26" class="fail-icon"><CircleCloseFilled /></el-icon>
+            <el-icon v-else-if="item.status === 'pending' || item.status === 'processing'" :size="26" class="spinner"><LoadingIcon /></el-icon>
+            <el-icon v-else :size="26"><VideoPlay /></el-icon>
           </div>
         </div>
-        <div class="card-meta">
-          <div class="card-prompt">{{ truncate(item.prompt, 80) }}</div>
-          <!-- 视频参数：时长 + 帧率 -->
-          <div v-if="item.type === 'video' && getVideoCardParams(item)" class="card-video-params">
-            <el-icon size="11"><VideoPlay /></el-icon>
-            <span>{{ getVideoCardParams(item) }}</span>
-          </div>
-          <div class="card-footer-row">
-            <span class="card-id" @click="copyRecordId(item.id)" :title="t('history.clickToCopyId')">
-              <el-icon size="11"><Document /></el-icon>
-              {{ t('history.idLabel') }}: {{ item.id }}
+
+        <!-- 主信息：提示词 + 类型/模式/模型/失败原因 -->
+        <div class="row-main">
+          <div class="row-prompt" :title="item.prompt">{{ item.prompt || '-' }}</div>
+          <div class="row-meta">
+            <span class="meta-chip">{{ item.type === 'image' ? t('history.image') : t('history.video') }}</span>
+            <span v-if="item.mode" class="meta-chip meta-mode">{{ t('params.mode.' + item.mode) || item.mode }}</span>
+            <span v-if="item.model" class="meta-model">{{ item.model }}</span>
+            <span
+              v-if="item.status === 'failed' && rowErrorText(item)"
+              class="row-error"
+              :title="rowErrorText(item)">
+              {{ rowErrorText(item) }}
             </span>
-            <span class="card-time">{{ formatTime(item.created_at, { emptyText: '' }) }}</span>
+          </div>
+        </div>
+
+        <!-- 右侧：状态 / 积分 / 时间 / 行内操作 -->
+        <div class="row-side">
+          <span class="status-chip" :class="'st-' + item.status">
+            <el-icon v-if="item.status === 'pending' || item.status === 'processing'" class="spinner"><LoadingIcon /></el-icon>
+            {{ statusText(item.status) }}
+          </span>
+          <span class="row-credits" :title="t('history.creditsConsumedLabel')">{{ item.credits_consumed ?? 0 }}</span>
+          <span class="row-time">{{ formatTime(item.created_at, { emptyText: '-' }) }}</span>
+        </div>
+        <div v-if="!editMode" class="row-actions" @click.stop>
+          <!-- 复制提示词 -->
+          <div
+            v-if="item.prompt"
+            class="row-action-btn"
+            @click="copyPrompt(item)"
+            :title="t('history.copyPrompt')">
+            <el-icon size="15"><CopyDocument /></el-icon>
+          </div>
+          <!-- 查看资产：成功生成已自动入库，跳转资产库 -->
+          <div
+            v-if="item.asset_id"
+            class="row-action-btn"
+            @click="router.push('/assets')"
+            :title="t('history.viewAsset')">
+            <el-icon size="15"><Collection /></el-icon>
+          </div>
+          <!-- 存为资产：无资产行的成功记录补存兜底（后端按生成记录幂等去重） -->
+          <div
+            v-else-if="item.status === 'success'"
+            class="row-action-btn"
+            @click="openSaveAsAsset(item)"
+            :title="t('history.saveAsAsset')">
+            <el-icon size="15"><Collection /></el-icon>
+          </div>
+          <!-- 后期处理-调色：仅成功视频 -->
+          <div
+            v-if="item.type === 'video' && item.status === 'success'"
+            class="row-action-btn"
+            @click="openPostProcess(item, 'color_grade')"
+            :title="t('history.postProcess.colorGrade')">
+            <el-icon size="15"><MagicStick /></el-icon>
+          </div>
+          <!-- 后期处理-剪辑：仅成功视频 -->
+          <div
+            v-if="item.type === 'video' && item.status === 'success'"
+            class="row-action-btn"
+            @click="openPostProcess(item, 'video_edit')"
+            :title="t('history.postProcess.videoEdit')">
+            <el-icon size="15"><Scissor /></el-icon>
+          </div>
+          <!-- 删除 -->
+          <div
+            class="row-action-btn row-action-delete"
+            @click="quickDelete(item)"
+            :title="t('history.delete')">
+            <el-icon size="15"><Delete /></el-icon>
           </div>
         </div>
       </div>
@@ -273,7 +198,7 @@
       <el-pagination
         v-model:current-page="page"
         v-model:page-size="pageSize"
-        :page-sizes="[12, 24, 48, 100]"
+        :page-sizes="[20, 50, 100]"
         :total="totalCount"
         layout="total, sizes, prev, pager, next"
         background
@@ -282,7 +207,7 @@
       />
     </div>
 
-    <!-- 详情弹窗 -->
+    <!-- 任务详情弹窗 -->
     <el-dialog
       v-model="detailVisible"
       :title="detailItem ? (detailItem.type === 'image' ? t('history.imageDetail') : t('history.videoDetail')) : t('history.detail')"
@@ -292,8 +217,8 @@
       <div v-if="detailItem" class="detail-content">
         <div class="detail-media">
           <ImageWithWatermark
-            v-if="detailItem.type === 'image'"
-            :src="detailItem.result_url ?? ''"
+            v-if="detailItem.type === 'image' && detailItem.result_url"
+            :src="detailItem.result_url"
             :alt="t('history.imageDetailAlt')"
             :img-class="'detail-image'"
             fit="contain"
@@ -301,9 +226,9 @@
             @load="onDetailImageLoad"
             @click="openImageViewer(detailItem)"
           />
-          <div v-else class="detail-video-wrap">
+          <div v-else-if="detailItem.type === 'video' && detailItem.result_url" class="detail-video-wrap">
             <video
-              v-if="detailItem.result_url && !detailVideoFailed"
+              v-if="!detailVideoFailed"
               ref="detailVideoEl"
               :src="getVideoStreamUrl(detailItem)"
               :poster="detailPoster"
@@ -317,18 +242,19 @@
               @abort="onDetailVideoAbort"
             ></video>
             <!-- 视频加载失败占位：上游 Provider URL 过期（如 Seedance 404），优雅降级避免破图 -->
-            <div v-else-if="detailVideoFailed" class="video-failed-placeholder">
+            <div v-else class="video-failed-placeholder">
               <el-icon :size="64"><VideoCamera /></el-icon>
               <span>{{ t('common.resourceExpired') }}</span>
-            </div>
-            <div v-else class="detail-video-empty">
-              <el-icon :size="36" :color="'var(--agnes-error)'"><CircleCloseFilled /></el-icon>
-              <div>{{ t('history.videoUrlEmpty') }}</div>
             </div>
             <div v-if="detailVideoLoading" class="detail-video-status">
               <el-icon :size="24" class="spinner"><LoadingIcon /></el-icon>
               <span>{{ t('history.videoLoading') }}</span>
             </div>
+          </div>
+          <!-- 无结果（失败/进行中）占位 -->
+          <div v-else class="video-failed-placeholder">
+            <el-icon :size="48" :class="{ 'fail-icon': detailItem.status === 'failed' }"><CircleCloseFilled /></el-icon>
+            <span>{{ detailItem.status === 'failed' ? rowErrorText(detailItem) || t('taskStatus.failed') : t('taskStatus.processing') }}</span>
           </div>
         </div>
         <div class="detail-info">
@@ -385,10 +311,18 @@
             </span>
           </div>
           <div class="info-row" v-if="detailItem.mode"><span class="label">{{ t('history.modeLabel') }}：</span><span class="mode-text">{{ t('params.mode.' + detailItem.mode) || detailItem.mode }}</span></div>
-          <div class="info-row"><span class="label">{{ t('history.statusLabel') }}：</span><span>{{ detailItem.status || 'success' }}</span></div>
+          <div class="info-row">
+            <span class="label">{{ t('history.statusLabel') }}：</span>
+            <span class="status-chip" :class="'st-' + detailItem.status">{{ statusText(detailItem.status) }}</span>
+          </div>
+          <!-- 失败归因（任务视图独有：错误类目 + 原始文案） -->
+          <div class="info-row" v-if="detailItem.status === 'failed' && rowErrorText(detailItem)">
+            <span class="label">{{ t('history.errorLabel') }}：</span>
+            <span class="error-text">{{ rowErrorText(detailItem) }}</span>
+          </div>
           <div class="info-row"><span class="label">{{ t('history.creditsConsumedLabel') }}：</span><span class="credits-value">{{ detailItem.credits_consumed ?? 0 }}</span></div>
           <div class="info-row"><span class="label">{{ t('history.createdAtLabel') }}：</span><span>{{ detailItem.created_at }}</span></div>
-          <div class="info-row url-row">
+          <div class="info-row url-row" v-if="detailItem.result_url">
             <span class="label">{{ t('history.linkLabel') }}：</span>
             <span class="url-value">{{ detailItem.result_url }}</span>
             <el-button size="small" link type="primary" @click="copyLink(detailItem.result_url ?? '')">{{ t('history.copyLink') }}</el-button>
@@ -430,7 +364,7 @@
       </template>
     </el-dialog>
 
-    <!-- 存为资产弹窗：把独立生成记录保存进资产库 -->
+    <!-- 存为资产弹窗：把独立生成记录保存进资产库（自动归档失败的补存兜底） -->
     <el-dialog
       v-model="saveAsAssetVisible"
       :title="t('history.saveAsAssetTitle')"
@@ -477,17 +411,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, reactive } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Refresh, Loading, Document, Delete, VideoPlay, CircleCloseFilled, VideoCamera, Edit, Close, Download, ZoomIn, Share, Warning, CopyDocument, MagicStick, Scissor, Collection } from '@element-plus/icons-vue'
+import { Refresh, Loading, Document, Delete, VideoPlay, CircleCloseFilled, VideoCamera, Edit, Close, CopyDocument, MagicStick, Scissor, Collection } from '@element-plus/icons-vue'
 import ImageViewer from '@/components/ImageViewer.vue'
 import { getHistoryList, deleteHistoryRecord, batchDeleteHistory } from '@/api/history'
 import { saveAssetFromGeneration } from '@/api/pipeline'
-import { updateShareStatus, batchUpdateShareStatus } from '@/api/plaza'
 import { useDownload } from '@/composables/useDownload'
 import { useCopyText } from '@/composables/useCopyText'
-import { useConfirm } from '@/composables/useConfirm'
 import { fetchBlobAsUrl } from '@/lib/blob'
 import { formatTime } from '@/lib/format'
 import { useTaskQueueStore } from '@/stores/taskQueue'
@@ -499,14 +431,13 @@ import PostProcessDialog from '@/components/PostProcessDialog.vue'
 
 const { t } = useI18n()
 const { copyText } = useCopyText()
-const { confirm } = useConfirm()
 const route = useRoute()
 const router = useRouter()
 
 // ---------- 从积分明细跳转过来时，通过 task_id 自动定位并打开详情 ----------
 const pendingTaskId = ref<string>('')
 
-// ---------- 图片查看器：历史记录图片点击后弹出，支持缩放/平移/旋转/下载 ----------
+// ---------- 图片查看器：详情图片点击后弹出，支持缩放/平移/旋转/下载 ----------
 const viewerVisible = ref(false)
 const viewerUrl = ref('')
 const viewerDownloadUrl = ref('')
@@ -518,7 +449,7 @@ function openImageViewer(item: GenerationRecord) {
   viewerVisible.value = true
 }
 
-// 监听全局任务队列的刷新信号，实现生成按钮点击后自动刷新历史列表
+// 监听全局任务队列的刷新信号，实现生成按钮点击后自动刷新任务列表
 const queue = useTaskQueueStore()
 
 // 通用下载组合式函数（携带 JWT，避免 <a> 标签不带 token 导致鉴权失败）
@@ -535,10 +466,10 @@ const totalCount = ref(0)
 const imageCount = ref(0)
 const videoCount = ref(0)
 const page = ref(1)
-const pageSize = ref(12)
+const pageSize = ref(20)
 const filterType = ref('all')
-// 来源筛选：默认仅独立生成（画布/项目生成已自动归档进资产库）
-const filterSource = ref('all')
+// 状态筛选（任务视图）：'' / success / failed / pending
+const filterStatus = ref('')
 
 const detailVisible = ref(false)
 const deleteVisible = ref(false)
@@ -557,22 +488,15 @@ const detailImageNatural = ref<{ w: number; h: number } | null>(null)
 const detailVideoNatural = ref<{ w: number; h: number } | null>(null)
 
 const videoThumbnails = reactive<Record<string, string>>({})
-const videoPreviews = reactive<Record<string, string>>({})
-const hoveredVideoId = ref<number | null>(null)
 const thumbnailLoading = reactive<Record<string, boolean>>({})
-const previewLoading = reactive<Record<string, boolean>>({})
 const thumbnailFailed = reactive<Record<string, boolean>>({})
 
 const editMode = ref(false)
 const selectedIds = ref<number[]>([])
 const batchDeleteVisible = ref(false)
 const batchDeleting = ref(false)
-const batchDownloading = ref(false)
-// ---------- 广场分享状态管理：单条 / 批量切换公开与私有 ----------
-const batchSettingPublic = ref(false)
-const batchSettingPrivate = ref(false)
 
-// ---------- 存为资产：把独立生成记录手动归档进资产库 ----------
+// ---------- 存为资产：把独立生成记录手动归档进资产库（兜底） ----------
 const saveAsAssetVisible = ref(false)
 const savingAsAsset = ref(false)
 const saveAssetTarget = ref<GenerationRecord | null>(null)
@@ -592,6 +516,23 @@ const isIndeterminate = computed(() => {
   return selectedOnPage.length > 0 && selectedOnPage.length < pageIds.length
 })
 
+/** 任务状态文案（库内状态：success / failed / pending / cancelled） */
+function statusText(status: string | undefined): string {
+  switch (status) {
+    case 'success': return t('taskStatus.done')
+    case 'failed': return t('taskStatus.failed')
+    case 'pending':
+    case 'processing': return t('taskStatus.processing')
+    case 'cancelled': return t('taskStatus.cancelled')
+    default: return status || '-'
+  }
+}
+
+/** 失败归因文案：原始错误信息优先，缺省回落错误类目 */
+function rowErrorText(item: GenerationRecord): string {
+  return (item.error_message || item.error_category || '').trim()
+}
+
 /**
  * 获取视频播放地址
  * 直接使用 Agnes CDN 的 result_url，因为 CDN 本身就是公开可访问的
@@ -601,7 +542,6 @@ function getVideoStreamUrl(item: GenerationRecord) {
   if (item.type !== 'video' || !item.result_url) return ''
   return item.result_url
 }
-
 
 async function loadVideoThumbnail(item: GenerationRecord) {
   if (videoThumbnails[item.id] || thumbnailLoading[item.id] || thumbnailFailed[item.id]) return
@@ -620,30 +560,6 @@ async function loadVideoThumbnail(item: GenerationRecord) {
   }
 }
 
-async function loadVideoPreview(item: GenerationRecord) {
-  if (videoPreviews[item.id] || previewLoading[item.id]) return
-  previewLoading[item.id] = true
-  try {
-    // 通过 axios 下载，自动携带 JWT token
-    const url = `/api/history/video/${item.id}/preview`
-    const blobUrl = await fetchBlobAsUrl(url)
-    videoPreviews[item.id] = blobUrl
-  } catch (e) {
-    console.warn('[History] ' + t('history.gifLoadFail') + ' id=' + item.id, e)
-  } finally {
-    previewLoading[item.id] = false
-  }
-}
-
-function onVideoCardHover(item: GenerationRecord) {
-  hoveredVideoId.value = item.id
-  loadVideoPreview(item)
-}
-
-function onVideoCardLeave(_item: GenerationRecord) {
-  hoveredVideoId.value = null
-}
-
 watch(detailVisible, (val) => {
   if (val) {
     detailPoster.value = ''
@@ -658,7 +574,9 @@ async function loadList(resetPage = false) {
   try {
     const data = await getHistoryList({
       type: filterType.value,
-      source: filterSource.value,
+      // 任务视图统一展示全部来源（后端 source 缺省为 independent，须显式传 all）
+      source: 'all',
+      status: filterStatus.value || undefined,
       page: page.value,
       page_size: pageSize.value
     })
@@ -666,7 +584,7 @@ async function loadList(resetPage = false) {
     totalCount.value = data.total || list.value.length
     imageCount.value = data.total_image_count ?? 0
     videoCount.value = data.total_video_count ?? 0
-    list.value.filter(i => i.type === 'video').forEach(item => {
+    list.value.filter(i => i.type === 'video' && i.result_url).forEach(item => {
       loadVideoThumbnail(item)
     })
 
@@ -799,7 +717,7 @@ function toggleEditMode() {
   }
 }
 
-function handleCardClick(item: GenerationRecord) {
+function handleRowClick(item: GenerationRecord) {
   if (editMode.value) {
     toggleSelect(item.id)
   } else {
@@ -816,7 +734,7 @@ function toggleSelect(id: number) {
   }
 }
 
-function toggleSelectAll(val: boolean) {
+function toggleSelectAll(val: boolean | string | number) {
   if (val) {
     const pageIds = list.value.map(item => item.id)
     const newSet = new Set(selectedIds.value)
@@ -825,37 +743,6 @@ function toggleSelectAll(val: boolean) {
   } else {
     const pageIds = new Set(list.value.map(item => item.id))
     selectedIds.value = selectedIds.value.filter(id => !pageIds.has(id))
-  }
-}
-
-/** 批量下载选中项（单图直接下载，多图打包为 zip） */
-async function batchDownload() {
-  if (selectedIds.value.length === 0) {
-    ElMessage.warning(t('history.pleaseSelectOne'))
-    return
-  }
-  batchDownloading.value = true
-  try {
-    const baseURL = import.meta.env.VITE_API_BASE_URL || ''
-
-    if (selectedIds.value.length === 1) {
-      // 单图：复用已有的单文件下载逻辑，直接下载
-      const id = selectedIds.value[0]
-      const proxyUrl = `${baseURL}/api/history/${id}/download`
-      // 默认文件名（后端 Content-Disposition 会返回带正确扩展名的文件名）
-      await downloadViaProxy(proxyUrl, `agnes-image-${id}.png`)
-    } else {
-      // 多图：打包为 zip 下载
-      const ids = selectedIds.value.join(',')
-      const proxyUrl = `${baseURL}/api/history/batch-download?ids=${ids}`
-      await downloadViaProxy(proxyUrl, `agnes-batch-${Date.now()}.zip`)
-    }
-    ElMessage.success(t('history.downloadStarted'))
-  } catch (err: any) {
-    console.warn('[History] 批量下载失败：', err)
-    ElMessage.error(err?.message || t('preview.videoCorsWarning'))
-  } finally {
-    batchDownloading.value = false
   }
 }
 
@@ -884,33 +771,9 @@ async function doBatchDelete() {
   }
 }
 
-/** 复制记录 ID 到剪贴板 */
-async function copyRecordId(id: number) {
-  const ok = await copyText(String(id), t('history.idCopied', { id }))
-  if (!ok) ElMessage.info(`${t('history.idLabel')}: ${id}`)
-}
+// ---------- 存为资产：把独立生成记录手动归档进资产库（自动归档失败时的兜底） ----------
 
-// ---------- 广场分享状态管理：单条切换 / 批量设为公开 / 批量设为私有 ----------
-
-/** 切换单条记录的分享状态（公开 ↔ 私有） */
-async function toggleShare(item: GenerationRecord) {
-  // 被管理员屏蔽的作品，不允许设为公开
-  if (item.moderation_status === 'rejected' && !item.is_public) {
-    ElMessage.warning(t('history.rejectedShareWarning'))
-    return
-  }
-  const newStatus = !item.is_public
-  try {
-    await updateShareStatus(item.id, newStatus)
-    // 更新本地记录的公开状态
-    item.is_public = newStatus
-    ElMessage.success(newStatus ? t('plaza.setPublicSuccess') : t('plaza.setPrivateSuccess'))
-  } catch (e) {
-    // 错误已在拦截器弹出
-  }
-}
-
-/** 打开「存为资产」弹窗（仅独立生成记录可手动归档） */
+/** 打开「存为资产」弹窗（仅无资产行的成功记录可手动归档） */
 function openSaveAsAsset(item: GenerationRecord) {
   saveAssetTarget.value = item
   saveAsAssetForm.name = (item.prompt || '').trim().slice(0, 50) || `生成记录 ${item.id}`
@@ -950,62 +813,6 @@ async function confirmSaveAsAsset() {
   }
 }
 
-/** 批量设为公开：弹出确认弹窗后调用批量接口 */
-async function confirmBatchSetPublic() {
-  if (selectedIds.value.length === 0) {
-    ElMessage.warning(t('history.pleaseSelectOne'))
-    return
-  }
-  // 过滤掉已被屏蔽的作品
-  const rejectedItems = list.value.filter(item =>
-    selectedIds.value.includes(item.id) && item.moderation_status === 'rejected'
-  )
-  const rejectedCount = rejectedItems.length
-  const validIds = selectedIds.value.filter(id => {
-    const item = list.value.find(i => i.id === id)
-    return item?.moderation_status !== 'rejected'
-  })
-  if (validIds.length === 0) {
-    ElMessage.warning(t('history.allSelectedRejected'))
-    return
-  }
-  const confirmText = rejectedCount > 0
-    ? t('history.confirmBatchPublicWithRejected', { valid: validIds.length, rejected: rejectedCount })
-    : t('plaza.confirmBatchPublic', { n: selectedIds.value.length })
-  await confirm(confirmText, t('plaza.batchSetPublic'))
-  batchSettingPublic.value = true
-  try {
-    await batchUpdateShareStatus(validIds, true)
-    ElMessage.success(t('plaza.batchSuccess'))
-    selectedIds.value = []
-    loadList()
-  } catch (e) {
-    // 错误已在拦截器弹出
-  } finally {
-    batchSettingPublic.value = false
-  }
-}
-
-/** 批量设为私有：弹出确认弹窗后调用批量接口 */
-async function confirmBatchSetPrivate() {
-  if (selectedIds.value.length === 0) {
-    ElMessage.warning(t('history.pleaseSelectOne'))
-    return
-  }
-  await confirm(t('plaza.confirmBatchPrivate', { n: selectedIds.value.length }), t('plaza.batchSetPrivate'))
-  batchSettingPrivate.value = true
-  try {
-    await batchUpdateShareStatus(selectedIds.value, false)
-    ElMessage.success(t('plaza.batchSuccess'))
-    selectedIds.value = []
-    loadList()
-  } catch (e) {
-    // 错误已在拦截器弹出
-  } finally {
-    batchSettingPrivate.value = false
-  }
-}
-
 async function copyLink(url: string) {
   if (!url) {
     ElMessage.warning(t('history.noValidLink'))
@@ -1015,41 +822,16 @@ async function copyLink(url: string) {
   if (!ok) ElMessage.error(t('history.copyLinkFailed'))
 }
 
-/** 卡片快捷复制提示词：复用通用剪贴板复制模块 */
+/** 行内快捷复制提示词：复用通用剪贴板复制模块 */
 async function copyPrompt(item: GenerationRecord) {
   if (!item.prompt) return
   const ok = await copyText(item.prompt, t('history.promptCopied'))
   if (!ok) ElMessage.error(t('history.copyLinkFailed'))
 }
 
-/** 卡片快捷下载（列表中直接点击下载图标） */
-async function downloadItem(item: GenerationRecord) {
-  if (!item?.result_url) {
-    ElMessage.warning(t('history.noValidResource'))
-    return
-  }
-  const baseURL = import.meta.env.VITE_API_BASE_URL || ''
-  const proxyUrl = `${baseURL}/api/history/${item.id}/download`
-  const defaultName = `agnes-${item.type}-${item.id}.${item.type === 'video' ? 'mp4' : 'png'}`
-  try {
-    await downloadViaProxy(proxyUrl, defaultName)
-    ElMessage.success(t('history.downloadStarted'))
-  } catch (err: any) {
-    ElMessage.error(err?.message || t('preview.videoCorsWarning'))
-  }
-}
-
-/** 卡片快捷删除（列表中直接点击删除图标）——调用历史记录删除模块 */
-async function quickDelete(item: GenerationRecord) {
-  if (!item?.id) return
-  // 复用详情弹窗中的 confirmDelete 逻辑，先设置当前项再弹出确认
-  detailItem.value = item
-  confirmDelete()
-}
-
 /**
  * 打开后期处理弹窗（调色/剪辑）
- * 由视频卡片上的 MagicStick/Scissor 按钮触发
+ * 由成功视频行上的 MagicStick/Scissor 按钮触发
  */
 function openPostProcess(item: GenerationRecord, _operation: 'color_grade' | 'video_edit') {
   if (!item?.id || item.type !== 'video') return
@@ -1064,7 +846,7 @@ function openPostProcess(item: GenerationRecord, _operation: 'color_grade' | 'vi
 }
 
 /**
- * 后期处理成功回调：刷新历史列表，提示用户新记录已生成
+ * 后期处理成功回调：刷新任务列表，提示用户新记录已生成
  */
 function handlePostProcessSuccess(result: { result_url: string; new_generation_id: number; operation: string }) {
   // 刷新列表，让新记录显示出来
@@ -1157,35 +939,14 @@ async function doDelete() {
   }
 }
 
-function truncate(text: string, max: number) {
-  if (!text) return ''
-  return text.length > max ? text.slice(0, max) + '…' : text
+/** 行内快捷删除 —— 复用详情删除确认逻辑 */
+function quickDelete(item: GenerationRecord) {
+  if (!item?.id) return
+  detailItem.value = item
+  confirmDelete()
 }
 
-/**
- * 获取视频卡片上显示的参数信息（时长 + 帧率）
- * 从 item.params 中提取，格式如 "5s · 24FPS"
- */
-function getVideoCardParams(item: GenerationRecord): string {
-  if (item.type !== 'video' || !item.params) return ''
-  const p = item.params as Record<string, unknown>
-  const parts: string[] = []
-  const seconds = p.seconds ?? p.duration
-  if (typeof seconds === 'number' && seconds > 0) {
-    parts.push(`${seconds}s`)
-  } else if (typeof seconds === 'string' && Number(seconds) > 0) {
-    parts.push(`${Number(seconds)}s`)
-  }
-  const fps = p.frame_rate ?? p.fps
-  if (typeof fps === 'number' && fps > 0) {
-    parts.push(`${fps}FPS`)
-  } else if (typeof fps === 'string' && Number(fps) > 0) {
-    parts.push(`${Number(fps)}FPS`)
-  }
-  return parts.join(' · ')
-}
-
-// 【历史自动刷新】每当有新任务完成/失败/取消时，自动刷新历史列表
+// 【任务自动刷新】每当有新任务完成/失败/取消时，自动刷新任务列表
 // 使用 watch 监听全局 taskQueue store 的 historyRefreshSignal，避免手动点击刷新按钮
 watch(
   () => queue.historyRefreshSignal,
@@ -1199,18 +960,15 @@ watch(
 )
 
 /**
- * 释放所有视频相关的 blob URL，避免内存泄漏
+ * 释放所有视频缩略图相关的 blob URL，避免内存泄漏
  */
 function clearVideoBlobUrls() {
   Object.values(videoThumbnails).forEach(url => {
     if (url && url.startsWith('blob:')) URL.revokeObjectURL(url)
   })
-  Object.values(videoPreviews).forEach(url => {
-    if (url && url.startsWith('blob:')) URL.revokeObjectURL(url)
-  })
 }
 
-// 【用户隔离】用户登录/登出后自动刷新历史列表，确保只看自己的数据
+// 【用户隔离】用户登录/登出后自动刷新任务列表，确保只看自己的数据
 // 由于 HistoryView 在 cachedViews 中被 keep-alive，不会重新 onMounted，
 // 因此需要通过事件监听来触发数据空间切换
 function handleUserSwitch() {
@@ -1251,10 +1009,27 @@ onBeforeUnmount(() => {
 <style scoped>
 .history-view { color: var(--agnes-text-primary); }
 
+.page-title {
+  font-size: 24px;
+  font-weight: 600;
+  margin: 0 0 8px;
+  color: var(--agnes-text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.page-desc {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--agnes-text-muted);
+}
+
 .filter-wrap {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
   margin-bottom: 20px;
   padding: 12px 16px;
   background: var(--agnes-bg-inset);
@@ -1311,302 +1086,228 @@ onBeforeUnmount(() => {
 @keyframes spin { to { transform: rotate(360deg); } }
 .empty-text { margin-top: 16px; font-size: 14px; }
 
-.history-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 18px;
+/* ---------- 任务行列表 ---------- */
+.task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
-.history-card {
+.task-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
   background: var(--agnes-bg-elevated);
   border: 1px solid var(--agnes-primary-border-faint);
   border-radius: 12px;
-  overflow: hidden;
   cursor: pointer;
   transition: all 0.2s ease;
   position: relative;
 }
-.history-card.is-selected {
+.task-row:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 24px var(--agnes-brand-glow);
+  border-color: var(--agnes-primary-border);
+}
+.task-row.is-selected {
   border-color: var(--agnes-error);
   box-shadow: 0 0 0 2px var(--agnes-error-border), 0 8px 24px var(--agnes-primary-border-faint);
-  transform: translateY(-2px);
 }
-.card-checkbox {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 2;
-  padding: 6px 8px;
+.row-checkbox {
+  padding: 4px 6px;
   background: var(--agnes-bg-elevated);
   border-radius: 8px;
   border: 1px solid var(--agnes-primary-border-faint);
   cursor: pointer;
+  flex-shrink: 0;
 }
-.history-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 8px 32px var(--agnes-brand-glow);
-  border-color: var(--agnes-primary-border);
-}
-.history-card.is-selected:hover {
-  transform: translateY(-2px);
-}
-.card-preview {
-  position: relative;
-  width: 100%;
-  aspect-ratio: 4/3;
+
+/* 缩略图：固定 4:3 小图 */
+.row-thumb {
+  width: 96px;
+  height: 72px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  overflow: hidden;
   background: var(--agnes-bg-base);
-  overflow: hidden;
-}
-.card-preview img,
-.card-preview video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-.video-thumb {
-  width: 100%;
-  height: 100%;
   position: relative;
-  background: var(--agnes-bg-elevated);
-  overflow: hidden;
 }
-.video-thumb-img {
+.row-thumb img,
+.row-thumb-media {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
-  transition: opacity 0.3s ease;
 }
-.video-thumb-placeholder {
+.thumb-placeholder {
   width: 100%;
   height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--agnes-text-faint);
+}
+.fail-icon { color: var(--agnes-error); }
+
+/* 主信息列 */
+.row-main {
+  flex: 1;
+  min-width: 0;
+}
+.row-prompt {
+  font-size: 13px;
+  color: var(--agnes-text-primary);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.row-meta {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.meta-chip {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #8bb4ff;
+  border: 1px solid rgba(139, 180, 255, 0.5);
+  background: rgba(10, 15, 30, 0.35);
+}
+.meta-chip.meta-mode {
+  color: #ffd98b;
+  border-color: rgba(255, 217, 139, 0.5);
+}
+.meta-model {
+  font-size: 12px;
+  color: var(--agnes-text-faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row-error {
+  font-size: 12px;
+  color: var(--agnes-error);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* 右侧信息列 */
+.row-side {
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  color: var(--agnes-text-muted);
+  align-items: flex-end;
+  gap: 4px;
+  width: 88px;
 }
-.video-thumb-placeholder .play-icon {
+/* 状态徽标：success 绿 / failed 红 / pending 蓝 / cancelled 灰 */
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.status-chip .el-icon { font-size: 12px; }
+.status-chip.st-success {
+  color: var(--agnes-success, #67c23a);
+  background: rgba(103, 194, 58, 0.12);
+  border: 1px solid rgba(103, 194, 58, 0.4);
+}
+.status-chip.st-failed {
+  color: var(--agnes-error);
+  background: var(--agnes-error-bg);
+  border: 1px solid var(--agnes-error-border);
+}
+.status-chip.st-pending,
+.status-chip.st-processing {
   color: var(--agnes-primary);
-  filter: drop-shadow(0 4px 12px var(--agnes-primary-border));
+  background: var(--agnes-info-bg);
+  border: 1px solid var(--agnes-primary-border);
 }
-.video-thumb-label {
-  font-size: 13px;
-  font-weight: 500;
+.status-chip.st-cancelled {
+  color: var(--agnes-text-muted);
+  background: var(--agnes-bg-inset);
+  border: 1px solid var(--agnes-primary-border-faint);
 }
-.video-preview-gif {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  z-index: 1;
-}
-/* 播放图标蒙层：视频缩略图属于沉浸式媒体预览，两套主题都用固定深色半透明背景，确保缩略图本身和白色播放图标都可见 */
-.video-play-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(10, 15, 30, 0.4);
-  z-index: 2;
-  transition: opacity 0.2s ease;
-  color: rgba(255, 255, 255, 0.9);
-}
-.video-play-overlay .el-icon {
-  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.5));
-}
-.video-thumb:hover .video-play-overlay {
-  opacity: 0;
-}
-.video-thumb:hover .video-thumb-img {
-  opacity: 0;
-}
-/* 类型标签（图片 / 视频）：叠在缩略图上，两套主题都用半透明深色背景 + 浅色文字 */
-.type-badge {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  padding: 4px 10px;
-  border-radius: 20px;
-  font-size: 11px;
+.row-credits {
+  font-size: 12px;
+  color: var(--agnes-credits-value);
   font-weight: 600;
-  color: #ffffff;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  background: rgba(10, 15, 30, 0.55);
-  backdrop-filter: blur(4px);
 }
-.type-badge.image { color: #8bb4ff; border: 1px solid rgba(139, 180, 255, 0.5); }
-.type-badge.video { color: #c4a7ff; border: 1px solid rgba(196, 167, 255, 0.5); }
-
-/* 生成模式标签（文生图 / 图生图 等）：叠在缩略图上，两套主题都用半透明深色背景 + 浅色文字 */
-.mode-badge {
-  position: absolute;
-  top: 10px;
-  left: 90px;
-  padding: 4px 10px;
-  border-radius: 20px;
-  font-size: 11px;
-  font-weight: 600;
-  background: rgba(10, 15, 30, 0.55);
-  backdrop-filter: blur(4px);
-}
-.mode-badge.mode-image {
-  color: #ffd98b;
-  border: 1px solid rgba(255, 217, 139, 0.5);
-}
-.mode-badge.mode-video {
-  color: #8be9d0;
-  border: 1px solid rgba(139, 233, 208, 0.5);
-}
-/* 详情页生成模式文字：用主题感知的 warning 色，浅色模式下为深橙、深色模式下为亮橙黄，保证两套主题下对比度均达标 */
-.mode-text {
-  color: var(--agnes-warning);
-  font-weight: 600;
+.row-time {
+  font-size: 12px;
+  color: var(--agnes-text-faint);
+  white-space: nowrap;
 }
 
-/* 卡片快捷操作按钮组（放大 / 下载 / 删除）—— 放在 card-preview 内部，z-index 足够高以确保不被内部 overlay 遮挡 */
-.card-actions {
+/* 行内快捷操作（hover 展示，叠在行右侧） */
+.row-actions {
   position: absolute;
-  bottom: 10px;
-  right: 10px;
-  z-index: 100;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 10;
   display: flex;
   gap: 6px;
-}
-.card-action-btn {
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  padding: 4px 6px;
   background: var(--agnes-bg-elevated);
-  backdrop-filter: blur(4px);
-  border-radius: 8px;
-  border: 1px solid var(--agnes-primary-border);
-  color: var(--agnes-primary-soft);
-  cursor: pointer;
+  border: 1px solid var(--agnes-primary-border-faint);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px var(--agnes-primary-border-faint);
   opacity: 0;
   pointer-events: none;
-  transition: all 0.2s ease;
+  transition: opacity 0.2s ease;
 }
-.history-card:hover .card-action-btn {
+.task-row:hover .row-actions {
   opacity: 1;
   pointer-events: auto;
 }
-.card-action-btn:hover {
+.row-action-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--agnes-bg-elevated);
+  border-radius: 6px;
+  border: 1px solid var(--agnes-primary-border-faint);
+  color: var(--agnes-primary-soft);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.row-action-btn:hover {
   background: var(--agnes-info-bg);
   border-color: var(--agnes-primary);
   color: #fff;
 }
-/* 删除按钮：独立的危险色样式，区别于放大/下载 */
-.card-action-btn.card-action-delete {
+.row-action-btn.row-action-delete {
   color: var(--agnes-error);
   border-color: var(--agnes-error-border);
 }
-.card-action-btn.card-action-delete:hover {
+.row-action-btn.row-action-delete:hover {
   background: var(--agnes-error-bg);
   border-color: var(--agnes-error);
   color: #fff;
 }
-/* 分享状态切换按钮：私有时灰色低调，公开时高亮 accent 色 */
-.card-action-btn.card-action-share {
-  color: var(--agnes-text-muted);
-  border-color: var(--agnes-primary-border-faint);
+/* 行内操作浮层盖住右侧信息列时的过渡底色 */
+.task-row:hover .row-side {
+  opacity: 0.25;
 }
-.card-action-btn.card-action-share.is-public {
-  color: var(--agnes-accent);
-  border-color: var(--agnes-accent);
-  opacity: 1;
-  pointer-events: auto;
-}
-.card-action-btn.card-action-share:hover {
-  background: var(--agnes-info-bg);
-  border-color: var(--agnes-accent);
-  color: var(--agnes-accent);
-}
-.card-action-btn.card-action-share.is-disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-  pointer-events: none;
-}
-/* 已分享到广场的状态标签：叠在缩略图右上角，公开时显示 */
-.public-badge {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  border-radius: 20px;
-  font-size: 11px;
-  font-weight: 600;
-  color: #ffffff;
-  background: var(--agnes-accent);
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  backdrop-filter: blur(4px);
-  z-index: 3;
-}
-
-.rejected-badge {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  border-radius: 20px;
-  font-size: 11px;
-  font-weight: 600;
-  color: #ffffff;
-  background: #ef4444;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  backdrop-filter: blur(4px);
-  z-index: 3;
-}
-.card-meta { padding: 12px 14px; }
-.card-prompt {
-  font-size: 13px;
-  color: var(--agnes-text-primary);
-  line-height: 1.5;
-  min-height: 40px;
-  overflow: hidden;
-}
-.card-video-params {
-  margin-top: 6px;
-  font-size: 11px;
-  color: var(--agnes-text-muted);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-.card-footer-row {
-  margin-top: 8px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-}
-.card-id {
-  font-size: 12px;
-  color: var(--agnes-text-faint);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  cursor: pointer;
-  transition: color 0.2s;
-}
-.card-id:hover {
-  color: var(--agnes-text-secondary);
-}
-.card-time {
-  font-size: 12px;
-  color: var(--agnes-text-faint);
+.row-side {
+  transition: opacity 0.2s ease;
 }
 
 .pagination-wrap {
@@ -1614,6 +1315,7 @@ onBeforeUnmount(() => {
   text-align: center;
 }
 
+/* ---------- 任务详情弹窗 ---------- */
 .detail-content { display: flex; gap: 24px; flex-direction: column; align-items: center; }
 .detail-media { width: 100%; text-align: center; }
 .detail-media img {
@@ -1654,6 +1356,15 @@ onBeforeUnmount(() => {
   font-size: 12px;
   font-weight: 500;
 }
+/* 详情页生成模式文字：用主题感知的 warning 色 */
+.mode-text {
+  color: var(--agnes-warning);
+  font-weight: 600;
+}
+.error-text {
+  color: var(--agnes-error);
+  word-break: break-all;
+}
 .url-row {
   margin-top: 8px;
   padding: 12px !important;
@@ -1687,17 +1398,7 @@ onBeforeUnmount(() => {
   max-width: 100%;
 }
 
-.detail-video-empty {
-  padding: 40px 20px;
-  background: var(--agnes-bg-base);
-  border-radius: 10px;
-  text-align: center;
-  color: var(--agnes-text-muted);
-  font-size: 13px;
-}
-.detail-video-empty div { margin-top: 10px; }
-
-/* 视频加载失败占位：居中展示图标 + 文案，避免破图 */
+/* 视频加载失败/无结果占位：居中展示图标 + 文案，避免破图 */
 .video-failed-placeholder {
   display: flex;
   flex-direction: column;
@@ -1727,16 +1428,10 @@ onBeforeUnmount(() => {
   font-size: 13px;
   pointer-events: none;
 }
-.detail-video-status.error {
-  color: var(--agnes-error);
-}
 
 .spinner {
   display: inline-block;
   animation: spin 1.2s linear infinite;
   color: var(--agnes-primary);
-}
-@keyframes spin {
-  to { transform: rotate(360deg); }
 }
 </style>
