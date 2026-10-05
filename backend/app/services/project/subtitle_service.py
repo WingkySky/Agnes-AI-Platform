@@ -49,42 +49,17 @@ logger = logging.getLogger("agnes_platform.project.subtitle")
 # Whisper 可选依赖（faster-whisper）
 # -------------------------------------------------
 # edge-tts + whisper 双模式对齐字幕。
+# 转写核心（可选依赖检测/模型缓存/transcribe_audio）已抽至
+# services/media/transcribe_service.py 公共域（项目/剪辑器共用）。
 # 本项目 whisper 为可选依赖：未安装时自动回退 LLM 拆分模式。
 # 安装方式：pip install faster-whisper
 # =====================================================
-try:
-    from faster_whisper import WhisperModel  # type: ignore
-    _WHISPER_AVAILABLE = True
-except ImportError:
-    _WHISPER_AVAILABLE = False
-
-
-def is_whisper_available() -> bool:
-    """检查 faster-whisper 是否已安装"""
-    return _WHISPER_AVAILABLE
-
-
-# Whisper 模型缓存（按 model_size 复用，避免重复加载）
-_whisper_model_cache: dict = {}
-
-
-def _get_whisper_model(model_size: str = "small", device: str = "cpu"):
-    """
-    获取（必要时加载）whisper 模型实例。
-
-    model_size: tiny/base/small/medium/large-v3 等，默认 small（中文识别效果与性能平衡）
-    device: cpu/cuda，默认 cpu（不依赖 GPU）
-    """
-    if not _WHISPER_AVAILABLE:
-        raise RuntimeError("faster-whisper 未安装，请先 pip install faster-whisper")
-    cache_key = f"{model_size}:{device}"
-    if cache_key not in _whisper_model_cache:
-        logger.info(f"加载 whisper 模型: size={model_size}, device={device}")
-        # compute_type=int8 默认，CPU 友好；GPU 环境可改 float16
-        _whisper_model_cache[cache_key] = WhisperModel(
-            model_size, device=device, compute_type="int8"
-        )
-    return _whisper_model_cache[cache_key]
+from app.services.media.transcribe_service import (
+    _WHISPER_AVAILABLE,
+    get_whisper_model as _get_whisper_model,
+    is_whisper_available,
+    transcribe_audio,
+)
 
 
 # =====================================================
@@ -295,8 +270,6 @@ async def _generate_subtitles_with_whisper(
     current_time = 0.0  # 全局时间轴起点
 
     try:
-        model = _get_whisper_model(whisper_model_size, device="cpu")
-
         async with httpx.AsyncClient(timeout=300) as client:
             for idx, (shot, audio_url, audio_duration_ms) in enumerate(whisper_shots):
                 # 下载音频
@@ -319,16 +292,8 @@ async def _generate_subtitles_with_whisper(
                     "progress": int(50 * (idx + 1) / max(len(whisper_shots), 1)),
                 })
 
-                # whisper 转写（同步 API，放在线程池避免阻塞事件循环）
-                segments_iter, _info = await asyncio.to_thread(
-                    model.transcribe,
-                    local_path,
-                    language="zh",
-                    vad_filter=True,
-                    word_timestamps=False,  # segment-level 已足够
-                )
-                # segments_iter 是 generator，需消费
-                segments = list(segments_iter)
+                # whisper 转写（公共域，线程池执行；segment-level 时间戳）
+                segments = await transcribe_audio(local_path, language="zh")
 
                 if not segments:
                     # whisper 没识别到内容，回退 LLM 处理该分镜
@@ -339,11 +304,9 @@ async def _generate_subtitles_with_whisper(
 
                 # 每条 segment 作为一个字幕片段
                 for seg in segments:
-                    text = (seg.text or "").strip()
-                    if not text:
-                        continue
-                    seg_start = float(seg.start)
-                    seg_end = float(seg.end)
+                    text = seg["text"]
+                    seg_start = seg["start"]
+                    seg_end = seg["end"]
                     seg_duration = max(seg_end - seg_start, 0.3)  # 最短 0.3s 保证可读
 
                     clip = ProjectTimelineClip(
@@ -366,7 +329,7 @@ async def _generate_subtitles_with_whisper(
                     })
 
                 # 推进时间轴（用音频实际时长，更精确）
-                audio_actual_duration = float(segments[-1].end) if segments else (
+                audio_actual_duration = segments[-1]["end"] if segments else (
                     (audio_duration_ms or shot.duration_ms or 3000) / 1000.0
                 )
                 current_time += audio_actual_duration

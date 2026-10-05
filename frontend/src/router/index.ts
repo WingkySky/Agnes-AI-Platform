@@ -94,6 +94,19 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/SceneEditorView.vue'),
     meta: { titleKey: 'router.sceneEditor', requiresAuth: true }
   },
+  // ---------- 剪辑器（独立实体，宿主唯一） ----------
+  {
+    path: '/editor/:uid',
+    name: 'editor',
+    component: () => import('@/views/EditorView.vue'),
+    meta: { titleKey: 'router.editor', requiresAuth: true }
+  },
+  {
+    path: '/editor-projects',
+    name: 'editor-projects',
+    component: () => import('@/views/EditorProjectsView.vue'),
+    meta: { titleKey: 'router.editorProjects', requiresAuth: true }
+  },
   {
     path: '/assets',
     name: 'assets',

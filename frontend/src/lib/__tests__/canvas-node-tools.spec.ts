@@ -34,7 +34,7 @@ describe('图片节点·有图', () => {
   it('一级只留 图生图/图生视频/替换图片/编辑/删除，其余全部分组收纳（去重后共 21 工具）', () => {
     expect(ids(m)).toEqual(['quick-generate-image', 'quick-generate-video', 'replace-image', 'edit', 'delete'])
     const total = m.primary.length + m.groups.reduce((n, g) => n + g.tools.length, 0)
-    expect(total).toBe(21)
+    expect(total).toBe(22)
   })
 
   it('生成组=重新生成+反推，编辑组 9 项按序，管理组 5 项按序', () => {
@@ -44,7 +44,7 @@ describe('图片节点·有图', () => {
       'angle', 'lighting', 'emotion', 'toggle-ratio',
     ])
     expect(groupIds(m, 'manage')).toEqual([
-      'save-asset', 'download', 'view-large', 'copy-prompt', 'info',
+      'save-asset', 'send-to-editor', 'download', 'view-large', 'copy-prompt', 'info',
     ])
     expect(m.groups.map((g) => g.key)).toEqual(['generate', 'edit', 'manage'])
     expect(m.groups.map((g) => g.labelKey)).toEqual(['groupGenerate', 'groupEdit', 'groupManage'])
@@ -107,7 +107,7 @@ describe('视频节点', () => {
     expect(groupIds(m, 'generate')).toEqual([
       'regenerate', 'capture-frame-first', 'capture-frame', 'capture-frame-last',
     ])
-    expect(groupIds(m, 'manage')).toEqual(['save-asset', 'download', 'info'])
+    expect(groupIds(m, 'manage')).toEqual(['save-asset', 'send-to-editor', 'download', 'info'])
   })
 
   it('无提示词时生成组只剩三截帧', () => {

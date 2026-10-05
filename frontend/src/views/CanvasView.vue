@@ -544,6 +544,7 @@ import { useConfirm } from '@/composables/useConfirm'
 import { useCopyText } from '@/composables/useCopyText'
 import { Download, Pencil, Plus, LayoutGrid, Link2 } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
+import { createEditorProject } from '@/api/editor'
 import { useDownload } from '@/composables/useDownload'
 import { useCanvasStore } from '@/stores/canvas'
 import { useUserStore } from '@/stores/user'
@@ -2315,8 +2316,7 @@ async function handleHoverRetry() {
 }
 
 // 悬停工具栏：存素材到素材库
-async function handleHoverSaveAsset() {
-  const panel = toolbarPanel.value
+async function handleHoverSaveAsset() {  const panel = toolbarPanel.value
   if (!panel) return
 
   const content: Record<string, unknown> = panel.content || {}
@@ -2340,6 +2340,55 @@ async function handleHoverSaveAsset() {
     ElMessage.success(t('canvas.messages.savedToAssets'))
   } catch (err) {
     ElMessage.error(`${t('canvas.messages.saveFailed')}: ${getErrorMessage(err) || err}`)
+  }
+}
+
+// 悬停工具栏：送进剪辑器（素材懒入库 → 建剪辑工程草稿 → 跳 /editor/:uid）
+async function handleHoverSendToEditor() {
+  const panel = toolbarPanel.value
+  if (!panel) return
+  const content: Record<string, unknown> = panel.content || {}
+  const url = (content.content || content.url) as string
+  if (!url) {
+    ElMessage.warning(t('canvas.messages.noSaveContent'))
+    return
+  }
+
+  // 已持数字 assetId 直接引用；否则经 registerAsset 懒入库（未登录/失败降级 uid → 阻断并提示）
+  let assetId: number | null = null
+  const existing = content.assetId
+  if (existing != null && /^\d+$/.test(String(existing))) {
+    assetId = Number(existing)
+  }
+  if (assetId == null) {
+    const { useAssetStore } = await import('@/stores/canvasAsset')
+    const assetStore = useAssetStore()
+    const item = await assetStore.registerAsset({
+      type: panel.type as 'image' | 'video',
+      url,
+      prompt: (content.prompt || '') as string,
+      name: panel.name || `${panel.type}-${panel.id.slice(0, 8)}`,
+      sourceNodeId: panel.id,
+      work_id: store.activeWorkspace?.work_id ?? undefined,
+    })
+    if (item && /^\d+$/.test(item.id)) assetId = Number(item.id)
+  }
+  if (assetId == null) {
+    ElMessage.warning(t('canvas.messages.sendToEditorNeedLogin'))
+    return
+  }
+
+  try {
+    const detail = await createEditorProject({
+      title: panel.name || t('editorProjects.defaultTitle'),
+      work_id: store.activeWorkspace?.work_id ?? undefined,
+      source_workspace_id: store.activeWorkspaceId ?? undefined,
+      asset_ids: [assetId],
+    })
+    ElMessage.success(t('editor.sendToEditorDone'))
+    void router.push(`/editor/${detail.uid}`)
+  } catch (err) {
+    ElMessage.error(`${t('editor.sendToEditorFailed')}: ${getErrorMessage(err) || err}`)
   }
 }
 
@@ -3208,6 +3257,7 @@ function handleToolAction(toolId: string, payload?: Record<string, unknown>) {
     retry: handleHoverRetry,
     'run-node': handleHoverRunNode,
     'save-asset': handleHoverSaveAsset,
+    'send-to-editor': handleHoverSendToEditor,
     download: handleHoverDownload,
     edit: handleHoverEdit,
     'quick-generate-image': () => handleQuickGenerate({ panel, mode: String(payload?.mode ?? 'image2image') }),

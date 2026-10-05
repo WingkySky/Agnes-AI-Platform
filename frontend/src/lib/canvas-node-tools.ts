@@ -197,6 +197,7 @@ export const TOOL_DEFS: ToolDef[] = [
 
   // —— 管理（管理组 / 简单形态平铺） ——
   { id: 'save-asset', icon: FolderPlus, labelKey: 'saveAsset', group: mediaManage, visible: (c) => c.hasContent },
+  { id: 'send-to-editor', icon: Film, labelKey: 'sendToEditor', group: mediaManage, visible: (c) => (isImage(c) || isVideo(c)) && c.hasContent },
   { id: 'download', icon: Download, labelKey: 'download', group: mediaManage, visible: (c) => c.hasContent && !isText(c) },
   { id: 'view-large', icon: Maximize2, labelKey: 'viewLarge', group: 'manage', visible: (c) => isImage(c) && c.hasContent },
   { id: 'copy-prompt', icon: Copy, labelKey: 'copyPrompt', group: 'manage', visible: (c) => isImage(c) && c.hasContent },

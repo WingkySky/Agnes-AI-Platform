@@ -69,6 +69,7 @@ from app.routes import scenes as scenes_route
 from app.routes import projects as projects_route
 from app.routes import canvas as canvas_route
 from app.routes import canvas_workspace as canvas_workspace_route
+from app.routes import editor as editor_route
 from app.routes import works as works_route
 from app.services.video_poller import poller_manager
 from app.services.image_poller import image_poller_manager
@@ -164,6 +165,10 @@ async def lifespan(app: FastAPI):
         await ensure_pipeline_seed(db)
         await ensure_official_presets(db)
     logger.info("✓ 种子数据已初始化（管理员/积分规则/流水线/官方预设）")
+
+    # 剪辑渲染：复位上次进程中断遗留的 rendering 态
+    from app.services.editor import render_service as editor_render_service
+    await editor_render_service.reset_stale_rendering()
 
     logger.info("🚀 Agnes AI Platform（全异步架构）后端服务已启动")
 
@@ -333,6 +338,7 @@ app.include_router(projects_route.router, prefix="/api", tags=["项目制创作"
 app.include_router(canvas_route.router, prefix="/api", tags=["无限画布"])
 app.include_router(canvas_workspace_route.router, prefix="/api", tags=["画布工作区"])
 app.include_router(works_route.router, prefix="/api", tags=["作品"])
+app.include_router(editor_route.router, prefix="/api", tags=["剪辑器"])
 
 
 # ---------- 健康检查 ----------

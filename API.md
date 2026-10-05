@@ -531,6 +531,25 @@ Swagger UI（交互式文档）：`http://localhost:8000/docs`
 | POST | `/api/assets/batch-delete` | 批量删除资产（按用户隔离；归档影子记录仅删资产库记录，不影响画布/项目本体）。请求体 `{ ids }`，响应 `{ deleted_count, failed_ids }` |
 | GET | `/api/assets/batch-download` | 批量下载打包 zip。`?ids=1,2,3`（单次 ≤100）；`/uploads/` 本地文件直读磁盘、远程地址服务端抓取，失败文件跳过 |
 
+### 剪辑器域（`/api/editor/projects`，登录级）
+
+> 剪辑工程为独立实体（不挂靠旧 project）；`work_id` 可空挂靠作品（一对多）。
+> 时间线文档 `document` 语义权威在前端命令表，后端只做骨架校验（形状/数值域/assetId 属主）。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/editor/projects` | 新建剪辑工程。请求体 `{ title, work_id?, source_workspace_id?, document?, asset_ids? }`；`document` 缺省生成空时间线（三轨）；`asset_ids`（画布圈选素材）按序建草稿（视频/图片排主轨、音频排音频轨，视频 duration=0 由前端元数据补正），素材必须已入库且属当前用户 |
+| GET | `/api/editor/projects` | 本人工程列表。查询参数：`work_id`（可选筛），按 `updated_at` 倒序 |
+| GET | `/api/editor/projects/{uid}` | 工程详情（含 document/revision/渲染状态）；非本人 403 |
+| PATCH | `/api/editor/projects/{uid}` | 编辑标题/挂靠作品（可选字段，仅更新提交项） |
+| DELETE | `/api/editor/projects/{uid}` | 删除工程（成片文件仍保留在资产库） |
+| PUT | `/api/editor/projects/{uid}/document` | 保存时间线。请求体 `{ document, base_revision }`；乐观锁不符 409 + `current_revision`（前端拉远端+冲突副本流程）；渲染进行中同样 409 |
+| POST | `/api/editor/projects/{uid}/render` | 提交渲染（`client_operation_id` 幂等）。服务端深拷贝 document 快照（`render_document`）后异步执行，立即返回状态；后台任务：素材本地化（远程 URL SSRF 校验后收口转存）→ 逐片段归一化（进度 `k/n`）→ 轨内 xfade/concat + 跨轨 overlay（PIP）→ 音频 adelay/amix → ASS 字幕硬烧 → 成片落 `uploads/editor/` 并自动入资产库（`source=compose`，`type=final`），`final_url` 挂工程 |
+| GET | `/api/editor/projects/{uid}/render` | 轮询渲染状态：`render_status`（idle/rendering/succeeded/failed）+ `render_progress`（`k/n` / `composing`）+ `final_url` + `render_error`（失败为 stderr 尾部）；应用启动时遗留 rendering 自动复位 failed |
+| POST | `/api/editor/projects/{uid}/subtitles/preview` | whisper 转写字幕草稿。请求体 `{ track_id }`（音频轨）；返回 `{ segments: [{start,end,text}] }`（时间线时间，已按片段 trimStart/时长裁剪）；入轨由前端 `rebuildSubtitleClips` 命令完成；服务器未装 faster-whisper 返回 503 |
+
+**document 骨架**：`{ timebase, width, height, tracks: [{id, kind: video/audio/subtitle, order, flag: hidden/locked/muted/null}], clips: [{id, trackId, assetId, start, duration, trimStart, props, text?}], subtitleStyle? }`；`props` 含 `speed/volume/fadeIn/fadeOut/rect(0~1 x/y/w/h, PIP)/transition({type: crossfade/fade/wipe, duration})`（转场挂在前一片段，与同轨后一片段之间生效）。
+
 ### `GET /api/plaza/creations`
 
 广场「创作」Tab 列表（无需登录）。返回已公开、含可用 `asset_url`、且审核通过（`moderation_status=approved`）的资产。

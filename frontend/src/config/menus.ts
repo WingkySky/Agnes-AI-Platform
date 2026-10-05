@@ -74,6 +74,15 @@ export const BUILT_IN_MENUS: BuiltInMenuItem[] = [
     is_group: false,
   },
   {
+    key: 'editor',
+    label_zh: '视频剪辑',
+    label_en: 'Video Editor',
+    icon: 'Film',
+    path: '/editor-projects',
+    require_admin: false,
+    is_group: false,
+  },
+  {
     key: 'assets',
     label_zh: '资产库',
     label_en: 'Asset Library',

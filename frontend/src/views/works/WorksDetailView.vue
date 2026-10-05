@@ -15,6 +15,26 @@
       <el-button type="primary" :icon="Plus" :disabled="!work" @click="createEpisode">{{ t('works.newEpisode') }}</el-button>
     </div>
 
+    <h3 class="section-title">{{ t('works.editorProjects') }}</h3>
+    <div class="canvas-grid">
+      <div v-for="p in projects" :key="p.uid" class="canvas-card" @click="openProject(p.uid)">
+        <div class="canvas-name" :title="p.title">{{ p.title }}</div>
+        <div class="canvas-time">
+          {{ t(`editor.renderStates.${p.render_status}`) }} · {{ formatDate(p.updated_at) }}
+        </div>
+        <div class="canvas-ops" @click.stop>
+          <el-button size="small" text type="primary" @click="openProject(p.uid)">{{ t('works.openProject') }}</el-button>
+          <a v-if="p.final_url" :href="p.final_url" target="_blank">
+            <el-button size="small" text type="success">{{ t('works.projectFinal') }}</el-button>
+          </a>
+        </div>
+      </div>
+      <div class="canvas-card new-card" @click="createProject">
+        <el-icon><Plus /></el-icon>
+        <span>{{ t('works.newProject') }}</span>
+      </div>
+    </div>
+
     <h3 class="section-title">{{ t('works.canvases') }}</h3>
     <el-empty v-if="!loading && canvases.length === 0" :description="t('works.canvasEmpty')" />
     <div v-else v-loading="loading" class="canvas-grid">
@@ -37,6 +57,7 @@ import { ArrowLeft, Plus } from 'lucide-vue-next'
 import { ElMessage } from 'element-plus'
 import { useI18n } from '@/i18n'
 import { useConfirm } from '@/composables/useConfirm'
+import { createEditorProject, listEditorProjects, type EditingProjectBrief } from '@/api/editor'
 import { getWork, type WorkItem } from '@/api/works'
 import { listWorkspaces, createWorkspace, deleteWorkspace, type WorkspaceBrief } from '@/api/canvasWorkspace'
 
@@ -48,6 +69,7 @@ const { confirm } = useConfirm()
 const workId = Number(route.params.id)
 const work = ref<WorkItem | null>(null)
 const canvases = ref<WorkspaceBrief[]>([])
+const projects = ref<EditingProjectBrief[]>([])
 const loading = ref(false)
 
 function formatDate(value: string | null): string {
@@ -59,6 +81,7 @@ async function fetchAll(): Promise<void> {
   try {
     work.value = await getWork(workId)
     canvases.value = await listWorkspaces({ work_id: workId })
+    projects.value = (await listEditorProjects(workId)).items
   } finally {
     loading.value = false
   }
@@ -69,6 +92,18 @@ async function createEpisode(): Promise<void> {
   await createWorkspace({ name, work_id: workId })
   ElMessage.success(t('works.episodeCreated'))
   await fetchAll()
+}
+
+async function createProject(): Promise<void> {
+  const detail = await createEditorProject({
+    title: t('works.projectN').replace('{n}', String(projects.value.length + 1)),
+    work_id: workId,
+  })
+  await openProject(detail.uid)
+}
+
+async function openProject(uid: string): Promise<void> {
+  await router.push(`/editor/${uid}`)
 }
 
 function enterCanvas(id: string): void {
@@ -137,6 +172,16 @@ onMounted(() => {
 
 .canvas-card:hover {
   box-shadow: var(--el-box-shadow-light);
+}
+
+.new-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--el-text-color-secondary);
+  border-style: dashed;
+  min-height: 96px;
 }
 
 .canvas-name {

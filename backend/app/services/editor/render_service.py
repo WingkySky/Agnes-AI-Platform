@@ -1,0 +1,420 @@
+# =====================================================
+# 剪辑渲染服务（Plan → media_compose lowering → 成片）
+#
+# 三层渲染的第二/三层：Plan → 单条 ffmpeg filter_complex 命令 → run_ffmpeg。
+# 提交时快照（render_document）+ client_operation_id 幂等 + asyncio 后台任务，
+# 进度写 render_progress（归一化 "k/n" / "composing"），前端轮询读取。
+#
+# 输入序模型（filter 里按序号引用）：
+#   输入 0 = 黑底画布（lavfi color，仅有视频轨时存在）
+#   随后 = 全部视频片段归一化文件（轨序 → 轨内片段序）
+#   随后 = 全部音频源文件（audio_clips 序）
+#
+# 合成策略（v1 明确边界，与 plan_builder 对应）：
+# - 全帧片段轨（rect 空/全帧）→ 轨内 xfade/concat 链后作为一层 overlay
+# - 带 rect 的片段（PIP）→ 归一化时已缩放到 rect 尺寸，按 render_start 窗口
+#   enable overlay（PIP 片段间硬切，转场不生效）
+# - 音频：逐段截取/atempo/volume/afade → adelay 定位 → amix
+# - 字幕：build_ass + subtitles 滤镜硬烧
+# - 成片落 uploads/editor/，final_url 挂工程并自动入资产库（source=compose）
+# =====================================================
+
+import asyncio
+import logging
+import os
+import shutil
+import uuid
+from pathlib import Path
+from typing import Optional
+
+from fastapi import HTTPException
+from sqlalchemy.future import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import async_session
+from app.models.asset import Asset
+from app.models.editing_project import (
+    RENDER_FAILED,
+    RENDER_RENDERING,
+    RENDER_SUCCEEDED,
+    EditingProject,
+)
+from app.services.editor.media_source import resolve_asset_local_file
+from app.services.editor.plan_builder import build_plan, timeline_total
+from app.services.media.subtitle_format import build_ass
+from app.services.media_compose import run_ffmpeg
+from app.services.upload_service import UPLOADS_DIR
+
+logger = logging.getLogger("agnes_platform.editor.render")
+
+EDITOR_OUTPUTS_DIR = os.path.join(UPLOADS_DIR, "editor")
+
+
+def render_status_payload(project: EditingProject) -> dict:
+    return {
+        "render_status": project.render_status,
+        "render_progress": project.render_progress,
+        "final_url": project.final_url,
+        "render_error": project.render_error,
+    }
+
+
+async def submit_render(db: AsyncSession, project: EditingProject, body: dict) -> dict:
+    """提交渲染：rendering 中幂等返回；写快照后起后台任务。"""
+    client_op = body.get("client_operation_id")
+    if project.render_status == RENDER_RENDERING:
+        return render_status_payload(project)
+    if client_op and project.render_client_op_id == client_op and project.render_status == RENDER_SUCCEEDED:
+        return render_status_payload(project)  # 同 op 重试：返回上次结果（幂等）
+
+    if not (project.document or {}).get("clips"):
+        raise HTTPException(status_code=400, detail="时间线为空，没有可渲染内容")
+
+    project.render_document = project.document
+    project.render_status = RENDER_RENDERING
+    project.render_error = None
+    project.render_progress = "0/0"
+    project.render_client_op_id = client_op
+    await db.commit()
+
+    asyncio.create_task(_render_task(project.uid))
+    return render_status_payload(project)
+
+
+async def reset_stale_rendering(db: Optional[AsyncSession] = None) -> None:
+    """应用启动时把上次进程中断遗留的 rendering 复位为 failed（lifespan 调用；可注入会话便于测试）。"""
+    if db is None:
+        async with async_session() as db:
+            await reset_stale_rendering(db)
+        return
+    rows = (
+        await db.scalars(select(EditingProject).where(EditingProject.render_status == RENDER_RENDERING))
+    ).all()
+    for project in rows:
+        project.render_status = RENDER_FAILED
+        project.render_error = "渲染进程中断，请重新导出"
+        project.render_progress = None
+    if rows:
+        await db.commit()
+
+
+async def _render_task(project_uid: str) -> None:
+    """后台渲染（自建 session；任何异常落 failed + 错误尾部）。"""
+    async with async_session() as db:
+        project = (
+            await db.scalars(select(EditingProject).where(EditingProject.uid == project_uid))
+        ).first()
+        if not project or project.render_status != RENDER_RENDERING:
+            return
+        try:
+            await _render_project(db, project)
+        except Exception as e:  # noqa: BLE001 — 后台任务兜底：失败态落库
+            logger.exception("[剪辑渲染] 任务失败 uid=%s", project_uid)
+            project.render_status = RENDER_FAILED
+            project.render_error = str(e)[-2000:]
+            project.render_progress = None
+            await db.commit()
+
+
+async def _render_project(db: AsyncSession, project: EditingProject) -> None:
+    snapshot = project.render_document or project.document
+    # 1. 素材本地化（远程先收口转存；失效片段剔除）
+    asset_ids = {c["assetId"] for c in snapshot.get("clips", []) if isinstance(c.get("assetId"), int)}
+    assets = {
+        a.id: a
+        for a in (
+            await db.scalars(select(Asset).where(Asset.id.in_(asset_ids)))
+        ).all()
+        if a.user_id == project.user_id
+    }
+    paths: dict[int, str] = {}
+    for asset in assets.values():
+        local = await resolve_asset_local_file(asset, EDITOR_OUTPUTS_DIR)
+        if local:
+            paths[asset.id] = local
+    plan = build_plan(snapshot, lambda aid: paths.get(aid))
+    if plan is None:
+        raise RuntimeError("没有可用素材片段（素材缺失或时长为 0）")
+
+    # 2. 片段归一化（进度 k/n）
+    plan, normalized = await _normalize_segments(db, project, plan)
+
+    # 3. 字幕 ASS（有事件才烧录；document subtitleStyle → build_ass style 键映射）
+    ass_path = None
+    if plan["subtitle_events"]:
+        style = plan.get("subtitle_style") or {}
+        ass_events = [
+            {"start_time": e["start"], "duration": e["end"] - e["start"], "text": e["text"]}
+            for e in plan["subtitle_events"]
+        ]
+        ass_style = {
+            "font_family": style.get("font") or "Noto Sans CJK SC",
+            "font_size": int(style.get("size") or 48),
+            "font_color": style.get("color") or "#FFFFFF",
+            "outline_width": 2 if style.get("outline") else 0,
+            "position": style.get("position") or "bottom",
+        }
+        ass_path = os.path.join(EDITOR_OUTPUTS_DIR, f"subs_{uuid.uuid4().hex[:12]}.ass")
+        Path(ass_path).write_text(build_ass(ass_events, ass_style), encoding="utf-8")
+
+    # 4. 终版合成
+    project.render_progress = "composing"
+    await db.commit()
+    tmp_out = os.path.join(EDITOR_OUTPUTS_DIR, f".render_{uuid.uuid4().hex[:12]}.mp4")
+    cmd = build_render_command(plan, normalized, ass_path, tmp_out)
+    await run_ffmpeg(cmd, timeout=1800, error_label="剪辑渲染")
+
+    # 5. 成片归属：落 uploads/editor + assets 入库 + final_url
+    storage_key = f"editor/{uuid.uuid4().hex}.mp4"
+    final_path = os.path.join(UPLOADS_DIR, storage_key)
+    shutil.move(tmp_out, final_path)
+    if ass_path and os.path.exists(ass_path):
+        os.remove(ass_path)
+    asset = Asset(
+        type="final", name=f"{project.title} 成片", description=None, visual_description="",
+        user_id=project.user_id, is_public=False, tags=[], version=1,
+        source="compose", kind="video",
+        asset_url=f"/uploads/{storage_key}", storage_key=storage_key,
+        work_id=project.work_id,
+    )
+    db.add(asset)
+    project.final_url = f"/uploads/{storage_key}"
+    project.render_status = RENDER_SUCCEEDED
+    project.render_progress = None
+    project.render_error = None
+    await db.commit()
+    logger.info("[剪辑渲染] 完成 uid=%s → %s", project.uid, storage_key)
+
+
+async def _normalize_segments(db: AsyncSession, project: EditingProject, plan: dict) -> tuple[dict, dict[str, str]]:
+    """逐片段截取+变速+归一化；进度写 render_progress。"""
+    segs = [s for t in plan["video_tracks"] for s in t["segments"]]
+    total = len(segs)
+    normalized: dict[str, str] = {}
+    for i, seg in enumerate(segs):
+        out = os.path.join(EDITOR_OUTPUTS_DIR, f".norm_{uuid.uuid4().hex[:12]}.mp4")
+        await run_ffmpeg(
+            _segment_normalize_cmd(seg, plan["width"], plan["height"], plan["timebase"], out),
+            timeout=900,
+            error_label=f"片段归一化（{seg['clip_id']}）",
+        )
+        normalized[seg["clip_id"]] = out
+        project.render_progress = f"{i + 1}/{total}"
+        await db.commit()
+    return plan, normalized
+
+
+# =====================================================
+# lowering：Plan → ffmpeg 命令（纯函数，黄金测试直测）
+# =====================================================
+
+def _even(v: float) -> int:
+    return max(2, int(round(v / 2)) * 2)
+
+
+def _is_full_frame(rect: Optional[dict]) -> bool:
+    return not rect or (float(rect.get("w", 1)) >= 1 and float(rect.get("h", 1)) >= 1)
+
+
+def _segment_normalize_cmd(seg: dict, width: int, height: int, fps: int, out_path: str) -> list[str]:
+    """单片段截取 + 变速 + 归一化（无声，统一分辨率/帧率供 xfade/overlay）"""
+    speed = seg["speed"]
+    src_span = seg["duration"] * speed
+    vf = [f"setpts=PTS/{speed}", f"fps={fps}"]
+    rect = seg.get("rect")
+    if rect and not _is_full_frame(rect):
+        w = _even(width * float(rect.get("w", 1)))
+        h = _even(height * float(rect.get("h", 1)))
+        vf.append(f"scale={w}:{h}:force_original_aspect_ratio=decrease")
+        vf.append(f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black")
+    else:
+        vf.append(f"scale={width}:{height}:force_original_aspect_ratio=decrease")
+        vf.append(f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black")
+    vf.append("setsar=1")
+    return [
+        "ffmpeg", "-y",
+        "-ss", f"{seg['trim_start']}",
+        "-t", f"{src_span:.6f}",
+        "-i", seg["asset_path"],
+        "-vf", ",".join(vf),
+        "-an",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-pix_fmt", "yuv420p",
+        out_path,
+    ]
+
+
+def _xfade_name(transition_type: str) -> str:
+    """Plan 转场类型 → ffmpeg xfade transition 名"""
+    return {"crossfade": "fade", "fade": "fadeblack", "wipe": "wipeleft"}.get(transition_type, "fade")
+
+
+def _atempo_chain(speed: float) -> list[str]:
+    """atempo 仅支持 0.5~2，链式拆分实现任意变速"""
+    if speed == 1.0:
+        return []
+    factors: list[float] = []
+    remaining = speed
+    while remaining > 2.0:
+        factors.append(2.0)
+        remaining /= 2.0
+    while remaining < 0.5:
+        factors.append(0.5)
+        remaining /= 0.5
+    factors.append(round(remaining, 6))
+    return [f"atempo={f}" for f in factors]
+
+
+def _audio_filter_for(seg: dict) -> str:
+    """单音频段滤镜：变速 → 音量 → fade"""
+    parts: list[str] = []
+    parts += _atempo_chain(seg["speed"])
+    if seg["volume"] != 1.0:
+        parts.append(f"volume={seg['volume']}")
+    if seg["fade_in"] > 0:
+        parts.append(f"afade=t=in:st=0:d={seg['fade_in']}")
+    if seg["fade_out"] > 0:
+        st = max(0.0, seg["duration"] - seg["fade_out"])
+        parts.append(f"afade=t=out:st={st:.3f}:d={seg['fade_out']}")
+    return ",".join(parts) if parts else "anull"
+
+
+def build_render_command(
+    plan: dict,
+    normalized: dict[str, str],
+    ass_path: Optional[str],
+    output_path: str,
+) -> list[str]:
+    """Plan + 归一化产物 → 单条 ffmpeg 命令（黄金测试直测，不执行）。"""
+    width, height, fps = plan["width"], plan["height"], plan["timebase"]
+    total = timeline_total(plan)
+    has_video = bool(plan["video_tracks"])
+
+    cmd: list[str] = ["ffmpeg", "-y"]
+    filters: list[str] = []
+    input_index = 0
+
+    # —— 视频输入与轨链 ——
+    # 黑底基座仅在 overlay 层数 > 1 时需要（单层全帧轨直接作为成片视频流）
+    def _track_is_single_layer(track: dict) -> bool:
+        segs = track["segments"]
+        return bool(segs) and all(_is_full_frame(s.get("rect")) for s in segs)
+
+    overlay_layer_count = sum(
+        1 if _track_is_single_layer(track) else len(track["segments"])
+        for track in plan["video_tracks"]
+    )
+    needs_base = overlay_layer_count > 1
+
+    overlay_items: list[tuple[str, int, int, str]] = []  # (label, x, y, enable)
+    if has_video and needs_base:
+        cmd += ["-f", "lavfi", "-i", f"color=c=black:s={width}x{height}:d={total:.6f}:r={fps}"]
+        input_index += 1
+
+    for track in plan["video_tracks"]:
+        segs = track["segments"]
+        if segs and all(_is_full_frame(s.get("rect")) for s in segs):
+            # 整轨一条链：xfade（有转场）/ concat
+            chain_in: Optional[str] = None
+            consumed = 0.0
+            for i, seg in enumerate(segs):
+                cmd += ["-i", normalized[seg["clip_id"]]]
+                label = f"[{input_index}:v]"
+                input_index += 1
+                if chain_in is None:
+                    chain_in = label
+                    consumed = seg["duration"]
+                    continue
+                trans = segs[i - 1].get("transition_applied")
+                out_label = f"[trk{track['track_id']}_{i}]"
+                if trans:
+                    offset = max(consumed - trans["duration"], 0)
+                    filters.append(
+                        f"{chain_in}{label}xfade=transition={_xfade_name(trans['type'])}"
+                        f":duration={trans['duration']:.3f}:offset={offset:.3f}{out_label}"
+                    )
+                    consumed = offset + seg["duration"]
+                else:
+                    filters.append(f"{chain_in}{label}concat=n=2:v=1:a=0{out_label}")
+                    consumed += seg["duration"]
+                chain_in = out_label
+            overlay_items.append((chain_in, 0, 0, ""))
+        else:
+            # PIP 轨：逐片段独立 overlay（窗口 enable；单片段轨无需 enable）
+            for seg in segs:
+                cmd += ["-i", normalized[seg["clip_id"]]]
+                label = f"[{input_index}:v]"
+                input_index += 1
+                rect = seg.get("rect") or {}
+                x = int(width * float(rect.get("x", 0)))
+                y = int(height * float(rect.get("y", 0)))
+                enable = (
+                    f":enable='between(t,{seg['render_start']:.3f},{seg['render_start'] + seg['duration']:.3f})'"
+                    if len(segs) > 1 else ""
+                )
+                overlay_items.append((label, x, y, enable))
+
+    # —— 音频输入 ——
+    audio_base = input_index
+    for seg in plan["audio_clips"]:
+        cmd += ["-ss", f"{seg['trim_start']}", "-t", f"{seg['duration'] * seg['speed']:.6f}", "-i", seg["asset_path"]]
+
+    # —— overlay 链 ——
+    final_v: Optional[str] = None
+    if has_video:
+        if len(overlay_items) == 1 and overlay_items[0][1] == 0 and overlay_items[0][2] == 0 and not overlay_items[0][3]:
+            current = overlay_items[0][0]  # 单层全帧：直接作为成片视频
+        else:
+            current = "[0:v]"
+            for i, (label, x, y, enable) in enumerate(overlay_items):
+                out_label = f"[ov{i}]"
+                filters.append(f"{current}{label}overlay={x}:{y}{enable}{out_label}")
+                current = out_label
+        # 字幕硬烧（挂在最终视频链上）
+        if ass_path:
+            escaped = ass_path.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+            filters.append(f"{current}subtitles=filename='{escaped}'[vout]")
+            final_v = "[vout]"
+        else:
+            final_v = current
+    # 兜底：无视频轨但 needs_base 误判不应发生；空内容在上方已抛错
+
+    # —— 音频混音 ——
+    delayed: list[str] = []
+    for i, seg in enumerate(plan["audio_clips"]):
+        chain = _audio_filter_for(seg)
+        delay_ms = int(seg["render_start"] * 1000)
+        parts = chain.split(",") if chain != "anull" else []
+        if delay_ms > 0:
+            parts.append(f"adelay={delay_ms}:all=1")
+        in_label = f"[{audio_base + i}:a]"
+        if parts:
+            out_label = f"[ad{i}]"
+            filters.append(f"{in_label}{','.join(parts)}{out_label}")
+            delayed.append(out_label)
+        else:
+            delayed.append(in_label)
+    if len(delayed) > 1:
+        filters.append(f"{''.join(delayed)}amix=inputs={len(delayed)}:normalize=0[aout]")
+        final_a = "[aout]"
+    elif delayed:
+        final_a = delayed[0]
+    else:
+        final_a = None
+
+    if final_v:
+        cmd += ["-map", final_v]
+    if final_a:
+        cmd += ["-map", final_a]
+    if filters:
+        cmd += ["-filter_complex", ";".join(filters)]
+    if not final_v:
+        cmd += ["-vn"]
+    if final_v:
+        cmd += ["-c:v", "libx264", "-preset", "medium", "-crf", "23", "-pix_fmt", "yuv420p"]
+    if final_a:
+        cmd += ["-c:a", "aac", "-b:a", "128k"]
+    if not final_v and not final_a:
+        raise RuntimeError("无可渲染内容")
+    cmd += [output_path]
+    return cmd
