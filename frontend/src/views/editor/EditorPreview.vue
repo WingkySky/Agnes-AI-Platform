@@ -1,12 +1,11 @@
 <script setup lang="ts">
 /* =====================================================
- * 预览区：浏览器本地预览
- * - 每条视频轨一个 <video>，按 rect 绝对定位层叠（PIP）
- * - 每条音频轨一个 <audio>
- * - 播放 = rAF 推进 store.playhead（单一时间源）；片段切换时换 src 重定位
- * - 音量/fade：媒体元素接入 WebAudio GainNode，每帧写入瞬时增益
- *   （lib/editor-audio 纯函数，与渲染 Plan 的 afade 语义一致）；
- *   跨域资源不进音频图，退回元素音量近似
+ * 预览区：浏览器本地预览（双路径）
+ * - WebCodecs 可用：canvas 路径（EditorCanvasStage，mediabunny 解码 +
+ *   音频统一调度，音频时钟主控推进播放头）
+ * - 不可用：DOM 路径，每条视频轨一个 <video>、音频轨一个 <audio>，
+ *   rAF 推进 store.playhead；音量/fade 经 WebAudio GainNode（clipGainAt）
+ * - 字幕层与控制条两路径共用；激活片段素材缓存两条路径共用
  * ===================================================== */
 
 import { computed, onBeforeUnmount, watch } from 'vue'
@@ -15,11 +14,16 @@ import { useEditorStore } from '@/stores/editor'
 import { useI18n } from '@/i18n'
 import { clipEnd, type EditorClip } from '@/lib/editor-types'
 import { clipGainAt } from '@/lib/editor-audio'
+import { hasWebCodecs } from '@/lib/editor-media'
+import EditorCanvasStage from './EditorCanvasStage.vue'
 
 const store = useEditorStore()
 
 const emptyStyle: Record<string, string> = {}
 const { t } = useI18n()
+
+/** canvas 路径开关（组件创建时判定一次） */
+const useCanvasPath = hasWebCodecs()
 
 /** subtitleStyle → 字幕层 CSS */
 const subtitleStyleVars = computed<Record<string, string>>(() => {
@@ -194,7 +198,7 @@ async function togglePlay(): Promise<void> {
   store.isPlaying = !store.isPlaying
 }
 
-// 播放循环：rAF 推进 playhead，逐帧同步媒体元素
+// 播放循环（仅 DOM 路径）：rAF 推进 playhead，逐帧同步媒体元素；canvas 路径由 EditorCanvasStage 推进
 let rafId = 0
 let lastTs = 0
 
@@ -213,7 +217,7 @@ function tick(ts: number): void {
   syncMedia()
   rafId = requestAnimationFrame(tick)
 }
-rafId = requestAnimationFrame(tick)
+if (!useCanvasPath) rafId = requestAnimationFrame(tick)
 
 onBeforeUnmount(() => {
   cancelAnimationFrame(rafId)
@@ -226,22 +230,25 @@ onBeforeUnmount(() => {
   <div class="preview">
     <div class="stage" :style="{ aspectRatio: store.doc ? `${store.doc.width} / ${store.doc.height}` : '16 / 9' }">
       <template v-if="store.doc">
-        <template v-for="track in videoTracks" :key="track.id">
-          <video
-            v-if="videoStates[track.id]?.url && track.flag !== 'hidden'"
-            :ref="(el) => setVideoEl(track.id, el)"
-            class="stage-video"
-            :style="activeClip(track.id) ? clipRectStyle(activeClip(track.id)!) : {}"
-            :src="videoStates[track.id]!.url ?? undefined"
-            playsinline
-          />
-        </template>
-        <template v-for="track in audioTracks" :key="track.id">
-          <audio
-            v-if="audioStates[track.id]?.url"
-            :ref="(el) => setAudioEl(track.id, el)"
-            :src="audioStates[track.id]!.url ?? undefined"
-          />
+        <EditorCanvasStage v-if="useCanvasPath" />
+        <template v-else>
+          <template v-for="track in videoTracks" :key="track.id">
+            <video
+              v-if="videoStates[track.id]?.url && track.flag !== 'hidden'"
+              :ref="(el) => setVideoEl(track.id, el)"
+              class="stage-video"
+              :style="activeClip(track.id) ? clipRectStyle(activeClip(track.id)!) : {}"
+              :src="videoStates[track.id]!.url ?? undefined"
+              playsinline
+            />
+          </template>
+          <template v-for="track in audioTracks" :key="track.id">
+            <audio
+              v-if="audioStates[track.id]?.url"
+              :ref="(el) => setAudioEl(track.id, el)"
+              :src="audioStates[track.id]!.url ?? undefined"
+            />
+          </template>
         </template>
         <div class="subtitle-layer">
           <p v-for="clip in activeSubtitles" :key="clip.id" class="subtitle-text" :style="subtitleStyleVars">

@@ -37,6 +37,7 @@ import {
 import { EditorHistory } from '@/lib/editor-history'
 import { reflowPlaceholders } from '@/lib/editor-derive'
 import { canPlaceOnTrack, findFreeTrack } from '@/lib/editor-placement'
+import { probeMediaDuration as probeMediaDurationWithFallback } from '@/lib/editor-media'
 import type { EditorDocument, EditorTrack } from '@/lib/editor-types'
 
 const AUTOSAVE_INTERVAL_MS = 2000
@@ -153,7 +154,7 @@ export const useEditorStore = defineStore('editor', () => {
     scheduleSave()
   }
 
-  function probeMediaDuration(url: string): Promise<number> {
+  function probeMediaElementDuration(url: string): Promise<number> {
     return new Promise((resolve) => {
       const el = document.createElement(url.match(/\.(mp3|wav|m4a|aac)(\?|$)/i) ? 'audio' : 'video')
       el.preload = 'metadata'
@@ -161,6 +162,11 @@ export const useEditorStore = defineStore('editor', () => {
       el.onerror = () => resolve(0)
       el.src = url
     })
+  }
+
+  /** 三级探测：mediabunny 容器元数据（WebCodecs 可用时）→ 元素 loadedmetadata 回退 */
+  async function probeMediaDuration(url: string): Promise<number> {
+    return probeMediaDurationWithFallback(url, probeMediaElementDuration)
   }
 
   /** 去重防线：同轨同素材落点过近（<80ms）视为重复放置 */
