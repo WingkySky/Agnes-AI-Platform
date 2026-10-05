@@ -150,8 +150,8 @@ onMounted(() => void reload())
   flex: 1;
   overflow-y: auto;
   display: grid;
-  /* 自适应网格：卡片保持可读的最小尺寸，面板变窄靠减列数适应（最窄 1 列） */
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  /* 自适应网格：卡片最小 150px 保证缩略图可读，面板变窄减列（最窄 1 列）、变宽加大卡片 */
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 8px;
   align-content: start;
   min-height: 0;
@@ -166,15 +166,14 @@ onMounted(() => void reload())
 }
 .asset-card img, .asset-card video {
   width: 100%;
-  height: auto;
-  aspect-ratio: 16 / 9;
+  /* 缩略图固定高度（≈16:9）：不随面板高度伸缩，尺寸始终可读 */
+  height: 84px;
   object-fit: cover;
   display: block;
   pointer-events: none;
 }
 .audio-mark {
-  aspect-ratio: 16 / 9;
-  height: auto;
+  height: 84px;
   display: flex;
   align-items: center;
   justify-content: center;
