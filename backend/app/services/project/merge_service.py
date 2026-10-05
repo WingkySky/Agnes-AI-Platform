@@ -667,7 +667,7 @@ def _video_normalize_cmd(
     ]
 
 
-async def _audio_clip_cmd(clip, src_path: str, out_path: str) -> List[str]:
+def _audio_clip_cmd(clip, src_path: str, out_path: str) -> List[str]:
     """构造音频裁剪截取命令（按 trim_start/duration 截取为 aac）。"""
     trim_start, duration = _clip_trim_range(clip)
     return [
