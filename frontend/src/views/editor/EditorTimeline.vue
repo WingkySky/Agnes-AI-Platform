@@ -19,6 +19,8 @@ const { t } = useI18n()
 
 const PX_PER_SEC = ref(80)
 const TIMELINE_PAD = 8
+/** 轨头列宽（与 CSS .track-head 一致）：刻度/播放头的 0 点必须在其之后 */
+const TRACK_HEAD_W = 168
 
 const trackRows = computed(() => {
   const doc = store.doc
@@ -35,17 +37,16 @@ const trackRows = computed(() => {
 })
 
 const contentWidth = computed(() =>
-  Math.max(600, (props.totalDuration + 6) * PX_PER_SEC.value + TIMELINE_PAD * 2),
+  Math.max(600, TRACK_HEAD_W + TIMELINE_PAD + (props.totalDuration + 6) * PX_PER_SEC.value + TIMELINE_PAD),
 )
 
 const timelineWidth = computed(() => (props.totalDuration + 6) * PX_PER_SEC.value)
 
 // ---------- 播放头 ----------
 
-const laneRef = ref<HTMLElement | null>(null)
-
 function seekByEvent(e: PointerEvent): void {
-  const lane = laneRef.value
+  // 取任一轨道 lane 作为时间 0 点基准（各 lane 左缘相同，且 viewport 相对坐标已含滚动）
+  const lane = laneRefs.values().next().value
   if (!lane) return
   const rect = lane.getBoundingClientRect()
   const sec = (e.clientX - rect.left + lane.scrollLeft) / PX_PER_SEC.value
@@ -186,7 +187,7 @@ const rulerTicks = computed(() => {
   return ticks
 })
 
-const playheadLeft = computed(() => TIMELINE_PAD + store.playhead * PX_PER_SEC.value)
+const playheadLeft = computed(() => TRACK_HEAD_W + TIMELINE_PAD + store.playhead * PX_PER_SEC.value)
 </script>
 
 <template>
@@ -204,13 +205,14 @@ const playheadLeft = computed(() => TIMELINE_PAD + store.playhead * PX_PER_SEC.v
 
     <div class="timeline-scroll">
       <div class="timeline-content" :style="{ width: `${contentWidth}px` }">
-        <!-- 标尺 -->
+        <!-- 标尺（时间 0 点在轨头列之后，与轨道 lane 坐标对齐） -->
         <div class="timeline-ruler" @pointerdown="onRulerPointerDown">
+          <div class="ruler-head" />
           <span
             v-for="tick in rulerTicks"
             :key="tick"
             class="ruler-tick"
-            :style="{ left: `${TIMELINE_PAD + tick * PX_PER_SEC}px` }"
+            :style="{ left: `${TRACK_HEAD_W + TIMELINE_PAD + tick * PX_PER_SEC}px` }"
           >{{ tick }}s</span>
         </div>
 
@@ -309,10 +311,21 @@ const playheadLeft = computed(() => TIMELINE_PAD + store.playhead * PX_PER_SEC.v
   position: sticky;
   top: 0;
   height: 22px;
+  display: flex;
+  align-items: stretch;
   background: var(--el-bg-color);
   border-bottom: 1px solid var(--el-border-color-lighter);
   cursor: pointer;
   z-index: 3;
+}
+/* 标尺轨头占位：与轨道轨头同宽同底色，横向滚动时同步 sticky，保证刻度 0 点从 lane 起 */
+.ruler-head {
+  position: sticky;
+  left: 0;
+  width: 168px;
+  flex-shrink: 0;
+  background: var(--el-bg-color);
+  border-right: 1px solid var(--el-border-color-lighter);
 }
 .ruler-tick {
   position: absolute;
@@ -397,7 +410,8 @@ const playheadLeft = computed(() => TIMELINE_PAD + store.playhead * PX_PER_SEC.v
   bottom: 0;
   width: 2px;
   background: var(--el-color-danger);
-  z-index: 4;
+  /* 低于 sticky 轨头（z=2）：横向滚动时播放头从轨头列下方穿过，不遮轨头 */
+  z-index: 1;
   pointer-events: none;
 }
 </style>
