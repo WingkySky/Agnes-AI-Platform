@@ -118,6 +118,40 @@ describe('splitClip', () => {
     const doc = baseDoc()
     expect(() => applyCommand(doc, cmd('splitClip', { clipId: 'c1', at: 4, newId: 'x' }))).toThrow(/split_outside_clip/)
   })
+  it('切点距边缘 < 最短时长 → split_too_close；恰好最短时长放行', () => {
+    const doc = baseDoc()
+    expect(() => applyCommand(doc, cmd('splitClip', { clipId: 'c1', at: 0.05, newId: 'x' }))).toThrow(/split_too_close/)
+    expect(() => applyCommand(doc, cmd('splitClip', { clipId: 'c1', at: 3.95, newId: 'x' }))).toThrow(/split_too_close/)
+    expect(applyCommand(doc, cmd('splitClip', { clipId: 'c1', at: 0.1, newId: 'x' })).clips.some((c) => c.id === 'x')).toBe(true)
+  })
+})
+
+describe('碰撞拒绝（video/audio 轨半开区间，字幕豁免）', () => {
+  it('addClip 落入占用区间 → overlap；贴边衔接放行；字幕轨共存放行', () => {
+    const doc = baseDoc()
+    expect(() => applyCommand(doc, cmd('addClip', {
+      clip: { id: 'cx', trackId: 'v1', start: 2, duration: 3, trimStart: 0, props: {} },
+    }))).toThrow(/overlap/)
+    expect(applyCommand(doc, cmd('addClip', {
+      clip: { id: 'cx', trackId: 'v1', start: 7, duration: 2, trimStart: 0, props: {} },
+    })).clips.some((c) => c.id === 'cx')).toBe(true)
+    expect(applyCommand(doc, cmd('addSubtitle', {
+      clip: { id: 't9', trackId: 's1', start: 1, duration: 1, trimStart: 0, props: {}, text: '共存' },
+    })).clips.some((c) => c.id === 't9')).toBe(true)
+  })
+  it('moveClip 同轨/跨轨撞邻 → overlap；贴边与空档放行', () => {
+    const doc = baseDoc()
+    expect(() => applyCommand(doc, cmd('moveClip', { clipId: 'c1', start: 5 }))).toThrow(/overlap/)
+    expect(() => applyCommand(doc, cmd('moveClip', { clipId: 'p1', trackId: 'v1', start: 2 }))).toThrow(/overlap/)
+    expect(applyCommand(doc, cmd('moveClip', { clipId: 'c1', start: 7 })).clips.find((c) => c.id === 'c1'))
+      .toMatchObject({ start: 7 })
+  })
+  it('trimClip 拉长撞邻 → overlap；裁到贴边放行', () => {
+    const doc = baseDoc()
+    expect(() => applyCommand(doc, cmd('trimClip', { clipId: 'c1', duration: 5 }))).toThrow(/overlap/)
+    expect(applyCommand(doc, cmd('trimClip', { clipId: 'c1', duration: 4 })).clips.find((c) => c.id === 'c1'))
+      .toMatchObject({ duration: 4 })
+  })
 })
 
 describe('removeClip / setClipProperty', () => {
@@ -214,9 +248,9 @@ describe('回放一致性', () => {
       cmd('addTrack', { track: { id: 'a2', kind: 'audio' } }),
       cmd('addClip', { clip: { id: 'm1', trackId: 'a2', assetId: 30, start: 0, duration: 5, trimStart: 0, props: {} } }),
       cmd('setClipProperty', { clipId: 'm1', props: { volume: 0.8, fadeIn: 0.3, fadeOut: 0.5, rect: { x: 0.1, y: 0.1, w: 0.5, h: 0.5 } } }),
-      cmd('moveClip', { clipId: 'c1', trackId: 'v2', start: 1.5 }),
+      cmd('moveClip', { clipId: 'c1', trackId: 'v2', start: 3 }),
       cmd('trimClip', { clipId: 'c2', duration: 2 }),
-      cmd('splitClip', { clipId: 'c1', at: 3, newId: 'c1b' }),
+      cmd('splitClip', { clipId: 'c1', at: 5, newId: 'c1b' }),
       cmd('setTrackFlag', { trackId: 'v2', flag: 'muted' }),
       cmd('rebuildSubtitleClips', { trackId: 's1', clips: [{ id: 'r1', start: 0, duration: 1, text: '重放' }] }),
       cmd('removeClip', { clipId: 'c1b' }),

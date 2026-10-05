@@ -3,6 +3,9 @@
  * 时间线区域：轨头（显隐/锁定）+ 轨道片段块 + 播放头
  * 交互：拖拽移动（moveClip）、边缘裁剪（trimClip）、播放头定位、
  *       素材拖入建片段（addClip）；拖拽中只改渲染态，pointerup 才入命令栈
+ * 几何：px↔秒换算全部收口到 lib/editor-scale（刻度/播放头/片段块共用）
+ * 吸附：片段边/播放头/0 点最近点吸附（lib/editor-snapping），Shift 临时禁用；
+ *       放置回退（占用轨→同类型空闲轨→自动开新轨）在 store.placeAsset
  * ===================================================== */
 
 import { computed, ref } from 'vue'
@@ -10,7 +13,17 @@ import { ElMessage } from 'element-plus'
 
 import { useEditorStore } from '@/stores/editor'
 import { useI18n } from '@/i18n'
-import { clipEnd, type EditorClip } from '@/lib/editor-types'
+import { MIN_CLIP_DURATION, clipEnd, type EditorClip } from '@/lib/editor-types'
+import {
+  PX_PER_SEC_MAX,
+  PX_PER_SEC_MIN,
+  TIMELINE_PAD,
+  TRACK_HEAD_W,
+  rulerStepSec,
+  timeToX,
+  xToTime,
+} from '@/lib/editor-scale'
+import { buildSnapPoints, resolveSnap, snapThresholdSec } from '@/lib/editor-snapping'
 
 const props = defineProps<{ totalDuration: number }>()
 
@@ -18,9 +31,6 @@ const store = useEditorStore()
 const { t } = useI18n()
 
 const PX_PER_SEC = ref(80)
-const TIMELINE_PAD = 8
-/** 轨头列宽（与 CSS .track-head 一致）：刻度/播放头的 0 点必须在其之后 */
-const TRACK_HEAD_W = 168
 
 const trackRows = computed(() => {
   const doc = store.doc
@@ -37,7 +47,7 @@ const trackRows = computed(() => {
 })
 
 const contentWidth = computed(() =>
-  Math.max(600, TRACK_HEAD_W + TIMELINE_PAD + (props.totalDuration + 6) * PX_PER_SEC.value + TIMELINE_PAD),
+  Math.max(600, TRACK_HEAD_W + timeToX(props.totalDuration + 6, PX_PER_SEC.value) + TIMELINE_PAD),
 )
 
 const timelineWidth = computed(() => (props.totalDuration + 6) * PX_PER_SEC.value)
@@ -49,8 +59,8 @@ function seekByEvent(e: PointerEvent): void {
   const lane = laneRefs.values().next().value
   if (!lane) return
   const rect = lane.getBoundingClientRect()
-  const sec = (e.clientX - rect.left + lane.scrollLeft) / PX_PER_SEC.value
-  store.playhead = Math.max(0, Math.min(sec, props.totalDuration))
+  const sec = xToTime(e.clientX - rect.left + lane.scrollLeft, PX_PER_SEC.value)
+  store.playhead = Math.min(sec, props.totalDuration)
 }
 
 function onRulerPointerDown(e: PointerEvent): void {
@@ -67,10 +77,10 @@ function onRulerPointerDown(e: PointerEvent): void {
 // ---------- 片段几何 ----------
 
 function clipStyle(clip: EditorClip): Record<string, string> {
-  const left = (dragRender.value?.clipId === clip.id ? dragRender.value.start : clip.start) * PX_PER_SEC.value
+  const start = dragRender.value?.clipId === clip.id ? dragRender.value.start : clip.start
   const duration = dragRender.value?.clipId === clip.id ? dragRender.value.duration : clip.duration
   return {
-    left: `${TIMELINE_PAD + left}px`,
+    left: `${timeToX(start, PX_PER_SEC.value)}px`,
     width: `${Math.max(duration * PX_PER_SEC.value, 6)}px`,
   }
 }
@@ -86,19 +96,41 @@ function beginDrag(e: PointerEvent, clip: EditorClip, mode: DragRender['mode']):
   const startX = e.clientX
   const orig = { start: clip.start, duration: clip.duration, trimStart: clip.trimStart }
   dragRender.value = { clipId: clip.id, ...orig, mode }
+  // 吸附候选在手势开始时定格（手势期间文档与播放头不变）；Shift 按住临时禁用
+  const snapPoints = store.doc && store.snappingEnabled
+    ? buildSnapPoints(store.doc, { excludeClipId: clip.id, playhead: store.playhead })
+    : null
+  const threshold = snapThresholdSec(PX_PER_SEC.value)
 
   const move = (ev: PointerEvent) => {
     if (!dragRender.value) return
     const delta = (ev.clientX - startX) / PX_PER_SEC.value
     const r = dragRender.value
+    const snapOn = snapPoints !== null && !ev.shiftKey
     if (mode === 'move') {
-      r.start = Math.max(0, orig.start + delta)
+      let next = Math.max(0, orig.start + delta)
+      if (snapOn) {
+        // 首尾两个边缘都试吸附，取偏移小的一侧
+        const a = resolveSnap(next, snapPoints, threshold)
+        const b = resolveSnap(next + orig.duration, snapPoints, threshold)
+        const da = a.point ? a.time - next : Infinity
+        const db = b.point ? b.time - (next + orig.duration) : Infinity
+        if (da !== Infinity && Math.abs(da) <= Math.abs(db)) next = Math.max(0, a.time)
+        else if (db !== Infinity) next = Math.max(0, b.time - orig.duration)
+      }
+      r.start = next
     } else if (mode === 'trim-right') {
-      r.duration = Math.max(0.1, orig.duration + delta)
+      let end = orig.start + Math.max(MIN_CLIP_DURATION, orig.duration + delta)
+      if (snapOn) end = Math.max(orig.start + MIN_CLIP_DURATION, resolveSnap(end, snapPoints, threshold).time)
+      r.duration = end - orig.start
     } else {
       // trim-left：start 右移吃掉时长，源内入点右移（speed=1 近似）
-      const maxShift = orig.duration - 0.1
-      const shift = Math.min(Math.max(delta, -orig.start), maxShift)
+      const maxShift = orig.duration - MIN_CLIP_DURATION
+      let shift = Math.min(Math.max(delta, -orig.start), maxShift)
+      if (snapOn) {
+        const snapped = resolveSnap(orig.start + shift, snapPoints, threshold).time - orig.start
+        shift = Math.min(Math.max(snapped, -orig.start), maxShift)
+      }
       r.start = orig.start + shift
       r.duration = orig.duration - shift
       r.trimStart = Math.max(0, orig.trimStart + shift)
@@ -159,19 +191,19 @@ async function onDropAsset(e: DragEvent, trackId: string): Promise<void> {
   if (track.kind === 'video' && asset.media_type !== 'image' && asset.media_type !== 'video') return
   if (track.kind === 'audio' && asset.media_type !== 'audio') return
   const lane = laneRefs.get(trackId)
-  const sec = (e.clientX - (lane?.getBoundingClientRect().left ?? 0) + (lane?.scrollLeft ?? 0)) / PX_PER_SEC.value
-  const start = Math.max(0, Math.round(sec * 1000) / 1000)
-  if (store.hasClipAt(trackId, assetId, start)) return  // 重复放置防线
-  // 时长：图片默认 3s；视频/音频探测元数据真实时长（探测失败兜底 5s，可后续裁剪）
-  let duration = 3
-  if (asset.media_type !== 'image') {
-    const probed = await store.probeMediaDuration(asset.asset_url)
-    duration = probed > 0 ? probed : 5
+  let start = xToTime(
+    e.clientX - (lane?.getBoundingClientRect().left ?? 0) + (lane?.scrollLeft ?? 0),
+    PX_PER_SEC.value,
+  )
+  if (store.snappingEnabled && !e.shiftKey) {
+    start = resolveSnap(
+      start,
+      buildSnapPoints(store.doc, { playhead: store.playhead }),
+      snapThresholdSec(PX_PER_SEC.value),
+    ).time
   }
-  store.applyOrToast({
-    op: 'addClip',
-    payload: { clip: { id: store.newId('clip'), trackId, assetId, start, duration: Math.round(duration * 1000) / 1000, trimStart: 0, props: {} } },
-  }, t('editor.ops.addClip'))
+  // 放置回退（占用轨→同类型空闲轨→自动开新轨）+ 探测时长 + 重复落点防线都在 placeAsset
+  await store.placeAsset(asset, { trackId, start: Math.round(start * 1000) / 1000 })
 }
 
 // 多轨 lane 引用（拖入定位用）
@@ -181,25 +213,31 @@ function setLaneRef(trackId: string, el: unknown): void {
 }
 
 const rulerTicks = computed(() => {
-  const step = PX_PER_SEC.value >= 60 ? 1 : 5
+  const step = rulerStepSec(PX_PER_SEC.value)
   const ticks: number[] = []
   for (let s = 0; s <= props.totalDuration + 6; s += step) ticks.push(s)
   return ticks
 })
 
-const playheadLeft = computed(() => TRACK_HEAD_W + TIMELINE_PAD + store.playhead * PX_PER_SEC.value)
+const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PER_SEC.value))
 </script>
 
 <template>
   <div class="timeline">
     <div class="timeline-toolbar">
       <el-button-group>
-        <el-button size="small" @click="PX_PER_SEC = Math.max(30, PX_PER_SEC - 20)">−</el-button>
-        <el-button size="small" @click="PX_PER_SEC = Math.min(200, PX_PER_SEC + 20)">+</el-button>
+        <el-button size="small" @click="PX_PER_SEC = Math.max(PX_PER_SEC_MIN, PX_PER_SEC - 20)">−</el-button>
+        <el-button size="small" @click="PX_PER_SEC = Math.min(PX_PER_SEC_MAX, PX_PER_SEC + 20)">+</el-button>
       </el-button-group>
       <el-button size="small" :icon="'Scissor'" :disabled="!store.selectedClipId" @click="splitSelected">
         {{ t('editor.split') }}
       </el-button>
+      <el-checkbox
+        class="snap-toggle"
+        size="small"
+        :model-value="store.snappingEnabled"
+        @change="store.setSnapping(!store.snappingEnabled)"
+      >{{ t('editor.snapToggle') }}</el-checkbox>
       <span class="playhead-time">{{ store.playhead.toFixed(2) }}s</span>
     </div>
 
@@ -212,7 +250,7 @@ const playheadLeft = computed(() => TRACK_HEAD_W + TIMELINE_PAD + store.playhead
             v-for="tick in rulerTicks"
             :key="tick"
             class="ruler-tick"
-            :style="{ left: `${TRACK_HEAD_W + TIMELINE_PAD + tick * PX_PER_SEC}px` }"
+            :style="{ left: `${TRACK_HEAD_W + timeToX(tick, PX_PER_SEC)}px` }"
           >{{ tick }}s</span>
         </div>
 
@@ -299,6 +337,7 @@ const playheadLeft = computed(() => TRACK_HEAD_W + TIMELINE_PAD + store.playhead
   color: var(--el-text-color-secondary);
   font-variant-numeric: tabular-nums;
 }
+.timeline-toolbar :deep(.el-checkbox) { height: 24px; margin-right: 0; }
 .timeline-scroll {
   overflow: auto;
   flex: 1;

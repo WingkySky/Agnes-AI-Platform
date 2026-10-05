@@ -6,7 +6,8 @@
  * - 自动保存：约 2s 节流 PUT 带 base_revision；409 → 本地内容建「冲突副本」工程保底，
  *   当前编辑器转拉远端版本（数据零丢弃，流程仿画布冲突副本）
  * - 视频片段 duration=0 是「送进剪辑器」草稿的显式契约：load 后 healDurations
- *   用媒体元数据补正（直改文档不入撤销栈，随后随保存落库）
+ *   用媒体元数据补正（纯函数 editor-derive 回填铺开，不入撤销栈，随后随保存落库）
+ * - 吸附开关是本地偏好（localStorage 极小配置），不随文档落库
  * ===================================================== */
 
 import { defineStore } from 'pinia'
@@ -34,16 +35,27 @@ import {
   type EditorCommand,
 } from '@/lib/editor-commands'
 import { EditorHistory } from '@/lib/editor-history'
-import type { EditorDocument } from '@/lib/editor-types'
+import { reflowPlaceholders } from '@/lib/editor-derive'
+import { canPlaceOnTrack, findFreeTrack } from '@/lib/editor-placement'
+import type { EditorDocument, EditorTrack } from '@/lib/editor-types'
 
 const AUTOSAVE_INTERVAL_MS = 2000
 const RENDER_POLL_MS = 2000
+const SNAP_PREF_KEY = 'agnes_editor_snap'
 
 function newId(prefix: string): string {
   const rand = typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID().slice(0, 8)
     : Math.random().toString(36).slice(2, 10)
   return `${prefix}_${rand}`
+}
+
+function readSnapPref(): boolean {
+  try {
+    return localStorage.getItem(SNAP_PREF_KEY) !== '0'
+  } catch {
+    return true
+  }
 }
 
 export const useEditorStore = defineStore('editor', () => {
@@ -61,6 +73,16 @@ export const useEditorStore = defineStore('editor', () => {
   const playhead = ref(0)
   const isPlaying = ref(false)
   const history = new EditorHistory()
+
+  // ---------- 本地偏好 ----------
+  const snappingEnabled = ref(readSnapPref())
+
+  function setSnapping(enabled: boolean): void {
+    snappingEnabled.value = enabled
+    try {
+      localStorage.setItem(SNAP_PREF_KEY, enabled ? '1' : '0')
+    } catch { /* 存储不可用时仅会话内生效 */ }
+  }
 
   // ---------- 保存态 ----------
   const dirty = ref(false)
@@ -111,43 +133,24 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /** 草稿占位补正：duration<=0 的片段用媒体元数据时长回填（不入撤销栈）。
-   * 只重排占位片段自身（轨内按原 start 序从最早占位处铺开），不碰用户已摆放的其他片段。 */
+   * 铺开规则在 lib/editor-derive 纯函数：视频轨占位按原 start 序从最早处顺序铺开，
+   * 音频占位按 start 直接定位；不碰用户已摆放的其他片段。 */
   async function healDurations(): Promise<void> {
     const current = doc.value
     if (!current) return
     const pending = current.clips.filter((c) => c.duration <= 0 && c.assetId != null)
     if (!pending.length) return
-    let changed = false
+    const healed = new Map<string, number>()
     await Promise.all(pending.map(async (clip) => {
       const asset = await fetchAsset(clip.assetId!)
       if (!asset?.asset_url) return
       const duration = await probeMediaDuration(asset.asset_url)
-      if (duration > 0) {
-        clip.duration = Math.round(duration * 1000) / 1000
-        changed = true
-      }
+      if (duration > 0) healed.set(clip.id, duration)
     }))
-    if (changed) {
-      const videoTracks = new Set(doc.value!.tracks.filter((t) => t.kind === 'video').map((t) => t.id))
-      const byTrack = new Map<string, typeof pending>()
-      for (const clip of pending) {
-        if (!videoTracks.has(clip.trackId)) continue  // 音频占位按 start 直接定位，不重排
-        const list = byTrack.get(clip.trackId) ?? []
-        list.push(clip)
-        byTrack.set(clip.trackId, list)
-      }
-      for (const [, clips] of byTrack) {
-        clips.sort((a, b) => a.start - b.start)
-        let cursor = clips[0].start
-        for (const clip of clips) {
-          clip.start = Math.round(cursor * 1000) / 1000
-          cursor += clip.duration
-        }
-      }
-      doc.value = { ...doc.value!, clips: [...doc.value!.clips] }
-      dirty.value = true
-      scheduleSave()
-    }
+    if (!healed.size) return
+    doc.value = { ...current, clips: reflowPlaceholders(current, healed) }
+    dirty.value = true
+    scheduleSave()
   }
 
   function probeMediaDuration(url: string): Promise<number> {
@@ -332,7 +335,53 @@ export const useEditorStore = defineStore('editor', () => {
     }
   }
 
-  /** 双击素材兜底：直接加到播放头处（视频/图片→首条视频轨，音频→首条音频轨） */
+  /** 素材落时间线（拖入指定轨 / 双击到播放头共用）：
+   * 请求轨放不下（类型不符/锁定/重叠）时回退同类型第一个空闲轨，全满则自动开新轨；
+   * 重复落点防线（<80ms）保留 */
+  async function placeAsset(asset: UnifiedAsset, at: { trackId: string; start: number }): Promise<void> {
+    if (!doc.value) return
+    const kind: 'video' | 'audio' = asset.media_type === 'audio' ? 'audio' : 'video'
+    const start = Math.round(Math.max(0, at.start) * 1000) / 1000
+    let duration = 3
+    if (asset.media_type !== 'image') {
+      await fetchAsset(asset.id)
+      const probed = await probeMediaDuration(asset.asset_url)
+      duration = probed > 0 ? probed : 5  // 探测失败兜底，可后续 trim
+    }
+    const span = { start, duration: Math.round(duration * 1000) / 1000 }
+    const requested = doc.value.tracks.find((tr) => tr.id === at.trackId)
+    let track: EditorTrack | null =
+      requested && requested.kind === kind && requested.flag !== 'locked'
+        && canPlaceOnTrack(doc.value.clips.filter((c) => c.trackId === requested.id), span)
+        ? requested
+        : null
+    if (!track) track = findFreeTrack(doc.value, kind, span)
+    if (!track) track = await createTrackOfKind(kind)
+    if (!track) {
+      ElMessage.warning(t('editor.errors.noTrack'))
+      return
+    }
+    if (hasClipAt(track.id, asset.id, start)) return
+    applyOrToast({
+      op: 'addClip',
+      payload: { clip: { id: newId('clip'), trackId: track.id, assetId: asset.id, start, duration: span.duration, trimStart: 0, props: {} } },
+    }, t('editor.ops.addClip'))
+  }
+
+  /** 自动开一条同类型新轨（放置回退的最后一档） */
+  async function createTrackOfKind(kind: 'video' | 'audio'): Promise<EditorTrack | null> {
+    if (!doc.value) return null
+    const track: EditorTrack = {
+      id: newId('track'),
+      kind,
+      order: doc.value.tracks.filter((tr) => tr.kind === kind).length,
+      flag: null,
+    }
+    if (!applyOrToast({ op: 'addTrack', payload: { track } }, t('editor.ops.addTrack'))) return null
+    return doc.value.tracks.find((tr) => tr.id === track.id) ?? null
+  }
+
+  /** 双击素材兜底：加到播放头处（放不下自动回退，见 placeAsset） */
   async function addAssetAtPlayhead(asset: UnifiedAsset): Promise<void> {
     if (!doc.value) return
     const kind: 'video' | 'audio' = asset.media_type === 'audio' ? 'audio' : 'video'
@@ -342,23 +391,7 @@ export const useEditorStore = defineStore('editor', () => {
       ElMessage.warning(t('editor.errors.noTrack'))
       return
     }
-    const start = Math.round(playhead.value * 1000) / 1000
-    if (hasClipAt(track.id, asset.id, start)) return
-    let duration = 3
-    if (asset.media_type !== 'image') {
-      await fetchAsset(asset.id)
-      const probed = await probeMediaDuration(asset.asset_url)
-      duration = probed > 0 ? probed : 5  // 探测失败兜底，可后续 trim
-    }
-    applyOrToast({
-      op: 'addClip',
-      payload: {
-        clip: {
-          id: newId('clip'), trackId: track.id, assetId: asset.id,
-          start, duration: Math.round(duration * 1000) / 1000, trimStart: 0, props: {},
-        },
-      },
-    }, t('editor.ops.addClip'))
+    await placeAsset(asset, { trackId: track.id, start: playhead.value })
   }
 
   async function rename(newTitle: string): Promise<void> {
@@ -388,11 +421,13 @@ export const useEditorStore = defineStore('editor', () => {
   return {
     uid, title, workId, sourceWorkspaceId, revision, loaded,
     doc, selectedClipId, playhead, isPlaying, history,
+    snappingEnabled, setSnapping,
     dirty, saving, lastSavedAt,
     renderStatus, renderProgress, renderError, finalUrl,
     assetCache,
-    load, fetchAsset, apply, applyOrToast, undo, redo, healDurations, addAssetAtPlayhead,
-    probeMediaDuration, hasClipAt,
+    load, fetchAsset, apply, applyOrToast, undo, redo, healDurations,
+    placeAsset, addAssetAtPlayhead,
+    probeMediaDuration,
     saveNow, scheduleSave, transcribeTrack, submitRender, rename,
     select, reset, newId,
   }

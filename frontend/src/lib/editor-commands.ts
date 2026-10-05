@@ -3,6 +3,8 @@
  *
  * - 每个命令 (doc, payload) => 新 doc，不可变更新（未变子树结构共享）
  * - fail-closed：未知 op / 非法 payload 抛 EditorCommandError，不改状态（可安全回放）
+ * - 碰撞拒绝：video/audio 轨禁止重叠（lib/editor-placement 半开区间判定，贴边不冲突）；
+ *   字幕轨 cue 可共存豁免
  * - 命令可序列化 {op, payload}；持久化的只有 document 快照，命令表回放仅用于测试
  * - 文案不在此层：错误码由组件层 i18n 转译
  * ===================================================== */
@@ -19,6 +21,7 @@ import {
   isTrackFlag,
   isTrackKind,
 } from './editor-types'
+import { canPlaceOnTrack, needsCollisionCheck } from './editor-placement'
 
 /** 命令错误码（组件层负责 i18n） */
 export type CommandErrorCode =
@@ -31,6 +34,8 @@ export type CommandErrorCode =
   | 'track_not_empty'
   | 'not_subtitle_track'
   | 'split_outside_clip'
+  | 'split_too_close'
+  | 'overlap'
 
 export class EditorCommandError extends Error {
   readonly code: CommandErrorCode
@@ -165,6 +170,12 @@ const commands: Record<EditorOp, (doc: EditorDocument, payload: CommandPayload) 
       props: clip.props ?? {},
       ...(track.kind === 'subtitle' ? { text: typeof clip.text === 'string' ? clip.text : '' } : {}),
     }
+    if (needsCollisionCheck(track) && !canPlaceOnTrack(
+      doc.clips.filter((c) => c.trackId === track.id),
+      { start: normalized.start, duration: normalized.duration },
+    )) {
+      throw new EditorCommandError('overlap', track.id)
+    }
     return { ...doc, clips: [...doc.clips, normalized] }
   },
 
@@ -182,6 +193,13 @@ const commands: Record<EditorOp, (doc: EditorDocument, payload: CommandPayload) 
         }
         trackId = target.id
       }
+      const track = findTrack(doc, trackId)
+      if (needsCollisionCheck(track) && !canPlaceOnTrack(
+        doc.clips.filter((c) => c.trackId === trackId),
+        { start, duration: clip.duration, excludeClipId: clip.id },
+      )) {
+        throw new EditorCommandError('overlap', trackId)
+      }
       return { ...clip, trackId, start }
     })
   },
@@ -196,6 +214,13 @@ const commands: Record<EditorOp, (doc: EditorDocument, payload: CommandPayload) 
         if (duration < MIN_CLIP_DURATION) duration = MIN_CLIP_DURATION
       }
       if (payload.trimStart !== undefined) trimStart = requireNonNegative(payload.trimStart, 'trimStart')
+      const track = findTrack(doc, clip.trackId)
+      if (needsCollisionCheck(track) && !canPlaceOnTrack(
+        doc.clips.filter((c) => c.trackId === clip.trackId),
+        { start, duration, excludeClipId: clip.id },
+      )) {
+        throw new EditorCommandError('overlap', clip.trackId)
+      }
       // duration 与 speed/trimStart 一致性由 UI 层保证；命令层只防负值与碎片化
       void speed
       return { ...clip, start, duration, trimStart }
@@ -213,6 +238,9 @@ const commands: Record<EditorOp, (doc: EditorDocument, payload: CommandPayload) 
     ensureUnlocked(track)
     if (at <= clip.start || at >= clipEnd(clip)) {
       throw new EditorCommandError('split_outside_clip', String(at))
+    }
+    if (at - clip.start < MIN_CLIP_DURATION || clipEnd(clip) - at < MIN_CLIP_DURATION) {
+      throw new EditorCommandError('split_too_close', String(at))
     }
     if (doc.clips.some((c) => c.id === newId)) {
       throw new EditorCommandError('duplicate_id', newId)
