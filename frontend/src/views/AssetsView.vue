@@ -223,7 +223,6 @@ import { updateAssetShare, deleteAsset } from '@/api/pipeline'
 const { t } = useI18n()
 const { confirm } = useConfirm()
 const assetStore = useAssetStore()
-const userStore = useUserStore()
 const router = useRouter()
 
 const SOURCE_OPTIONS = [
