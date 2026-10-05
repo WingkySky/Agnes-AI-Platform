@@ -1,10 +1,12 @@
 <script setup lang="ts">
 /* =====================================================
- * 预览区：浏览器本地预览（v1，如实声明近似值）
+ * 预览区：浏览器本地预览
  * - 每条视频轨一个 <video>，按 rect 绝对定位层叠（PIP）
  * - 每条音频轨一个 <audio>
  * - 播放 = rAF 推进 store.playhead（单一时间源）；片段切换时换 src 重定位
- * - 音量/fade 为近似值，精确听感以成片渲染为准
+ * - 音量/fade：媒体元素接入 WebAudio GainNode，每帧写入瞬时增益
+ *   （lib/editor-audio 纯函数，与渲染 Plan 的 afade 语义一致）；
+ *   跨域资源不进音频图，退回元素音量近似
  * ===================================================== */
 
 import { computed, onBeforeUnmount, watch } from 'vue'
@@ -12,6 +14,7 @@ import { computed, onBeforeUnmount, watch } from 'vue'
 import { useEditorStore } from '@/stores/editor'
 import { useI18n } from '@/i18n'
 import { clipEnd, type EditorClip } from '@/lib/editor-types'
+import { clipGainAt } from '@/lib/editor-audio'
 
 const store = useEditorStore()
 
@@ -124,8 +127,8 @@ function syncMedia(): void {
     const expected = clip.trimStart + (store.playhead - clip.start) * speed
     if (Math.abs(el.currentTime - expected) > 0.3) el.currentTime = Math.max(0, expected)
     el.playbackRate = Math.min(Math.max(speed, 0.25), 4)
-    el.volume = Math.min(1, Math.max(0, (clip.props.volume ?? 1) * volumeFactor(clip, store.playhead)))
     el.muted = track.flag === 'muted'
+    applyGain(el, clip)
     if (store.isPlaying && el.paused) void el.play().catch(() => undefined)
     if (!store.isPlaying && !el.paused) el.pause()
   }
@@ -137,21 +140,58 @@ function syncMedia(): void {
     const speed = clip.props.speed ?? 1
     const expected = clip.trimStart + (store.playhead - clip.start) * speed
     if (Math.abs(el.currentTime - expected) > 0.3) el.currentTime = Math.max(0, expected)
-    el.volume = Math.min(1, Math.max(0, (clip.props.volume ?? 1) * volumeFactor(clip, store.playhead)))
+    el.playbackRate = Math.min(Math.max(speed, 0.25), 4)
     el.muted = track.flag === 'muted'
+    applyGain(el, clip)
     if (store.isPlaying && el.paused) void el.play().catch(() => undefined)
     if (!store.isPlaying && !el.paused) el.pause()
   }
 }
 
-/** fade 近似系数 */
-function volumeFactor(clip: EditorClip, now: number): number {
-  let factor = 1
-  const { fadeIn = 0, fadeOut = 0 } = clip.props
-  if (fadeIn > 0 && now - clip.start < fadeIn) factor *= (now - clip.start) / fadeIn
-  const end = clipEnd(clip)
-  if (fadeOut > 0 && end - now < fadeOut) factor *= Math.max(0, (end - now) / fadeOut)
-  return factor
+// ---------- WebAudio 增益（精确音量/fade） ----------
+
+let audioCtx: AudioContext | null = null
+/** 元素 → 增益节点；null = 已判定直连（跨域资源不进图，避免静音回退不了） */
+const audioGraph = new WeakMap<HTMLMediaElement, GainNode | null>()
+
+function isSameOrigin(url: string): boolean {
+  try {
+    return new URL(url, location.origin).origin === location.origin
+  } catch {
+    return false
+  }
+}
+
+function gainFor(el: HTMLMediaElement): GainNode | null {
+  if (audioGraph.has(el)) return audioGraph.get(el) ?? null
+  if (!isSameOrigin(el.currentSrc || el.src)) {
+    audioGraph.set(el, null)
+    return null
+  }
+  if (!audioCtx) audioCtx = new AudioContext()
+  const source = audioCtx.createMediaElementSource(el)
+  const gain = audioCtx.createGain()
+  source.connect(gain).connect(audioCtx.destination)
+  audioGraph.set(el, gain)
+  return gain
+}
+
+/** 每帧把片段瞬时增益写入 GainNode（10ms 平滑无爆音）；播前确保上下文已恢复 */
+function applyGain(el: HTMLMediaElement, clip: EditorClip): void {
+  const gain = gainFor(el)
+  if (gain && audioCtx) {
+    el.volume = 1
+    if (audioCtx.state === 'suspended' && store.isPlaying) void audioCtx.resume()
+    gain.gain.setTargetAtTime(clipGainAt(clip, store.playhead), audioCtx.currentTime, 0.01)
+  } else {
+    el.volume = Math.min(1, Math.max(0, clipGainAt(clip, store.playhead)))
+  }
+}
+
+/** 播放按钮走用户手势恢复 AudioContext（空格键等路径由 applyGain 内的 resume 兜底） */
+async function togglePlay(): Promise<void> {
+  if (audioCtx?.state === 'suspended') await audioCtx.resume().catch(() => undefined)
+  store.isPlaying = !store.isPlaying
 }
 
 // 播放循环：rAF 推进 playhead，逐帧同步媒体元素
@@ -175,7 +215,11 @@ function tick(ts: number): void {
 }
 rafId = requestAnimationFrame(tick)
 
-onBeforeUnmount(() => cancelAnimationFrame(rafId))
+onBeforeUnmount(() => {
+  cancelAnimationFrame(rafId)
+  void audioCtx?.close().catch(() => undefined)
+  audioCtx = null
+})
 </script>
 
 <template>
@@ -210,7 +254,7 @@ onBeforeUnmount(() => cancelAnimationFrame(rafId))
 
     <div class="preview-controls">
       <el-button size="small" @click="store.playhead = 0">⏮</el-button>
-      <el-button size="small" type="primary" @click="store.isPlaying = !store.isPlaying">
+      <el-button size="small" type="primary" @click="togglePlay">
         {{ store.isPlaying ? t('editor.pause') : t('editor.play') }}
       </el-button>
       <span class="preview-time">{{ store.playhead.toFixed(2) }}s</span>
