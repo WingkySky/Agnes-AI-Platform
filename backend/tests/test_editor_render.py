@@ -67,9 +67,9 @@ def test_plan_video_tracks_and_transition_compression():
     assert v1["segments"][1]["render_start"] == 3.5
     assert v1["total"] == 6.5
     assert v1["segments"][0]["transition_applied"] == {"type": "crossfade", "duration": 0.5}
-    # PIP 轨：无转场，render_start 为轨内时间（overlay enable 用）
+    # PIP 轨：无转场，render_start 为文档绝对位置（overlay enable 窗口用）
     v2 = next(t for t in plan["video_tracks"] if t["track_id"] == "v2")
-    assert v2["segments"][0]["render_start"] == 0
+    assert v2["segments"][0]["render_start"] == 1
     assert v2["segments"][0]["rect"] == {"x": 0.6, "y": 0.6, "w": 0.3, "h": 0.3}
     # 音频保留时间线 start（adelay 定位）
     audio = plan["audio_clips"][0]
@@ -98,6 +98,59 @@ def test_plan_duration_zero_dropped():
     assert plan["audio_clips"] == []
 
 
+# ---------- 音画分离：视频自带音频进 Plan/命令 ----------
+
+def _kinds(aid):
+    return {1: "video", 2: "video", 3: "image", 4: "audio"}.get(aid)
+
+
+def test_plan_video_audio_candidates_and_muted():
+    plan = build_plan(_doc(), lambda aid: PATHS.get(aid), _kinds)
+    audio_ids = {s["clip_id"] for s in plan["audio_clips"]}
+    # 未静音视频片段自带音频进音频图；图片素材/静音标记剔除
+    assert audio_ids == {"c1", "c2", "a9"}
+    muted = _doc()
+    muted["clips"][0]["props"]["muted"] = True  # 音画分离后源片段
+    plan2 = build_plan(muted, lambda aid: PATHS.get(aid), _kinds)
+    assert {s["clip_id"] for s in plan2["audio_clips"]} == {"c2", "a9"}
+    # 不传 kind 解析器 = 旧行为（视频自带音频不进 Plan）
+    plan3 = build_plan(_doc(), lambda aid: PATHS.get(aid))
+    assert {s["clip_id"] for s in plan3["audio_clips"]} == {"a9"}
+
+
+def test_render_command_with_video_audio_candidates():
+    plan = build_plan(_doc(), lambda aid: PATHS.get(aid), _kinds)
+    normalized = {"c1": "/tmp/n1.mp4", "c2": "/tmp/n2.mp4", "p1": "/tmp/n3.mp4"}
+    cmd = build_render_command(plan, normalized, None, "/tmp/final.mp4")
+    text = " ".join(cmd)
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    # 输入：基座 1 + 视频段 3 + 音频 3（c1/c2 视频自带 + a9 音频轨）= 7 个 -i
+    assert text.count(" -i ") == 7
+    # 视频自带音频走同一 atempo/volume/afade/adelay 链（c2 start=4 → adelay 4000）
+    assert "adelay=4000:all=1" in graph
+    assert "amix=inputs=3" in graph
+
+
+def test_render_command_two_fullframe_tracks_offset_windows():
+    """回归：两个全帧片段分属两条视频轨——各轨按时间线位置开窗，上层轨不得从头遮盖下层轨"""
+    doc = _doc()
+    doc["clips"] = [
+        {"id": "cA", "trackId": "v1", "assetId": 1, "start": 0, "duration": 5.042, "trimStart": 0, "props": {}},
+        {"id": "cB", "trackId": "v2", "assetId": 2, "start": 5.042, "duration": 3.375, "trimStart": 0, "props": {}},
+    ]
+    plan = build_plan(doc, lambda aid: PATHS.get(aid), lambda aid: "video")
+    v2 = next(t for t in plan["video_tracks"] if t["track_id"] == "v2")
+    assert v2["chain_start"] == 5.042 and v2["total"] == 3.375
+    cmd = build_render_command(plan, {"cA": "/tmp/nA.mp4", "cB": "/tmp/nB.mp4"}, None, "/tmp/f.mp4")
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert "overlay=0:0:enable='between(t,0.000,5.042)'" in graph
+    # 上层轨 pts 平移到锚点（否则 overlay 按主时间轴取帧会跳到 eof 冻结末帧）
+    assert "[2:v]setpts=PTS+5.042/TB" in graph
+    assert "overlay=0:0:enable='between(t,5.042,8.417)'" in graph
+    # 音频轴与视频窗同源：后段自带音频 adelay 在其文档位置
+    assert "adelay=5042:all=1" in graph
+
+
 # ---------- lowering 命令结构 ----------
 
 def test_normalize_cmd_structure():
@@ -119,11 +172,12 @@ def test_render_command_fullframe_xfade_and_pip():
     graph = cmd[cmd.index("-filter_complex") + 1]
     # 输入：黑底基座 + 主轨两段 + PIP 一段 + 音频一段 = 5 个 -i
     assert text.count(" -i ") == 5
-    # xfade 链（主轨内转场压缩 offset=3.5）+ PIP overlay（rect 0.6*1280/0.6*720）
+    # xfade 链（主轨内转场压缩 offset=3.5）+ PIP overlay（绝对窗口 + pts 平移）
     assert "xfade=transition=fade:duration=0.500:offset=3.500" in graph
-    assert "overlay=768:432" in graph
-    # 音频链：volume/afade（start=0 无 adelay）
-    assert "[4:a]volume=0.8,afade=t=in:st=0:d=0.3[ad0]" in graph
+    assert "setpts=PTS+1.000/TB" in graph
+    assert "overlay=768:432:enable='between(t,1.000,3.000)'" in graph
+    # 音频链：volume/afade + 统一重采样（start=0 无 adelay）
+    assert "[4:a]volume=0.8,afade=t=in:st=0:d=0.3,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[ad0]" in graph
     assert "-pix_fmt" in cmd and cmd[-1] == "/tmp/final.mp4"
 
 

@@ -394,6 +394,68 @@ export const useEditorStore = defineStore('editor', () => {
     await placeAsset(asset, { trackId: track.id, start: playhead.value })
   }
 
+  /** 音画分离：视频片段静音，自带音频转投音频轨（放不下自动回退/新建轨） */
+  async function detachAudio(clipId: string): Promise<void> {
+    if (!doc.value) return
+    const clip = doc.value.clips.find((c) => c.id === clipId)
+    if (!clip || clip.assetId == null) return
+    const asset = await fetchAsset(clip.assetId)
+    if (!asset || asset.media_type === 'image') {
+      ElMessage.warning(t('editor.detachNoAudio'))
+      return
+    }
+    const track = findFreeTrack(doc.value, 'audio', { start: clip.start, duration: clip.duration })
+      ?? await createTrackOfKind('audio')
+    if (!track) {
+      ElMessage.warning(t('editor.errors.noTrack'))
+      return
+    }
+    applyOrToast({ op: 'detachAudio', payload: { clipId, newId: newId('clip'), trackId: track.id } }, t('editor.ops.detachAudio'))
+  }
+
+  /** 播放头处分割选中片段（时间线按钮 / S 键共用） */
+  function splitSelectedAtPlayhead(): void {
+    const clipId = selectedClipId.value
+    if (!clipId || !doc.value) return
+    const clip = doc.value.clips.find((c) => c.id === clipId)
+    if (!clip) return
+    if (playhead.value <= clip.start || playhead.value >= clip.start + clip.duration) {
+      ElMessage.warning(t('editor.splitOutsideClip'))
+      return
+    }
+    applyOrToast({ op: 'splitClip', payload: { clipId, at: Math.round(playhead.value * 1000) / 1000, newId: newId('clip') } }, t('editor.ops.splitClip'))
+  }
+
+  /** 复制片段到原片段尾部（原轨放不下回退同类型空闲轨/新建轨） */
+  async function duplicateClip(clipId: string): Promise<void> {
+    const d = doc.value
+    if (!d) return
+    const clip = d.clips.find((c) => c.id === clipId)
+    if (!clip) return
+    const track = d.tracks.find((tr) => tr.id === clip.trackId)
+    if (!track) return
+    const start = Math.round((clip.start + clip.duration) * 1000) / 1000
+    let trackId = track.id
+    if (track.kind === 'video' || track.kind === 'audio') {
+      const span = { start, duration: clip.duration }
+      if (!canPlaceOnTrack(d.clips.filter((c) => c.trackId === track.id), span)) {
+        const fallback = findFreeTrack(d, track.kind, span) ?? await createTrackOfKind(track.kind)
+        if (!fallback) return
+        trackId = fallback.id
+      }
+    }
+    applyOrToast({
+      op: 'addClip',
+      payload: {
+        clip: {
+          id: newId('clip'), trackId, assetId: clip.assetId, start,
+          duration: clip.duration, trimStart: clip.trimStart, props: { ...clip.props },
+          ...(clip.text ? { text: clip.text } : {}),
+        },
+      },
+    }, t('editor.ops.addClip'))
+  }
+
   async function rename(newTitle: string): Promise<void> {
     if (!uid.value || !newTitle.trim()) return
     const detail = await updateEditorProject(uid.value, { title: newTitle.trim() })
@@ -426,7 +488,7 @@ export const useEditorStore = defineStore('editor', () => {
     renderStatus, renderProgress, renderError, finalUrl,
     assetCache,
     load, fetchAsset, apply, applyOrToast, undo, redo, healDurations,
-    placeAsset, addAssetAtPlayhead,
+    placeAsset, addAssetAtPlayhead, detachAudio, splitSelectedAtPlayhead, duplicateClip,
     probeMediaDuration,
     saveNow, scheduleSave, transcribeTrack, submitRender, rename,
     select, reset, newId,

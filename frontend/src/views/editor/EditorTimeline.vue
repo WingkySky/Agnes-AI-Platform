@@ -9,11 +9,11 @@
  * ===================================================== */
 
 import { computed, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { Close, Headset, Mute, QuestionFilled, Switch } from '@element-plus/icons-vue'
 
 import { useEditorStore } from '@/stores/editor'
 import { useI18n } from '@/i18n'
-import { MIN_CLIP_DURATION, clipEnd, type EditorClip } from '@/lib/editor-types'
+import { MIN_CLIP_DURATION, TRANSITION_TYPES, clipEnd, type EditorClip, type TransitionType } from '@/lib/editor-types'
 import {
   PX_PER_SEC_MAX,
   PX_PER_SEC_MIN,
@@ -87,15 +87,41 @@ function clipStyle(clip: EditorClip): Record<string, string> {
 
 // ---------- 拖拽 / 裁剪（手势态不入历史） ----------
 
-interface DragRender { clipId: string; start: number; duration: number; trimStart: number; mode: 'move' | 'trim-left' | 'trim-right' }
+interface DragRender { clipId: string; start: number; duration: number; trimStart: number; mode: 'move' | 'trim-left' | 'trim-right'; trackId: string; originTrackId: string; kind: string }
 const dragRender = ref<DragRender | null>(null)
+
+/** 指针所在的可放置轨道（同类型且未锁定），无效返回 null（目标保持粘性） */
+function laneUnderPointer(clientY: number, kind: string): string | null {
+  for (const [trackId, el] of laneRefs) {
+    const rect = el.getBoundingClientRect()
+    if (clientY >= rect.top && clientY <= rect.bottom) {
+      const track = store.doc?.tracks.find((tr) => tr.id === trackId)
+      return track && track.kind === kind && track.flag !== 'locked' ? trackId : null
+    }
+  }
+  return null
+}
+
+/** 跨轨拖动中的幽灵块：只画在非原轨的目标轨上 */
+function moveGhost(trackId: string): boolean {
+  const r = dragRender.value
+  return !!r && r.mode === 'move' && r.trackId === trackId && r.trackId !== r.originTrackId
+}
+
+function ghostStyle(): Record<string, string> {
+  const r = dragRender.value!
+  return {
+    left: `${timeToX(r.start, PX_PER_SEC.value)}px`,
+    width: `${Math.max(r.duration * PX_PER_SEC.value, 6)}px`,
+  }
+}
 
 function beginDrag(e: PointerEvent, clip: EditorClip, mode: DragRender['mode']): void {
   e.stopPropagation()
   store.select(clip.id)
   const startX = e.clientX
   const orig = { start: clip.start, duration: clip.duration, trimStart: clip.trimStart }
-  dragRender.value = { clipId: clip.id, ...orig, mode }
+  dragRender.value = { clipId: clip.id, ...orig, mode, trackId: clip.trackId, originTrackId: clip.trackId, kind: store.doc?.tracks.find((tr) => tr.id === clip.trackId)?.kind ?? '' }
   // 吸附候选在手势开始时定格（手势期间文档与播放头不变）；Shift 按住临时禁用
   const snapPoints = store.doc && store.snappingEnabled
     ? buildSnapPoints(store.doc, { excludeClipId: clip.id, playhead: store.playhead })
@@ -119,6 +145,8 @@ function beginDrag(e: PointerEvent, clip: EditorClip, mode: DragRender['mode']):
         else if (db !== Infinity) next = Math.max(0, b.time - orig.duration)
       }
       r.start = next
+      const target = laneUnderPointer(ev.clientY, r.kind)
+      if (target) r.trackId = target
     } else if (mode === 'trim-right') {
       let end = orig.start + Math.max(MIN_CLIP_DURATION, orig.duration + delta)
       if (snapOn) end = Math.max(orig.start + MIN_CLIP_DURATION, resolveSnap(end, snapPoints, threshold).time)
@@ -150,7 +178,9 @@ function commitDrag(): void {
   dragRender.value = null
   if (!r) return
   if (r.mode === 'move') {
-    store.applyOrToast({ op: 'moveClip', payload: { clipId: r.clipId, start: Math.round(r.start * 1000) / 1000 } }, t('editor.ops.moveClip'))
+    const payload: Record<string, unknown> = { clipId: r.clipId, start: Math.round(r.start * 1000) / 1000 }
+    if (r.trackId !== r.originTrackId) payload.trackId = r.trackId
+    store.applyOrToast({ op: 'moveClip', payload }, t('editor.ops.moveClip'))
   } else {
     store.applyOrToast({
       op: 'trimClip',
@@ -165,15 +195,7 @@ function commitDrag(): void {
 }
 
 function splitSelected(): void {
-  const clipId = store.selectedClipId
-  if (!clipId || !store.doc) return
-  const clip = store.doc.clips.find((c) => c.id === clipId)
-  if (!clip) return
-  if (store.playhead <= clip.start || store.playhead >= clipEnd(clip)) {
-    ElMessage.warning(t('editor.splitOutsideClip'))
-    return
-  }
-  store.applyOrToast({ op: 'splitClip', payload: { clipId, at: store.playhead, newId: store.newId('clip') } }, t('editor.ops.splitClip'))
+  store.splitSelectedAtPlayhead()
 }
 
 // ---------- 素材拖入 ----------
@@ -206,14 +228,163 @@ async function onDropAsset(e: DragEvent, trackId: string): Promise<void> {
   await store.placeAsset(asset, { trackId, start: Math.round(start * 1000) / 1000 })
 }
 
+// ---------- 片段标注（音频/转场/淡变可视化） ----------
+
+/** 片段音频态：分离后静音显示静音图标；视频片段自带音频显示音频图标 */
+function audioBadge(clip: EditorClip, kind: string): 'muted' | 'audio' | null {
+  if (kind === 'subtitle') return null
+  if (clip.props.muted === true) return 'muted'
+  return kind === 'video' && clip.assetId != null ? 'audio' : null
+}
+
+/** 片段淡变包络（剪映式穹顶）：淡入/淡出把整块内容塑成穹顶——上边缘沿包络曲线走，
+ * 两端低（fade 区四分之一椭圆：边缘陡、顶部收平）、中间满高，曲线之上露出底色。
+ * 音频=音量包络，视频/字幕=不透明度包络，全轨道共用同一种剪映淡变语言。
+ * 返回开路 path（不含 Z，供描边复用）；无淡变返回 null（保持满框矩形）。 */
+function clipEnvelope(clip: EditorClip): string | null {
+  if ((clip.props.fadeIn ?? 0) <= 0 && (clip.props.fadeOut ?? 0) <= 0) return null
+  const w = clip.duration * PX_PER_SEC.value
+  if (w <= 0) return null
+  let fi = Math.min((clip.props.fadeIn ?? 0) * PX_PER_SEC.value / w, 1) * 100
+  let fo = Math.min((clip.props.fadeOut ?? 0) * PX_PER_SEC.value / w, 1) * 100
+  if (fi + fo > 100) {
+    const k = 100 / (fi + fo)
+    fi *= k
+    fo *= k
+  }
+  const rise = fi > 0 ? `C 0 ${100 - 55.23} ${fi * 0.4477} 0 ${fi} 0` : 'L 0 0'
+  const fall = fo > 0 ? `C ${100 - fo * 0.4477} 0 100 ${100 - 55.23} 100 100` : 'L 100 100'
+  return `M 0 100 ${rise} L ${100 - fo} 0 ${fall}`
+}
+
+/** 包络填充/描边跟轨道主色（fill 与片段底色同档，曲线之上露出 lane 底色） */
+const ENVELOPE_COLORS: Record<string, { fill: string; stroke: string }> = {
+  video: { fill: 'var(--el-color-primary-light-8)', stroke: 'var(--el-color-primary-light-5)' },
+  audio: { fill: 'var(--el-color-success-light-8)', stroke: 'var(--el-color-success-light-5)' },
+  subtitle: { fill: 'var(--el-color-warning-light-8)', stroke: 'var(--el-color-warning-light-5)' },
+}
+
+/** 同轨相邻接缝（整轨全帧链才有转场链路）：转场挂在前一片段，接缝处可点击选取 */
+function rowJunctions(row: { track: { kind: string }; clips: EditorClip[] }): { clip: EditorClip; x: number }[] {
+  if (!row.clips.length || row.track.kind === 'subtitle') return []
+  const fullFrame = row.clips.every((c) => !c.props.rect || (c.props.rect.w >= 1 && c.props.rect.h >= 1))
+  if (!fullFrame) return []
+  const out: { clip: EditorClip; x: number }[] = []
+  for (let i = 0; i + 1 < row.clips.length; i++) {
+    if (Math.abs(clipEnd(row.clips[i]) - row.clips[i + 1].start) < 0.02) {
+      out.push({ clip: row.clips[i], x: clipEnd(row.clips[i]) })
+    }
+  }
+  return out
+}
+
+interface JunctionState { x: number; y: number; clipId: string; type: TransitionType | null; duration: number }
+const junctionMenu = ref<JunctionState | null>(null)
+
+function openJunctionMenu(e: MouseEvent, clip: EditorClip): void {
+  const t = clip.props.transition
+  junctionMenu.value = {
+    x: Math.min(e.clientX, window.innerWidth - 200),
+    y: Math.min(e.clientY, window.innerHeight - 230),
+    clipId: clip.id,
+    type: t?.type ?? null,
+    duration: t?.duration ?? 0.5,
+  }
+}
+
+function applyJunction(type: TransitionType | null): void {
+  const j = junctionMenu.value!
+  store.applyOrToast({ op: 'setClipProperty', payload: { clipId: j.clipId, props: { transition: type ? { type, duration: j.duration } : null } } }, t('editor.ops.setClipProperty'))
+  junctionMenu.value = null
+}
+
+/** 转场已激活时改时长立即生效（菜单不关闭） */
+function setJunctionDuration(v: number | undefined): void {
+  const j = junctionMenu.value
+  if (!j) return
+  j.duration = v ?? 0.5
+  if (j.type) {
+    store.applyOrToast({ op: 'setClipProperty', payload: { clipId: j.clipId, props: { transition: { type: j.type, duration: j.duration } } } }, t('editor.ops.setClipProperty'))
+  }
+}
+
 // 多轨 lane 引用（拖入定位用）
 const laneRefs = new Map<string, HTMLElement>()
 function setLaneRef(trackId: string, el: unknown): void {
   if (el) laneRefs.set(trackId, el as HTMLElement)
 }
 
-const rulerTicks = computed(() => {
-  const step = rulerStepSec(PX_PER_SEC.value)
+// ---------- 右键菜单（片段 / 轨道 lane） ----------
+
+interface CtxMenuState { x: number; y: number; clip: EditorClip | null; kind: string | null }
+const ctxMenu = ref<CtxMenuState | null>(null)
+
+function openClipMenu(e: MouseEvent, clip: EditorClip, kind: string): void {
+  store.select(clip.id)
+  ctxMenu.value = { x: Math.min(e.clientX, window.innerWidth - 170), y: Math.min(e.clientY, window.innerHeight - 190), clip, kind }
+}
+function openLaneMenu(e: MouseEvent, kind: string): void {
+  ctxMenu.value = { x: Math.min(e.clientX, window.innerWidth - 170), y: Math.min(e.clientY, window.innerHeight - 190), clip: null, kind }
+}
+
+interface CtxItem { label: string; disabled: boolean; run: () => void }
+
+const ctxItems = computed<CtxItem[]>(() => {
+  const m = ctxMenu.value
+  if (!m) return []
+  if (m.clip) {
+    const clip = m.clip
+    const items: CtxItem[] = [{
+      label: t('editor.split'),
+      disabled: store.playhead <= clip.start || store.playhead >= clipEnd(clip),
+      run: () => store.splitSelectedAtPlayhead(),
+    }]
+    if (m.kind === 'video') {
+      items.push({ label: t('editor.ops.detachAudio'), disabled: clip.assetId == null, run: () => void store.detachAudio(clip.id) })
+    }
+    if (m.kind !== 'subtitle') {
+      items.push({
+        label: clip.props.muted ? t('editor.menuUnmute') : t('editor.menuMute'),
+        disabled: false,
+        run: () => store.applyOrToast({ op: 'setClipProperty', payload: { clipId: clip.id, props: { muted: !clip.props.muted } } }, t('editor.ops.setClipProperty')),
+      })
+    }
+    items.push({ label: t('common.delete'), disabled: false, run: () => store.applyOrToast({ op: 'removeClip', payload: { clipId: clip.id } }, t('editor.ops.removeClip')) })
+    return items
+  }
+  if (m.kind === 'video' || m.kind === 'audio') {
+    return [{
+      label: t('editor.menuAddSameTrack'),
+      disabled: false,
+      run: () => store.applyOrToast({ op: 'addTrack', payload: { track: { id: store.newId('track'), kind: m.kind } } }, t('editor.ops.addTrack')),
+    }]
+  }
+  return []
+})
+
+function onCtxItemClick(item: CtxItem): void {
+  item.run()
+  ctxMenu.value = null
+}
+
+// ---------- 快捷键提示 ----------
+
+const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent)
+const mod = isMac ? '⌘' : 'Ctrl'
+
+const shortcutList = computed(() => [
+  { keys: 'Space', label: `${t('editor.play')}/${t('editor.pause')}` },
+  { keys: `${mod}+B`, label: t('editor.split') },
+  { keys: `${mod}+C`, label: t('editor.shortcutDuplicate') },
+  { keys: 'Delete', label: t('common.delete') },
+  { keys: '←/→', label: t('editor.shortcutStepFrame') },
+  { keys: 'Shift+←/→', label: t('editor.shortcutStepSecond') },
+  { keys: 'Home/End', label: t('editor.shortcutHomeEnd') },
+  { keys: `${mod}+Z`, label: t('editor.undo') },
+  { keys: `${mod}+Shift+Z`, label: t('editor.redo') },
+])
+
+const rulerTicks = computed(() => {  const step = rulerStepSec(PX_PER_SEC.value)
   const ticks: number[] = []
   for (let s = 0; s <= props.totalDuration + 6; s += step) ticks.push(s)
   return ticks
@@ -238,6 +409,17 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
         :model-value="store.snappingEnabled"
         @change="store.setSnapping(!store.snappingEnabled)"
       >{{ t('editor.snapToggle') }}</el-checkbox>
+      <el-popover placement="bottom-end" :width="240" trigger="click">
+        <template #reference>
+          <el-button size="small" :icon="QuestionFilled" text :title="t('editor.shortcutsTitle')" />
+        </template>
+        <div class="shortcut-list">
+          <div v-for="s in shortcutList" :key="s.keys + s.label" class="shortcut-row">
+            <span class="shortcut-keys">{{ s.keys }}</span>
+            <span class="shortcut-label">{{ s.label }}</span>
+          </div>
+        </div>
+      </el-popover>
       <span class="playhead-time">{{ store.playhead.toFixed(2) }}s</span>
     </div>
 
@@ -262,7 +444,19 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
           :class="{ hidden: row.track.flag === 'hidden' }"
         >
           <div class="track-head">
-            <span class="track-kind" :data-kind="row.track.kind">{{ t(`editor.trackKinds.${row.track.kind}`) }}</span>
+            <div class="track-head-line">
+              <span class="track-kind" :data-kind="row.track.kind">{{ t(`editor.trackKinds.${row.track.kind}`) }}</span>
+              <span :title="row.clips.length ? t('editor.errors.track_not_empty') : t('editor.ops.removeTrack')">
+                <el-button
+                  class="track-delete"
+                  :icon="Close"
+                  text
+                  size="small"
+                  :disabled="row.clips.length > 0"
+                  @click="store.applyOrToast({ op: 'removeTrack', payload: { trackId: row.track.id } }, t('editor.ops.removeTrack'))"
+                />
+              </span>
+            </div>
             <el-checkbox
               v-if="row.track.kind !== 'audio'"
               :model-value="row.track.flag === 'hidden'"
@@ -288,6 +482,7 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
             @dragover.prevent="dropActive = row.track.id"
             @dragleave="dropActive = null"
             @drop.prevent="onDropAsset($event, row.track.id)"
+            @contextmenu.prevent="openLaneMenu($event, row.track.kind)"
           >
             <div
               v-for="clip in row.clips"
@@ -299,19 +494,91 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
                 audio: row.track.kind === 'audio',
                 subtitle: row.track.kind === 'subtitle',
                 ghost: dragRender?.clipId === clip.id,
+                draggedOut: dragRender?.clipId === clip.id && dragRender?.trackId !== dragRender?.originTrackId,
+                enveloped: !!clipEnvelope(clip),
               }"
               :style="clipStyle(clip)"
               @pointerdown="beginDrag($event, clip, 'move')"
+              @contextmenu.prevent="openClipMenu($event, clip, row.track.kind)"
             >
+              <svg v-if="clipEnvelope(clip)" class="clip-envelope" viewBox="0 0 100 100" preserveAspectRatio="none">
+                <path
+                  :d="`${clipEnvelope(clip)} Z`"
+                  :style="{ fill: ENVELOPE_COLORS[row.track.kind].fill }"
+                />
+                <path
+                  :d="clipEnvelope(clip) ?? undefined"
+                  :style="{ fill: 'none', stroke: ENVELOPE_COLORS[row.track.kind].stroke, strokeWidth: '1.5px' }"
+                  vector-effect="non-scaling-stroke"
+                />
+              </svg>
               <span class="clip-handle left" @pointerdown="beginDrag($event, clip, 'trim-left')" />
               <span class="clip-label">{{ clip.text || (clip.assetId ? `#${clip.assetId}` : clip.id) }}</span>
+              <span v-if="audioBadge(clip, row.track.kind)" class="clip-audio">
+                <el-icon>
+                  <Mute v-if="audioBadge(clip, row.track.kind) === 'muted'" />
+                  <Headset v-else />
+                </el-icon>
+              </span>
               <span class="clip-handle right" @pointerdown="beginDrag($event, clip, 'trim-right')" />
             </div>
+            <div v-if="moveGhost(row.track.id)" class="ghost-block" :class="row.track.kind" :style="ghostStyle()" />
+            <button
+              v-for="j in rowJunctions(row)"
+              :key="`junc_${j.clip.id}`"
+              class="junction-btn"
+              :class="{ active: !!j.clip.props.transition }"
+              :style="{ left: `${timeToX(j.x, PX_PER_SEC) - 9}px` }"
+              :title="j.clip.props.transition ? t(`editor.transitions.${j.clip.props.transition.type}`) : t('editor.propTransition')"
+              @click.stop="openJunctionMenu($event, j.clip)"
+            >
+              <el-icon><Switch /></el-icon>
+            </button>
           </div>
         </div>
 
         <!-- 播放头 -->
         <div class="playhead" :style="{ left: `${playheadLeft}px` }" />
+      </div>
+    </div>
+
+    <!-- 右键菜单 -->
+    <div v-if="ctxMenu" class="ctx-backdrop" @pointerdown="ctxMenu = null" @contextmenu.prevent="ctxMenu = null">
+      <div class="ctx-menu" :style="{ left: `${ctxMenu.x}px`, top: `${ctxMenu.y}px` }" @pointerdown.stop>
+        <button
+          v-for="(item, i) in ctxItems"
+          :key="i"
+          class="ctx-item"
+          :disabled="item.disabled"
+          @click="onCtxItemClick(item)"
+        >{{ item.label }}</button>
+      </div>
+    </div>
+
+    <!-- 接缝转场菜单 -->
+    <div v-if="junctionMenu" class="ctx-backdrop" @pointerdown="junctionMenu = null" @contextmenu.prevent="junctionMenu = null">
+      <div class="ctx-menu" :style="{ left: `${junctionMenu.x}px`, top: `${junctionMenu.y}px` }" @pointerdown.stop>
+        <button
+          v-for="tr in TRANSITION_TYPES"
+          :key="tr"
+          class="ctx-item"
+          :class="{ current: junctionMenu.type === tr }"
+          @click="applyJunction(tr)"
+        >{{ t(`editor.transitions.${tr}`) }}<span v-if="junctionMenu.type === tr"> ✓</span></button>
+        <button class="ctx-item" :class="{ current: !junctionMenu.type }" @click="applyJunction(null)">
+          {{ t('editor.none') }}<span v-if="!junctionMenu.type"> ✓</span>
+        </button>
+        <div class="junction-duration">
+          <span>{{ t('editor.propTransitionDuration') }}</span>
+          <el-input-number
+            size="small"
+            :model-value="junctionMenu.duration"
+            :min="0.1"
+            :max="3"
+            :step="0.1"
+            @change="setJunctionDuration"
+          />
+        </div>
       </div>
     </div>
   </div>
@@ -338,6 +605,16 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
   font-variant-numeric: tabular-nums;
 }
 .timeline-toolbar :deep(.el-checkbox) { height: 24px; margin-right: 0; }
+.shortcut-list { display: flex; flex-direction: column; gap: 6px; }
+.shortcut-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 12px; }
+.shortcut-keys {
+  font-family: monospace;
+  background: var(--el-fill-color);
+  padding: 1px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.shortcut-label { color: var(--el-text-color-regular); }
 .timeline-scroll {
   overflow: auto;
   flex: 1;
@@ -397,6 +674,36 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
   font-size: 12px;
   font-weight: 600;
 }
+.track-head-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.track-delete { height: 20px; width: 20px; padding: 0; }
+.ctx-backdrop { position: fixed; inset: 0; z-index: 100; }
+.ctx-menu {
+  position: fixed;
+  min-width: 140px;
+  padding: 4px;
+  background: var(--el-bg-color-overlay);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  box-shadow: var(--el-box-shadow-light);
+  display: flex;
+  flex-direction: column;
+}
+.ctx-item {
+  border: none;
+  background: none;
+  text-align: left;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--el-text-color-primary);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.ctx-item:hover:not(:disabled) { background: var(--el-fill-color); }
+.ctx-item:disabled { color: var(--el-text-color-placeholder); cursor: not-allowed; }
 .track-kind[data-kind='video'] { color: var(--el-color-primary); }
 .track-kind[data-kind='audio'] { color: var(--el-color-success); }
 .track-kind[data-kind='subtitle'] { color: var(--el-color-warning); }
@@ -427,6 +734,27 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
 .clip-block.subtitle { background: var(--el-color-warning-light-8); border-color: var(--el-color-warning-light-5); }
 .clip-block.selected { outline: 2px solid var(--el-color-primary); z-index: 1; }
 .clip-block.ghost { opacity: 0.6; }
+.clip-block.dragged-out { opacity: 0.15; }
+.clip-block.enveloped { background: transparent; }
+.clip-envelope {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}
+.ghost-block {
+  position: absolute;
+  top: 6px;
+  height: 40px;
+  border: 1px dashed var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 1;
+}
+.ghost-block.audio { border-color: var(--el-color-success); background: var(--el-color-success-light-9); }
 .clip-label {
   font-size: 12px;
   overflow: hidden;
@@ -434,6 +762,53 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
   white-space: nowrap;
   pointer-events: none;
 }
+.clip-audio {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  color: var(--el-text-color-regular);
+  opacity: 0.75;
+  pointer-events: none;
+}
+.clip-audio :deep(.el-icon) { font-size: 12px; }
+.junction-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--el-border-color);
+  border-radius: 4px;
+  background: var(--el-bg-color-overlay);
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  z-index: 2;
+}
+.junction-btn:hover { color: var(--el-color-primary); border-color: var(--el-color-primary); }
+.junction-btn.active {
+  color: var(--el-color-primary);
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
+.junction-btn :deep(.el-icon) { font-size: 11px; }
+.junction-duration {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px 2px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  border-top: 1px solid var(--el-border-color-lighter);
+  margin-top: 4px;
+}
+.ctx-item.current { color: var(--el-color-primary); }
 .clip-handle {
   position: absolute;
   top: 0;

@@ -37,6 +37,8 @@ export interface ClipProps {
   fadeOut?: number
   rect?: ClipRect
   transition?: ClipTransition
+  /** 音画分离后源片段静音：自带音频不再进预览与渲染 */
+  muted?: boolean
 }
 
 export interface EditorClip {

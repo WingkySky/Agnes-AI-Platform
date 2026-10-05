@@ -1,5 +1,5 @@
 /* =====================================================
- * 剪辑器命令状态机 — 12 op 纯函数命令表
+ * 剪辑器命令状态机 — 13 op 纯函数命令表
  *
  * - 每个命令 (doc, payload) => 新 doc，不可变更新（未变子树结构共享）
  * - fail-closed：未知 op / 非法 payload 抛 EditorCommandError，不改状态（可安全回放）
@@ -36,6 +36,7 @@ export type CommandErrorCode =
   | 'split_outside_clip'
   | 'split_too_close'
   | 'overlap'
+  | 'not_audio_track'
 
 export class EditorCommandError extends Error {
   readonly code: CommandErrorCode
@@ -53,7 +54,7 @@ export interface EditorCommand {
 }
 
 export const EDITOR_OPS = [
-  'addClip', 'moveClip', 'trimClip', 'splitClip', 'removeClip', 'setClipProperty',
+  'addClip', 'moveClip', 'trimClip', 'splitClip', 'removeClip', 'detachAudio', 'setClipProperty',
   'addSubtitle', 'removeSubtitle', 'rebuildSubtitleClips',
   'addTrack', 'removeTrack', 'setTrackFlag',
 ] as const
@@ -114,7 +115,11 @@ function normalizePropsDelta(delta: unknown): Partial<Record<keyof ClipProps, un
         throw new EditorCommandError('invalid_payload', 'volume')
       }
     } else if (key === 'fadeIn' || key === 'fadeOut') requireNonNegative(value, key)
-    else if (key === 'transition') {
+    else if (key === 'muted') {
+      if (typeof value !== 'boolean') {
+        throw new EditorCommandError('invalid_payload', 'muted')
+      }
+    } else if (key === 'transition') {
       if (typeof value !== 'object' || value === null || !isTransitionType((value as Record<string, unknown>).type)) {
         throw new EditorCommandError('invalid_payload', 'transition.type')
       }
@@ -264,6 +269,45 @@ const commands: Record<EditorOp, (doc: EditorDocument, payload: CommandPayload) 
   removeClip: (doc, payload) => {
     findClip(doc, payload.clipId)
     return { ...doc, clips: doc.clips.filter((c) => c.id !== payload.clipId) }
+  },
+
+  detachAudio: (doc, payload) => {
+    const { clip } = findClip(doc, payload.clipId)
+    const sourceTrack = findTrack(doc, clip.trackId)
+    if (sourceTrack.kind !== 'video') {
+      throw new EditorCommandError('invalid_payload', 'detach requires video clip')
+    }
+    ensureUnlocked(sourceTrack)
+    const newId = payload.newId
+    if (typeof newId !== 'string' || !newId) {
+      throw new EditorCommandError('invalid_payload', 'newId')
+    }
+    const targetTrack = findTrack(doc, payload.trackId)
+    if (targetTrack.kind !== 'audio') {
+      throw new EditorCommandError('not_audio_track', targetTrack.id)
+    }
+    ensureUnlocked(targetTrack)
+    if (doc.clips.some((c) => c.id === newId)) {
+      throw new EditorCommandError('duplicate_id', newId)
+    }
+    if (!canPlaceOnTrack(
+      doc.clips.filter((c) => c.trackId === targetTrack.id),
+      { start: clip.start, duration: clip.duration },
+    )) {
+      throw new EditorCommandError('overlap', targetTrack.id)
+    }
+    const detached: EditorClip = {
+      id: newId,
+      trackId: targetTrack.id,
+      assetId: clip.assetId,
+      start: clip.start,
+      duration: clip.duration,
+      trimStart: clip.trimStart,
+      // 变速跟着媒体走（音频同一素材同速率）；音量/fade 从零起调，源片段静音
+      props: clip.props.speed !== undefined ? { speed: clip.props.speed } : {},
+    }
+    const clips = doc.clips.map((c) => (c.id === clip.id ? { ...c, props: { ...c.props, muted: true } } : c))
+    return { ...doc, clips: [...clips, detached] }
   },
 
   setClipProperty: (doc, payload) => {

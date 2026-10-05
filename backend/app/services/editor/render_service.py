@@ -8,13 +8,15 @@
 # 输入序模型（filter 里按序号引用）：
 #   输入 0 = 黑底画布（lavfi color，仅有视频轨时存在）
 #   随后 = 全部视频片段归一化文件（轨序 → 轨内片段序）
-#   随后 = 全部音频源文件（audio_clips 序）
+#   随后 = 全部音频源文件（audio_clips 序；含未静音视频片段的自带音频）
 #
 # 合成策略（v1 明确边界，与 plan_builder 对应）：
-# - 全帧片段轨（rect 空/全帧）→ 轨内 xfade/concat 链后作为一层 overlay
-# - 带 rect 的片段（PIP）→ 归一化时已缩放到 rect 尺寸，按 render_start 窗口
+# - 全帧片段轨（rect 空/全帧）→ 轨内 xfade/concat 链后作为一层 overlay，
+#   整链按轨锚点时间窗 enable（多轨互不遮盖）
+# - 带 rect 的片段（PIP）→ 归一化时已缩放到 rect 尺寸，按文档位置窗口
 #   enable overlay（PIP 片段间硬切，转场不生效）
-# - 音频：逐段截取/atempo/volume/afade → adelay 定位 → amix
+# - 音频：逐段截取/atempo/volume/afade → adelay 定位 → amix；
+#   视频自带音频（音画分离未分离时默认携带）需 ffprobe 确认真实含音流
 # - 字幕：build_ass + subtitles 滤镜硬烧
 # - 成片落 uploads/editor/，final_url 挂工程并自动入资产库（source=compose）
 # =====================================================
@@ -118,6 +120,8 @@ async def _render_task(project_uid: str) -> None:
 
 async def _render_project(db: AsyncSession, project: EditingProject) -> None:
     snapshot = project.render_document or project.document
+    # 归一化/字幕/成片都写 uploads/editor/，缺目录会直接打不开输出文件
+    os.makedirs(EDITOR_OUTPUTS_DIR, exist_ok=True)
     # 1. 素材本地化（远程先收口转存；失效片段剔除）
     asset_ids = {c["assetId"] for c in snapshot.get("clips", []) if isinstance(c.get("assetId"), int)}
     assets = {
@@ -132,9 +136,21 @@ async def _render_project(db: AsyncSession, project: EditingProject) -> None:
         local = await resolve_asset_local_file(asset, EDITOR_OUTPUTS_DIR)
         if local:
             paths[asset.id] = local
-    plan = build_plan(snapshot, lambda aid: paths.get(aid))
+    plan = build_plan(
+        snapshot,
+        lambda aid: paths.get(aid),
+        lambda aid: assets[aid].kind if aid in assets else None,
+    )
     if plan is None:
         raise RuntimeError("没有可用素材片段（素材缺失或时长为 0）")
+
+    # 音频候选过滤：视频自带音频需文件真实含音流（无声视频/纯画面素材剔除）
+    probe_paths = sorted({s["asset_path"] for s in plan["audio_clips"] if s.get("from_video")})
+    probe_results = {p: await _has_audio_stream(p) for p in probe_paths}
+    plan["audio_clips"] = [
+        s for s in plan["audio_clips"]
+        if not s.get("from_video") or probe_results.get(s["asset_path"], False)
+    ]
 
     # 2. 片段归一化（进度 k/n）
     plan, normalized = await _normalize_segments(db, project, plan)
@@ -184,6 +200,22 @@ async def _render_project(db: AsyncSession, project: EditingProject) -> None:
     project.render_error = None
     await db.commit()
     logger.info("[剪辑渲染] 完成 uid=%s → %s", project.uid, storage_key)
+
+
+async def _has_audio_stream(path: str) -> bool:
+    """ffprobe 探测文件是否含音频流（无声视频/纯画面素材不进音频图）"""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffprobe", "-v", "error", "-select_streams", "a",
+            "-show_entries", "stream=index", "-of", "csv=p=0", path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+        return bool(stdout.strip())
+    except Exception:  # noqa: BLE001 — 探测失败按无声处理，不阻塞渲染
+        logger.warning("[剪辑渲染] ffprobe 音流探测失败 %s", path)
+        return False
 
 
 async def _normalize_segments(db: AsyncSession, project: EditingProject, plan: dict) -> tuple[dict, dict[str, str]]:
@@ -295,26 +327,31 @@ def build_render_command(
     input_index = 0
 
     # —— 视频输入与轨链 ——
-    # 黑底基座仅在 overlay 层数 > 1 时需要（单层全帧轨直接作为成片视频流）
+    # 黑底基座在走 overlay 合成时需要；单条全帧轨直接作为成片视频流
     def _track_is_single_layer(track: dict) -> bool:
         segs = track["segments"]
         return bool(segs) and all(_is_full_frame(s.get("rect")) for s in segs)
+
+    def _enable(start: float, end: float) -> str:
+        return f":enable='between(t,{start:.3f},{end:.3f})'"
 
     overlay_layer_count = sum(
         1 if _track_is_single_layer(track) else len(track["segments"])
         for track in plan["video_tracks"]
     )
-    needs_base = overlay_layer_count > 1
+    direct_single = has_video and overlay_layer_count == 1
+    needs_base = has_video and not direct_single
 
     overlay_items: list[tuple[str, int, int, str]] = []  # (label, x, y, enable)
-    if has_video and needs_base:
+    if needs_base:
         cmd += ["-f", "lavfi", "-i", f"color=c=black:s={width}x{height}:d={total:.6f}:r={fps}"]
         input_index += 1
 
     for track in plan["video_tracks"]:
         segs = track["segments"]
         if segs and all(_is_full_frame(s.get("rect")) for s in segs):
-            # 整轨一条链：xfade（有转场）/ concat
+            # 整轨一条链：xfade（有转场）/ concat；整链按轨锚点的时间线窗口开合，
+            # 多轨互不遮盖（上层轨只在自身窗口内可见）
             chain_in: Optional[str] = None
             consumed = 0.0
             for i, seg in enumerate(segs):
@@ -338,9 +375,16 @@ def build_render_command(
                     filters.append(f"{chain_in}{label}concat=n=2:v=1:a=0{out_label}")
                     consumed += seg["duration"]
                 chain_in = out_label
-            overlay_items.append((chain_in, 0, 0, ""))
+            chain_start = track["chain_start"]
+            layer_label = chain_in
+            if chain_start > 0:
+                # overlay 副输入按 pts 对位主时间轴：链内容 pts 从 0 起，
+                # 必须平移到轨锚点，否则窗口内只剩 eof 后的冻结末帧
+                layer_label = f"[trk{track['track_id']}ts]"
+                filters.append(f"{chain_in}setpts=PTS+{chain_start:.3f}/TB{layer_label}")
+            overlay_items.append((layer_label, 0, 0, _enable(chain_start, chain_start + track["total"])))
         else:
-            # PIP 轨：逐片段独立 overlay（窗口 enable；单片段轨无需 enable）
+            # PIP 轨：逐片段按绝对时间线窗口 overlay（同样先平移 pts）
             for seg in segs:
                 cmd += ["-i", normalized[seg["clip_id"]]]
                 label = f"[{input_index}:v]"
@@ -348,11 +392,11 @@ def build_render_command(
                 rect = seg.get("rect") or {}
                 x = int(width * float(rect.get("x", 0)))
                 y = int(height * float(rect.get("y", 0)))
-                enable = (
-                    f":enable='between(t,{seg['render_start']:.3f},{seg['render_start'] + seg['duration']:.3f})'"
-                    if len(segs) > 1 else ""
-                )
-                overlay_items.append((label, x, y, enable))
+                if seg["render_start"] > 0:
+                    shifted = f"[pip{input_index}]"
+                    filters.append(f"{label}setpts=PTS+{seg['render_start']:.3f}/TB{shifted}")
+                    label = shifted
+                overlay_items.append((label, x, y, _enable(seg["render_start"], seg["render_start"] + seg["duration"])))
 
     # —— 音频输入 ——
     audio_base = input_index
@@ -362,8 +406,8 @@ def build_render_command(
     # —— overlay 链 ——
     final_v: Optional[str] = None
     if has_video:
-        if len(overlay_items) == 1 and overlay_items[0][1] == 0 and overlay_items[0][2] == 0 and not overlay_items[0][3]:
-            current = overlay_items[0][0]  # 单层全帧：直接作为成片视频
+        if direct_single:
+            current = overlay_items[0][0]  # 单条全帧轨：直接作为成片视频
         else:
             current = "[0:v]"
             for i, (label, x, y, enable) in enumerate(overlay_items):
@@ -387,13 +431,13 @@ def build_render_command(
         parts = chain.split(",") if chain != "anull" else []
         if delay_ms > 0:
             parts.append(f"adelay={delay_ms}:all=1")
+        # amix 要求各输入采样率/格式/声道一致：视频音轨（常见 48k）与音频文件（常见 44.1k）
+        # 混音前统一重采样，否则整条 filter graph 报错
+        parts.append("aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo")
         in_label = f"[{audio_base + i}:a]"
-        if parts:
-            out_label = f"[ad{i}]"
-            filters.append(f"{in_label}{','.join(parts)}{out_label}")
-            delayed.append(out_label)
-        else:
-            delayed.append(in_label)
+        out_label = f"[ad{i}]"
+        filters.append(f"{in_label}{','.join(parts)}{out_label}")
+        delayed.append(out_label)
     if len(delayed) > 1:
         filters.append(f"{''.join(delayed)}amix=inputs={len(delayed)}:normalize=0[aout]")
         final_a = "[aout]"

@@ -127,7 +127,7 @@ function syncMedia(): void {
     const expected = clip.trimStart + (store.playhead - clip.start) * speed
     if (Math.abs(el.currentTime - expected) > 0.3) el.currentTime = Math.max(0, expected)
     el.playbackRate = Math.min(Math.max(speed, 0.25), 4)
-    el.muted = track.flag === 'muted'
+    el.muted = track.flag === 'muted' || clip.props.muted === true
     applyGain(el, clip)
     if (store.isPlaying && el.paused) void el.play().catch(() => undefined)
     if (!store.isPlaying && !el.paused) el.pause()
@@ -141,7 +141,7 @@ function syncMedia(): void {
     const expected = clip.trimStart + (store.playhead - clip.start) * speed
     if (Math.abs(el.currentTime - expected) > 0.3) el.currentTime = Math.max(0, expected)
     el.playbackRate = Math.min(Math.max(speed, 0.25), 4)
-    el.muted = track.flag === 'muted'
+    el.muted = track.flag === 'muted' || clip.props.muted === true
     applyGain(el, clip)
     if (store.isPlaying && el.paused) void el.play().catch(() => undefined)
     if (!store.isPlaying && !el.paused) el.pause()

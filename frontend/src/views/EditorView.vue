@@ -64,6 +64,7 @@ async function ensureLoaded(): Promise<void> {
 function onKeydown(e: KeyboardEvent): void {
   const target = e.target as HTMLElement
   if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
+  const mod = e.ctrlKey || e.metaKey
   if (e.code === 'Space') {
     e.preventDefault()
     store.isPlaying = !store.isPlaying
@@ -72,6 +73,22 @@ function onKeydown(e: KeyboardEvent): void {
       e.preventDefault()
       store.applyOrToast({ op: 'removeClip', payload: { clipId: store.selectedClipId } }, t('editor.ops.removeClip'))
     }
+  } else if ((e.key === 'b' || e.key === 'B') && mod) {
+    e.preventDefault()  // 分割（剪映 Ctrl+B / Premiere Ctrl+K 惯例）
+    store.splitSelectedAtPlayhead()
+  } else if ((e.key === 'c' || e.key === 'C') && mod && store.selectedClipId) {
+    e.preventDefault()  // 复制片段到尾部
+    void store.duplicateClip(store.selectedClipId)
+  } else if (e.key === 'Home') {
+    e.preventDefault()
+    store.playhead = 0
+  } else if (e.key === 'End') {
+    e.preventDefault()
+    store.playhead = store.doc ? Math.max(0, ...store.doc.clips.map(clipEnd)) : 0
+  } else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !mod) {
+    e.preventDefault()
+    const step = e.shiftKey ? 1 : 1 / (store.doc?.timebase || 30)
+    store.playhead = Math.max(0, store.playhead + (e.key === 'ArrowRight' ? step : -step))
   } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
     e.preventDefault()
     if (e.shiftKey) store.redo()

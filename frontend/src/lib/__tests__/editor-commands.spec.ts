@@ -171,6 +171,39 @@ describe('removeClip / setClipProperty', () => {
     expect(() => applyCommand(doc, cmd('setClipProperty', { clipId: 'p1', props: { volume: 9 } }))).toThrow()
     expect(() => applyCommand(doc, cmd('setClipProperty', { clipId: 'p1', props: { evil: 1 } }))).toThrow(/unknown prop/)
   })
+  it('muted 仅接受布尔值', () => {
+    expect(applyCommand(baseDoc(), cmd('setClipProperty', { clipId: 'c1', props: { muted: true } }))
+      .clips.find((c) => c.id === 'c1')?.props.muted).toBe(true)
+    expect(() => applyCommand(baseDoc(), cmd('setClipProperty', { clipId: 'c1', props: { muted: 1 } }))).toThrow(/invalid_payload/)
+  })
+})
+
+describe('detachAudio', () => {
+  it('视频片段静音 + 自带音频转投音频轨（仅带变速）', () => {
+    const doc = baseDoc()
+    const next = applyCommand(doc, cmd('detachAudio', { clipId: 'c1', newId: 'ad1', trackId: 'a1' }))
+    expect(next.clips.find((c) => c.id === 'c1')?.props.muted).toBe(true)
+    expect(next.clips.find((c) => c.id === 'ad1')).toMatchObject({
+      trackId: 'a1', assetId: 10, start: 0, duration: 4, trimStart: 1, props: {},
+    })
+    expect(next.clips.length).toBe(5)
+  })
+  it('变速片段分离后音频片段带同速', () => {
+    const doc = applyCommand(baseDoc(), cmd('setClipProperty', { clipId: 'c1', props: { speed: 2 } }))
+    const next = applyCommand(doc, cmd('detachAudio', { clipId: 'c1', newId: 'ad1', trackId: 'a1' }))
+    expect(next.clips.find((c) => c.id === 'ad1')?.props.speed).toBe(2)
+  })
+  it('非视频片段 / 目标非音频轨 → 抛错', () => {
+    const doc = baseDoc()
+    expect(() => applyCommand(doc, cmd('detachAudio', { clipId: 't1', newId: 'x', trackId: 'a1' }))).toThrow(/invalid_payload/)
+    expect(() => applyCommand(doc, cmd('detachAudio', { clipId: 'c1', newId: 'x', trackId: 'v2' }))).toThrow(/not_audio_track/)
+  })
+  it('目标音频轨重叠 → overlap', () => {
+    const doc = applyCommand(baseDoc(), cmd('addClip', {
+      clip: { id: 'm1', trackId: 'a1', assetId: 30, start: 1, duration: 5, trimStart: 0, props: {} },
+    }))
+    expect(() => applyCommand(doc, cmd('detachAudio', { clipId: 'c1', newId: 'x', trackId: 'a1' }))).toThrow(/overlap/)
+  })
 })
 
 describe('addSubtitle / removeSubtitle / rebuildSubtitleClips', () => {
@@ -237,8 +270,8 @@ describe('fail-closed', () => {
     expect(() => applyCommand(doc, broken)).toThrow(/unknown_op/)
     expect(doc.clips.length).toBe(4)
   })
-  it('op 表恰好 12 个', () => {
-    expect(EDITOR_OPS.length).toBe(12)
+  it('op 表恰好 13 个', () => {
+    expect(EDITOR_OPS.length).toBe(13)
   })
 })
 
