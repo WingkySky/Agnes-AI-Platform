@@ -6,6 +6,7 @@
 const enUS = {
   // ------ Common ------
   common: {
+    back: 'Back',
     confirm: 'Confirm',
     cancel: 'Cancel',
     close: 'Close',

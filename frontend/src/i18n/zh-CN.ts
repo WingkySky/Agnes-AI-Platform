@@ -7,6 +7,7 @@
 const zhCN = {
   // ------ 通用 ------
   common: {
+    back: '返回',
     confirm: '确认',
     cancel: '取消',
     close: '关闭',

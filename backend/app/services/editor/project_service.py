@@ -93,7 +93,8 @@ async def create_project(
         source_workspace_id=source_workspace_id,
     )
     db.add(project)
-    await db.flush()
+    await db.commit()
+    await db.refresh(project)
     return project
 
 
@@ -123,7 +124,7 @@ async def update_project(
         if not owned:
             raise HTTPException(status_code=403, detail="无权挂靠此作品")
         project.work_id = work_id
-    await db.flush()
+    await db.commit()
     return project
 
 
@@ -141,13 +142,13 @@ async def save_document(
     await validate_document_assets(db, document, project.user_id)
     project.document = document
     project.revision += 1
-    await db.flush()
+    await db.commit()
     return project
 
 
 async def delete_project(db: AsyncSession, project: EditingProject) -> None:
     await db.delete(project)
-    await db.flush()
+    await db.commit()
 
 
 async def build_draft_from_assets(

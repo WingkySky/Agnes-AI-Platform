@@ -96,6 +96,29 @@ async def test_crud_and_revision_flow(memory_db):
         assert (await client.get(f"{URL}/{uid}")).status_code == 404
 
 
+async def test_persistence_across_session_rollback(memory_db):
+    """回归：写操作必须真实提交（get_async_db 不自动提交，请求结束会话关闭即回滚）。
+    API 响应后手动 rollback，行仍须存活——曾因只 flush 不 commit 导致线上新建后 GET 404。"""
+    from sqlalchemy.future import select as _select
+    from app.models.editing_project import EditingProject
+
+    user = await _seed_user(memory_db, "u1")
+    async for client in _build_client(memory_db, user):
+        uid = (await client.post(URL, json={"title": "落库验证"})).json()["data"]["uid"]
+        await client.put(f"{URL}/{uid}/document", json={"document": _doc(), "base_revision": 1})
+
+        await memory_db.rollback()  # 模拟请求结束会话丢弃未提交内容
+        project = (await memory_db.scalars(_select(EditingProject).where(EditingProject.uid == uid))).first()
+        assert project is not None, "工程未提交落库"
+        assert project.title == "落库验证"
+        assert project.revision == 2 and project.document["clips"]
+
+        # 删除同样真实提交
+        assert (await client.delete(f"{URL}/{uid}")).status_code == 200
+        await memory_db.rollback()
+        assert (await memory_db.scalars(_select(EditingProject).where(EditingProject.uid == uid))).first() is None
+
+
 async def test_owner_boundary_403(memory_db):
     owner = await _seed_user(memory_db, "owner")
     other = await _seed_user(memory_db, "other")
