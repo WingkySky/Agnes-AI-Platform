@@ -24,6 +24,18 @@ const trackKind = computed(() => {
   return store.doc.tracks.find((tr) => tr.id === selected.value!.trackId)?.kind ?? null
 })
 
+/** 减速拉长会撞同轨后一片段：滑块下限钳到不撞车的最小倍率（命令层 overlap 拒绝兜底） */
+const speedMin = computed(() => {
+  const clip = selected.value
+  if (!clip || !store.doc) return 0.25
+  const next = store.doc.clips
+    .filter((c) => c.trackId === clip.trackId && c.id !== clip.id && c.start >= clip.start)
+    .sort((a, b) => a.start - b.start)[0]
+  if (!next) return 0.25
+  const bound = (clip.duration * (clip.props.speed ?? 1)) / (next.start - clip.start)
+  return Math.max(0.25, Math.min(clip.props.speed ?? 1, Math.ceil(bound * 100) / 100))
+})
+
 const sliderDrafts = ref<Record<string, number>>({})
 watch(() => selected.value?.id, () => { sliderDrafts.value = {} })
 
@@ -127,7 +139,7 @@ function removeSelected(): void {
         <label>{{ t('editor.propSpeed') }}</label>
         <el-slider
           :model-value="sliderValue('speed', selected.props.speed ?? 1)"
-          :min="0.25"
+          :min="speedMin"
           :max="4"
           :step="0.25"
           show-input

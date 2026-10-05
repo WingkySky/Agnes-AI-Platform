@@ -318,7 +318,24 @@ const commands: Record<EditorOp, (doc: EditorDocument, payload: CommandPayload) 
         if (value === null) delete props[key as keyof ClipProps]
         else (props as Record<string, unknown>)[key] = value
       }
-      return { ...clip, props }
+      // 变速保持源内跨度不变：duration = 源跨度 / speed（块长随倍率伸缩）。
+      // 加速只缩短不会撞车；减速拉长需过同轨碰撞检查（fail-closed overlap）；
+      // 加速到碎片化截底 MIN_CLIP_DURATION（此后源跨度随之收窄）
+      let duration = clip.duration
+      if (typeof delta.speed === 'number') {
+        duration = Math.max(
+          MIN_CLIP_DURATION,
+          Math.round((clip.duration * (clip.props.speed ?? 1) / delta.speed) * 1000) / 1000,
+        )
+        const track = findTrack(doc, clip.trackId)
+        if (duration > clip.duration && needsCollisionCheck(track) && !canPlaceOnTrack(
+          doc.clips.filter((c) => c.trackId === clip.trackId),
+          { start: clip.start, duration, excludeClipId: clip.id },
+        )) {
+          throw new EditorCommandError('overlap', clip.trackId)
+        }
+      }
+      return { ...clip, props, duration }
     })
   },
 

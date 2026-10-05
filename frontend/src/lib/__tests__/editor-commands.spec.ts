@@ -102,12 +102,13 @@ describe('trimClip', () => {
 describe('splitClip', () => {
   it('前后半段：属性留前半段，后半段默认；trimStart 按变速换算', () => {
     const doc = baseDoc()
+    // 变速派生时长：c1 duration 4 → speed 2 → 2（块 0~2）
     const speeded = applyCommand(doc, cmd('setClipProperty', { clipId: 'c1', props: { speed: 2 } }))
-    const split = applyCommand(speeded, cmd('splitClip', { clipId: 'c1', at: 2, newId: 'c1b' }))
+    const split = applyCommand(speeded, cmd('splitClip', { clipId: 'c1', at: 1, newId: 'c1b' }))
     const first = split.clips.find((c) => c.id === 'c1')
     const second = split.clips.find((c) => c.id === 'c1b')
-    expect(first).toMatchObject({ start: 0, duration: 2, props: { speed: 2 } })
-    expect(second).toMatchObject({ start: 2, duration: 2, trimStart: 1 + 2 * 2, props: {} })
+    expect(first).toMatchObject({ start: 0, duration: 1, props: { speed: 2 } })
+    expect(second).toMatchObject({ start: 1, duration: 1, trimStart: 1 + 1 * 2, props: {} })
   })
   it('字幕片段分割保留文本', () => {
     const doc = baseDoc()
@@ -203,6 +204,29 @@ describe('detachAudio', () => {
       clip: { id: 'm1', trackId: 'a1', assetId: 30, start: 1, duration: 5, trimStart: 0, props: {} },
     }))
     expect(() => applyCommand(doc, cmd('detachAudio', { clipId: 'c1', newId: 'x', trackId: 'a1' }))).toThrow(/overlap/)
+  })
+})
+
+describe('setClipProperty 变速派生时长', () => {
+  it('保持源内跨度：duration = 源跨度 / speed（加速缩短，减速拉长）', () => {
+    const doc = baseDoc()
+    const speeded = applyCommand(doc, cmd('setClipProperty', { clipId: 'p1', props: { speed: 2 } }))
+    expect(speeded.clips.find((c) => c.id === 'p1')).toMatchObject({ duration: 1, props: { speed: 2 } })
+    const slowed = applyCommand(doc, cmd('setClipProperty', { clipId: 'p1', props: { speed: 0.5 } }))
+    expect(slowed.clips.find((c) => c.id === 'p1')).toMatchObject({ duration: 4, props: { speed: 0.5 } })
+    // 链式换算以当前速率为基准：duration 1 @2x（跨度 2）→ 0.25x → 1*2/0.25 = 8，跨度仍 2
+    const chained = applyCommand(speeded, cmd('setClipProperty', { clipId: 'p1', props: { speed: 0.25 } }))
+    expect(chained.clips.find((c) => c.id === 'p1')?.duration).toBe(8)
+  })
+  it('减速拉长撞同轨邻接片段 → overlap', () => {
+    // c1(0~4) 与 c2(4~7) 贴边：任何减速都会撞上 c2
+    expect(() => applyCommand(baseDoc(), cmd('setClipProperty', { clipId: 'c1', props: { speed: 0.5 } })))
+      .toThrow(/overlap/)
+  })
+  it('加速到碎片化截底 MIN_CLIP_DURATION', () => {
+    const doc = applyCommand(baseDoc(), cmd('trimClip', { clipId: 'p1', duration: 0.3 }))
+    const next = applyCommand(doc, cmd('setClipProperty', { clipId: 'p1', props: { speed: 4 } }))
+    expect(next.clips.find((c) => c.id === 'p1')?.duration).toBe(0.1)
   })
 })
 
