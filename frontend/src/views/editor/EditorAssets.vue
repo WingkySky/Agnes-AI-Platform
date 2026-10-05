@@ -150,7 +150,8 @@ onMounted(() => void reload())
   flex: 1;
   overflow-y: auto;
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  /* 自适应网格：面板拖宽自动多列（剪映式缩略图墙） */
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
   gap: 8px;
   align-content: start;
   min-height: 0;
@@ -165,13 +166,15 @@ onMounted(() => void reload())
 }
 .asset-card img, .asset-card video {
   width: 100%;
-  height: 64px;
+  height: auto;
+  aspect-ratio: 16 / 9;
   object-fit: cover;
   display: block;
   pointer-events: none;
 }
 .audio-mark {
-  height: 64px;
+  aspect-ratio: 16 / 9;
+  height: auto;
   display: flex;
   align-items: center;
   justify-content: center;

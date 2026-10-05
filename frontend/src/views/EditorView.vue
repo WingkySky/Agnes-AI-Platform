@@ -5,10 +5,11 @@
  * 所有区域直读 editor store，不层层传 props
  * ===================================================== */
 
-import { computed, onBeforeUnmount, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, Download, VideoPlay } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import type { Ref } from 'vue'
 
 import EditorAssets from '@/views/editor/EditorAssets.vue'
 import EditorPreview from '@/views/editor/EditorPreview.vue'
@@ -47,6 +48,49 @@ function goBack(): void {
   else router.push('/works')
 }
 
+// ---------- 可拖拽分隔条（面板尺寸为本地 UI 态） ----------
+
+const bodyEl = ref<HTMLElement | null>(null)
+const assetsW = ref(208)
+const inspectorW = ref(240)
+/** 上排高度（px）；0 = 未初始化，回退 CSS 44% */
+const topH = ref(0)
+
+function startDrag(e: PointerEvent, move: (dx: number, dy: number) => void): void {
+  e.preventDefault()
+  const startX = e.clientX
+  const startY = e.clientY
+  const onMove = (ev: PointerEvent): void => move(ev.clientX - startX, ev.clientY - startY)
+  const up = (): void => {
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', up)
+  }
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', up)
+}
+
+/** 纵向分隔条：dir=1 拖右变宽（素材），dir=-1 拖左变宽（属性） */
+function dragPanelW(e: PointerEvent, target: Ref<number>, dir: 1 | -1): void {
+  const start = target.value
+  startDrag(e, (dx) => { target.value = Math.min(480, Math.max(160, start + dir * dx)) })
+}
+
+function dragAssetsW(e: PointerEvent): void {
+  dragPanelW(e, assetsW, 1)
+}
+
+function dragInspectorW(e: PointerEvent): void {
+  dragPanelW(e, inspectorW, -1)
+}
+
+function dragTopH(e: PointerEvent): void {
+  const bodyH = bodyEl.value?.clientHeight ?? 720
+  const start = topH.value || Math.round(bodyH * 0.44)
+  startDrag(e, (_dx, dy) => {
+    topH.value = Math.min(Math.max(start + dy, 160), Math.max(bodyH - 260, 160))
+  })
+}
+
 async function ensureLoaded(): Promise<void> {
   const uid = String(route.params.uid || '')
   if (!uid) return
@@ -61,8 +105,7 @@ async function ensureLoaded(): Promise<void> {
   }
 }
 
-function onKeydown(e: KeyboardEvent): void {
-  const target = e.target as HTMLElement
+function onKeydown(e: KeyboardEvent): void {  const target = e.target as HTMLElement
   if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
   const mod = e.ctrlKey || e.metaKey
   if (e.code === 'Space') {
@@ -134,12 +177,15 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
-    <div class="editor-body">
-      <div class="editor-top">
-        <EditorAssets class="editor-assets" />
+    <div ref="bodyEl" class="editor-body">
+      <div class="editor-top" :style="topH ? { height: `${topH}px` } : undefined">
+        <EditorAssets class="editor-assets" :style="{ width: `${assetsW}px` }" />
+        <span class="splitter splitter-v" @pointerdown="dragAssetsW" />
         <EditorPreview class="editor-preview" />
-        <EditorInspector class="editor-inspector" />
+        <span class="splitter splitter-v" @pointerdown="dragInspectorW" />
+        <EditorInspector class="editor-inspector" :style="{ width: `${inspectorW}px` }" />
       </div>
+      <span class="splitter splitter-h" @pointerdown="dragTopH" />
       <div class="editor-bottom">
         <EditorTimeline :total-duration="totalDuration" />
       </div>
@@ -188,25 +234,22 @@ onBeforeUnmount(() => {
   flex-direction: column;
   min-height: 0;
 }
-/* 上排：素材 | 预览 | 属性，高度收敛；下排全留给时间线 */
+/* 上排：素材 | 预览 | 属性（宽度由分隔条拖拽调节）；下排全留给时间线 */
 .editor-top {
   display: flex;
-  flex: 0 0 44%;
+  flex: 0 0 auto;
+  height: 44%;
   min-height: 0;
 }
 .editor-assets {
-  width: 208px;
   flex-shrink: 0;
   border-right: 1px solid var(--el-border-color-lighter);
 }
 .editor-preview {
   flex: 1;
   min-width: 0;
-  max-width: 520px;
-  margin: 0 auto;
 }
 .editor-inspector {
-  width: 240px;
   flex-shrink: 0;
   border-left: 1px solid var(--el-border-color-lighter);
   overflow-y: auto;
@@ -214,5 +257,25 @@ onBeforeUnmount(() => {
 .editor-bottom {
   flex: 1;
   min-height: 260px;
+}
+/* 分隔条：悬停高亮，负 margin 少占布局空间 */
+.splitter {
+  flex-shrink: 0;
+  touch-action: none;
+  z-index: 10;
+}
+.splitter-v {
+  width: 5px;
+  margin: 0 -2px;
+  cursor: col-resize;
+}
+.splitter-h {
+  display: block;
+  height: 5px;
+  margin: -2px 0;
+  cursor: row-resize;
+}
+.splitter:hover {
+  background: var(--el-color-primary-light-5);
 }
 </style>

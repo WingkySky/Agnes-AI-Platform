@@ -137,50 +137,66 @@ function removeSelected(): void {
           <p class="rect-hint">{{ t('editor.propRectHint') }}</p>
         </template>
 
-        <label>{{ t('editor.propSpeed') }}</label>
-        <el-slider
-          :model-value="sliderValue('speed', selected.props.speed ?? 1)"
-          :min="speedMin"
-          :max="4"
-          :step="0.25"
-          show-input
-          :show-input-controls="false"
-          @input="(v: number) => onSliderInput('speed', v)"
-          @change="(v: number) => onSliderChange('speed', v)"
-        />
+        <div class="prop-row">
+          <label>{{ t('editor.propSpeed') }}</label>
+          <el-slider
+            :model-value="sliderValue('speed', selected.props.speed ?? 1)"
+            :min="speedMin"
+            :max="4"
+            :step="0.25"
+            @input="(v: number) => onSliderInput('speed', v)"
+            @change="(v: number) => onSliderChange('speed', v)"
+          />
+          <span class="prop-value">{{ sliderValue('speed', selected.props.speed ?? 1).toFixed(2) }}×</span>
+        </div>
 
-        <label>{{ t('editor.propVolume') }}</label>
-        <el-slider
-          :model-value="sliderValue('volume', selected.props.volume ?? 1)"
-          :min="0"
-          :max="2"
-          :step="0.05"
-          @input="(v: number) => onSliderInput('volume', v)"
-          @change="(v: number) => onSliderChange('volume', v)"
-        />
-        <el-checkbox
-          size="small"
-          :model-value="selected.props.muted === true"
-          @change="setProp('muted', !selected.props.muted)"
-        >{{ t('editor.propMuted') }}</el-checkbox>
-        <label>{{ t('editor.propFadeIn') }}（s）</label>
-        <el-slider
-          :model-value="sliderValue('fadeIn', selected.props.fadeIn ?? 0)"
-          :min="0"
-          :max="5"
-          :step="0.1"
-          @input="(v: number) => onSliderInput('fadeIn', v)"
-          @change="(v: number) => onSliderChange('fadeIn', v)"
-        />
-        <label>{{ t('editor.propFadeOut') }}（s）</label>
-        <el-slider
-          :model-value="sliderValue('fadeOut', selected.props.fadeOut ?? 0)"
-          :min="0"
-          :max="5"
-          :step="0.1"
-          @input="(v: number) => onSliderInput('fadeOut', v)"
-          @change="(v: number) => onSliderChange('fadeOut', v)"
-        />
+        <div class="prop-row">
+          <label>{{ t('editor.propVolume') }}</label>
+          <el-slider
+            :model-value="sliderValue('volume', selected.props.volume ?? 1)"
+            :min="0"
+            :max="2"
+            :step="0.05"
+            @input="(v: number) => onSliderInput('volume', v)"
+            @change="(v: number) => onSliderChange('volume', v)"
+          />
+          <span class="prop-value">{{ Math.round(sliderValue('volume', selected.props.volume ?? 1) * 100) }}%</span>
+        </div>
+
+        <div class="prop-row">
+          <label>{{ t('editor.propMuted') }}</label>
+          <el-checkbox
+            size="small"
+            :model-value="selected.props.muted === true"
+            @change="setProp('muted', !selected.props.muted)"
+          />
+        </div>
+
+        <div class="prop-row">
+          <label>{{ t('editor.propFadeIn') }}</label>
+          <el-slider
+            :model-value="sliderValue('fadeIn', selected.props.fadeIn ?? 0)"
+            :min="0"
+            :max="5"
+            :step="0.1"
+            @input="(v: number) => onSliderInput('fadeIn', v)"
+            @change="(v: number) => onSliderChange('fadeIn', v)"
+          />
+          <span class="prop-value">{{ sliderValue('fadeIn', selected.props.fadeIn ?? 0).toFixed(1) }}s</span>
+        </div>
+
+        <div class="prop-row">
+          <label>{{ t('editor.propFadeOut') }}</label>
+          <el-slider
+            :model-value="sliderValue('fadeOut', selected.props.fadeOut ?? 0)"
+            :min="0"
+            :max="5"
+            :step="0.1"
+            @input="(v: number) => onSliderInput('fadeOut', v)"
+            @change="(v: number) => onSliderChange('fadeOut', v)"
+          />
+          <span class="prop-value">{{ sliderValue('fadeOut', selected.props.fadeOut ?? 0).toFixed(1) }}s</span>
+        </div>
       </template>
 
       <div class="actions">
@@ -206,6 +222,18 @@ function removeSelected(): void {
 .inspector label { font-size: 12px; color: var(--el-text-color-secondary); }
 .row { display: flex; gap: 6px; align-items: center; }
 .row.grid2 { display: grid; grid-template-columns: 1fr 1fr; }
+/* 紧凑行式：标签左 / 控件中 / 数值右 */
+.prop-row { display: flex; align-items: center; gap: 8px; }
+.prop-row > label { width: 48px; flex-shrink: 0; margin: 0; }
+.prop-row :deep(.el-slider) { flex: 1; }
+.prop-row :deep(.el-slider__runway) { margin: 10px 0; }
+.prop-value {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  min-width: 44px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 .rect-hint { margin: 0; font-size: 11px; color: var(--el-text-color-secondary); }
 .actions { margin-top: 12px; display: flex; gap: 8px; }
 .empty { color: var(--el-text-color-secondary); text-align: center; padding: 32px 0; }
