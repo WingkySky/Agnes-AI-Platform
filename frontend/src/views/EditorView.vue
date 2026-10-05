@@ -48,13 +48,37 @@ function goBack(): void {
   else router.push('/works')
 }
 
-// ---------- 可拖拽分隔条（面板尺寸为本地 UI 态） ----------
+// ---------- 可拖拽分隔条（面板尺寸本地持久化，刷新恢复） ----------
+
+const LAYOUT_KEY = 'agnes_editor_layout'
+
+interface PanelLayout { assetsW: number; inspectorW: number; topH: number }
+
+function readLayout(): PanelLayout | null {
+  try {
+    const raw = localStorage.getItem(LAYOUT_KEY)
+    if (!raw) return null
+    const l: PanelLayout = JSON.parse(raw)
+    if (![l.assetsW, l.inspectorW, l.topH].every((v) => Number.isFinite(v))) return null
+    return l
+  } catch {
+    return null
+  }
+}
 
 const bodyEl = ref<HTMLElement | null>(null)
-const assetsW = ref(208)
-const inspectorW = ref(240)
+const saved = readLayout()
+const assetsW = ref(Math.min(480, Math.max(160, saved?.assetsW ?? 208)))
+const inspectorW = ref(Math.min(480, Math.max(160, saved?.inspectorW ?? 240)))
 /** 上排高度（px）；0 = 未初始化，回退 CSS 44% */
-const topH = ref(0)
+const topH = ref(Math.max(160, saved?.topH ?? 0))
+
+function persistLayout(): void {
+  if (!topH.value) return
+  try {
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify({ assetsW: assetsW.value, inspectorW: inspectorW.value, topH: topH.value }))
+  } catch { /* 存储不可用时忽略 */ }
+}
 
 function startDrag(e: PointerEvent, move: (dx: number, dy: number) => void): void {
   e.preventDefault()
@@ -64,6 +88,7 @@ function startDrag(e: PointerEvent, move: (dx: number, dy: number) => void): voi
   const up = (): void => {
     window.removeEventListener('pointermove', onMove)
     window.removeEventListener('pointerup', up)
+    persistLayout()
   }
   window.addEventListener('pointermove', onMove)
   window.addEventListener('pointerup', up)
@@ -144,6 +169,7 @@ onMounted(() => {
     router.push('/login')
     return
   }
+  if (!topH.value) topH.value = Math.round((bodyEl.value?.clientHeight ?? 720) * 0.44)
   void ensureLoaded()
   window.addEventListener('keydown', onKeydown)
 })
