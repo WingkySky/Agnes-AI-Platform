@@ -603,7 +603,7 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
   border-top: 1px solid var(--el-border-color-lighter);
   display: flex;
   flex-direction: column;
-  height: 380px;
+  height: 100%;
   flex-shrink: 0;
   background: var(--el-fill-color-lighter);
 }

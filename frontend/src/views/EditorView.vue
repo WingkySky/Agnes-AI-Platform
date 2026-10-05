@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /* =====================================================
  * 剪辑器（/editor/:uid）— 宿主唯一入口
- * 布局：顶栏 / 左素材面板 / 中预览 / 下时间线 / 右属性面板
+ * 布局：顶栏 / 上排=左素材+中预览+右属性 / 下排=时间线全宽通底
  * 所有区域直读 editor store，不层层传 props
  * ===================================================== */
 
@@ -135,12 +135,14 @@ onBeforeUnmount(() => {
     </header>
 
     <div class="editor-body">
-      <EditorAssets class="editor-assets" />
-      <div class="editor-main">
-        <EditorPreview />
+      <div class="editor-top">
+        <EditorAssets class="editor-assets" />
+        <EditorPreview class="editor-preview" />
+        <EditorInspector class="editor-inspector" />
+      </div>
+      <div class="editor-bottom">
         <EditorTimeline :total-duration="totalDuration" />
       </div>
-      <EditorInspector class="editor-inspector" />
     </div>
   </div>
 </template>
@@ -183,23 +185,34 @@ onBeforeUnmount(() => {
 .editor-body {
   flex: 1;
   display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+/* 上排：素材 | 预览 | 属性，高度收敛；下排全留给时间线 */
+.editor-top {
+  display: flex;
+  flex: 0 0 44%;
   min-height: 0;
 }
 .editor-assets {
-  width: 224px;
+  width: 208px;
   flex-shrink: 0;
   border-right: 1px solid var(--el-border-color-lighter);
 }
-.editor-main {
+.editor-preview {
   flex: 1;
-  display: flex;
-  flex-direction: column;
   min-width: 0;
+  max-width: 520px;
+  margin: 0 auto;
 }
 .editor-inspector {
-  width: 248px;
+  width: 240px;
   flex-shrink: 0;
   border-left: 1px solid var(--el-border-color-lighter);
   overflow-y: auto;
+}
+.editor-bottom {
+  flex: 1;
+  min-height: 260px;
 }
 </style>
