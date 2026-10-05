@@ -88,3 +88,47 @@ async def test_ingest_dedup_and_failure_skip(memory_db):
     await memory_db.commit()
     await memory_db.refresh(failed)
     assert await asset_archive.ingest_generation_asset(memory_db, failed) is None
+
+
+async def test_backfill_generations_to_assets(memory_db):
+    """存量补课：历史成功生成批量入库（幂等；失败记录跳过；remaining 归零）"""
+    from app.services.asset_library import backfill_generations_to_assets
+
+    user = await _seed_user(memory_db, "u4")
+    ok_gen = _generation(user.id, result_url="/uploads/legacy/a.png")
+    ok_gen2 = _generation(user.id, result_url="/uploads/legacy/b.png")
+    failed_gen = _generation(user.id, status="failed")
+    memory_db.add_all([ok_gen, ok_gen2, failed_gen])
+    await memory_db.commit()
+
+    data = await backfill_generations_to_assets(memory_db, limit=100)
+    assert data["created"] == 2  # 失败记录不入库
+
+    assets = (await memory_db.scalars(select(Asset))).all()
+    assert len(assets) == 2
+    assert all(a.source == "generation" for a in assets)
+
+    # 幂等：再跑一次不重复建行
+    again = await backfill_generations_to_assets(memory_db, limit=100)
+    assert again["created"] == 0
+    assert again["remaining"] == 0
+
+
+async def test_backfill_dead_link_processed(memory_db):
+    """上游死链：转存失败时置空串标记已处理（防死循环），资产行仍保留"""
+    from app.services.asset_library import backfill_asset_storage
+
+    user = await _seed_user(memory_db, "u5")
+    asset = Asset(
+        type="material", name="死链素材", visual_description="", reference_images=[],
+        user_id=user.id, is_public=False, tags=[], version=1,
+        kind="image", asset_url="https://expired.example.com/x.png",
+    )
+    memory_db.add(asset)
+    await memory_db.commit()
+    await memory_db.refresh(asset)
+
+    data = await backfill_asset_storage(memory_db, limit=10)
+    assert data["remaining"] == 0
+    await memory_db.refresh(asset)
+    assert asset.storage_key == ""

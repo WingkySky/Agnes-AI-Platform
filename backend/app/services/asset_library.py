@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.asset import Asset
 from app.models.generation import Generation
 from app.schemas.assets import AssetSaveFromGenerationRequest
+from app.services.asset_archive import ingest_generation_asset
 
 # 允许的资产类型
 VALID_ASSET_TYPES = {"character", "prop", "scene", "brand", "material", "clip", "final"}
@@ -262,6 +263,22 @@ async def backfill_asset_storage(db: AsyncSession, *, limit: int = 200) -> dict:
         url = asset.asset_url
         if url and url.startswith("/uploads/"):
             asset.storage_key = url.removeprefix("/uploads/")
+        elif url and url.startswith("data:"):
+            # b64 兜底图：解码为真实文件入库（消除巨型 data URI）
+            try:
+                from app.services.media_storage import save_media
+                header, _, payload = url.partition(",")
+                mime = header[5:].split(";")[0] or "image/png"
+                import base64
+                data = base64.b64decode(payload)
+                result = await save_media(
+                    data, ext=mime.split("/")[-1], media_type=asset.kind or "image",
+                )
+                asset.asset_url = result["url"]
+                asset.storage_key = result["storage_key"]
+                migrated += 1
+            except Exception:  # noqa: BLE001 — 解码失败标记已处理，不阻塞整体
+                asset.storage_key = ""
         elif url and url.startswith(("http://", "https://")):
             try:
                 from app.services.media_storage import ingest_url
@@ -269,8 +286,11 @@ async def backfill_asset_storage(db: AsyncSession, *, limit: int = 200) -> dict:
                 asset.asset_url = ingested["url"]
                 asset.storage_key = ingested["storage_key"]
                 migrated += 1
-            except Exception:  # noqa: BLE001 — 单条转存失败留待下次重试
-                continue
+            except Exception:  # noqa: BLE001 — 上游链接已死（过期 404 等）：保留原 URL，置空串标记已处理防死循环
+                asset.storage_key = ""
+        else:
+            # 空/未知协议地址：无文件键可派生，置空串标记已处理（避免每轮重复捞取）
+            asset.storage_key = ""
     await db.commit()
     remaining = (
         await db.scalars(
@@ -288,13 +308,6 @@ async def backfill_generations_to_assets(db: AsyncSession, *, limit: int = 200) 
     容器信息从 generation 行透传；work_id 无法回溯置空。
     返回 {processed, created, remaining}。
     """
-    seen = set(
-        (
-            await db.scalars(
-                select(Asset.source_generation_id).where(Asset.source_generation_id.is_not(None))
-            )
-        ).all()
-    )
     gen_ids = (
         await db.scalars(
             select(Generation.id)
@@ -302,16 +315,15 @@ async def backfill_generations_to_assets(db: AsyncSession, *, limit: int = 200) 
                 Generation.status == "success",
                 Generation.result_url.is_not(None),
                 Generation.result_url != "",
+                ~select(Asset.id).where(Asset.source_generation_id == Generation.id).exists(),
             )
             .order_by(Generation.id.desc())
-            .limit(limit * 3)
+            .limit(limit)
         )
     ).all()
     processed = 0
     created = 0
     for gid in gen_ids:
-        if gid in seen:
-            continue
         gen = (
             await db.scalars(select(Generation).where(Generation.id == gid))
         ).first()

@@ -11,15 +11,6 @@
       <h2 class="page-title">{{ t('assets.title') }}</h2>
       <span class="page-total">{{ t('assets.total').replace('{n}', String(total)) }}</span>
       <el-button
-        v-if="userStore.isAdmin"
-        :loading="backfilling"
-        class="head-create"
-        @click="runBackfill"
-      >
-        <el-icon><Refresh /></el-icon>
-        {{ t('assets.backfill') }}
-      </el-button>
-      <el-button
         v-permission="'pipeline:save_asset'"
         type="primary"
         class="head-create"
@@ -219,14 +210,13 @@ import { useI18n } from '@/i18n'
 import { ElMessage, ElImage } from 'element-plus'
 import { useConfirm } from '@/composables/useConfirm'
 import {
-  Search, Plus, Picture, View, Delete, MagicStick, EditPen, Headset, Share, Refresh,
+  Search, Plus, Picture, View, Delete, MagicStick, EditPen, Headset, Share,
 } from '@element-plus/icons-vue'
 import { useAssetStore } from '@/stores/asset'
-import { useUserStore } from '@/stores/user'
 import AssetDetailModal from '@/components/pipeline/AssetDetailModal.vue'
 import ImageWithWatermark from '@/components/ImageWithWatermark.vue'
 import ImageViewer from '@/components/ImageViewer.vue'
-import { listAssets, backfillAssets, type UnifiedAsset } from '@/api/assets'
+import { listAssets, type UnifiedAsset } from '@/api/assets'
 import { listWorks, type WorkItem } from '@/api/works'
 import { updateAssetShare, deleteAsset } from '@/api/pipeline'
 
@@ -332,33 +322,6 @@ async function loadWorks(): Promise<void> {
   try {
     works.value = (await listWorks()).items
   } catch (_e) { /* 筛选项加载失败不阻塞列表 */ }
-}
-
-// ---------- 存量补课（管理员）：资产行回填 + 历史生成批量入库 ----------
-const backfilling = ref(false)
-
-async function runBackfill(): Promise<void> {
-  backfilling.value = true
-  try {
-    // 循环调用直到两阶段 remaining 都归零（每次最多 500 条，避免一次拉爆）
-    let gensRemaining = Infinity
-    let created = 0
-    let migrated = 0
-    for (let i = 0; i < 50 && gensRemaining > 0; i++) {
-      const res = await backfillAssets(500)
-      created += res.generations.created
-      migrated += res.rows.migrated
-      gensRemaining = res.generations.remaining
-      if (res.rows.processed === 0 && res.generations.processed === 0) break
-    }
-    ElMessage.success(t('assets.backfillDone').replace('{n}', String(created)))
-    reload()
-  } catch (e: unknown) {
-    const err = e as { message?: string }
-    ElMessage.error(err.message || t('assets.loadFailed'))
-  } finally {
-    backfilling.value = false
-  }
 }
 
 let keywordTimer: ReturnType<typeof setTimeout> | null = null

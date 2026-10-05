@@ -1363,8 +1363,6 @@ const enUS = {
       canvas: 'Canvas',
     },
     emptyTip: 'No assets yet. Generate in canvas or projects and save your first asset!',
-    backfill: 'Sync History',
-    backfillDone: 'Sync complete: {n} historical assets ingested',
     noDesc: 'No description',
     // 资产类型枚举（与后端 AssetType 对齐：character/prop/scene/brand）
     type: {
