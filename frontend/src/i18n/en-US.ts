@@ -1049,6 +1049,7 @@ const enUS = {
     propTransition: 'Transition (to next clip on same track)',
     propTransitionDuration: 'Duration',
     propRect: 'Position & size',
+    propRectHint: 'Select the picture in the preview and drag to move it, drag a corner to resize. Values are fractions of the frame (0-1).',
     propSpeed: 'Speed',
     propVolume: 'Volume',
     propFadeIn: 'Fade in',

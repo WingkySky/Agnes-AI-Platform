@@ -35,9 +35,10 @@ const PX_PER_SEC = ref(80)
 const trackRows = computed(() => {
   const doc = store.doc
   if (!doc) return []
+  // 显示序 = 视觉层序：order 大（顶层）排在列表最上面，与预览/渲染的遮盖关系一致
   const kindOrder = { video: 0, audio: 1, subtitle: 2 } as const
   return [...doc.tracks]
-    .sort((a, b) => kindOrder[a.kind] - kindOrder[b.kind] || a.order - b.order)
+    .sort((a, b) => kindOrder[a.kind] - kindOrder[b.kind] || b.order - a.order)
     .map((track) => ({
       track,
       clips: doc.clips

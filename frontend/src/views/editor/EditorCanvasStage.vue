@@ -3,6 +3,8 @@
  * canvas 预览路径（WebCodecs 可用时启用）
  * - 画面：mediabunny 逐帧解码 → planFrame 绘制清单 → 2D canvas drawImage
  * - 音频：AudioEngine 统一调度（音频时钟主控），rAF 只读投影时间
+ * - 画中画直接操作：点选片段、拖动移动、四角等比缩放（松手经
+ *   setClipProperty 入撤销栈；几何纯函数在 lib/editor-compositor）
  * - 播放头推进/外部 seek 检测/end-of-doc 都在本组件；字幕与控制条在壳层
  * ===================================================== */
 
@@ -10,17 +12,30 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { AudioBufferSink, CanvasSink } from 'mediabunny'
 
 import { useEditorStore } from '@/stores/editor'
-import { planFrame } from '@/lib/editor-compositor'
+import { useI18n } from '@/i18n'
+import {
+  cornerHit,
+  moveRect,
+  pickDrawItem,
+  planFrame,
+  resizeRect,
+  type DrawItem,
+  type RectCorner,
+} from '@/lib/editor-compositor'
 import { AudioEngine, sourceTimeAt } from '@/lib/editor-audio-engine'
 import { clearMediaPool, createAudioSink, createVideoSink, getImageBitmap } from '@/lib/editor-media'
-import { clipEnd, type EditorClip } from '@/lib/editor-types'
+import { clipEnd, FULL_RECT, type ClipRect, type EditorClip } from '@/lib/editor-types'
 
 const store = useEditorStore()
+const { t } = useI18n()
 
 /** 视为外部 seek 的播放头偏差（秒） */
 const SEEK_EPS = 0.15
 /** 同一请求时刻不重复拉帧 */
 const REQ_EPS = 1e-6
+/** 角点手柄命中半径 / 绘制半边长（px） */
+const HANDLE_HIT_R = 8
+const HANDLE_DRAW = 4
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 let ctx2d: CanvasRenderingContext2D | null = null
@@ -104,6 +119,99 @@ async function pullFrame(st: VideoFrameState, clip: EditorClip, url: string): Pr
   }
 }
 
+// ---------- 画中画直接操作（拖动/缩放） ----------
+
+interface DragState {
+  clipId: string
+  mode: 'move' | RectCorner
+  startRect: ClipRect
+  startX: number
+  startY: number
+}
+
+let drag: DragState | null = null
+/** 拖拽中的矩形视觉覆盖（pointerup 才入命令栈） */
+let dragRect: ClipRect | null = null
+
+function pointerPos(e: PointerEvent, canvas: HTMLCanvasElement): { px: number; py: number } {
+  const rect = canvas.getBoundingClientRect()
+  return { px: e.clientX - rect.left, py: e.clientY - rect.top }
+}
+
+function currentPlan(): DrawItem[] {
+  const doc = store.doc
+  return doc ? planFrame(doc, store.playhead, cssW, cssH) : []
+}
+
+function onPointerDown(e: PointerEvent): void {
+  const canvas = canvasRef.value
+  if (!canvas || !store.doc) return
+  const { px, py } = pointerPos(e, canvas)
+  const plan = currentPlan()
+  const selItem = store.selectedClipId ? plan.find((i) => i.clipId === store.selectedClipId) : undefined
+  const corner = selItem ? cornerHit(selItem, px, py, HANDLE_HIT_R) : null
+  const item = corner && selItem ? selItem : pickDrawItem(plan, px, py)
+  if (!item) {
+    store.select(null)
+    return
+  }
+  if (item.clipId !== store.selectedClipId) store.select(item.clipId)
+  const clip = store.doc.clips.find((c) => c.id === item.clipId)
+  if (!clip) return
+  drag = {
+    clipId: item.clipId,
+    mode: corner ?? 'move',
+    startRect: { ...(clip.props.rect ?? FULL_RECT) },
+    startX: px,
+    startY: py,
+  }
+  dragRect = { ...drag.startRect }
+  canvas.setPointerCapture(e.pointerId)
+}
+
+function onPointerMove(e: PointerEvent): void {
+  const canvas = canvasRef.value
+  if (!canvas) return
+  const { px, py } = pointerPos(e, canvas)
+  if (drag && dragRect) {
+    const dx = (px - drag.startX) / cssW
+    const dy = (py - drag.startY) / cssH
+    dragRect = drag.mode === 'move'
+      ? moveRect(drag.startRect, dx, dy)
+      : resizeRect(drag.startRect, drag.mode, dx, dy)
+    return
+  }
+  updateCursor(canvas, px, py)
+}
+
+function onPointerUp(): void {
+  if (!drag) return
+  const clipId = drag.clipId
+  const final = dragRect
+  const start = drag.startRect
+  drag = null
+  dragRect = null
+  const changed = final
+    && (final.x !== start.x || final.y !== start.y || final.w !== start.w || final.h !== start.h)
+  if (final && changed) {
+    store.applyOrToast(
+      { op: 'setClipProperty', payload: { clipId, props: { rect: final } } },
+      t('editor.ops.setClipProperty'),
+    )
+  }
+}
+
+function updateCursor(canvas: HTMLCanvasElement, px: number, py: number): void {
+  const plan = currentPlan()
+  const selItem = store.selectedClipId ? plan.find((i) => i.clipId === store.selectedClipId) : undefined
+  const corner = selItem ? cornerHit(selItem, px, py, HANDLE_HIT_R) : null
+  if (corner) {
+    canvas.style.cursor = corner === 'nw' || corner === 'se' ? 'nwse-resize' : 'nesw-resize'
+    return
+  }
+  canvas.style.cursor = pickDrawItem(plan, px, py) ? 'move' : 'default'
+}
+
 // ---------- 绘制 ----------
 
 function drawImageItem(item: { x: number; y: number; w: number; h: number }, src: CanvasImageSource): void {
@@ -119,8 +227,17 @@ function draw(): void {
   ctx2d.fillStyle = '#000'
   ctx2d.fillRect(0, 0, cssW, cssH)
   const plan = planFrame(doc, store.playhead, cssW, cssH)
+  // 拖拽中的片段用覆盖矩形替换（文档在 pointerup 才更新）
+  let items = plan
+  if (drag && dragRect) {
+    const clipId = drag.clipId
+    const r = dragRect
+    items = plan.map((it) => it.clipId === clipId
+      ? { ...it, x: r.x * cssW, y: r.y * cssH, w: r.w * cssW, h: r.h * cssH }
+      : it)
+  }
   const active = new Set<string>()
-  for (const item of plan) {
+  for (const item of items) {
     if (item.w <= 0 || item.h <= 0) continue
     active.add(item.clipId)
     const asset = store.assetCache.get(item.assetId)
@@ -141,8 +258,28 @@ function draw(): void {
       void pullFrame(st, clip, url)
     }
   }
+  drawSelection(items)
   for (const id of videoStates.keys()) {
     if (!active.has(id)) videoStates.delete(id)
+  }
+}
+
+/** 选中片段描边 + 四角手柄 */
+function drawSelection(items: DrawItem[]): void {
+  if (!ctx2d || !store.selectedClipId) return
+  const sel = items.find((i) => i.clipId === store.selectedClipId)
+  if (!sel || sel.w <= 0 || sel.h <= 0) return
+  ctx2d.strokeStyle = 'rgba(255,255,255,0.9)'
+  ctx2d.lineWidth = 1
+  ctx2d.strokeRect(sel.x + 0.5, sel.y + 0.5, sel.w - 1, sel.h - 1)
+  ctx2d.fillStyle = '#fff'
+  for (const [cx, cy] of [
+    [sel.x, sel.y],
+    [sel.x + sel.w, sel.y],
+    [sel.x, sel.y + sel.h],
+    [sel.x + sel.w, sel.y + sel.h],
+  ]) {
+    ctx2d.fillRect(cx - HANDLE_DRAW, cy - HANDLE_DRAW, HANDLE_DRAW * 2, HANDLE_DRAW * 2)
   }
 }
 
@@ -209,7 +346,13 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <canvas ref="canvasRef" class="stage-canvas" />
+  <canvas
+    ref="canvasRef"
+    class="stage-canvas"
+    @pointerdown="onPointerDown"
+    @pointermove="onPointerMove"
+    @pointerup="onPointerUp"
+  />
 </template>
 
 <style scoped>
@@ -218,5 +361,6 @@ onBeforeUnmount(() => {
   inset: 0;
   width: 100%;
   height: 100%;
+  touch-action: none;
 }
 </style>

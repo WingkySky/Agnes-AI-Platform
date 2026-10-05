@@ -1031,6 +1031,7 @@ const zhCN = {
     propTransition: '转场（与同轨后一片段之间）',
     propTransitionDuration: '转场时长',
     propRect: '位置尺寸',
+    propRectHint: '在预览窗点选画面后可直接拖动位置、拖四角缩放；数值为画幅占比（0~1）',
     propSpeed: '变速',
     propVolume: '音量',
     propFadeIn: '淡入',

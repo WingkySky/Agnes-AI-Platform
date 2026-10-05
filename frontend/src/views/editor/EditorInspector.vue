@@ -134,6 +134,7 @@ function removeSelected(): void {
               @change="(v: number | undefined) => setProp('rect', { x: selected!.props.rect?.x ?? 0, y: selected!.props.rect?.y ?? 0, w: selected!.props.rect?.w ?? 1, h: selected!.props.rect?.h ?? 1, [key]: v ?? 0 })"
             />
           </div>
+          <p class="rect-hint">{{ t('editor.propRectHint') }}</p>
         </template>
 
         <label>{{ t('editor.propSpeed') }}</label>
@@ -205,6 +206,7 @@ function removeSelected(): void {
 .inspector label { font-size: 12px; color: var(--el-text-color-secondary); }
 .row { display: flex; gap: 6px; align-items: center; }
 .row.grid2 { display: grid; grid-template-columns: 1fr 1fr; }
+.rect-hint { margin: 0; font-size: 11px; color: var(--el-text-color-secondary); }
 .actions { margin-top: 12px; display: flex; gap: 8px; }
 .empty { color: var(--el-text-color-secondary); text-align: center; padding: 32px 0; }
 </style>

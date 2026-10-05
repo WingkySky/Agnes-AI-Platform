@@ -1,11 +1,13 @@
 /* =====================================================
  * 预览合成器 planFrame 纯函数测试
  * - 轨序（order 大=上层）、hidden 跳过、激活判定、rect→像素换算
+ * - 画中画直接操作几何：拾取/角点命中/移动钳制/缩放锚定
  * ===================================================== */
 
 import { describe, expect, it } from 'vitest'
 
-import { planFrame } from '@/lib/editor-compositor'
+import { cornerHit, moveRect, pickDrawItem, planFrame, resizeRect } from '@/lib/editor-compositor'
+import type { DrawItem } from '@/lib/editor-compositor'
 import type { EditorClip, EditorDocument, EditorTrack } from '@/lib/editor-types'
 
 function track(id: string, kind: EditorTrack['kind'], order: number, flag: EditorTrack['flag'] = null): EditorTrack {
@@ -66,5 +68,67 @@ describe('planFrame', () => {
       ],
     )
     expect(planFrame(d, 1, 1920, 1080)).toEqual([])
+  })
+})
+
+describe('pickDrawItem', () => {
+  const items: DrawItem[] = [
+    { clipId: 'base', assetId: 1, x: 0, y: 0, w: 200, h: 100 },
+    { clipId: 'pip', assetId: 2, x: 100, y: 25, w: 100, h: 50 },
+  ]
+  it('PIP 覆盖区命中顶层，其余区域命中底层', () => {
+    expect(pickDrawItem(items, 150, 50)?.clipId).toBe('pip')
+    expect(pickDrawItem(items, 50, 50)?.clipId).toBe('base')
+  })
+  it('空白处返回 null', () => {
+    expect(pickDrawItem(items, 250, 50)).toBeNull()
+  })
+})
+
+describe('cornerHit', () => {
+  const item: DrawItem = { clipId: 'c', assetId: 1, x: 100, y: 50, w: 100, h: 50 }
+  it('角点半径内命中对应角', () => {
+    expect(cornerHit(item, 100, 50, 8)).toBe('nw')
+    expect(cornerHit(item, 205, 105, 8)).toBe('se')
+    expect(cornerHit(item, 193, 50, 8)).toBe('ne')
+    expect(cornerHit(item, 100, 93, 8)).toBe('sw')
+  })
+  it('中心与超出半径不命中', () => {
+    expect(cornerHit(item, 150, 75, 8)).toBeNull()
+    expect(cornerHit(item, 120, 50, 8)).toBeNull()
+  })
+})
+
+describe('moveRect', () => {
+  it('自由移动', () => {
+    expect(moveRect({ x: 0.2, y: 0.2, w: 0.5, h: 0.5 }, 0.1, -0.05)).toEqual({ x: 0.3, y: 0.15, w: 0.5, h: 0.5 })
+  })
+  it('钳制在画幅内', () => {
+    expect(moveRect({ x: 0.8, y: 0.1, w: 0.5, h: 0.5 }, 0.5, 0)).toEqual({ x: 0.5, y: 0.1, w: 0.5, h: 0.5 })
+    expect(moveRect({ x: 0.2, y: 0, w: 0.5, h: 0.5 }, -1, 0.9)).toEqual({ x: 0, y: 0.5, w: 0.5, h: 0.5 })
+  })
+})
+
+describe('resizeRect', () => {
+  it('se 角缩放：左上角锚定，等比', () => {
+    const r = resizeRect({ x: 0.25, y: 0.25, w: 0.5, h: 0.25 }, 'se', 0.25, 0.125)
+    expect(r).toEqual({ x: 0.25, y: 0.25, w: 0.75, h: 0.375 })
+  })
+  it('nw 角缩放：右下角锚定，向左上拖为放大', () => {
+    const r = resizeRect({ x: 0.25, y: 0.25, w: 0.5, h: 0.25 }, 'nw', -0.25, -0.125)
+    expect(r).toEqual({ x: 0, y: 0.125, w: 0.75, h: 0.375 })
+  })
+  it('钳制画幅边界：se 拖出右边按对角锚定收敛', () => {
+    const r = resizeRect({ x: 0.5, y: 0.5, w: 0.5, h: 0.5 }, 'se', 2, 2)
+    expect(r).toEqual({ x: 0.5, y: 0.5, w: 0.5, h: 0.5 })
+  })
+  it('最小边长下限', () => {
+    const r = resizeRect({ x: 0.25, y: 0.25, w: 0.5, h: 0.5 }, 'se', -0.9, -0.9)
+    expect(r?.w).toBe(0.05)
+    expect(r?.h).toBe(0.05)
+  })
+  it('纵横比锁定：只拖一个轴也按等比缩放', () => {
+    const r = resizeRect({ x: 0, y: 0, w: 0.5, h: 0.25 }, 'se', 0.25, 0)
+    expect(r).toEqual({ x: 0, y: 0, w: 0.75, h: 0.375 })
   })
 })
