@@ -317,6 +317,29 @@ export const useEditorStore = defineStore('editor', () => {
     }
   }
 
+  /** 双击素材兜底：直接加到播放头处（视频/图片→首条视频轨，音频→首条音频轨） */
+  async function addAssetAtPlayhead(asset: UnifiedAsset): Promise<void> {
+    if (!doc.value) return
+    const kind: 'video' | 'audio' = asset.media_type === 'audio' ? 'audio' : 'video'
+    const track = doc.value.tracks.find((tr) => tr.kind === kind && tr.flag !== 'locked')
+      ?? doc.value.tracks.find((tr) => tr.kind === kind)
+    if (!track) {
+      ElMessage.warning(t('editor.errors.noTrack'))
+      return
+    }
+    const okAdded = applyOrToast({
+      op: 'addClip',
+      payload: {
+        clip: {
+          id: newId('clip'), trackId: track.id, assetId: asset.id,
+          start: Math.round(playhead.value * 1000) / 1000,
+          duration: asset.media_type === 'image' ? 3 : 0, trimStart: 0, props: {},
+        },
+      },
+    }, t('editor.ops.addClip'))
+    if (okAdded && asset.media_type !== 'image') void healDurations()
+  }
+
   async function rename(newTitle: string): Promise<void> {
     if (!uid.value || !newTitle.trim()) return
     const detail = await updateEditorProject(uid.value, { title: newTitle.trim() })
@@ -347,7 +370,7 @@ export const useEditorStore = defineStore('editor', () => {
     dirty, saving, lastSavedAt,
     renderStatus, renderProgress, renderError, finalUrl,
     assetCache,
-    load, fetchAsset, apply, applyOrToast, undo, redo, healDurations,
+    load, fetchAsset, apply, applyOrToast, undo, redo, healDurations, addAssetAtPlayhead,
     saveNow, scheduleSave, transcribeTrack, submitRender, rename,
     select, reset, newId,
   }

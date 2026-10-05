@@ -60,6 +60,12 @@ function onPage(next: number): void {
 
 function onDragStart(e: DragEvent, asset: UnifiedAsset): void {
   e.dataTransfer?.setData('text/asset-id', String(asset.id))
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copy'
+}
+
+/** 双击兜底：不经拖拽，直接加到播放头处（视频/图片→首条视频轨，音频→首条音频轨） */
+async function onAssetActivate(asset: UnifiedAsset): Promise<void> {
+  await store.addAssetAtPlayhead(asset)
 }
 
 async function onPickFile(e: Event): Promise<void> {
@@ -105,7 +111,9 @@ onMounted(() => void reload())
         :key="asset.id"
         class="asset-card"
         draggable="true"
+        :title="t('editor.assetDblClickHint')"
         @dragstart="onDragStart($event, asset)"
+        @dblclick="onAssetActivate(asset)"
       >
         <img v-if="asset.media_type === 'image'" :src="asset.thumb_url || asset.asset_url" loading="lazy">
         <video v-else-if="asset.media_type === 'video'" :src="asset.asset_url" preload="metadata" muted />

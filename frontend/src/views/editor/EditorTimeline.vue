@@ -240,9 +240,9 @@ const playheadLeft = computed(() => TIMELINE_PAD + store.playhead * PX_PER_SEC.v
             :ref="(el) => setLaneRef(row.track.id, el)"
             class="track-lane"
             :class="{ drop: dropActive === row.track.id, locked: row.track.flag === 'locked' }"
-            @dragover="dropActive = row.track.id"
+            @dragover.prevent="dropActive = row.track.id"
             @dragleave="dropActive = null"
-            @drop="onDropAsset($event, row.track.id)"
+            @drop.prevent="onDropAsset($event, row.track.id)"
           >
             <div
               v-for="clip in row.clips"
