@@ -49,6 +49,17 @@ describe('addClip', () => {
     expect(next.clips.map((c) => c.id)).toEqual(['c1', 'c2', 'p1', 't1', 'c3'])
     expect(doc.clips.map((c) => c.id)).toEqual(['c1', 'c2', 'p1', 't1']) // 不可变
   })
+  it('duration=0 占位合法（草稿契约，healDurations/渲染 Plan 兜底）', () => {
+    const next = applyCommand(baseDoc(), cmd('addClip', {
+      clip: { id: 'c4', trackId: 'v1', assetId: 21, start: 9, duration: 0, trimStart: 0, props: {} },
+    }))
+    expect(next.clips.find((c) => c.id === 'c4')?.duration).toBe(0)
+  })
+  it('负 duration → 抛错', () => {
+    expect(() => applyCommand(baseDoc(), cmd('addClip', {
+      clip: { id: 'c9', trackId: 'v1', start: 9, duration: -1 },
+    }))).toThrow(/invalid_payload/)
+  })
   it('重复 id / 轨道不存在 / 锁定轨 → 抛错', () => {
     const doc = baseDoc()
     const locked = applyCommand(doc, cmd('setTrackFlag', { trackId: 'v1', flag: 'locked' }))

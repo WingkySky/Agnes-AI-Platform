@@ -110,7 +110,8 @@ export const useEditorStore = defineStore('editor', () => {
     void healDurations()
   }
 
-  /** 草稿契约补正：duration<=0 的视频片段用媒体元数据时长回填（不入撤销栈） */
+  /** 草稿占位补正：duration<=0 的片段用媒体元数据时长回填（不入撤销栈）。
+   * 只重排占位片段自身（轨内按原 start 序从最早占位处铺开），不碰用户已摆放的其他片段。 */
   async function healDurations(): Promise<void> {
     const current = doc.value
     if (!current) return
@@ -127,14 +128,21 @@ export const useEditorStore = defineStore('editor', () => {
       }
     }))
     if (changed) {
-      // 同轨视频片段按时间线顺序重排 start（草稿占位 start 全为累进占位）
-      const videos = doc.value!.clips
-        .filter((c) => c.trackId.startsWith('v') && doc.value!.tracks.find((t) => t.id === c.trackId)?.kind === 'video')
-        .sort((a, b) => a.start - b.start)
-      let cursor = 0
-      for (const clip of videos) {
-        clip.start = cursor
-        cursor += clip.duration
+      const videoTracks = new Set(doc.value!.tracks.filter((t) => t.kind === 'video').map((t) => t.id))
+      const byTrack = new Map<string, typeof pending>()
+      for (const clip of pending) {
+        if (!videoTracks.has(clip.trackId)) continue  // 音频占位按 start 直接定位，不重排
+        const list = byTrack.get(clip.trackId) ?? []
+        list.push(clip)
+        byTrack.set(clip.trackId, list)
+      }
+      for (const [, clips] of byTrack) {
+        clips.sort((a, b) => a.start - b.start)
+        let cursor = clips[0].start
+        for (const clip of clips) {
+          clip.start = Math.round(cursor * 1000) / 1000
+          cursor += clip.duration
+        }
       }
       doc.value = { ...doc.value!, clips: [...doc.value!.clips] }
       dirty.value = true
@@ -150,6 +158,13 @@ export const useEditorStore = defineStore('editor', () => {
       el.onerror = () => resolve(0)
       el.src = url
     })
+  }
+
+  /** 去重防线：同轨同素材落点过近（<80ms）视为重复放置 */
+  function hasClipAt(trackId: string, assetId: number, start: number): boolean {
+    return !!doc.value?.clips.some(
+      (c) => c.trackId === trackId && c.assetId === assetId && Math.abs(c.start - start) < 0.08,
+    )
   }
 
   // ---------- 命令进入 ----------
@@ -327,17 +342,23 @@ export const useEditorStore = defineStore('editor', () => {
       ElMessage.warning(t('editor.errors.noTrack'))
       return
     }
-    const okAdded = applyOrToast({
+    const start = Math.round(playhead.value * 1000) / 1000
+    if (hasClipAt(track.id, asset.id, start)) return
+    let duration = 3
+    if (asset.media_type !== 'image') {
+      await fetchAsset(asset.id)
+      const probed = await probeMediaDuration(asset.asset_url)
+      duration = probed > 0 ? probed : 5  // 探测失败兜底，可后续 trim
+    }
+    applyOrToast({
       op: 'addClip',
       payload: {
         clip: {
           id: newId('clip'), trackId: track.id, assetId: asset.id,
-          start: Math.round(playhead.value * 1000) / 1000,
-          duration: asset.media_type === 'image' ? 3 : 0, trimStart: 0, props: {},
+          start, duration: Math.round(duration * 1000) / 1000, trimStart: 0, props: {},
         },
       },
     }, t('editor.ops.addClip'))
-    if (okAdded && asset.media_type !== 'image') void healDurations()
   }
 
   async function rename(newTitle: string): Promise<void> {
@@ -371,6 +392,7 @@ export const useEditorStore = defineStore('editor', () => {
     renderStatus, renderProgress, renderError, finalUrl,
     assetCache,
     load, fetchAsset, apply, applyOrToast, undo, redo, healDurations, addAssetAtPlayhead,
+    probeMediaDuration, hasClipAt,
     saveNow, scheduleSave, transcribeTrack, submitRender, rename,
     select, reset, newId,
   }

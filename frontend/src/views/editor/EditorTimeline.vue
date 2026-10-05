@@ -148,7 +148,6 @@ function splitSelected(): void {
 const dropActive = ref<string | null>(null)
 
 async function onDropAsset(e: DragEvent, trackId: string): Promise<void> {
-  e.preventDefault()
   dropActive.value = null
   const assetId = Number(e.dataTransfer?.getData('text/asset-id'))
   if (!assetId || !store.doc) return
@@ -158,14 +157,20 @@ async function onDropAsset(e: DragEvent, trackId: string): Promise<void> {
   if (!asset) return
   if (track.kind === 'video' && asset.media_type !== 'image' && asset.media_type !== 'video') return
   if (track.kind === 'audio' && asset.media_type !== 'audio') return
-  const sec = (e.clientX - (laneRefs.get(trackId)?.getBoundingClientRect().left ?? 0) + (laneRefs.get(trackId)?.scrollLeft ?? 0)) / PX_PER_SEC.value
+  const lane = laneRefs.get(trackId)
+  const sec = (e.clientX - (lane?.getBoundingClientRect().left ?? 0) + (lane?.scrollLeft ?? 0)) / PX_PER_SEC.value
   const start = Math.max(0, Math.round(sec * 1000) / 1000)
-  const duration = asset.media_type === 'image' ? 3 : 0
+  if (store.hasClipAt(trackId, assetId, start)) return  // 重复放置防线
+  // 时长：图片默认 3s；视频/音频探测元数据真实时长（探测失败兜底 5s，可后续裁剪）
+  let duration = 3
+  if (asset.media_type !== 'image') {
+    const probed = await store.probeMediaDuration(asset.asset_url)
+    duration = probed > 0 ? probed : 5
+  }
   store.applyOrToast({
     op: 'addClip',
-    payload: { clip: { id: store.newId('clip'), trackId, assetId, start, duration, trimStart: 0, props: {} } },
+    payload: { clip: { id: store.newId('clip'), trackId, assetId, start, duration: Math.round(duration * 1000) / 1000, trimStart: 0, props: {} } },
   }, t('editor.ops.addClip'))
-  if (duration === 0) void store.healDurations()
 }
 
 // 多轨 lane 引用（拖入定位用）

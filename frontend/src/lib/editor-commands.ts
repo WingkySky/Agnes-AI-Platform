@@ -159,7 +159,8 @@ const commands: Record<EditorOp, (doc: EditorDocument, payload: CommandPayload) 
       trackId: track.id,
       assetId: typeof clip.assetId === 'number' ? clip.assetId : null,
       start: requireNonNegative(clip.start, 'start'),
-      duration: requirePositive(clip.duration, 'duration'),
+      // duration>=0：0 为「送进剪辑器」草稿占位契约（前端 healDurations / 渲染 Plan 剔除 0 片段）
+      duration: requireNonNegative(clip.duration, 'duration'),
       trimStart: requireNonNegative(clip.trimStart ?? 0, 'trimStart'),
       props: clip.props ?? {},
       ...(track.kind === 'subtitle' ? { text: typeof clip.text === 'string' ? clip.text : '' } : {}),
