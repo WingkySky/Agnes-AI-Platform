@@ -4,7 +4,9 @@
 # =====================================================
 
 import pytest
+from sqlalchemy import select
 
+from app.models.asset import Asset
 from app.models.generation import Generation
 from app.models.user import User
 from app.services import asset_archive

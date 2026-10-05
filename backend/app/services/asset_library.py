@@ -278,3 +278,65 @@ async def backfill_asset_storage(db: AsyncSession, *, limit: int = 200) -> dict:
         )
     ).first() or 0
     return {"processed": len(rows), "migrated": migrated, "remaining": int(remaining)}
+
+
+async def backfill_generations_to_assets(db: AsyncSession, *, limit: int = 200) -> dict:
+    """
+    存量生成记录补入库（一次性；管理员触发）：
+    成功且有结果 URL 的历史 generation 若还没有对应资产行（影子转正上线前的旧记录），
+    逐条走 ingest_generation_asset 建真资产行（幂等，按 source_generation_id 去重）。
+    容器信息从 generation 行透传；work_id 无法回溯置空。
+    返回 {processed, created, remaining}。
+    """
+    seen = set(
+        (
+            await db.scalars(
+                select(Asset.source_generation_id).where(Asset.source_generation_id.is_not(None))
+            )
+        ).all()
+    )
+    gen_ids = (
+        await db.scalars(
+            select(Generation.id)
+            .where(
+                Generation.status == "success",
+                Generation.result_url.is_not(None),
+                Generation.result_url != "",
+            )
+            .order_by(Generation.id.desc())
+            .limit(limit * 3)
+        )
+    ).all()
+    processed = 0
+    created = 0
+    for gid in gen_ids:
+        if gid in seen:
+            continue
+        gen = (
+            await db.scalars(select(Generation).where(Generation.id == gid))
+        ).first()
+        if not gen:
+            continue
+        try:
+            asset = await ingest_generation_asset(db, gen, {
+                "container_type": gen.container_type,
+                "container_id": gen.container_id,
+            })
+            processed += 1
+            if asset:
+                created += 1
+        except Exception:  # noqa: BLE001 — 单条失败留待下次重试
+            continue
+        if processed >= limit:
+            break
+    remaining = (
+        await db.scalars(
+            select(func.count()).select_from(Generation).where(
+                Generation.status == "success",
+                Generation.result_url.is_not(None),
+                Generation.result_url != "",
+                ~select(Asset.id).where(Asset.source_generation_id == Generation.id).exists(),
+            )
+        )
+    ).first() or 0
+    return {"processed": processed, "created": created, "remaining": int(remaining)}
