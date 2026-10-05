@@ -150,8 +150,8 @@ onMounted(() => void reload())
   flex: 1;
   overflow-y: auto;
   display: grid;
-  /* 自适应网格：面板拖宽自动多列（剪映式缩略图墙） */
-  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  /* 自适应网格：卡片保持可读的最小尺寸，面板变窄靠减列数适应（最窄 1 列） */
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 8px;
   align-content: start;
   min-height: 0;
