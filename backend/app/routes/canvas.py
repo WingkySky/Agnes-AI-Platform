@@ -64,7 +64,9 @@ async def canvas_subtitle(
     current_user: User = Depends(get_current_user),
 ):
     try:
-        result = await canvas_media_service.generate_subtitles(payload.text, payload.max_chars, style_hint=payload.prompt)
+        result = await canvas_media_service.generate_subtitles(
+            payload.text, payload.max_chars, style_hint=payload.prompt, audio_url=payload.audio_url,
+        )
         return ok(data=CanvasSubtitleResponse(**result))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

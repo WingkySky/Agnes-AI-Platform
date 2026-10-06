@@ -87,19 +87,31 @@
               {{ entityKindLabel }}<span v-if="panel.content?.entityName"> · {{ panel.content.entityName }}</span>
             </div>
             <div v-if="entityEditorOpen" class="entity-editor" :style="{ background: theme.node.panel, borderColor: theme.node.stroke }" @click.stop>
+              <div v-if="entityLinked" class="entity-link-flag">{{ t('entityLib.linkEntity') }}</div>
               <input
                 :value="panel.content?.entityName || ''"
                 class="entity-input" :style="{ borderColor: theme.node.stroke, color: theme.node.text }"
                 :placeholder="t('canvas.script.wizard.namePlaceholder')"
-                @change="updatePanelContent('entityName', ($event.target as HTMLInputElement)?.value)"
+                @change="onEntityNameChange(($event.target as HTMLInputElement)?.value)"
               >
               <textarea
                 :value="panel.content?.entityDesc || ''"
                 rows="3"
                 class="entity-input" :style="{ borderColor: theme.node.stroke, color: theme.node.text }"
                 :placeholder="t('canvas.script.wizard.descPlaceholder')"
-                @change="updatePanelContent('entityDesc', ($event.target as HTMLTextAreaElement)?.value)"
+                @change="onEntityDescChange(($event.target as HTMLTextAreaElement)?.value)"
               ></textarea>
+              <EntityVersionList
+                v-if="entityLinked && entityVersions.length"
+                :versions="entityVersions"
+                @adopt="onAdoptVersion"
+              />
+              <el-button
+                v-else-if="workId"
+                size="small" type="primary" plain class="entity-link-btn"
+                :disabled="!String(panel.content?.entityName || '').trim()"
+                @click="linkToLibrary"
+              >{{ t('entityLib.link') }}</el-button>
             </div>
           </template>
           <!-- 有图：显示图片（object-contain） -->
@@ -422,16 +434,19 @@
  * ===================================================== */
 
 import { computed, ref, nextTick, watch, onMounted, onUnmounted } from 'vue'
+import { ElMessage } from 'element-plus'
 import { Image as ImageIcon, Video, Music2, RefreshCw, Play } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
 import { useCanvasStore } from '@/stores/canvas'
 import ImageWithWatermark from '@/components/ImageWithWatermark.vue'
 import ScriptNodeContent from '@/components/canvas/nodes/ScriptNodeContent.vue'
 import TableNodeContent from '@/components/canvas/nodes/TableNodeContent.vue'
+import EntityVersionList from '@/components/works/EntityVersionList.vue'
 import { readLineage } from '@/lib/canvas-storyboard'
 import { registerVideoTime } from '@/lib/canvas-image-ops'
 import { fitNodeToMedia } from '@/lib/canvas-media'
 import { getCanvasVoicesCached, getCanvasBgmsCached, type CanvasVoice, type CanvasBgm } from '@/api/canvas'
+import { adoptEntityVersion, createWorkEntity, listWorkEntities, updateWorkEntity, type EntityVersion } from '@/api/workEntities'
 
 /* ---------- i18n ---------- */
 const { t } = useI18n()
@@ -687,6 +702,74 @@ const entityKindLabel = computed(() =>
     : entityKind.value === 'scene' ? t('canvas.node.entityScene')
       : t('canvas.node.entityProp'),
 )
+
+/* ---------- 实体库挂链（entityId）：版本切换 / 入库 / 编辑直写实体 ---------- */
+const workId = computed(() => store.activeWorkspace?.work_id ?? null)
+const entityLinked = computed(() => typeof props.panel.content?.entityId === 'number' && (props.panel.content?.entityId as number) > 0)
+const entityVersions = ref<EntityVersion[]>([])
+
+watch(entityEditorOpen, (open) => {
+  if (open && entityLinked.value) void fetchEntityVersions()
+})
+
+async function fetchEntityVersions(): Promise<void> {
+  const eid = props.panel.content?.entityId
+  if (typeof eid !== 'number' || !workId.value) return
+  try {
+    const found = (await listWorkEntities(workId.value)).items.find((e) => e.id === eid)
+    entityVersions.value = found?.versions ?? []
+  } catch {
+    entityVersions.value = []
+  }
+}
+
+/** 名称/描述编辑：挂链时直写实体（content 存缓存镜像），未挂链只写卡片 */
+function onEntityNameChange(value: string) {
+  updatePanelContent('entityName', value)
+  const eid = props.panel.content?.entityId
+  if (typeof eid === 'number' && value.trim()) void updateWorkEntity(eid, { name: value.trim() })
+}
+
+function onEntityDescChange(value: string) {
+  updatePanelContent('entityDesc', value)
+  const eid = props.panel.content?.entityId
+  if (typeof eid === 'number') void updateWorkEntity(eid, { description: value.trim() || undefined })
+}
+
+/** 未挂链存量卡入库：建实体+当前图入首版本，回写 entityId */
+async function linkToLibrary() {
+  const wid = workId.value
+  const kind = entityKind.value
+  const name = String(props.panel.content?.entityName || '').trim()
+  if (!wid || !kind || !name) return
+  try {
+    const rawAssetId = props.panel.content?.assetId
+    const assetId = typeof rawAssetId === 'string' && /^\d+$/.test(rawAssetId) ? Number(rawAssetId) : undefined
+    const created = await createWorkEntity(wid, {
+      kind, name,
+      description: String(props.panel.content?.entityDesc || '').trim() || undefined,
+      ...(assetId ? { asset_id: assetId } : {}),
+    })
+    updatePanelContent('entityId', created.id)
+    entityVersions.value = created.versions
+    ElMessage.success(t('entityLib.linkedMsg'))
+  } catch (err) {
+    ElMessage.error(String(err))
+  }
+}
+
+/** 版本切换器回切：采用后卡片图同步为采用版本设定图 */
+async function onAdoptVersion(versionId: number) {
+  const eid = props.panel.content?.entityId
+  if (typeof eid !== 'number') return
+  try {
+    const updated = await adoptEntityVersion(eid, versionId)
+    entityVersions.value = updated.versions
+    if (updated.active_image_url) updatePanelContent('content', updated.active_image_url)
+  } catch (err) {
+    ElMessage.error(String(err))
+  }
+}
 
 /* ---------- 工具函数 ---------- */
 
@@ -1174,6 +1257,26 @@ onUnmounted(() => {
   background: transparent;
   font-family: inherit;
   box-sizing: border-box;
+}
+.entity-link-flag {
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--el-color-primary);
+  opacity: 0.9;
+}
+.entity-link-btn {
+  align-self: flex-start;
+}
+/* 实体版本列表在卡片小窗里压缩：缩略图更小、列表更矮 */
+.entity-editor :deep(.entity-versions) {
+  max-height: 130px;
+}
+.entity-editor :deep(.thumb) {
+  width: 40px;
+  height: 40px;
+}
+.entity-editor :deep(.version-row) {
+  padding: 4px 6px;
 }
 .image-content {
   width: 100%;

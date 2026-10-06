@@ -219,6 +219,10 @@ export interface GenerationContextPayload {
   asset_name?: string | null
   /** 画布所属作品（生成结果自动入库的作品标记） */
   work_id?: number | null
+  /** 实体卡挂链实体：生成成功服务端自动建版本并采用 */
+  entity_id?: number | null
+  /** 表现图角色：design（默认，新版本并采用）/ angle（多角度派生，追加进采用版本） */
+  version_role?: string | null
 }
 
 /** 图片异步任务创建响应（内联 dict） */

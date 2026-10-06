@@ -981,7 +981,7 @@ AI 提示词优化（登录用户），返回结构化正负提示词。
 |---|---|---|
 | GET | `/api/works` | 本人作品列表（updated_at 倒序） |
 | POST | `/api/works` | 创建 `{ title, description?, cover_url? }` |
-| GET/PATCH/DELETE | `/api/works/{id}` | 详情 / 更新 / 删除（删除解绑画布） |
+| GET/PATCH/DELETE | `/api/works/{id}` | 详情 / 更新 / 删除（删除解绑画布，实体库随之级联删除） |
 
 ### 画布媒体域与轻成片（/api/canvas）
 
@@ -992,5 +992,20 @@ AI 提示词优化（登录用户），返回结构化正负提示词。
 | GET | `/api/canvas/voices` | TTS 音色库（内置 8 音色，支持 Edge 音色名透传） |
 | GET | `/api/canvas/bgms` | BGM 曲库（内置 + 用户自定义，含 available 与情绪分类） |
 | POST | `/api/canvas/tts` | `{ text, voice?, speed? }` → `{ audio_url, duration_ms }`（不变） |
-| POST | `/api/canvas/subtitle` | `{ text, max_chars?, prompt? }` → `{ srt, segments, total_duration }`；`prompt` 为拆分补充要求（拼进 LLM 提示词） |
+| POST | `/api/canvas/subtitle` | `{ text, max_chars?, prompt?, audio_url? }` → `{ srt, segments, total_duration }`；`prompt` 为拆分补充要求（拼进 LLM 提示词）；`audio_url` 提供时走 faster-whisper 转写真实时间戳（上游 TTS 台词源），失败/未装回退 LLM 拆分（0.24s/字估算） |
 | POST | `/api/canvas/compose` | `{ video_urls, audios?, subtitles?, with_subtitle?, bgm_id?, aspect_ratio?, transition? }` → `{ video_url, duration_ms }`；`audios` 多段配音按视频段顺序拼接成单轨（旧 `audio_url` 单段入口兼容保留）；`transition` none/fade/dissolve/wipe/slide，非 none 且多段走 xfade 重编码链 |
+
+## 21. 作品实体库（跨集复用的事实源）
+
+新表 `work_entities`（kind=character/scene/prop / name / description，归属作品）+ `work_entity_versions`（只增版本；`images` JSON `[{asset_id, role}]`，role=design 设定图/turnaround 三视图/angle 视角；`is_active` 采用位，每实体至多一个）。存量库 create_all 自动建。画布实体卡（image 节点 `content.entityId`）引用实体；生成成功后按 context `entity_id` 自动建版本并采用（`version_role=angle` 时追加进当前采用版本），作品不匹配拒绝。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/works/{work_id}/entities?kind=` | 作品实体列表（含版本列表与采用图 url；非本人 403 / 不存在 404） |
+| POST | `/api/works/{work_id}/entities` | 创建 `{ kind, name, description?, asset_id? }`；带 asset_id 建首版本并采用 |
+| PATCH | `/api/entities/{id}` | 更新 `{ name?, description? }` |
+| DELETE | `/api/entities/{id}` | 删除实体与版本（不动资产；挂链画布卡片脱钩保留当前图） |
+| POST | `/api/entities/{id}/versions` | `{ asset_id, role?="design" }`；design 新开版本并自动采用，angle/turnaround 追加进当前采用版本 |
+| POST | `/api/entities/{id}/adopt` | `{ version_id }` 切换采用版本（版本切换器回切） |
+
+表现图引用统一资产库 asset_id（资产须存在且属本人）。

@@ -69,7 +69,7 @@ async def update_work(
 
 
 async def delete_work(db: AsyncSession, work: Work) -> None:
-    """删除作品并解绑名下画布（work_id 置空，画布本体保留为自由画布）"""
+    """删除作品：画布解绑为自由画布；实体库（含版本）随作品级联删除，画布本体保留"""
     canvases = (
         await db.scalars(select(CanvasWorkspace).where(CanvasWorkspace.work_id == work.id))
     ).all()

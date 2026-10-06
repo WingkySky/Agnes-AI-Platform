@@ -40,6 +40,7 @@
               <th class="col-duration">{{ t('canvas.script.wizard.colDuration') }}</th>
               <th class="col-size">{{ t('canvas.script.wizard.colSize') }}</th>
               <th class="col-camera">{{ t('canvas.script.wizard.colCamera') }}</th>
+              <th class="col-angle">{{ t('canvas.script.wizard.colAngle') }}</th>
               <th class="col-scene">{{ t('canvas.script.wizard.colScene') }}</th>
               <th class="col-characters">{{ t('canvas.script.wizard.colCharacters') }}</th>
               <th class="col-link" :title="t('canvas.script.wizard.linkTip')">{{ t('canvas.script.wizard.colLink') }}</th>
@@ -67,6 +68,9 @@
               <td class="col-camera">
                 <input v-model="shot.camera" class="wiz-input" :style="inputStyle" :placeholder="t('canvas.script.cameraPlaceholder')" @input="persistShots">
               </td>
+              <td class="col-angle">
+                <input v-model="shot.angle" class="wiz-input" :style="inputStyle" :placeholder="t('canvas.script.wizard.anglePlaceholder')" list="shot-angle-options" @input="persistShots">
+              </td>
               <td class="col-scene">
                 <input v-model="shot.location" class="wiz-input" :style="inputStyle" :placeholder="t('canvas.script.wizard.scenePlaceholder')" @input="persistShots">
               </td>
@@ -88,6 +92,9 @@
             </tr>
           </tbody>
         </table>
+        <datalist id="shot-angle-options">
+          <option v-for="a in anglePresets" :key="a" :value="a" />
+        </datalist>
         <button type="button" class="wiz-btn" :style="btnStyle" @click="addShot">+ {{ t('canvas.script.wizard.addShot') }}</button>
       </div>
 
@@ -145,6 +152,7 @@
                 class="wiz-input asset-name" :style="inputStyle"
                 :placeholder="t('canvas.script.wizard.namePlaceholder')"
                 @input="persistAssets"
+                @change="onAssetMetaChange(a, section.kind)"
               >
               <textarea
                 v-model="a.description"
@@ -152,6 +160,7 @@
                 class="wiz-input asset-desc" :style="inputStyle"
                 :placeholder="t('canvas.script.wizard.descPlaceholder')"
                 @input="persistAssets"
+                @change="onAssetMetaChange(a, section.kind)"
               ></textarea>
               <span v-if="assetShotLabel(section.kind, a.name)" class="asset-shots" :style="mutedStyle">
                 {{ t('canvas.script.wizard.assocShots', { nos: assetShotLabel(section.kind, a.name) }) }}
@@ -328,7 +337,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from '@/i18n'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useCanvasStore, type CanvasPanel } from '@/stores/canvas'
 import ComposerParamBar from '@/components/canvas/ComposerParamBar.vue'
 import { checkCreditsBeforeGenerate } from '@/lib/canvas-credits'
@@ -363,6 +372,9 @@ import {
 import { buildAssetPrompt, buildFramePrompt } from '@/lib/storyboard/prompts'
 import { listStyleEntries, resolveStyleConfig } from '@/lib/storyboard/library'
 import type { EntityKind } from '@/lib/storyboard/schemas'
+import { loadEntityScriptAssets, upsertEntitiesToLibrary } from '@/lib/canvas-entity-assets'
+import { addEntityVersion, createWorkEntity, deleteWorkEntity, updateWorkEntity, uploadEntityImage } from '@/api/workEntities'
+import { createAsset } from '@/api/assets'
 
 const props = defineProps<{ panelId: string; visible: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -384,10 +396,15 @@ const shotSizes = computed(() => [
   { value: '特写', label: t('canvas.script.sizeExtreme') },
 ])
 
+/** 视角常用词（datalist 候选，允许自由输入） */
+const anglePresets = ['平视', '俯视', '仰视', '鸟瞰', '主观']
+
 /* ---------- 向导状态（打开时从节点 content 初始化，编辑即持久化） ---------- */
 const step = ref(1)
 const shots = ref<CanvasShot[]>([])
 const assets = ref<ScriptAssets>({ characters: [], scenes: [], props: [] })
+// 实体库模式：挂作品画布上 assets 是 work_entities 的视图（实体库为唯一事实源，不再写 content.assets）
+const libraryMode = ref(false)
 const styleChoice = ref('none')
 const styleCustom = ref('')
 const styleEntries = ref<Array<{ id: number; name: string }>>([])
@@ -409,14 +426,44 @@ watch(() => props.visible, (v) => {
   if (!v || !panel.value) return
   step.value = 1
   shots.value = readShots(panel.value)
-  const a = readAssets(panel.value)
-  assets.value = { characters: a.characters, scenes: a.scenes, props: a.props }
+  void initAssets()
   // 画布级风格选择回填（随工作区持久化）
   const sel = store.activeWorkspace?.styleConfig
   styleChoice.value = sel?.presetId != null ? String(sel.presetId) : sel?.customText ? 'custom' : 'none'
   styleCustom.value = sel?.customText || ''
   void listStyleEntries().then((entries) => { styleEntries.value = entries })
 })
+
+/** 实体库初始化：挂作品画布拉实体库为视图 + 存量 content.assets 按名收敛；自由画布维持存量路径 */
+async function initAssets(): Promise<void> {
+  const workId = store.activeWorkspace?.work_id ?? null
+  if (!workId || !panel.value) {
+    libraryMode.value = false
+    const a = readAssets(panel.value!)
+    assets.value = { characters: a.characters, scenes: a.scenes, props: a.props }
+    return
+  }
+  libraryMode.value = true
+  try {
+    // 存量 content.assets 按名 upsert 进实体库后清空（一次性收敛，不写双读兼容）
+    const legacy = readAssets(panel.value)
+    const legacyItems = [...legacy.characters, ...legacy.scenes, ...legacy.props].map((a) => ({
+      kind: (legacy.characters.includes(a) ? 'character' : legacy.scenes.includes(a) ? 'scene' : 'prop') as EntityKind,
+      name: a.name,
+      description: a.description,
+    }))
+    if (legacyItems.length > 0) {
+      await upsertEntitiesToLibrary(workId, legacyItems)
+      updateContent({ assets: { characters: [], scenes: [], props: [] } })
+    }
+    assets.value = await loadEntityScriptAssets(workId)
+  } catch (err) {
+    libraryMode.value = false
+    ElMessage.error(getErrorMessage(err) || String(err))
+    const a = readAssets(panel.value)
+    assets.value = { characters: a.characters, scenes: a.scenes, props: a.props }
+  }
+}
 
 /** 风格选择变更：解析生效配置写入工作区（实体图/分镜图/Agent 统一取用） */
 async function onStyleChange() {
@@ -437,7 +484,27 @@ function persistShots() {
 }
 
 function persistAssets() {
+  // 实体库模式：assets 是 work_entities 的视图，不写 content.assets
+  if (libraryMode.value) return
   updateContent({ assets: JSON.parse(JSON.stringify(assets.value)) })
+}
+
+/** 实体库实体 id → 数字实体 id（库模式资产卡 id 形如 entity_12） */
+function entityIdOf(id: string): number | null {
+  return id.startsWith('entity_') ? Number(id.slice('entity_'.length)) || null : null
+}
+
+/** 实体库模式：名称/描述失焦直写实体 */
+async function onAssetMetaChange(asset: ShotAsset, kind: 'characters' | 'scenes' | 'props') {
+  if (!libraryMode.value) return
+  const eid = entityIdOf(asset.id)
+  if (!eid || !asset.name.trim()) return
+  const entityKind: EntityKind = kind === 'characters' ? 'character' : kind === 'scenes' ? 'scene' : 'prop'
+  try {
+    await updateWorkEntity(eid, { name: asset.name.trim(), description: asset.description.trim() || undefined })
+  } catch (err) {
+    ElMessage.error(getErrorMessage(err) || String(err))
+  }
 }
 
 /* ---------- 步骤指示条（标题/提示随数据动态） ---------- */
@@ -475,6 +542,7 @@ function addShot() {
     duration: 5,
     shotSize: '中景',
     camera: '',
+    angle: '',
     description: '',
     dialogue: '',
     characters: [],
@@ -504,12 +572,38 @@ function removeShot(idx: number) {
 }
 
 /* ---------- 步骤2：资产卡编辑 ---------- */
-function addAsset(kind: 'characters' | 'scenes' | 'props') {
-  assets.value[kind].push({ id: newId('asset'), name: '', description: '', imageUrl: '' })
-  persistAssets()
+async function addAsset(kind: 'characters' | 'scenes' | 'props') {
+  if (!libraryMode.value) {
+    assets.value[kind].push({ id: newId('asset'), name: '', description: '', imageUrl: '' })
+    persistAssets()
+    return
+  }
+  const workId = store.activeWorkspace?.work_id
+  if (!workId) return
+  const entityKind: EntityKind = kind === 'characters' ? 'character' : kind === 'scenes' ? 'scene' : 'prop'
+  try {
+    const res = await ElMessageBox.prompt(t('entityLib.namePh'), t('entityLib.newEntity'))
+    const name = (res.value || '').trim()
+    if (!name) return
+    await createWorkEntity(workId, { kind: entityKind, name })
+    assets.value = await loadEntityScriptAssets(workId)
+  } catch (err) {
+    if (err !== 'cancel' && err !== 'close') ElMessage.error(getErrorMessage(err) || String(err))
+  }
 }
 
-function removeAsset(kind: 'characters' | 'scenes' | 'props', id: string) {
+async function removeAsset(kind: 'characters' | 'scenes' | 'props', id: string) {
+  if (libraryMode.value) {
+    const eid = entityIdOf(id)
+    const workId = store.activeWorkspace?.work_id
+    try {
+      if (eid && workId) await deleteWorkEntity(eid)
+      assets.value = await loadEntityScriptAssets(workId!)
+    } catch (err) {
+      ElMessage.error(getErrorMessage(err) || String(err))
+    }
+    return
+  }
   assets.value[kind] = assets.value[kind].filter((a) => a.id !== id)
   persistAssets()
 }
@@ -529,6 +623,7 @@ async function generateAssetImage(asset: ShotAsset, kind: 'characters' | 'scenes
   generatingAssets.value = new Set([...generatingAssets.value, asset.id])
   try {
     const entityKind: EntityKind = kind === 'characters' ? 'character' : kind === 'scenes' ? 'scene' : 'prop'
+    const entityId = libraryMode.value ? entityIdOf(asset.id) : null
     const ctx = {
       prompt: buildAssetPrompt(
         { kind: entityKind, name: asset.name, description: asset.description, refImageUrl: '' },
@@ -546,6 +641,8 @@ async function generateAssetImage(asset: ShotAsset, kind: 'characters' | 'scenes
       container_name: (panel.value?.name as string) || undefined,
       asset_type: entityKind,
       asset_name: asset.name || desc,
+      // 实体库模式：context 带实体引用，服务端生成成功自动建版本+采用
+      ...(entityId ? { entity_id: entityId, work_id: store.activeWorkspace?.work_id ?? null } : {}),
     })
     const result = await pollImageTask(resp.task_id)
     asset.imageUrl = result.resultUrl
@@ -583,15 +680,32 @@ function openUpload(asset: ShotAsset, kind: 'characters' | 'scenes' | 'props') {
   }
 }
 
-function handleFileSelect(event: Event) {
+async function handleFileSelect(event: Event) {
   const file = (event.target as HTMLInputElement)?.files?.[0]
   if (!file || !uploadTarget.value) return
   const { kind, id } = uploadTarget.value
+  const asset = assets.value[kind].find((a) => a.id === id)
+  if (!asset) return
+  // 实体库模式：上传走资产库并追加为采用版本表现图
+  if (libraryMode.value) {
+    const eid = entityIdOf(id)
+    const workId = store.activeWorkspace?.work_id
+    if (!eid || !workId) return
+    try {
+      const { url } = await uploadEntityImage(file)
+      const created = await createAsset({ url, media_type: 'image', name: asset.name.trim() || file.name, work_id: workId })
+      const updated = await addEntityVersion(eid, { asset_id: created.id })
+      asset.imageUrl = updated.active_image_url || url
+    } catch (err) {
+      ElMessage.error(getErrorMessage(err) || String(err))
+    }
+    return
+  }
   const reader = new FileReader()
   reader.onload = () => {
-    const asset = assets.value[kind].find((a) => a.id === id)
-    if (asset) {
-      asset.imageUrl = reader.result as string
+    const target = assets.value[kind].find((a) => a.id === id)
+    if (target) {
+      target.imageUrl = reader.result as string
       persistAssets()
     }
   }
@@ -974,6 +1088,9 @@ function stepTitleStyle(s: { no: number }) {
 }
 .shot-table .col-camera {
   width: 140px;
+}
+.shot-table .col-angle {
+  width: 90px;
 }
 .shot-table .col-scene {
   width: 110px;

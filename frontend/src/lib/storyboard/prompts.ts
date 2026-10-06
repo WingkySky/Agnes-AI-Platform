@@ -71,7 +71,7 @@ export function splitStoryboardPrompt(input: {
 
 ## 要求
 - 镜头数量：${input.shotCountMin} 到 ${input.shotCountMax} 个
-- 每个镜头包含：no（序号，从1开始）、shot_size（景别：远景/全景/中景/近景/特写）、camera（机位/运镜）、location（场景名，必须取自场景清单）、characters（出场角色名数组，必须取自角色清单）、props（出场物品名数组，取自物品清单，可为空数组）、description（画面描述）、dialogue（台词，没有则为空字符串）
+- 每个镜头包含：no（序号，从1开始）、shot_size（景别：远景/全景/中景/近景/特写）、camera（机位/运镜）、angle（视角：平视/俯视/仰视/鸟瞰/主观等，默认平视）、location（场景名，必须取自场景清单）、characters（出场角色名数组，必须取自角色清单）、props（出场物品名数组，取自物品清单，可为空数组）、description（画面描述）、dialogue（台词，没有则为空字符串）
 - ${cameraLine}
 - description 必须是单帧画面描述：只表现该镜头的一个瞬间（主体+动作瞬间+场景+光线），镜头内连续动作拆成多个分镜，不叙述先后；包含场景、人物动作、表情、光线；人物以角色名指代，与 characters 字段一致；60~120 字，信息密度优先；台词不写入 description
 - 严格输出 JSON 对象，不要输出任何其他内容
@@ -89,7 +89,7 @@ ${entityLines(input.scenes, true)}
 ${entityLines(input.props, true)}
 
 ## 输出格式
-{"shots": [{"no": 1, "shot_size": "中景", "camera": "缓推", "location": "...", "characters": ["..."], "props": [], "description": "...", "dialogue": "..."}]}`
+{"shots": [{"no": 1, "shot_size": "中景", "camera": "缓推", "angle": "平视", "location": "...", "characters": ["..."], "props": [], "description": "...", "dialogue": "..."}]}`
 }
 
 /** 一枪出模板（剧情 → 实体清单 + 分镜，向导/Composer 快速路径；实体与分镜同次产出） */
@@ -112,7 +112,7 @@ export function planStoryboardPrompt(input: {
 ## 要求
 - 镜头数量：${input.shotCountMin} 到 ${input.shotCountMax} 个
 - 实体清单：从剧情中提取。角色 description 写外貌/服饰/气质等可直接用于生成角色设定图的内容；场景 description 写环境/时间/氛围；物品 description 写外观/材质/状态等可视特征。若下方已给定角色/场景设定，必须沿用其 name 与描述，不得改写
-- 每个镜头包含：no（序号，从1开始）、shot_size（景别：远景/全景/中景/近景/特写）、camera（机位/运镜）、location（场景名，必须取自场景清单）、characters（出场角色名数组，必须取自角色清单）、props（出场物品名数组，取自物品清单，可为空数组）、description（画面描述）、dialogue（台词，没有则为空字符串）
+- 每个镜头包含：no（序号，从1开始）、shot_size（景别：远景/全景/中景/近景/特写）、camera（机位/运镜）、angle（视角：平视/俯视/仰视/鸟瞰/主观等，默认平视）、location（场景名，必须取自场景清单）、characters（出场角色名数组，必须取自角色清单）、props（出场物品名数组，取自物品清单，可为空数组）、description（画面描述）、dialogue（台词，没有则为空字符串）
 - ${cameraLine}
 - description 必须是单帧画面描述：只表现该镜头的一个瞬间（主体+动作瞬间+场景+光线），镜头内连续动作拆成多个分镜，不叙述先后；包含场景、人物动作、表情、光线；人物以角色名指代，与 characters 字段一致；60~120 字，信息密度优先；台词不写入 description
 - 台词短句化，符合短剧节奏
@@ -128,18 +128,19 @@ ${entityLines(input.characters, true)}
 ${entityLines(input.scenes, true)}
 
 ## 输出格式
-{"assets": {"characters": [{"name": "...", "description": "..."}], "scenes": [{"name": "...", "description": "..."}], "props": [{"name": "...", "description": "..."}]}, "shots": [{"no": 1, "shot_size": "中景", "camera": "缓推", "location": "...", "characters": ["..."], "props": [], "description": "...", "dialogue": "..."}]}`
+{"assets": {"characters": [{"name": "...", "description": "..."}], "scenes": [{"name": "...", "description": "..."}], "props": [{"name": "...", "description": "..."}]}, "shots": [{"no": 1, "shot_size": "中景", "camera": "缓推", "angle": "平视", "location": "...", "characters": ["..."], "props": [], "description": "...", "dialogue": "..."}]}`
 }
 
-/** 分镜图成品提示词：画面描述 + 单帧约束 + 景别/运镜 + 风格 + 实体设定上下文 */
+/** 分镜图成品提示词：画面描述 + 单帧约束 + 景别/运镜/视角 + 风格 + 实体设定上下文 */
 export function buildFramePrompt(
-  shot: Pick<StoryboardShot, 'description' | 'shotSize' | 'camera'>,
+  shot: Pick<StoryboardShot, 'description' | 'shotSize' | 'camera' | 'angle'>,
   contexts: { characters: string[]; scenes: string[]; props?: string[] },
   style: StyleConfig = EMPTY_STYLE,
 ): string {
   const lines = [shot.description, SINGLE_FRAME_PROMPT_LINE]
   if (shot.shotSize) lines.push(`景别：${shot.shotSize}`)
   if (shot.camera) lines.push(`运镜：${shot.camera}`)
+  if (shot.angle) lines.push(`视角：${shot.angle}`)
   const styleText = styleSection(style)
   if (styleText) lines.push(styleText)
   if (contexts.characters.length > 0) lines.push(`角色设定：${contexts.characters.join('；')}`)

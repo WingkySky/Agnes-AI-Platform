@@ -71,6 +71,7 @@ from app.routes import canvas as canvas_route
 from app.routes import canvas_workspace as canvas_workspace_route
 from app.routes import editor as editor_route
 from app.routes import works as works_route
+from app.routes import work_entities as work_entities_route
 from app.services.video_poller import poller_manager
 from app.services.image_poller import image_poller_manager
 from app.services.agnes_client import agnes_client
@@ -338,6 +339,7 @@ app.include_router(projects_route.router, prefix="/api", tags=["项目制创作"
 app.include_router(canvas_route.router, prefix="/api", tags=["无限画布"])
 app.include_router(canvas_workspace_route.router, prefix="/api", tags=["画布工作区"])
 app.include_router(works_route.router, prefix="/api", tags=["作品"])
+app.include_router(work_entities_route.router, prefix="/api", tags=["作品实体库"])
 app.include_router(editor_route.router, prefix="/api", tags=["剪辑器"])
 
 

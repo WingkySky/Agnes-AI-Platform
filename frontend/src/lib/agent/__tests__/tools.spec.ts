@@ -161,10 +161,10 @@ describe('agent_get_state', () => {
 })
 
 describe('agent_apply_ops', () => {
-  it('批量建节点/连线并回填新 id；非法连线单条报错不中断', () => {
+  it('批量建节点/连线并回填新 id；非法连线单条报错不中断', async () => {
     const canvas = makeCanvas()
     const textId = canvas.addPanel({ type: 'text', content: { text: '提示词' }, x: 0, y: 0, width: 240, height: 180 })
-    const res = tool('agent_apply_ops').execute({
+    const res = await tool('agent_apply_ops').execute({
       ops: [
         { op: 'add_panel', type: 'tts', content: {} },
         { op: 'add_connection', source_panel_id: textId, target_panel_id: '缺失' },
@@ -183,20 +183,20 @@ describe('agent_apply_ops', () => {
     expect(canvas.snapshots.length).toBe(1) // 整批一个撤销快照
   })
 
-  it('delete_panel 同时清理相关连线', () => {
+  it('delete_panel 同时清理相关连线', async () => {
     const canvas = makeCanvas()
     const a = canvas.addPanel({ type: 'text', content: {}, x: 0, y: 0, width: 240, height: 180 })
     const b = canvas.addPanel({ type: 'text', content: {}, x: 0, y: 0, width: 240, height: 180 })
     const cid = canvas.addConnection({ source_panel_id: a, target_panel_id: b })?.id
-    const res = tool('agent_apply_ops').execute({ ops: [{ op: 'delete_panel', panel_id: a }] }, canvas) as { ok: boolean }
+    const res = await tool('agent_apply_ops').execute({ ops: [{ op: 'delete_panel', panel_id: a }] }, canvas) as { ok: boolean }
     expect(res.ok).toBe(true)
     expect(canvas.panels.length).toBe(1)
     expect(canvas.connections.some((c) => c.id === cid)).toBe(false)
   })
 
-  it('text 节点内容字段归一：LLM 写 text 自动落到渲染字段 content', () => {
+  it('text 节点内容字段归一：LLM 写 text 自动落到渲染字段 content', async () => {
     const canvas = makeCanvas()
-    const res = tool('agent_apply_ops').execute({
+    const res = await tool('agent_apply_ops').execute({
       ops: [
         { op: 'add_panel', type: 'text', name: '剧本', content: { text: '初稿' } },
         { op: 'update_panel', panel_id: '剧本', changes: { content: { text: '二稿' } } },
@@ -207,10 +207,10 @@ describe('agent_apply_ops', () => {
     expect(p?.content).toEqual({ content: '二稿' })
   })
 
-  it('节点引用支持名称：同批次新建按名称连线、已有节点按名称连线', () => {
+  it('节点引用支持名称：同批次新建按名称连线、已有节点按名称连线', async () => {
     const canvas = makeCanvas()
     const scriptId = canvas.addPanel({ type: 'text', name: '剧本', content: {}, x: 0, y: 0, width: 240, height: 180 })
-    const res = tool('agent_apply_ops').execute({
+    const res = await tool('agent_apply_ops').execute({
       ops: [
         { op: 'add_panel', type: 'image', name: '分镜图1', content: { prompt: 'p1' } },
         { op: 'add_connection', source_panel_id: '剧本', target_panel_id: '分镜图1' },
@@ -307,9 +307,9 @@ describe('agent_get_models', () => {
 })
 
 describe('模型指定强制（费用安全）', () => {
-  it('add_panel 剥离 LLM 传入的 content.model，其余内容保留', () => {
+  it('add_panel 剥离 LLM 传入的 content.model，其余内容保留', async () => {
     const canvas = makeCanvas()
-    const res = tool('agent_apply_ops').execute({
+    const res = await tool('agent_apply_ops').execute({
       ops: [{ op: 'add_panel', type: 'video', name: '镜头1', content: { prompt: '城市夜景', model: 'seedance-pro', seconds: 5 } }],
     }, canvas) as { ok: boolean }
     expect(res.ok).toBe(true)
@@ -319,10 +319,10 @@ describe('模型指定强制（费用安全）', () => {
     expect('model' in panel.content).toBe(false)
   })
 
-  it('update_panel 剥离 changes.content.model，不得篡改已有节点模型', () => {
+  it('update_panel 剥离 changes.content.model，不得篡改已有节点模型', async () => {
     const canvas = makeCanvas()
     const pid = canvas.addPanel({ type: 'video', content: { prompt: 'a', model: 'agnes-video-2.5' }, x: 0, y: 0, width: 240, height: 180 })
-    const res = tool('agent_apply_ops').execute({
+    const res = await tool('agent_apply_ops').execute({
       ops: [{ op: 'update_panel', panel_id: pid, changes: { content: { prompt: 'b', model: 'seedance-pro' } } }],
     }, canvas) as { ok: boolean }
     expect(res.ok).toBe(true)
@@ -424,7 +424,7 @@ describe('storyboard_split', () => {
 
   it('收集实体卡调用拆分并回传成品 prompt；无实体卡报错', async () => {
     vi.mocked(splitStoryboard).mockResolvedValueOnce([
-      { no: 1, shotSize: '近景', camera: '缓推', description: '雨夜回头', dialogue: '谁？', characters: ['林小满'], location: '巷口', props: [], prompt: '成品提示词' },
+      { no: 1, shotSize: '近景', camera: '缓推', angle: '平视', description: '雨夜回头', dialogue: '谁？', characters: ['林小满'], location: '巷口', props: [], prompt: '成品提示词' },
     ])
     const canvas = makeCanvas()
     canvas.addPanel(entityCard('林小满', 'character', 'https://i/x.png'))

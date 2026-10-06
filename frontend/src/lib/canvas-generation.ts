@@ -138,6 +138,17 @@ function resourceLabel(type: string, index: number): string {
  * - source=canvas：历史页默认过滤
  * - work_id：画布所属作品（生成结果自动入库的作品标记）
  */
+/**
+ * 实体卡判定（image 节点 content.kind=character/scene/prop）：
+ * 是实体卡返回挂链实体 id（未挂链为 null）；非实体卡返回 undefined
+ */
+export function entityCardLinkId(node: GenerationPanel): number | null | undefined {
+  const kind = node.content?.kind
+  if (kind !== 'character' && kind !== 'scene' && kind !== 'prop') return undefined
+  const id = node.content?.entityId
+  return typeof id === 'number' && id > 0 ? id : null
+}
+
 export function buildCanvasContext(node: GenerationPanel, store: CanvasGenerationStore): GenerationContextPayload {
   const lineage = node.content?.lineage as { scriptPanelId?: unknown; shotNo?: unknown } | undefined
   const workId = store.activeWorkspace?.work_id ?? undefined
@@ -946,6 +957,11 @@ export async function executeInNodeGeneration(
   if (!ctx.prompt || !ctx.prompt.trim()) {
     throw new Error('提示词为空，请在节点上填写 prompt 或连接上游文本节点')
   }
+  // 实体卡门槛：挂作品画布上的未挂链实体卡禁止就地生成（先入库才能生成；自由画布无实体库不拦）
+  const linkedEntityId = entityCardLinkId(panel)
+  if (linkedEntityId === null && store.activeWorkspace?.work_id) {
+    throw new Error('该实体卡尚未入库作品实体库，请先在卡片上「入库」后再生成')
+  }
   const params = readPanelGenParams(panel, 'image')
   const config: GenerationConfig = { model: params.model, size: normalizeSize(params.size), response_format: 'url' }
 
@@ -970,7 +986,13 @@ export async function executeInNodeGeneration(
         ctx.inputSummary.imageCount = ctx.referenceImages.length
         ctx.referenceVideos = []
       }
-      return createGenerationTask(ctx, config, buildCanvasContext(panel, store))
+      // 实体卡挂链再生成：context 带实体引用，服务端生成成功自动建版本+采用（design）
+      const payload = buildCanvasContext(panel, store)
+      if (linkedEntityId) {
+        payload.entity_id = linkedEntityId
+        payload.version_role = 'design'
+      }
+      return createGenerationTask(ctx, config, payload)
     },
     (taskId, cb) => pollImageTask(taskId, cb),
     ctx.prompt,

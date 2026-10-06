@@ -8,6 +8,7 @@
 from datetime import datetime
 
 from sqlalchemy import Column, DateTime, Integer, String, Text
+from sqlalchemy.orm import relationship
 
 from app.core.database import Base
 
@@ -24,6 +25,9 @@ class Work(Base):
     description = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    # 删作品连带删实体库（versions 再级联）；无 relationship 时 unit of work 删除顺序不保证
+    entities = relationship("WorkEntity", cascade="all, delete-orphan")
 
     def to_dict(self) -> dict:
         return {

@@ -59,12 +59,13 @@ describe('注册表卫生（create 模式）', () => {
     expect(new Set(items.map((i) => i.id)).size).toBe(items.length)
   })
 
-  it('分组顺序 媒体 → 辅助 → 快捷操作，末组只有上传动作', () => {
+  it('分组顺序 媒体 → 辅助 → 快捷操作，末组为上传与实体库动作', () => {
     const groups = resolveCreateGroups()
     expect(groups.map((g) => g.key)).toEqual(['media', 'assist', 'action'])
     expect(groups.map((g) => t(g.labelKey))).toEqual(['媒体节点', '辅助节点', '快捷操作'])
-    expect(groups[2].items).toHaveLength(1)
+    expect(groups[2].items).toHaveLength(2)
     expect(groups[2].items[0].kind).toBe('upload')
+    expect(groups[2].items[1]).toMatchObject({ id: 'action:entity-pick', kind: 'action' })
   })
 
   it('image/video/audio 归媒体组', () => {

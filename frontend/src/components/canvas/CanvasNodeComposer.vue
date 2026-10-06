@@ -105,6 +105,7 @@ import { createChatSession, sendMessageStream } from '@/api/chat'
 import { getErrorMessage } from '@/lib/type-helpers'
 import { getUpstreamNodes } from '@/lib/canvas-generation'
 import { mergeExtractedAssets, readAssets, readShots } from '@/lib/canvas-storyboard'
+import { loadEntityScriptAssets, upsertEntitiesToLibrary } from '@/lib/canvas-entity-assets'
 import { planStoryboard } from '@/lib/storyboard/pipeline'
 import { listCameraVocabulary } from '@/lib/storyboard/library'
 import type { StoryboardEntity } from '@/lib/storyboard/schemas'
@@ -260,9 +261,11 @@ async function sendScript() {
   busy.value = true
   try {
     persistText()
-    // 上游图片节点 = 角色参考图，上游文本节点 = 角色设定；已有资产卡一并回传（反向通道，分镜沿用已有设定）
+    // 上游图片节点 = 角色参考图，上游文本节点 = 角色设定；实体卡/资产卡一并回传（反向通道，分镜沿用已有设定）
     const upstreamNodes = getUpstreamNodes(panel.value.id, store.panels, store.connections)
-    const assets = readAssets(panel.value)
+    // 实体库为唯一事实源：挂作品画布从 work_entities 取数；自由画布回落 content.assets 存量路径
+    const workId = store.activeWorkspace?.work_id ?? null
+    const assets = workId ? await loadEntityScriptAssets(workId) : readAssets(panel.value)
     const toEntity = (kind: EntityKind) => (a: { name: string; description: string; imageUrl: string }): StoryboardEntity => ({
       kind,
       name: a.name,
@@ -293,6 +296,7 @@ async function sendScript() {
       duration: 5,
       shotSize: s.shotSize,
       camera: s.camera,
+      angle: s.angle,
       description: s.description,
       dialogue: s.dialogue,
       characters: s.characters,
@@ -300,13 +304,21 @@ async function sendScript() {
       location: s.location,
     }))
     updateContent({ shots: JSON.parse(JSON.stringify(shots)) })
-    // LLM 提取的实体清单按名去重预填资产卡（不覆盖已有卡）
-    const merged = mergeExtractedAssets(readAssets(panel.value!), {
-      characters: out.assets.characters,
-      scenes: out.assets.scenes,
-      props: out.assets.props,
-    })
-    if (merged) updateContent({ assets: JSON.parse(JSON.stringify(merged)) })
+    // LLM 提取的实体清单按名收敛：挂作品画布 upsert 进实体库；自由画布预填存量资产卡
+    if (workId) {
+      await upsertEntitiesToLibrary(workId, [
+        ...out.assets.characters.map((e) => ({ kind: 'character' as const, name: e.name || '', description: e.description || '' })),
+        ...out.assets.scenes.map((e) => ({ kind: 'scene' as const, name: e.name || '', description: e.description || '' })),
+        ...out.assets.props.map((e) => ({ kind: 'prop' as const, name: e.name || '', description: e.description || '' })),
+      ])
+    } else {
+      const merged = mergeExtractedAssets(readAssets(panel.value!), {
+        characters: out.assets.characters,
+        scenes: out.assets.scenes,
+        props: out.assets.props,
+      })
+      if (merged) updateContent({ assets: JSON.parse(JSON.stringify(merged)) })
+    }
     // 已有分镜数量变化时清空旧的派生标记由向导处理；这里唤起向导进入确认镜头
     if (readShots(panel.value!).length > 0) {
       store.openScriptWizardId = panel.value!.id

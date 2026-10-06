@@ -20,7 +20,7 @@ from app.models.generation import Generation
 from app.models.model_definition import ModelDefinition
 from app.core.database import new_async_session
 from app.services.credits_service import confirm_credits, refund_credits
-from app.services import asset_archive
+from app.services import asset_archive, work_entity_service
 
 logger = logging.getLogger("agnes_platform")
 
@@ -230,13 +230,31 @@ async def persist_generation(
                     )
 
             # ===== 生成结果统一入库（影子转正）：成功生成全部建真资产行（旁路，失败仅记日志）=====
+            ingested_asset = None
             try:
-                await asset_archive.ingest_generation_asset(session, record, task.context or {})
+                ingested_asset = await asset_archive.ingest_generation_asset(session, record, task.context or {})
             except Exception as ingest_err:
                 logger.error(
                     "%s 生成结果入库失败（不影响主流程）: task_id=%s error=%s",
                     log_prefix, task.task_id, ingest_err, exc_info=True,
                 )
+
+            # ===== 画布实体卡产图自动入版本（ctx.entity_id，生成即版本+自动采用；旁路失败仅记日志）=====
+            if ingested_asset is not None:
+                ctx = task.context or {}
+                entity_id = ctx.get("entity_id")
+                if entity_id:
+                    try:
+                        await work_entity_service.add_version_from_generation(
+                            session, int(entity_id), ingested_asset.id, record.id,
+                            role=ctx.get("version_role"),
+                            work_id=ctx.get("work_id") if isinstance(ctx.get("work_id"), int) else None,
+                        )
+                    except Exception as ver_err:
+                        logger.error(
+                            "%s 实体版本自动入库失败（不影响主流程）: task_id=%s error=%s",
+                            log_prefix, task.task_id, ver_err, exc_info=True,
+                        )
         logger.info(
             "%s 记录已异步写入数据库: task_id=%s moderation=%s",
             log_prefix, task.task_id, moderation_status,

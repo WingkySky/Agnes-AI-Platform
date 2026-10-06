@@ -77,13 +77,63 @@ async def generate_tts(text: str, voice: str = "default", speed: float = 1.0) ->
 # 字幕拆分
 # =====================================================
 
-async def generate_subtitles(text: str, max_chars: int = 20, style_hint: Optional[str] = None) -> dict:
+async def generate_subtitles(
+    text: str, max_chars: int = 20, style_hint: Optional[str] = None,
+    audio_url: Optional[str] = None,
+) -> dict:
     """
-    画布文案 → LLM 拆分字幕，返回 {srt, segments, total_duration}
+    画布文案 → 字幕，返回 {srt, segments, total_duration}
 
-    segments: [{start_time, duration, text}]，时长按字数估算（0.24s/字，最短 1s）
+    - audio_url 提供且 whisper 可用：转写音频出真实时间戳字幕（台词源接通后的精准模式）；
+      转写失败/无结果自动回退 LLM 拆分
+    - 否则 LLM 拆分（segments 时长按字数估算 0.24s/字，最短 1s）
     style_hint: 用户补充的拆分要求（风格/节奏/禁用词等），拼进 LLM 提示词
     """
+    if audio_url:
+        try:
+            whisper_clips = await _subtitles_from_audio(audio_url)
+            if whisper_clips:
+                total = whisper_clips[-1]["start_time"] + whisper_clips[-1]["duration"]
+                logger.info("[画布字幕] whisper 模式 %d 条, 总时长 %.1fs", len(whisper_clips), total)
+                return {"srt": build_srt(whisper_clips), "segments": whisper_clips, "total_duration": round(total, 3)}
+        except Exception as e:
+            logger.warning("[画布字幕] whisper 转写失败，回退 LLM 拆分: %s", e)
+    return await _subtitles_from_llm(text, max_chars, style_hint)
+
+
+async def _subtitles_from_audio(audio_url: str) -> List[dict]:
+    """音频 URL → faster-whisper 转写 → 字幕片段（真实时间戳）；未安装或无结果返回空"""
+    from app.services.media import transcribe_service
+
+    if not transcribe_service.is_whisper_available():
+        return []
+    if not is_safe_url(audio_url):
+        raise ValueError("音频地址不安全")
+    tmp_dir = tempfile.mkdtemp(prefix="canvas_subtitle_")
+    local_path = ensure_within(tmp_dir, "audio.wav")
+    try:
+        async with httpx.AsyncClient(timeout=300) as client:
+            resp = await client.get(audio_url)
+            resp.raise_for_status()
+            Path(local_path).write_bytes(resp.content)
+        segments = await transcribe_service.transcribe_audio(local_path, language="zh")
+        clips: List[dict] = []
+        for seg in segments:
+            seg_text = (seg.get("text") or "").strip()
+            duration = max(float(seg.get("end", 0)) - float(seg.get("start", 0)), 0.3)
+            if not seg_text:
+                continue
+            clips.append({
+                "start_time": round(float(seg.get("start", 0)), 3),
+                "duration": round(duration, 3),
+                "text": seg_text,
+            })
+        return clips
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+async def _subtitles_from_llm(text: str, max_chars: int = 20, style_hint: Optional[str] = None) -> dict:
     text = (text or "").strip()
     if not text:
         raise ValueError("文本内容为空，无法生成字幕")

@@ -29,6 +29,8 @@ export interface CanvasShot {
   duration: number
   shotSize: string
   camera: string
+  /** 视角（平视/俯视/仰视/鸟瞰/主观等，空为平视默认） */
+  angle: string
   description: string
   dialogue: string
   /** 出场角色名列表（资产卡按名命中） */
@@ -129,6 +131,7 @@ export function readShots(panel: { content?: Record<string, unknown> }): CanvasS
       duration: typeof item.duration === 'number' ? item.duration : 5,
       shotSize: typeof item.shotSize === 'string' ? item.shotSize : '中景',
       camera: typeof item.camera === 'string' ? item.camera : '',
+      angle: typeof item.angle === 'string' ? item.angle : '',
       description: item.description,
       dialogue: typeof item.dialogue === 'string' ? item.dialogue : '',
       characters: Array.isArray(item.characters)
@@ -261,10 +264,11 @@ export function buildShotContexts(shot: CanvasShot, assets: ScriptAssets, extraC
   }
 }
 
-/** 分镜视频 prompt：画面描述 + 运镜 */
+/** 分镜视频 prompt：画面描述 + 运镜 + 视角 */
 export function buildShotVideoPrompt(shot: CanvasShot): string {
   const lines = [shot.description]
   if (shot.camera) lines.push(`运镜：${shot.camera}`)
+  if (shot.angle) lines.push(`视角：${shot.angle}`)
   return lines.join('\n')
 }
 

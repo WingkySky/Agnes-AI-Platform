@@ -23,6 +23,8 @@ export interface StoryboardShot {
   shotSize: string
   /** 运镜（从库词表取值） */
   camera: string
+  /** 视角（平视/俯视/仰视/鸟瞰/主观等，空为平视默认） */
+  angle: string
   /** 画面描述（单帧、可直接生图） */
   description: string
   /** 台词（不入图，视频阶段配音/字幕用） */
@@ -106,6 +108,7 @@ export function parseShot(raw: Record<string, unknown>, fallbackNo: number): Omi
     no: typeof raw.no === 'number' && raw.no >= 1 ? raw.no : fallbackNo,
     shotSize: sizes.includes(shotSize) ? shotSize : '中景',
     camera: readString(raw.camera).trim(),
+    angle: readString(raw.angle).trim(),
     description: readString(raw.description).trim(),
     dialogue: readString(raw.dialogue).trim(),
     characters: readStringArray(raw.characters),

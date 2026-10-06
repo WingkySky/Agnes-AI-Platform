@@ -350,6 +350,8 @@
         @confirm="handleAngleConfirm"
         @cancel="imageOpsState.angle.visible = false"
       />
+      <!-- 实体选择器：从作品实体库落挂链实体卡（快捷菜单动作） -->
+      <EntityPickerDialog v-model="entityPickerVisible" @select="onPickEntity" />
       <!-- AI 打光弹窗 -->
       <CanvasLightingDialog
         v-if="imageOpsState.lighting.visible"
@@ -575,6 +577,8 @@ import CanvasImageCropDialog from '@/components/canvas/CanvasImageCropDialog.vue
 import CanvasImageSplitDialog from '@/components/canvas/CanvasImageSplitDialog.vue'
 import CanvasImageUpscaleDialog from '@/components/canvas/CanvasImageUpscaleDialog.vue'
 import CanvasImageAngleDialog from '@/components/canvas/CanvasImageAngleDialog.vue'
+import EntityPickerDialog from '@/components/canvas/EntityPickerDialog.vue'
+import type { WorkEntityItem } from '@/api/workEntities'
 import CanvasLightingDialog from '@/components/canvas/CanvasLightingDialog.vue'
 import CanvasEmotionDialog from '@/components/canvas/CanvasEmotionDialog.vue'
 // 画布分组层组件（成员制分组，替代旧流程模式步骤）
@@ -594,10 +598,10 @@ import {
   createWorkspaceFromTemplate,
 } from '@/lib/canvas-templates'
 // 画布生成：上游节点查找（用于配置节点 prompt 为空时检查上游文本）+ 生成归档上下文
-import { getUpstreamNodes, buildCanvasContext, resumeLoadingCanvasNodes, resolvePromptMentions, executeSourceImageGeneration, executeSourceVideoGeneration, type CanvasGenerationStore, type GenerationContext } from '@/lib/canvas-generation'
+import { getUpstreamNodes, buildCanvasContext, resumeLoadingCanvasNodes, resolvePromptMentions, executeSourceImageGeneration, executeSourceVideoGeneration, entityCardLinkId, type CanvasGenerationStore, type GenerationContext } from '@/lib/canvas-generation'
 import { createBatchContent, fillCellFromNode, readBatchContent } from '@/lib/canvas-batch-table'
 // 分镜派生：单镜头图生视频 + 整组重跑的批量积分确认
-import { confirmGroupedCost, deriveVideoForShot, deriveTailFrameFromImageNode, derivePrevFrameFromImageNode, deriveChainVideosFromImageNode, getShotLineageInfo } from '@/lib/canvas-storyboard'
+import { confirmGroupedCost, deriveVideoForShot, deriveTailFrameFromImageNode, derivePrevFrameFromImageNode, deriveChainVideosFromImageNode, getShotLineageInfo, readShots } from '@/lib/canvas-storyboard'
 // 分组包络计算与智能建议分组（按连线连通分量）
 import { calculateGroupBounds, suggestGroups } from '@/lib/canvas-groups'
 // 一键整理布局（面板摆放位置优化，按类别分块平铺）
@@ -1462,8 +1466,17 @@ function handleQuickMenuSelect(item: QuickMenuItem) {
     return
   }
   if (item.kind === 'action') {
-    // 快捷生成：在拖线源节点上打开快捷生成弹窗（结果节点自动连回源节点）
     closeQuickMenu()
+    // 实体库：打开实体选择器（落挂链实体卡，跨集复用入口）
+    if (item.id === 'action:entity-pick') {
+      if (!store.activeWorkspace?.work_id) {
+        ElMessage.warning(t('entityLib.noWork'))
+        return
+      }
+      entityPickerVisible.value = true
+      return
+    }
+    // 快捷生成：在拖线源节点上打开快捷生成弹窗（结果节点自动连回源节点）
     const sourcePanel = store.panels.find((p) => p.id === quickMenu.sourceId)
     if (sourcePanel) handleQuickGenerate({ panel: sourcePanel, mode: String(item.content?.mode || 'image2image') })
     return
@@ -1683,6 +1696,8 @@ const quickGenerateState = reactive({
 
 // 打开快捷生成弹窗（由文本/图片节点的生图/生视频按钮触发）
 function handleQuickGenerate({ panel, mode }: { panel: typeof store.panels[number]; mode: string }) {
+  // 实体卡门槛：未挂链实体卡先入库才能生成（自由画布无实体库不拦）
+  if (!ensureEntityLinked(panel)) return
   // 校验源内容非空
   if (panel.type === 'text') {
     const text = contentString(panel.content?.content).trim()
@@ -1905,13 +1920,38 @@ function getUpstreamRunNodes(panelId: string, types: string[]) {
   return bands.flatMap((band) => band.sort((a, b) => a.x - b.x))
 }
 
-/** 收集配音/字幕来源文本：优先上游文本节点内容，兜底节点自身 text */
+/** 收集配音/字幕来源文本：显式文本节点 > 上游分镜台词（结构化台词源，按 no 拼接）> 节点自身 text */
 function collectRunText(panel: CanvasPanel): string {
   for (const p of getUpstreamRunNodes(panel.id, ['text'])) {
     const text = contentString(p.content?.content).trim()
     if (text) return text
   }
+  const dialogue = collectScriptDialogue(panel)
+  if (dialogue) return dialogue
   return contentString(panel.content?.text).trim()
+}
+
+/** 上游 script 节点的分镜台词（结构化台词源：whisper 字幕与 TTS 共用） */
+function collectScriptDialogue(panel: CanvasPanel): string {
+  for (const p of getUpstreamRunNodes(panel.id, ['script'])) {
+    const lines = readShots(p)
+      .sort((a, b) => a.no - b.no)
+      .map((s) => s.dialogue.trim())
+      .filter(Boolean)
+    if (lines.length) return lines.join('\n')
+  }
+  return ''
+}
+
+/** 字幕节点 whisper 模式音频源：上游 tts 节点的结果音频（有则真实时间戳转写，无则 LLM 拆分） */
+function collectSubtitleAudioUrl(panel: CanvasPanel): string | undefined {
+  for (const tts of getUpstreamRunNodes(panel.id, ['tts'])) {
+    const resultId = contentString(tts.content?.result_panel_id)
+    const result = resultId ? store.panels.find((p) => p.id === resultId) : null
+    const url = result?.content?.content
+    if (result?.type === 'audio' && url) return String(url)
+  }
+  return undefined
 }
 
 /** 确保执行结果节点存在：已有则复用并置 loading（重试），否则新建并连线 */
@@ -1971,6 +2011,8 @@ async function runSubtitleNode(panel: CanvasPanel) {
       text,
       max_chars: Number(panel.content?.max_chars) || 20,
       prompt: contentString(panel.content?.prompt) || undefined,
+      // 上游有 TTS 产物时走 whisper 转写（真实时间戳），服务端失败自动回退 LLM 拆分
+      audio_url: collectSubtitleAudioUrl(panel),
     })
     store.updatePanel(resultId, { content: { content: res.srt, status: 'success' } })
     store.pushSnapshot()
@@ -2047,7 +2089,38 @@ async function handleNodeRun(panel: CanvasPanel) {
 async function handleHoverRunNode() {
   const panel = toolbarPanel.value
   if (!panel) return
+  // 实体卡门槛：未挂链实体卡先入库才能生成
+  if (!ensureEntityLinked(panel)) return
   await handleNodeRun(panel)
+}
+
+// ===== 实体库（画布实体卡挂链） =====
+const entityPickerVisible = ref(false)
+
+/** 实体卡生成门槛：未挂链实体卡拦截并提示入库；非实体卡/已挂链/自由画布放行 */
+function ensureEntityLinked(panel: typeof store.panels[number]): boolean {
+  const linked = entityCardLinkId(panel)
+  if (linked === undefined) return true
+  if (linked !== null || !store.activeWorkspace?.work_id) return true
+  ElMessage.warning(t('entityLib.unlinkWarn'))
+  return false
+}
+
+/** 实体选择器选中：在快捷菜单位落挂链实体卡（跨集复用入口） */
+function onPickEntity(entity: WorkEntityItem) {
+  entityPickerVisible.value = false
+  const activeVersion = entity.versions.find((v) => v.is_active)
+  const designImage = activeVersion?.images.find((i) => i.role === 'design') || activeVersion?.images[0]
+  const id = createNodeAt('image', quickMenu.worldX, quickMenu.worldY, {
+    kind: entity.kind,
+    entityId: entity.id,
+    entityName: entity.name,
+    entityDesc: entity.description || '',
+    content: entity.active_image_url || '',
+    status: entity.active_image_url ? 'success' : '',
+    ...(designImage ? { assetId: String(designImage.asset_id) } : {}),
+  })
+  store.updatePanel(id, { name: entity.name })
 }
 
 // 通用：重试生成
@@ -2982,6 +3055,14 @@ async function generateDerivedImage(opts: {
     // 参考图转 base64（远程 URL 会自动走后端代理下载后再转）
     const base64Images = opts.base64Images ?? [await toBase64IfNeeded(opts.imageUrl)]
 
+    // 派生图 context：源是挂链实体卡时按 angle 角色追加进当前采用版本（兄弟节点照常落画布）
+    const context = buildCanvasContext(panel, store)
+    const srcEntityId = entityCardLinkId(panel)
+    if (srcEntityId) {
+      context.entity_id = srcEntityId
+      context.version_role = 'angle'
+    }
+
     const resp = await createImageTask({
       prompt: opts.prompt,
       model: useModelsStore().defaultImageModel,
@@ -2991,7 +3072,7 @@ async function generateDerivedImage(opts: {
       // 用数组形式传参，与当前后端 schema 对齐；旧字段也保留一份兜底
       base64_images: base64Images,
       base64_image: base64Images[0],
-      context: buildCanvasContext(panel, store),
+      context,
     })
     taskId = resp.task_id
     taskQueue.registerCanvasTask({

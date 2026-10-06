@@ -72,8 +72,8 @@ export function getCanvasBgmsCached(): Promise<{ bgms: CanvasBgm[]; moods: strin
   return _bgmsCache
 }
 
-/** 画布文案 → LLM 拆分 SRT 字幕 */
-export function generateCanvasSubtitles(data: { text: string; max_chars?: number; prompt?: string }): Promise<CanvasSubtitleResult> {
+/** 画布文案 → SRT 字幕（audio_url 提供时服务端 whisper 转写真实时间戳，失败回退 LLM 拆分） */
+export function generateCanvasSubtitles(data: { text: string; max_chars?: number; prompt?: string; audio_url?: string }): Promise<CanvasSubtitleResult> {
   return client.post('/api/canvas/subtitle', data)
 }
 

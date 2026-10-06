@@ -8,8 +8,10 @@
  * ===================================================== */
 
 import type { CanvasPanel, CanvasConnection, CanvasStyleSelection } from '@/stores/canvas'
+import { useCanvasStore } from '@/stores/canvas'
 import { executeInNodeGeneration, executeInNodeVideoGeneration } from '@/lib/canvas-generation'
 import { composeCanvasVideos } from '@/api/canvas'
+import { createWorkEntity } from '@/api/workEntities'
 import { useModelsStore } from '@/stores/models'
 import type { ModelInfo } from '@/types'
 import { Type } from 'typebox'
@@ -188,7 +190,7 @@ function getState(canvas: AgentCanvasStore): AgentToolResult {
 }
 
 /** 批量应用画布操作：整批一个撤销快照，逐条执行并收集结果 */
-function applyOps(args: Record<string, unknown>, canvas: AgentCanvasStore): AgentToolResult {
+async function applyOps(args: Record<string, unknown>, canvas: AgentCanvasStore): Promise<AgentToolResult> {
   const opsRaw = Array.isArray(args.ops) ? args.ops : []
   if (opsRaw.length === 0) return { ok: false, error: 'ops 为空' }
 
@@ -197,6 +199,8 @@ function applyOps(args: Record<string, unknown>, canvas: AgentCanvasStore): Agen
   const newPanelIds: string[] = []
   // 本批次新建节点 name → id：让后续 op 能按名称引用同批新建的节点（一拍完成建点+连线）
   const newPanelByName = new Map<string, string>()
+  // 本批次新建的实体卡节点：落卡后自动注册作品实体库（实体库为唯一事实源）
+  const entityCardIds: string[] = []
 
   // 节点引用解析：id 优先，其次节点名称（含本批次新建）；解析失败返回 null
   const resolveRef = (ref: unknown): string | null => {
@@ -227,6 +231,7 @@ function applyOps(args: Record<string, unknown>, canvas: AgentCanvasStore): Agen
         })
         if (name) newPanelByName.set(name, id)
         newPanelIds.push(id)
+        if (panelType === 'image' && isEntityKind(asRecord(op.content)?.kind)) entityCardIds.push(id)
         results.push({ index: i, op: kind, ok: true, panel_id: id })
       } else if (kind === 'update_panel') {
         const panelId = resolveRef(op.panel_id)
@@ -277,8 +282,38 @@ function applyOps(args: Record<string, unknown>, canvas: AgentCanvasStore): Agen
     }
   })
 
+  // 落卡自动注册实体库：实体卡建实体（生成门槛「先入库才能生成」由 executeInNodeGeneration 兜底拦截）
+  for (const pid of entityCardIds) {
+    await registerAgentEntityCard(pid)
+  }
+
   const failed = results.filter((r) => r.ok === false)
   return { ok: failed.length === 0, data: { results, new_panel_ids: newPanelIds }, error: failed.length ? `${failed.length} 条操作失败` : undefined }
+}
+
+/** Agent 落实体卡自动注册作品实体库（挂作品画布才注册）；失败不阻塞落卡，卡片可走「入库」补挂 */
+async function registerAgentEntityCard(panelId: string): Promise<void> {
+  try {
+    const store = useCanvasStore()
+    const panel = store.panels.find((p) => p.id === panelId)
+    if (!panel) return
+    const content = panel.content || {}
+    const existingId = content.entityId
+    if (typeof existingId === 'number' && existingId > 0) return
+    const kind = content.kind
+    if (!isEntityKind(kind)) return
+    const workId = store.activeWorkspace?.work_id
+    if (!workId) return
+    const name = typeof content.entityName === 'string' && content.entityName.trim()
+      ? content.entityName.trim()
+      : (panel.name || '').trim()
+    if (!name) return
+    const desc = typeof content.entityDesc === 'string' ? content.entityDesc.trim() : ''
+    const created = await createWorkEntity(workId, { kind, name, description: desc || undefined })
+    store.updatePanel(panelId, { content: { ...content, entityId: created.id } })
+  } catch {
+    // 注册失败静默：卡片保持未挂链，用户可在卡片弹层「入库」
+  }
 }
 
 // ---------- 分镜管线工具（实体卡收集 + 实体提取/分镜拆分） ----------

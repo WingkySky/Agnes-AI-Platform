@@ -9,7 +9,7 @@
 import type { Component } from 'vue'
 import {
   Image as ImageIcon, Video, Music2, FileText, Mic, Captions,
-  Clapperboard, ClipboardList, Table2, Upload,
+  Clapperboard, ClipboardList, Table2, Upload, Users,
 } from 'lucide-vue-next'
 import { t } from '@/i18n'
 import { validateConnectionTypes } from '@/stores/canvas'
@@ -74,6 +74,11 @@ const UPLOAD_ITEM: QuickMenuItem = {
   id: 'action:upload', kind: 'upload', icon: Upload, labelKey: 'canvas.quickMenu.uploadImage',
 }
 
+/** 实体库动作项：从作品实体库选实体落挂链画布卡（跨集复用入口） */
+const ENTITY_PICK_ITEM: QuickMenuItem = {
+  id: 'action:entity-pick', kind: 'action', icon: Users, labelKey: 'entityLib.title',
+}
+
 /** 按类型构造节点菜单项（节点名复用 canvas.nodeNames.*） */
 function nodeMenuItem(entry: NodeEntry): QuickMenuItem {
   return {
@@ -122,7 +127,7 @@ export function resolveCreateGroups(): QuickMenuGroup[] {
   for (const entry of NODE_ITEMS) {
     groups.find((g) => g.key === entry.group)!.items.push(nodeMenuItem(entry))
   }
-  groups[groups.length - 1].items.push(UPLOAD_ITEM)
+  groups[groups.length - 1].items.push(UPLOAD_ITEM, ENTITY_PICK_ITEM)
   return groups
 }
 

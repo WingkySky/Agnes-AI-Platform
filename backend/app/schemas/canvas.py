@@ -20,10 +20,11 @@ class CanvasTtsResponse(BaseModel):
 
 
 class CanvasSubtitleRequest(BaseModel):
-    """画布字幕请求（text 上游节点内容）"""
+    """画布字幕请求（text 上游节点内容；audio_url 提供时走 whisper 真实时间戳）"""
     text: str = Field(..., min_length=1, description="待拆分的文案")
     max_chars: int = Field(default=20, ge=5, le=50, description="每条字幕最大字数")
     prompt: Optional[str] = Field(None, max_length=500, description="拆分补充要求（风格/节奏/禁用词等）")
+    audio_url: Optional[str] = Field(None, max_length=2048, description="上游 TTS 音频 URL：提供时 whisper 转写出真实时间戳字幕，失败回退 LLM 拆分")
 
 
 class CanvasSubtitleSegment(BaseModel):

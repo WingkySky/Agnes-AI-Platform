@@ -81,15 +81,16 @@ describe('schemas 解析容错', () => {
 })
 
 describe('buildFramePrompt / buildAssetPrompt', () => {
-  it('成品提示词含单帧约束、景别运镜、实体上下文', () => {
+  it('成品提示词含单帧约束、景别运镜视角、实体上下文', () => {
     const prompt = buildFramePrompt(
-      { description: '林小满在雨夜巷口回头', shotSize: '近景', camera: '缓推' },
+      { description: '林小满在雨夜巷口回头', shotSize: '近景', camera: '缓推', angle: '俯视' },
       { characters: ['林小满：红衣少女'], scenes: ['雨夜巷口：湿漉石板'], props: ['油纸伞：褪色红伞'] },
     )
     expect(prompt).toContain('林小满在雨夜巷口回头')
     expect(prompt).toContain(SINGLE_FRAME_PROMPT_LINE)
     expect(prompt).toContain('景别：近景')
     expect(prompt).toContain('运镜：缓推')
+    expect(prompt).toContain('视角：俯视')
     expect(prompt).toContain('角色设定：林小满：红衣少女')
     expect(prompt).toContain('物品设定：油纸伞：褪色红伞')
     expect(prompt).not.toContain('画面风格')
@@ -97,7 +98,7 @@ describe('buildFramePrompt / buildAssetPrompt', () => {
 
   it('风格配置注入 prefix/suffix 与避免行；空风格无风格段', () => {
     const style: StyleConfig = { prefix: '赛博朋克', suffix: '霓虹光', negativePrompt: '低质量' }
-    const prompt = buildFramePrompt({ description: 'x', shotSize: '', camera: '' }, { characters: [], scenes: [] }, style)
+    const prompt = buildFramePrompt({ description: 'x', shotSize: '', camera: '', angle: '' }, { characters: [], scenes: [] }, style)
     expect(prompt).toContain('画面风格：赛博朋克，霓虹光')
     expect(prompt).toContain('画面避免：低质量')
     expect(buildAssetPrompt({ kind: 'prop', name: '伞', description: '红伞', refImageUrl: '' }, style)).toContain('画面风格：赛博朋克，霓虹光')

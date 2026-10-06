@@ -978,7 +978,7 @@ export const useProjectStore = defineStore('project', {
       const propTexts = (shot.props?.length ? prps.filter((p) => bound.has(p.name.trim())) : prps)
         .map((p) => text(p.name, p.visual_desc || p.description || '')).filter(Boolean)
       const prompt = buildFramePrompt(
-        { description: shot.visual_desc || '', shotSize: shot.shot_type || '', camera: shot.camera_movement || '' },
+        { description: shot.visual_desc || '', shotSize: shot.shot_type || '', camera: shot.camera_movement || '', angle: shot.angle || '' },
         { characters: characterTexts, scenes: scene ? [text(scene.name, sceneDesc)] : [], props: propTexts },
       )
       const updated = await apiUpdateShot(pid, shotId, { image_prompt: prompt })

@@ -210,6 +210,8 @@ class GenerationContext(BaseModel):
     container_name: Optional[str] = Field(default=None, description="容器名快照")
     asset_type: Optional[str] = Field(default=None, description="归档资产类型：material / clip / character / scene / final")
     asset_name: Optional[str] = Field(default=None, description="归档资产名")
+    entity_id: Optional[int] = Field(default=None, description="画布实体卡挂链实体：生成成功自动建版本并采用")
+    version_role: Optional[str] = Field(default=None, description="实体表现图角色：design（默认，新版本）/ angle（多角度派生，追加进采用版本）")
 
     @field_validator("source")
     @classmethod
