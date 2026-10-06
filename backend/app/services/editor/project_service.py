@@ -50,13 +50,14 @@ async def get_owned_project(db: AsyncSession, uid: str, user: User) -> EditingPr
 
 
 def default_document() -> dict:
-    """空工程默认时间线（三轨，无片段）"""
+    """空工程默认时间线（三轨，无片段）；flags 与前端 TrackFlags 契约一致（四开全关）"""
+    all_off = {"hidden": False, "locked": False, "muted": False, "solo": False}
     return {
         "timebase": 30, "width": 1280, "height": 720,
         "tracks": [
-            {"id": "v1", "kind": "video", "order": 0, "flag": None},
-            {"id": "a1", "kind": "audio", "order": 0, "flag": None},
-            {"id": "s1", "kind": "subtitle", "order": 0, "flag": None},
+            {"id": "v1", "kind": "video", "order": 0, "flags": dict(all_off)},
+            {"id": "a1", "kind": "audio", "order": 0, "flags": dict(all_off)},
+            {"id": "s1", "kind": "subtitle", "order": 0, "flags": dict(all_off)},
         ],
         "clips": [],
         "subtitleStyle": {"font": "Noto Sans CJK SC", "size": 48, "color": "#FFFFFF",
@@ -190,9 +191,9 @@ async def build_draft_from_assets(
     doc = {
         "timebase": 30, "width": 1280, "height": 720,
         "tracks": [
-            {"id": "v1", "kind": "video", "order": 0, "flag": None},
-            {"id": "a1", "kind": "audio", "order": 0, "flag": None},
-            {"id": "s1", "kind": "subtitle", "order": 0, "flag": None},
+            {"id": "v1", "kind": "video", "order": 0, "flags": {}},
+            {"id": "a1", "kind": "audio", "order": 0, "flags": {}},
+            {"id": "s1", "kind": "subtitle", "order": 0, "flags": {}},
         ],
         "clips": video_clips + audio_clips,
         "subtitleStyle": {"font": "Noto Sans CJK SC", "size": 48, "color": "#FFFFFF",

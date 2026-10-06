@@ -6,14 +6,14 @@
 import { describe, expect, it } from 'vitest'
 
 import { buildSnapPoints, resolveSnap, snapThresholdSec } from '@/lib/editor-snapping'
-import type { EditorDocument } from '@/lib/editor-types'
+import { EMPTY_TRACK_FLAGS, type EditorDocument } from '@/lib/editor-types'
 
 function baseDoc(): EditorDocument {
   return {
     timebase: 30,
     width: 1280,
     height: 720,
-    tracks: [{ id: 'v1', kind: 'video', order: 0, flag: null }],
+    tracks: [{ id: 'v1', kind: 'video', order: 0, flags: { ...EMPTY_TRACK_FLAGS } }],
     clips: [
       { id: 'a', trackId: 'v1', assetId: 1, start: 2, duration: 3, trimStart: 0, props: {} },
       { id: 'b', trackId: 'v1', assetId: 2, start: 8, duration: 1, trimStart: 0, props: {} },

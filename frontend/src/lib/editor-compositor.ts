@@ -2,8 +2,7 @@
  * 预览合成器（纯函数）
  * - planFrame：文档 + 播放头 → 自底向上的绘制清单（视频轨激活片段，归一化 rect
  *   换算为 stage 像素）；字幕走 DOM 层不进清单；执行层只做 drawImage
- * - 与渲染端语义对齐：轨 order 大 = 上层；hidden 轨跳过；无激活片段输出黑底
- * ===================================================== */
+ * - 与渲染端语义对齐：轨 order 大 = 上层；hidden 轨跳过；无激活片段输出黑底 * ===================================================== */
 
 import { clipEnd, FULL_RECT, type ClipRect, type EditorDocument } from './editor-types'
 
@@ -25,7 +24,7 @@ export function planFrame(
   stageH: number,
 ): DrawItem[] {
   const videoTracks = doc.tracks
-    .filter((tr) => tr.kind === 'video' && tr.flag !== 'hidden')
+    .filter((tr) => tr.kind === 'video' && !tr.flags.hidden)
     .sort((a, b) => a.order - b.order)
   const items: DrawItem[] = []
   for (const track of videoTracks) {

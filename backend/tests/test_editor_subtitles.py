@@ -22,9 +22,9 @@ def _doc():
     return {
         "timebase": 30, "width": 1280, "height": 720,
         "tracks": [
-            {"id": "v1", "kind": "video", "order": 0, "flag": None},
-            {"id": "a1", "kind": "audio", "order": 0, "flag": None},
-            {"id": "s1", "kind": "subtitle", "order": 0, "flag": None},
+            {"id": "v1", "kind": "video", "order": 0, "flags": {}},
+            {"id": "a1", "kind": "audio", "order": 0, "flags": {}},
+            {"id": "s1", "kind": "subtitle", "order": 0, "flags": {}},
         ],
         "clips": [
             {"id": "c-a1", "trackId": "a1", "assetId": 1, "start": 2.0,

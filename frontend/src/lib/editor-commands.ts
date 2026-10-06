@@ -1,5 +1,5 @@
 /* =====================================================
- * 剪辑器命令状态机 — 13 op 纯函数命令表
+ * 剪辑器命令状态机 — 14 op 纯函数命令表
  *
  * - 每个命令 (doc, payload) => 新 doc，不可变更新（未变子树结构共享）
  * - fail-closed：未知 op / 非法 payload 抛 EditorCommandError，不改状态（可安全回放）
@@ -14,11 +14,11 @@ import {
   type EditorClip,
   type EditorDocument,
   type EditorTrack,
-  type TrackFlag,
+  EMPTY_TRACK_FLAGS,
   MIN_CLIP_DURATION,
   clipEnd,
   isTransitionType,
-  isTrackFlag,
+  isTrackFlagsPatch,
   isTrackKind,
 } from './editor-types'
 import { canPlaceOnTrack, needsCollisionCheck } from './editor-placement'
@@ -56,7 +56,7 @@ export interface EditorCommand {
 export const EDITOR_OPS = [
   'addClip', 'moveClip', 'trimClip', 'splitClip', 'removeClip', 'detachAudio', 'setClipProperty',
   'addSubtitle', 'removeSubtitle', 'rebuildSubtitleClips',
-  'addTrack', 'removeTrack', 'setTrackFlag',
+  'addTrack', 'removeTrack', 'setTrackFlags', 'moveTrack',
 ] as const
 export type EditorOp = (typeof EDITOR_OPS)[number]
 
@@ -81,7 +81,7 @@ function findClip(doc: EditorDocument, clipId: unknown): { clip: EditorClip; ind
 }
 
 function ensureUnlocked(track: EditorTrack): void {
-  if (track.flag === 'locked') throw new EditorCommandError('track_locked', track.id)
+  if (track.flags.locked) throw new EditorCommandError('track_locked', track.id)
 }
 
 function requirePositive(v: unknown, name: string): number {
@@ -151,7 +151,7 @@ function withClip(doc: EditorDocument, clipId: string, mutate: (c: EditorClip) =
   return { ...doc, clips }
 }
 
-// ---------- 12 op 实现 ----------
+// ---------- 14 op 实现 ----------
 
 const commands: Record<EditorOp, (doc: EditorDocument, payload: CommandPayload) => EditorDocument> = {
   addClip: (doc, payload) => {
@@ -400,7 +400,7 @@ const commands: Record<EditorOp, (doc: EditorDocument, payload: CommandPayload) 
     }
     const sameKind = doc.tracks.filter((t) => t.kind === track.kind)
     const order = typeof track.order === 'number' ? track.order : sameKind.length
-    const next: EditorTrack = { id: track.id, kind: track.kind, order, flag: null }
+    const next: EditorTrack = { id: track.id, kind: track.kind, order, flags: { ...EMPTY_TRACK_FLAGS } }
     return { ...doc, tracks: [...doc.tracks, next] }
   },
 
@@ -412,16 +412,38 @@ const commands: Record<EditorOp, (doc: EditorDocument, payload: CommandPayload) 
     return { ...doc, tracks: doc.tracks.filter((t) => t.id !== track.id) }
   },
 
-  setTrackFlag: (doc, payload) => {
-    findTrack(doc, payload.trackId)
-    const flag = payload.flag
-    if (flag !== null && !isTrackFlag(flag)) {
-      throw new EditorCommandError('invalid_payload', 'flag')
+  /** 轨道开关部分合并：payload.flags 是布尔增量，未提及的键保持原值（多开可并存） */
+  setTrackFlags: (doc, payload) => {
+    const track = findTrack(doc, payload.trackId)
+    const patch = payload.flags
+    if (!isTrackFlagsPatch(patch)) {
+      throw new EditorCommandError('invalid_payload', 'flags')
     }
     return {
       ...doc,
-      tracks: doc.tracks.map((t) => (t.id === payload.trackId ? { ...t, flag: flag as TrackFlag | null } : t)),
+      tracks: doc.tracks.map((t) => (t.id === track.id ? { ...t, flags: { ...t.flags, ...patch } } : t)),
     }
+  },
+
+  /** 同类型轨内重排：toIndex 为「移除被拖轨后」的同类型显示序插入位（0=顶），重编号 order 保持稠密 */
+  moveTrack: (doc, payload) => {
+    const track = findTrack(doc, payload.trackId)
+    const toIndex = payload.toIndex
+    if (typeof toIndex !== 'number' || !Number.isInteger(toIndex) || toIndex < 0) {
+      throw new EditorCommandError('invalid_payload', 'toIndex')
+    }
+    const sameKind = doc.tracks
+      .filter((t) => t.kind === track.kind)
+      .sort((a, b) => b.order - a.order) // 显示序：order 大在上
+    const cur = sameKind.findIndex((t) => t.id === track.id)
+    const target = Math.min(toIndex, sameKind.length - 1) // 越界钳到末位
+    if (target === cur) return doc // 原位放置：结构共享零变更
+    const next = sameKind.filter((t) => t.id !== track.id)
+    next.splice(target, 0, track)
+    const n = next.length
+    const orderById = new Map(next.map((t, i) => [t.id, n - 1 - i]))
+    // 只替换同类型轨，其他轨保持引用相等（结构共享）
+    return { ...doc, tracks: doc.tracks.map((t) => (orderById.has(t.id) ? { ...t, order: orderById.get(t.id)! } : t)) }
   },
 }
 

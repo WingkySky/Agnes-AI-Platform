@@ -71,6 +71,8 @@ export const useEditorStore = defineStore('editor', () => {
   // ---------- 文档与编辑态 ----------
   const doc = shallowRef<EditorDocument | null>(null)
   const selectedClipId = ref<string | null>(null)
+  /** 轨道选中（点轨头/轨道空白处）：与片段选中互斥，Delete 键删空轨 */
+  const selectedTrackId = ref<string | null>(null)
   const playhead = ref(0)
   const isPlaying = ref(false)
   const history = new EditorHistory()
@@ -373,7 +375,7 @@ export const useEditorStore = defineStore('editor', () => {
     const span = { start, duration: Math.round(duration * 1000) / 1000 }
     const requested = doc.value.tracks.find((tr) => tr.id === at.trackId)
     let track: EditorTrack | null =
-      requested && requested.kind === kind && requested.flag !== 'locked'
+      requested && requested.kind === kind && !requested.flags.locked
         && canPlaceOnTrack(doc.value.clips.filter((c) => c.trackId === requested.id), span)
         ? requested
         : null
@@ -398,7 +400,7 @@ export const useEditorStore = defineStore('editor', () => {
       id: newId('track'),
       kind,
       order: doc.value.tracks.filter((tr) => tr.kind === kind).length,
-      flag: null,
+      flags: { hidden: false, locked: false, muted: false, solo: false },
     }
     if (!applyOrToast({ op: 'addTrack', payload: { track } }, t('editor.ops.addTrack'))) return null
     return doc.value.tracks.find((tr) => tr.id === track.id) ?? null
@@ -408,7 +410,7 @@ export const useEditorStore = defineStore('editor', () => {
   async function addAssetAtPlayhead(asset: UnifiedAsset): Promise<void> {
     if (!doc.value) return
     const kind: 'video' | 'audio' = asset.media_type === 'audio' ? 'audio' : 'video'
-    const track = doc.value.tracks.find((tr) => tr.kind === kind && tr.flag !== 'locked')
+    const track = doc.value.tracks.find((tr) => tr.kind === kind && !tr.flags.locked)
       ?? doc.value.tracks.find((tr) => tr.kind === kind)
     if (!track) {
       ElMessage.warning(t('editor.errors.noTrack'))
@@ -487,6 +489,12 @@ export const useEditorStore = defineStore('editor', () => {
 
   function select(clipId: string | null): void {
     selectedClipId.value = clipId
+    if (clipId) selectedTrackId.value = null
+  }
+
+  function selectTrack(trackId: string | null): void {
+    selectedTrackId.value = trackId
+    if (trackId) selectedClipId.value = null
   }
 
   function reset(): void {
@@ -498,6 +506,7 @@ export const useEditorStore = defineStore('editor', () => {
     dirty.value = false
     history.clear()
     selectedClipId.value = null
+    selectedTrackId.value = null
     playhead.value = 0
     previewingAsset.value = null
     renderStatus.value = 'idle'
@@ -506,7 +515,7 @@ export const useEditorStore = defineStore('editor', () => {
 
   return {
     uid, title, workId, sourceWorkspaceId, revision, loaded,
-    doc, selectedClipId, playhead, isPlaying, history,
+    doc, selectedClipId, selectedTrackId, playhead, isPlaying, history,
     previewingAsset, startAssetPreview, endAssetPreview,
     snappingEnabled, setSnapping,
     dirty, saving, lastSavedAt,
@@ -516,6 +525,6 @@ export const useEditorStore = defineStore('editor', () => {
     placeAsset, addAssetAtPlayhead, detachAudio, splitSelectedAtPlayhead, duplicateClip,
     probeMediaDuration,
     saveNow, scheduleSave, transcribeTrack, submitRender, rename,
-    select, reset, newId,
+    select, selectTrack, reset, newId,
   }
 })

@@ -1,6 +1,6 @@
 /* =====================================================
  * 剪辑器命令状态机黄金测试
- * - 12 op 逐个：输入 doc + payload → 期望 doc（对表）
+ * - 14 op 逐个：输入 doc + payload → 期望 doc（对表）
  * - fail-closed：未知 op / 非法 payload 抛错且不改状态
  * - 回放一致性：随机命令序列 JSON 序列化 → 重放 → 结果一致
  * - history：200 层截断 / undo / redo / 分支丢弃
@@ -15,7 +15,7 @@ import {
   type EditorCommand,
 } from '@/lib/editor-commands'
 import { EditorHistory, MAX_HISTORY_ENTRIES } from '@/lib/editor-history'
-import type { EditorDocument } from '@/lib/editor-types'
+import { EMPTY_TRACK_FLAGS, type EditorDocument } from '@/lib/editor-types'
 
 function baseDoc(): EditorDocument {
   return {
@@ -23,10 +23,10 @@ function baseDoc(): EditorDocument {
     width: 1280,
     height: 720,
     tracks: [
-      { id: 'v1', kind: 'video', order: 0, flag: null },
-      { id: 'v2', kind: 'video', order: 1, flag: null },
-      { id: 'a1', kind: 'audio', order: 0, flag: null },
-      { id: 's1', kind: 'subtitle', order: 0, flag: null },
+      { id: 'v1', kind: 'video', order: 0, flags: { ...EMPTY_TRACK_FLAGS } },
+      { id: 'v2', kind: 'video', order: 1, flags: { ...EMPTY_TRACK_FLAGS } },
+      { id: 'a1', kind: 'audio', order: 0, flags: { ...EMPTY_TRACK_FLAGS } },
+      { id: 's1', kind: 'subtitle', order: 0, flags: { ...EMPTY_TRACK_FLAGS } },
     ],
     clips: [
       { id: 'c1', trackId: 'v1', assetId: 10, start: 0, duration: 4, trimStart: 1, props: {} },
@@ -62,7 +62,7 @@ describe('addClip', () => {
   })
   it('重复 id / 轨道不存在 / 锁定轨 → 抛错', () => {
     const doc = baseDoc()
-    const locked = applyCommand(doc, cmd('setTrackFlag', { trackId: 'v1', flag: 'locked' }))
+    const locked = applyCommand(doc, cmd('setTrackFlags', { trackId: 'v1', flags: { locked: true } }))
     expect(() => applyCommand(doc, cmd('addClip', { clip: { id: 'c1', trackId: 'v1', start: 9, duration: 1 } })))
       .toThrow(EditorCommandError)
     expect(() => applyCommand(locked, cmd('addClip', { clip: { id: 'c9', trackId: 'v1', start: 9, duration: 1 } })))
@@ -264,10 +264,10 @@ describe('addSubtitle / removeSubtitle / rebuildSubtitleClips', () => {
   })
 })
 
-describe('addTrack / removeTrack / setTrackFlag', () => {
-  it('addTrack 默认 order 同类递增', () => {
+describe('addTrack / removeTrack / setTrackFlags / moveTrack', () => {
+  it('addTrack 默认 order 同类递增、flags 全关', () => {
     const next = applyCommand(baseDoc(), cmd('addTrack', { track: { id: 'v3', kind: 'video' } }))
-    expect(next.tracks.find((t) => t.id === 'v3')).toMatchObject({ order: 2, flag: null })
+    expect(next.tracks.find((t) => t.id === 'v3')).toMatchObject({ order: 2, flags: { hidden: false, locked: false, muted: false, solo: false } })
   })
   it('removeTrack 仅允许空轨', () => {
     const doc = baseDoc()
@@ -276,12 +276,39 @@ describe('addTrack / removeTrack / setTrackFlag', () => {
     const next = applyCommand(emptied, cmd('removeTrack', { trackId: 's1' }))
     expect(next.tracks.map((t) => t.id)).toEqual(['v1', 'v2', 'a1'])
   })
-  it('setTrackFlag 合法值与 null', () => {
-    const next = applyCommand(baseDoc(), cmd('setTrackFlag', { trackId: 'v1', flag: 'hidden' }))
-    expect(next.tracks.find((t) => t.id === 'v1')?.flag).toBe('hidden')
-    const reset = applyCommand(next, cmd('setTrackFlag', { trackId: 'v1', flag: null }))
-    expect(reset.tracks.find((t) => t.id === 'v1')?.flag).toBeNull()
-    expect(() => applyCommand(baseDoc(), cmd('setTrackFlag', { trackId: 'v1', flag: 'boom' }))).toThrow()
+  it('setTrackFlags 部分合并：多开可并存，未提及键保持原值', () => {
+    const next = applyCommand(baseDoc(), cmd('setTrackFlags', { trackId: 'v1', flags: { hidden: true, locked: true } }))
+    expect(next.tracks.find((t) => t.id === 'v1')?.flags).toMatchObject({ hidden: true, locked: true, muted: false, solo: false })
+    const reset = applyCommand(next, cmd('setTrackFlags', { trackId: 'v1', flags: { hidden: false } }))
+    expect(reset.tracks.find((t) => t.id === 'v1')?.flags).toMatchObject({ hidden: false, locked: true })
+    expect(() => applyCommand(baseDoc(), cmd('setTrackFlags', { trackId: 'v1', flags: { boom: true } }))).toThrow(/invalid_payload/)
+    expect(() => applyCommand(baseDoc(), cmd('setTrackFlags', { trackId: 'v1', flags: { locked: 1 } }))).toThrow(/invalid_payload/)
+  })
+  it('moveTrack 同类型内重排（显示序 0=顶），order 重编号稠密', () => {
+    const doc = baseDoc() // v2 order1 在顶、v1 order0 在底；把 v1 拖到顶
+    const next = applyCommand(doc, cmd('moveTrack', { trackId: 'v1', toIndex: 0 }))
+    expect(next.tracks.find((t) => t.id === 'v1')!.order).toBe(1)
+    expect(next.tracks.find((t) => t.id === 'v2')!.order).toBe(0)
+  })
+  it('toIndex 相对移除后的序列：拖到底落到末位', () => {
+    const doc = baseDoc() // 显示序 [v2, v1]，v2 拖到底：移除后 [v1] 插入位 1
+    const next = applyCommand(doc, cmd('moveTrack', { trackId: 'v2', toIndex: 1 }))
+    expect(next.tracks.find((t) => t.id === 'v2')!.order).toBe(0)
+    expect(next.tracks.find((t) => t.id === 'v1')!.order).toBe(1)
+  })
+  it('原位放置返回同引用；只动同类型轨（其他类型引用相等）', () => {
+    const doc = baseDoc()
+    expect(applyCommand(doc, cmd('moveTrack', { trackId: 'v1', toIndex: 1 }))).toBe(doc)
+    const moved = applyCommand(doc, cmd('moveTrack', { trackId: 'v1', toIndex: 0 }))
+    expect(moved.tracks.find((t) => t.id === 'a1')).toBe(doc.tracks.find((t) => t.id === 'a1'))
+    expect(moved.tracks.find((t) => t.id === 'v1')).not.toBe(doc.tracks.find((t) => t.id === 'v1'))
+  })
+  it('越界钳位；track 不存在 / toIndex 非法 → 抛错', () => {
+    const doc = baseDoc()
+    expect(applyCommand(doc, cmd('moveTrack', { trackId: 'v1', toIndex: 99 }))).toBe(doc) // 钳到末位 = 原位
+    expect(() => applyCommand(doc, cmd('moveTrack', { trackId: 'vx', toIndex: 0 }))).toThrow(/track_not_found/)
+    expect(() => applyCommand(doc, cmd('moveTrack', { trackId: 'v1', toIndex: -1 }))).toThrow(/invalid_payload/)
+    expect(() => applyCommand(doc, cmd('moveTrack', { trackId: 'v1', toIndex: 0.5 }))).toThrow(/invalid_payload/)
   })
 })
 
@@ -294,8 +321,8 @@ describe('fail-closed', () => {
     expect(() => applyCommand(doc, broken)).toThrow(/unknown_op/)
     expect(doc.clips.length).toBe(4)
   })
-  it('op 表恰好 13 个', () => {
-    expect(EDITOR_OPS.length).toBe(13)
+  it('op 表恰好 14 个', () => {
+    expect(EDITOR_OPS.length).toBe(14)
   })
 })
 
@@ -308,7 +335,8 @@ describe('回放一致性', () => {
       cmd('moveClip', { clipId: 'c1', trackId: 'v2', start: 3 }),
       cmd('trimClip', { clipId: 'c2', duration: 2 }),
       cmd('splitClip', { clipId: 'c1', at: 5, newId: 'c1b' }),
-      cmd('setTrackFlag', { trackId: 'v2', flag: 'muted' }),
+      cmd('setTrackFlags', { trackId: 'v2', flags: { muted: true } }),
+      cmd('moveTrack', { trackId: 'v1', toIndex: 0 }),
       cmd('rebuildSubtitleClips', { trackId: 's1', clips: [{ id: 'r1', start: 0, duration: 1, text: '重放' }] }),
       cmd('removeClip', { clipId: 'c1b' }),
     ]
@@ -325,7 +353,7 @@ describe('EditorHistory', () => {
   it('undo/redo 往返', () => {
     const history = new EditorHistory()
     const d0 = baseDoc()
-    const d1 = applyCommand(d0, cmd('setTrackFlag', { trackId: 'v1', flag: 'hidden' }))
+    const d1 = applyCommand(d0, cmd('setTrackFlags', { trackId: 'v1', flags: { hidden: true } }))
     const d2 = applyCommand(d1, cmd('addTrack', { track: { id: 'a9', kind: 'audio' } }))
     history.push({ undoDoc: d0, redoDoc: d1, label: 'a' })
     history.push({ undoDoc: d1, redoDoc: d2, label: 'b' })

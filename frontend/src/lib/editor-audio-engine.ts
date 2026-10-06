@@ -16,7 +16,8 @@ import type { AudioBufferSink, WrappedAudioBuffer } from 'mediabunny'
 /** 调度前视窗口（秒） */
 export const AUDIO_LOOKAHEAD_S = 2
 
-/** 参与预览声音的片段窗口（音频轨 + 未静音视频自带音频；音画分离源片段已 muted 自动跳过） */
+/** 参与预览声音的片段窗口（音频轨 + 未静音视频自带音频；音画分离源片段已 muted 自动跳过）。
+ * 独奏是预览监听态：存在独奏轨时只出独奏轨的声音（成片渲染不读 solo）。 */
 export interface AudibleSpan {
   clip: EditorClip
   /** 与窗口相交后的时间线域范围 */
@@ -26,11 +27,12 @@ export interface AudibleSpan {
 
 export function audibleSpans(doc: EditorDocument, from: number, to: number): AudibleSpan[] {
   const byId = new Map(doc.tracks.map((tr) => [tr.id, tr]))
+  const anySolo = doc.tracks.some((tr) => tr.flags.solo)
   const out: AudibleSpan[] = []
   for (const clip of doc.clips) {
     const track = byId.get(clip.trackId)
     if (!track || track.kind === 'subtitle') continue
-    if (track.flag === 'muted' || clip.props.muted === true) continue
+    if (track.flags.muted || (anySolo && !track.flags.solo) || clip.props.muted === true) continue
     if (clip.assetId == null) continue
     const spanFrom = Math.max(clip.start, from)
     const spanTo = Math.min(clipEnd(clip), to)

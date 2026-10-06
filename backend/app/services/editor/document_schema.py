@@ -18,6 +18,7 @@ MAX_DOCUMENT_BYTES = 2 * 1024 * 1024
 
 _TRACK_KINDS = {"video", "audio", "subtitle"}
 _TRANSITION_TYPES = {"crossfade", "fade", "wipe"}
+_TRACK_FLAG_KEYS = {"hidden", "locked", "muted", "solo"}
 
 
 def _fail(msg: str) -> None:
@@ -50,8 +51,12 @@ def validate_document_skeleton(doc: Any) -> dict:
         if tr["id"] in track_ids:
             _fail(f"轨道 id 重复: {tr['id']}")
         track_ids.add(tr["id"])
-        if tr.get("flag") is not None and tr.get("flag") not in ("hidden", "locked", "muted"):
-            _fail(f"tracks[{i}].flag 非法")
+        flags = tr.get("flags")
+        if flags is not None:
+            if not isinstance(flags, dict) or any(
+                k not in _TRACK_FLAG_KEYS or not isinstance(v, bool) for k, v in flags.items()
+            ):
+                _fail(f"tracks[{i}].flags 非法")
 
     clip_ids = set()
     for i, c in enumerate(doc["clips"]):

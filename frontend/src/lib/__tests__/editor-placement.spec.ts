@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { canPlaceOnTrack, findFreeTrack, spansOverlap } from '@/lib/editor-placement'
-import type { EditorDocument } from '@/lib/editor-types'
+import { EMPTY_TRACK_FLAGS, type EditorDocument } from '@/lib/editor-types'
 
 function baseDoc(): EditorDocument {
   return {
@@ -14,10 +14,10 @@ function baseDoc(): EditorDocument {
     width: 1280,
     height: 720,
     tracks: [
-      { id: 'v1', kind: 'video', order: 0, flag: null },
-      { id: 'v2', kind: 'video', order: 1, flag: 'locked' },
-      { id: 'v3', kind: 'video', order: 2, flag: null },
-      { id: 'a1', kind: 'audio', order: 0, flag: null },
+      { id: 'v1', kind: 'video', order: 0, flags: { ...EMPTY_TRACK_FLAGS } },
+      { id: 'v2', kind: 'video', order: 1, flags: { ...EMPTY_TRACK_FLAGS, locked: true } },
+      { id: 'v3', kind: 'video', order: 2, flags: { ...EMPTY_TRACK_FLAGS } },
+      { id: 'a1', kind: 'audio', order: 0, flags: { ...EMPTY_TRACK_FLAGS } },
     ],
     clips: [
       { id: 'c1', trackId: 'v1', assetId: 1, start: 0, duration: 4, trimStart: 0, props: {} },

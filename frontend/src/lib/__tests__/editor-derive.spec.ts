@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { reflowPlaceholders } from '@/lib/editor-derive'
-import type { EditorDocument } from '@/lib/editor-types'
+import { EMPTY_TRACK_FLAGS, type EditorDocument } from '@/lib/editor-types'
 
 function baseDoc(): EditorDocument {
   return {
@@ -14,8 +14,8 @@ function baseDoc(): EditorDocument {
     width: 1280,
     height: 720,
     tracks: [
-      { id: 'v1', kind: 'video', order: 0, flag: null },
-      { id: 'a1', kind: 'audio', order: 0, flag: null },
+      { id: 'v1', kind: 'video', order: 0, flags: { ...EMPTY_TRACK_FLAGS } },
+      { id: 'a1', kind: 'audio', order: 0, flags: { ...EMPTY_TRACK_FLAGS } },
     ],
     clips: [
       { id: 'real', trackId: 'v1', assetId: 1, start: 0, duration: 2, trimStart: 0, props: {} },

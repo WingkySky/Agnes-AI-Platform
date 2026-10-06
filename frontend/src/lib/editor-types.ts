@@ -5,14 +5,21 @@
  * ===================================================== */
 
 export type TrackKind = 'video' | 'audio' | 'subtitle'
-export type TrackFlag = 'hidden' | 'locked' | 'muted'
+
+/** 轨道开关键：hidden 画面不渲染 / locked 禁编辑 / muted 不出声 / solo 预览监听独奏 */
+export type TrackFlagKey = 'hidden' | 'locked' | 'muted' | 'solo'
+export type TrackFlags = Record<TrackFlagKey, boolean>
+
+export const TRACK_FLAG_KEYS: TrackFlagKey[] = ['hidden', 'locked', 'muted', 'solo']
+
+export const EMPTY_TRACK_FLAGS: TrackFlags = { hidden: false, locked: false, muted: false, solo: false }
 
 /** 轨道；order 大=上层（多视频轨 PIP 依据） */
 export interface EditorTrack {
   id: string
   kind: TrackKind
   order: number
-  flag: TrackFlag | null
+  flags: TrackFlags
 }
 
 export type TransitionType = 'crossfade' | 'fade' | 'wipe'
@@ -82,8 +89,10 @@ export function isTrackKind(v: unknown): v is TrackKind {
   return v === 'video' || v === 'audio' || v === 'subtitle'
 }
 
-export function isTrackFlag(v: unknown): v is TrackFlag {
-  return v === 'hidden' || v === 'locked' || v === 'muted'
+/** 校验轨道开关补丁：键限定四开、值必须布尔（setTrackFlags payload 用） */
+export function isTrackFlagsPatch(v: unknown): v is Partial<TrackFlags> {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false
+  return Object.entries(v).every(([k, val]) => TRACK_FLAG_KEYS.includes(k as TrackFlagKey) && typeof val === 'boolean')
 }
 
 export function isTransitionType(v: unknown): v is TransitionType {

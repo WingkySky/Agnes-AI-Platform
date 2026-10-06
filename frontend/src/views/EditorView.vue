@@ -139,10 +139,20 @@ function onKeydown(e: KeyboardEvent): void {  const target = e.target as HTMLEle
   } else if (e.key === 'Escape' && store.previewingAsset) {
     e.preventDefault()
     store.endAssetPreview()
+  } else if (e.key === 'Escape') {
+    if (store.selectedClipId || store.selectedTrackId) {
+      e.preventDefault()
+      store.select(null)
+      store.selectTrack(null)
+    }
   } else if (e.key === 'Delete' || e.key === 'Backspace') {
     if (store.selectedClipId) {
       e.preventDefault()
       store.applyOrToast({ op: 'removeClip', payload: { clipId: store.selectedClipId } }, t('editor.ops.removeClip'))
+    } else if (store.selectedTrackId) {
+      // 轨非空时命令层拒绝并 toast（track_not_empty）
+      e.preventDefault()
+      store.applyOrToast({ op: 'removeTrack', payload: { trackId: store.selectedTrackId } }, t('editor.ops.removeTrack'))
     }
   } else if ((e.key === 'b' || e.key === 'B') && mod) {
     e.preventDefault()  // 分割（剪映 Ctrl+B / Premiere Ctrl+K 惯例）

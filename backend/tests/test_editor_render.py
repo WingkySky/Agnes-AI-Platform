@@ -30,10 +30,10 @@ def _doc():
     return {
         "timebase": 30, "width": 1280, "height": 720,
         "tracks": [
-            {"id": "v1", "kind": "video", "order": 0, "flag": None},
-            {"id": "v2", "kind": "video", "order": 1, "flag": None},
-            {"id": "a1", "kind": "audio", "order": 0, "flag": None},
-            {"id": "s1", "kind": "subtitle", "order": 0, "flag": None},
+            {"id": "v1", "kind": "video", "order": 0, "flags": {}},
+            {"id": "v2", "kind": "video", "order": 1, "flags": {}},
+            {"id": "a1", "kind": "audio", "order": 0, "flags": {}},
+            {"id": "s1", "kind": "subtitle", "order": 0, "flags": {}},
         ],
         "clips": [
             {"id": "c1", "trackId": "v1", "assetId": 1, "start": 0, "duration": 4, "trimStart": 1,
@@ -96,6 +96,44 @@ def test_plan_duration_zero_dropped():
     doc["clips"][3]["duration"] = 0  # 草稿占位片段
     plan = build_plan(doc, lambda aid: PATHS.get(aid))
     assert plan["audio_clips"] == []
+
+
+# ---------- 轨道开关：hidden 剔整轨 / muted 剔声留画 / solo 监听态不入成片 ----------
+
+def test_plan_hidden_track_excluded_entirely():
+    doc = _doc()
+    doc["tracks"][0]["flags"] = {"hidden": True}  # v1 整轨剔除
+    plan = build_plan(doc, lambda aid: PATHS.get(aid), _kinds)
+    assert {t["track_id"] for t in plan["video_tracks"]} == {"v2"}
+    # 隐藏视频轨的自带音频也一并剔除
+    assert {s["clip_id"] for s in plan["audio_clips"]} == {"a9"}
+    doc["tracks"][2]["flags"] = {"hidden": True}  # 静音音频轨（hidden 同样剔除）
+    plan2 = build_plan(doc, lambda aid: PATHS.get(aid), _kinds)
+    assert plan2["audio_clips"] == []
+
+
+def test_plan_muted_track_drops_audio_keeps_video():
+    doc = _doc()
+    doc["tracks"][0]["flags"] = {"muted": True}  # v1 静音：画面在、自带音频剔
+    plan = build_plan(doc, lambda aid: PATHS.get(aid), _kinds)
+    assert {t["track_id"] for t in plan["video_tracks"]} == {"v1", "v2"}
+    assert {s["clip_id"] for s in plan["audio_clips"]} == {"a9"}
+    doc["tracks"][2]["flags"] = {"muted": True}  # a1 静音：音频图清空
+    plan2 = build_plan(doc, lambda aid: PATHS.get(aid), _kinds)
+    assert plan2["audio_clips"] == []
+
+
+def test_plan_hidden_subtitle_track_no_events_and_solo_ignored():
+    doc = _doc()
+    doc["tracks"][3]["flags"] = {"hidden": True}
+    plan = build_plan(doc, lambda aid: PATHS.get(aid))
+    assert plan["subtitle_events"] == []
+    # solo 是预览监听态：不影响成片
+    doc["tracks"][3]["flags"] = {"solo": True}
+    doc["tracks"][0]["flags"] = {"solo": True}
+    plan2 = build_plan(doc, lambda aid: PATHS.get(aid))
+    assert plan2["subtitle_events"] == [{"start": 0.5, "end": 2.0, "text": "你好字幕"}]
+    assert {t["track_id"] for t in plan2["video_tracks"]} == {"v1", "v2"}
 
 
 # ---------- 音画分离：视频自带音频进 Plan/命令 ----------

@@ -8,10 +8,10 @@
 import { describe, expect, it } from 'vitest'
 
 import { audibleSpans, gainBreakpoints, sourceTimeAt, timelineTimeAt } from '@/lib/editor-audio-engine'
-import type { EditorClip, EditorDocument, EditorTrack, TrackFlag, TrackKind } from '@/lib/editor-types'
+import { EMPTY_TRACK_FLAGS, type EditorClip, type EditorDocument, type EditorTrack, type TrackFlags, type TrackKind } from '@/lib/editor-types'
 
-function track(id: string, kind: TrackKind, order = 0, flag: TrackFlag | null = null): EditorTrack {
-  return { id, kind, order, flag }
+function track(id: string, kind: TrackKind, order = 0, flags: Partial<TrackFlags> = {}): EditorTrack {
+  return { id, kind, order, flags: { ...EMPTY_TRACK_FLAGS, ...flags } }
 }
 
 function clip(id: string, trackId: string, start: number, duration: number, props: EditorClip['props'] = {}, assetId: number | null = 1): EditorClip {
@@ -36,9 +36,9 @@ describe('audibleSpans', () => {
     expect(spans.map((s) => s.clip.id)).toEqual(['ca', 'cv'])
   })
 
-  it('音频轨 muted flag 排除；视频片段 props.muted（音画分离源）排除', () => {
+  it('音频轨 muted 排除；视频片段 props.muted（音画分离源）排除', () => {
     const d = doc(
-      [track('tA', 'audio', 0, 'muted'), track('tV', 'video')],
+      [track('tA', 'audio', 0, { muted: true }), track('tV', 'video')],
       [
         clip('ca', 'tA', 0, 4),
         clip('cv', 'tV', 0, 4, { muted: true }),
@@ -47,6 +47,17 @@ describe('audibleSpans', () => {
     )
     const spans = audibleSpans(d, 0, 10)
     expect(spans.map((s) => s.clip.id)).toEqual(['cv2'])
+  })
+
+  it('独奏监听态：存在独奏轨时只出独奏轨的声音', () => {
+    const d = doc(
+      [track('tA', 'audio'), track('tV', 'video', 0, { solo: true })],
+      [clip('ca', 'tA', 0, 4), clip('cv', 'tV', 0, 4)],
+    )
+    expect(audibleSpans(d, 0, 10).map((s) => s.clip.id)).toEqual(['cv'])
+    // 独奏轨自己也出声；全部取消独奏后恢复
+    const none = doc([track('tA', 'audio'), track('tV', 'video')], [clip('ca', 'tA', 0, 4), clip('cv', 'tV', 0, 4)])
+    expect(audibleSpans(none, 0, 10).map((s) => s.clip.id)).toEqual(['ca', 'cv'])
   })
 
   it('assetId 为空（未绑定素材）不出声', () => {

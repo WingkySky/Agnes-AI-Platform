@@ -105,7 +105,8 @@ const activeSubtitles = computed(() =>
   (store.doc?.clips ?? [])
     .filter((c) => {
       const track = store.doc?.tracks.find((tr) => tr.id === c.trackId)
-      return track?.kind === 'subtitle' && store.playhead >= c.start && store.playhead < clipEnd(c) && c.text
+      return track?.kind === 'subtitle' && !track.flags.hidden
+        && store.playhead >= c.start && store.playhead < clipEnd(c) && c.text
     })
     .sort((a, b) => a.start - b.start),
 )
@@ -134,6 +135,8 @@ function setAudioEl(trackId: string, el: unknown): void {
 
 function syncMedia(): void {
   if (!store.doc) return
+  // 独奏是预览监听态：存在独奏轨时只出独奏轨的声音（成片渲染不受影响）
+  const anySolo = store.doc.tracks.some((tr) => tr.flags.solo)
   for (const track of videoTracks.value) {
     const el = videoEls.get(track.id)
     if (!el) continue
@@ -143,7 +146,7 @@ function syncMedia(): void {
     const expected = clip.trimStart + (store.playhead - clip.start) * speed
     if (Math.abs(el.currentTime - expected) > 0.3) el.currentTime = Math.max(0, expected)
     el.playbackRate = Math.min(Math.max(speed, 0.25), 4)
-    el.muted = track.flag === 'muted' || clip.props.muted === true
+    el.muted = track.flags.muted || (anySolo && !track.flags.solo) || clip.props.muted === true
     applyGain(el, clip)
     if (store.isPlaying && el.paused) void el.play().catch(() => undefined)
     if (!store.isPlaying && !el.paused) el.pause()
@@ -157,7 +160,7 @@ function syncMedia(): void {
     const expected = clip.trimStart + (store.playhead - clip.start) * speed
     if (Math.abs(el.currentTime - expected) > 0.3) el.currentTime = Math.max(0, expected)
     el.playbackRate = Math.min(Math.max(speed, 0.25), 4)
-    el.muted = track.flag === 'muted' || clip.props.muted === true
+    el.muted = track.flags.muted || (anySolo && !track.flags.solo) || clip.props.muted === true
     applyGain(el, clip)
     if (store.isPlaying && el.paused) void el.play().catch(() => undefined)
     if (!store.isPlaying && !el.paused) el.pause()
@@ -247,7 +250,7 @@ onBeforeUnmount(() => {
           <template v-else>
             <template v-for="track in videoTracks" :key="track.id">
               <video
-                v-if="videoStates[track.id]?.url && track.flag !== 'hidden'"
+                v-if="videoStates[track.id]?.url && !track.flags.hidden"
                 :ref="(el) => setVideoEl(track.id, el)"
                 class="stage-video"
                 :style="activeClip(track.id) ? clipRectStyle(activeClip(track.id)!) : {}"

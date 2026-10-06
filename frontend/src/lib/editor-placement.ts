@@ -43,7 +43,7 @@ export function findFreeTrack(
 ): EditorTrack | null {
   return (
     doc.tracks
-      .filter((t) => t.kind === kind && t.flag !== 'locked')
+      .filter((t) => t.kind === kind && !t.flags.locked)
       .sort((a, b) => a.order - b.order)
       .find((t) => canPlaceOnTrack(doc.clips.filter((c) => c.trackId === t.id), span)) ?? null
   )

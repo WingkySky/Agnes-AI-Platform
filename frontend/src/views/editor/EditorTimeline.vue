@@ -1,19 +1,21 @@
 <script setup lang="ts">
 /* =====================================================
- * 时间线区域：轨头（显隐/锁定）+ 轨道片段块 + 播放头
- * 交互：拖拽移动（moveClip）、边缘裁剪（trimClip）、播放头定位、
- *       素材拖入建片段（addClip）；拖拽中只改渲染态，pointerup 才入命令栈
+ * 时间线区域：轨头（状态图标钮 + 拖拽重排 + 选中）+ 轨道片段块 + 播放头
+ * 交互：拖拽移动（moveClip）、边缘裁剪（trimClip）、轨头拖拽重排（moveTrack）、
+ *       点轨头/轨道空白选中轨道（Delete 删空轨）、播放头定位、素材拖入建片段；
+ *       拖拽中只改渲染态，pointerup 才入命令栈
  * 几何：px↔秒换算全部收口到 lib/editor-scale（刻度/播放头/片段块共用）
  * 吸附：片段边/播放头/0 点最近点吸附（lib/editor-snapping），Shift 临时禁用；
  *       放置回退（占用轨→同类型空闲轨→自动开新轨）在 store.placeAsset
  * ===================================================== */
 
-import { computed, ref } from 'vue'
+import { computed, ref, type Component } from 'vue'
 import { Close, Delete, Headset, Mute, QuestionFilled, RefreshLeft, RefreshRight, Scissor, Switch } from '@element-plus/icons-vue'
+import { Eye, EyeOff, GripVertical, Headphones, Lock, LockOpen, Volume2, VolumeX } from 'lucide-vue-next'
 
 import { useEditorStore } from '@/stores/editor'
 import { useI18n } from '@/i18n'
-import { MIN_CLIP_DURATION, TRANSITION_TYPES, clipEnd, type EditorClip, type TransitionType } from '@/lib/editor-types'
+import { MIN_CLIP_DURATION, TRANSITION_TYPES, clipEnd, type EditorClip, type EditorTrack, type TrackFlagKey, type TrackKind, type TransitionType } from '@/lib/editor-types'
 import {
   PX_PER_SEC_MAX,
   PX_PER_SEC_MIN,
@@ -97,7 +99,7 @@ function laneUnderPointer(clientY: number, kind: string): string | null {
     const rect = el.getBoundingClientRect()
     if (clientY >= rect.top && clientY <= rect.bottom) {
       const track = store.doc?.tracks.find((tr) => tr.id === trackId)
-      return track && track.kind === kind && track.flag !== 'locked' ? trackId : null
+      return track && track.kind === kind && !track.flags.locked ? trackId : null
     }
   }
   return null
@@ -197,6 +199,92 @@ function commitDrag(): void {
 
 function splitSelected(): void {
   store.splitSelectedAtPlayhead()
+}
+
+// ---------- 轨道选中 / 状态开关 / 轨头拖拽重排 ----------
+
+/** 点轨道空白处选中轨道（与片段选中互斥，Delete 删空轨） */
+function onLanePointerDown(trackId: string): void {
+  store.selectTrack(trackId)
+}
+
+/** 轨头状态图标钮配置：按轨道类型给开关集（音频无隐藏、字幕无声音开关） */
+interface TrackFlagBtn { key: TrackFlagKey; icon: Component; title: string }
+
+function trackFlagButtons(track: EditorTrack): TrackFlagBtn[] {
+  const btns: TrackFlagBtn[] = []
+  if (track.kind !== 'audio') {
+    btns.push({ key: 'hidden', icon: track.flags.hidden ? EyeOff : Eye, title: track.flags.hidden ? 'editor.trackShow' : 'editor.trackHide' })
+  }
+  if (track.kind !== 'subtitle') {
+    btns.push({ key: 'muted', icon: track.flags.muted ? VolumeX : Volume2, title: track.flags.muted ? 'editor.trackUnmute' : 'editor.trackMute' })
+    btns.push({ key: 'solo', icon: Headphones, title: 'editor.trackSolo' })
+  }
+  btns.push({ key: 'locked', icon: track.flags.locked ? Lock : LockOpen, title: track.flags.locked ? 'editor.trackUnlock' : 'editor.trackLock' })
+  return btns
+}
+
+function toggleTrackFlag(track: EditorTrack, key: TrackFlagKey): void {
+  store.applyOrToast(
+    { op: 'setTrackFlags', payload: { trackId: track.id, flags: { [key]: !track.flags[key] } } },
+    t('editor.ops.setTrackFlags'),
+  )
+}
+
+interface TrackDragState { trackId: string; kind: TrackKind; targetIndex: number | null }
+const trackDrag = ref<TrackDragState | null>(null)
+
+/** 轨头拖拽手柄起手：同类型轨内重排，指示线只画同类型行 */
+function beginTrackDrag(e: PointerEvent, track: EditorTrack): void {
+  e.preventDefault()
+  store.selectTrack(track.id)
+  trackDrag.value = { trackId: track.id, kind: track.kind, targetIndex: null }
+  const move = (ev: PointerEvent) => {
+    const d = trackDrag.value
+    if (!d) return
+    d.targetIndex = trackInsertIndex(ev.clientY, track)
+  }
+  const up = () => {
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', up)
+    commitTrackDrag()
+  }
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', up)
+}
+
+/** 插入位（移除被拖轨后的同类型显示序）：越过行中点算落到其上方 */
+function trackInsertIndex(clientY: number, track: EditorTrack): number {
+  const rows = trackRows.value.filter((r) => r.track.kind === track.kind && r.track.id !== track.id)
+  for (let i = 0; i < rows.length; i++) {
+    const el = rowRefs.get(rows[i]!.track.id)
+    if (!el) continue
+    const rect = el.getBoundingClientRect()
+    if (clientY < rect.top + rect.height / 2) return i
+  }
+  return rows.length
+}
+
+function commitTrackDrag(): void {
+  const d = trackDrag.value
+  trackDrag.value = null
+  if (!d || d.targetIndex === null) return
+  const cur = trackRows.value.filter((r) => r.track.kind === d.kind).findIndex((r) => r.track.id === d.trackId)
+  if (d.targetIndex === cur) return // 原位放置不入栈
+  store.applyOrToast({ op: 'moveTrack', payload: { trackId: d.trackId, toIndex: d.targetIndex } }, t('editor.ops.moveTrack'))
+}
+
+/** 重排指示：被拖行半透明；落点行上/下缘画插入线 */
+function reorderMark(trackId: string): '' | 'dragging' | 'above' | 'below' {
+  const d = trackDrag.value
+  if (!d) return ''
+  if (trackId === d.trackId) return 'dragging'
+  const rows = trackRows.value.filter((r) => r.track.kind === d.kind && r.track.id !== d.trackId)
+  const idx = rows.findIndex((r) => r.track.id === trackId)
+  if (idx < 0) return ''
+  if (idx === d.targetIndex) return 'above'
+  if (d.targetIndex === rows.length && idx === rows.length - 1) return 'below'
+  return ''
 }
 
 /** 删除选中片段（时间线工具栏按钮，与 Delete 键同路径） */
@@ -319,6 +407,13 @@ function setJunctionDuration(v: number | undefined): void {
 const laneRefs = new Map<string, HTMLElement>()
 function setLaneRef(trackId: string, el: unknown): void {
   if (el) laneRefs.set(trackId, el as HTMLElement)
+}
+
+// 整行引用（轨道重排的插入位计算用）
+const rowRefs = new Map<string, HTMLElement>()
+function setRowRef(trackId: string, el: unknown): void {
+  if (el) rowRefs.set(trackId, el as HTMLElement)
+  else rowRefs.delete(trackId)
 }
 
 // ---------- 右键菜单（片段 / 轨道 lane） ----------
@@ -455,13 +550,30 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
         <div
           v-for="row in trackRows"
           :key="row.track.id"
+          :ref="(el) => setRowRef(row.track.id, el)"
           class="track-row"
-          :class="{ hidden: row.track.flag === 'hidden' }"
+          :class="{
+            hidden: row.track.flags.hidden,
+            selected: store.selectedTrackId === row.track.id,
+            dragging: reorderMark(row.track.id) === 'dragging',
+            'drop-above': reorderMark(row.track.id) === 'above',
+            'drop-below': reorderMark(row.track.id) === 'below',
+          }"
         >
-          <div class="track-head">
+          <div
+            class="track-head"
+            :class="{ selected: store.selectedTrackId === row.track.id }"
+            @pointerdown="store.selectTrack(row.track.id)"
+          >
             <div class="track-head-line">
+              <span class="track-grip" :title="t('editor.trackReorder')" @pointerdown="beginTrackDrag($event, row.track)">
+                <el-icon><GripVertical /></el-icon>
+              </span>
               <span class="track-kind" :data-kind="row.track.kind">{{ t(`editor.trackKinds.${row.track.kind}`) }}</span>
-              <span :title="row.clips.length ? t('editor.errors.track_not_empty') : t('editor.ops.removeTrack')">
+              <span
+                class="head-delete"
+                :title="row.clips.length ? t('editor.errors.track_not_empty') : t('editor.ops.removeTrack')"
+              >
                 <el-button
                   class="track-delete"
                   :icon="Close"
@@ -472,28 +584,25 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
                 />
               </span>
             </div>
-            <el-checkbox
-              v-if="row.track.kind !== 'audio'"
-              :model-value="row.track.flag === 'hidden'"
-              size="small"
-              @change="store.applyOrToast({ op: 'setTrackFlag', payload: { trackId: row.track.id, flag: row.track.flag === 'hidden' ? null : 'hidden' } }, t('editor.ops.setTrackFlag'))"
-            >{{ t('editor.trackHidden') }}</el-checkbox>
-            <el-checkbox
-              v-else
-              :model-value="row.track.flag === 'muted'"
-              size="small"
-              @change="store.applyOrToast({ op: 'setTrackFlag', payload: { trackId: row.track.id, flag: row.track.flag === 'muted' ? null : 'muted' } }, t('editor.ops.setTrackFlag'))"
-            >{{ t('editor.trackMuted') }}</el-checkbox>
-            <el-checkbox
-              :model-value="row.track.flag === 'locked'"
-              size="small"
-              @change="store.applyOrToast({ op: 'setTrackFlag', payload: { trackId: row.track.id, flag: row.track.flag === 'locked' ? null : 'locked' } }, t('editor.ops.setTrackFlag'))"
-            >{{ t('editor.trackLocked') }}</el-checkbox>
+            <div class="track-flag-row">
+              <button
+                v-for="f in trackFlagButtons(row.track)"
+                :key="f.key"
+                class="flag-btn"
+                :data-key="f.key"
+                :class="{ active: row.track.flags[f.key] }"
+                :title="t(f.title)"
+                @click="toggleTrackFlag(row.track, f.key)"
+              >
+                <component :is="f.icon" :size="14" />
+              </button>
+            </div>
           </div>
           <div
             :ref="(el) => setLaneRef(row.track.id, el)"
             class="track-lane"
-            :class="{ drop: dropActive === row.track.id, locked: row.track.flag === 'locked' }"
+            :class="{ drop: dropActive === row.track.id, locked: row.track.flags.locked }"
+            @pointerdown="onLanePointerDown(row.track.id)"
             @dragover.prevent="dropActive = row.track.id"
             @dragleave="dropActive = null"
             @drop.prevent="onDropAsset($event, row.track.id)"
@@ -681,29 +790,72 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
   border-bottom: 1px solid var(--el-border-color-lighter);
 }
 .track-row.hidden { opacity: 0.45; }
+.track-row.dragging { opacity: 0.35; }
+.track-row.drop-above { box-shadow: inset 0 2px 0 0 var(--el-color-primary); }
+.track-row.drop-below { box-shadow: inset 0 -2px 0 0 var(--el-color-primary); }
+.track-row.selected .track-lane { background: var(--el-color-primary-light-9); }
 .track-head {
   width: 168px;
   flex-shrink: 0;
   padding: 4px 8px;
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 2px;
   background: var(--el-bg-color);
   border-right: 1px solid var(--el-border-color-lighter);
   position: sticky;
   left: 0;
   z-index: 2;
+  user-select: none;
+  cursor: pointer;
 }
-.track-kind {
-  font-size: 12px;
-  font-weight: 600;
+.track-head.selected {
+  background: var(--el-color-primary-light-9);
+  box-shadow: inset 3px 0 0 0 var(--el-color-primary);
 }
 .track-head-line {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 4px;
+}
+.head-delete { margin-left: auto; }
+.track-grip {
+  display: flex;
+  align-items: center;
+  color: var(--el-text-color-placeholder);
+  cursor: grab;
+  touch-action: none;
+}
+.track-grip:hover { color: var(--el-text-color-secondary); }
+.track-grip :deep(.el-icon) { font-size: 13px; }
+.track-kind {
+  font-size: 12px;
+  font-weight: 600;
 }
 .track-delete { height: 20px; width: 20px; padding: 0; }
+.track-flag-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.flag-btn {
+  width: 26px;
+  height: 20px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+}
+.flag-btn:hover { background: var(--el-fill-color); color: var(--el-text-color-primary); }
+.flag-btn.active { color: var(--el-color-primary); background: var(--el-color-primary-light-9); border-color: var(--el-color-primary-light-5); }
+.flag-btn.active[data-key='hidden'] { color: var(--el-color-info); background: var(--el-color-info-light-9); border-color: var(--el-color-info-light-5); }
+.flag-btn.active[data-key='muted'] { color: var(--el-color-danger); background: var(--el-color-danger-light-9); border-color: var(--el-color-danger-light-5); }
+.flag-btn.active[data-key='solo'] { color: var(--el-color-warning); background: var(--el-color-warning-light-9); border-color: var(--el-color-warning-light-5); }
 .ctx-backdrop { position: fixed; inset: 0; z-index: 100; }
 .ctx-menu {
   position: fixed;
@@ -731,8 +883,6 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
 .track-kind[data-kind='video'] { color: var(--el-color-primary); }
 .track-kind[data-kind='audio'] { color: var(--el-color-success); }
 .track-kind[data-kind='subtitle'] { color: var(--el-color-warning); }
-.track-head :deep(.el-checkbox) { height: 18px; margin-right: 8px; }
-.track-head :deep(.el-checkbox__label) { font-size: 11px; }
 .track-lane {
   position: relative;
   height: 52px;

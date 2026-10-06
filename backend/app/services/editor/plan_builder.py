@@ -12,6 +12,8 @@
 #   位置绝对开窗——多轨片段互不遮盖，视频与音频轴（adelay）同源
 # - 音频图来源：音频轨片段 + 未静音视频片段的自带音频（音画分离：
 #   detachAudio 后源片段 muted=true 剔出音频图）；无声视频由 lowering 层 ffprobe 过滤
+# - 轨道开关（flags）：hidden 整轨剔除（画面/声音/字幕全不进成片）；muted 只剔声音；
+#   solo 是前端预览监听态，渲染端刻意不读
 # - 合成策略：全帧片段轨走 xfade 链整轨叠加；带 rect 的片段逐个按窗口 overlay
 #   （PIP 片段间为硬切，转场仅在整轨 xfade 路径生效——v1 明确边界）
 # =====================================================
@@ -45,6 +47,9 @@ def build_plan(
     clips = document.get("clips") or []
     kind_of = {t.get("id"): t.get("kind") for t in tracks if isinstance(t, dict)}
     order_of = {t.get("id"): _num(t.get("order"), 0) for t in tracks if isinstance(t, dict)}
+    # 轨道开关（前端 flags 字典，缺省全关）：hidden 整轨不进成片；
+    # muted 只剔声音（视频轨画面照常）；solo 是预览监听态，渲染端刻意不读
+    flags_of = {t.get("id"): (t.get("flags") or {}) for t in tracks if isinstance(t, dict)}
 
     video_tracks: dict[str, list[dict]] = {}
     audio_clips: list[dict] = []
@@ -53,6 +58,9 @@ def build_plan(
         if not isinstance(clip, dict):
             continue
         track_id = clip.get("trackId")
+        flags = flags_of.get(track_id) or {}
+        if flags.get("hidden") is True:
+            continue  # 隐藏轨整轨剔除（视频/音频画面与声音都不进成片）
         asset_id = clip.get("assetId") if isinstance(clip.get("assetId"), int) else None
         path = resolve_path(asset_id) if asset_id is not None else None
         if not path:
@@ -77,11 +85,14 @@ def build_plan(
             "transition": props.get("transition") if isinstance(props.get("transition"), dict) else None,
         }
         if kind_of.get(track_id) == "audio":
+            if flags.get("muted") is True:
+                continue  # 静音音频轨不进音频图
             audio_clips.append(base)
         elif kind_of.get(track_id) == "video":
             video_tracks.setdefault(track_id, []).append(base)
-            # 音画分离：视频自带音频与音频轨同链混音；静音标记/图片素材不进音频图
-            if not base["muted"] and resolve_asset_kind is not None and resolve_asset_kind(asset_id) == "video":
+            # 音画分离：视频自带音频与音频轨同链混音；静音标记/轨静音/图片素材不进音频图
+            if not base["muted"] and flags.get("muted") is not True \
+                    and resolve_asset_kind is not None and resolve_asset_kind(asset_id) == "video":
                 audio_clips.append({**base, "from_video": True})
         # subtitle clips 不进 Plan（字幕事件单独派生）
 
@@ -138,13 +149,15 @@ def build_plan(
     for seg in audio_clips:
         seg["render_start"] = seg["start"]
 
-    # 字幕事件（text 片段）
+    # 字幕事件（text 片段；隐藏字幕轨不出字幕）
     subtitle_events = sorted(
         (
             {"start": _num(c.get("start")), "end": _num(c.get("start")) + _num(c.get("duration")),
              "text": str(c.get("text") or "").strip()}
             for c in clips
-            if isinstance(c, dict) and c.get("text") and kind_of.get(c.get("trackId")) == "subtitle"
+            if isinstance(c, dict) and c.get("text")
+            and kind_of.get(c.get("trackId")) == "subtitle"
+            and (flags_of.get(c.get("trackId")) or {}).get("hidden") is not True
         ),
         key=lambda e: e["start"],
     )

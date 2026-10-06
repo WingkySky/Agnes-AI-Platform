@@ -8,10 +8,10 @@ import { describe, expect, it } from 'vitest'
 
 import { cornerHit, moveRect, pickDrawItem, planFrame, resizeRect } from '@/lib/editor-compositor'
 import type { DrawItem } from '@/lib/editor-compositor'
-import type { EditorClip, EditorDocument, EditorTrack } from '@/lib/editor-types'
+import { EMPTY_TRACK_FLAGS, type EditorClip, type EditorDocument, type EditorTrack, type TrackFlags } from '@/lib/editor-types'
 
-function track(id: string, kind: EditorTrack['kind'], order: number, flag: EditorTrack['flag'] = null): EditorTrack {
-  return { id, kind, order, flag }
+function track(id: string, kind: EditorTrack['kind'], order: number, flags: Partial<TrackFlags> = {}): EditorTrack {
+  return { id, kind, order, flags: { ...EMPTY_TRACK_FLAGS, ...flags } }
 }
 
 function clip(id: string, trackId: string, start: number, duration: number, props: EditorClip['props'] = {}, assetId: number | null = 1): EditorClip {
@@ -39,7 +39,7 @@ describe('planFrame', () => {
 
   it('hidden 轨跳过；播放头不在片段内跳过', () => {
     const d = doc(
-      [track('tH', 'video', 1, 'hidden'), track('tV', 'video', 0)],
+      [track('tH', 'video', 1, { hidden: true }), track('tV', 'video', 0)],
       [
         clip('hid', 'tH', 0, 4),
         clip('before', 'tV', 4, 2),

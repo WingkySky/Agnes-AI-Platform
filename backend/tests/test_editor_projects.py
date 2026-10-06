@@ -22,8 +22,8 @@ def _doc(**overrides):
     doc = {
         "timebase": 30, "width": 1280, "height": 720,
         "tracks": [
-            {"id": "v1", "kind": "video", "order": 0, "flag": None},
-            {"id": "a1", "kind": "audio", "order": 0, "flag": None},
+            {"id": "v1", "kind": "video", "order": 0, "flags": {}},
+            {"id": "a1", "kind": "audio", "order": 0, "flags": {}},
         ],
         "clips": [
             {"id": "c1", "trackId": "v1", "assetId": None, "start": 0.0,
@@ -141,6 +141,10 @@ async def test_document_skeleton_validation(memory_db):
             {"timebase": 0},                                        # 缺字段
             _doc(width=0),                                          # 分辨率越界
             _doc(tracks=[{"id": "v1", "kind": "3d", "order": 0}]),  # kind 非法
+            _doc(tracks=[{"id": "v1", "kind": "video", "order": 0,
+                          "flags": {"hidden": 1}}]),              # flags 值必须布尔
+            _doc(tracks=[{"id": "v1", "kind": "video", "order": 0,
+                          "flags": {"boom": True}}]),             # flags 键白名单外
             _doc(clips=[{"id": "c1", "trackId": "vx", "start": 0, "duration": 1}]),  # trackId 不存在
             _doc(clips=[{"id": "c1", "trackId": "v1", "start": -1, "duration": 1}]),  # 负 start
             _doc(clips=[{"id": "c1", "trackId": "v1", "start": 0, "duration": 1,
