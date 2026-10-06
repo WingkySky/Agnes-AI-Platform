@@ -5,6 +5,7 @@
  * ===================================================== */
 
 import type { CanvasSubtitleSegment } from '@/api/canvas'
+import { formatTimecode } from './editor-timecode'
 
 export interface NodeFitSize {
   width: number
@@ -48,11 +49,9 @@ function srtTimeToSeconds(value: string): number {
   return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) + Number(m[4]) / 1000
 }
 
-/** 秒 → SRT 时间 "00:00:01,500" */
+/** 秒 → SRT 时间 "00:00:01,500"（formatTimecode 的逗号毫秒分隔变体） */
 function srtSecondsToTime(total: number): string {
-  const totalMs = Math.max(0, Math.round(total * 1000))
-  const p2 = (n: number) => String(n).padStart(2, '0')
-  return `${p2(Math.floor(totalMs / 3600000))}:${p2(Math.floor((totalMs % 3600000) / 60000))}:${p2(Math.floor((totalMs % 60000) / 1000))},${String(totalMs % 1000).padStart(3, '0')}`
+  return formatTimecode(total).replace('.', ',')
 }
 
 /** 字幕片段数组 → SRT 文本（parseSrt 的对称输出，按 start_time 排序） */

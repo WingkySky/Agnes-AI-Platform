@@ -10,10 +10,12 @@
 
 import { computed, onBeforeUnmount, watch } from 'vue'
 import { Headset } from '@element-plus/icons-vue'
+import { ArrowLeftToLine, ArrowRightToLine, ChevronsLeft, ChevronsRight, Pause, Play, StepBack, StepForward } from 'lucide-vue-next'
 
 import { useEditorStore } from '@/stores/editor'
 import { useI18n } from '@/i18n'
 import { clipEnd, type EditorClip } from '@/lib/editor-types'
+import { formatTimecode } from '@/lib/editor-timecode'
 import { clipGainAt } from '@/lib/editor-audio'
 import { hasWebCodecs } from '@/lib/editor-media'
 import EditorCanvasStage from './EditorCanvasStage.vue'
@@ -213,6 +215,19 @@ async function togglePlay(): Promise<void> {
   store.isPlaying = !store.isPlaying
 }
 
+// ---------- 传输控制条（与键盘快捷键同一套语义：EditorView.onKeydown） ----------
+
+const frameStep = computed(() => 1 / (store.doc?.timebase || 30))
+const totalDuration = computed(() => Math.max(0, ...(store.doc?.clips ?? []).map(clipEnd)))
+
+function nudge(delta: number): void {
+  store.playhead = Math.min(totalDuration.value, Math.max(0, store.playhead + delta))
+}
+
+function goEnd(): void {
+  store.playhead = totalDuration.value
+}
+
 // 播放循环（仅 DOM 路径）：rAF 推进 playhead，逐帧同步媒体元素；canvas 路径由 EditorCanvasStage 推进
 let rafId = 0
 let lastTs = 0
@@ -302,11 +317,21 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="preview-controls">
-      <el-button size="small" @click="store.playhead = 0">⏮</el-button>
-      <el-button size="small" type="primary" @click="togglePlay">
-        {{ store.isPlaying ? t('editor.pause') : t('editor.play') }}
-      </el-button>
-      <span class="preview-time">{{ store.playhead.toFixed(2) }}s</span>
+      <div class="preview-timecode">
+        <span class="current">{{ formatTimecode(store.playhead) }}</span>
+        <span class="sep">/</span>
+        <span class="total">{{ formatTimecode(totalDuration) }}</span>
+      </div>
+      <div class="transport">
+        <el-button circle text size="small" :icon="ArrowLeftToLine" :title="t('editor.goStartTip')" :disabled="store.playhead <= 0" @click="store.playhead = 0" />
+        <el-button circle text size="small" :icon="ChevronsLeft" :title="t('editor.rewind1sTip')" :disabled="store.playhead <= 0" @click="nudge(-1)" />
+        <el-button circle text size="small" :icon="StepBack" :title="t('editor.prevFrameTip')" :disabled="store.playhead <= 0" @click="nudge(-frameStep)" />
+        <el-button circle size="small" type="primary" :icon="store.isPlaying ? Pause : Play" :title="store.isPlaying ? t('editor.pauseBtnTip') : t('editor.playBtnTip')" @click="togglePlay" />
+        <el-button circle text size="small" :icon="StepForward" :title="t('editor.nextFrameTip')" :disabled="store.playhead >= totalDuration" @click="nudge(frameStep)" />
+        <el-button circle text size="small" :icon="ChevronsRight" :title="t('editor.forward1sTip')" :disabled="store.playhead >= totalDuration" @click="nudge(1)" />
+        <el-button circle text size="small" :icon="ArrowRightToLine" :title="t('editor.goEndTip')" :disabled="store.playhead >= totalDuration" @click="goEnd" />
+      </div>
+      <div />
     </div>
   </div>
 </template>
@@ -408,16 +433,26 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 .preview-controls {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: 4px 12px 6px;
+}
+.preview-timecode {
+  justify-self: start;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.preview-timecode .current { color: var(--el-text-color-primary); font-weight: 600; }
+.preview-timecode .sep,
+.preview-timecode .total { color: var(--el-text-color-secondary); }
+.transport {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 4px 0 6px;
+  gap: 2px;
 }
-.preview-time {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  font-variant-numeric: tabular-nums;
-  min-width: 64px;
-}
+.transport :deep(.el-button + .el-button) { margin-left: 0; }
 </style>
