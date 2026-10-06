@@ -1,7 +1,7 @@
-/* fitNodeToMedia 单测：保宽定高、上下限钳制、已贴合免触发 */
+/* fitNodeToMedia 单测：保宽定高、上下限钳制、已贴合免触发；SRT 格式化与往返 */
 
 import { describe, it, expect } from 'vitest'
-import { fitNodeToMedia } from '../canvas-media'
+import { fitNodeToMedia, formatSrtCues, parseSrt } from '../canvas-media'
 
 const MAX_H = 560
 const MIN_H = 160
@@ -35,5 +35,30 @@ describe('fitNodeToMedia', () => {
 
   it('比例误差在 1% 内视为已贴合', () => {
     expect(fitNodeToMedia(341, 192, 1920, 1080, MAX_H, MIN_H)).toBeNull()
+  })
+})
+
+describe('formatSrtCues / parseSrt 往返', () => {
+  it('格式化输出标准 SRT 块（序号 + 逗号毫秒时间轴）', () => {
+    const srt = formatSrtCues([
+      { start_time: 1.5, duration: 2, text: '第一句' },
+      { start_time: 0, duration: 1, text: '开头' },
+    ])
+    expect(srt).toBe('1\n00:00:00,000 --> 00:00:01,000\n开头\n\n2\n00:00:01,500 --> 00:00:03,500\n第一句')
+  })
+
+  it('毫秒边界进位正确（999.9ms 不产出 1000）', () => {
+    const srt = formatSrtCues([{ start_time: 0.9999, duration: 1.0001, text: 'x' }])
+    expect(srt).toContain('00:00:01,000 --> 00:00:02,000')
+  })
+
+  it('与 parseSrt 往返一致（含 , 毫秒分隔与多行文本）', () => {
+    const sample = '1\n00:00:01,500 --> 00:00:03,000\nHello\nWorld\n\n2\n00:00:04,000 --> 00:00:05,250\n第二句'
+    const cues = parseSrt(sample)
+    expect(cues).toEqual([
+      { start_time: 1.5, duration: 1.5, text: 'Hello\nWorld' },
+      { start_time: 4, duration: 1.25, text: '第二句' },
+    ])
+    expect(parseSrt(formatSrtCues(cues))).toEqual(cues)
   })
 })

@@ -9,13 +9,18 @@
  *       放置回退（占用轨→同类型空闲轨→自动开新轨）在 store.placeAsset
  * ===================================================== */
 
-import { computed, ref, type Component } from 'vue'
+import { computed, onUnmounted, ref, type Component } from 'vue'
+import { ElMessage } from 'element-plus'
 import { Close, Delete, Headset, Mute, QuestionFilled, RefreshLeft, RefreshRight, Scissor, Switch } from '@element-plus/icons-vue'
 import { Eye, EyeOff, GripVertical, Headphones, Lock, LockOpen, Volume2, VolumeX } from 'lucide-vue-next'
 
 import { useEditorStore } from '@/stores/editor'
 import { useI18n } from '@/i18n'
 import { MIN_CLIP_DURATION, TRANSITION_TYPES, clipEnd, type EditorClip, type EditorTrack, type TrackFlagKey, type TrackKind, type TransitionType } from '@/lib/editor-types'
+import { formatSrtCues, parseSrt } from '@/lib/canvas-media'
+import { clearStripCaches } from '@/lib/editor-strips'
+import { useDownload } from '@/composables/useDownload'
+import EditorClipMedia from './EditorClipMedia.vue'
 import {
   PX_PER_SEC_MAX,
   PX_PER_SEC_MIN,
@@ -418,15 +423,15 @@ function setRowRef(trackId: string, el: unknown): void {
 
 // ---------- 右键菜单（片段 / 轨道 lane） ----------
 
-interface CtxMenuState { x: number; y: number; clip: EditorClip | null; kind: string | null }
+interface CtxMenuState { x: number; y: number; clip: EditorClip | null; kind: string | null; trackId: string | null }
 const ctxMenu = ref<CtxMenuState | null>(null)
 
 function openClipMenu(e: MouseEvent, clip: EditorClip, kind: string): void {
   store.select(clip.id)
-  ctxMenu.value = { x: Math.min(e.clientX, window.innerWidth - 170), y: Math.min(e.clientY, window.innerHeight - 190), clip, kind }
+  ctxMenu.value = { x: Math.min(e.clientX, window.innerWidth - 170), y: Math.min(e.clientY, window.innerHeight - 190), clip, kind, trackId: null }
 }
-function openLaneMenu(e: MouseEvent, kind: string): void {
-  ctxMenu.value = { x: Math.min(e.clientX, window.innerWidth - 170), y: Math.min(e.clientY, window.innerHeight - 190), clip: null, kind }
+function openLaneMenu(e: MouseEvent, track: EditorTrack): void {
+  ctxMenu.value = { x: Math.min(e.clientX, window.innerWidth - 170), y: Math.min(e.clientY, window.innerHeight - 190), clip: null, kind: track.kind, trackId: track.id }
 }
 
 interface CtxItem { label: string; disabled: boolean; run: () => void }
@@ -454,6 +459,14 @@ const ctxItems = computed<CtxItem[]>(() => {
     items.push({ label: t('common.delete'), disabled: false, run: () => store.applyOrToast({ op: 'removeClip', payload: { clipId: clip.id } }, t('editor.ops.removeClip')) })
     return items
   }
+  if (m.kind === 'subtitle' && m.trackId) {
+    const trackId = m.trackId
+    const hasClips = store.doc?.clips.some((c) => c.trackId === trackId) ?? false
+    return [
+      { label: t('editor.importSrt'), disabled: false, run: () => importSrt(trackId) },
+      { label: t('editor.exportSrt'), disabled: !hasClips, run: () => exportSrt(trackId) },
+    ]
+  }
   if (m.kind === 'video' || m.kind === 'audio') {
     return [{
       label: t('editor.menuAddSameTrack'),
@@ -463,6 +476,46 @@ const ctxItems = computed<CtxItem[]>(() => {
   }
   return []
 })
+
+function importSrt(trackId: string): void {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = '.srt,text/plain'
+  input.onchange = async () => {
+    const file = input.files?.[0]
+    if (!file) return
+    const segments = parseSrt(await file.text())
+    if (!segments.length) {
+      ElMessage.warning(t('editor.srtEmpty'))
+      return
+    }
+    const ok = store.applyOrToast({
+      op: 'rebuildSubtitleClips',
+      payload: {
+        trackId,
+        clips: segments.map((s) => ({ id: store.newId('clip'), start: s.start_time, duration: s.duration, text: s.text })),
+      },
+    }, t('editor.ops.rebuildSubtitleClips'))
+    if (ok) ElMessage.success(t('editor.srtImported', { n: segments.length }))
+  }
+  input.click()
+}
+
+function exportSrt(trackId: string): void {
+  const doc = store.doc
+  if (!doc) return
+  const clips = doc.clips
+    .filter((c) => c.trackId === trackId)
+    .sort((a, b) => a.start - b.start)
+    .map((c) => ({ start_time: c.start, duration: c.duration, text: c.text ?? '' }))
+  const srt = formatSrtCues(clips)
+  void useDownload().triggerDownload(
+    new Blob([srt], { type: 'application/x-subrip' }),
+    `${store.title || 'subtitles'}.srt`,
+  )
+}
+
+onUnmounted(clearStripCaches)
 
 function onCtxItemClick(item: CtxItem): void {
   item.run()
@@ -606,7 +659,7 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
             @dragover.prevent="dropActive = row.track.id"
             @dragleave="dropActive = null"
             @drop.prevent="onDropAsset($event, row.track.id)"
-            @contextmenu.prevent="openLaneMenu($event, row.track.kind)"
+            @contextmenu.prevent="openLaneMenu($event, row.track)"
           >
             <div
               v-for="clip in row.clips"
@@ -625,6 +678,7 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
               @pointerdown="beginDrag($event, clip, 'move')"
               @contextmenu.prevent="openClipMenu($event, clip, row.track.kind)"
             >
+              <EditorClipMedia v-if="row.track.kind !== 'subtitle'" :clip="clip" :kind="row.track.kind" />
               <svg v-if="clipEnvelope(clip)" class="clip-envelope" viewBox="0 0 100 100" preserveAspectRatio="none">
                 <path
                   :d="`${clipEnvelope(clip)} Z`"
@@ -930,6 +984,7 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
 }
 .ghost-block.audio { border-color: var(--el-color-success); background: var(--el-color-success-light-9); }
 .clip-label {
+  position: relative;
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;

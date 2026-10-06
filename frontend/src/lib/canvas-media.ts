@@ -48,6 +48,21 @@ function srtTimeToSeconds(value: string): number {
   return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) + Number(m[4]) / 1000
 }
 
+/** 秒 → SRT 时间 "00:00:01,500" */
+function srtSecondsToTime(total: number): string {
+  const totalMs = Math.max(0, Math.round(total * 1000))
+  const p2 = (n: number) => String(n).padStart(2, '0')
+  return `${p2(Math.floor(totalMs / 3600000))}:${p2(Math.floor((totalMs % 3600000) / 60000))}:${p2(Math.floor((totalMs % 60000) / 1000))},${String(totalMs % 1000).padStart(3, '0')}`
+}
+
+/** 字幕片段数组 → SRT 文本（parseSrt 的对称输出，按 start_time 排序） */
+export function formatSrtCues(segments: CanvasSubtitleSegment[]): string {
+  return [...segments]
+    .sort((a, b) => a.start_time - b.start_time)
+    .map((seg, i) => `${i + 1}\n${srtSecondsToTime(seg.start_time)} --> ${srtSecondsToTime(seg.start_time + seg.duration)}\n${seg.text}`)
+    .join('\n\n')
+}
+
 /** 解析 SRT 文本为字幕片段数组（start_time / duration / text） */
 export function parseSrt(srt: string): CanvasSubtitleSegment[] {
   const segments: CanvasSubtitleSegment[] = []

@@ -103,6 +103,17 @@ export async function createAudioSink(url: string): Promise<AudioBufferSink | nu
   }
 }
 
+/** 为素材条建小尺寸帧抓取 sink（无视频轨返回 null；160px 宽足够缩略图平铺） */
+export async function createThumbSink(url: string): Promise<CanvasSink | null> {
+  try {
+    const entry = await getMediaTracks(url)
+    if (!entry.video) return null
+    return new CanvasSink(entry.video, { width: 160, poolSize: 1 })
+  } catch {
+    return null
+  }
+}
+
 /** mediabunny 时长探测（秒）：容器元数据优先，缺失再精确计算；失败返回 0 */
 export async function probeDuration(url: string): Promise<number> {
   try {
