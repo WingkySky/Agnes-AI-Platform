@@ -64,6 +64,12 @@ function onPage(next: number): void {
   void reload()
 }
 
+/** 单击临时预览到预览窗（再点同一素材关闭）；拖拽入轨/双击加轨行为不变 */
+function onAssetClick(asset: UnifiedAsset): void {
+  if (store.previewingAsset?.id === asset.id) store.endAssetPreview()
+  else store.startAssetPreview(asset)
+}
+
 function onDragStart(e: DragEvent, asset: UnifiedAsset): void {
   e.dataTransfer?.setData('text/asset-id', String(asset.id))
   if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copy'
@@ -112,9 +118,11 @@ onMounted(() => void reload())
         v-for="asset in items"
         :key="asset.id"
         class="asset-card"
+        :class="{ active: store.previewingAsset?.id === asset.id }"
         draggable="true"
-        :title="t('editor.assetDblClickHint')"
+        :title="t('editor.assetCardHint')"
         @dragstart="onDragStart($event, asset)"
+        @click="onAssetClick(asset)"
         @dblclick="onAssetActivate(asset)"
       >
         <div class="asset-thumb">
@@ -188,6 +196,12 @@ onMounted(() => void reload())
 .asset-card:hover {
   border-color: var(--el-color-primary);
   box-shadow: var(--el-box-shadow-light);
+}
+/* 预览中的素材卡：与悬停同色系但常显，配合预览窗角标形成“正在看哪个”的对应关系 */
+.asset-card.active {
+  border-color: var(--el-color-primary);
+  box-shadow: var(--el-box-shadow-light);
+  background: var(--el-color-primary-light-9);
 }
 .asset-thumb {
   aspect-ratio: 16 / 9;

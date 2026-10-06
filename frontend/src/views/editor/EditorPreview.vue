@@ -9,6 +9,7 @@
  * ===================================================== */
 
 import { computed, onBeforeUnmount, watch } from 'vue'
+import { Headset } from '@element-plus/icons-vue'
 
 import { useEditorStore } from '@/stores/editor'
 import { useI18n } from '@/i18n'
@@ -21,6 +22,17 @@ const store = useEditorStore()
 
 const emptyStyle: Record<string, string> = {}
 const { t } = useI18n()
+
+/** 画面尺寸：锁文档比例，取槽位内最大等比尺寸（cqw/cqh 随面板拖拽实时缩放；
+ *  宽高都显式给出，避免 aspect-ratio 被单边钳制后比例破坏拉伸变形） */
+const stageStyle = computed<Record<string, string>>(() => {
+  const doc = store.doc
+  const ratio = doc && doc.height > 0 ? doc.width / doc.height : 16 / 9
+  return {
+    width: `min(100cqw, calc(100cqh * ${ratio}))`,
+    height: `min(100cqh, calc(100cqw / ${ratio}))`,
+  }
+})
 
 /** canvas 路径开关（组件创建时判定一次） */
 const useCanvasPath = hasWebCodecs()
@@ -228,35 +240,62 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="preview">
-    <div class="stage" :style="{ aspectRatio: store.doc ? `${store.doc.width} / ${store.doc.height}` : '16 / 9' }">
-      <template v-if="store.doc">
-        <EditorCanvasStage v-if="useCanvasPath" />
-        <template v-else>
-          <template v-for="track in videoTracks" :key="track.id">
-            <video
-              v-if="videoStates[track.id]?.url && track.flag !== 'hidden'"
-              :ref="(el) => setVideoEl(track.id, el)"
-              class="stage-video"
-              :style="activeClip(track.id) ? clipRectStyle(activeClip(track.id)!) : {}"
-              :src="videoStates[track.id]!.url ?? undefined"
-              playsinline
-            />
+    <div class="stage-wrap">
+      <div class="stage" :style="stageStyle">
+        <template v-if="store.doc">
+          <EditorCanvasStage v-if="useCanvasPath" />
+          <template v-else>
+            <template v-for="track in videoTracks" :key="track.id">
+              <video
+                v-if="videoStates[track.id]?.url && track.flag !== 'hidden'"
+                :ref="(el) => setVideoEl(track.id, el)"
+                class="stage-video"
+                :style="activeClip(track.id) ? clipRectStyle(activeClip(track.id)!) : {}"
+                :src="videoStates[track.id]!.url ?? undefined"
+                playsinline
+              />
+            </template>
+            <template v-for="track in audioTracks" :key="track.id">
+              <audio
+                v-if="audioStates[track.id]?.url"
+                :ref="(el) => setAudioEl(track.id, el)"
+                :src="audioStates[track.id]!.url ?? undefined"
+              />
+            </template>
           </template>
-          <template v-for="track in audioTracks" :key="track.id">
-            <audio
-              v-if="audioStates[track.id]?.url"
-              :ref="(el) => setAudioEl(track.id, el)"
-              :src="audioStates[track.id]!.url ?? undefined"
-            />
-          </template>
+          <div class="subtitle-layer">
+            <p v-for="clip in activeSubtitles" :key="clip.id" class="subtitle-text" :style="subtitleStyleVars">
+              {{ clip.text }}
+            </p>
+          </div>
         </template>
-        <div class="subtitle-layer">
-          <p v-for="clip in activeSubtitles" :key="clip.id" class="subtitle-text" :style="subtitleStyleVars">
-            {{ clip.text }}
-          </p>
+        <div v-else class="stage-empty">{{ t('editor.previewEmpty') }}</div>
+
+        <!-- 素材临时预览浮层：盖在时间线画面上方，不碰 playhead/文档；点时间线即恢复。
+             点击进入是用户手势，带声自动播放合法（Safari 若拦截则用原生播放键，静默降级） -->
+        <div v-if="store.previewingAsset" class="asset-preview">
+          <video
+            v-if="store.previewingAsset.media_type === 'video'"
+            :key="store.previewingAsset.id"
+            :src="store.previewingAsset.asset_url"
+            controls
+            autoplay
+            playsinline
+          />
+          <img
+            v-else-if="store.previewingAsset.media_type === 'image'"
+            :key="store.previewingAsset.id"
+            :src="store.previewingAsset.asset_url"
+            :alt="store.previewingAsset.name"
+          >
+          <div v-else class="audio-preview">
+            <el-icon :size="40"><Headset /></el-icon>
+            <span class="audio-name">{{ store.previewingAsset.name }}</span>
+            <audio :key="store.previewingAsset.id" :src="store.previewingAsset.asset_url" controls autoplay />
+          </div>
+          <span class="preview-badge">{{ t('editor.assetPreviewing') }}</span>
         </div>
-      </template>
-      <div v-else class="stage-empty">{{ t('editor.previewEmpty') }}</div>
+      </div>
     </div>
 
     <div class="preview-controls">
@@ -275,18 +314,25 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  background: var(--el-fill-color-darker);
+  /* 通铺纯黑：画面外的留白即信箱黑边，不露面板灰底 */
+  background: #000;
+}
+/* 画面槽位：container-type 使 stage 可用 cqw/cqh 度量可用空间 */
+.stage-wrap {
+  flex: 1;
+  min-height: 0;
+  container-type: size;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .stage {
   position: relative;
-  flex: 1;
-  margin: 8px auto;
-  max-width: 100%;
-  max-height: 100%;
-  min-height: 0;
+  /* 兜底：内联 min(100cqw/100cqh) 不可用时退回撑满（老浏览器不塌陷） */
+  width: 100%;
+  height: 100%;
   background: #000;
   overflow: hidden;
-  border-radius: 4px;
 }
 .stage-video {
   position: absolute;
@@ -317,6 +363,46 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   color: var(--el-text-color-secondary);
+}
+/* 素材临时预览：盖住整个画面区（DOM 顺序在 canvas/字幕层之后，自然在上层） */
+.asset-preview {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+}
+.asset-preview video, .asset-preview img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.audio-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: var(--el-text-color-secondary);
+}
+.audio-name {
+  max-width: 70%;
+  font-size: 13px;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.preview-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 2px 8px;
+  font-size: 12px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 3px;
+  pointer-events: none;
 }
 .preview-controls {
   display: flex;

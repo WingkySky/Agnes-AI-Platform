@@ -136,6 +136,9 @@ function onKeydown(e: KeyboardEvent): void {  const target = e.target as HTMLEle
   if (e.code === 'Space') {
     e.preventDefault()
     store.isPlaying = !store.isPlaying
+  } else if (e.key === 'Escape' && store.previewingAsset) {
+    e.preventDefault()
+    store.endAssetPreview()
   } else if (e.key === 'Delete' || e.key === 'Backspace') {
     if (store.selectedClipId) {
       e.preventDefault()

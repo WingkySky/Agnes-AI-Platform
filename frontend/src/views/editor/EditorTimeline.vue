@@ -401,7 +401,8 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
 </script>
 
 <template>
-  <div class="timeline">
+  <!-- 点击时间线任意处退出素材临时预览、恢复时间线画面 -->
+  <div class="timeline" @pointerdown="store.endAssetPreview()">
     <!-- 时间线工具栏（剪映式：编辑动作在左，缩放/时间在右） -->
     <div class="timeline-toolbar">
       <el-button size="small" text :icon="RefreshLeft" :disabled="!store.history.canUndo" :title="t('editor.undo')" @click="store.undo()" />

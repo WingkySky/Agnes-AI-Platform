@@ -11,7 +11,7 @@
  * ===================================================== */
 
 import { defineStore } from 'pinia'
-import { ref, shallowRef } from 'vue'
+import { ref, shallowRef, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 
 import { t } from '@/i18n'
@@ -74,6 +74,22 @@ export const useEditorStore = defineStore('editor', () => {
   const playhead = ref(0)
   const isPlaying = ref(false)
   const history = new EditorHistory()
+
+  // ---------- 素材临时预览（会话内 UI 态，不入文档/撤销栈/保存） ----------
+  // 预览窗画面是 doc+playhead 的派生态：临时预览只盖浮层、不碰这两个值，退出即自动精确恢复
+  const previewingAsset = shallowRef<UnifiedAsset | null>(null)
+
+  function startAssetPreview(asset: UnifiedAsset): void {
+    previewingAsset.value = asset
+    isPlaying.value = false // 防止时间线声音与预览叠音
+  }
+
+  function endAssetPreview(): void {
+    previewingAsset.value = null
+  }
+
+  // 开始播放时间线（空格/播放键）= 回到时间线视图
+  watch(isPlaying, (playing) => { if (playing) previewingAsset.value = null })
 
   // ---------- 本地偏好 ----------
   const snappingEnabled = ref(readSnapPref())
@@ -368,10 +384,11 @@ export const useEditorStore = defineStore('editor', () => {
       return
     }
     if (hasClipAt(track.id, asset.id, start)) return
-    applyOrToast({
+    const ok = applyOrToast({
       op: 'addClip',
       payload: { clip: { id: newId('clip'), trackId: track.id, assetId: asset.id, start, duration: span.duration, trimStart: 0, props: {} } },
     }, t('editor.ops.addClip'))
+    if (ok) endAssetPreview() // 已落时间线，自动回到时间线视图
   }
 
   /** 自动开一条同类型新轨（放置回退的最后一档） */
@@ -482,6 +499,7 @@ export const useEditorStore = defineStore('editor', () => {
     history.clear()
     selectedClipId.value = null
     playhead.value = 0
+    previewingAsset.value = null
     renderStatus.value = 'idle'
     finalUrl.value = null
   }
@@ -489,6 +507,7 @@ export const useEditorStore = defineStore('editor', () => {
   return {
     uid, title, workId, sourceWorkspaceId, revision, loaded,
     doc, selectedClipId, playhead, isPlaying, history,
+    previewingAsset, startAssetPreview, endAssetPreview,
     snappingEnabled, setSnapping,
     dirty, saving, lastSavedAt,
     renderStatus, renderProgress, renderError, finalUrl,
