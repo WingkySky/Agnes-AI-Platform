@@ -1,8 +1,8 @@
 # =====================================================
-# 项目制 LLM 公共工具 — 从 wizard.py 抽出（原实现原样保留）
+# LLM 公共工具 — 原项目域 _llm.py 迁入（原实现原样保留）
 #
-# 消费方：subtitle_service / canvas_media_service（画布 TTS/字幕/合成节点的
-# LLM 子调用）。项目制编排已迁前端管线，wizard 本体已删除。
+# 消费方：canvas_media_service（画布 TTS/字幕/合成节点的 LLM 子调用）、
+# prompt_optimize_service。项目制编排已迁前端管线，项目域已退役。
 # =====================================================
 
 import json
@@ -53,7 +53,7 @@ async def call_llm(
 ) -> str:
     """
     调用 LLM 返回文本（通过 AgnesAIClient._post 走 chat/completions）。
-    模型优先级：显式 model > fallback_model（项目所有者偏好）> 系统默认（管理员配置）。
+    模型优先级：显式 model > fallback_model > 系统默认（管理员配置）。
     """
     body_model = ""
     if model:

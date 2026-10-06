@@ -3963,16 +3963,6 @@ const enUS = {
   },
 
   // ------ Project management (Episode Isolation) ------
-  project: {
-    currentEpisode: 'Current Episode',
-    allEpisodes: 'All Episodes',
-    selectEpisode: 'Select episode',
-    selectEpisodeFirst: 'Please select an episode first',
-    copyToEpisode: 'Copy to episode',
-    copiedToEpisode: 'Copied to target episode',
-    splitFromScript: 'Split from script',
-    createShot: 'New Shot',
-  },
 
   // ------ Canvas Agent ------
   agent: {

@@ -2,14 +2,14 @@
 # 提示词优化器服务（prompt_optimize_service）
 #
 # 五种模式结构化返回正负提示词 + 变化说明 + 假设声明 + 最多两个备选版本。
-# LLM 调用复用 project/_llm.call_llm（系统默认对话模型），JSON 解析失败自动重试一次。
+# LLM 调用复用 services/llm.call_llm（系统默认对话模型），JSON 解析失败自动重试一次。
 # =====================================================
 
 import logging
 import re
 from typing import Any, Optional
 
-from app.services.project._llm import call_llm, parse_json_loose
+from app.services.llm import call_llm, parse_json_loose
 
 logger = logging.getLogger("agnes_platform")
 

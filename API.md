@@ -985,7 +985,7 @@ AI 提示词优化（登录用户），返回结构化正负提示词。
 
 ### 画布媒体域与轻成片（/api/canvas）
 
-媒体域公共层抽至 `services/media/`（tts_provider 音色库与 Edge TTS / subtitle_format SRT+ASS / bgm_library 曲库），画布与项目制共用；`media_compose` 新增 `concat_with_xfade`（xfade 转场链公共实现）。
+媒体域公共层抽至 `services/media/`（tts_provider 音色库与 Edge TTS / subtitle_format SRT+ASS / bgm_library 曲库）；`media_compose` 新增 `concat_with_xfade`（xfade 转场链公共实现）。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|

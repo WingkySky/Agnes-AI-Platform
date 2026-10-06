@@ -31,21 +31,4 @@ from app.models.canvas_workspace import CanvasWorkspace, CanvasSnapshot, MAX_AUT
 from app.models.work import Work
 from app.models.work_entity import WorkEntity, WorkEntityVersion, ENTITY_KINDS, IMAGE_ROLES
 from app.models.editing_project import EditingProject, RENDER_IDLE, RENDER_RENDERING, RENDER_SUCCEEDED, RENDER_FAILED
-from app.models.project import (
-    Project,
-    ProjectScript,
-    ProjectCharacter,
-    ProjectScene,
-    ProjectProp,
-    ProjectEntityAsset,
-    ProjectShot,
-    ProjectShotCharacter,
-    ProjectShotProp,
-    ProjectShotFrameImage,
-    ProjectShotVideo,
-    # Phase 2: 配音 / 音色映射 / 时间线片段
-    ProjectShotAudio,
-    ProjectCharacterVoice,
-    ProjectTimelineClip,
-)
 from app.models.api_call_log import ApiCallLog

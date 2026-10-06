@@ -4,7 +4,7 @@
  * 管理员页：用户与角色管理 / 积分规则配置
  * - requiresAuth 路由：未登录时自动跳转到登录页
  * - requiresAdmin 路由：非管理员访问时 403 并跳转首页
- * - 所有业务页（chat/images/videos/history/canvas/projects/settings）均需登录
+ * - 所有业务页（chat/images/videos/history/canvas/works/settings）均需登录
  * ===================================================== */
 
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
@@ -84,9 +84,6 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/works/WorksDetailView.vue'),
     meta: { titleKey: 'router.workDetail', requiresAuth: true }
   },
-  // ---------- 项目制创作（融合退役：入口下线，路由重定向到作品页；数据表子批次 4 清理） ----------
-  { path: '/projects', redirect: '/works' },
-  { path: '/projects/:id', redirect: '/works' },
   // ---------- 3D 场景导演台：用 3D 空间布局生成可控的镜头语言 prompt ----------
   {
     path: '/scene-editor',

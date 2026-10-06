@@ -83,18 +83,6 @@ async def resolve_user_chat_model_id(db, user_id: int, explicit: str = "") -> st
     return await _system_default_chat_model_id(db)
 
 
-async def resolve_project_chat_model_id(db, project_id: int, explicit: str = "") -> str:
-    """按项目解析创作类对话模型（使用项目所有者的用户偏好，免去各调用点透传 user_id）"""
-    if explicit:
-        return explicit
-    from sqlalchemy.future import select
-    from app.models.project import Project
-    result = await db.execute(select(Project.user_id).where(Project.id == project_id))
-    row = result.first()
-    owner_id = row[0] if row else 0
-    return await resolve_user_chat_model_id(db, owner_id)
-
-
 async def resolve_system_chat_model_id(db, key: str) -> str:
     """
     系统级对话模型解析（审核 / 标题总结等）：指定配置项 > 系统默认 > 第一个 chat 模型。

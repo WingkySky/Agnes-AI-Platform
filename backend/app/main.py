@@ -66,7 +66,6 @@ from app.routes import admin_review as admin_review_route
 from app.routes import asset as asset_route
 from app.routes import assets as assets_route
 from app.routes import scenes as scenes_route
-from app.routes import projects as projects_route
 from app.routes import canvas as canvas_route
 from app.routes import canvas_workspace as canvas_workspace_route
 from app.routes import editor as editor_route
@@ -335,7 +334,6 @@ app.include_router(assets_route.router, prefix="/api", tags=["资产库"])
 app.include_router(scenes_route.router, prefix="/api", tags=["3D 场景（导演台）"])
 app.include_router(mcp_route.router, prefix="/api", tags=["MCP 服务器"])
 app.include_router(setup_route.router, prefix="/api", tags=["首启初始化"])
-app.include_router(projects_route.router, prefix="/api", tags=["项目制创作"])
 app.include_router(canvas_route.router, prefix="/api", tags=["无限画布"])
 app.include_router(canvas_workspace_route.router, prefix="/api", tags=["画布工作区"])
 app.include_router(works_route.router, prefix="/api", tags=["作品"])

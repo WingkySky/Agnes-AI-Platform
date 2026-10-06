@@ -42,7 +42,7 @@ from app.services.media_compose import (
 from app.services.upload_service import UPLOADS_DIR
 from app.services.media.tts_provider import call_tts_provider, resolve_edge_voice
 from app.services.media.subtitle_format import DEFAULT_SUBTITLE_STYLE, build_ass, build_srt
-from app.services.project._llm import parse_json_loose, call_llm
+from app.services.llm import parse_json_loose, call_llm
 
 logger = logging.getLogger("agnes_platform.canvas.media")
 
