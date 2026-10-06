@@ -357,7 +357,9 @@ function clipEnvelope(clip: EditorClip): string | null {
   return `M 0 100 ${rise} L ${100 - fo} 0 ${fall}`
 }
 
-/** 包络填充/描边跟轨道主色（fill 与片段底色同档，曲线之上露出 lane 底色） */
+/** 包络填充/描边跟轨道主色：填充是素材条之上的半透明色罩（fill-opacity 见下），
+ * 曲线之上露出 lane 底色；描边全强度保证曲线在缩略图/音波上可读 */
+const ENVELOPE_FILL_OPACITY = 0.5
 const ENVELOPE_COLORS: Record<string, { fill: string; stroke: string }> = {
   video: { fill: 'var(--el-color-primary-light-8)', stroke: 'var(--el-color-primary-light-5)' },
   audio: { fill: 'var(--el-color-success-light-8)', stroke: 'var(--el-color-success-light-5)' },
@@ -682,7 +684,7 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
               <svg v-if="clipEnvelope(clip)" class="clip-envelope" viewBox="0 0 100 100" preserveAspectRatio="none">
                 <path
                   :d="`${clipEnvelope(clip)} Z`"
-                  :style="{ fill: ENVELOPE_COLORS[row.track.kind].fill }"
+                  :style="{ fill: ENVELOPE_COLORS[row.track.kind].fill, fillOpacity: ENVELOPE_FILL_OPACITY }"
                 />
                 <path
                   :d="clipEnvelope(clip) ?? undefined"
