@@ -4,9 +4,9 @@
  * 拖入时间线建片段；上传走 POST /api/assets 入库后引用
  * ===================================================== */
 
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Upload } from '@element-plus/icons-vue'
+import { Film, Headset, Upload } from '@element-plus/icons-vue'
 
 import { createAsset, listAssets, type UnifiedAsset } from '@/api/assets'
 import { uploadCanvasAsset } from '@/api/canvasWorkspace'
@@ -26,6 +26,10 @@ const loading = ref(false)
 const uploading = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 
+const typeOptions = computed(() =>
+  (['video', 'image', 'audio'] as const).map((kind) => ({ label: t(`editor.mediaTypes.${kind}`), value: kind })),
+)
+
 async function reload(): Promise<void> {
   loading.value = true
   try {
@@ -42,7 +46,9 @@ async function reload(): Promise<void> {
   }
 }
 
-function switchType(kind: 'video' | 'image' | 'audio'): void {
+/** el-segmented 的 change 值是宽类型，进来的值必须是合法媒体类型才生效 */
+function switchType(kind: string | number | boolean | undefined): void {
+  if (kind !== 'video' && kind !== 'image' && kind !== 'audio') return
   mediaType.value = kind
   page.value = 1
   void reload()
@@ -80,7 +86,7 @@ async function onPickFile(e: Event): Promise<void> {
     const mediaTypeFromFile = file.type.startsWith('audio') ? 'audio' : file.type.startsWith('video') ? 'video' : 'image'
     const asset = await createAsset({ url, media_type: mediaTypeFromFile, name: file.name, work_id: store.workId ?? undefined })
     ElMessage.success(t('editor.uploadDone'))
-    if (asset.media_type !== mediaType.value) switchType(asset.media_type as 'video' | 'image' | 'audio')
+    if (asset.media_type !== mediaType.value) switchType(asset.media_type)
     else await reload()
   } catch {
     // 拦截器已提示
@@ -94,16 +100,12 @@ onMounted(() => void reload())
 
 <template>
   <div class="asset-panel">
-    <el-input v-model="keyword" size="small" clearable :placeholder="t('editor.searchPlaceholder')" @keyup.enter="search" @clear="search" />
-    <div class="type-tabs">
-      <el-button v-for="kind in (['video', 'image', 'audio'] as const)" :key="kind" size="small" :type="mediaType === kind ? 'primary' : ''" @click="switchType(kind)">
-        {{ t(`editor.mediaTypes.${kind}`) }}
-      </el-button>
-      <el-button size="small" :icon="Upload" :loading="uploading" @click="fileInput?.click()">
-        {{ t('editor.upload') }}
-      </el-button>
+    <div class="type-row">
+      <el-input v-model="keyword" size="small" clearable :placeholder="t('editor.searchPlaceholder')" @keyup.enter="search" @clear="search" />
+      <el-button size="small" :icon="Upload" :title="t('editor.upload')" :aria-label="t('editor.upload')" :loading="uploading" @click="fileInput?.click()" />
       <input ref="fileInput" type="file" hidden :accept="mediaType === 'audio' ? 'audio/*' : mediaType === 'video' ? 'video/*' : 'image/*'" @change="onPickFile">
     </div>
+    <el-segmented class="type-tabs" :model-value="mediaType" size="small" :options="typeOptions" @change="switchType" />
 
     <div v-loading="loading" class="asset-list">
       <div
@@ -115,24 +117,31 @@ onMounted(() => void reload())
         @dragstart="onDragStart($event, asset)"
         @dblclick="onAssetActivate(asset)"
       >
-        <img v-if="asset.media_type === 'image'" :src="asset.thumb_url || asset.asset_url" loading="lazy">
-        <video v-else-if="asset.media_type === 'video'" :src="asset.asset_url" preload="metadata" muted />
-        <div v-else class="audio-mark">♪</div>
+        <div class="asset-thumb">
+          <img v-if="asset.media_type === 'image'" :src="asset.thumb_url || asset.asset_url" loading="lazy">
+          <!-- #t=0.1 让浏览器在 preload=metadata 阶段就绘制首帧，避免视频卡全黑 -->
+          <video v-else-if="asset.media_type === 'video'" :src="`${asset.asset_url}#t=0.1`" preload="metadata" muted />
+          <div v-else class="audio-mark"><el-icon><Headset /></el-icon></div>
+        </div>
         <span class="asset-name" :title="asset.name">{{ asset.name }}</span>
       </div>
-      <div v-if="!loading && !items.length" class="empty">{{ t('editor.assetEmpty') }}</div>
+      <div v-if="!loading && !items.length" class="empty">
+        <el-icon :size="26"><Film /></el-icon>
+        <p>{{ t('editor.assetEmpty') }}</p>
+      </div>
     </div>
 
-    <el-pagination
-      v-if="total > PAGE_SIZE"
-      layout="prev, pager, next"
-      small
-      :total="total"
-      :page-size="PAGE_SIZE"
-      :current-page="page"
-      @current-change="onPage"
-    />
-    <p class="drag-hint">{{ t('editor.dragHint') }}</p>
+    <div v-if="total > PAGE_SIZE" class="list-footer">
+      <el-pagination
+        layout="prev, pager, next"
+        small
+        :total="total"
+        :page-size="PAGE_SIZE"
+        :current-page="page"
+        @current-change="onPage"
+      />
+      <span class="total">{{ t('editor.assetTotal', { n: total }) }}</span>
+    </div>
   </div>
 </template>
 
@@ -145,59 +154,94 @@ onMounted(() => void reload())
   height: 100%;
   overflow: hidden;
 }
-.type-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.type-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.type-row .el-input {
+  flex: 1;
+}
+.type-tabs {
+  width: 100%;
+}
 .asset-list {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   display: grid;
-  /* 自适应网格：卡片最小 150px 保证缩略图可读，面板变窄减列（最窄 1 列）、变宽加大卡片 */
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  /* 容器高度确定时 Chrome 会把裸 auto 行按剩余高度均分塌缩成细条，必须锁内容高度 */
+  grid-auto-rows: minmax(max-content, auto);
   gap: 8px;
   align-content: start;
-  min-height: 0;
 }
 .asset-card {
   border: 1px solid var(--el-border-color-lighter);
-  border-radius: 4px;
+  border-radius: 6px;
   overflow: hidden;
   cursor: grab;
   background: var(--el-fill-color-lighter);
   position: relative;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
-.asset-card img, .asset-card video {
+.asset-card:hover {
+  border-color: var(--el-color-primary);
+  box-shadow: var(--el-box-shadow-light);
+}
+.asset-thumb {
+  aspect-ratio: 16 / 9;
+  background: var(--el-fill-color-dark);
+}
+.asset-thumb img, .asset-thumb video {
   width: 100%;
-  /* 缩略图固定高度（≈16:9）：不随面板高度伸缩，尺寸始终可读 */
-  height: 84px;
+  height: 100%;
   object-fit: cover;
   display: block;
   pointer-events: none;
 }
 .audio-mark {
-  height: 84px;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 24px;
+  font-size: 26px;
   color: var(--el-color-success);
 }
 .asset-name {
-  display: block;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 14px 6px 4px;
   font-size: 11px;
-  padding: 2px 4px;
+  color: #fff;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.65));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .empty {
   grid-column: 1 / -1;
-  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
   color: var(--el-text-color-secondary);
-  padding: 24px 0;
+  padding: 32px 0;
 }
-.drag-hint {
+.empty p {
+  margin: 0;
+  font-size: 12px;
+}
+.list-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.total {
+  margin-left: auto;
   font-size: 11px;
   color: var(--el-text-color-secondary);
-  margin: 0;
-  text-align: center;
 }
 </style>

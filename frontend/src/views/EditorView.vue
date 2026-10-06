@@ -70,8 +70,8 @@ const bodyEl = ref<HTMLElement | null>(null)
 const saved = readLayout()
 const assetsW = ref(Math.min(480, Math.max(160, saved?.assetsW ?? 208)))
 const inspectorW = ref(Math.min(480, Math.max(160, saved?.inspectorW ?? 240)))
-/** 上排高度（px）；0 = 未初始化，回退 CSS 44% */
-const topH = ref(Math.max(160, saved?.topH ?? 0))
+/** 上排高度（px）；0 = 未定制，回退 CSS 44%（哨兵 0 不能被最小值钳掉，否则新会话永远是最小高度） */
+const topH = ref(saved?.topH ? Math.max(240, saved.topH) : 0)
 
 function persistLayout(): void {
   if (!topH.value) return
@@ -112,7 +112,7 @@ function dragTopH(e: PointerEvent): void {
   const bodyH = bodyEl.value?.clientHeight ?? 720
   const start = topH.value || Math.round(bodyH * 0.44)
   startDrag(e, (_dx, dy) => {
-    topH.value = Math.min(Math.max(start + dy, 160), Math.max(bodyH - 260, 160))
+    topH.value = Math.min(Math.max(start + dy, 240), Math.max(bodyH - 260, 240))
   })
 }
 
@@ -169,7 +169,6 @@ onMounted(() => {
     router.push('/login')
     return
   }
-  if (!topH.value) topH.value = Math.round((bodyEl.value?.clientHeight ?? 720) * 0.44)
   void ensureLoaded()
   window.addEventListener('keydown', onKeydown)
 })
