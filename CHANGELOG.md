@@ -4,9 +4,30 @@
 
 ## [Unreleased]
 
+## [0.0.7] - 2026-10-06
+
+### 视频剪辑器：全新独立剪辑实体
+
+- **剪辑工程独立实体**：新表 `editing_projects`（文档快照 + revision 乐观锁 + 渲染状态/进度/快照/幂等列），端点 `/api/editor/projects` 增删改查、文档保存 409 冲突副本、whisper 字幕预览；前端新增侧边栏「视频剪辑」入口与作品详情工程区 → `/editor/:uid` 宿主页（节流自动保存、冲突副本、草稿占位时长补正）；whisper 转写抽 `services/media/transcribe_service` 公共域复用
+- **命令状态机**：14 op 可序列化命令表（addClip/moveClip/trimClip/splitClip/removeClip/detachAudio/setClipProperty、字幕 3 op、轨道 4 op）纯函数 fail-closed（未知 op / 非法 payload 抛错不改状态，可安全回放），200 层结构共享快照撤销，vitest 黄金对表 + 重放一致性锁死
+- **多轨时间线**：视频/音频/字幕三类轨道、多视频轨画中画；最近点吸附（Shift 临时禁用 + 开关记忆）+ 碰撞拒绝 + 占用轨放置三级回退（同类型空闲轨 → 自动开新轨）；片段分割 / 复制 / 音画分离 / 接缝转场菜单（叠化/溶解/擦除）/ 淡入淡出包络 / 静音徽标 / 片段与轨道右键菜单；标尺 px↔秒换算收口根治 0 点错位类问题
+- **片段素材条**：视频片段缩略图条（mediabunny 按源时间网格取帧）/ 图片位图铺满 / 音频音波条（全量解码分桶），asset 级 LRU 缓存 + 失败负缓存 + 串行解码队列让位预览解码；SRT 导入（解析后全量替换字幕轨，撤销可回）与导出（按时间排序下载 `{工程名}.srt`）
+- **预览双路径 + 全音频统一调度**：WebCodecs 可用走 canvas 合成（mediabunny 帧迭代解码），否则 DOM 媒体元素降级；视频自带音频与音频轨统一解 PCM 挂 WebAudio（样本级音量/淡变增益），音频时钟主控推进播放头；时长探测三级化（容器元数据 → 元素 → 兜底）；画中画预览点选拖动 / 四角等比缩放直接操作（松手入撤销栈）；画面容器查询等比适配（信箱式留白）
+- **标准传输控制条**：三区布局——左「当前/总时长」时间码 `HH:MM:SS.mmm`（等宽数字防抖）+ 中 7 键图标组（首帧/退1秒/上一帧/播放暂停/下一帧/进1秒/尾帧，lucide 通用图标）+ 右占位；动作语义与键盘快捷键完全同源，播放头到边界自动禁用对应按钮，tooltip 标注快捷键
+- **渲染管线**：渲染 Plan 纯函数 lowering（转场压缩 render_start 的 xfade 链、PIP overlay 窗口、变速 atempo 保音高、多轨混音统一重采样 48k 立体声、ASS 字幕硬烧）→ 单条 ffmpeg；提交时文档快照 + `client_operation_id` 幂等 + asyncio 后台任务 + 启动 stale 复位；成片落 `uploads/editor` 并入库资产库、来源画布回写；真实工程端到端渲染验证通过（与预期画面 SSIM 0.969~0.985）
+- **布局对齐剪映**：上排=素材墙+预览+属性、下排=全宽时间线，上排高度与面板宽度分隔条全可拖拽 + localStorage 持久化；素材库 16:9 自适应缩略图墙（行列随面板尺寸适应）+ 素材卡单击浮层临时预览（退出零成本恢复）
+- **升级注意**：`works`/`editing_projects`/`api_call_logs` 为新表启动自动建；`canvas_workspaces.work_id`、`assets` 四列（storage_key/thumb_url/source/work_id）、`generations.error_category/error_message`、`model_definitions.cost_multiplier` 为存量库需手动 ALTER（见模型文件升级注释）；历史成功生成进资产库需管理员在资产库页点「同步历史资产」（幂等，可重复执行）
+- **测试**：vitest 530 绿 + vue-tsc 零错 + build 过；pytest 252 绿；浏览器多轮实测拖拽缩放/预览/渲染/落库
+
+### 资产统一：单一素材池 + 历史任务视图（融合子批次 2a）
+
+- **统一资产单池**：`assets` 表升级为统一身份（数字 id + 懒迁移），存储收口层治理死链；生成结果全量自动入库（任务上下文透出作品归属）；`/api/assets` 用户级路由（媒体类型/来源/作品/关键词服务端筛选 + 分页 + 批量分享/删除/zip 下载 + PATCH 字段编辑）
+- **单池入口统一**：资产库页两区合并单池（卡片预览/用于生成/分享/编辑/删除，来源与作品标签）；画布素材库面板同源切 `/api/assets`（生成历史/我的素材双 tab + 本作品/全部范围切换 + 检索强化）；历史页重定位为任务视图（行式列表 + 状态筛选 + 复制提示词/查看资产/存为资产兜底/后期处理/删除）
+- **存量补课**：管理员「同步历史资产」按钮 + 幂等 backfill 端点（历史成功生成批量入库，写库失败单条跳过不阻塞）
+
 ### 剪辑器轨道交互升级：拖拽换轨 + 轨道选中 + 轨头四开关
 
-- **轨道多开状态**：轨道旗标由单值 `flag`（hidden/locked/muted 三选一）改为 `flags` 四开布尔（hidden/locked/muted/solo 可并存），命令 `setTrackFlag` 改为 `setTrackFlags` 部分合并语义；**注意**：存量剪辑工程文档为旧格式时前端时间线不渲染（项目未上线不写兼容，需按新格式重新保存或重建工程），后端骨架校验同步改为 `flags` 字典白名单校验
+- **轨道多开状态**：轨道旗标由单值 `flag`（hidden/locked/muted 三选一）改为 `flags` 四开布尔（hidden/locked/muted/solo 可并存），命令 `setTrackFlag` 改为 `setTrackFlags` 部分合并语义；后端骨架校验同步改为 `flags` 字典白名单校验
 - **轨头图标按钮**：轨头左侧重做——拖拽手柄 + 类型名 + 删除钮一行，状态图标一行（隐藏 Eye/EyeOff、原声 Volume2/VolumeX、独奏 Headphones、锁定 Lock/LockOpen，lucide 图标按类型给开关集：音频无隐藏、字幕无声音开关），激活态分色（隐藏灰/静音红/独奏黄/锁定主题色）+ 悬停 tooltip；原两个 checkbox 退役
 - **轨道拖拽换轨**：轨头手柄拖拽在同类型轨内重排（新命令 `moveTrack`，order 重编号保持稠密、原位放置结构共享零入栈），拖动中显示主色插入指示线、被拖行半透明；后端渲染 Plan 同类型轨序即层叠序不受影响
 - **轨道选中**：点轨头/轨道空白处选中轨道（轨头主题色高亮 + 左侧色条 + lane 淡底），与片段选中互斥；Delete/Backspace 删除选中空轨（非空轨 toast 拒绝），Escape 清除选中
