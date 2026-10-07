@@ -21,7 +21,6 @@ import {
   createEditorProject,
   getEditorProject,
   getEditorRevision,
-  previewSubtitleSegments,
   saveEditorDocument,
   submitEditorRender,
   getEditorRenderStatus,
@@ -278,27 +277,6 @@ export const useEditorStore = defineStore('editor', () => {
     dirty.value = false
     history.clear()
     ElMessage.info(t('editor.conflictReloaded'))
-  }
-
-  // ---------- 字幕 ----------
-
-  async function transcribeTrack(trackId: string): Promise<void> {
-    if (!uid.value) return
-    try {
-      const { segments } = await previewSubtitleSegments(uid.value, trackId)
-      if (!segments.length) {
-        ElMessage.info(t('editor.subtitleEmpty'))
-        return
-      }
-      apply(cmd('rebuildSubtitleClips', {
-        trackId,
-        clips: segments.map((s) => ({ id: newId('sub'), start: s.start, duration: Math.max(s.end - s.start, 0.3), text: s.text })),
-      }), t('editor.ops.rebuildSubtitleClips'))
-    } catch (err) {
-      const detail = (err as Error & { detail?: { message?: string } | string }).detail
-      const msg = typeof detail === 'string' ? detail : detail?.message
-      ElMessage.error(msg || t('editor.errors.transcribe'))
-    }
   }
 
   // ---------- 远端变更感知（Agent 对话式剪辑写入的轻轮询，空闲才合入） ----------
@@ -595,7 +573,7 @@ export const useEditorStore = defineStore('editor', () => {
     load, fetchAsset, apply, applyOrToast, undo, redo, healDurations,
     placeAsset, appendAssetToTrack, createTopTrackOfKind, setCoverUrl, detachAudio, splitSelectedAtPlayhead, duplicateClip,
     probeMediaDuration,
-    saveNow, scheduleSave, transcribeTrack, submitRender, rename,
+    saveNow, scheduleSave, submitRender, rename,
     startRemotePoll, stopRemotePoll,
     select, selectTrack, reset, newId,
   }

@@ -9,6 +9,7 @@
 # 得时间线时间；早于 trimStart 的段落丢弃，超出片段时长的部分截断。
 # =====================================================
 
+import logging
 import shutil
 import tempfile
 from typing import List
@@ -21,6 +22,8 @@ from app.services.asset_library import get_asset_by_id
 from app.services.editor.media_source import resolve_asset_local_file
 from app.services.media.transcribe_service import is_whisper_available, transcribe_audio
 
+logger = logging.getLogger(__name__)
+
 # 字幕最短可读时长（与项目域对齐）
 MIN_SEGMENT_SEC = 0.3
 
@@ -31,8 +34,9 @@ def _audio_clips_on_track(project: EditingProject, track_id: str) -> list[dict]:
     track = tracks.get(track_id)
     if not track:
         raise HTTPException(status_code=404, detail="字幕转写目标轨道不存在")
-    if track.get("kind") != "audio":
-        raise HTTPException(status_code=400, detail="字幕转写仅支持音频轨")
+    # 视频轨可转写：whisper 的 decode_audio 能直接解视频容器音轨
+    if track.get("kind") not in ("audio", "video"):
+        raise HTTPException(status_code=400, detail="字幕转写仅支持音频/视频轨")
     clips = [
         c for c in doc.get("clips", [])
         if isinstance(c, dict) and c.get("trackId") == track_id and isinstance(c.get("assetId"), int)
@@ -64,7 +68,11 @@ async def preview_subtitle_segments(
             local_path = await resolve_asset_local_file(asset, tmp_dir)
             if not local_path:
                 continue
-            segments = await transcribe_audio(local_path, language="zh")
+            try:
+                segments = await transcribe_audio(local_path, language="zh")
+            except Exception:  # noqa: BLE001 — 单片段转写失败（无声视频等）跳过，不阻塞整轨
+                logger.warning("[字幕转写] 片段 %s 转写失败，已跳过", clip.get("id"), exc_info=True)
+                continue
 
             clip_start = float(clip.get("start") or 0.0)
             clip_duration = float(clip.get("duration") or 0.0)
