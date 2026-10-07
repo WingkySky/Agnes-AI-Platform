@@ -74,8 +74,10 @@ def test_plan_video_tracks_and_transition_compression():
     # 音频保留时间线 start（adelay 定位）
     audio = plan["audio_clips"][0]
     assert audio["start"] == 0 and audio["render_start"] == 0 and audio["volume"] == 0.8
-    # 字幕事件
-    assert plan["subtitle_events"] == [{"start": 0.5, "end": 2.0, "text": "你好字幕"}]
+    # 字幕事件（fade 默认 0）
+    assert plan["subtitle_events"] == [
+        {"start": 0.5, "end": 2.0, "text": "你好字幕", "fade_in": 0.0, "fade_out": 0.0},
+    ]
     # 总时长 = max(轨 total 6.5, 音频 2) = 6.5
     assert timeline_total(plan) == 6.5
 
@@ -132,7 +134,7 @@ def test_plan_hidden_subtitle_track_no_events_and_solo_ignored():
     doc["tracks"][3]["flags"] = {"solo": True}
     doc["tracks"][0]["flags"] = {"solo": True}
     plan2 = build_plan(doc, lambda aid: PATHS.get(aid))
-    assert plan2["subtitle_events"] == [{"start": 0.5, "end": 2.0, "text": "你好字幕"}]
+    assert plan2["subtitle_events"] == [{"start": 0.5, "end": 2.0, "text": "你好字幕", "fade_in": 0.0, "fade_out": 0.0}]
     assert {t["track_id"] for t in plan2["video_tracks"]} == {"v1", "v2"}
 
 
@@ -272,6 +274,40 @@ def test_xfade_name_and_audio_filter():
     assert _audio_filter_for(seg) == "volume=0.8,afade=t=in:st=0:d=0.3"
     # 4x 变速 → atempo 链 2.0,2.0
     assert _audio_filter_for({**seg, "speed": 4.0, "volume": 1.0, "fade_in": 0}).startswith("atempo=2.0,atempo=2.0")
+
+
+# ---------- 画面淡变：全帧 RGB fade / PIP alpha fade / 字幕 \fad ----------
+
+def test_plan_subtitle_fade_fields():
+    doc = _doc()
+    doc["clips"][4]["props"] = {"fadeIn": 0.2, "fadeOut": 0.3}
+    plan = build_plan(doc, lambda aid: PATHS.get(aid))
+    assert plan["subtitle_events"][0]["fade_in"] == 0.2
+    assert plan["subtitle_events"][0]["fade_out"] == 0.3
+
+
+def test_render_command_video_fade_filters():
+    """画面淡变 lowering：全帧链输入 RGB fade；PIP overlay 输入 alpha 变体（先补 yuva420p）"""
+    doc = _doc()
+    doc["clips"][1]["props"]["fadeIn"] = 0.4   # c2 全帧链段
+    doc["clips"][1]["props"]["fadeOut"] = 0.5
+    doc["clips"][2]["props"]["fadeIn"] = 0.3   # p1 PIP 段
+    plan = build_plan(doc, lambda aid: PATHS.get(aid))
+    normalized = {"c1": "/tmp/n1.mp4", "c2": "/tmp/n2.mp4", "p1": "/tmp/n3.mp4"}
+    cmd = build_render_command(plan, normalized, None, "/tmp/final.mp4")
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert "fade=t=in:st=0:d=0.4,fade=t=out:st=2.500:d=0.5" in graph  # 全帧变黑
+    assert "format=yuva420p,fade=t=in:st=0:d=0.3:alpha=1" in graph    # PIP 透明度
+    # 无淡变的片段不产生 fade 滤镜（c1 输入直连 xfade，c2 经 [fv3] 过滤后进链）
+    assert "[1:v][fv3]xfade=" in graph
+
+
+def test_build_ass_fade_override():
+    from app.services.media.subtitle_format import build_ass
+    ev = [{"start_time": 0.5, "duration": 1.5, "text": "你好"}]
+    assert "\\fad(" not in build_ass(ev)  # 未配置淡变：输出与旧版一致
+    out = build_ass([{**ev[0], "fade_in": 0.3, "fade_out": 0.5}])
+    assert "{\\fad(300,500)}你好" in out
 
 
 # ---------- 端点行为 ----------

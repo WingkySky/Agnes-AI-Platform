@@ -18,8 +18,9 @@ export interface DrawItem {
   y: number
   w: number
   h: number
-  /** 非空时本项是转场后段：与清单中紧邻其前的同轨前段按类型/进度混合 */
-  blend?: { type: TransitionType; progress: number }
+  /** 非空时本项是转场后段：与清单中紧邻其前的同轨前段按类型/进度混合；
+   *  duration=转场时长（供执行层把 progress 换算成后段媒体内等效时间，算画面淡变） */
+  blend?: { type: TransitionType; progress: number; duration: number }
 }
 
 function isFullFrameRect(rect: ClipRect | null | undefined): boolean {
@@ -70,7 +71,7 @@ export function planFrame(
       y: nextRect.y * stageH,
       w: nextRect.w * stageW,
       h: nextRect.h * stageH,
-      blend: { type: tr.type, progress: Math.min(1, Math.max(0, (playhead - winStart) / tr.duration)) },
+      blend: { type: tr.type, progress: Math.min(1, Math.max(0, (playhead - winStart) / tr.duration)), duration: tr.duration },
     })
   }
   return items

@@ -19,7 +19,9 @@
 #   压缩 render_start 开窗并以 acrossfade 融合转场衔接（audio_chains）；
 #   视频自带音频（音画分离未分离时默认携带）需 ffprobe 确认真实含音流
 # - 效果器：归一化阶段施加 hue=s=0（黑白）/ gblur（模糊，sigma=strength×20）
-# - 字幕：build_ass + subtitles 滤镜硬烧
+# - 画面淡变（fadeIn/fadeOut）：终版图内对片段输入施加 fade 滤镜（全帧链 RGB
+#   变黑；overlay 输入走 alpha=1 变体并先补 format=yuva420p）
+# - 字幕：build_ass + subtitles 滤镜硬烧（片段 fade → ASS \fad 整条淡变）
 # - 成片落 uploads/editor/，final_url 挂工程并自动入资产库（source=compose）
 # =====================================================
 
@@ -170,7 +172,8 @@ async def _render_project(db: AsyncSession, project: EditingProject) -> None:
     if plan["subtitle_events"]:
         style = plan.get("subtitle_style") or {}
         ass_events = [
-            {"start_time": e["start"], "duration": e["end"] - e["start"], "text": e["text"]}
+            {"start_time": e["start"], "duration": e["end"] - e["start"], "text": e["text"],
+             "fade_in": e.get("fade_in", 0), "fade_out": e.get("fade_out", 0)}
             for e in plan["subtitle_events"]
         ]
         ass_style = {
@@ -339,6 +342,22 @@ def _audio_filter_for(seg: dict) -> str:
     return ",".join(parts) if parts else "anull"
 
 
+def _video_fade_chain(seg: dict, alpha: bool) -> Optional[str]:
+    """片段画面淡变滤镜（终版图内施加，输入为归一化片段、pts 自 0 起）。
+    overlay 输入走 alpha 变体并需先补带 alpha 的像素格式——libx264 归一化
+    中间产物（yuv420p）编不了 alpha，故 PIP 淡变只能在终版图内做。"""
+    parts: list[str] = []
+    if alpha:
+        parts.append("format=yuva420p")
+    suffix = ":alpha=1" if alpha else ""
+    if seg["fade_in"] > 0:
+        parts.append(f"fade=t=in:st=0:d={seg['fade_in']}{suffix}")
+    if seg["fade_out"] > 0:
+        st = max(0.0, seg["duration"] - seg["fade_out"])
+        parts.append(f"fade=t=out:st={st:.3f}:d={seg['fade_out']}{suffix}")
+    return ",".join(parts) if parts else None
+
+
 def build_render_command(
     plan: dict,
     normalized: dict[str, str],
@@ -386,6 +405,11 @@ def build_render_command(
                 cmd += ["-i", normalized[seg["clip_id"]]]
                 label = f"[{input_index}:v]"
                 input_index += 1
+                vfade = _video_fade_chain(seg, alpha=False)
+                if vfade:
+                    faded = f"[fv{input_index}]"
+                    filters.append(f"{label}{vfade}{faded}")
+                    label = faded
                 if chain_in is None:
                     chain_in = label
                     consumed = seg["duration"]
@@ -417,6 +441,11 @@ def build_render_command(
                 cmd += ["-i", normalized[seg["clip_id"]]]
                 label = f"[{input_index}:v]"
                 input_index += 1
+                vfade = _video_fade_chain(seg, alpha=True)
+                if vfade:
+                    faded = f"[fv{input_index}]"
+                    filters.append(f"{label}{vfade}{faded}")
+                    label = faded
                 rect = seg.get("rect") or {}
                 x = int(width * float(rect.get("x", 0)))
                 y = int(height * float(rect.get("y", 0)))

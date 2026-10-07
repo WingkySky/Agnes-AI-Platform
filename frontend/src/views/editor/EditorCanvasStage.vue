@@ -23,6 +23,7 @@ import {
   type RectCorner,
 } from '@/lib/editor-compositor'
 import { AudioEngine, sourceTimeAt } from '@/lib/editor-audio-engine'
+import { clipFadeAlphaAt } from '@/lib/editor-audio'
 import { canvasFilterForEffects } from '@/lib/editor-fx-registry'
 import { clearMediaPool, createAudioSink, createVideoSink, getImageBitmap } from '@/lib/editor-media'
 import { clipEnd, FULL_RECT, type ClipRect, type EditorClip } from '@/lib/editor-types'
@@ -217,17 +218,20 @@ function updateCursor(canvas: HTMLCanvasElement, px: number, py: number): void {
 
 // ---------- 绘制 ----------
 
-function drawImageItem(item: { x: number; y: number; w: number; h: number }, src: CanvasImageSource): void {
+function drawImageItem(item: { x: number; y: number; w: number; h: number }, src: CanvasImageSource, alpha: number): void {
   if (!ctx2d) return
+  ctx2d.globalAlpha = alpha
   ctx2d.drawImage(src, item.x, item.y, item.w, item.h)
+  ctx2d.globalAlpha = 1
 }
 
-/** 转场混合绘制后段（前段已在画布上）：crossfade=alpha 混合 / fade=黑场插值 / wipe=擦除显现 */
-function drawBlendItem(item: DrawItem, src: CanvasImageSource): void {
+/** 转场混合绘制后段（前段已在画布上）：crossfade=alpha 混合 / fade=黑场插值 / wipe=擦除显现；
+ *  fadeAlpha=后段自身画面淡变，与转场进度相乘（与渲染端 fade 先于 xfade 施加对齐） */
+function drawBlendItem(item: DrawItem, src: CanvasImageSource, fadeAlpha: number): void {
   if (!ctx2d) return
   const blend = item.blend!
   if (blend.type === 'crossfade') {
-    ctx2d.globalAlpha = blend.progress
+    ctx2d.globalAlpha = blend.progress * fadeAlpha
     ctx2d.drawImage(src, item.x, item.y, item.w, item.h)
     ctx2d.globalAlpha = 1
     return
@@ -237,11 +241,13 @@ function drawBlendItem(item: DrawItem, src: CanvasImageSource): void {
     ctx2d.beginPath()
     ctx2d.rect(item.x, item.y, item.w * blend.progress, item.h)
     ctx2d.clip()
+    ctx2d.globalAlpha = fadeAlpha
     ctx2d.drawImage(src, item.x, item.y, item.w, item.h)
+    ctx2d.globalAlpha = 1
     ctx2d.restore()
     return
   }
-  // fade：前半 前段→黑，后半 黑→后段（fadeblack 语义近似）
+  // fade：前半 前段→黑，后半 黑→后段（fadeblack 语义近似；黑场不乘后段淡变）
   if (blend.progress < 0.5) {
     ctx2d.globalAlpha = blend.progress * 2
     ctx2d.fillStyle = '#000'
@@ -250,7 +256,7 @@ function drawBlendItem(item: DrawItem, src: CanvasImageSource): void {
   } else {
     ctx2d.fillStyle = '#000'
     ctx2d.fillRect(item.x, item.y, item.w, item.h)
-    ctx2d.globalAlpha = (blend.progress - 0.5) * 2
+    ctx2d.globalAlpha = (blend.progress - 0.5) * 2 * fadeAlpha
     ctx2d.drawImage(src, item.x, item.y, item.w, item.h)
     ctx2d.globalAlpha = 1
   }
@@ -291,12 +297,18 @@ function draw(): void {
       continue
     }
     const itemClip = doc.clips.find((c) => c.id === item.clipId)
+    // 画面淡变透明度：普通项按播放头；转场后段按窗口内等效时间位（与渲染端
+    // fade 先于 xfade 施加的语义对齐）；画布底黑，globalAlpha 即变黑/alpha 淡变
+    const alpha = !itemClip ? 1 : clipFadeAlphaAt(
+      itemClip,
+      item.blend ? itemClip.start + item.blend.progress * item.blend.duration : store.playhead,
+    )
     if (asset.media_type === 'image') {
       void getImageBitmap(url).then((bmp) => {
         if (bmp && mounted && version === planVersion) {
           applyEffectFilter(itemClip)
-          if (item.blend) drawBlendItem(item, bmp)
-          else drawImageItem(item, bmp)
+          if (item.blend) drawBlendItem(item, bmp, alpha)
+          else drawImageItem(item, bmp, alpha)
           ctx2d!.filter = 'none'
         }
       })
@@ -305,8 +317,8 @@ function draw(): void {
       const st = ensureVideoState(item.clipId, url)
       if (st.canvas) {
         applyEffectFilter(itemClip)
-        if (item.blend) drawBlendItem(item, st.canvas)
-        else drawImageItem(item, st.canvas)
+        if (item.blend) drawBlendItem(item, st.canvas, alpha)
+        else drawImageItem(item, st.canvas, alpha)
         ctx2d.filter = 'none'
       }
       void pullFrame(st, itemClip, url, store.playhead)

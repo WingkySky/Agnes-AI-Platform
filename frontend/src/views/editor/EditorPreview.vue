@@ -16,7 +16,7 @@ import { useEditorStore } from '@/stores/editor'
 import { useI18n } from '@/i18n'
 import { clipEnd, type EditorClip } from '@/lib/editor-types'
 import { formatTimecode } from '@/lib/editor-timecode'
-import { clipGainAt } from '@/lib/editor-audio'
+import { clipGainAt, clipFadeAlphaAt } from '@/lib/editor-audio'
 import { hasWebCodecs } from '@/lib/editor-media'
 import EditorCanvasStage from './EditorCanvasStage.vue'
 
@@ -282,7 +282,12 @@ onBeforeUnmount(() => {
             </template>
           </template>
           <div class="subtitle-layer">
-            <p v-for="clip in activeSubtitles" :key="clip.id" class="subtitle-text" :style="subtitleStyleVars">
+            <p
+              v-for="clip in activeSubtitles"
+              :key="clip.id"
+              class="subtitle-text"
+              :style="{ ...subtitleStyleVars, opacity: clipFadeAlphaAt(clip, store.playhead) }"
+            >
               {{ clip.text }}
             </p>
           </div>

@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { clipGainAt } from '@/lib/editor-audio'
+import { clipGainAt, clipFadeAlphaAt } from '@/lib/editor-audio'
 import type { EditorClip } from '@/lib/editor-types'
 
 function clip(props: EditorClip['props'] = {}, start = 0, duration = 4): EditorClip {
@@ -45,5 +45,32 @@ describe('clipGainAt', () => {
     expect(clipGainAt(clip({ volume: 0 }), 1)).toBe(0)
     const c = clip({ fadeOut: 1 }, 0, 4)
     expect(clipGainAt(c, 5)).toBe(0)
+  })
+})
+
+describe('clipFadeAlphaAt', () => {
+  it('无 fade：恒为 1（与增益不同，不含 volume）', () => {
+    expect(clipFadeAlphaAt(clip({ volume: 0.3 }), 2)).toBe(1)
+    expect(clipFadeAlphaAt(clip(), 2)).toBe(1)
+  })
+  it('fadeIn 线性上升；fadeOut 线性下降；双向相乘', () => {
+    const fi = clip({ fadeIn: 2 })
+    expect(clipFadeAlphaAt(fi, 0)).toBe(0)
+    expect(clipFadeAlphaAt(fi, 1)).toBeCloseTo(0.5)
+    expect(clipFadeAlphaAt(fi, 2)).toBe(1)
+    const fo = clip({ fadeOut: 2 }, 0, 4)
+    expect(clipFadeAlphaAt(fo, 3)).toBeCloseTo(0.5)
+    expect(clipFadeAlphaAt(fo, 4)).toBe(0)
+    const both = clip({ fadeIn: 1, fadeOut: 1 }, 0, 4)
+    expect(clipFadeAlphaAt(both, 0.5)).toBeCloseTo(0.5)
+    expect(clipFadeAlphaAt(both, 3.5)).toBeCloseTo(0.5)
+    expect(clipFadeAlphaAt(both, 2)).toBe(1)
+  })
+  it('转场窗口内等效时间位：后段未开播时按片段起点 + 偏移计算淡入', () => {
+    // blend 项传 clip.start + progress*duration：progress=0 → 淡入起点 alpha=0
+    const c = clip({ fadeIn: 1 }, 4, 3)
+    expect(clipFadeAlphaAt(c, 4)).toBe(0)
+    expect(clipFadeAlphaAt(c, 4.5)).toBeCloseTo(0.5)
+    expect(clipFadeAlphaAt(c, 5)).toBe(1)
   })
 })

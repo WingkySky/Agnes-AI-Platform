@@ -204,11 +204,13 @@ def build_plan(
     for seg in audio_clips:
         seg["render_start"] = seg["start"]
 
-    # 字幕事件（text 片段；隐藏字幕轨不出字幕）
+    # 字幕事件（text 片段；隐藏字幕轨不出字幕；fade 供 ASS \fad 整条淡变）
     subtitle_events = sorted(
         (
             {"start": _num(c.get("start")), "end": _num(c.get("start")) + _num(c.get("duration")),
-             "text": str(c.get("text") or "").strip()}
+             "text": str(c.get("text") or "").strip(),
+             "fade_in": _num((c.get("props") or {}).get("fadeIn")),
+             "fade_out": _num((c.get("props") or {}).get("fadeOut"))}
             for c in clips
             if isinstance(c, dict) and c.get("text")
             and kind_of.get(c.get("trackId")) == "subtitle"

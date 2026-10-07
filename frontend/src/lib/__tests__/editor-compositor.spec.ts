@@ -69,7 +69,7 @@ describe('planFrame', () => {
     // 窗口内（3.5s，进度 0.5）：a 在下 + b blend 项
     expect(planFrame(d, 3.5, 1920, 1080)).toEqual([
       { clipId: 'a', assetId: 1, x: 0, y: 0, w: 1920, h: 1080 },
-      { clipId: 'b', assetId: 2, x: 0, y: 0, w: 1920, h: 1080, blend: { type: 'crossfade', progress: 0.5 } },
+      { clipId: 'b', assetId: 2, x: 0, y: 0, w: 1920, h: 1080, blend: { type: 'crossfade', progress: 0.5, duration: 1 } },
     ])
     // 进度钳到 1：播放头贴衔接点
     expect(planFrame(d, 3.99, 1920, 1080)[1].blend!.progress).toBeCloseTo(0.99)

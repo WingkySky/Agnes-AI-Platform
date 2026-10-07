@@ -92,6 +92,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         end = format_ass_time(clip["start_time"] + clip["duration"])
         # 转义 ASS 特殊字符
         text = clip["text"].replace("\n", "\\N")
-        events.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text}")
+        # 整条淡变（毫秒）；未配置时不加覆盖块，输出与旧版一致
+        fi = float(clip.get("fade_in") or 0)
+        fo = float(clip.get("fade_out") or 0)
+        fade = f"{{\\fad({round(fi * 1000)},{round(fo * 1000)})}}" if fi > 0 or fo > 0 else ""
+        events.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{fade}{text}")
 
     return header + "\n".join(events) + "\n"
