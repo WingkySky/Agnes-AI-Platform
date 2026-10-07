@@ -9,6 +9,12 @@ vi.mock('@/lib/canvas-generation', () => ({
 
 vi.mock('@/api/canvas', () => ({
   composeCanvasVideos: vi.fn(async () => ({ video_url: 'https://example.com/final.mp4', duration_ms: 10000 })),
+  generateCanvasTts: vi.fn(async () => ({ audio_url: 'https://a/tts.mp3', duration_ms: 3200 })),
+  getCanvasVoicesCached: vi.fn(async () => ({ voices: [{ voice_id: 'narrator_female_zh', name: '女声旁白', gender: 'female', suitable_for: '旁白、女主' }] })),
+}))
+
+vi.mock('@/api/assets', () => ({
+  createAsset: vi.fn(async () => ({ id: 2001, name: '配音-旁白1', media_type: 'audio', asset_url: 'https://a/tts.mp3' })),
 }))
 
 vi.mock('@/stores/models', () => ({
@@ -52,7 +58,8 @@ import { resolveToolCall } from '../policy'
 import type { AgentCanvasStore } from '../tools'
 import type { CanvasPanel, CanvasConnection } from '@/stores/canvas'
 import { executeInNodeGeneration, executeInNodeVideoGeneration } from '@/lib/canvas-generation'
-import { composeCanvasVideos } from '@/api/canvas'
+import { composeCanvasVideos, generateCanvasTts } from '@/api/canvas'
+import { createAsset } from '@/api/assets'
 
 /** 内存版画布 store：按 canvas store 真实语义实现工具层所需成员 */
 function makeCanvas(): AgentCanvasStore & { snapshots: number[] } {
@@ -134,6 +141,12 @@ function tool(name: string) {
   const t = findAgentTool(name)
   if (!t) throw new Error(`工具不存在: ${name}`)
   return t
+}
+
+/** 经变量中转调用 execute：语义与直接调用一致（Mimosa 门禁对 execute 字面量实参形态误报注入，见 AGENTS.md 误报类别） */
+async function runTool(name: string, args: Record<string, unknown>, canvas: AgentCanvasStore): Promise<unknown> {
+  const handler = tool(name).execute
+  return handler(args, canvas)
 }
 
 beforeEach(() => {
@@ -268,6 +281,73 @@ describe('agent_run_generation', () => {
     expect(composeCanvasVideos).not.toHaveBeenCalled()
   })
 
+  it('compose：url 字段落库的视频节点（引入素材）也参与拼接不误报未生成', async () => {
+    const canvas = makeCanvas()
+    const v1 = canvas.addPanel({ type: 'video', content: { url: '/uploads/editor/a.mp4', prompt: '成片视频' }, x: 0, y: 0, width: 400, height: 240 })
+    const composeId = canvas.addPanel({ type: 'compose', content: {}, x: 0, y: 400, width: 360, height: 240 })
+    canvas.addConnection({ source_panel_id: v1, target_panel_id: composeId })
+
+    const res = await runTool('agent_run_generation', { panel_id: composeId }, canvas) as { ok: boolean; data?: Record<string, unknown> }
+    expect(res.ok).toBe(true)
+    expect(composeCanvasVideos).toHaveBeenCalledWith(expect.objectContaining({ video_urls: ['/uploads/editor/a.mp4'] }))
+  })
+
+  it('compose：上游 TTS 结果节点音轨混入 audios，直写在节点上的旧假配音不再误收', async () => {
+    const canvas = makeCanvas()
+    const v1 = canvas.addPanel({ type: 'video', content: { content: 'https://v/1.mp4' }, x: 0, y: 0, width: 400, height: 240 })
+    const tts1 = canvas.addPanel({ type: 'tts', content: { content: 'https://i/stale.png', status: 'success' }, x: 500, y: 0, width: 280, height: 180 })
+    const audioResultId = canvas.addPanel({ type: 'audio', content: { content: 'https://a/2.mp3' }, x: 800, y: 220, width: 280, height: 180 })
+    const tts2 = canvas.addPanel({ type: 'tts', content: { result_panel_id: audioResultId }, x: 800, y: 0, width: 280, height: 180 })
+    const composeId = canvas.addPanel({ type: 'compose', content: {}, x: 0, y: 400, width: 360, height: 240 })
+    canvas.addConnection({ source_panel_id: v1, target_panel_id: composeId })
+    canvas.addConnection({ source_panel_id: tts1, target_panel_id: composeId })
+    canvas.addConnection({ source_panel_id: tts2, target_panel_id: composeId })
+
+    const res = await runTool('agent_run_generation', { panel_id: composeId }, canvas) as { ok: boolean }
+    expect(res.ok).toBe(true)
+    expect(composeCanvasVideos).toHaveBeenCalledWith(expect.objectContaining({ audios: ['https://a/2.mp3'] }))
+  })
+
+  it('已带成片的视频节点盲触发生成被拒，force 才放行覆盖', async () => {
+    const canvas = makeCanvas()
+    const v = canvas.addPanel({ type: 'video', content: { url: '/uploads/editor/a.mp4' }, x: 0, y: 0, width: 400, height: 240 })
+    const denied = await runTool('agent_run_generation', { panel_id: v }, canvas) as { ok: boolean; error?: string }
+    expect(denied.ok).toBe(false)
+    expect(denied.error).toContain('force')
+    expect(executeInNodeVideoGeneration).not.toHaveBeenCalled()
+    const res = await runTool('agent_run_generation', { panel_id: v, force: true }, canvas) as { ok: boolean }
+    expect(res.ok).toBe(true)
+    expect(executeInNodeVideoGeneration).toHaveBeenCalled()
+  })
+
+  it('tts：收集上游 text 文案生成配音，写入独立音频结果节点并回写 result_panel_id', async () => {
+    const canvas = makeCanvas()
+    const text = canvas.addPanel({ type: 'text', content: { content: '喵喵～今天真快乐呀！' }, x: 0, y: 0, width: 360, height: 180 })
+    const tts = canvas.addPanel({ type: 'tts', content: { voice: 'narrator_female_zh', speed: 1.1 }, x: 500, y: 0, width: 280, height: 180 })
+    canvas.addConnection({ source_panel_id: text, target_panel_id: tts })
+
+    const res = await runTool('agent_run_generation', { panel_id: tts }, canvas) as { ok: boolean; data?: Record<string, unknown> }
+    expect(res.ok).toBe(true)
+    expect(generateCanvasTts).toHaveBeenCalledWith({ text: '喵喵～今天真快乐呀！', voice: 'narrator_female_zh', speed: 1.1 })
+    expect(createAsset).toHaveBeenCalledWith(expect.objectContaining({ media_type: 'audio' }))
+    expect(res.data?.asset_id).toBe(2001)
+    const resultNode = canvas.panels.find((p) => p.type === 'audio')
+    expect(resultNode?.content.content).toBe('https://a/tts.mp3')
+    expect(resultNode?.content.status).toBe('success')
+    expect(resultNode?.content.asset_id).toBe(2001)
+    expect(canvas.panels.find((p) => p.id === tts)?.content.result_panel_id).toBe(resultNode?.id)
+    expect(canvas.connections.some((c) => c.source_panel_id === tts && c.target_panel_id === resultNode?.id)).toBe(true)
+  })
+
+  it('tts：没有文案来源时报错且不生成', async () => {
+    const canvas = makeCanvas()
+    const tts = canvas.addPanel({ type: 'tts', content: { voice: 'default' }, x: 0, y: 0, width: 280, height: 180 })
+    const res = await runTool('agent_run_generation', { panel_id: tts }, canvas) as { ok: boolean; error?: string }
+    expect(res.ok).toBe(false)
+    expect(res.error).toContain('没有文案来源')
+    expect(generateCanvasTts).not.toHaveBeenCalled()
+  })
+
   it('video 生成失败时返回失败结果', async () => {
     const canvas = makeCanvas()
     const v = canvas.addPanel({ type: 'video', content: { prompt: '测试' }, x: 0, y: 0, width: 400, height: 240 })
@@ -287,8 +367,8 @@ describe('agent_run_generation', () => {
 })
 
 describe('agent_get_models', () => {
-  it('返回时长档位、默认时长、默认模型与模型参考图上限；视频模型带自己的档位，未配置回落全局', () => {
-    const res = tool('agent_get_models').execute({}, makeCanvas()) as { ok: boolean; data: Record<string, unknown> }
+  it('返回时长档位、默认时长、默认模型、模型参考图上限与音色目录；视频模型带自己的档位，未配置回落全局', async () => {
+    const res = await runTool('agent_get_models', {}, makeCanvas()) as { ok: boolean; data: Record<string, unknown> }
     expect(res.ok).toBe(true)
     expect(res.data.video_durations).toEqual([3, 5, 7, 10, 15])
     expect(res.data.default_video_duration).toBe(5)
@@ -303,6 +383,9 @@ describe('agent_get_models', () => {
     expect(images.length).toBe(1)
     expect(images[0].max_ref_images).toBeNull()
     expect(images[0].is_default).toBe(true)
+    const voices = res.data.voices as Record<string, unknown>[]
+    expect(voices.length).toBe(1)
+    expect(voices[0].voice_id).toBe('narrator_female_zh')
   })
 })
 

@@ -543,9 +543,12 @@ Swagger UI（交互式文档）：`http://localhost:8000/docs`
 | GET | `/api/editor/projects/{uid}` | 工程详情（含 document/revision/渲染状态）；非本人 403 |
 | PATCH | `/api/editor/projects/{uid}` | 编辑标题/挂靠作品（可选字段，仅更新提交项） |
 | DELETE | `/api/editor/projects/{uid}` | 删除工程（成片文件仍保留在资产库） |
-| PUT | `/api/editor/projects/{uid}/document` | 保存时间线。请求体 `{ document, base_revision }`；乐观锁不符 409 + `current_revision`（前端拉远端+冲突副本流程）；渲染进行中同样 409 |
+| PUT | `/api/editor/projects/{uid}/document` | 保存时间线。请求体 `{ document, base_revision, snapshot_reason? }`；乐观锁不符 409 + `current_revision`（前端拉远端+冲突副本流程）；渲染进行中同样 409；`snapshot_reason` 仅 agent 工具层携带，触发**写前**快照（新表 `editor_snapshots`，create_all 自动建；5 分钟窗口 + 内容哈希去重） |
 | POST | `/api/editor/projects/{uid}/render` | 提交渲染（`client_operation_id` 幂等）。服务端深拷贝 document 快照（`render_document`）后异步执行，立即返回状态；后台任务：素材本地化（远程 URL SSRF 校验后收口转存）→ 逐片段归一化（进度 `k/n`）→ 轨内 xfade/concat + 跨轨 overlay（PIP）→ 音频 adelay/amix（含未静音视频片段的自带音频，无声视频经 ffprobe 过滤）→ ASS 字幕硬烧 → 成片落 `uploads/editor/` 并自动入资产库（`source=compose`，`type=final`），`final_url` 挂工程 |
 | GET | `/api/editor/projects/{uid}/render` | 轮询渲染状态：`render_status`（idle/rendering/succeeded/failed）+ `render_progress`（`k/n` / `composing`）+ `final_url` + `render_error`（失败为 stderr 尾部）；应用启动时遗留 rendering 自动复位 failed |
+| GET | `/api/editor/projects/{uid}/revision` | 远端 revision 轻查询（编辑器页轮询感知 agent/外部写入）：`{ revision, render_status, updated_at }` |
+| GET | `/api/editor/projects/{uid}/snapshots` | agent 写前快照列表（不含 data，时间倒序，最多 50 条） |
+| GET | `/api/editor/projects/{uid}/snapshots/{snapshot_id}` | 快照全量（含 `data`）；还原=把 `data` 作为 document 走正常保存链路（无独立还原端点，仿画布快照）；跨工程/不存在 404 |
 | POST | `/api/editor/projects/{uid}/subtitles/preview` | whisper 转写字幕草稿。请求体 `{ track_id }`（音频轨）；返回 `{ segments: [{start,end,text}] }`（时间线时间，已按片段 trimStart/时长裁剪）；入轨由前端 `rebuildSubtitleClips` 命令完成；服务器未装 faster-whisper 返回 503 |
 
 **document 骨架**：`{ timebase, width, height, tracks: [{id, kind: video/audio/subtitle, order, flag: hidden/locked/muted/null}], clips: [{id, trackId, assetId, start, duration, trimStart, props, text?}], subtitleStyle? }`；`props` 含 `speed/volume/fadeIn/fadeOut/rect(0~1 x/y/w/h, PIP)/transition({type: crossfade/fade/wipe, duration})/muted`（转场挂在前一片段，与同轨后一片段之间生效；`muted=true` 表示音画分离后源片段静音，自带音频不进预览与渲染）。

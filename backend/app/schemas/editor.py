@@ -24,9 +24,10 @@ class EditorProjectUpdate(BaseModel):
 
 
 class EditorDocumentSave(BaseModel):
-    """保存时间线文档（乐观锁）"""
+    """保存时间线文档（乐观锁）；snapshot_reason 仅 agent 工具层携带，触发写前快照"""
     document: dict[str, Any]
     base_revision: int = Field(..., ge=1)
+    snapshot_reason: Optional[str] = Field(None, max_length=255)
 
 
 class EditorProjectBrief(BaseModel):

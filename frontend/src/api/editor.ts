@@ -69,9 +69,34 @@ export function deleteEditorProject(uid: string): Promise<unknown> {
   return client.delete(`/api/editor/projects/${uid}`)
 }
 
-/** 保存时间线文档（revision 乐观锁，409 冲突由调用方处理） */
-export function saveEditorDocument(uid: string, document: EditorDocument, baseRevision: number): Promise<{ revision: number; saved_at: string }> {
-  return client.put(`/api/editor/projects/${uid}/document`, { document, base_revision: baseRevision })
+/** 保存时间线文档（revision 乐观锁，409 冲突由调用方处理）；snapshotReason 仅 agent 工具层携带，触发服务端写前快照 */
+export function saveEditorDocument(uid: string, document: EditorDocument, baseRevision: number, snapshotReason?: string): Promise<{ revision: number; saved_at: string }> {
+  const body: Record<string, unknown> = { document, base_revision: baseRevision }
+  if (snapshotReason) body.snapshot_reason = snapshotReason
+  return client.put(`/api/editor/projects/${uid}/document`, body)
+}
+
+/** 远端 revision 轻查询（编辑器页轮询感知外部写入） */
+export function getEditorRevision(uid: string): Promise<{ revision: number; render_status: string; updated_at: string | null }> {
+  return client.get(`/api/editor/projects/${uid}/revision`)
+}
+
+/** agent 写前快照（列表不含 data） */
+export interface EditorSnapshotBrief {
+  id: number
+  kind: string
+  reason: string | null
+  revision: number
+  created_at: string | null
+}
+
+export function listEditorSnapshots(uid: string): Promise<{ items: EditorSnapshotBrief[] }> {
+  return client.get(`/api/editor/projects/${uid}/snapshots`)
+}
+
+/** 快照全量（还原=拉 data 走正常保存链路） */
+export function getEditorSnapshot(uid: string, snapshotId: number): Promise<EditorSnapshotBrief & { data: EditorDocument }> {
+  return client.get(`/api/editor/projects/${uid}/snapshots/${snapshotId}`)
 }
 
 /** whisper 转写字幕草稿（指定音频轨） */

@@ -10,7 +10,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, Integer, JSON, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, JSON, String, Text
 
 from app.core.database import Base
 
@@ -46,3 +46,24 @@ class EditingProject(Base):
     source_workspace_id = Column(String(64), nullable=True)             # 来源画布（送进剪辑器，成片回写用）
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class EditorSnapshot(Base):
+    """剪辑工程快照（agent 写前兜底：还原=拉 data 走正常保存链路，无独立还原端点，仿画布快照）"""
+
+    __tablename__ = "editor_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_uid = Column(String(36), ForeignKey("editing_projects.uid", ondelete="CASCADE"),
+                         nullable=False, index=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    kind = Column(String(20), nullable=False, default="agent")          # agent=写前自动（manual 预留）
+    reason = Column(String(255), nullable=True)                         # 工具层携带的 snapshot_reason
+    revision = Column(Integer, nullable=False, default=1)               # 快照时的工程版本号
+    content_hash = Column(String(64), nullable=False, default="")       # data 的 sha256（去重比较）
+    data = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    __table_args__ = (
+        Index("ix_editor_snapshots_project_created", "project_uid", "created_at"),
+    )

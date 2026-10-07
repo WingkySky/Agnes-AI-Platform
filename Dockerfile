@@ -18,7 +18,8 @@ RUN npm run build
 FROM python:3.12-slim
 ARG APP_VERSION=dev
 ENV APP_VERSION=${APP_VERSION} \
-    DATABASE_URL=sqlite:////app/data/agnes_platform.db
+    DATABASE_URL=sqlite:////app/data/agnes_platform.db \
+    HF_HOME=/app/data/hf
 
 WORKDIR /app/backend
 COPY backend/requirements.txt ./

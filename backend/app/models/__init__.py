@@ -30,5 +30,12 @@ from app.models.scene3d import Scene3D
 from app.models.canvas_workspace import CanvasWorkspace, CanvasSnapshot, MAX_AUTO_SNAPSHOTS, SNAPSHOT_MIN_INTERVAL_SEC
 from app.models.work import Work
 from app.models.work_entity import WorkEntity, WorkEntityVersion, ENTITY_KINDS, IMAGE_ROLES
-from app.models.editing_project import EditingProject, RENDER_IDLE, RENDER_RENDERING, RENDER_SUCCEEDED, RENDER_FAILED
+from app.models.editing_project import (
+    EditingProject,
+    EditorSnapshot,
+    RENDER_IDLE,
+    RENDER_RENDERING,
+    RENDER_SUCCEEDED,
+    RENDER_FAILED,
+)
 from app.models.api_call_log import ApiCallLog

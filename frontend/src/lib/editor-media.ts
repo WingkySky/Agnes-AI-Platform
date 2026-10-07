@@ -126,10 +126,21 @@ export async function probeDuration(url: string): Promise<number> {
   }
 }
 
+/** 元素 loadedmetadata 时长探测（ mediabunny 不可用/容器元数据缺失时的回退；失败返回 0） */
+export function probeElementDuration(url: string): Promise<number> {
+  return new Promise((resolve) => {
+    const el = document.createElement(/\.(mp3|wav|m4a|aac)(\?|$)/i.test(url) ? 'audio' : 'video')
+    el.preload = 'metadata'
+    el.onloadedmetadata = () => resolve(el.duration || 0)
+    el.onerror = () => resolve(0)
+    el.src = url
+  })
+}
+
 /** 三级时长探测：mediabunny（WebCodecs 可用时）→ 元素探测回退 */
 export async function probeMediaDuration(
   url: string,
-  elementProbe: (url: string) => Promise<number>,
+  elementProbe: (url: string) => Promise<number> = probeElementDuration,
 ): Promise<number> {
   if (hasWebCodecs()) {
     const probed = await probeDuration(url)

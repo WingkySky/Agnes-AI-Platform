@@ -16,6 +16,8 @@ import { createImageTask } from '@/api/images'
 import { createVideoTask } from '@/api/videos'
 import { getPreset } from '@/api/presets'
 import { applyCanvasOps, getWorkspace, listWorkspaces } from '@/api/canvasWorkspace'
+import { generateCanvasTts } from '@/api/canvas'
+import { createAsset } from '@/api/assets'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useModelsStore } from '@/stores/models'
 import { useCanvasStore } from '@/stores/canvas'
@@ -25,6 +27,7 @@ import { AGENT_TOOLS } from './tools'
 import type { AgentKernel, HostTool } from './kernel'
 import { runSubagent, subagentHostFromParent } from './subagent'
 import { loadAgentSkillFull, readSkillResource, saveAgentSkill, SKILL_CONTENT_MAX_CHARS } from './skills'
+import { EDITOR_TOOLS } from './editor-tools'
 
 /** 媒体完成后落画布的计划（工具注册 → chat store 媒体轮询成功时消费） */
 export interface CanvasPlacementPlan {
@@ -67,10 +70,15 @@ function recentMediaUrl(ctx: unknown, type: 'image' | 'video'): string | null {
 }
 
 /** 目标工作区解析：显式参数优先，缺省走 ctx 的多级兜底链（画布页实时态 → 偏好 → 最近 → 自动建） */
-async function resolveTarget(ctx: unknown, explicit: unknown): Promise<CanvasTarget | null> {
+export async function resolveTarget(ctx: unknown, explicit: unknown): Promise<CanvasTarget | null> {
   if (typeof explicit === 'string' && explicit.trim()) return { workspaceId: explicit.trim(), workspaceName: '' }
   if (isChatCtx(ctx) && typeof ctx.resolveCanvasTarget === 'function') return ctx.resolveCanvasTarget()
   return null
+}
+
+/** 「生成后自动放入画布」偏好（place_on_canvas 未传时的默认值；非 chat 宿主返回 false） */
+export async function autoPlacePref(ctx: unknown): Promise<boolean> {
+  return isChatCtx(ctx) && typeof ctx.isAutoPlaceMedia === 'function' ? await ctx.isAutoPlaceMedia() : false
 }
 
 /** 落点告知文案：自动建与已有画布措辞区分 */
@@ -620,6 +628,55 @@ const canvasConnectTool = {
   },
 }
 
+/** 文本转配音宿主工具（Edge TTS 免费入口）：画布 tts 节点之外的通用 TTS——剪辑工程/对话页配音靠它。
+ *  与画布 agent_run_generation(kind=tts) 的差异：不依赖画布节点，直接文本→音频→素材库 asset_id */
+const generateTtsTool = {
+  name: 'generate_tts',
+  description:
+    '文本转语音配音（免费）：把台词/旁白文案合成为音频并入素材库，返回 asset_id、audio_url 与时长。' +
+    '剪辑工程配音链路：editor_get_overview 拿字幕/片段的时间点与文案 → 按段调本工具生成 → editor_apply_ops 的 addClip {assetId} 加进音频轨对齐时间。' +
+    'voice 音色按角色/场景选：default 阳光男声（缺省）/female 标准女声/male，或内置音色 id：' +
+    'narrator_male_zh 男声旁白、narrator_female_zh 女声旁白、young_male_zh 年轻男声、young_female_zh 年轻女声、' +
+    'mature_male_zh 成熟男声、mature_female_zh 成熟女声、child_zh 童声、elder_zh 老年声；speed 语速倍率缺省 1.0。',
+  parameters: Type.Object({
+    text: Type.String({ description: '要合成的台词/旁白文本' }),
+    voice: Type.Optional(Type.String({ description: '音色（见工具描述），缺省 default' })),
+    speed: Type.Optional(Type.Number({ description: '语速倍率，缺省 1.0' })),
+    name: Type.Optional(Type.String({ description: '素材名（缺省「配音-TTS」）' })),
+  }),
+  execute: async (args: Record<string, unknown>): Promise<AgentToolResult> => {
+    const text = typeof args.text === 'string' ? args.text.trim() : ''
+    if (!text) return { ok: false, error: 'text 不能为空：把要合成的台词/旁白文本传进来' }
+    const voice = typeof args.voice === 'string' && args.voice.trim() ? args.voice.trim() : 'default'
+    const speed = typeof args.speed === 'number' && args.speed > 0 ? args.speed : 1.0
+    const name = typeof args.name === 'string' && args.name.trim() ? `配音-${args.name.trim().slice(0, 24)}` : '配音-TTS'
+    try {
+      const res = await generateCanvasTts({ text, voice, speed })
+      // 统一素材库入库：editor_apply_ops 的 addClip 只认 assetId，不入库配音进不了剪辑工程
+      let assetId: number | null = null
+      try {
+        const asset = await createAsset({ url: res.audio_url, media_type: 'audio', name })
+        assetId = asset.id
+      } catch {
+        /* 入库失败不阻塞返回：audio_url 仍可用于画布 compose，缺少 asset_id 时结果里说明 */
+      }
+      return {
+        ok: true,
+        data: {
+          asset_id: assetId,
+          audio_url: res.audio_url,
+          duration_ms: res.duration_ms ?? null,
+          message: assetId != null
+            ? `配音已生成并入素材库（asset_id ${assetId}）：剪辑工程用 editor_apply_ops 的 addClip {assetId: ${assetId}} 加进音频轨；画布 compose 可直接用 audio_url`
+            : `配音已生成但素材库入库失败（可重试本工具）：audio_url ${res.audio_url}`,
+        },
+      }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  },
+}
+
 /** chat 宿主工具组（经内核 HostTool 包装后挂载；追加新工具放末尾，测试按索引取用） */
 export const CHAT_TOOLS = [
   imageTool,
@@ -632,6 +689,8 @@ export const CHAT_TOOLS = [
   canvasGetOverviewTool,
   canvasAddPanelsTool,
   canvasConnectTool,
+  ...EDITOR_TOOLS,
+  generateTtsTool,
 ]
 
 /** 工具名清单（allowed-tools 白名单映射目标） */

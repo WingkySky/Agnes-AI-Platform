@@ -1,21 +1,27 @@
 # =====================================================
-# 剪辑工程服务层（CRUD + revision 乐观锁保存）
+# 剪辑工程服务层（CRUD + revision 乐观锁保存 + agent 写前快照）
 # =====================================================
 
+import hashlib
+import json
 import uuid
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.models.editing_project import EditingProject
+from app.models.editing_project import EditorSnapshot, EditingProject
 from app.models.user import User
 from app.services.editor.document_schema import (
     check_document_size,
     validate_document_assets,
     validate_document_skeleton,
 )
+
+# agent 写前快照去重窗口：同窗口内内容哈希一致则不重复落快照（仿画布 auto snapshot 节流）
+SNAPSHOT_DEDUP_WINDOW = timedelta(seconds=300)
 
 
 def _to_dict(p: EditingProject) -> dict:
@@ -133,15 +139,56 @@ async def update_project(
     return project
 
 
+def _document_hash(document: dict) -> str:
+    return hashlib.sha256(
+        json.dumps(document, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
+async def maybe_snapshot(db: AsyncSession, project: EditingProject, reason: Optional[str]) -> Optional[EditorSnapshot]:
+    """写前快照（当前文档未变时）：仅 agent 工具层携带 snapshot_reason 触发；
+    去重窗口内内容哈希一致则跳过。与随后的保存同事务提交。"""
+    since = datetime.utcnow() - SNAPSHOT_DEDUP_WINDOW
+    latest = (
+        await db.scalars(
+            select(EditorSnapshot)
+            .where(
+                EditorSnapshot.project_uid == project.uid,
+                EditorSnapshot.created_at >= since,
+            )
+            .order_by(EditorSnapshot.created_at.desc())
+        )
+    ).first()
+    content_hash = _document_hash(project.document or {})
+    if latest is not None and latest.content_hash == content_hash:
+        return None
+    snap = EditorSnapshot(
+        project_uid=project.uid,
+        user_id=project.user_id,
+        kind="agent",
+        reason=reason,
+        revision=project.revision,
+        content_hash=content_hash,
+        data=project.document or {},
+    )
+    db.add(snap)
+    await db.flush()
+    return snap
+
+
 async def save_document(
-    db: AsyncSession, project: EditingProject, document: dict, base_revision: int
+    db: AsyncSession, project: EditingProject, document: dict, base_revision: int,
+    snapshot_reason: Optional[str] = None,
 ) -> EditingProject:
-    """保存时间线文档；base_revision 不符返回 409（仿画布冲突语义）"""
+    """保存时间线文档；base_revision 不符返回 409（仿画布冲突语义）；
+    snapshot_reason 非空时写前快照（agent 兜底还原用）"""
     if base_revision != project.revision:
         raise HTTPException(
             status_code=409,
             detail={"message": "文档已被其他会话修改", "current_revision": project.revision},
         )
+    if snapshot_reason:
+        await maybe_snapshot(db, project, snapshot_reason)
     check_document_size(document)
     validate_document_skeleton(document)
     await validate_document_assets(db, document, project.user_id)
@@ -149,6 +196,44 @@ async def save_document(
     project.revision += 1
     await db.commit()
     return project
+
+
+async def list_snapshots(
+    db: AsyncSession, project: EditingProject, limit: int = 50
+) -> list[EditorSnapshot]:
+    """快照列表（不含 data，时间倒序）"""
+    stmt = (
+        select(EditorSnapshot)
+        .where(EditorSnapshot.project_uid == project.uid)
+        .order_by(EditorSnapshot.created_at.desc())
+        .limit(limit)
+    )
+    return list((await db.scalars(stmt)).all())
+
+
+async def get_snapshot(db: AsyncSession, project: EditingProject, snapshot_id: int) -> EditorSnapshot:
+    """取单条快照全量（含 data）；不属于该工程 404"""
+    snap = (
+        await db.scalars(
+            select(EditorSnapshot).where(
+                EditorSnapshot.id == snapshot_id,
+                EditorSnapshot.project_uid == project.uid,
+            )
+        )
+    ).first()
+    if not snap:
+        raise HTTPException(status_code=404, detail="快照不存在")
+    return snap
+
+
+def snapshot_brief(s: EditorSnapshot) -> dict:
+    return {
+        "id": s.id,
+        "kind": s.kind,
+        "reason": s.reason,
+        "revision": s.revision,
+        "created_at": s.created_at.isoformat() if s.created_at else None,
+    }
 
 
 async def delete_project(db: AsyncSession, project: EditingProject) -> None:

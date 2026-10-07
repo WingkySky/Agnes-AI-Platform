@@ -5,9 +5,8 @@
 #   - is_whisper_available / get_whisper_model：可选依赖与模型缓存
 #   - transcribe_audio：本地音频 → [{start, end, text}]（线程池执行，不阻塞事件循环）
 #
-# faster-whisper 为可选依赖：未安装时 is_whisper_available()=False，
-# 各业务域自行决定回退策略（项目域回退 LLM 拆分；剪辑器返回 503）。
-# 安装方式：pip install faster-whisper
+# faster-whisper 已是正式依赖（requirements.txt）；运行时可用性检查保留作兜底，
+# 未装环境下各业务域自行决定回退策略（项目域回退 LLM 拆分；剪辑器返回 503）。
 # =====================================================
 
 import asyncio
@@ -17,7 +16,22 @@ from typing import List
 logger = logging.getLogger("agnes_platform.media.transcribe")
 
 try:
+    import av
     from faster_whisper import WhisperModel  # type: ignore
+
+    # PyAV 19 移除了 av.open 的 metadata_errors 参数（新行为=metadata 一律按 UTF-8 +
+    # surrogateescape 字节级无损读取，旧参数"忽略 metadata 错误"的语义已成默认）；
+    # faster-whisper 1.2.1 仍传该参数会 TypeError，这里包一层剥掉。
+    # 上游适配发版后垫片自然空转（不再有该入参），届时可整体删除。
+    if int(av.__version__.split(".", 1)[0]) >= 19:
+        _av_open = av.open
+
+        def _av_open_compat(*args, **kwargs):
+            kwargs.pop("metadata_errors", None)
+            return _av_open(*args, **kwargs)
+
+        av.open = _av_open_compat
+
     _WHISPER_AVAILABLE = True
 except ImportError:
     _WHISPER_AVAILABLE = False

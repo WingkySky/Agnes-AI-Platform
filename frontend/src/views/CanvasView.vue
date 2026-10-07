@@ -2050,7 +2050,8 @@ function collectComposeSubtitles(panel: CanvasPanel): CanvasSubtitleSegment[] | 
 
 /** compose 节点执行：多段视频（按摆放顺序）+ 可选配音/字幕 → 成片视频节点 */
 async function runComposeNode(panel: CanvasPanel) {
-  const videos = getUpstreamRunNodes(panel.id, ['video']).filter((p) => p.content?.content)
+  // 成片 URL 生成回写在 content、引入素材落库在 url（与 agent 工具层 videoUrlOf 同口径）
+  const videos = getUpstreamRunNodes(panel.id, ['video']).filter((p) => p.content?.content || p.content?.url)
   if (!videos.length) {
     ElMessage.warning(t('canvas.messages.composeNoVideo'))
     return
@@ -2059,7 +2060,7 @@ async function runComposeNode(panel: CanvasPanel) {
   store.updatePanel(panel.id, { content: { status: 'loading', errorDetails: null } })
   try {
     const res = await composeCanvasVideos({
-      video_urls: videos.map((p) => String(p.content?.content)),
+      video_urls: videos.map((p) => String(p.content?.content || p.content?.url)),
       audios: collectComposeAudioUrls(panel),
       subtitles: withSubtitle ? collectComposeSubtitles(panel) : null,
       with_subtitle: withSubtitle,

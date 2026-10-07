@@ -13,7 +13,7 @@ import type { ImageContent, Model } from '@earendil-works/pi-ai'
 import type { TSchema } from 'typebox'
 import { AGENT_TOOLS, toolsForMode } from './tools'
 import type { AgentCanvasStore, AgentToolResult } from './tools'
-import { resolveToolCall, gatedKindOf } from './policy'
+import { resolveToolCall, resolveHostGenerationGate, gatedKindOf } from './policy'
 import type { AgentMode } from './policy'
 import { getActiveSkillScope } from './skills'
 import { createAgentModel, agentStreamFn } from './provider'
@@ -46,11 +46,13 @@ export type KernelEvent =
   | { type: 'done'; stopped: boolean; error: string | null }
 
 /** 宿主自带工具（chat 宿主等）：结构与画布 AgentTool 对齐，execute 的 ctx 由 deps.toolContext 提供；
- *  callId 为机制层工具调用 id（子代理进度定位用），parent 为执行本工具的内核实例（agent_delegate 构建子代理宿主用） */
+ *  callId 为机制层工具调用 id（子代理进度定位用），parent 为执行本工具的内核实例（agent_delegate 构建子代理宿主用）。
+ *  group 仅 generation 有门语义（耗时动作：readonly 拒绝 / confirm 每工具首次过门），其余组宿主模式放行 */
 export interface HostTool {
   name: string
   description: string
   parameters: TSchema
+  group?: 'read' | 'write' | 'generation'
   execute(args: Record<string, unknown>, ctx: unknown, callId?: string, parent?: AgentKernel): AgentToolResult | Promise<AgentToolResult>
 }
 
@@ -245,20 +247,24 @@ export class AgentKernel {
    *  宿主工具组模式无档位策略（围栏由各宿主 beforeToolCall 负责）；画布宿主走 policy 三档，
    *  阶段门确认卡入 FIFO 队列，confirm 按序唤醒。source 标记来自子任务的请求，确认卡据此展示来源。 */
   async authorizeTool(toolName: string, args: Record<string, unknown>, source?: string): Promise<{ allowed: boolean; reason?: string; stop: boolean }> {
-    if (this.deps.tools) return { allowed: true, stop: false }
+    const hostTool = this.deps.tools?.find((t) => t.name === toolName)
+    // 宿主工具组模式默认放行（围栏由各宿主 beforeToolCall 负责）；仅 generation 组走确认门
+    if (this.deps.tools && hostTool?.group !== 'generation') return { allowed: true, stop: false }
     // mcp__ 前缀 = 外部 MCP 工具（命名约定，见 lib/agent/mcp.ts），走独立 'mcp' 组策略
-    const toolGroup = toolName.startsWith('mcp__') ? 'mcp' : AGENT_TOOLS.find((t) => t.name === toolName)?.group ?? 'write'
+    const toolGroup = toolName.startsWith('mcp__') ? 'mcp' : (hostTool?.group ?? AGENT_TOOLS.find((t) => t.name === toolName)?.group ?? 'write')
     const panelId = typeof args.panel_id === 'string' ? args.panel_id : ''
     const panelType = panelId ? this.deps.getCanvas?.().panels.find((p) => p.id === panelId)?.type : undefined
 
-    const decision = resolveToolCall({
-      mode: this.deps.getMode?.() ?? 'confirm',
-      toolName,
-      toolGroup,
-      args,
-      gatedKinds: this.gatedKinds,
-      panelType,
-    })
+    const decision = this.deps.tools
+      ? resolveHostGenerationGate(toolName, this.deps.getMode?.() ?? 'confirm', this.gatedKinds)
+      : resolveToolCall({
+          mode: this.deps.getMode?.() ?? 'confirm',
+          toolName,
+          toolGroup,
+          args,
+          gatedKinds: this.gatedKinds,
+          panelType,
+        })
 
     if (decision.action === 'allow') {
       this.recordGatedKind(toolName, args, panelType)
@@ -291,7 +297,8 @@ export class AgentKernel {
   }
 
   private recordGatedKind(toolName: string, args: Record<string, unknown>, panelType: string | undefined): void {
-    const kind = gatedKindOf(toolName, args, panelType)
+    const hostKind = this.deps.tools?.some((t) => t.name === toolName && t.group === 'generation') ? toolName : null
+    const kind = hostKind ?? gatedKindOf(toolName, args, panelType)
     if (kind && !this.gatedKinds.includes(kind)) this.gatedKinds.push(kind)
   }
 

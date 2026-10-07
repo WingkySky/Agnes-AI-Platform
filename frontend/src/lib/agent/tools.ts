@@ -10,7 +10,8 @@
 import type { CanvasPanel, CanvasConnection, CanvasStyleSelection } from '@/stores/canvas'
 import { useCanvasStore } from '@/stores/canvas'
 import { executeInNodeGeneration, executeInNodeVideoGeneration } from '@/lib/canvas-generation'
-import { composeCanvasVideos } from '@/api/canvas'
+import { composeCanvasVideos, generateCanvasTts, getCanvasVoicesCached } from '@/api/canvas'
+import { createAsset } from '@/api/assets'
 import { createWorkEntity } from '@/api/workEntities'
 import { useModelsStore } from '@/stores/models'
 import type { ModelInfo } from '@/types'
@@ -344,14 +345,32 @@ function groupByKind(cards: StoryboardEntity[]) {
   }
 }
 
-/** Agent 版 compose 成片：按摆放顺序收集上游已生成视频，拼接为连续成片写回节点 */
+/** 视频节点当前成片 URL：生成回写在 content，引入素材等落库在 url（与画布层 canvas-generation 读取同口径） */
+function videoUrlOf(panel: CanvasPanel): string {
+  const c = panel.content || {}
+  if (typeof c.content === 'string' && c.content) return c.content
+  if (typeof c.videoUrl === 'string' && c.videoUrl) return c.videoUrl
+  return typeof c.url === 'string' ? c.url : ''
+}
+
+/** Agent 版 compose 成片：按摆放顺序收集上游已生成视频（+TTS 音轨混音），拼接为连续成片写回节点 */
 async function runCompose(panel: CanvasPanel, canvas: AgentCanvasStore): Promise<AgentToolResult> {
-  const connectedVideos = canvas.connections
+  const upstreams = canvas.connections
     .filter((c) => c.target_panel_id === panel.id)
     .map((c) => canvas.panels.find((p) => p.id === c.source_panel_id))
-    .filter((p): p is CanvasPanel => !!p && (p.type || 'text') === 'video')
+    .filter((p): p is CanvasPanel => !!p)
+  const connectedVideos = upstreams.filter((p) => (p.type || 'text') === 'video')
+  // 上游 TTS 音轨：只认结果音频节点——tts 节点自身 content 是历史假配音（图片 URL）的藏污点，直写形态不再采信
+  const audios = upstreams
+    .filter((p) => (p.type || 'text') === 'tts')
+    .map((p) => {
+      const resultId = typeof p.content?.result_panel_id === 'string' ? p.content.result_panel_id : ''
+      const result = resultId ? canvas.panels.find((x) => x.id === resultId) : null
+      return result?.type === 'audio' && typeof result.content?.content === 'string' ? result.content.content : ''
+    })
+    .filter(Boolean)
   // 不静默跳过未完成的段：缺一段成片就是错的，必须让 LLM 知道并等待/重试
-  const pending = connectedVideos.filter((p) => !(typeof p.content?.content === 'string' && p.content.content))
+  const pending = connectedVideos.filter((p) => !videoUrlOf(p))
   if (pending.length > 0) {
     return { ok: false, error: `有 ${pending.length} 段上游视频尚未生成完成（节点: ${pending.map((p) => p.name || p.id).join('、')}），等它们生成完成后再调用拼接` }
   }
@@ -388,7 +407,10 @@ async function runCompose(panel: CanvasPanel, canvas: AgentCanvasStore): Promise
   }
   canvas.updatePanel(panel.id, { content: { status: 'loading', errorDetails: null } })
   try {
-    const res = await composeCanvasVideos({ video_urls: videos.map((p) => String(p.content?.content)) })
+    const res = await composeCanvasVideos({
+      video_urls: videos.map((p) => videoUrlOf(p)),
+      audios: audios.length > 0 ? audios : undefined,
+    })
     canvas.updatePanel(resultId, { content: { content: res.video_url, status: 'success' } })
     canvas.updatePanel(panel.id, { content: { status: 'idle' } })
     return {
@@ -402,13 +424,91 @@ async function runCompose(panel: CanvasPanel, canvas: AgentCanvasStore): Promise
   }
 }
 
+/** Agent 版 TTS 配音：镜像画布手动执行（文案收集 → generateCanvasTts → 独立配音音频节点）。连线只建立数据流，生成必须显式执行 */
+async function runTts(panel: CanvasPanel, canvas: AgentCanvasStore): Promise<AgentToolResult> {
+  // 文案来源：上游 text 节点 > 节点自身 text（与画布手动执行同口径）
+  let text = ''
+  for (const c of canvas.connections.filter((c) => c.target_panel_id === panel.id)) {
+    const src = canvas.panels.find((p) => p.id === c.source_panel_id)
+    const t = src && (src.type || 'text') === 'text' && typeof src.content?.content === 'string' ? src.content.content.trim() : ''
+    if (t) {
+      text = t
+      break
+    }
+  }
+  if (!text && typeof panel.content?.text === 'string' && panel.content.text.trim()) text = panel.content.text.trim()
+  if (!text) {
+    return { ok: false, error: '该 TTS 节点没有文案来源：先建 text 节点写台词并连线到本节点（或在节点 content.text 里直接写台词），再执行生成' }
+  }
+  // 结果写入独立配音音频节点（复用已有结果节点支持重试）——compose 音轨采集与画布播放都认这个形态
+  let resultId = typeof panel.content?.result_panel_id === 'string' ? panel.content.result_panel_id : ''
+  if (resultId && !canvas.panels.some((p) => p.id === resultId)) resultId = ''
+  if (!resultId) {
+    resultId = canvas.addPanel({
+      type: 'audio',
+      x: panel.x + panel.width + 60,
+      y: panel.y,
+      width: 340,
+      height: 120,
+      content: { content: '', status: 'loading' },
+    })
+    canvas.addConnection({ source_panel_id: panel.id, target_panel_id: resultId })
+    canvas.updatePanel(panel.id, { content: { result_panel_id: resultId } })
+    canvas.pushSnapshot()
+  } else {
+    canvas.updatePanel(resultId, { content: { content: '', status: 'loading', errorDetails: null } })
+  }
+  try {
+    const res = await generateCanvasTts({
+      text,
+      voice: typeof panel.content?.voice === 'string' && panel.content.voice ? panel.content.voice : 'default',
+      speed: Number(panel.content?.speed) || 1.0,
+    })
+    // 自动入统一素材库：editor_apply_ops 的 addClip 只认素材库 assetId，不入库配音就进不了剪辑工程
+    let assetId: number | null = null
+    try {
+      const asset = await createAsset({ url: res.audio_url, media_type: 'audio', name: `配音-${(panel.name || 'TTS').trim().slice(0, 24)}` })
+      assetId = asset.id
+    } catch {
+      /* 入库失败不阻塞配音使用（音频 URL 已写回节点），仅缺少 asset_id */
+    }
+    canvas.updatePanel(resultId, { content: { content: res.audio_url, status: 'success', duration_ms: res.duration_ms ?? null, asset_id: assetId } })
+    canvas.updatePanel(panel.id, { content: { status: 'idle' } })
+    return {
+      ok: true,
+      data: {
+        panel_id: resultId,
+        kind: 'tts',
+        audio_url: res.audio_url,
+        asset_id: assetId,
+        duration_ms: res.duration_ms ?? null,
+        message: assetId != null
+          ? `配音已生成并入素材库（asset_id ${assetId}）：加进剪辑工程用 editor_apply_ops 的 addClip 引用该 asset_id，混入画布成片则把 tts 节点连线到 compose`
+          : '配音已生成并写入音频结果节点，把 tts 节点连线到 compose 即可混入成片',
+      },
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    canvas.updatePanel(resultId, { content: { status: 'error', errorDetails: msg } })
+    return { ok: false, error: `配音生成失败: ${msg}` }
+  }
+}
+
 async function runGeneration(args: Record<string, unknown>, canvas: AgentCanvasStore): Promise<AgentToolResult> {
   const panelId = asString(args.panel_id)
   const panel = canvas.panels.find((p) => p.id === panelId)
   if (!panel) return { ok: false, error: `节点不存在: ${panelId}` }
 
-  const fallbackKind = panel.type === 'video' ? 'video' : panel.type === 'compose' ? 'compose' : 'image'
+  const fallbackKind = panel.type === 'video' ? 'video' : panel.type === 'compose' ? 'compose' : panel.type === 'tts' ? 'tts' : 'image'
   const kind = asString(args.kind) || fallbackKind
+  // 视频节点已带成片时再触发生成会白烧生成额度（compose 曾因 url 字段误判"未生成"引发）：
+  // 默认拒绝，显式 force 才覆盖重生成；引入素材/拼接走连线 compose，不需要生成
+  if (kind === 'video' && videoUrlOf(panel) && args.force !== true) {
+    return {
+      ok: false,
+      error: '该视频节点已有成片，无需生成。确要重新生成并覆盖现有视频请传 force: true；只是使用该视频则直接连线 compose 即可',
+    }
+  }
   // 用户点名模型时的唯一入口：校验后在生成前写入节点（UI 与任务记录均可见）；未传则跟随用户默认偏好
   const modelArg = asString(args.model)
   if (modelArg && (kind === 'video' || kind === 'image' || kind === 'asset')) {
@@ -426,6 +526,8 @@ async function runGeneration(args: Record<string, unknown>, canvas: AgentCanvasS
       if (!ok) return { ok: false, error: '视频生成失败，错误详情已写入该节点' }
     } else if (kind === 'compose') {
       return await runCompose(panel, canvas)
+    } else if (kind === 'tts') {
+      return await runTts(panel, canvas)
     } else {
       const ok = await executeInNodeGeneration(panel, canvas, { waitFor: true })
       if (!ok) return { ok: false, error: '图片生成失败，错误详情已写入该节点' }
@@ -492,13 +594,14 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: 'agent_get_models',
     group: 'read',
-    description: '读取生成模型能力：默认模型（default_video_model / default_image_model，用户在偏好设置中选择的）、视频时长档位（全局 + 各模型自己的档位，秒）、默认时长、各模型参考图上限。规划分镜视频时长、决定参考图连线数量前先调用；某模型的 content.seconds 必须从该模型自己的 video_durations 档位中选取。用户没有点名模型时一律跟随默认模型，不要自行挑选。',
+    description: '读取生成模型能力与配音音色目录：默认模型（default_video_model / default_image_model，用户在偏好设置中选择的）、视频时长档位（全局 + 各模型自己的档位，秒）、默认时长、各模型参考图上限。规划分镜视频时长、决定参考图连线数量前先调用；某模型的 content.seconds 必须从该模型自己的 video_durations 档位中选取。voices 为 TTS 音色清单（voice_id/名称/性别/适用场景）：建 tts 配音节点时 content.voice 按角色与场景从中选取（如旁白选 narrator_*、儿童角色选 child_zh），缺省 default；speed 为语速倍率。用户没有点名模型时一律跟随默认模型，不要自行挑选。',
     parameters: Type.Object({}),
-    execute: () => {
+    execute: async () => {
       const ms = useModelsStore()
       const globalDurations = [...ms.videoDurations]
       const defaultVideo = ms.defaultVideoModel
       const defaultImage = ms.defaultImageModel
+      const voices = await getCanvasVoicesCached().then((r) => r.voices).catch(() => [])
       return {
         ok: true,
         data: {
@@ -506,6 +609,7 @@ export const AGENT_TOOLS: AgentTool[] = [
           default_video_duration: ms.defaultVideoDuration,
           default_video_model: defaultVideo,
           default_image_model: defaultImage,
+          voices,
           video_models: ms.videoModels.map((m) => ({
             ...summarizeModel(m),
             is_default: m.id === defaultVideo,
@@ -602,7 +706,7 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: 'agent_apply_ops',
     group: 'write',
-    description: '批量应用画布操作（整批一个撤销快照）。可用 op：add_panel（建节点，type 可选 text/image/video/config/tts/subtitle/compose，content 里 text 节点放 content 字段、媒体节点放 prompt 字段）、update_panel（改节点，changes 与节点结构一致）、delete_panel、add_connection（连线方向 = 数据流向，从上游资源指向下游生成）、delete_connection。节点引用（panel_id/source_panel_id/target_panel_id）可直接写节点名称（推荐，同批次新建的节点也能按名称引用），或用 agent_get_state 返回的 id。',
+    description: '批量应用画布操作（整批一个撤销快照）。可用 op：add_panel（建节点，type 可选 text/image/video/tts/subtitle/compose，content 里 text 节点放 content 字段、媒体节点放 prompt 字段、tts 节点可带 voice（音色 id，从 agent_get_models 的 voices 目录按角色/场景选取）与 speed（语速倍率））、update_panel（改节点，changes 与节点结构一致）、delete_panel、add_connection（连线方向 = 数据流向，从上游资源指向下游生成）、delete_connection。节点引用（panel_id/source_panel_id/target_panel_id）可直接写节点名称（推荐，同批次新建的节点也能按名称引用），或用 agent_get_state 返回的 id。连线只建立数据流：tts/video/image 等生成类节点建好并连线后，必须逐个调用 agent_run_generation 才会真正生成内容。',
     parameters: Type.Object({
       ops: Type.Array(applyOpSchema, { description: '操作列表，按顺序执行' }),
     }),
@@ -780,11 +884,12 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: 'agent_run_generation',
     group: 'generation',
-    description: '对画布节点触发生成，会阻塞等待生成完成并返回成败。image：对分镜图节点就地生成（自动收集节点自身内容与上游连线资源作参考）。asset：对实体设定卡节点（image 节点带 kind）生成设定图。video：对目标视频节点就地生成（content.seconds 指定该段时长，须从 agent_get_models 的时长档位中按分镜节奏选取，多数视频模型一次只吃 1-2 张参考图——多分镜连续视频必须每分镜一段、最后 compose 拼接，不要挤进一个节点）。model：仅当用户明确点名生成模型时才传，必须是 agent_get_models 列出的对应类型模型 id；其余情况一律省略，跟随用户默认偏好。compose：对成片合成节点执行拼接，把上游各段视频按画布摆放顺序拼成连续成片；若有上游视频未生成完成会返回错误，此时等待/重试失败的分段即可。',
+    description: '对画布节点触发生成，会阻塞等待生成完成并返回成败。image：对分镜图节点就地生成（自动收集节点自身内容与上游连线资源作参考）。asset：对实体设定卡节点（image 节点带 kind）生成设定图。video：对目标视频节点就地生成（content.seconds 指定该段时长，须从 agent_get_models 的时长档位中按分镜节奏选取，多数视频模型一次只吃 1-2 张参考图——多分镜连续视频必须每分镜一段、最后 compose 拼接，不要挤进一个节点）；节点已带成片 URL 时会被拒绝（防止误烧生成额度），确要覆盖重生成才传 force: true，只是使用该视频则直接连线 compose。tts：对配音节点执行语音合成——连线只建立数据流、不会自动生成，必须执行本工具才出音频；文案取上游 text 节点（或节点 content.text），音色 content.voice 从 agent_get_models 的 voices 目录按角色/场景选取，语速 content.speed 为倍率；结果写入独立配音音频节点并自动入素材库（返回 asset_id，剪辑工程 addClip 可直接引用）。compose：对成片合成节点执行拼接，把上游各段视频按画布摆放顺序拼成连续成片（上游配音音轨自动混入）；若有上游视频未生成完成会返回错误，此时等待/重试失败的分段即可。model：仅当用户明确点名生成模型时才传，必须是 agent_get_models 列出的对应类型模型 id；其余情况一律省略，跟随用户默认偏好。',
     parameters: Type.Object({
       panel_id: Type.String({ description: '目标节点 id' }),
-      kind: Type.Optional(Type.Union([Type.Literal('image'), Type.Literal('asset'), Type.Literal('video'), Type.Literal('compose')], { description: 'asset=实体设定图；缺省按节点类型推断' })),
+      kind: Type.Optional(Type.Union([Type.Literal('image'), Type.Literal('asset'), Type.Literal('video'), Type.Literal('tts'), Type.Literal('compose')], { description: 'asset=实体设定图；tts=配音合成；缺省按节点类型推断' })),
       model: Type.Optional(Type.String({ description: '仅用户点名模型时传；必须是 agent_get_models 中该类型的可用模型 id' })),
+      force: Type.Optional(Type.Boolean({ description: '该视频节点已带成片时，确要重新生成并覆盖才传 true' })),
     }),
     execute: runGeneration,
   },

@@ -8,7 +8,7 @@
  * ===================================================== */
 
 import { t } from '@/i18n'
-import { mcpShortName } from './tool-labels'
+import { mcpShortName, toolStepLabel } from './tool-labels'
 
 export type AgentMode = 'readonly' | 'confirm' | 'auto'
 
@@ -114,4 +114,22 @@ export function gatedKindOf(toolName: string, args: Record<string, unknown>, pan
   if (toolName.startsWith('mcp__')) return toolName
   if (toolName !== 'agent_run_generation') return null
   return inferGenerationKind(typeof args.kind === 'string' ? args.kind : '', panelType)
+}
+
+/** 宿主 generation 组门：chat 宿主工具组默认放行（与既有画布/生成工具行为一致），
+ *  仅声明 group='generation' 的耗时工具走门——readonly 档拒绝；confirm 档每工具首次过门（语义同 MCP 门）；auto/已过门直通 */
+export function resolveHostGenerationGate(toolName: string, mode: AgentMode, gatedKinds: string[]): PolicyDecision {
+  if (mode === 'readonly') {
+    return { action: 'reject', reason: '当前为只读模式，不允许执行渲染等耗时生成操作', stop: false }
+  }
+  if (mode === 'confirm' && !gatedKinds.includes(toolName)) {
+    return {
+      action: 'gate',
+      kind: 'tool',
+      stage: toolName,
+      summary: t('agent.confirmGenerationTool', { tool: toolStepLabel(toolName) }),
+      onReject: `用户未允许执行 ${toolName}，流程已停止，等用户调整后再试`,
+    }
+  }
+  return { action: 'allow' }
 }

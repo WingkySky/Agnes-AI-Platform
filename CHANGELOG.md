@@ -4,6 +4,58 @@
 
 ## [Unreleased]
 
+## [0.0.8] - 2026-10-07
+
+### Agent 上游空响应自动重试（韧性加固）
+
+- **provider 层空响应韧性**：上游网关偶发把空补全替换为占位文本（`[System: Empty response is not allowed]`）以 200 原样返回，对话会把它当助手回复展示并落库（2026-10-07 实测）。`agentStreamFn` 现包装了一层探测重试——首段文本按占位串前缀探测（正常回复只缓冲 1 个文本增量，流式体验不变），整轮命中占位或纯空补全（无文本/工具/思考）即丢弃本轮自动重试一次；重试仍异常按原样透传（优雅降级），上游 error/用户中止不重试
+- **测试**：vitest 新增重试语义 5 例（占位重试/空补全重试/正常直通单次调用/末次降级透传/error 不重试），562 绿 + build 过
+
+### Agent 对话式剪辑（批次 3A：剪辑器接入全局对话）
+
+- **剪辑器工具组 `editor_*` 挂载全局 Agent**（7 工具，与 `canvas_*` 同先例常驻 chat 内核）：`editor_list_projects`（列工程）/ `editor_get_overview`（时间线全貌 + assetId→素材映射 + 素材库摘要）/ `editor_create_project`（新建，asset_ids 按序自动排草稿）/ `editor_apply_ops`（**单一批量写入口**，17 op 全量，全部校验通过才保存）/ `editor_generate_subtitles`（whisper 转写音频轨 → 全量替换字幕轨）/ `editor_render`（提交渲染 + 内部轮询至完成 + 回复成片链接）/ `editor_get_render_status`。对话即可完成「选素材 → 排时间线 → 加字幕 → 渲染成片 → 落画布」全链路
+- **前端工具层复用命令表（方案 A）**：工具层 GET 文档 → `lib/editor-commands` 17 op 纯函数 fail-closed 校验 → PUT 单文档（base_revision 乐观锁），与 UI 编辑零分叉、零后端命令逻辑复制；任一 op 校验失败整体不落盘（原子）；写前快照 `snapshot_reason` 仅工具层携带
+- **时长探测补真值**：addClip 视频/音频片段缺时长时经 `probeMediaDuration`（mediabunny → 元素三级探测，元素探测下沉 `editor-media.probeElementDuration` 共用）自动补真实时长——`duration=0` 草稿占位片段会被渲染 Plan 剔除，agent 不开编辑器直接渲染的坑由此关闭；图片默认 3s 静帧；轨道/位置/片段 id 缺省自动补全（默认轨 + 轨尾放置）
+- **快照兜底（新表 `editor_snapshots`，create_all 自动建）**：agent 保存触发**写前**快照（5 分钟窗口 + 内容哈希去重）；快照列表/全量端点（`GET /snapshots[/{id}]`）；还原=拉快照 data 走正常保存链路（无独立还原端点，仿画布快照）；对话内恢复（模型反向调工具）优先，快照为整盘兜底
+- **编辑器页远端轻轮询**：镜像画布页先例——空闲（无未保存改动/未在保存/未播放/页面可见/非渲染中）每 5s 查 `GET /{uid}/revision` 新端点，远端领先则静默合入并提示；有脏改动不拉，交给既有 409 冲突副本（数据零丢弃）
+- **宿主 generation 组确认门**：`HostTool` 增可选 `group` 字段，chat 宿主工具组默认放行（与既有行为一致），仅声明 `generation` 组的耗时工具（`editor_render`）走门——readonly 档拒绝、confirm 档每工具首次过门（语义同 MCP 门，`policy.resolveHostGenerationGate` 纯函数）、auto 直通
+- **成片交付**：渲染成功回复可点成片链接；`place_on_canvas` 缺省按「生成后自动放入画布」偏好，落画布复用 canvas ops（成片已自动入资产库）
+- **测试**：pytest 新增快照写前/去重/跨工程隔离/三态鉴权/revision 端点等 4 例（255 绿）；vitest 新增工具层目标解析/原子校验/时长探测/渲染轮询落画布/宿主门三档等 12 例（557 绿）+ vue-tsc 零错 + build 过
+- 设计文档 `.zcode/plans/2026-10-07-batch3a-editor-agent-editing-design.md`（取代 2026-10-04 项目制时代版本）
+
+### 字幕转写依赖收编
+
+- **faster-whisper 收编为正式依赖**（原为可选依赖、镜像默认缺席，自动字幕能力形同虚设）：进 `requirements.txt`（Docker 镜像双架构 wheel 均有），Dockerfile 设 `HF_HOME=/app/data/hf` 让首次转写自动下载的 whisper 模型（small，约 460MB）落入数据卷、升级/重启不重拉；`transcribe_service` 运行时可用性检查保留作兜底
+- **PyAV 19 兼容垫片**：PyAV 19 移除 `av.open` 的 `metadata_errors` 参数，faster-whisper 1.2.1 `decode_audio` 直接 TypeError（真实冒烟撞出；上游最新仍为 1.2.1 无修复版）。`transcribe_service` 按大版本号挂垫片剥掉该入参——PyAV 19 新默认语义（metadata 一律 UTF-8+surrogateescape 字节级无损读取）与旧参数意图等价；av 不钉版跟随最新，上游适配发版后垫片自然空转。pip-audit 全量零漏洞
+
+### 画布 Agent compose 字段口径修复（真实链路撞出：配音→合成误触发视频生成被 429）
+
+- **compose 就绪校验容错读**：上游视频节点 URL 生成回写在 `content`、引入素材落库在 `url`，agent compose 校验与拼接入参只认 `content`——「已带成片 URL 的节点」被误报"尚未生成完成"，agent 据此误触发视频生成撞 Agnes 免费额度 429（`api_call_logs` 实锤）。统一 `videoUrlOf` 三兜底（content/videoUrl/url，与画布层读取同口径），CanvasView 手动 compose 同款修复
+- **agent compose 补 TTS 音轨混入**：compose API 本就支持 `audios`，agent 版此前只拼视频——上游 tts 节点音轨（节点直写 / 结果节点两种形态）现自动混入，配音→合成闭环才真正成立
+- **`agent_run_generation` 防误烧门**：已带成片的视频节点再触发生成默认拒绝（要求显式 `force: true` 覆盖重生成），杜绝"对已有素材的节点盲跑生成"白烧额度；工具 schema 与描述同步
+- **测试**：vitest 新增 url 节点拼接 / TTS 音轨混入 / 防误烧门 force 放行 3 例（565 绿）+ build 过
+
+### 画布 Agent 配音链路修复（真实链路撞出：tts 节点走了图片生成）
+
+- **`agent_run_generation` 增加 `tts` kind（根因修复）**：kind 推断原本 `video/compose` 之外一律按 image——agent 对 tts 节点触发生成实际跑的是**图片生成**，图片 URL 被当"配音"写进节点并入素材库（type=image），最终合成无声。新增执行体镜像画布手动执行：文案取上游 text 节点（或节点 content.text）→ `generateCanvasTts`（voice/speed 透传）→ 结果写**独立配音音频节点**（`result_panel_id` 回写，与 compose 音轨采集/画布播放双对齐）；无文案来源明确报错
+- **音色目录结构化透出**：`agent_get_models` 扩展返回 `voices`（复用后端既有 `GET /api/canvas/voices` 内置音色库：旁白男/女声、年轻/成熟、童声、老年声，带性别与适用场景）——agent 可按角色/场景挑音色，而非盲选；两个工具描述同步写明 tts 节点契约（**连线只建立数据流，必须执行 `agent_run_generation(kind=tts)` 才生成**、voice/speed 字段），apply_ops 描述顺带清掉已退役的 config 类型
+- 下游自愈：假音频根因断掉后，compose 音轨混入（上批次已补）拿到真音频，"配音→合成"闭环成立；不加资产导入类型校验（YAGNI，项目未上线）
+- **测试**：vitest 新增 tts 执行/结果节点写入/无文案报错/voices 透出 4 处断言（567 绿）+ build 过
+
+### 配音入工程链路补全（第二轮回测撞出：浏览器旧 bundle + 两个真实缺口）
+
+- **⚠️ 环境坑（非代码）**：修复后的第一轮回测（会话 83）agent 仍说「没有 TTS 生成能力」并对 tts 节点跑出图片（api_call_logs 三笔 image_create）——vite 服务端已是新代码，但**浏览器页面没刷新，agent 内核工具集是页面加载时的快照**；改完前端工具必须强刷页面再测
+- **runTts 自动入素材库**：editor_apply_ops 的 addClip 只认素材库 assetId，此前 agent 生成的配音从不入库、永远进不了剪辑工程（结构性缺口）；现在生成后自动 `createAsset(media_type=audio)` 返回 asset_id 并写入结果节点，工具结果直接给出「addClip 引用该 asset_id」的下一步指引
+- **editor_apply_ops 补全累积 + 类型守卫**：同批次 `[addTrack, addClip]` 时补全逻辑看不到新轨、跳过 id 补全导致命令表 invalid_payload（真实撞过）；现在 addTrack/removeTrack 效果累积进工作轨表；音频轨只收 audio、视频轨只收 video/image——图片假配音在入轨前被拦（清晰报错替代 invalid_payload）
+- **compose 音轨采集收口**：只认结果音频节点；tts 节点直写 content 的兜底移除——历史直写数据全是假配音图片 URL，纯藏污点
+- **测试**：vitest 新增批次 addTrack+addClip 补全 / 音轨类型守卫 / 配音入库断言（569 绿）+ build 过
+
+### 宿主级 generate_tts 工具（第三轮回测撞出：TTS 能力只在画布宿主）
+
+- **结构性缺口**：TTS 只存在于画布宿主的 `agent_run_generation(kind=tts)`，而剪辑工程/对话页宿主只挂 `editor_*` + 通用生成——用户在工程语境里要配音，agent 如实回答「没有 TTS 工具」（会话 84/85 实锤，工具集里确实没有）
+- **`generate_tts` 进全局 CHAT_TOOLS**：文本 → Edge TTS（免费）→ 自动入素材库 → 返回 asset_id + addClip 指引，任何宿主可用；描述内联 8 个内置音色 id（旁白男/女声、年轻/成熟、童声、老年声）按角色/场景选；`tool-labels` 补 `agent.actGenTts` 标签（zh/en）且 `agent_run_generation` 的 kind 文案同步识别 tts
+- **测试**：vitest 新增宿主级配音生成/入库/空文本 3 断言（571 绿）+ build 过
+
 ## [0.0.7] - 2026-10-06
 
 ### 视频剪辑器：全新独立剪辑实体

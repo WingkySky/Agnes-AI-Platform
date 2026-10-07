@@ -56,7 +56,7 @@ function applyOpsDetail(args: Record<string, unknown>): string {
 /** agent_run_generation：按 kind 选文案（asset 归入生成图片，与画布层原口径一致） */
 function runGenerationDetail(args: Record<string, unknown>, opts: ToolLabelOpts): string {
   const kind = typeof args.kind === 'string' ? args.kind : ''
-  const label = kind === 'video' ? t('agent.actGenVideo') : kind === 'compose' ? t('agent.actCompose') : t('agent.actGenImage')
+  const label = kind === 'video' ? t('agent.actGenVideo') : kind === 'tts' ? t('agent.actGenTts') : kind === 'compose' ? t('agent.actCompose') : t('agent.actGenImage')
   return withName(label, nodeName(args.panel_id, opts))
 }
 
@@ -83,11 +83,20 @@ export const TOOL_LABELS: Record<string, ToolLabelEntry> = {
   // 对话宿主（chat-tools.ts CHAT_TOOLS）
   generate_image: { key: 'agent.actGenImage' },
   generate_video: { key: 'agent.actGenVideo' },
+  generate_tts: { key: 'agent.actGenTts', detail: (a) => withName(t('agent.actGenTts'), typeof a.name === 'string' ? a.name : '') },
   // 对话宿主画布工具组（云端 ops 增量写入）
   canvas_list_workspaces: { key: 'agent.actCanvasListWorkspaces' },
   canvas_get_overview: { key: 'agent.actCanvasOverview' },
   canvas_add_panels: { key: 'agent.actCanvasAddPanels', detail: (a) => `${t('agent.actCanvasAddPanels')} ×${Array.isArray(a.panels) ? a.panels.length : 0}` },
   canvas_connect: { key: 'agent.actCanvasConnect', detail: (a) => `${t('agent.actCanvasConnect')} ×${Array.isArray(a.connections) ? a.connections.length : 0}` },
+  // 对话宿主剪辑器工具组（批次 3A 对话式剪辑）
+  editor_list_projects: { key: 'agent.actEditorListProjects' },
+  editor_get_overview: { key: 'agent.actEditorOverview' },
+  editor_create_project: { key: 'agent.actEditorCreateProject', detail: (a) => withName(t('agent.actEditorCreateProject'), typeof a.title === 'string' ? a.title : '') },
+  editor_apply_ops: { key: 'agent.actEditorApplyOps', detail: (a) => `${t('agent.actEditorApplyOps')} ×${Array.isArray(a.ops) ? a.ops.length : 0}` },
+  editor_generate_subtitles: { key: 'agent.actEditorGenSubtitles' },
+  editor_render: { key: 'agent.actEditorRender' },
+  editor_get_render_status: { key: 'agent.actEditorRenderStatus' },
 }
 
 /** mcp__{serverId}__{tool} 的短名（末段；非 mcp 工具原样返回） */

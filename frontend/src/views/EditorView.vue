@@ -195,11 +195,13 @@ onMounted(() => {
     return
   }
   void ensureLoaded()
+  store.startRemotePoll()
   window.addEventListener('keydown', onKeydown)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
+  store.stopRemotePoll()
   void store.saveNow()
   store.reset()
 })

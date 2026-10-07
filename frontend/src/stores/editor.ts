@@ -20,6 +20,7 @@ import {
   type EditingProjectBrief,
   createEditorProject,
   getEditorProject,
+  getEditorRevision,
   previewSubtitleSegments,
   saveEditorDocument,
   submitEditorRender,
@@ -37,7 +38,7 @@ import {
 import { EditorHistory } from '@/lib/editor-history'
 import { reflowPlaceholders } from '@/lib/editor-derive'
 import { canPlaceOnTrack, findFreeTrack } from '@/lib/editor-placement'
-import { probeMediaDuration as probeMediaDurationWithFallback } from '@/lib/editor-media'
+import { probeMediaDuration as probeMediaDurationWithFallback, probeElementDuration } from '@/lib/editor-media'
 import { clipEnd, type EditorDocument, type EditorTrack } from '@/lib/editor-types'
 
 const AUTOSAVE_INTERVAL_MS = 2000
@@ -174,19 +175,9 @@ export const useEditorStore = defineStore('editor', () => {
     scheduleSave()
   }
 
-  function probeMediaElementDuration(url: string): Promise<number> {
-    return new Promise((resolve) => {
-      const el = document.createElement(url.match(/\.(mp3|wav|m4a|aac)(\?|$)/i) ? 'audio' : 'video')
-      el.preload = 'metadata'
-      el.onloadedmetadata = () => resolve(el.duration || 0)
-      el.onerror = () => resolve(0)
-      el.src = url
-    })
-  }
-
   /** 三级探测：mediabunny 容器元数据（WebCodecs 可用时）→ 元素 loadedmetadata 回退 */
   async function probeMediaDuration(url: string): Promise<number> {
-    return probeMediaDurationWithFallback(url, probeMediaElementDuration)
+    return probeMediaDurationWithFallback(url, probeElementDuration)
   }
 
   /** 去重防线：同轨同素材落点过近（<80ms）视为重复放置 */
@@ -308,6 +299,41 @@ export const useEditorStore = defineStore('editor', () => {
       const msg = typeof detail === 'string' ? detail : detail?.message
       ElMessage.error(msg || t('editor.errors.transcribe'))
     }
+  }
+
+  // ---------- 远端变更感知（Agent 对话式剪辑写入的轻轮询，空闲才合入） ----------
+
+  const REMOTE_POLL_MS = 5000
+  let remotePollTimer: ReturnType<typeof setInterval> | null = null
+
+  function startRemotePoll(): void {
+    if (remotePollTimer) return
+    remotePollTimer = setInterval(() => void pollRemote(), REMOTE_POLL_MS)
+  }
+
+  function stopRemotePoll(): void {
+    if (remotePollTimer) {
+      clearInterval(remotePollTimer)
+      remotePollTimer = null
+    }
+  }
+
+  /** 空闲（无未保存改动/未在保存/未播放/页面可见/非渲染中）才感知远端：revision 领先则静默合入远端文档；
+   *  有脏改动不拉——交给自动保存的 409 冲突副本兜底（数据零丢弃，仿画布页轻轮询先例） */
+  async function pollRemote(): Promise<void> {
+    if (!uid.value || !loaded.value || dirty.value || saving.value) return
+    if (isPlaying.value || document.hidden || renderStatus.value === 'rendering') return
+    try {
+      const remote = await getEditorRevision(uid.value)
+      if (remote.revision <= revision.value) return
+      const detail = await getEditorProject(uid.value)
+      if (dirty.value || saving.value) return // 拉取期间产生本地改动：放弃本轮，走冲突副本
+      doc.value = detail.document
+      revision.value = detail.revision
+      renderStatus.value = detail.render_status
+      lastSavedAt.value = detail.updated_at
+      ElMessage.info(t('editor.remoteMerged'))
+    } catch { /* 轮询失败静默，下一轮再试 */ }
   }
 
   // ---------- 渲染 ----------
@@ -542,6 +568,7 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   function reset(): void {
+    stopRemotePoll()
     if (saveTimer) clearTimeout(saveTimer)
     saveTimer = null
     uid.value = ''
@@ -569,6 +596,7 @@ export const useEditorStore = defineStore('editor', () => {
     placeAsset, appendAssetToTrack, createTopTrackOfKind, setCoverUrl, detachAudio, splitSelectedAtPlayhead, duplicateClip,
     probeMediaDuration,
     saveNow, scheduleSave, transcribeTrack, submitRender, rename,
+    startRemotePoll, stopRemotePoll,
     select, selectTrack, reset, newId,
   }
 })

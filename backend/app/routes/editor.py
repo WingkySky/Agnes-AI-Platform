@@ -3,7 +3,10 @@
 #
 # - POST/GET /api/editor/projects            新建（支持画布圈选素材草稿）/ 列表
 # - GET/PATCH/DELETE /api/editor/projects/{uid}  详情 / 改标题挂靠 / 删
-# - PUT  /api/editor/projects/{uid}/document 时间线保存（revision 乐观锁 409）
+# - PUT  /api/editor/projects/{uid}/document 时间线保存（revision 乐观锁 409；
+#        snapshot_reason 仅 agent 工具层携带，触发写前快照）
+# - GET  /api/editor/projects/{uid}/revision  远端 revision 轻查询（编辑器页轮询）
+# - GET  /api/editor/projects/{uid}/snapshots[/{id}]  agent 写前快照列表/全量（还原走正常保存链路）
 # - POST /api/editor/projects/{uid}/subtitles/preview  whisper 转写字幕草稿
 #   （渲染端点在 render_service 落地阶段接入）
 #
@@ -107,7 +110,7 @@ async def delete_project(
     return ok(message="已删除剪辑工程")
 
 
-@router.put("/{uid}/document", summary="保存时间线文档（revision 乐观锁）")
+@router.put("/{uid}/document", summary="保存时间线文档（revision 乐观锁；snapshot_reason 触发写前快照）")
 async def save_document(
     uid: str,
     body: EditorDocumentSave,
@@ -117,8 +120,47 @@ async def save_document(
     project = await project_service.get_owned_project(db, uid, current_user)
     if project.render_status == render_service.RENDER_RENDERING:
         raise HTTPException(status_code=409, detail="渲染进行中（使用提交时快照），渲染完成后可继续保存")
-    project = await project_service.save_document(db, project, body.document, body.base_revision)
+    project = await project_service.save_document(
+        db, project, body.document, body.base_revision, snapshot_reason=body.snapshot_reason
+    )
     return ok(data={"revision": project.revision, "saved_at": project.updated_at.isoformat()})
+
+
+@router.get("/{uid}/revision", summary="远端 revision 轻查询（编辑器页轮询感知外部写入）")
+async def get_revision(
+    uid: str,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await project_service.get_owned_project(db, uid, current_user)
+    return ok(data={
+        "revision": project.revision,
+        "render_status": project.render_status,
+        "updated_at": project.updated_at.isoformat() if project.updated_at else None,
+    })
+
+
+@router.get("/{uid}/snapshots", summary="快照列表（不含 data，时间倒序）")
+async def list_snapshots(
+    uid: str,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await project_service.get_owned_project(db, uid, current_user)
+    rows = await project_service.list_snapshots(db, project)
+    return ok(data={"items": [project_service.snapshot_brief(s) for s in rows]})
+
+
+@router.get("/{uid}/snapshots/{snapshot_id}", summary="快照全量（含 data，还原时拉取）")
+async def get_snapshot(
+    uid: str,
+    snapshot_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await project_service.get_owned_project(db, uid, current_user)
+    snap = await project_service.get_snapshot(db, project, snapshot_id)
+    return ok(data={**project_service.snapshot_brief(snap), "data": snap.data})
 
 
 @router.post("/{uid}/render", summary="提交渲染（提交时快照 + client_operation_id 幂等）")
