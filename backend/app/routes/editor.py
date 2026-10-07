@@ -92,7 +92,7 @@ async def update_project(
     current_user: User = Depends(get_current_user),
 ):
     project = await project_service.get_owned_project(db, uid, current_user)
-    project = await project_service.update_project(db, project, body.title, body.work_id)
+    project = await project_service.update_project(db, project, body.title, body.work_id, cover_url=body.cover_url)
     return ok(data=project_service._to_dict(project))
 
 

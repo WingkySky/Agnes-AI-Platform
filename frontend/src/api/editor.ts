@@ -16,6 +16,7 @@ export interface EditingProjectBrief {
   title: string
   revision: number
   final_url: string | null
+  cover_url: string | null
   render_status: 'idle' | 'rendering' | 'succeeded' | 'failed'
   render_error: string | null
   render_progress: string | null
@@ -51,11 +52,19 @@ export function getEditorProject(uid: string): Promise<EditingProjectDetail> {
 }
 
 /** 编辑工程元数据（标题/挂靠作品） */
-export function updateEditorProject(uid: string, body: { title?: string; work_id?: number | null }): Promise<EditingProjectDetail> {
+/** 更新工程元数据（标题/挂靠/封面） */
+export function updateEditorProject(uid: string, body: { title?: string; work_id?: number | null; cover_url?: string }): Promise<EditingProjectDetail> {
   return client.patch(`/api/editor/projects/${uid}`, body)
 }
 
 /** 删除剪辑工程 */
+/** 上传剪辑工程封面原图（复用 /api/uploads/image）→ { url } */
+export function uploadEditorCover(file: File): Promise<{ url: string }> {
+  const form = new FormData()
+  form.append('file', file)
+  return client.post('/api/uploads/image', form)
+}
+
 export function deleteEditorProject(uid: string): Promise<unknown> {
   return client.delete(`/api/editor/projects/${uid}`)
 }

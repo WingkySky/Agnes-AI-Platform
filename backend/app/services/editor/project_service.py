@@ -28,6 +28,7 @@ def _to_dict(p: EditingProject) -> dict:
         "document": p.document,
         "revision": p.revision,
         "final_url": p.final_url,
+        "cover_url": p.cover_url,
         "render_status": p.render_status,
         "render_error": p.render_error,
         "render_progress": p.render_progress,
@@ -110,8 +111,11 @@ async def list_projects(
 
 
 async def update_project(
-    db: AsyncSession, project: EditingProject, title: Optional[str], work_id: Optional[int]
+    db: AsyncSession, project: EditingProject, title: Optional[str], work_id: Optional[int],
+    cover_url: Optional[str] = None,
 ) -> EditingProject:
+    if cover_url is not None:
+        project.cover_url = cover_url or None  # 空串=清空封面
     if title is not None:
         if not title.strip():
             raise HTTPException(status_code=400, detail="标题不能为空")

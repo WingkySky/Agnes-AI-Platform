@@ -16,6 +16,8 @@ import { Eye, EyeOff, GripVertical, Headphones, Lock, LockOpen, Volume2, VolumeX
 
 import { useEditorStore } from '@/stores/editor'
 import { useI18n } from '@/i18n'
+import { ImagePlay } from 'lucide-vue-next'
+import EditorCoverDialog from './EditorCoverDialog.vue'
 import { MIN_CLIP_DURATION, clipEnd, type EditorClip, type EditorTrack, type TrackFlagKey, type TrackKind, type TrackTransition, type TransitionType } from '@/lib/editor-types'
 import { TRANSITION_TYPES } from '@/lib/editor-fx-registry'
 import { formatSrtCues, parseSrt } from '@/lib/canvas-media'
@@ -409,6 +411,7 @@ function rowJunctions(row: { track: EditorTrack; clips: EditorClip[] }): { clip:
 
 interface JunctionState { x: number; y: number; trackId: string; clipId: string; type: TransitionType | null; duration: number }
 const junctionMenu = ref<JunctionState | null>(null)
+const coverDialogVisible = ref(false)
 
 function openJunctionMenu(e: MouseEvent, clip: EditorClip, transition: TrackTransition | null): void {
   junctionMenu.value = {
@@ -587,6 +590,7 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
   <div class="timeline" @pointerdown="store.endAssetPreview()">
     <!-- 时间线工具栏（剪映式：编辑动作在左，缩放/时间在右） -->
     <div class="timeline-toolbar">
+      <el-button size="small" text :icon="ImagePlay" :title="t('editor.coverButton')" @click="coverDialogVisible = true">{{ t('editor.coverButton') }}</el-button>
       <el-button size="small" text :icon="RefreshLeft" :disabled="!store.history.canUndo" :title="t('editor.undo')" @click="store.undo()" />
       <el-button size="small" text :icon="RefreshRight" :disabled="!store.history.canRedo" :title="t('editor.redo')" @click="store.redo()" />
       <span class="toolbar-divider" />
@@ -798,6 +802,8 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
         </div>
       </div>
     </div>
+
+    <EditorCoverDialog v-model="coverDialogVisible" />
   </div>
 </template>
 

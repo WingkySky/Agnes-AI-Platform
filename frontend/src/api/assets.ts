@@ -39,7 +39,7 @@ export function getAsset(id: number): Promise<UnifiedAsset> {
 /** 编辑资产元数据（name/type/description/visual_description，仅提交字段更新） */
 export function updateAsset(
   id: number,
-  data: Partial<Pick<UnifiedAsset, 'name' | 'type' | 'description' | 'visual_description'>>,
+  data: Partial<Pick<UnifiedAsset, 'name' | 'type' | 'description' | 'visual_description' | 'work_id'>>,
 ): Promise<UnifiedAsset> {
   return client.patch(`/api/assets/${id}`, data)
 }

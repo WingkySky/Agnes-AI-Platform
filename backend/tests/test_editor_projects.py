@@ -201,3 +201,17 @@ async def test_work_binding_and_draft_from_assets(memory_db):
         # 按作品筛选列表
         resp = await client.get(URL, params={"work_id": work.id})
         assert resp.json()["data"]["total"] == 1
+
+async def test_update_cover_url(memory_db):
+    """PATCH cover_url：本人 200 且响应/列表带封面；空串清空；非法长字符串 400"""
+    user = await _seed_user(memory_db, "ucover")
+    async for client in _build_client(memory_db, user):
+        detail = (await client.post(URL, json={"title": "封面工程"})).json()["data"]
+        uid = detail["uid"]
+        resp = await client.patch(f"{URL}/{uid}", json={"cover_url": "/uploads/editor/cover_x.jpg"})
+        assert resp.status_code == 200
+        assert resp.json()["data"]["cover_url"] == "/uploads/editor/cover_x.jpg"
+        items = (await client.get(URL)).json()["data"]["items"]
+        assert items[0]["cover_url"] == "/uploads/editor/cover_x.jpg"
+        assert (await client.patch(f"{URL}/{uid}", json={"cover_url": ""})).status_code == 200
+        assert (await client.get(f"{URL}/{uid}")).json()["data"]["cover_url"] is None

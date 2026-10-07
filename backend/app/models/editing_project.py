@@ -35,6 +35,9 @@ class EditingProject(Base):
     document = Column(JSON, nullable=False, default=dict)
     revision = Column(Integer, nullable=False, default=1)               # 乐观锁版本号，每次保存自增
     final_url = Column(String(1024), nullable=True)                     # 最近一次渲染成片
+    #   存量库升级（dev 库已执行）：
+    #   ALTER TABLE editing_projects ADD COLUMN cover_url VARCHAR(1024);
+    cover_url = Column(String(1024), nullable=True)                     # 工程封面（帧截图或上传图，/uploads/ 相对路径）
     render_status = Column(String(20), nullable=False, default=RENDER_IDLE)
     render_error = Column(Text, nullable=True)
     render_progress = Column(String(20), nullable=True)                 # 归一化 "3/8" 或 "composing"

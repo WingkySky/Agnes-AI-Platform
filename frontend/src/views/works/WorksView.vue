@@ -16,10 +16,14 @@
         <div class="cover">
           <img v-if="w.cover_url" :src="w.cover_url" alt="" />
           <span v-else class="cover-ph">{{ w.title.slice(0, 1) }}</span>
-          <label class="cover-change" :title="t('works.changeCover')" @click.stop>
-            <input type="file" accept="image/jpeg,image/png,image/webp" hidden @change="(e) => changeCover(w, e)" />
+          <button
+            type="button"
+            class="cover-change"
+            :title="t('works.changeCover')"
+            @click.stop="openCoverDialog(w)"
+          >
             <ImagePlus :size="14" />
-          </label>
+          </button>
         </div>
         <div class="meta">
           <div class="name" :title="w.title">{{ w.title }}</div>
@@ -74,6 +78,7 @@
         <el-button type="primary" :disabled="!bindTarget" @click="submitBind">{{ t('common.confirm') }}</el-button>
       </template>
     </el-dialog>
+  <WorkCoverDialog v-if="coverWork" v-model="coverDialogVisible" :work="coverWork" @saved="fetchWorks" />
   </div>
 </template>
 
@@ -84,8 +89,9 @@ import { Plus, ImagePlus } from 'lucide-vue-next'
 import { ElMessage } from 'element-plus'
 import { useI18n } from '@/i18n'
 import { useConfirm } from '@/composables/useConfirm'
-import { listWorks, createWork, deleteWork, updateWork, uploadWorkCover, type WorkItem } from '@/api/works'
+import { listWorks, createWork, deleteWork, updateWork, type WorkItem } from '@/api/works'
 import { useRename } from '@/composables/useRename'
+import WorkCoverDialog from '@/components/works/WorkCoverDialog.vue'
 import { listWorkspaces, deleteWorkspace, setWorkspaceWork, type WorkspaceBrief } from '@/api/canvasWorkspace'
 
 const { t } = useI18n()
@@ -158,15 +164,13 @@ async function removeFree(canvas: WorkspaceBrief): Promise<void> {
   await fetchWorks()
 }
 
-async function changeCover(work: WorkItem, event: Event): Promise<void> {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  input.value = ''
-  if (!file) return
-  const { url } = await uploadWorkCover(file)
-  await updateWork(work.id, { cover_url: url })
-  ElMessage.success(t('works.coverUpdated'))
-  await fetchWorks()
+// ===== 更换封面弹窗（四来源：素材库/成片选帧/工程封面/上传） =====
+const coverDialogVisible = ref(false)
+const coverWork = ref<WorkItem | null>(null)
+
+function openCoverDialog(work: WorkItem): void {
+  coverWork.value = work
+  coverDialogVisible.value = true
 }
 
 async function renameWork(work: WorkItem): Promise<void> {

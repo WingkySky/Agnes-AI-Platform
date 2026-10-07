@@ -32,6 +32,7 @@ from app.core.database import get_async_db
 from app.core.response import ok
 from app.core.security import get_current_user
 from app.models.asset import Asset
+from app.models.work import Work
 from app.models.asset_like import AssetLike
 from app.models.user import User
 from app.schemas.assets import ASSET_TYPE_CHOICES, AssetUpdateRequest
@@ -350,6 +351,16 @@ async def update_asset_metadata(
         raise HTTPException(status_code=400, detail="名称不能为空")
     if "type" in updates and updates["type"] not in ASSET_TYPE_CHOICES:
         raise HTTPException(status_code=400, detail=f"不支持的资产类型：{updates['type']}")
+
+    # 作品归属校验（换/挂归属须是本人作品；-1 语义=清除归属）
+    if "work_id" in updates and updates["work_id"] is not None:
+        owned = (
+            await db.scalars(
+                select(Work.id).where(Work.id == updates["work_id"], Work.user_id == current_user.id)
+            )
+        ).first()
+        if not owned:
+            raise HTTPException(status_code=403, detail="无权挂靠此作品")
 
     asset = await asset_library.get_asset_by_id(db, asset_id)
     if not asset or asset.user_id != current_user.id:

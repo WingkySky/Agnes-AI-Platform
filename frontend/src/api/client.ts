@@ -23,9 +23,15 @@ const client = axios.create({
   }
 })
 
-// ---------- 请求拦截：自动注入 JWT ----------
+// ---------- 请求拦截：自动注入 JWT + FormData 修正 ----------
 client.interceptors.request.use(
   (config) => {
+    // 实例默认 Content-Type 是 application/json；axios 对 FormData + JSON 头会走
+    // formDataToJSON 把 File 序列化成 {}（后端 422 file required）。发 FormData 时
+    // 移除该头，让浏览器自动设置 multipart/form-data 与 boundary。
+    if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+      config.headers['Content-Type'] = undefined
+    }
     // 从 user store 取 token；注意 init 可能还未调用，
     // 这里做惰性读取以保证最新值
     let accessToken: string | null = null

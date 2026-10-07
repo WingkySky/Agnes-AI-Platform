@@ -17,7 +17,8 @@
 
     <h3 class="section-title">{{ t('works.editorProjects') }}</h3>
     <div class="canvas-grid">
-      <div v-for="p in projects" :key="p.uid" class="canvas-card" @click="openProject(p.uid)">
+      <div v-for="p in projects" :key="p.uid" class="canvas-card project-card" @click="openProject(p.uid)">
+        <img v-if="p.cover_url" class="project-cover" :src="p.cover_url" alt="" loading="lazy">
         <div class="canvas-name" :title="p.title">{{ p.title }}</div>
         <div class="canvas-time">
           {{ t(`editor.renderStates.${p.render_status}`) }} · {{ formatDate(p.updated_at) }}
@@ -352,6 +353,15 @@ onMounted(() => {
 
 .canvas-card:hover {
   box-shadow: var(--el-box-shadow-light);
+}
+.project-card .project-cover {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  display: block;
+  background: var(--el-fill-color-dark);
 }
 
 .new-card {

@@ -88,7 +88,8 @@ onMounted(() => void reload())
     <div v-loading="loading" class="project-grid">
       <div v-for="project in items" :key="project.uid" class="project-card" @click="open(project.uid)">
         <div class="card-cover">
-          <el-icon :size="28"><VideoCamera /></el-icon>
+          <img v-if="project.cover_url" :src="project.cover_url" alt="" loading="lazy">
+          <el-icon v-else :size="28"><VideoCamera /></el-icon>
           <el-tag v-if="project.final_url" type="success" size="small">{{ t('editorProjects.hasFinal') }}</el-tag>
         </div>
         <div class="card-body">
@@ -145,6 +146,13 @@ onMounted(() => void reload())
   gap: 8px;
   background: var(--el-fill-color-light);
   color: var(--el-text-color-secondary);
+  overflow: hidden;
+}
+.card-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 .card-body {
   padding: 8px 12px 4px;

@@ -284,3 +284,31 @@ async def test_keyword_matches_description(memory_db):
         assert resp.json()["data"]["total"] == 1
         resp = await client.get(ASSETS_URL, params={"keyword": "不存在的词"})
         assert resp.json()["data"]["total"] == 0
+
+async def test_patch_work_id_ownership(memory_db):
+    """PATCH work_id 换归属：本人作品 200 / 他人作品 403 / 不影响其他字段"""
+    user = await _seed_user(memory_db, "owner")
+    other = await _seed_user(memory_db, "other")
+    work = Work(user_id=user.id, title="我的剧")
+    other_work = Work(user_id=other.id, title="别人的剧")
+    memory_db.add_all([work, other_work])
+    await memory_db.commit()
+    await memory_db.refresh(work)
+    await memory_db.refresh(other_work)
+
+    async for client in _build_client(memory_db, user):
+        resp = await client.post(ASSETS_URL, json={"url": "/uploads/x/a.png", "media_type": "image", "name": "图"})
+        asset_id = resp.json()["data"]["id"]
+
+        # 挂到本人作品
+        resp = await client.patch(f"{ASSETS_URL}/{asset_id}", json={"work_id": work.id})
+        assert resp.status_code == 200
+        assert resp.json()["data"]["work_id"] == work.id
+        # 挂到他人作品 403
+        resp = await client.patch(f"{ASSETS_URL}/{asset_id}", json={"work_id": other_work.id})
+        assert resp.status_code == 403
+        # 名称编辑不受影响
+        resp = await client.patch(f"{ASSETS_URL}/{asset_id}", json={"name": "改名"})
+        assert resp.status_code == 200
+        assert resp.json()["data"]["name"] == "改名"
+        assert resp.json()["data"]["work_id"] == work.id

@@ -170,6 +170,7 @@ class AssetUpdateRequest(BaseModel):
     type: Optional[str] = Field(None, description="类型：character / prop / scene / brand / material / clip / final")
     description: Optional[str] = Field(None, description="详细描述")
     visual_description: Optional[str] = Field(None, description="外观描述文本（用于生成提示词）")
+    work_id: Optional[int] = Field(None, description="所属作品标记（需归属当前用户）")
 
 
 # =====================================================

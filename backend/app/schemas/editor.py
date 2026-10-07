@@ -20,6 +20,7 @@ class EditorProjectUpdate(BaseModel):
     """编辑剪辑工程元数据（仅更新提交项）"""
     title: Optional[str] = Field(None, min_length=1, max_length=200)
     work_id: Optional[int] = None
+    cover_url: Optional[str] = Field(None, max_length=1024, description="封面图 URL（帧截图/上传图）")
 
 
 class EditorDocumentSave(BaseModel):
@@ -36,6 +37,7 @@ class EditorProjectBrief(BaseModel):
     title: str
     revision: int
     final_url: Optional[str] = None
+    cover_url: Optional[str] = None
     render_status: str
     render_error: Optional[str] = None
     render_progress: Optional[str] = None

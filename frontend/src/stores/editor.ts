@@ -113,6 +113,7 @@ export const useEditorStore = defineStore('editor', () => {
   const renderProgress = ref<string | null>(null)
   const renderError = ref<string | null>(null)
   const finalUrl = ref<string | null>(null)
+  const coverUrl = ref<string | null>(null)
 
   // ---------- 素材缓存（预览/时间线取 url） ----------
   const assetCache = shallowRef<Map<number, UnifiedAsset>>(new Map())
@@ -145,6 +146,7 @@ export const useEditorStore = defineStore('editor', () => {
     renderProgress.value = detail.render_progress
     renderError.value = detail.render_error
     finalUrl.value = detail.final_url
+    coverUrl.value = detail.cover_url
     history.clear()
     dirty.value = false
     loaded.value = true
@@ -438,6 +440,13 @@ export const useEditorStore = defineStore('editor', () => {
     if (ok) endAssetPreview() // 已落时间线，自动回到时间线视图
   }
 
+  /** 设置工程封面（弹窗保存：帧截图/上传图 URL 已先上传，这里只 PATCH + 本地同步） */
+  async function setCoverUrl(url: string): Promise<void> {
+    if (!uid.value) return
+    await updateEditorProject(uid.value, { cover_url: url })
+    coverUrl.value = url
+  }
+
   /** 拖拽上移新建轨：在该类型显示顶层（order 最大）之上开一条新轨 */
   async function createTopTrackOfKind(kind: 'video' | 'audio'): Promise<EditorTrack | null> {
     if (!doc.value) return null
@@ -557,7 +566,7 @@ export const useEditorStore = defineStore('editor', () => {
     renderStatus, renderProgress, renderError, finalUrl,
     assetCache,
     load, fetchAsset, apply, applyOrToast, undo, redo, healDurations,
-    placeAsset, appendAssetToTrack, createTopTrackOfKind, detachAudio, splitSelectedAtPlayhead, duplicateClip,
+    placeAsset, appendAssetToTrack, createTopTrackOfKind, setCoverUrl, detachAudio, splitSelectedAtPlayhead, duplicateClip,
     probeMediaDuration,
     saveNow, scheduleSave, transcribeTrack, submitRender, rename,
     select, selectTrack, reset, newId,
