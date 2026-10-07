@@ -3,14 +3,15 @@
  * - 纯函数：audibleSpans（哪些片段出声+窗口裁剪）、sourceTimeAt/timelineTimeAt
  *   （变速时间映射）、gainBreakpoints（线性包络断点）——vitest 锁死行为
  * - AudioEngine 薄执行层：音频时钟主控（t0 锚定），lookahead 窗口内把
- *   mediabunny 解出的 PCM buffer 依次挂 AudioBufferSourceNode（playbackRate=变速）
+ *   mediabunny 解出的 PCM buffer 依次挂 AudioBufferSourceNode
  *   + GainNode（setValueAtTime/linearRampToValueAtTime 样本级 fade）
- * - 已知取舍：变速走 varispeed（音高随速度偏移），渲染端 atempo 保音高；
- *   预览与成片在变速片段存在音高差异，待后续批次引入时域拉伸
+ * - 变速：speed≠1 片段走 ClipStretcher 流式 WSOLA 拉伸（保音高，与渲染端
+ *   atempo 对齐）；拉伸输出按时间线域 rate=1 调度
  * ===================================================== */
 
 import { clipEnd, type EditorClip, type EditorDocument } from './editor-types'
 import { clipGainAt } from './editor-audio'
+import { ClipStretcher, type StretchedChunk } from './editor-audio-stretch'
 import type { AudioBufferSink, WrappedAudioBuffer } from 'mediabunny'
 
 /** 调度前视窗口（秒） */
@@ -80,6 +81,9 @@ interface ActiveAudio {
   sources: AudioBufferSourceNode[]
   pumping: boolean
   stopping: boolean
+  /** 变速保音高流式拉伸管道（speed≠1 首块时建立） */
+  stretcher: ClipStretcher | null
+  stretcherDone: boolean
 }
 
 export class AudioEngine {
@@ -138,6 +142,8 @@ export class AudioEngine {
           sources: [],
           pumping: false,
           stopping: false,
+          stretcher: null,
+          stretcherDone: false,
         }
         a.gain.connect(this.ctx.destination)
         this.actives.set(span.clip.id, a)
@@ -168,7 +174,15 @@ export class AudioEngine {
       while (!a.stopping) {
         const wb = a.pending ?? (await a.iter.next()).value
         a.pending = null
-        if (!wb) break // 源耗尽
+        if (!wb) {
+          // 源耗尽：一次性冲出拉伸管道尾窗
+          if (a.stretcher && !a.stretcherDone) {
+            a.stretcherDone = true
+            const tail = a.stretcher.flush()
+            if (tail) this.scheduleStretched(a, tail, playhead)
+          }
+          break
+        }
         const speed = a.clip.props.speed ?? 1
         const ta = timelineTimeAt(a.clip, wb.timestamp)
         const tb = ta + wb.duration / speed
@@ -176,7 +190,18 @@ export class AudioEngine {
           a.pending = wb
           break
         }
-        if (tb > playhead) this.schedule(a, wb, ta, tb, playhead, speed)
+        if (tb > playhead) {
+          if (speed !== 1) {
+            // 变速：源块进流式 WSOLA 管道，拉伸块按时间线域 rate=1 调度（保音高）
+            if (!a.stretcher) {
+              a.stretcher = new ClipStretcher(speed, wb.buffer.sampleRate, ta)
+            }
+            const chunk = a.stretcher.push(wb)
+            if (chunk) this.scheduleStretched(a, chunk, playhead)
+          } else {
+            this.schedule(a, wb, ta, tb, playhead, speed)
+          }
+        }
         if (tb >= windowEnd) break
       }
     } catch {
@@ -190,17 +215,39 @@ export class AudioEngine {
     const src = this.ctx.createBufferSource()
     src.buffer = wb.buffer
     src.playbackRate.value = speed
-    src.connect(a.gain)
     // 首个 buffer 可能含片段起点之前的样本（包对齐），起播时刻钳到片段起点
     const startT = Math.max(ta, playhead, a.clip.start)
-    for (const [i, p] of gainBreakpoints(a.clip, startT, tb).entries()) {
+    const offset = startT > ta
+      ? Math.max(0, Math.min(wb.buffer.duration, sourceTimeAt(a.clip, startT) - wb.timestamp))
+      : 0
+    this.startSource(a, src, startT, tb, offset)
+  }
+
+  /** 拉伸块调度：chunk 已是时间线域（rate=1），起播钳片段起点/播放头 */
+  private scheduleStretched(a: ActiveAudio, chunk: StretchedChunk, playhead: number): void {
+    const end = chunk.t0 + chunk.frames / chunk.sampleRate
+    const startT = Math.max(chunk.t0, playhead, a.clip.start)
+    if (startT >= end) return // 整块已过播放头（冲尾零块常落片段外）
+    const src = this.ctx.createBufferSource()
+    const buffer = this.ctx.createBuffer(2, chunk.frames, chunk.sampleRate)
+    const l = buffer.getChannelData(0)
+    const r = buffer.getChannelData(1)
+    for (let i = 0; i < chunk.frames; i++) {
+      l[i] = chunk.data[i * 2]!
+      r[i] = chunk.data[i * 2 + 1]!
+    }
+    src.buffer = buffer
+    this.startSource(a, src, startT, end, startT > chunk.t0 ? startT - chunk.t0 : 0)
+  }
+
+  /** 公共尾部：接增益包络 + 定时起播 + 结束清理 */
+  private startSource(a: ActiveAudio, src: AudioBufferSourceNode, startT: number, endT: number, offset: number): void {
+    src.connect(a.gain)
+    for (const [i, p] of gainBreakpoints(a.clip, startT, endT).entries()) {
       const at = this.ctxTime(p.t)
       if (i === 0) a.gain.gain.setValueAtTime(p.v, at)
       else a.gain.gain.linearRampToValueAtTime(p.v, at)
     }
-    const offset = startT > ta
-      ? Math.max(0, Math.min(wb.buffer.duration, sourceTimeAt(a.clip, startT) - wb.timestamp))
-      : 0
     src.start(this.ctxTime(startT), offset)
     a.sources.push(src)
     src.onended = () => {
@@ -212,6 +259,8 @@ export class AudioEngine {
   private disposeActive(a: ActiveAudio): void {
     a.stopping = true
     a.pending = null
+    a.stretcher = null
+    a.stretcherDone = true
     for (const s of a.sources) {
       try { s.stop() } catch { /* 未开始时忽略 */ }
       s.disconnect()
