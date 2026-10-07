@@ -177,6 +177,16 @@ describe('removeClip / setClipProperty', () => {
       .clips.find((c) => c.id === 'c1')?.props.muted).toBe(true)
     expect(() => applyCommand(baseDoc(), cmd('setClipProperty', { clipId: 'c1', props: { muted: 1 } }))).toThrow(/invalid_payload/)
   })
+  it('camera 运镜：合法形状落 props，非法 type/strength 抛错，null 清除', () => {
+    const next = applyCommand(baseDoc(), cmd('setClipProperty', {
+      clipId: 'c1', props: { camera: { type: 'zoomIn', strength: 0.8 } },
+    }))
+    expect(next.clips.find((c) => c.id === 'c1')?.props.camera).toEqual({ type: 'zoomIn', strength: 0.8 })
+    const cleared = applyCommand(next, cmd('setClipProperty', { clipId: 'c1', props: { camera: null } }))
+    expect(cleared.clips.find((c) => c.id === 'c1')?.props.camera).toBeUndefined()
+    expect(() => applyCommand(baseDoc(), cmd('setClipProperty', { clipId: 'c1', props: { camera: { type: 'rotate', strength: 1 } } }))).toThrow(/invalid_payload/)
+    expect(() => applyCommand(baseDoc(), cmd('setClipProperty', { clipId: 'c1', props: { camera: { type: 'zoomIn', strength: 3 } } }))).toThrow(/invalid_payload/)
+  })
 })
 
 describe('detachAudio', () => {

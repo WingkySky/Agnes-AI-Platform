@@ -24,6 +24,7 @@ import {
   isTrackKind,
 } from './editor-types'
 import { canPlaceOnTrack, needsCollisionCheck } from './editor-placement'
+import { isCameraType } from './editor-camera-registry'
 
 /** 命令错误码（组件层负责 i18n） */
 export type CommandErrorCode =
@@ -129,6 +130,13 @@ function normalizePropsDelta(delta: unknown): Partial<Record<keyof ClipProps, un
         return typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 1
       })) {
         throw new EditorCommandError('invalid_payload', 'rect')
+      }
+    } else if (key === 'camera') {
+      // 运镜 { type, strength }（预设白名单见 editor-camera-registry）；null 清除由上方通用分支处理
+      const c = value as Record<string, unknown>
+      if (typeof c !== 'object' || c === null || !isCameraType(c.type)
+        || typeof c.strength !== 'number' || !Number.isFinite(c.strength) || c.strength < 0 || c.strength > 1) {
+        throw new EditorCommandError('invalid_payload', 'camera')
       }
     } else {
       throw new EditorCommandError('invalid_payload', `unknown prop: ${key}`)
