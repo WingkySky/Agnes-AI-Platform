@@ -4,6 +4,39 @@
 
 ## [Unreleased]
 
+## [0.0.9] - 2026-10-07
+
+### 剪辑器深化二期（四批）
+
+#### 画面淡变补齐（fadeIn/fadeOut 全轨生效）
+
+- **渲染端**：fade 滤镜统一落终版 filter graph（归一化 H.264 中间产物编不了 alpha）——全帧链 RGB 变黑、overlay 输入 `format=yuva420p` 透明度淡变（PIP）；无淡变片段命令逐字节不变
+- **字幕**：subtitle_events 带 fade 字段，ASS Dialogue 加 `\fad` 整条淡变（未配置输出不变）
+- **预览端**：`clipFadeAlphaAt` 纯函数（与 clipGainAt 同包络、不含 volume）+ 画布 globalAlpha（blend 转场项与进度相乘、后段按窗口内等效时间位）+ DOM 字幕层 opacity；compositor blend 项补 duration（后段媒体内等效时间换算）
+- **测试**：pytest 258 / vitest 574 绿 + vue-tsc + build 过
+
+#### 字幕工作区（whisper 转写入口 + SRT 导入收编）
+
+- 时间线工具栏新增「字幕」按钮 → 字幕工作区弹窗（与封面按钮同范式）：转写源轨（音频/视频）+ 目标字幕轨（支持新建）→ whisper 转写 → 可编辑草稿列表（改文本/删行）→ 替换/追加双落轨（均走既有 rebuildSubtitleClips，追加=既有 cue 保留原位合并，一次撤销步）
+- SRT 导入改填同一草稿确认（右键菜单保留快径），导出 SRT 从目标轨取
+- **后端 transcribe_bridge**：kind 校验放宽为 audio/video（whisper decode_audio 能解视频容器音轨）；单片段转写失败 try/except 跳过不阻塞整轨
+- 新 `lib/editor-subtitles` 纯函数（draftToCues/mergeSubtitleCues）；删除 store 无调用方的 transcribeTrack（弹窗草稿流取代）
+- **测试**：pytest 260 / vitest 578 绿 + vue-tsc + build 过
+
+#### 变速预览保音高（流式 WSOLA 拉伸管道）
+
+- 引入 `@soundtouchjs/core`（MPL-2.0；旧包 soundtouchjs 为 LGPL 勿引）Stretch 段纯时域拉伸：**每个活跃变速片段一个流式 ClipStretcher**，源块进→拉伸块出（时间线域 rate=1 调度），与渲染端 atempo 语义对齐——mediabunny 流式架构下零额外内存、零预热（原整段预拉伸+LRU 方案实施时精化为流式）
+- 单声道复制双声道、>2 声道取前两；源耗尽灌零迭代冲 WSOLA 尾窗；引擎抽公共 startSource（增益包络/起播/清理），窗口判定与 speed=1 直通不变
+- **测试**：vitest 583（+5，真实 WSOLA 管道 node 直测）绿 + vue-tsc + build 过
+
+#### 运镜（摄像机）——预设注册表 + 预览/成片一致
+
+- 新 `lib/editor-camera-registry`（描述符模式，沿 fx-registry 范式）：六预设 推进/拉远/左移/右移/上移/下移 + 强度 0~1；`cameraRectAt`（预览裁剪窗）与后端 `_camera_zoompan`（ffmpeg 表达式）数值同源，保证预览与成片一致
+- **渲染端**：归一化 scale/pad/setsar 后追加 zoompan（d=1 逐帧、in 帧号线性插值、strength 烘常量；全帧/PIP 内容都适用，音频不动）；document_schema props.camera 白名单校验
+- **预览端**：drawImage 九参源矩形裁剪实现 Ken Burns，blend 转场项同样带裁剪（与渲染端 zoompan 先于 xfade 施加对齐）；Inspector 视频片段运镜区（预设下拉，无=清除 + 强度滑条专用草稿提交）
+- **fix**：setClipProperty props 白名单补 camera——新增片段属性须过三层门（前端命令表 normalizePropsDelta 白名单 + 类型层 + 后端 document_schema 白名单），漏一层即 invalid_payload
+- **测试**：pytest 263 / vitest 591 绿 + vue-tsc + build 过
+
 ## [0.0.8] - 2026-10-07
 
 ### Agent 上游空响应自动重试（韧性加固）
