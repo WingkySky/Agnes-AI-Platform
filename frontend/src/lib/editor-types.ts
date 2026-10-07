@@ -20,11 +20,16 @@ export interface EditorTrack {
   kind: TrackKind
   order: number
   flags: TrackFlags
+  /** 轨级衔接点转场：afterClipId 与其同轨紧随片段之间的过渡（仅视频轨全帧链生效） */
+  transitions?: TrackTransition[]
 }
 
 export type TransitionType = 'crossfade' | 'fade' | 'wipe'
 
-export interface ClipTransition {
+/** 轨级衔接点转场实体：挂在「前一片段」上，作用于它与紧随片段的交界 */
+export interface TrackTransition {
+  id: string
+  afterClipId: string
   type: TransitionType
   duration: number
 }
@@ -37,13 +42,27 @@ export interface ClipRect {
   h: number
 }
 
+/** 视觉效果器（video/image 片段可挂多种；渲染端 lowering 为 ffmpeg 滤镜，预览端 canvas filter） */
+export type EffectType = 'grayscale' | 'blur'
+
+export function isEffectType(v: unknown): v is EffectType {
+  return v === 'grayscale' || v === 'blur'
+}
+
+export interface ClipEffect {
+  id: string
+  type: EffectType
+  /** 0~1：blur→gblur sigma（×20）；grayscale 恒定黑白（strength 留作灰度混合） */
+  strength: number
+}
+
 export interface ClipProps {
   speed?: number
   volume?: number
   fadeIn?: number
   fadeOut?: number
   rect?: ClipRect
-  transition?: ClipTransition
+  effects?: ClipEffect[]
   /** 音画分离后源片段静音：自带音频不再进预览与渲染 */
   muted?: boolean
 }
@@ -80,8 +99,6 @@ export interface EditorDocument {
   subtitleStyle?: SubtitleStyle
 }
 
-export const TRANSITION_TYPES: TransitionType[] = ['crossfade', 'fade', 'wipe']
-
 /** 片段最短时长（秒），trim 下限 */
 export const MIN_CLIP_DURATION = 0.1
 
@@ -96,7 +113,7 @@ export function isTrackFlagsPatch(v: unknown): v is Partial<TrackFlags> {
 }
 
 export function isTransitionType(v: unknown): v is TransitionType {
-  return TRANSITION_TYPES.includes(v as TransitionType)
+  return v === 'crossfade' || v === 'fade' || v === 'wipe'
 }
 
 function isNum(v: unknown): v is number {

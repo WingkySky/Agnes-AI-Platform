@@ -16,7 +16,8 @@ import { Eye, EyeOff, GripVertical, Headphones, Lock, LockOpen, Volume2, VolumeX
 
 import { useEditorStore } from '@/stores/editor'
 import { useI18n } from '@/i18n'
-import { MIN_CLIP_DURATION, TRANSITION_TYPES, clipEnd, type EditorClip, type EditorTrack, type TrackFlagKey, type TrackKind, type TransitionType } from '@/lib/editor-types'
+import { MIN_CLIP_DURATION, clipEnd, type EditorClip, type EditorTrack, type TrackFlagKey, type TrackKind, type TrackTransition, type TransitionType } from '@/lib/editor-types'
+import { TRANSITION_TYPES } from '@/lib/editor-fx-registry'
 import { formatSrtCues, parseSrt } from '@/lib/canvas-media'
 import { clearStripCaches } from '@/lib/editor-strips'
 import { useDownload } from '@/composables/useDownload'
@@ -95,7 +96,7 @@ function clipStyle(clip: EditorClip): Record<string, string> {
 
 // ---------- 拖拽 / 裁剪（手势态不入历史） ----------
 
-interface DragRender { clipId: string; start: number; duration: number; trimStart: number; mode: 'move' | 'trim-left' | 'trim-right'; trackId: string; originTrackId: string; kind: string }
+interface DragRender { clipId: string; start: number; duration: number; trimStart: number; mode: 'move' | 'trim-left' | 'trim-right'; trackId: string; originTrackId: string; kind: string; toNewTrack?: boolean }
 const dragRender = ref<DragRender | null>(null)
 
 /** 指针所在的可放置轨道（同类型且未锁定），无效返回 null（目标保持粘性） */
@@ -110,10 +111,20 @@ function laneUnderPointer(clientY: number, kind: string): string | null {
   return null
 }
 
-/** 跨轨拖动中的幽灵块：只画在非原轨的目标轨上 */
+/** 同类型显示顶层 lane（order 大在上）；无同类型轨返回 null */
+function sameKindLanesTop(kind: string): { trackId: string; el: HTMLElement } | null {
+  const lanes = [...laneRefs.entries()]
+    .map(([trackId, el]) => ({ trackId, el, track: store.doc?.tracks.find((tr) => tr.id === trackId) }))
+    .filter((x) => x.track?.kind === kind)
+    .sort((a, b) => b.track!.order - a.track!.order)
+  return lanes[0] ?? null
+}
+
+/** 跨轨拖动中的幽灵块：画在非原轨目标轨；新建轨态画在顶层 lane 上 */
 function moveGhost(trackId: string): boolean {
   const r = dragRender.value
-  return !!r && r.mode === 'move' && r.trackId === trackId && r.trackId !== r.originTrackId
+  return !!r && r.mode === 'move' && r.trackId === trackId
+    && (r.trackId !== r.originTrackId || !!r.toNewTrack)
 }
 
 function ghostStyle(): Record<string, string> {
@@ -154,7 +165,15 @@ function beginDrag(e: PointerEvent, clip: EditorClip, mode: DragRender['mode']):
       }
       r.start = next
       const target = laneUnderPointer(ev.clientY, r.kind)
-      if (target) r.trackId = target
+      // 指针拉出到同类型 lane 群上方（原轨之上）：新建轨态，ghost 画在显示顶层 lane
+      const topLane = sameKindLanesTop(r.kind)
+      if (!target && topLane && ev.clientY < topLane.el.getBoundingClientRect().top) {
+        r.toNewTrack = true
+        r.trackId = topLane.trackId
+      } else {
+        r.toNewTrack = false
+        if (target) r.trackId = target
+      }
     } else if (mode === 'trim-right') {
       let end = orig.start + Math.max(MIN_CLIP_DURATION, orig.duration + delta)
       if (snapOn) end = Math.max(orig.start + MIN_CLIP_DURATION, resolveSnap(end, snapPoints, threshold).time)
@@ -181,13 +200,20 @@ function beginDrag(e: PointerEvent, clip: EditorClip, mode: DragRender['mode']):
   window.addEventListener('pointerup', up)
 }
 
-function commitDrag(): void {
+async function commitDrag(): Promise<void> {
   const r = dragRender.value
   dragRender.value = null
   if (!r) return
   if (r.mode === 'move') {
     const payload: Record<string, unknown> = { clipId: r.clipId, start: Math.round(r.start * 1000) / 1000 }
-    if (r.trackId !== r.originTrackId) payload.trackId = r.trackId
+    if (r.toNewTrack) {
+      // 上移新建轨：顶层开新轨（无轨数上限）再把片段挪进去；两步各自可撤销
+      const nt = await store.createTopTrackOfKind(r.kind as 'video' | 'audio')
+      if (!nt) return
+      payload.trackId = nt.id
+    } else if (r.trackId !== r.originTrackId) {
+      payload.trackId = r.trackId
+    }
     store.applyOrToast({ op: 'moveClip', payload }, t('editor.ops.moveClip'))
   } else {
     store.applyOrToast({
@@ -367,36 +393,42 @@ const ENVELOPE_COLORS: Record<string, { fill: string; stroke: string }> = {
 }
 
 /** 同轨相邻接缝（整轨全帧链才有转场链路）：转场挂在前一片段，接缝处可点击选取 */
-function rowJunctions(row: { track: { kind: string }; clips: EditorClip[] }): { clip: EditorClip; x: number }[] {
-  if (!row.clips.length || row.track.kind === 'subtitle') return []
+function rowJunctions(row: { track: EditorTrack; clips: EditorClip[] }): { clip: EditorClip; x: number; transition: TrackTransition | null }[] {
+  if (!row.clips.length || row.track.kind !== 'video') return []
   const fullFrame = row.clips.every((c) => !c.props.rect || (c.props.rect.w >= 1 && c.props.rect.h >= 1))
   if (!fullFrame) return []
-  const out: { clip: EditorClip; x: number }[] = []
+  const out: { clip: EditorClip; x: number; transition: TrackTransition | null }[] = []
   for (let i = 0; i + 1 < row.clips.length; i++) {
     if (Math.abs(clipEnd(row.clips[i]) - row.clips[i + 1].start) < 0.02) {
-      out.push({ clip: row.clips[i], x: clipEnd(row.clips[i]) })
+      const transition = row.track.transitions?.find((tr) => tr.afterClipId === row.clips[i].id) ?? null
+      out.push({ clip: row.clips[i], x: clipEnd(row.clips[i]), transition })
     }
   }
   return out
 }
 
-interface JunctionState { x: number; y: number; clipId: string; type: TransitionType | null; duration: number }
+interface JunctionState { x: number; y: number; trackId: string; clipId: string; type: TransitionType | null; duration: number }
 const junctionMenu = ref<JunctionState | null>(null)
 
-function openJunctionMenu(e: MouseEvent, clip: EditorClip): void {
-  const t = clip.props.transition
+function openJunctionMenu(e: MouseEvent, clip: EditorClip, transition: TrackTransition | null): void {
   junctionMenu.value = {
     x: Math.min(e.clientX, window.innerWidth - 200),
     y: Math.min(e.clientY, window.innerHeight - 230),
+    trackId: clip.trackId,
     clipId: clip.id,
-    type: t?.type ?? null,
-    duration: t?.duration ?? 0.5,
+    type: transition?.type ?? null,
+    duration: transition?.duration ?? 0.5,
   }
 }
 
 function applyJunction(type: TransitionType | null): void {
   const j = junctionMenu.value!
-  store.applyOrToast({ op: 'setClipProperty', payload: { clipId: j.clipId, props: { transition: type ? { type, duration: j.duration } : null } } }, t('editor.ops.setClipProperty'))
+  store.applyOrToast(
+    type
+      ? { op: 'setTransition', payload: { trackId: j.trackId, afterClipId: j.clipId, transitionId: `tr_${Date.now().toString(36)}`, type, duration: j.duration } }
+      : { op: 'removeTransition', payload: { trackId: j.trackId, afterClipId: j.clipId } },
+    t('editor.propTransition'),
+  )
   junctionMenu.value = null
 }
 
@@ -406,7 +438,7 @@ function setJunctionDuration(v: number | undefined): void {
   if (!j) return
   j.duration = v ?? 0.5
   if (j.type) {
-    store.applyOrToast({ op: 'setClipProperty', payload: { clipId: j.clipId, props: { transition: { type: j.type, duration: j.duration } } } }, t('editor.ops.setClipProperty'))
+    store.applyOrToast({ op: 'setTransition', payload: { trackId: j.trackId, afterClipId: j.clipId, transitionId: `tr_${Date.now().toString(36)}`, type: j.type, duration: j.duration } }, t('editor.propTransition'))
   }
 }
 
@@ -702,15 +734,20 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
               </span>
               <span class="clip-handle right" @pointerdown="beginDrag($event, clip, 'trim-right')" />
             </div>
-            <div v-if="moveGhost(row.track.id)" class="ghost-block" :class="row.track.kind" :style="ghostStyle()" />
+            <div
+              v-if="moveGhost(row.track.id)"
+              class="ghost-block"
+              :class="[row.track.kind, { 'new-track': dragRender?.toNewTrack && dragRender.trackId === row.track.id }]"
+              :style="ghostStyle()"
+            />
             <button
               v-for="j in rowJunctions(row)"
               :key="`junc_${j.clip.id}`"
               class="junction-btn"
-              :class="{ active: !!j.clip.props.transition }"
+              :class="{ active: !!j.transition }"
               :style="{ left: `${timeToX(j.x, PX_PER_SEC) - 9}px` }"
-              :title="j.clip.props.transition ? t(`editor.transitions.${j.clip.props.transition.type}`) : t('editor.propTransition')"
-              @click.stop="openJunctionMenu($event, j.clip)"
+              :title="j.transition ? t(`editor.transitions.${j.transition.type}`) : t('editor.propTransition')"
+              @click.stop="openJunctionMenu($event, j.clip, j.transition)"
             >
               <el-icon><Switch /></el-icon>
             </button>
@@ -973,6 +1010,11 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
   height: 100%;
   display: block;
   pointer-events: none;
+}
+.ghost-block.new-track {
+  border: 1px dashed var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+  opacity: 0.9;
 }
 .ghost-block {
   position: absolute;

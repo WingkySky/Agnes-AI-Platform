@@ -23,6 +23,7 @@ import {
   type RectCorner,
 } from '@/lib/editor-compositor'
 import { AudioEngine, sourceTimeAt } from '@/lib/editor-audio-engine'
+import { canvasFilterForEffects } from '@/lib/editor-fx-registry'
 import { clearMediaPool, createAudioSink, createVideoSink, getImageBitmap } from '@/lib/editor-media'
 import { clipEnd, FULL_RECT, type ClipRect, type EditorClip } from '@/lib/editor-types'
 
@@ -98,8 +99,10 @@ function ensureVideoState(clipId: string, url: string): VideoFrameState {
   return st
 }
 
-async function pullFrame(st: VideoFrameState, clip: EditorClip, url: string): Promise<void> {
-  const t = sourceTimeAt(clip, store.playhead)
+async function pullFrame(st: VideoFrameState, clip: EditorClip, url: string, timelineT: number): Promise<void> {
+  // 转场 blend 项在播放头未到其 start 时拉帧：钳到片段起点（显示后段开头内容，
+  // 与渲染端 xfade 链中后段自其 trim 起播的语义对齐）
+  const t = sourceTimeAt(clip, Math.max(timelineT, clip.start))
   if (st.fetching || (st.canvas && Math.abs(t - st.reqT) < REQ_EPS)) return
   st.fetching = true
   try {
@@ -219,6 +222,47 @@ function drawImageItem(item: { x: number; y: number; w: number; h: number }, src
   ctx2d.drawImage(src, item.x, item.y, item.w, item.h)
 }
 
+/** 转场混合绘制后段（前段已在画布上）：crossfade=alpha 混合 / fade=黑场插值 / wipe=擦除显现 */
+function drawBlendItem(item: DrawItem, src: CanvasImageSource): void {
+  if (!ctx2d) return
+  const blend = item.blend!
+  if (blend.type === 'crossfade') {
+    ctx2d.globalAlpha = blend.progress
+    ctx2d.drawImage(src, item.x, item.y, item.w, item.h)
+    ctx2d.globalAlpha = 1
+    return
+  }
+  if (blend.type === 'wipe') {
+    ctx2d.save()
+    ctx2d.beginPath()
+    ctx2d.rect(item.x, item.y, item.w * blend.progress, item.h)
+    ctx2d.clip()
+    ctx2d.drawImage(src, item.x, item.y, item.w, item.h)
+    ctx2d.restore()
+    return
+  }
+  // fade：前半 前段→黑，后半 黑→后段（fadeblack 语义近似）
+  if (blend.progress < 0.5) {
+    ctx2d.globalAlpha = blend.progress * 2
+    ctx2d.fillStyle = '#000'
+    ctx2d.fillRect(item.x, item.y, item.w, item.h)
+    ctx2d.globalAlpha = 1
+  } else {
+    ctx2d.fillStyle = '#000'
+    ctx2d.fillRect(item.x, item.y, item.w, item.h)
+    ctx2d.globalAlpha = (blend.progress - 0.5) * 2
+    ctx2d.drawImage(src, item.x, item.y, item.w, item.h)
+    ctx2d.globalAlpha = 1
+  }
+}
+
+/** 施加片段效果器滤镜（canvas filter 与渲染端 ffmpeg 滤镜同源，见 editor-fx-registry） */
+function applyEffectFilter(clip: EditorClip | undefined): void {
+  if (!ctx2d) return
+  const filter = clip ? canvasFilterForEffects(clip.props.effects) : null
+  ctx2d.filter = filter ?? 'none'
+}
+
 function draw(): void {
   const canvas = canvasRef.value
   const doc = store.doc
@@ -246,16 +290,26 @@ function draw(): void {
       void store.fetchAsset(item.assetId)
       continue
     }
+    const itemClip = doc.clips.find((c) => c.id === item.clipId)
     if (asset.media_type === 'image') {
       void getImageBitmap(url).then((bmp) => {
-        if (bmp && mounted && version === planVersion) drawImageItem(item, bmp)
+        if (bmp && mounted && version === planVersion) {
+          applyEffectFilter(itemClip)
+          if (item.blend) drawBlendItem(item, bmp)
+          else drawImageItem(item, bmp)
+          ctx2d!.filter = 'none'
+        }
       })
     } else {
-      const clip = doc.clips.find((c) => c.id === item.clipId)
-      if (!clip) continue
+      if (!itemClip) continue
       const st = ensureVideoState(item.clipId, url)
-      if (st.canvas) drawImageItem(item, st.canvas)
-      void pullFrame(st, clip, url)
+      if (st.canvas) {
+        applyEffectFilter(itemClip)
+        if (item.blend) drawBlendItem(item, st.canvas)
+        else drawImageItem(item, st.canvas)
+        ctx2d.filter = 'none'
+      }
+      void pullFrame(st, itemClip, url, store.playhead)
     }
   }
   drawSelection(items)

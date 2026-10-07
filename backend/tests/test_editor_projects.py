@@ -149,8 +149,10 @@ async def test_document_skeleton_validation(memory_db):
             _doc(clips=[{"id": "c1", "trackId": "v1", "start": -1, "duration": 1}]),  # 负 start
             _doc(clips=[{"id": "c1", "trackId": "v1", "start": 0, "duration": 1,
                          "props": {"speed": 0}}]),                  # speed<=0
+            _doc(tracks=[{"id": "v1", "kind": "video", "order": 0,
+                          "transitions": [{"id": "t", "afterClipId": "c1", "type": "boom", "duration": 1}]}]),  # 转场类型非法
             _doc(clips=[{"id": "c1", "trackId": "v1", "start": 0, "duration": 1,
-                         "props": {"transition": {"type": "boom", "duration": 1}}}]),  # 转场类型非法
+                         "props": {"effects": [{"id": "e", "type": "blur", "strength": 2}]}}]),  # 效果器 strength 越界
         ]
         for bad in bad_docs:
             resp = await client.put(f"{URL}/{uid}/document", json={"document": bad, "base_revision": 1})

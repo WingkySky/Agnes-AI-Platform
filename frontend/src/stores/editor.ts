@@ -38,7 +38,7 @@ import { EditorHistory } from '@/lib/editor-history'
 import { reflowPlaceholders } from '@/lib/editor-derive'
 import { canPlaceOnTrack, findFreeTrack } from '@/lib/editor-placement'
 import { probeMediaDuration as probeMediaDurationWithFallback } from '@/lib/editor-media'
-import type { EditorDocument, EditorTrack } from '@/lib/editor-types'
+import { clipEnd, type EditorDocument, type EditorTrack } from '@/lib/editor-types'
 
 const AUTOSAVE_INTERVAL_MS = 2000
 const RENDER_POLL_MS = 2000
@@ -406,17 +406,52 @@ export const useEditorStore = defineStore('editor', () => {
     return doc.value.tracks.find((tr) => tr.id === track.id) ?? null
   }
 
-  /** 双击素材兜底：加到播放头处（放不下自动回退，见 placeAsset） */
-  async function addAssetAtPlayhead(asset: UnifiedAsset): Promise<void> {
+  /**
+   * 双击素材：追加到主轨（该类型显示顶层轨）尾部——start=轨内最后片段末尾，
+   * 连续双击在同轨首尾相接往后排，而不是层层开新轨；无可用主轨（全锁/无轨）时建轨
+   */
+  async function appendAssetToTrack(asset: UnifiedAsset): Promise<void> {
     if (!doc.value) return
     const kind: 'video' | 'audio' = asset.media_type === 'audio' ? 'audio' : 'video'
-    const track = doc.value.tracks.find((tr) => tr.kind === kind && !tr.flags.locked)
-      ?? doc.value.tracks.find((tr) => tr.kind === kind)
+    const track = doc.value.tracks
+      .filter((tr) => tr.kind === kind && !tr.flags.locked)
+      .sort((a, b) => b.order - a.order)[0]
+      ?? await createTrackOfKind(kind)
     if (!track) {
       ElMessage.warning(t('editor.errors.noTrack'))
       return
     }
-    await placeAsset(asset, { trackId: track.id, start: playhead.value })
+    const start = doc.value.clips
+      .filter((c) => c.trackId === track.id)
+      .reduce((max, c) => Math.max(max, clipEnd(c)), 0)
+    let duration = 3
+    if (asset.media_type !== 'image') {
+      await fetchAsset(asset.id)
+      const probed = await probeMediaDuration(asset.asset_url)
+      duration = probed > 0 ? probed : 5  // 探测失败兜底，可后续 trim
+    }
+    if (hasClipAt(track.id, asset.id, start)) return
+    const ok = applyOrToast({
+      op: 'addClip',
+      payload: { clip: { id: newId('clip'), trackId: track.id, assetId: asset.id, start, duration: Math.round(duration * 1000) / 1000, trimStart: 0, props: {} } },
+    }, t('editor.ops.addClip'))
+    if (ok) endAssetPreview() // 已落时间线，自动回到时间线视图
+  }
+
+  /** 拖拽上移新建轨：在该类型显示顶层（order 最大）之上开一条新轨 */
+  async function createTopTrackOfKind(kind: 'video' | 'audio'): Promise<EditorTrack | null> {
+    if (!doc.value) return null
+    const maxOrder = doc.value.tracks
+      .filter((tr) => tr.kind === kind)
+      .reduce((max, tr) => Math.max(max, tr.order), -1)
+    const track: EditorTrack = {
+      id: newId('track'),
+      kind,
+      order: maxOrder + 1,
+      flags: { hidden: false, locked: false, muted: false, solo: false },
+    }
+    if (!applyOrToast({ op: 'addTrack', payload: { track } }, t('editor.ops.addTrack'))) return null
+    return doc.value.tracks.find((tr) => tr.id === track.id) ?? null
   }
 
   /** 音画分离：视频片段静音，自带音频转投音频轨（放不下自动回退/新建轨） */
@@ -522,7 +557,7 @@ export const useEditorStore = defineStore('editor', () => {
     renderStatus, renderProgress, renderError, finalUrl,
     assetCache,
     load, fetchAsset, apply, applyOrToast, undo, redo, healDurations,
-    placeAsset, addAssetAtPlayhead, detachAudio, splitSelectedAtPlayhead, duplicateClip,
+    placeAsset, appendAssetToTrack, createTopTrackOfKind, detachAudio, splitSelectedAtPlayhead, duplicateClip,
     probeMediaDuration,
     saveNow, scheduleSave, transcribeTrack, submitRender, rename,
     select, selectTrack, reset, newId,

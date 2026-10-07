@@ -1,5 +1,5 @@
 /* =====================================================
- * 剪辑器命令状态机 — 14 op 纯函数命令表
+ * 剪辑器命令状态机 — 17 op 纯函数命令表
  *
  * - 每个命令 (doc, payload) => 新 doc，不可变更新（未变子树结构共享）
  * - fail-closed：未知 op / 非法 payload 抛 EditorCommandError，不改状态（可安全回放）
@@ -10,6 +10,7 @@
  * ===================================================== */
 
 import {
+  type ClipEffect,
   type ClipProps,
   type EditorClip,
   type EditorDocument,
@@ -17,6 +18,7 @@ import {
   EMPTY_TRACK_FLAGS,
   MIN_CLIP_DURATION,
   clipEnd,
+  isEffectType,
   isTransitionType,
   isTrackFlagsPatch,
   isTrackKind,
@@ -57,6 +59,7 @@ export const EDITOR_OPS = [
   'addClip', 'moveClip', 'trimClip', 'splitClip', 'removeClip', 'detachAudio', 'setClipProperty',
   'addSubtitle', 'removeSubtitle', 'rebuildSubtitleClips',
   'addTrack', 'removeTrack', 'setTrackFlags', 'moveTrack',
+  'setTransition', 'removeTransition', 'setClipEffects',
 ] as const
 export type EditorOp = (typeof EDITOR_OPS)[number]
 
@@ -119,11 +122,6 @@ function normalizePropsDelta(delta: unknown): Partial<Record<keyof ClipProps, un
       if (typeof value !== 'boolean') {
         throw new EditorCommandError('invalid_payload', 'muted')
       }
-    } else if (key === 'transition') {
-      if (typeof value !== 'object' || value === null || !isTransitionType((value as Record<string, unknown>).type)) {
-        throw new EditorCommandError('invalid_payload', 'transition.type')
-      }
-      requirePositive((value as Record<string, unknown>).duration, 'transition.duration')
     } else if (key === 'rect') {
       const r = value as Record<string, unknown>
       if (typeof r !== 'object' || r === null || ['x', 'y', 'w', 'h'].some((k) => {
@@ -140,6 +138,40 @@ function normalizePropsDelta(delta: unknown): Partial<Record<keyof ClipProps, un
   return out
 }
 
+/** 校验并规范 effects 整组数组（setClipEffects 整组替换语义） */
+function normalizeEffects(value: unknown): ClipEffect[] {
+  if (!Array.isArray(value)) {
+    throw new EditorCommandError('invalid_payload', 'effects')
+  }
+  return value.map((raw) => {
+    const e = raw as Record<string, unknown>
+    if (typeof e?.id !== 'string' || !e.id || !isEffectType(e.type)) {
+      throw new EditorCommandError('invalid_payload', 'effects[]')
+    }
+    const strength = e.strength
+    if (typeof strength !== 'number' || !Number.isFinite(strength) || strength < 0 || strength > 1) {
+      throw new EditorCommandError('invalid_payload', 'effects[].strength')
+    }
+    return { id: e.id, type: e.type, strength }
+  })
+}
+
+/** 同轨紧随片段：afterClip 按 start 排序后的下一个（无则无相邻性，转场不成立） */
+function nextClipOnTrack(doc: EditorDocument, trackId: string, afterClipId: string): EditorClip | null {
+  const clips = doc.clips
+    .filter((c) => c.trackId === trackId)
+    .sort((a, b) => a.start - b.start || a.id.localeCompare(b.id))
+  const idx = clips.findIndex((c) => c.id === afterClipId)
+  return idx >= 0 && idx + 1 < clips.length ? clips[idx + 1]! : null
+}
+
+/** 不可变更新 tracks 数组中某条轨道 */
+function withTrack(doc: EditorDocument, trackId: string, mutate: (t: EditorTrack) => EditorTrack): EditorDocument {
+  const track = findTrack(doc, trackId)
+  ensureUnlocked(track)
+  return { ...doc, tracks: doc.tracks.map((t) => (t.id === trackId ? mutate(t) : t)) }
+}
+
 /** 不可变更新 clips 数组中某个片段 */
 function withClip(doc: EditorDocument, clipId: string, mutate: (c: EditorClip) => EditorClip): EditorDocument {
   const { clip, index } = findClip(doc, clipId)
@@ -151,7 +183,7 @@ function withClip(doc: EditorDocument, clipId: string, mutate: (c: EditorClip) =
   return { ...doc, clips }
 }
 
-// ---------- 14 op 实现 ----------
+// ---------- 17 op 实现 ----------
 
 const commands: Record<EditorOp, (doc: EditorDocument, payload: CommandPayload) => EditorDocument> = {
   addClip: (doc, payload) => {
@@ -268,7 +300,14 @@ const commands: Record<EditorOp, (doc: EditorDocument, payload: CommandPayload) 
 
   removeClip: (doc, payload) => {
     findClip(doc, payload.clipId)
-    return { ...doc, clips: doc.clips.filter((c) => c.id !== payload.clipId) }
+    const clipId = payload.clipId as string
+    // 衔接点转场清理：指向被删片段的转场一并移除（其余轨的转场保持引用相等）
+    const tracks = doc.tracks.map((t) => (
+      t.transitions?.some((tr) => tr.afterClipId === clipId)
+        ? { ...t, transitions: t.transitions.filter((tr) => tr.afterClipId !== clipId) }
+        : t
+    ))
+    return { ...doc, clips: doc.clips.filter((c) => c.id !== clipId), tracks }
   },
 
   detachAudio: (doc, payload) => {
@@ -444,6 +483,57 @@ const commands: Record<EditorOp, (doc: EditorDocument, payload: CommandPayload) 
     const orderById = new Map(next.map((t, i) => [t.id, n - 1 - i]))
     // 只替换同类型轨，其他轨保持引用相等（结构共享）
     return { ...doc, tracks: doc.tracks.map((t) => (orderById.has(t.id) ? { ...t, order: orderById.get(t.id)! } : t)) }
+  },
+
+  /** 衔接点转场 upsert：同 afterClipId 覆盖；仅视频轨且必须存在同轨紧随片段（fail-closed） */
+  setTransition: (doc, payload) => {
+    const trackId = payload.trackId as string
+    const afterClipId = payload.afterClipId as string
+    const track = findTrack(doc, trackId)
+    if (track.kind !== 'video') {
+      throw new EditorCommandError('invalid_payload', 'transition requires video track')
+    }
+    const afterClip = doc.clips.find((c) => c.id === afterClipId && c.trackId === trackId)
+    if (!afterClip) {
+      throw new EditorCommandError('clip_not_found', String(afterClipId))
+    }
+    if (!nextClipOnTrack(doc, trackId, afterClipId)) {
+      throw new EditorCommandError('invalid_payload', 'transition requires a following clip')
+    }
+    if (!isTransitionType(payload.type)) {
+      throw new EditorCommandError('invalid_payload', 'transition.type')
+    }
+    const duration = requirePositive(payload.duration, 'transition.duration')
+    const transition = { id: payload.transitionId as string, afterClipId, type: payload.type, duration }
+    if (typeof transition.id !== 'string' || !transition.id) {
+      throw new EditorCommandError('invalid_payload', 'transitionId')
+    }
+    return withTrack(doc, trackId, (t) => {
+      const transitions = (t.transitions ?? []).filter((tr) => tr.afterClipId !== afterClipId)
+      return { ...t, transitions: [...transitions, transition] }
+    })
+  },
+
+  /** 删除衔接点转场（按 afterClipId 定位；不存在报错 fail-closed） */
+  removeTransition: (doc, payload) => {
+    const trackId = payload.trackId as string
+    const afterClipId = payload.afterClipId as string
+    const track = findTrack(doc, trackId)
+    if (!track.transitions?.some((tr) => tr.afterClipId === afterClipId)) {
+      throw new EditorCommandError('invalid_payload', `no transition after ${afterClipId}`)
+    }
+    return withTrack(doc, trackId, (t) => ({ ...t, transitions: t.transitions!.filter((tr) => tr.afterClipId !== afterClipId) }))
+  },
+
+  /** 效果器整组替换：空数组删除 effects 键（文档保持精简） */
+  setClipEffects: (doc, payload) => {
+    const effects = normalizeEffects(payload.effects)
+    return withClip(doc, payload.clipId as string, (clip) => {
+      const props: ClipProps = { ...clip.props }
+      if (effects.length === 0) delete props.effects
+      else props.effects = effects
+      return { ...clip, props }
+    })
   },
 }
 

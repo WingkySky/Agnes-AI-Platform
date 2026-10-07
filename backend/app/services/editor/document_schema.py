@@ -18,6 +18,7 @@ MAX_DOCUMENT_BYTES = 2 * 1024 * 1024
 
 _TRACK_KINDS = {"video", "audio", "subtitle"}
 _TRANSITION_TYPES = {"crossfade", "fade", "wipe"}
+_EFFECT_TYPES = {"grayscale", "blur"}
 _TRACK_FLAG_KEYS = {"hidden", "locked", "muted", "solo"}
 
 
@@ -57,6 +58,17 @@ def validate_document_skeleton(doc: Any) -> dict:
                 k not in _TRACK_FLAG_KEYS or not isinstance(v, bool) for k, v in flags.items()
             ):
                 _fail(f"tracks[{i}].flags 非法")
+        transitions = tr.get("transitions")
+        if transitions is not None:
+            if not isinstance(transitions, list):
+                _fail(f"tracks[{i}].transitions 必须为数组")
+            for j, t in enumerate(transitions):
+                if not isinstance(t, dict) or not t.get("id") or not t.get("afterClipId"):
+                    _fail(f"tracks[{i}].transitions[{j}] 形状非法")
+                if t.get("type") not in _TRANSITION_TYPES:
+                    _fail(f"tracks[{i}].transitions[{j}].type 非法")
+                if not _num(t.get("duration")) or t["duration"] <= 0:
+                    _fail(f"tracks[{i}].transitions[{j}].duration 必须为正数")
 
     clip_ids = set()
     for i, c in enumerate(doc["clips"]):
@@ -91,12 +103,15 @@ def validate_document_skeleton(doc: Any) -> dict:
                 not _num(rect.get(k)) or not (0 <= rect[k] <= 1) for k in ("x", "y", "w", "h")
             ):
                 _fail(f"clips[{i}].props.rect 必须为 0~1 的 x/y/w/h")
-        tr = props.get("transition")
-        if tr is not None:
-            if not isinstance(tr, dict) or tr.get("type") not in _TRANSITION_TYPES:
-                _fail(f"clips[{i}].props.transition 非法")
-            if not _num(tr.get("duration")) or tr["duration"] <= 0:
-                _fail(f"clips[{i}].props.transition.duration 必须为正数")
+        effects = props.get("effects")
+        if effects is not None:
+            if not isinstance(effects, list):
+                _fail(f"clips[{i}].props.effects 必须为数组")
+            for j, e in enumerate(effects):
+                if not isinstance(e, dict) or not e.get("id") or e.get("type") not in _EFFECT_TYPES:
+                    _fail(f"clips[{i}].props.effects[{j}] 形状非法")
+                if not _num(e.get("strength")) or not (0 <= e["strength"] <= 1):
+                    _fail(f"clips[{i}].props.effects[{j}].strength 必须在 0~1")
         if c.get("text") is not None and not isinstance(c.get("text"), str):
             _fail(f"clips[{i}].text 必须为字符串")
 

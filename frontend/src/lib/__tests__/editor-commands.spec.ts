@@ -321,8 +321,91 @@ describe('fail-closed', () => {
     expect(() => applyCommand(doc, broken)).toThrow(/unknown_op/)
     expect(doc.clips.length).toBe(4)
   })
-  it('op 表恰好 14 个', () => {
-    expect(EDITOR_OPS.length).toBe(14)
+  it('op 表恰好 17 个', () => {
+    expect(EDITOR_OPS.length).toBe(17)
+  })
+})
+
+// ---------- 转场/效果器实体（17 op 新增三件） ----------
+
+describe('setTransition', () => {
+  it('建立衔接点转场（upsert：同 afterClipId 覆盖）', () => {
+    const doc = baseDoc()
+    const next = applyCommand(doc, cmd('setTransition', {
+      trackId: 'v1', afterClipId: 'c1', transitionId: 'tr1', type: 'crossfade', duration: 0.5,
+    }))
+    expect(next.tracks.find((t) => t.id === 'v1')?.transitions).toEqual([
+      { id: 'tr1', afterClipId: 'c1', type: 'crossfade', duration: 0.5 },
+    ])
+    const again = applyCommand(next, cmd('setTransition', {
+      trackId: 'v1', afterClipId: 'c1', transitionId: 'tr2', type: 'wipe', duration: 0.8,
+    }))
+    const transitions = again.tracks.find((t) => t.id === 'v1')?.transitions ?? []
+    expect(transitions).toHaveLength(1)
+    expect(transitions[0]).toMatchObject({ id: 'tr2', type: 'wipe', duration: 0.8 })
+  })
+
+  it('非视频轨 / 无紧随片段 / 非法类型或时长 → 抛错', () => {
+    const doc = baseDoc()
+    expect(() => applyCommand(doc, cmd('setTransition', {
+      trackId: 'a1', afterClipId: 'c1', transitionId: 'tr', type: 'crossfade', duration: 0.5,
+    }))).toThrow() // 音频轨
+    // c2 是 v1 最后一个片段，无紧随
+    expect(() => applyCommand(doc, cmd('setTransition', {
+      trackId: 'v1', afterClipId: 'c2', transitionId: 'tr', type: 'crossfade', duration: 0.5,
+    }))).toThrow()
+    expect(() => applyCommand(doc, cmd('setTransition', {
+      trackId: 'v1', afterClipId: 'c1', transitionId: 'tr', type: 'dissolve', duration: 0.5,
+    }))).toThrow()
+    expect(() => applyCommand(doc, cmd('setTransition', {
+      trackId: 'v1', afterClipId: 'c1', transitionId: 'tr', type: 'crossfade', duration: 0,
+    }))).toThrow()
+  })
+})
+
+describe('removeTransition', () => {
+  it('按 afterClipId 删除衔接点转场；不存在抛错', () => {
+    const doc = applyCommand(baseDoc(), cmd('setTransition', {
+      trackId: 'v1', afterClipId: 'c1', transitionId: 'tr1', type: 'fade', duration: 0.6,
+    }))
+    const next = applyCommand(doc, cmd('removeTransition', { trackId: 'v1', afterClipId: 'c1' }))
+    expect(next.tracks.find((t) => t.id === 'v1')?.transitions).toEqual([])
+    expect(() => applyCommand(next, cmd('removeTransition', { trackId: 'v1', afterClipId: 'c1' }))).toThrow()
+  })
+})
+
+describe('removeClip 转场清理', () => {
+  it('删除片段时移除指向它的衔接点转场', () => {
+    const doc = applyCommand(baseDoc(), cmd('setTransition', {
+      trackId: 'v1', afterClipId: 'c1', transitionId: 'tr1', type: 'crossfade', duration: 0.5,
+    }))
+    const next = applyCommand(doc, cmd('removeClip', { clipId: 'c1' }))
+    expect(next.tracks.find((t) => t.id === 'v1')?.transitions).toEqual([])
+  })
+})
+
+describe('setClipEffects', () => {
+  it('整组替换效果器；空数组删除 effects 键', () => {
+    const next = applyCommand(baseDoc(), cmd('setClipEffects', {
+      clipId: 'c1',
+      effects: [
+        { id: 'e1', type: 'grayscale', strength: 1 },
+        { id: 'e2', type: 'blur', strength: 0.4 },
+      ],
+    }))
+    expect(next.clips.find((c) => c.id === 'c1')?.props.effects).toHaveLength(2)
+    const cleared = applyCommand(next, cmd('setClipEffects', { clipId: 'c1', effects: [] }))
+    expect(cleared.clips.find((c) => c.id === 'c1')?.props.effects).toBeUndefined()
+  })
+
+  it('非法类型 / strength 越界 / 非数组 → 抛错', () => {
+    expect(() => applyCommand(baseDoc(), cmd('setClipEffects', {
+      clipId: 'c1', effects: [{ id: 'e1', type: 'sepia', strength: 1 }],
+    }))).toThrow()
+    expect(() => applyCommand(baseDoc(), cmd('setClipEffects', {
+      clipId: 'c1', effects: [{ id: 'e1', type: 'blur', strength: 1.5 }],
+    }))).toThrow()
+    expect(() => applyCommand(baseDoc(), cmd('setClipEffects', { clipId: 'c1', effects: 'x' }))).toThrow()
   })
 })
 

@@ -10,7 +10,8 @@ import { computed, ref, watch } from 'vue'
 
 import { useEditorStore } from '@/stores/editor'
 import { useI18n } from '@/i18n'
-import { TRANSITION_TYPES, type TransitionType } from '@/lib/editor-types'
+import type { ClipEffect, EffectType, TransitionType } from '@/lib/editor-types'
+import { EFFECT_TYPES, TRANSITION_TYPES } from '@/lib/editor-fx-registry'
 
 const store = useEditorStore()
 const { t } = useI18n()
@@ -48,6 +49,65 @@ function onSliderInput(key: string, v: number): void {
 function onSliderChange(key: string, v: number): void {
   delete sliderDrafts.value[key]
   setProp(key, v)
+}
+
+/** 衔接点转场（轨级实体）：选中片段与其同轨紧随片段之间的过渡 */
+const junctionTransition = computed(() => {
+  const clip = selected.value
+  if (!clip || !store.doc) return null
+  const track = store.doc.tracks.find((tr) => tr.id === clip.trackId)
+  return track?.transitions?.find((tr) => tr.afterClipId === clip.id) ?? null
+})
+
+const canEditTransition = computed(() => {
+  const clip = selected.value
+  if (!clip || !store.doc || trackKind.value !== 'video') return false
+  return store.doc.clips.some((c) => c.trackId === clip.trackId && c.start > clip.start)
+})
+
+function setTransitionType(v: string): void {
+  const clip = selected.value
+  if (!clip) return
+  if (!v) {
+    if (junctionTransition.value) {
+      store.applyOrToast({ op: 'removeTransition', payload: { trackId: clip.trackId, afterClipId: clip.id } }, t('editor.propTransition'))
+    }
+    return
+  }
+  store.applyOrToast({
+    op: 'setTransition',
+    payload: { trackId: clip.trackId, afterClipId: clip.id, transitionId: junctionTransition.value?.id ?? `tr_${Date.now().toString(36)}`, type: v as TransitionType, duration: junctionTransition.value?.duration ?? 0.5 },
+  }, t('editor.propTransition'))
+}
+
+function setTransitionDuration(v: number | undefined): void {
+  const clip = selected.value
+  const current = junctionTransition.value
+  if (!clip || !current) return
+  store.applyOrToast({
+    op: 'setTransition',
+    payload: { trackId: clip.trackId, afterClipId: clip.id, transitionId: current.id, type: current.type, duration: v ?? 0.5 },
+  }, t('editor.propTransition'))
+}
+
+// ---------- 效果器（整组替换走 setClipEffects，可撤销） ----------
+const selectedEffects = computed<ClipEffect[]>(() => selected.value?.props.effects ?? [])
+
+function setEffects(effects: ClipEffect[]): void {
+  if (!selected.value) return
+  store.applyOrToast({ op: 'setClipEffects', payload: { clipId: selected.value.id, effects } }, t('editor.propEffects'))
+}
+
+function addEffect(type: EffectType): void {
+  setEffects([...selectedEffects.value, { id: `fx_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`, type, strength: type === 'blur' ? 0.4 : 1 }])
+}
+
+function updateEffect(id: string, strength: number): void {
+  setEffects(selectedEffects.value.map((e) => (e.id === id ? { ...e, strength } : e)))
+}
+
+function removeEffect(id: string): void {
+  setEffects(selectedEffects.value.filter((e) => e.id !== id))
 }
 
 function setProp(key: string, value: unknown): void {
@@ -99,25 +159,51 @@ function removeSelected(): void {
       <template v-else>
         <template v-if="trackKind === 'video'">
           <label>{{ t('editor.propTransition') }}</label>
-          <div class="row">
+          <div v-if="canEditTransition" class="row">
             <el-select
               size="small"
-              :model-value="selected.props.transition?.type ?? ''"
+              :model-value="junctionTransition?.type ?? ''"
               clearable
               :placeholder="t('editor.none')"
-              @change="(v: string) => setProp('transition', v ? { type: v as TransitionType, duration: selected!.props.transition?.duration ?? 0.5 } : null)"
+              @change="setTransitionType"
             >
               <el-option v-for="tr in TRANSITION_TYPES" :key="tr" :label="t(`editor.transitions.${tr}`)" :value="tr" />
             </el-select>
             <el-input-number
-              v-if="selected.props.transition"
+              v-if="junctionTransition"
               size="small"
-              :model-value="selected.props.transition.duration"
+              :model-value="junctionTransition.duration"
               :min="0.1"
               :max="3"
               :step="0.1"
-              @change="(v: number | undefined) => setProp('transition', { type: selected!.props.transition!.type, duration: v ?? 0.5 })"
+              @change="setTransitionDuration"
             />
+          </div>
+          <p v-else class="muted-hint">{{ t('editor.transitionNeedNext') }}</p>
+
+          <label>{{ t('editor.propEffects') }}</label>
+          <div v-for="e in selectedEffects" :key="e.id" class="row">
+            <span class="effect-name">{{ t(`editor.effects.${e.type}`) }}</span>
+            <el-input-number
+              v-if="e.type === 'blur'"
+              size="small"
+              :model-value="e.strength"
+              :min="0"
+              :max="1"
+              :step="0.05"
+              @change="(v: number | undefined) => updateEffect(e.id, v ?? 0.4)"
+            />
+            <el-button size="small" text type="danger" @click="removeEffect(e.id)">{{ t('common.delete') }}</el-button>
+          </div>
+          <div class="row">
+            <el-dropdown size="small" @command="(cmd: EffectType) => addEffect(cmd)">
+              <el-button size="small">{{ t('editor.effectAdd') }}</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item v-for="et in EFFECT_TYPES" :key="et" :command="et">{{ t(`editor.effects.${et}`) }}</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </div>
 
           <label>{{ t('editor.propRect') }}（PIP）</label>

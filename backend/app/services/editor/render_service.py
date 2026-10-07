@@ -15,8 +15,10 @@
 #   整链按轨锚点时间窗 enable（多轨互不遮盖）
 # - 带 rect 的片段（PIP）→ 归一化时已缩放到 rect 尺寸，按文档位置窗口
 #   enable overlay（PIP 片段间硬切，转场不生效）
-# - 音频：逐段截取/atempo/volume/afade → adelay 定位 → amix；
+# - 音频：逐段截取/atempo/volume/afade → adelay 定位 → amix；全帧轨自带音频按
+#   压缩 render_start 开窗并以 acrossfade 融合转场衔接（audio_chains）；
 #   视频自带音频（音画分离未分离时默认携带）需 ffprobe 确认真实含音流
+# - 效果器：归一化阶段施加 hue=s=0（黑白）/ gblur（模糊，sigma=strength×20）
 # - 字幕：build_ass + subtitles 滤镜硬烧
 # - 成片落 uploads/editor/，final_url 挂工程并自动入资产库（source=compose）
 # =====================================================
@@ -145,12 +147,20 @@ async def _render_project(db: AsyncSession, project: EditingProject) -> None:
         raise RuntimeError("没有可用素材片段（素材缺失或时长为 0）")
 
     # 音频候选过滤：视频自带音频需文件真实含音流（无声视频/纯画面素材剔除）
-    probe_paths = sorted({s["asset_path"] for s in plan["audio_clips"] if s.get("from_video")})
+    probe_paths = sorted(
+        {s["asset_path"] for s in plan["audio_clips"] if s.get("from_video")}
+        | {m["asset_path"] for ch in plan.get("audio_chains", []) for m in ch["members"]}
+    )
     probe_results = {p: await _has_audio_stream(p) for p in probe_paths}
     plan["audio_clips"] = [
         s for s in plan["audio_clips"]
         if not s.get("from_video") or probe_results.get(s["asset_path"], False)
     ]
+    for chain in plan.get("audio_chains", []):
+        chain["members"] = [
+            m for m in chain["members"]
+            if not m.get("from_video") or probe_results.get(m["asset_path"], False)
+        ]
 
     # 2. 片段归一化（进度 k/n）
     plan, normalized = await _normalize_segments(db, project, plan)
@@ -249,10 +259,19 @@ def _is_full_frame(rect: Optional[dict]) -> bool:
 
 
 def _segment_normalize_cmd(seg: dict, width: int, height: int, fps: int, out_path: str) -> list[str]:
-    """单片段截取 + 变速 + 归一化（无声，统一分辨率/帧率供 xfade/overlay）"""
+    """单片段截取 + 变速 + 效果器滤镜 + 归一化（无声，统一分辨率/帧率供 xfade/overlay）"""
     speed = seg["speed"]
     src_span = seg["duration"] * speed
-    vf = [f"setpts=PTS/{speed}", f"fps={fps}"]
+    # 效果器在缩放前施加（避免模糊/去色波及 pad 出的黑边）
+    vf: list[str] = [f"setpts=PTS/{speed}"]
+    for e in seg.get("effects") or []:
+        if not isinstance(e, dict):
+            continue
+        strength = min(max(float(e.get("strength") or 0), 0), 1)
+        f = _effect_filter(str(e.get("type")), strength)
+        if f:
+            vf.append(f)
+    vf.append(f"fps={fps}")
     rect = seg.get("rect")
     if rect and not _is_full_frame(rect):
         w = _even(width * float(rect.get("w", 1)))
@@ -277,8 +296,17 @@ def _segment_normalize_cmd(seg: dict, width: int, height: int, fps: int, out_pat
 
 
 def _xfade_name(transition_type: str) -> str:
-    """Plan 转场类型 → ffmpeg xfade transition 名"""
+    """Plan 转场类型 → ffmpeg xfade transition 名（与前端 editor-fx-registry 的 ffmpegName 对齐，新增转场两处各加一行）"""
     return {"crossfade": "fade", "fade": "fadeblack", "wipe": "wipeleft"}.get(transition_type, "fade")
+
+
+def _effect_filter(effect_type: str, strength: float) -> Optional[str]:
+    """效果器 → 归一化 vf 滤镜片段（与前端 editor-fx-registry 的 ffmpegFilter 对齐，新增效果器两处各加一行）"""
+    if effect_type == "grayscale":
+        return "hue=s=0"
+    if effect_type == "blur":
+        return f"gblur=sigma={strength * 20:.2f}" if strength > 0 else None
+    return None
 
 
 def _atempo_chain(speed: float) -> list[str]:
@@ -399,9 +427,20 @@ def build_render_command(
                 overlay_items.append((label, x, y, _enable(seg["render_start"], seg["render_start"] + seg["duration"])))
 
     # —— 音频输入 ——
-    audio_base = input_index
+    # 平铺段（音频轨 + PIP 轨自带音频）在前，各全帧轨压缩链成员随后（链序）
+    flat_entries: list[tuple[int, dict]] = []
     for seg in plan["audio_clips"]:
+        flat_entries.append((input_index, seg))
         cmd += ["-ss", f"{seg['trim_start']}", "-t", f"{seg['duration'] * seg['speed']:.6f}", "-i", seg["asset_path"]]
+        input_index += 1
+    chain_entries: list[list[tuple[int, dict]]] = []
+    for chain in plan.get("audio_chains", []):
+        entries: list[tuple[int, dict]] = []
+        for m in chain["members"]:
+            entries.append((input_index, m))
+            cmd += ["-ss", f"{m['trim_start']}", "-t", f"{m['duration'] * m['speed']:.6f}", "-i", m["asset_path"]]
+            input_index += 1
+        chain_entries.append(entries)
 
     # —— overlay 链 ——
     final_v: Optional[str] = None
@@ -424,20 +463,82 @@ def build_render_command(
     # 兜底：无视频轨但 needs_base 误判不应发生；空内容在上方已抛错
 
     # —— 音频混音 ——
+    # 平铺段：滤镜 → adelay(文档位)；压缩链：相邻存活成员 acrossfade 融合为子链
+    # （transition_in.from_clip_id 指向的前一成员须存活且相邻，否则切子链），
+    # 子链起点按压缩 render_start adelay；全部汇入 amix
     delayed: list[str] = []
-    for i, seg in enumerate(plan["audio_clips"]):
+    audio_seq = 0
+
+    def _member_filter_parts(seg: dict) -> list[str]:
         chain = _audio_filter_for(seg)
-        delay_ms = int(seg["render_start"] * 1000)
         parts = chain.split(",") if chain != "anull" else []
+        # amix/acrossfade 要求各输入采样率/格式/声道一致（视频音轨 48k 与音频文件
+        # 44.1k 混音前统一重采样，否则整条 filter graph 报错）
+        parts.append("aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo")
+        return parts
+
+    for iidx, seg in flat_entries:
+        parts = _member_filter_parts(seg)
+        delay_ms = int(seg["render_start"] * 1000)
         if delay_ms > 0:
             parts.append(f"adelay={delay_ms}:all=1")
-        # amix 要求各输入采样率/格式/声道一致：视频音轨（常见 48k）与音频文件（常见 44.1k）
-        # 混音前统一重采样，否则整条 filter graph 报错
-        parts.append("aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo")
-        in_label = f"[{audio_base + i}:a]"
-        out_label = f"[ad{i}]"
-        filters.append(f"{in_label}{','.join(parts)}{out_label}")
+        out_label = f"[ad{audio_seq}]"
+        filters.append(f"[{iidx}:a]{','.join(parts)}{out_label}")
         delayed.append(out_label)
+        audio_seq += 1
+
+    for entries in chain_entries:
+        # 按成员顺序切子链
+        subchains: list[list[tuple[int, dict]]] = []
+        current: list[tuple[int, dict]] = []
+        prev_member: Optional[dict] = None
+        for iidx, m in entries:
+            linked = (
+                prev_member is not None
+                and isinstance(m.get("transition_in"), dict)
+                and m["transition_in"].get("from_clip_id") == prev_member.get("clip_id")
+            )
+            if current and linked:
+                current.append((iidx, m))
+            else:
+                if current:
+                    subchains.append(current)
+                current = [(iidx, m)]
+            prev_member = m
+        if current:
+            subchains.append(current)
+
+        for sub in subchains:
+            start_ms = int(sub[0][1]["render_start"] * 1000)
+            if len(sub) == 1:
+                iidx, seg = sub[0]
+                parts = _member_filter_parts(seg)
+                if start_ms > 0:
+                    parts.append(f"adelay={start_ms}:all=1")
+                out_label = f"[ad{audio_seq}]"
+                filters.append(f"[{iidx}:a]{','.join(parts)}{out_label}")
+            else:
+                cur_label: Optional[str] = None
+                for k, (iidx, seg) in enumerate(sub):
+                    mid = f"[am{audio_seq}_{k}]"
+                    filters.append(f"[{iidx}:a]{','.join(_member_filter_parts(seg))}{mid}")
+                    if cur_label is None:
+                        cur_label = mid
+                        continue
+                    trans = seg.get("transition_in") or {}
+                    out = f"[ac{audio_seq}_{k}]"
+                    filters.append(
+                        f"{cur_label}{mid}acrossfade=d={float(trans.get('duration', 0)):.3f}"
+                        f":c1=tri:c2=tri{out}"
+                    )
+                    cur_label = out
+                if start_ms > 0:
+                    out = f"[ac{audio_seq}_shift]"
+                    filters.append(f"{cur_label}adelay={start_ms}:all=1{out}")
+                    cur_label = out
+                delayed.append(cur_label)
+            audio_seq += 1
+
     if len(delayed) > 1:
         filters.append(f"{''.join(delayed)}amix=inputs={len(delayed)}:normalize=0[aout]")
         final_a = "[aout]"

@@ -7,13 +7,18 @@
 #
 # 关键派生规则：
 # - 时间线 gap 保留黑场（合成基座为黑底画布；整轨全帧链内除外——链内按连续压缩）
-# - 同轨相邻片段转场配对：transition 挂在前一片段，与紧随其后的同轨片段生效
-# - 输出时间窗：整轨全帧链锚定首片段文档位置（轨内转场压缩）；PIP 片段按文档
-#   位置绝对开窗——多轨片段互不遮盖，视频与音频轴（adelay）同源
-# - 音频图来源：音频轨片段 + 未静音视频片段的自带音频（音画分离：
-#   detachAudio 后源片段 muted=true 剔出音频图）；无声视频由 lowering 层 ffprobe 过滤
-# - 轨道开关（flags）：hidden 整轨剔除（画面/声音/字幕全不进成片）；muted 只剔声音；
-#   solo 是前端预览监听态，渲染端刻意不读
+# - 轨级衔接点转场（track.transitions）：按 afterClipId 配对「前一片段与其同轨
+#   紧随片段」；仅视频轨全帧链生效（PIP 间硬切、音频轨不支持——声明边界）
+# - 输出时间窗：整轨全帧链锚定首片段文档位置（轨内转场压缩 render_start 累计
+#   前移）；PIP 片段按文档位置绝对开窗——多轨片段互不遮盖
+# - 音频图：音频轨片段 + 未静音视频片段的自带音频（音画分离：detachAudio 后
+#   muted=true 剔出）；全帧轨的自带音频按压缩后 render_start 开窗（与画面同步），
+#   以 audio_chains 组织供 lowering 做 acrossfade；音频轨与 PIP 轨音频按文档位
+#   adelay（无压缩，位置即文档位）
+# - 效果器（clip.props.effects）：随片段进 Plan，lowering 层 lowering 为 ffmpeg
+#   滤镜（hue=s=0 / gblur）；预览端 canvas filter 同源
+# - 轨道开关（flags）：hidden 整轨剔除；muted 只剔声音；solo 是前端预览监听态，
+#   渲染端刻意不读
 # - 合成策略：全帧片段轨走 xfade 链整轨叠加；带 rect 的片段逐个按窗口 overlay
 #   （PIP 片段间为硬切，转场仅在整轨 xfade 路径生效——v1 明确边界）
 # =====================================================
@@ -50,6 +55,15 @@ def build_plan(
     # 轨道开关（前端 flags 字典，缺省全关）：hidden 整轨不进成片；
     # muted 只剔声音（视频轨画面照常）；solo 是预览监听态，渲染端刻意不读
     flags_of = {t.get("id"): (t.get("flags") or {}) for t in tracks if isinstance(t, dict)}
+    # 轨级衔接点转场：{track_id: {afterClipId: transition}}
+    transitions_of: dict[str, dict] = {}
+    for t in tracks:
+        if isinstance(t, dict) and isinstance(t.get("transitions"), list):
+            transitions_of[t["id"]] = {
+                tr.get("afterClipId"): tr
+                for tr in t["transitions"]
+                if isinstance(tr, dict) and tr.get("afterClipId")
+            }
 
     video_tracks: dict[str, list[dict]] = {}
     audio_clips: list[dict] = []
@@ -82,18 +96,21 @@ def build_plan(
             "fade_out": _num(props.get("fadeOut")),
             "muted": props.get("muted") is True,
             "rect": props.get("rect") if isinstance(props.get("rect"), dict) else None,
-            "transition": props.get("transition") if isinstance(props.get("transition"), dict) else None,
+            "effects": props.get("effects") if isinstance(props.get("effects"), list) else [],
         }
         if kind_of.get(track_id) == "audio":
             if flags.get("muted") is True:
                 continue  # 静音音频轨不进音频图
             audio_clips.append(base)
         elif kind_of.get(track_id) == "video":
-            video_tracks.setdefault(track_id, []).append(base)
             # 音画分离：视频自带音频与音频轨同链混音；静音标记/轨静音/图片素材不进音频图
-            if not base["muted"] and flags.get("muted") is not True \
-                    and resolve_asset_kind is not None and resolve_asset_kind(asset_id) == "video":
-                audio_clips.append({**base, "from_video": True})
+            base["has_own_audio"] = (
+                not base["muted"]
+                and flags.get("muted") is not True
+                and resolve_asset_kind is not None
+                and resolve_asset_kind(asset_id) == "video"
+            )
+            video_tracks.setdefault(track_id, []).append(base)
         # subtitle clips 不进 Plan（字幕事件单独派生）
 
     # 视频轨：排序 + 输出时间窗派生
@@ -101,6 +118,7 @@ def build_plan(
     # - 含 PIP 片段的轨：逐片段按文档位置绝对开窗（PIP 硬切，无转场，轨内 gap 保留）
     # - total = 轨内容相对链锚点 chain_start 的跨度（timeline_total = chain_start + total）
     plan_tracks: list[dict] = []
+    audio_chains: list[dict] = []
     for track_id in sorted(video_tracks, key=lambda tid: order_of.get(tid, 0)):
         segs = sorted(video_tracks[track_id], key=lambda s: s["start"])
         full_frame_chain = all(
@@ -114,10 +132,11 @@ def build_plan(
                 seg["render_start"] = round(cursor, 6)
                 cursor += seg["duration"]
                 nxt = segs[i + 1] if i + 1 < len(segs) else None
-                if nxt and seg.get("transition"):
+                tr = transitions_of.get(track_id, {}).get(seg["clip_id"])
+                if nxt and tr:
                     seg["transition_applied"] = {
-                        "type": seg["transition"].get("type", "crossfade"),
-                        "duration": min(_num(seg["transition"].get("duration"), 0.5),
+                        "type": tr.get("type", "crossfade"),
+                        "duration": min(_num(tr.get("duration"), 0.5),
                                         seg["duration"], nxt["duration"]),
                     }
                     cursor -= seg["transition_applied"]["duration"]
@@ -130,10 +149,46 @@ def build_plan(
                 "total": round(cursor - anchor, 6),
                 "segments": segs,
             })
+            # 全帧轨自带音频 → 压缩链（render_start 与画面压缩对齐；转场衔接点
+            # 带来源片段 id，lowering 仅在两段相邻存活时 acrossfade）
+            members = []
+            for i, seg in enumerate(segs):
+                if not seg.get("has_own_audio"):
+                    continue
+                prev_seg = segs[i - 1] if i > 0 else None
+                # 进入本段的转场 = 前一段的 transition_applied（衔接点挂前段）
+                trans = prev_seg["transition_applied"] if prev_seg is not None else None
+                members.append({
+                    "clip_id": seg["clip_id"],
+                    "asset_id": seg["asset_id"],
+                    "asset_path": seg["asset_path"],
+                    "start": seg["start"],
+                    "duration": seg["duration"],
+                    "trim_start": seg["trim_start"],
+                    "speed": seg["speed"],
+                    "volume": seg["volume"],
+                    "fade_in": seg["fade_in"],
+                    "fade_out": seg["fade_out"],
+                    "from_video": True,
+                    "render_start": seg["render_start"],
+                    "transition_in": (
+                        {"from_clip_id": prev_seg["clip_id"], "duration": trans["duration"]}
+                        if trans and prev_seg is not None and prev_seg.get("has_own_audio")
+                        else None
+                    ),
+                })
+            if members:
+                audio_chains.append({
+                    "track_id": track_id,
+                    "chain_start": round(anchor, 6),
+                    "members": members,
+                })
         else:
             for seg in segs:
                 seg["render_start"] = round(seg["start"], 6)
                 seg["transition_applied"] = None
+                if seg.get("has_own_audio"):
+                    audio_clips.append({**seg, "from_video": True, "render_start": seg["start"]})
             chain_start = segs[0]["render_start"] if segs else 0.0
             end = max((s["render_start"] + s["duration"] for s in segs), default=chain_start)
             plan_tracks.append({
@@ -144,7 +199,7 @@ def build_plan(
                 "segments": segs,
             })
 
-    # 音频：按时间线 start 排（adelay 定位，转场不影响音频轴）
+    # 平铺音频（音频轨 + PIP 轨自带音频）：按文档位 adelay（无压缩）
     audio_clips.sort(key=lambda s: s["start"])
     for seg in audio_clips:
         seg["render_start"] = seg["start"]
@@ -171,6 +226,7 @@ def build_plan(
         "timebase": int(_num(document.get("timebase"), 30)) or 30,
         "video_tracks": plan_tracks,
         "audio_clips": audio_clips,
+        "audio_chains": audio_chains,
         "subtitle_events": subtitle_events,
         "subtitle_style": document.get("subtitleStyle") or {},
     }

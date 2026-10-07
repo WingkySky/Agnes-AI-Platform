@@ -2,9 +2,13 @@
  * 预览合成器（纯函数）
  * - planFrame：文档 + 播放头 → 自底向上的绘制清单（视频轨激活片段，归一化 rect
  *   换算为 stage 像素）；字幕走 DOM 层不进清单；执行层只做 drawImage
- * - 与渲染端语义对齐：轨 order 大 = 上层；hidden 轨跳过；无激活片段输出黑底 * ===================================================== */
+ * - 转场混合：播放头落在衔接点转场窗口（前片段尾部）时，后片段作为 blend 项
+ *   追加进清单（紧跟前片段之后），执行层按类型混合（与渲染端 xfade 语义对齐；
+ *   仅全帧片段，PIP 硬切与渲染端一致）
+ * - 与渲染端语义对齐：轨 order 大 = 上层；hidden 轨跳过；无激活片段输出黑底
+ * ===================================================== */
 
-import { clipEnd, FULL_RECT, type ClipRect, type EditorDocument } from './editor-types'
+import { clipEnd, FULL_RECT, type ClipRect, type EditorDocument, type TransitionType } from './editor-types'
 
 /** 绘制清单项：assetId 由执行层解析为视频帧（media sink）或图片位图；clipId 供执行层维护解码状态 */
 export interface DrawItem {
@@ -14,6 +18,12 @@ export interface DrawItem {
   y: number
   w: number
   h: number
+  /** 非空时本项是转场后段：与清单中紧邻其前的同轨前段按类型/进度混合 */
+  blend?: { type: TransitionType; progress: number }
+}
+
+function isFullFrameRect(rect: ClipRect | null | undefined): boolean {
+  return !rect || (rect.w >= 1 && rect.h >= 1)
 }
 
 /** 当前播放头一帧的绘制清单（自底向上；stage 尺寸为 CSS 像素，dpr 由执行层处理） */
@@ -40,6 +50,27 @@ export function planFrame(
       y: rect.y * stageH,
       w: rect.w * stageW,
       h: rect.h * stageH,
+    })
+    // 转场窗口：前片段尾部 duration 区间 → 后片段作为 blend 项追加（全帧限定）
+    const tr = track.transitions?.find((t) => t.afterClipId === clip.id)
+    if (!tr || tr.duration <= 0) continue
+    const end = clipEnd(clip)
+    const winStart = end - tr.duration
+    if (playhead < winStart || playhead >= end) continue
+    if (!isFullFrameRect(clip.props.rect)) continue
+    const next = doc.clips
+      .filter((c) => c.trackId === track.id && c.start > clip.start)
+      .sort((a, b) => a.start - b.start || a.id.localeCompare(b.id))[0]
+    if (!next || next.assetId == null || !isFullFrameRect(next.props.rect)) continue
+    const nextRect = next.props.rect ?? FULL_RECT
+    items.push({
+      clipId: next.id,
+      assetId: next.assetId,
+      x: nextRect.x * stageW,
+      y: nextRect.y * stageH,
+      w: nextRect.w * stageW,
+      h: nextRect.h * stageH,
+      blend: { type: tr.type, progress: Math.min(1, Math.max(0, (playhead - winStart) / tr.duration)) },
     })
   }
   return items

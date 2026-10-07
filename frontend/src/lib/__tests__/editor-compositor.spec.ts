@@ -58,6 +58,43 @@ describe('planFrame', () => {
     ])
   })
 
+  it('转场窗口：前片段尾部追加后片段 blend 项（进度归一化）', () => {
+    const t = track('tV', 'video', 0)
+    t.transitions = [{ id: 'tr1', afterClipId: 'a', type: 'crossfade', duration: 1 }]
+    const d = doc([t], [clip('a', 'tV', 0, 4, {}, 1), clip('b', 'tV', 4, 3, {}, 2)])
+    // 窗口前：只有前段
+    expect(planFrame(d, 2.5, 1920, 1080)).toEqual([
+      { clipId: 'a', assetId: 1, x: 0, y: 0, w: 1920, h: 1080 },
+    ])
+    // 窗口内（3.5s，进度 0.5）：a 在下 + b blend 项
+    expect(planFrame(d, 3.5, 1920, 1080)).toEqual([
+      { clipId: 'a', assetId: 1, x: 0, y: 0, w: 1920, h: 1080 },
+      { clipId: 'b', assetId: 2, x: 0, y: 0, w: 1920, h: 1080, blend: { type: 'crossfade', progress: 0.5 } },
+    ])
+    // 进度钳到 1：播放头贴衔接点
+    expect(planFrame(d, 3.99, 1920, 1080)[1].blend!.progress).toBeCloseTo(0.99)
+  })
+
+  it('转场窗口外/PIP 片段/无后段不产生 blend 项', () => {
+    const t = track('tV', 'video', 0)
+    t.transitions = [{ id: 'tr1', afterClipId: 'a', type: 'wipe', duration: 1 }]
+    // 后段是 PIP → 不混合
+    const pipNext = doc([t], [
+      clip('a', 'tV', 0, 4, {}, 1),
+      clip('b', 'tV', 4, 3, { rect: { x: 0.5, y: 0.5, w: 0.4, h: 0.4 } }, 2),
+    ])
+    expect(planFrame(pipNext, 3.5, 1920, 1080)).toHaveLength(1)
+    // 前段是 PIP → 不混合
+    const pipPrev = doc([t], [
+      clip('a', 'tV', 0, 4, { rect: { x: 0.5, y: 0.5, w: 0.4, h: 0.4 } }, 1),
+      clip('b', 'tV', 4, 3, {}, 2),
+    ])
+    expect(planFrame(pipPrev, 3.5, 1920, 1080)).toHaveLength(1)
+    // a 是末段（无后段）
+    const last = doc([t], [clip('a', 'tV', 0, 4, {}, 1)])
+    expect(planFrame(last, 3.5, 1920, 1080)).toHaveLength(1)
+  })
+
   it('assetId 为空的片段跳过；音频/字幕轨永不进清单', () => {
     const d = doc(
       [track('tV', 'video', 0), track('tA', 'audio', 0), track('tS', 'subtitle', 0)],

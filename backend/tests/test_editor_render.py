@@ -30,14 +30,14 @@ def _doc():
     return {
         "timebase": 30, "width": 1280, "height": 720,
         "tracks": [
-            {"id": "v1", "kind": "video", "order": 0, "flags": {}},
+            {"id": "v1", "kind": "video", "order": 0, "flags": {},
+             "transitions": [{"id": "tr1", "afterClipId": "c1", "type": "crossfade", "duration": 0.5}]},
             {"id": "v2", "kind": "video", "order": 1, "flags": {}},
             {"id": "a1", "kind": "audio", "order": 0, "flags": {}},
             {"id": "s1", "kind": "subtitle", "order": 0, "flags": {}},
         ],
         "clips": [
-            {"id": "c1", "trackId": "v1", "assetId": 1, "start": 0, "duration": 4, "trimStart": 1,
-             "props": {"transition": {"type": "crossfade", "duration": 0.5}}},
+            {"id": "c1", "trackId": "v1", "assetId": 1, "start": 0, "duration": 4, "trimStart": 1, "props": {}},
             {"id": "c2", "trackId": "v1", "assetId": 2, "start": 4, "duration": 3, "trimStart": 0, "props": {}},
             {"id": "p1", "trackId": "v2", "assetId": 3, "start": 1, "duration": 2, "trimStart": 0,
              "props": {"rect": {"x": 0.6, "y": 0.6, "w": 0.3, "h": 0.3}}},
@@ -144,16 +144,23 @@ def _kinds(aid):
 
 def test_plan_video_audio_candidates_and_muted():
     plan = build_plan(_doc(), lambda aid: PATHS.get(aid), _kinds)
-    audio_ids = {s["clip_id"] for s in plan["audio_clips"]}
-    # 未静音视频片段自带音频进音频图；图片素材/静音标记剔除
-    assert audio_ids == {"c1", "c2", "a9"}
+    # 全帧轨自带音频进压缩链（audio_chains），音频轨片段平铺（audio_clips）
+    assert {s["clip_id"] for s in plan["audio_clips"]} == {"a9"}
+    chain = next(c for c in plan["audio_chains"] if c["track_id"] == "v1")
+    assert [m["clip_id"] for m in chain["members"]] == ["c1", "c2"]
+    # 压缩对齐：c2 自带音频 render_start = 3.5（转场压缩后），衔接点带来源与时长
+    assert chain["members"][1]["render_start"] == 3.5
+    assert chain["members"][1]["transition_in"] == {"from_clip_id": "c1", "duration": 0.5}
     muted = _doc()
     muted["clips"][0]["props"]["muted"] = True  # 音画分离后源片段
     plan2 = build_plan(muted, lambda aid: PATHS.get(aid), _kinds)
-    assert {s["clip_id"] for s in plan2["audio_clips"]} == {"c2", "a9"}
+    assert {s["clip_id"] for s in plan2["audio_clips"]} == {"a9"}
+    chain2 = next(c for c in plan2["audio_chains"] if c["track_id"] == "v1")
+    assert [m["clip_id"] for m in chain2["members"]] == ["c2"]
+    assert chain2["members"][0]["transition_in"] is None  # 前段无音频可融合
     # 不传 kind 解析器 = 旧行为（视频自带音频不进 Plan）
     plan3 = build_plan(_doc(), lambda aid: PATHS.get(aid))
-    assert {s["clip_id"] for s in plan3["audio_clips"]} == {"a9"}
+    assert plan3["audio_chains"] == []
 
 
 def test_render_command_with_video_audio_candidates():
@@ -162,11 +169,11 @@ def test_render_command_with_video_audio_candidates():
     cmd = build_render_command(plan, normalized, None, "/tmp/final.mp4")
     text = " ".join(cmd)
     graph = cmd[cmd.index("-filter_complex") + 1]
-    # 输入：基座 1 + 视频段 3 + 音频 3（c1/c2 视频自带 + a9 音频轨）= 7 个 -i
+    # 输入：基座 1 + 视频段 3 + 音频 3（a9 平铺 + c1/c2 链成员）= 7 个 -i
     assert text.count(" -i ") == 7
-    # 视频自带音频走同一 atempo/volume/afade/adelay 链（c2 start=4 → adelay 4000）
-    assert "adelay=4000:all=1" in graph
-    assert "amix=inputs=3" in graph
+    # c1/c2 自带音频 acrossfade 融合（转场 0.5s），子链起点=0 无 adelay
+    assert "acrossfade=d=0.500:c1=tri:c2=tri" in graph
+    assert "amix=inputs=2" in graph
 
 
 def test_render_command_two_fullframe_tracks_offset_windows():
@@ -200,6 +207,18 @@ def test_normalize_cmd_structure():
     assert "setpts=PTS/2" in cmd[cmd.index("-vf") + 1]
     assert "scale=1280:720" in cmd[cmd.index("-vf") + 1]
     assert "-an" in cmd
+
+
+def test_normalize_cmd_effects_filters():
+    """效果器 lowering：黑白=hue=s=0，模糊=gblur sigma=strength×20；缩放前施加"""
+    seg = {"clip_id": "c1", "asset_path": "/tmp/a.mp4", "duration": 4, "trim_start": 0,
+           "speed": 1, "rect": None,
+           "effects": [{"id": "e1", "type": "grayscale", "strength": 1},
+                        {"id": "e2", "type": "blur", "strength": 0.4}]}
+    cmd = _segment_normalize_cmd(seg, 1280, 720, 30, "/tmp/out.mp4")
+    vf = cmd[cmd.index("-vf") + 1]
+    assert "hue=s=0" in vf and "gblur=sigma=8.00" in vf
+    assert vf.index("hue=s=0") < vf.index("scale=1280:720")  # 缩放前
 
 
 def test_render_command_fullframe_xfade_and_pip():
