@@ -65,6 +65,11 @@ export function deleteWorkspace(id: string): Promise<void> {
 }
 
 /** 挂靠/解绑作品（work_id=null 解绑为自由画布） */
+/** 画布改名（PATCH name；挂靠/解绑走 setWorkspaceWork） */
+export function renameWorkspace(id: string, name: string): Promise<{ id: string; work_id: number | null }> {
+  return client.patch(`/api/canvas/workspaces/${id}`, { name })
+}
+
 export function setWorkspaceWork(id: string, workId: number | null): Promise<{ id: string; work_id: number | null }> {
   return client.patch(`/api/canvas/workspaces/${id}`, { work_id: workId })
 }

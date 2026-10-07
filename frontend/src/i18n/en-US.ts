@@ -8,6 +8,9 @@ const enUS = {
   common: {
     back: 'Back',
     confirm: 'Confirm',
+    rename: 'Rename',
+    renamePrompt: 'Enter a new name',
+    renameDone: 'Renamed',
     cancel: 'Cancel',
     close: 'Close',
     delete: 'Delete',
@@ -770,11 +773,6 @@ const enUS = {
 
     // ===== Works Showcase View (PresetCenter main tab = works) =====
     works: {
-    editorProjects: 'Editing Projects',
-    newProject: 'New Editing Project',
-    openProject: 'Open',
-    projectFinal: 'Output',
-    projectN: 'Editing Project {n}',
       selectPresetPlaceholder: 'Select a preset to filter works (leave empty to show all)',
       typeAll: 'All',
       typeImage: 'Image',
@@ -1016,6 +1014,11 @@ const enUS = {
     freeCanvases: 'Unattached Canvases',
     bindDone: 'Attached to work',
     changeCover: 'Change Cover',
+    editorProjects: 'Editing Projects',
+    newProject: 'New Editing Project',
+    openProject: 'Open',
+    projectFinal: 'Output',
+    projectN: 'Editing Project {n}',
     coverUpdated: 'Cover updated',
   },
   // ------ Work Entity Library ------

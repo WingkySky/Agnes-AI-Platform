@@ -6,16 +6,18 @@
 
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Delete, EditPen, Plus, VideoCamera } from '@element-plus/icons-vue'
+import { Delete, Edit, EditPen, Plus, VideoCamera } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
-import { createEditorProject, deleteEditorProject, listEditorProjects, type EditingProjectBrief } from '@/api/editor'
+import { createEditorProject, deleteEditorProject, listEditorProjects, updateEditorProject, type EditingProjectBrief } from '@/api/editor'
+import { useRename } from '@/composables/useRename'
 import { useEditorStore } from '@/stores/editor'
 import { useI18n } from '@/i18n'
 
 const router = useRouter()
 const editorStore = useEditorStore()
 const { t } = useI18n()
+const { rename } = useRename()
 
 const items = ref<EditingProjectBrief[]>([])
 const loading = ref(false)
@@ -65,6 +67,14 @@ async function remove(project: EditingProjectBrief): Promise<void> {
   await reload()
 }
 
+async function renameProject(project: EditingProjectBrief): Promise<void> {
+  const name = await rename(project.title)
+  if (!name) return
+  await updateEditorProject(project.uid, { title: name })
+  ElMessage.success(t('common.renameDone'))
+  await reload()
+}
+
 onMounted(() => void reload())
 </script>
 
@@ -88,6 +98,7 @@ onMounted(() => void reload())
         <div class="card-actions">
           <el-tag :type="renderTag(project.render_status)" size="small">{{ t(`editor.renderStates.${project.render_status}`) }}</el-tag>
           <el-button :icon="EditPen" text size="small" @click.stop="open(project.uid)" />
+          <el-button :icon="Edit" text size="small" :title="t('common.rename')" @click.stop="renameProject(project)" />
           <el-button :icon="Delete" text size="small" type="danger" @click.stop="remove(project)" />
         </div>
       </div>

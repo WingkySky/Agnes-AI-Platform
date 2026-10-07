@@ -7,7 +7,7 @@
 
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Download, VideoPlay } from '@element-plus/icons-vue'
+import { ArrowLeft, Download, Edit, VideoPlay } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import type { Ref } from 'vue'
 
@@ -16,6 +16,8 @@ import EditorPreview from '@/views/editor/EditorPreview.vue'
 import EditorTimeline from '@/views/editor/EditorTimeline.vue'
 import EditorInspector from '@/views/editor/EditorInspector.vue'
 import { useEditorStore } from '@/stores/editor'
+import { updateEditorProject } from '@/api/editor'
+import { useRename } from '@/composables/useRename'
 import { useUserStore } from '@/stores/user'
 import { clipEnd } from '@/lib/editor-types'
 import { useI18n } from '@/i18n'
@@ -23,6 +25,7 @@ import { useI18n } from '@/i18n'
 const route = useRoute()
 const router = useRouter()
 const store = useEditorStore()
+const { rename } = useRename()
 const { t } = useI18n()
 const userStore = useUserStore()
 
@@ -46,6 +49,15 @@ function goBack(): void {
   if (store.workId) router.push(`/works/${store.workId}`)
   else if (window.history.length > 1) router.back()
   else router.push('/works')
+}
+
+async function renameProject(): Promise<void> {
+  if (!store.uid) return
+  const name = await rename(store.title || '')
+  if (!name) return
+  await updateEditorProject(store.uid, { title: name })
+  store.title = name
+  ElMessage.success(t('common.renameDone'))
 }
 
 // ---------- 可拖拽分隔条（面板尺寸本地持久化，刷新恢复） ----------
@@ -197,7 +209,8 @@ onBeforeUnmount(() => {
   <div class="editor-page">
     <header class="editor-topbar">
       <el-button :icon="ArrowLeft" text @click="goBack">{{ t('common.back') }}</el-button>
-      <span class="editor-title" :title="store.title">{{ store.title || t('editor.title') }}</span>
+      <span class="editor-title" :title="store.title" @click="renameProject">{{ store.title || t('editor.title') }}</span>
+      <el-button :icon="Edit" text size="small" :title="t('common.rename')" @click="renameProject" />
       <div class="topbar-actions">
         <span class="save-state">{{ saveLabel }}</span>
         <el-tag v-if="store.renderStatus === 'rendering'" type="warning" size="small">
@@ -248,6 +261,7 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 .editor-title {
+  cursor: pointer;
   font-weight: 600;
   max-width: 280px;
   overflow: hidden;

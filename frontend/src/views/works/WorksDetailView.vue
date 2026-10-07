@@ -43,6 +43,7 @@
         <div class="canvas-time">{{ formatDate(c.updated_at) }}</div>
         <div class="canvas-ops" @click.stop>
           <el-button size="small" text type="primary" @click="enterCanvas(c.id)">{{ t('works.enterCanvas') }}</el-button>
+          <el-button size="small" text @click="renameCanvas(c)">{{ t('common.rename') }}</el-button>
           <el-button size="small" text type="danger" @click="removeCanvas(c)">{{ t('common.delete') }}</el-button>
         </div>
       </div>
@@ -123,7 +124,8 @@ import { useI18n } from '@/i18n'
 import { useConfirm } from '@/composables/useConfirm'
 import { createEditorProject, listEditorProjects, type EditingProjectBrief } from '@/api/editor'
 import { getWork, type WorkItem } from '@/api/works'
-import { listWorkspaces, createWorkspace, deleteWorkspace, type WorkspaceBrief } from '@/api/canvasWorkspace'
+import { listWorkspaces, createWorkspace, deleteWorkspace, renameWorkspace, type WorkspaceBrief } from '@/api/canvasWorkspace'
+import { useRename } from '@/composables/useRename'
 import { createAsset } from '@/api/assets'
 import {
   createWorkEntity, deleteWorkEntity, listWorkEntities, updateWorkEntity, uploadEntityImage, adoptEntityVersion,
@@ -135,6 +137,7 @@ const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const { confirm } = useConfirm()
+const { rename } = useRename()
 
 const workId = Number(route.params.id)
 const work = ref<WorkItem | null>(null)
@@ -282,6 +285,14 @@ function enterCanvas(id: string): void {
 async function removeCanvas(canvas: WorkspaceBrief): Promise<void> {
   await confirm(`${t('common.delete')}: ${canvas.name}?`, t('common.delete'))
   await deleteWorkspace(canvas.id)
+  await fetchAll()
+}
+
+async function renameCanvas(canvas: WorkspaceBrief): Promise<void> {
+  const name = await rename(canvas.name)
+  if (!name) return
+  await renameWorkspace(canvas.id, name)
+  ElMessage.success(t('common.renameDone'))
   await fetchAll()
 }
 

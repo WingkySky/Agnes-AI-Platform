@@ -27,6 +27,7 @@
           <div class="time">{{ formatDate(w.updated_at) }}</div>
         </div>
         <div class="ops" @click.stop>
+          <el-button size="small" text @click="renameWork(w)">{{ t('common.rename') }}</el-button>
           <el-button size="small" text type="danger" @click="removeWork(w)">{{ t('common.delete') }}</el-button>
         </div>
       </div>
@@ -84,9 +85,11 @@ import { ElMessage } from 'element-plus'
 import { useI18n } from '@/i18n'
 import { useConfirm } from '@/composables/useConfirm'
 import { listWorks, createWork, deleteWork, updateWork, uploadWorkCover, type WorkItem } from '@/api/works'
+import { useRename } from '@/composables/useRename'
 import { listWorkspaces, deleteWorkspace, setWorkspaceWork, type WorkspaceBrief } from '@/api/canvasWorkspace'
 
 const { t } = useI18n()
+const { rename } = useRename()
 const router = useRouter()
 const { confirm } = useConfirm()
 
@@ -163,6 +166,14 @@ async function changeCover(work: WorkItem, event: Event): Promise<void> {
   const { url } = await uploadWorkCover(file)
   await updateWork(work.id, { cover_url: url })
   ElMessage.success(t('works.coverUpdated'))
+  await fetchWorks()
+}
+
+async function renameWork(work: WorkItem): Promise<void> {
+  const name = await rename(work.title)
+  if (!name) return
+  await updateWork(work.id, { title: name })
+  ElMessage.success(t('common.renameDone'))
   await fetchWorks()
 }
 

@@ -16,8 +16,9 @@ class WorkspaceCreate(BaseModel):
 
 
 class WorkspaceWorkBind(BaseModel):
-    """挂靠/解绑作品（PATCH；work_id=None 解绑为自由画布）"""
+    """改名/挂靠/解绑（PATCH；name 与 work_id 二选一或同传；work_id=None 解绑为自由画布）"""
     work_id: Optional[int] = Field(None, description="目标作品 id，None=解绑")
+    name: Optional[str] = Field(None, min_length=1, max_length=255, description="画布新名称")
 
 
 class WorkspaceSave(BaseModel):

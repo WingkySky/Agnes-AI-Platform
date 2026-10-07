@@ -125,3 +125,20 @@ async def test_workspace_work_bind_unbind(memory_db):
         resp = await client.patch(f"{WS_URL}/{ws['id']}", json={"work_id": None})
         assert resp.status_code == 200
         assert resp.json()["data"]["work_id"] is None
+
+
+async def test_workspace_rename_via_patch(memory_db):
+    """PATCH name 改画布名：401 未登录 / 403 他人 / 200 本人（与挂靠同一端点）"""
+    user = await _seed_user(memory_db, "u10")
+    other = await _seed_user(memory_db, "u11")
+    async for client in _build_client(memory_db, user):
+        ws = (await client.post(WS_URL, json={"name": "旧名"})).json()["data"]
+        ws_id = ws["id"]
+        resp = await client.patch(f"{WS_URL}/{ws_id}", json={"name": "  新名  "})
+        assert resp.status_code == 200
+        names = [w["name"] for w in (await client.get(WS_URL)).json()["data"]]
+        assert names == ["新名"]  # strip 生效
+    async for client in _build_client(memory_db, other):
+        assert (await client.patch(f"{WS_URL}/{ws_id}", json={"name": "hack"})).status_code == 403
+    async for client in _build_client(memory_db):
+        assert (await client.patch(f"{WS_URL}/{ws_id}", json={"name": "x"})).status_code == 401

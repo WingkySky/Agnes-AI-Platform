@@ -178,7 +178,7 @@ async def get_workspace(
     return ok(data=WorkspaceDetail.model_validate(ws).model_dump(mode="json"))
 
 
-@router.patch("/{workspace_id}", summary="挂靠/解绑作品（work_id=None 解绑为自由画布）")
+@router.patch("/{workspace_id}", summary="改名/挂靠/解绑作品（name 改名；work_id=None 解绑为自由画布）")
 async def bind_workspace_work(
     workspace_id: str,
     payload: WorkspaceWorkBind,
@@ -186,6 +186,8 @@ async def bind_workspace_work(
     current_user: User = Depends(get_current_user),
 ):
     ws = await _get_owned_workspace(db, workspace_id, current_user)
+    if payload.name is not None:
+        ws.name = payload.name.strip() or ws.name
     if payload.work_id is not None:
         owned = (
             await db.scalars(

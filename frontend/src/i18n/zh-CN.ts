@@ -9,6 +9,9 @@ const zhCN = {
   common: {
     back: '返回',
     confirm: '确认',
+    rename: '重命名',
+    renamePrompt: '输入新名称',
+    renameDone: '已重命名',
     cancel: '取消',
     close: '关闭',
     delete: '删除',
@@ -770,11 +773,6 @@ const zhCN = {
 
     // ===== 作品展示视图（PresetCenter 主 Tab = works） =====
     works: {
-    editorProjects: '剪辑工程',
-    newProject: '新建剪辑工程',
-    openProject: '打开工程',
-    projectFinal: '成片',
-    projectN: '剪辑工程 {n}',
       selectPresetPlaceholder: '选择预设筛选作品（不选则展示全部）',
       typeAll: '全部',
       typeImage: '图片',
@@ -998,6 +996,11 @@ const zhCN = {
     freeCanvases: '未挂靠画布',
     bindDone: '已挂到作品',
     changeCover: '更换封面',
+    editorProjects: '剪辑工程',
+    newProject: '新建剪辑工程',
+    openProject: '打开工程',
+    projectFinal: '成片',
+    projectN: '剪辑工程 {n}',
     coverUpdated: '封面已更新',
   },
   // ------ 作品实体库 ------
