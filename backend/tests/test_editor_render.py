@@ -176,6 +176,25 @@ def test_render_command_with_video_audio_candidates():
     assert "amix=inputs=2" in graph
 
 
+def test_render_command_single_member_chain_consumed():
+    """回归：链内仅一段有自带音频（如前段静音/图片隔断）→ 单成员子链标签必须进 amix，
+    否则 ffmpeg 报 adelay 输出 unconnected"""
+    doc = _doc()
+    doc["clips"][0]["props"]["muted"] = True  # c1 音画分离静音：链内只剩 c2 有自带音频
+    plan = build_plan(doc, lambda aid: PATHS.get(aid), _kinds)
+    normalized = {"c1": "/tmp/n1.mp4", "c2": "/tmp/n2.mp4", "p1": "/tmp/n3.mp4"}
+    cmd = build_render_command(plan, normalized, None, "/tmp/final.mp4")
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    # c2 单成员子链（压缩位 3.5s adelay）+ a9 平铺 → amix 两路全消费
+    assert "adelay=3500:all=1[ad" in graph
+    assert "amix=inputs=2" in graph
+    # 每个产出的 ad/ac 标签都被 amix 引用（无悬空输出）
+    import re
+    produced = set(re.findall(r"\[(ad\d+)\]", graph))
+    consumed = set(re.findall(r"\[ad\d+\]\[", graph)) | {m for m in re.findall(r"amix=inputs=\d+(?:[^;]*)", graph)}
+    assert f"amix=inputs={len(produced)}" in graph
+
+
 def test_render_command_two_fullframe_tracks_offset_windows():
     """回归：两个全帧片段分属两条视频轨——各轨按时间线位置开窗，上层轨不得从头遮盖下层轨"""
     doc = _doc()

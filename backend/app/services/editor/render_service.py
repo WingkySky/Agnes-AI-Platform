@@ -517,6 +517,7 @@ def build_render_command(
                     parts.append(f"adelay={start_ms}:all=1")
                 out_label = f"[ad{audio_seq}]"
                 filters.append(f"[{iidx}:a]{','.join(parts)}{out_label}")
+                delayed.append(out_label)
             else:
                 cur_label: Optional[str] = None
                 for k, (iidx, seg) in enumerate(sub):
