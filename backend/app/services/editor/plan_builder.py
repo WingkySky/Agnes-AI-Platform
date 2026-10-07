@@ -97,6 +97,7 @@ def build_plan(
             "muted": props.get("muted") is True,
             "rect": props.get("rect") if isinstance(props.get("rect"), dict) else None,
             "effects": props.get("effects") if isinstance(props.get("effects"), list) else [],
+            "camera": props.get("camera") if isinstance(props.get("camera"), dict) else None,
         }
         if kind_of.get(track_id) == "audio":
             if flags.get("muted") is True:

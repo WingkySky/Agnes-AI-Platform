@@ -1128,6 +1128,8 @@ const zhCN = {
     srtImported: '已导入 {n} 条字幕',
     subtitleWorkspace: '字幕',
     subtitleWorkspaceTitle: '字幕工作区',
+    cameraSection: '运镜',
+    camera: { zoomIn: '推进', zoomOut: '拉远', panLeft: '左移', panRight: '右移', panUp: '上移', panDown: '下移' },
     subGenSource: '转写源轨',
     subTargetTrack: '目标字幕轨',
     subNewTrack: '＋ 新建字幕轨',

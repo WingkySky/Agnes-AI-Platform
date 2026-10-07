@@ -24,6 +24,7 @@ import {
 } from '@/lib/editor-compositor'
 import { AudioEngine, sourceTimeAt } from '@/lib/editor-audio-engine'
 import { clipFadeAlphaAt } from '@/lib/editor-audio'
+import { cameraRectAt, type CameraRect } from '@/lib/editor-camera-registry'
 import { canvasFilterForEffects } from '@/lib/editor-fx-registry'
 import { clearMediaPool, createAudioSink, createVideoSink, getImageBitmap } from '@/lib/editor-media'
 import { clipEnd, FULL_RECT, type ClipRect, type EditorClip } from '@/lib/editor-types'
@@ -218,21 +219,39 @@ function updateCursor(canvas: HTMLCanvasElement, px: number, py: number): void {
 
 // ---------- 绘制 ----------
 
-function drawImageItem(item: { x: number; y: number; w: number; h: number }, src: CanvasImageSource, alpha: number): void {
+function drawImageItem(item: { x: number; y: number; w: number; h: number }, src: CanvasImageSource, alpha: number, cam: CameraRect | null): void {
   if (!ctx2d) return
   ctx2d.globalAlpha = alpha
-  ctx2d.drawImage(src, item.x, item.y, item.w, item.h)
+  if (cam) {
+    // 运镜裁剪窗：片段画面内取 (x,y,1/zoom,1/zoom) 归一化子矩形铺满原位
+    const sw = item.w / cam.zoom
+    const sh = item.h / cam.zoom
+    ctx2d.drawImage(src, item.x + (item.w - sw) * cam.x, item.y + (item.h - sh) * cam.y, sw, sh, item.x, item.y, item.w, item.h)
+  } else {
+    ctx2d.drawImage(src, item.x, item.y, item.w, item.h)
+  }
   ctx2d.globalAlpha = 1
 }
 
 /** 转场混合绘制后段（前段已在画布上）：crossfade=alpha 混合 / fade=黑场插值 / wipe=擦除显现；
- *  fadeAlpha=后段自身画面淡变，与转场进度相乘（与渲染端 fade 先于 xfade 施加对齐） */
-function drawBlendItem(item: DrawItem, src: CanvasImageSource, fadeAlpha: number): void {
+ *  fadeAlpha=后段自身画面淡变，与转场进度相乘（与渲染端 fade 先于 xfade 施加对齐）；
+ *  cam=后段运镜裁剪窗（与渲染端 zoompan 在 xfade 前施加对齐） */
+function drawBlendItem(item: DrawItem, src: CanvasImageSource, fadeAlpha: number, cam: CameraRect | null): void {
   if (!ctx2d) return
   const blend = item.blend!
+  const drawCam = (img: CanvasImageSource): void => {
+    if (!ctx2d) return
+    if (cam) {
+      const sw = item.w / cam.zoom
+      const sh = item.h / cam.zoom
+      ctx2d.drawImage(img, item.x + (item.w - sw) * cam.x, item.y + (item.h - sh) * cam.y, sw, sh, item.x, item.y, item.w, item.h)
+    } else {
+      ctx2d.drawImage(img, item.x, item.y, item.w, item.h)
+    }
+  }
   if (blend.type === 'crossfade') {
     ctx2d.globalAlpha = blend.progress * fadeAlpha
-    ctx2d.drawImage(src, item.x, item.y, item.w, item.h)
+    drawCam(src)
     ctx2d.globalAlpha = 1
     return
   }
@@ -242,7 +261,7 @@ function drawBlendItem(item: DrawItem, src: CanvasImageSource, fadeAlpha: number
     ctx2d.rect(item.x, item.y, item.w * blend.progress, item.h)
     ctx2d.clip()
     ctx2d.globalAlpha = fadeAlpha
-    ctx2d.drawImage(src, item.x, item.y, item.w, item.h)
+    drawCam(src)
     ctx2d.globalAlpha = 1
     ctx2d.restore()
     return
@@ -257,7 +276,7 @@ function drawBlendItem(item: DrawItem, src: CanvasImageSource, fadeAlpha: number
     ctx2d.fillStyle = '#000'
     ctx2d.fillRect(item.x, item.y, item.w, item.h)
     ctx2d.globalAlpha = (blend.progress - 0.5) * 2 * fadeAlpha
-    ctx2d.drawImage(src, item.x, item.y, item.w, item.h)
+    drawCam(src)
     ctx2d.globalAlpha = 1
   }
 }
@@ -303,12 +322,14 @@ function draw(): void {
       itemClip,
       item.blend ? itemClip.start + item.blend.progress * item.blend.duration : store.playhead,
     )
+    // 运镜裁剪窗（时间线域进度，与渲染端 zoompan 帧号插值同源）
+    const cam = itemClip ? cameraRectAt(itemClip.props.camera, (store.playhead - itemClip.start) / Math.max(itemClip.duration, 1e-6)) : null
     if (asset.media_type === 'image') {
       void getImageBitmap(url).then((bmp) => {
         if (bmp && mounted && version === planVersion) {
           applyEffectFilter(itemClip)
-          if (item.blend) drawBlendItem(item, bmp, alpha)
-          else drawImageItem(item, bmp, alpha)
+          if (item.blend) drawBlendItem(item, bmp, alpha, cam)
+          else drawImageItem(item, bmp, alpha, cam)
           ctx2d!.filter = 'none'
         }
       })
@@ -317,8 +338,8 @@ function draw(): void {
       const st = ensureVideoState(item.clipId, url)
       if (st.canvas) {
         applyEffectFilter(itemClip)
-        if (item.blend) drawBlendItem(item, st.canvas, alpha)
-        else drawImageItem(item, st.canvas, alpha)
+        if (item.blend) drawBlendItem(item, st.canvas, alpha, cam)
+        else drawImageItem(item, st.canvas, alpha, cam)
         ctx2d.filter = 'none'
       }
       void pullFrame(st, itemClip, url, store.playhead)

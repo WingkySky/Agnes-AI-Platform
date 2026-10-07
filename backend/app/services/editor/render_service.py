@@ -261,6 +261,29 @@ def _is_full_frame(rect: Optional[dict]) -> bool:
     return not rect or (float(rect.get("w", 1)) >= 1 and float(rect.get("h", 1)) >= 1)
 
 
+def _camera_zoompan(camera: Optional[dict], duration: float, fps: int, width: int, height: int) -> Optional[str]:
+    """运镜 → zoompan 滤镜（Ken Burns；与前端 editor-camera-registry 的 rectAt 数值同源，
+    新增运镜前后端各加一行）。d=1 逐帧输出，in=帧号线性插值，strength 烘进常量。"""
+    if not isinstance(camera, dict) or camera.get("type") not in _CAMERA_TYPES:
+        return None
+    strength = min(max(float(camera.get("strength") or 0), 0), 1)
+    n = max(1, round(duration * fps))
+    nm1 = max(n - 1, 1)
+    ctype = camera["type"]
+    if ctype in ("zoomIn", "zoomOut"):
+        k = _CAMERA_ZOOM_RANGE * strength * (1 if ctype == "zoomIn" else -1)
+        term = f"{k:+.6f}*min(in/{nm1},1)"
+        z = f"max(1,1{term})" if k < 0 else f"1{term}"
+        x, y = "(iw-iw/zoom)/2", "(ih-ih/zoom)/2"
+    else:
+        z = f"{1 + _CAMERA_PAN_ZOOM * strength:.6f}"
+        dx, dy = {"panLeft": (-1, 0), "panRight": (1, 0), "panUp": (0, -1), "panDown": (0, 1)}[ctype]
+        term = f"({dx}*(min(in/{nm1},1)-0.5))"
+        x = f"(iw-iw/zoom)/2+{term}*(iw-iw/zoom)" if dx else "(iw-iw/zoom)/2"
+        y = f"(ih-ih/zoom)/2+({dy}*(min(in/{nm1},1)-0.5))*(ih-ih/zoom)" if dy else "(ih-ih/zoom)/2"
+    return f"zoompan=z='{z}':x='{x}':y='{y}':d=1:s={width}x{height}:fps={fps}"
+
+
 def _segment_normalize_cmd(seg: dict, width: int, height: int, fps: int, out_path: str) -> list[str]:
     """单片段截取 + 变速 + 效果器滤镜 + 归一化（无声，统一分辨率/帧率供 xfade/overlay）"""
     speed = seg["speed"]
@@ -279,12 +302,15 @@ def _segment_normalize_cmd(seg: dict, width: int, height: int, fps: int, out_pat
     if rect and not _is_full_frame(rect):
         w = _even(width * float(rect.get("w", 1)))
         h = _even(height * float(rect.get("h", 1)))
-        vf.append(f"scale={w}:{h}:force_original_aspect_ratio=decrease")
-        vf.append(f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black")
     else:
-        vf.append(f"scale={width}:{height}:force_original_aspect_ratio=decrease")
-        vf.append(f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black")
+        w, h = width, height
+    vf.append(f"scale={w}:{h}:force_original_aspect_ratio=decrease")
+    vf.append(f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black")
     vf.append("setsar=1")
+    # 运镜在已归一化几何上做 Ken Burns（画面/PIP 内容都适用）
+    zoompan = _camera_zoompan(seg.get("camera"), seg["duration"], fps, w, h)
+    if zoompan:
+        vf.append(zoompan)
     return [
         "ffmpeg", "-y",
         "-ss", f"{seg['trim_start']}",
@@ -310,6 +336,12 @@ def _effect_filter(effect_type: str, strength: float) -> Optional[str]:
     if effect_type == "blur":
         return f"gblur=sigma={strength * 20:.2f}" if strength > 0 else None
     return None
+
+
+# 运镜预设白名单（与前端 editor-camera-registry 的 CAMERA_TYPES 对齐，新增运镜两处各加一行）
+_CAMERA_TYPES = {"zoomIn", "zoomOut", "panLeft", "panRight", "panUp", "panDown"}
+_CAMERA_ZOOM_RANGE = 0.6
+_CAMERA_PAN_ZOOM = 0.3
 
 
 def _atempo_chain(speed: float) -> list[str]:

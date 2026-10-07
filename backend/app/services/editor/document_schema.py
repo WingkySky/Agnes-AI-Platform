@@ -19,6 +19,8 @@ MAX_DOCUMENT_BYTES = 2 * 1024 * 1024
 _TRACK_KINDS = {"video", "audio", "subtitle"}
 _TRANSITION_TYPES = {"crossfade", "fade", "wipe"}
 _EFFECT_TYPES = {"grayscale", "blur"}
+# 运镜预设白名单（与前端 editor-camera-registry 的 CAMERA_TYPES 对齐，新增运镜前后端各加一行）
+_CAMERA_TYPES = {"zoomIn", "zoomOut", "panLeft", "panRight", "panUp", "panDown"}
 _TRACK_FLAG_KEYS = {"hidden", "locked", "muted", "solo"}
 
 
@@ -112,6 +114,13 @@ def validate_document_skeleton(doc: Any) -> dict:
                     _fail(f"clips[{i}].props.effects[{j}] 形状非法")
                 if not _num(e.get("strength")) or not (0 <= e["strength"] <= 1):
                     _fail(f"clips[{i}].props.effects[{j}].strength 必须在 0~1")
+        camera = props.get("camera")
+        if camera is not None:
+            # 白名单与前端 editor-camera-registry 的 CAMERA_TYPES 对齐，新增运镜前后端各加一行
+            if not isinstance(camera, dict) or camera.get("type") not in _CAMERA_TYPES:
+                _fail(f"clips[{i}].props.camera 形状非法")
+            elif not _num(camera.get("strength")) or not (0 <= camera["strength"] <= 1):
+                _fail(f"clips[{i}].props.camera.strength 必须在 0~1")
         if c.get("text") is not None and not isinstance(c.get("text"), str):
             _fail(f"clips[{i}].text 必须为字符串")
 

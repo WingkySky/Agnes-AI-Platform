@@ -63,6 +63,8 @@ export interface ClipProps {
   fadeOut?: number
   rect?: ClipRect
   effects?: ClipEffect[]
+  /** 运镜（摄像机）：{ type, strength }，见 editor-camera-registry；不设 = 无运镜 */
+  camera?: { type: string; strength: number }
   /** 音画分离后源片段静音：自带音频不再进预览与渲染 */
   muted?: boolean
 }

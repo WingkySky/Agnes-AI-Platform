@@ -12,6 +12,7 @@ import { useEditorStore } from '@/stores/editor'
 import { useI18n } from '@/i18n'
 import type { ClipEffect, EffectType, TransitionType } from '@/lib/editor-types'
 import { EFFECT_TYPES, TRANSITION_TYPES } from '@/lib/editor-fx-registry'
+import { CAMERA_TYPES, isCameraType } from '@/lib/editor-camera-registry'
 
 const store = useEditorStore()
 const { t } = useI18n()
@@ -110,6 +111,31 @@ function removeEffect(id: string): void {
   setEffects(selectedEffects.value.filter((e) => e.id !== id))
 }
 
+// ---------- 运镜（预设 + 强度，双端同源见 editor-camera-registry） ----------
+const selectedCamera = computed(() => {
+  const cam = selected.value?.props.camera
+  return cam && isCameraType(cam.type) ? cam : null
+})
+
+function setCameraType(v: string): void {
+  setProp('camera', v ? { type: v, strength: selectedCamera.value?.strength ?? 0.5 } : null)
+}
+
+function setCameraStrength(v: number | undefined): void {
+  const cam = selectedCamera.value
+  if (!cam) return
+  setProp('camera', { ...cam, strength: v ?? 0.5 })
+}
+
+function onCameraStrengthInput(v: number): void {
+  sliderDrafts.value.cameraStrength = v
+}
+
+function onCameraStrengthChange(v: number): void {
+  delete sliderDrafts.value.cameraStrength
+  setCameraStrength(v)
+}
+
 function setProp(key: string, value: unknown): void {
   if (!selected.value) return
   store.applyOrToast({ op: 'setClipProperty', payload: { clipId: selected.value.id, props: { [key]: value } } }, t('editor.ops.setClipProperty'))
@@ -204,6 +230,29 @@ function removeSelected(): void {
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
+          </div>
+
+          <label>{{ t('editor.cameraSection') }}</label>
+          <div class="row">
+            <el-select
+              size="small"
+              :model-value="selectedCamera?.type ?? ''"
+              clearable
+              :placeholder="t('editor.none')"
+              @change="setCameraType"
+            >
+              <el-option v-for="ct in CAMERA_TYPES" :key="ct" :label="t(`editor.camera.${ct}`)" :value="ct" />
+            </el-select>
+            <el-slider
+              v-if="selectedCamera"
+              class="camera-strength"
+              :model-value="sliderValue('cameraStrength', selectedCamera.strength)"
+              :min="0"
+              :max="1"
+              :step="0.05"
+              @input="onCameraStrengthInput"
+              @change="onCameraStrengthChange"
+            />
           </div>
 
           <label>{{ t('editor.propRect') }}（PIP）</label>

@@ -242,6 +242,54 @@ def test_normalize_cmd_effects_filters():
     assert vf.index("hue=s=0") < vf.index("scale=1280:720")  # 缩放前
 
 
+# ---------- 运镜：zoompan lowering（Ken Burns，归一化几何上施加） ----------
+
+def test_normalize_cmd_camera_zoompan():
+    from app.services.editor.render_service import _camera_zoompan
+    seg = {"clip_id": "c1", "asset_path": "/tmp/a.mp4", "duration": 4, "trim_start": 0,
+           "speed": 1, "rect": None,
+           "camera": {"type": "zoomIn", "strength": 1}}
+    cmd = _segment_normalize_cmd(seg, 1280, 720, 30, "/tmp/out.mp4")
+    vf = cmd[cmd.index("-vf") + 1]
+    # 4s*30fps=120 帧：zoom 1→1.6 线性；setsar 之后施加
+    assert "zoompan=z='1+0.600000*min(in/119,1)'" in vf
+    assert "s=1280x720:fps=30" in vf
+    assert vf.index("zoompan=") > vf.index("setsar=1")
+
+
+def test_camera_zoompan_variants():
+    from app.services.editor.render_service import _camera_zoompan
+    # 拉远：zoom 从 1.6 收回 1（max 钳制）
+    out = _camera_zoompan({"type": "zoomOut", "strength": 1}, 4, 30, 1280, 720)
+    assert out is not None and "max(1,1-0.600000*min(in/119,1))" in out
+    # 平移：zoom 恒定 1.3，窗口沿方向滑动
+    out2 = _camera_zoompan({"type": "panRight", "strength": 1}, 2, 30, 1280, 720)
+    assert out2 is not None and "z='1.300000'" in out2
+    assert "(1*(min(in/59,1)-0.5))*(iw-iw/zoom)" in out2
+    # 非法 type / 缺 camera → None
+    assert _camera_zoompan({"type": "rotate"}, 4, 30, 1280, 720) is None
+    assert _camera_zoompan(None, 4, 30, 1280, 720) is None
+
+
+def test_plan_camera_carried_and_schema_validated():
+    """Plan 带 camera 字段；document_schema 对 camera 白名单校验"""
+    doc = _doc()
+    doc["clips"][1]["props"]["camera"] = {"type": "panLeft", "strength": 0.8}
+    plan = build_plan(doc, lambda aid: PATHS.get(aid))
+    v1 = next(t for t in plan["video_tracks"] if t["track_id"] == "v1")
+    assert v1["segments"][1]["camera"] == {"type": "panLeft", "strength": 0.8}
+
+    from app.services.editor.document_schema import validate_document_skeleton
+    bad = _doc()
+    bad["clips"][1]["props"]["camera"] = {"type": "rotate", "strength": 1}
+    with pytest.raises(Exception, match="camera"):
+        validate_document_skeleton(bad)
+    bad2 = _doc()
+    bad2["clips"][1]["props"]["camera"] = {"type": "zoomIn", "strength": 3}
+    with pytest.raises(Exception, match="strength"):
+        validate_document_skeleton(bad2)
+
+
 def test_render_command_fullframe_xfade_and_pip():
     plan = build_plan(_doc(), lambda aid: PATHS.get(aid))
     normalized = {"c1": "/tmp/n1.mp4", "c2": "/tmp/n2.mp4", "p1": "/tmp/n3.mp4"}

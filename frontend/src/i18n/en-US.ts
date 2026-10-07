@@ -1146,6 +1146,8 @@ const enUS = {
     srtImported: 'Imported {n} subtitles',
     subtitleWorkspace: 'Subtitles',
     subtitleWorkspaceTitle: 'Subtitle Workspace',
+    cameraSection: 'Camera',
+    camera: { zoomIn: 'Push In', zoomOut: 'Pull Out', panLeft: 'Pan Left', panRight: 'Pan Right', panUp: 'Pan Up', panDown: 'Pan Down' },
     subGenSource: 'Source track',
     subTargetTrack: 'Target track',
     subNewTrack: '＋ New subtitle track',
