@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### Agent 一级公民 · 批次 1（全局 Agent 宿主）
+
+- **全局侧边抽屉 `AgentDrawer`**：任意页面经顶栏按钮或 `Alt+A` 快捷键唤出（输入框聚焦同样生效），右侧 440px 抽屉内组合共享聊天组件（消息列表/输入条/技能清单/模型胶囊/待发附件预览），与对话页绑定同一 chat store——会话、流式输出、确认卡全量同源；首开兜底 `init()`（幂等）+ 滚底；画布型会话选中后跳画布续聊（同对话页规则）；登录后才渲染（与顶栏 auth gate 一致）
+- **工具可达性模型重构：scope 注册制**——`canvasToolsActive` 布尔升级为 `agentScopes` 注册表（`registerAgentScope/unregisterAgentScope`，幂等覆盖 + 热更池内全部内核的工具与系统提示）；CanvasView 迁移为注册/注销（行为等价），EditorView 新注册 `editor` scope（元数据，为批次 2 反向控制桥路由预留；editor_* 工具保持常驻）；系统提示段改为按 host 静态映射（`HOST_CONTEXT_SECTIONS`），注册方无需感知提示词内容
+- **发送链路收口**：ChatView 的附件粘贴/URL 识别/发送/"/" 技能逻辑抽为共享组合式 `useChatComposer`（对话页与抽屉双消费），待发附件预览抽为共享组件 `ChatPendingAttachments`；**顺带修复**：对话页 keep-alive 下全局粘贴监听在其他页面仍活跃的存量问题（enabled 守卫互斥：抽屉开着只收抽屉的，画布页粘贴图片不再被隐形收集）
+- **测试**：vitest 新增 scope 注册/幂等/editor 元数据不注入画布工具 3 例（593 绿）+ vue-tsc 零错 + build 过；设计文档 `.zcode/plans/2026-10-07-agent-first-class-citizen-design.md`（批次 2/3 见设计档总纲）
+
 ## [0.0.9] - 2026-10-07
 
 ### 剪辑器深化二期（四批）

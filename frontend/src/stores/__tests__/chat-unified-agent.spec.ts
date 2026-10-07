@@ -178,16 +178,16 @@ describe('Agent 统一宿主：全局档位', () => {
   })
 })
 
-describe('Agent 统一宿主：画布深度工具挂载', () => {
-  it('setCanvasToolsActive(true)：池内内核 setExtraTools 注入画布工具，系统提示附加画布段', async () => {
+describe('Agent 统一宿主：scope 注册制（宿主深度工具挂载）', () => {
+  it('registerAgentScope(canvas)：池内内核 setExtraTools 注入画布工具，系统提示附加画布段', async () => {
     const store = useChatStore()
     await store._kernelFor(1)
     const k = mocks.kernels[0]
-    // 创建时画布未激活：extraTools 仅 MCP 工具
+    // 创建时画布未注册：extraTools 仅 MCP 工具
     const createdArgs = k.setExtraTools.mock.calls[0][0] as { name: string }[]
     expect(createdArgs.map((t) => t.name)).toEqual(['mcp__1__t'])
 
-    store.setCanvasToolsActive(true)
+    store.registerAgentScope({ host: 'canvas' })
     const lastArgs = k.setExtraTools.mock.calls[k.setExtraTools.mock.calls.length - 1]![0] as { name: string }[]
     expect(lastArgs.map((t) => t.name)).toContain('canvas_marker_tool')
     expect(lastArgs.map((t) => t.name)).toContain('mcp__1__t')
@@ -195,9 +195,38 @@ describe('Agent 统一宿主：画布深度工具挂载', () => {
     const prompts = k.setSystemPrompt.mock.calls.map((c) => String(c[0]))
     expect(prompts.some((p) => p.includes('CANVAS_SECTION'))).toBe(true)
 
-    store.setCanvasToolsActive(false)
+    store.unregisterAgentScope('canvas')
     const offArgs = k.setExtraTools.mock.calls[k.setExtraTools.mock.calls.length - 1]![0] as { name: string }[]
     expect(offArgs.map((t) => t.name)).toEqual(['mcp__1__t'])
+  })
+
+  it('registerAgentScope 幂等：同 host 同元数据重复注册不重复热更内核', async () => {
+    const store = useChatStore()
+    await store._kernelFor(1)
+    const k = mocks.kernels[0]
+    const callsBefore = k.setExtraTools.mock.calls.length
+    store.registerAgentScope({ host: 'canvas' })
+    const afterFirst = k.setExtraTools.mock.calls.length
+    expect(afterFirst).toBeGreaterThan(callsBefore)
+    store.registerAgentScope({ host: 'canvas' })
+    expect(k.setExtraTools.mock.calls.length).toBe(afterFirst)
+  })
+
+  it('editor scope 只注册元数据：不注入画布工具，不附加画布提示段', async () => {
+    const store = useChatStore()
+    await store._kernelFor(1)
+    const k = mocks.kernels[0]
+    k.setExtraTools.mockClear()
+    k.setSystemPrompt.mockClear()
+    store.registerAgentScope({ host: 'editor', projectId: 'proj_1' })
+    expect(store.agentScopes.editor?.projectId).toBe('proj_1')
+    expect(k.setExtraTools).toHaveBeenCalledTimes(1)
+    const args = k.setExtraTools.mock.calls[0][0] as { name: string }[]
+    expect(args.map((t) => t.name)).toEqual(['mcp__1__t'])
+    const prompts = k.setSystemPrompt.mock.calls.map((c) => String(c[0]))
+    expect(prompts.every((p) => !p.includes('CANVAS_SECTION'))).toBe(true)
+    store.unregisterAgentScope('editor')
+    expect(store.agentScopes.editor).toBeUndefined()
   })
 })
 

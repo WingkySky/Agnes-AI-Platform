@@ -61,6 +61,21 @@ import type {
   AgentStepRecord,
 } from '@/types'
 
+/** Agent 宿主种类（scope 注册制：页面挂载时注册，驱动深度工具注入与提示词上下文） */
+export type AgentHostKind = 'canvas' | 'editor'
+
+/** 页面注册的执行 scope（workspaceId/projectId 供批次 2 反向控制桥路由） */
+export interface AgentScope {
+  host: AgentHostKind
+  workspaceId?: string
+  projectId?: string
+}
+
+/** 各宿主注册后附加的系统提示段（静态映射，注册方无需感知提示词内容） */
+const HOST_CONTEXT_SECTIONS: Partial<Record<AgentHostKind, string>> = {
+  canvas: CANVAS_CONTEXT_SECTION,
+}
+
 /** 内核投影消息（对话页时间线；落库/渲染共用） */
 export interface ChatKernelMessage {
   id: string
@@ -356,8 +371,10 @@ export const useChatStore = defineStore('chat', {
     /** 用户偏好记忆（面板记忆入口展示与删除） */
     memoryAvailable: boolean
     memoryPreferences: string[]
-    /** 画布深度工具是否挂载（仅画布页 true，由 CanvasView 挂载/卸载驱动） */
-    canvasToolsActive: boolean
+    /** 已注册的 Agent 执行 scope（页面挂载注册：画布页=canvas、剪辑器页=editor） */
+    agentScopes: Partial<Record<AgentHostKind, AgentScope>>
+    /** 全局 Agent 抽屉开关（顶栏按钮 / Alt+A / 抽屉内关闭共用同一事实源） */
+    agentDrawerOpen: boolean
     // 是否已完成初始化（配合 keep-alive）
     _initialized: boolean
   } => ({
@@ -380,10 +397,10 @@ export const useChatStore = defineStore('chat', {
     mcpCapabilities: [],
     memoryAvailable: false,
     memoryPreferences: [],
-    canvasToolsActive: false,
+    agentScopes: {},
+    agentDrawerOpen: false,
     _initialized: false,
   }),
-
   getters: {
     activeSession(state): ChatSession | null {
       return state.sessions.find(s => s.id === state.activeSessionId) || null
@@ -532,7 +549,7 @@ export const useChatStore = defineStore('chat', {
         }
         const prompt = [
           buildChatSystemPrompt(skillsCache),
-          ...(this.canvasToolsActive ? [CANVAS_CONTEXT_SECTION] : []),
+          ...Object.keys(this.agentScopes).map((h) => HOST_CONTEXT_SECTIONS[h as AgentHostKind]).filter(Boolean),
           memorySectionCache,
           mcpSummaryCache,
         ].filter(Boolean).join('\n\n')
@@ -542,9 +559,11 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    /** extraTools 装配：MCP 工具 + 画布页激活时的画布深度工具（统一注入通道） */
+    /** extraTools 装配：MCP 工具 + 已注册 scope 的宿主深度工具（统一注入通道） */
     _extraTools(): HostTool[] {
-      return this.canvasToolsActive ? [...mcpToolsCache, ...canvasHostTools()] : [...mcpToolsCache]
+      const tools = [...mcpToolsCache]
+      if (this.agentScopes.canvas) tools.push(...canvasHostTools())
+      return tools
     },
 
     /**
@@ -826,10 +845,32 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    /** 画布深度工具挂载开关（CanvasView 挂载/卸载驱动）：热更池内全部内核的工具与系统提示 */
-    setCanvasToolsActive(active: boolean): void {
-      if (this.canvasToolsActive === active) return
-      this.canvasToolsActive = active
+    /** 全局 Agent 抽屉开关 */
+    setAgentDrawerOpen(open: boolean): void {
+      this.agentDrawerOpen = open
+    },
+
+    toggleAgentDrawer(): void {
+      this.agentDrawerOpen = !this.agentDrawerOpen
+    },
+
+    /** scope 注册（页面 onMounted）：幂等覆盖同 host 旧值，热更池内全部内核 */
+    registerAgentScope(scope: AgentScope): void {
+      const prev = this.agentScopes[scope.host]
+      if (prev && prev.workspaceId === scope.workspaceId && prev.projectId === scope.projectId) return
+      this.agentScopes[scope.host] = scope
+      this._refreshHostTools()
+    },
+
+    /** scope 注销（页面 onBeforeUnmount） */
+    unregisterAgentScope(host: AgentHostKind): void {
+      if (!this.agentScopes[host]) return
+      delete this.agentScopes[host]
+      this._refreshHostTools()
+    },
+
+    /** scope 变更热更：池内全部内核重装工具与系统提示 */
+    _refreshHostTools(): void {
       const extras = this._extraTools()
       for (const [, k] of poolOf(this)) {
         k.setExtraTools(extras)

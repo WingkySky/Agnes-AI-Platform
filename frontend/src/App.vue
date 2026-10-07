@@ -121,6 +121,17 @@
 
         <!-- 右上角：全局操作区 -->
         <div class="app-header-right">
+          <!-- 全局 Agent 抽屉（任意页面 Alt+A 唤出，仅登录后） -->
+          <el-tooltip
+            v-if="userStore.isAuthenticated"
+            :content="t('agent.drawerTooltip')"
+            placement="bottom"
+          >
+            <button class="icon-btn" :class="{ 'is-active': chatStore.agentDrawerOpen }" @click="chatStore.toggleAgentDrawer()">
+              <el-icon><ChatDotRound /></el-icon>
+            </button>
+          </el-tooltip>
+
           <!-- 积分显示（仅登录后）：点击跳转到积分明细页 -->
           <el-tooltip
             v-if="userStore.isAuthenticated"
@@ -195,6 +206,9 @@
       <!-- 全局任务队列悬浮面板（路由切换时不销毁） -->
       <TaskQueuePanel v-if="!isStandaloneRoute" />
 
+      <!-- 全局 Agent 侧边抽屉（Agent 一级公民：任意页面唤出，与会话页同源） -->
+      <AgentDrawer v-if="!isStandaloneRoute && userStore.isAuthenticated" />
+
       <!-- 页脚（独立全屏页面不显示） -->
       <footer v-if="!isStandaloneRoute" class="app-footer">
         <span>{{ t('app.footer') }}</span>
@@ -214,10 +228,12 @@ import {
 } from '@element-plus/icons-vue'
 import { getIconByName as getIcon } from '@/lib/icons'
 import TaskQueuePanel from './components/TaskQueuePanel.vue'
+import AgentDrawer from './components/chat/AgentDrawer.vue'
 import LanguageSwitcher from './components/LanguageSwitcher.vue'
 import { useI18n, getElementPlusLocale } from '@/i18n'
 import { useModelsStore } from '@/stores/models'
 import { useUserStore } from '@/stores/user'
+import { useChatStore } from '@/stores/chat'
 import { useThemeStore } from '@/stores/theme'
 import { useCanvasStore } from '@/stores/canvas'
 import { usePermissionStore } from '@/stores/permission'
@@ -230,6 +246,7 @@ const router = useRouter()
 
 const modelsStore = useModelsStore()
 const userStore = useUserStore()
+const chatStore = useChatStore()
 const themeStore = useThemeStore()
 const canvasStore = useCanvasStore()
 const permissionStore = usePermissionStore()
@@ -675,6 +692,11 @@ const epLocale = computed(() => {
   transition: all 0.2s ease;
   font-size: 18px;
 }
+.icon-btn.is-active {
+  color: var(--agnes-primary);
+  background: var(--agnes-primary-soft, rgba(90, 150, 255, 0.12));
+}
+
 .icon-btn:hover {
   background: var(--agnes-bg-hover);
   color: var(--agnes-text-primary);

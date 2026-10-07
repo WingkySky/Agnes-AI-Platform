@@ -16,6 +16,7 @@ import EditorPreview from '@/views/editor/EditorPreview.vue'
 import EditorTimeline from '@/views/editor/EditorTimeline.vue'
 import EditorInspector from '@/views/editor/EditorInspector.vue'
 import { useEditorStore } from '@/stores/editor'
+import { useChatStore } from '@/stores/chat'
 import { updateEditorProject } from '@/api/editor'
 import { useRename } from '@/composables/useRename'
 import { useUserStore } from '@/stores/user'
@@ -25,6 +26,7 @@ import { useI18n } from '@/i18n'
 const route = useRoute()
 const router = useRouter()
 const store = useEditorStore()
+const chatStore = useChatStore()
 const { rename } = useRename()
 const { t } = useI18n()
 const userStore = useUserStore()
@@ -196,11 +198,14 @@ onMounted(() => {
   }
   void ensureLoaded()
   store.startRemotePoll()
+  // Agent scope 注册（批次 2 反向控制桥路由元数据；editor_* 工具本身常驻）
+  chatStore.registerAgentScope({ host: 'editor', projectId: String(route.params.uid || '') })
   window.addEventListener('keydown', onKeydown)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
+  chatStore.unregisterAgentScope('editor')
   store.stopRemotePoll()
   void store.saveNow()
   store.reset()

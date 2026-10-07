@@ -4028,8 +4028,8 @@ onMounted(async () => {
   loadWorksMap()
   // 启动远端 revision 轻轮询（外部宿主增量写入感知：对话 Agent/CLI 落画布等）
   store.startRemotePoll()
-  // 画布页激活：统一 Agent 挂载画布深度工具（离开画布页自动移除）
-  chatStore.setCanvasToolsActive(true)
+  // 画布页激活：统一 Agent 注册 canvas scope（深度工具随注册注入，离开画布页注销）
+  chatStore.registerAgentScope({ host: 'canvas' })
   // 刷新后节点里的 blob object URL 已失效，按 assetId 从素材库重建
   await remapAssetUrls()
   // 统一资产层：旧 uid 型 assetId 懒迁移为数字 id（幂等）
@@ -4058,9 +4058,9 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  // 停止远端 revision 轻轮询；移除画布深度工具挂载
+  // 停止远端 revision 轻轮询；注销画布深度工具 scope
   store.stopRemotePoll()
-  chatStore.setCanvasToolsActive(false)
+  chatStore.unregisterAgentScope('canvas')
   // 移除全局事件监听
   window.removeEventListener('keydown', handleKeyDown)
   window.removeEventListener('keyup', handleKeyUp)
