@@ -152,6 +152,19 @@ export function stepSummaryOf(result?: string | null): StepSummary | undefined {
     (typeof parsed.message === 'string' && parsed.message) ||
     ''
   const url = data ? summaryUrlOf(data) ?? summaryUrlOf(parsed) : summaryUrlOf(parsed)
-  if (!text && !url) return undefined
-  return { text, url }
+  if (text) return { text, url }
+  // message 缺失（如桥上原生 agent_apply_ops 回执）按结构化字段合成建卡/连线摘要
+  const source = data ?? parsed
+  const parts: string[] = []
+  if (Array.isArray(source.new_panel_ids) && source.new_panel_ids.length) {
+    parts.push(t('agent.summaryNodes', { n: source.new_panel_ids.length }))
+  }
+  if (Array.isArray(source.results) && source.results.length) {
+    const conns = source.results.filter((r) => isRecord(r) && r.op === 'add_connection' && r.ok === true).length
+    const failed = source.results.filter((r) => isRecord(r) && r.ok === false).length
+    if (conns) parts.push(t('agent.summaryConns', { n: conns }))
+    if (failed) parts.push(t('agent.summaryFailed', { n: failed }))
+  }
+  if (parts.length) return { text: parts.join(t('agent.opsJoiner')), url }
+  return url ? { text: '', url } : undefined
 }

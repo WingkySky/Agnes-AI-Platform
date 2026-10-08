@@ -74,4 +74,17 @@ describe('stepSummaryOf（批次 3 完成回执摘要）', () => {
     expect(stepSummaryOf(JSON.stringify({ ok: true, data: { final_url: 'https://cdn/f.mp4' } })))
       .toEqual({ text: '', url: 'https://cdn/f.mp4' })
   })
+
+  it('message 缺失时按结构化字段合成建卡/连线/失败摘要（桥上原生 apply_ops 回执）', () => {
+    const r = stepSummaryOf(JSON.stringify({
+      results: [
+        { index: 0, op: 'add_panel', ok: true, panel_id: 'p1' },
+        { index: 1, op: 'add_panel', ok: true, panel_id: 'p2' },
+        { index: 2, op: 'add_connection', ok: true, connection_id: 'c1' },
+        { index: 3, op: 'delete_panel', ok: false, error: 'x' },
+      ],
+      new_panel_ids: ['p1', 'p2'],
+    }))
+    expect(r?.text).toBe('已新建 2 个节点、新建 1 条连线、1 条失败')
+  })
 })
