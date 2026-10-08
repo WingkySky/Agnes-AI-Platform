@@ -1012,3 +1012,14 @@ AI 提示词优化（登录用户），返回结构化正负提示词。
 | POST | `/api/entities/{id}/adopt` | `{ version_id }` 切换采用版本（版本切换器回切） |
 
 表现图引用统一资产库 asset_id（资产须存在且属本人）。
+
+## 22. Agent 反向控制桥（页面实时执行通道）
+
+Agent 一级公民批次 2：chat 内核（任意宿主/标签页）的画布/剪辑器工具调用经后端中继到**打开着的目标页面**实时执行并回执——操作过程可见。目标页面（画布/剪辑器）经 WS 注册为 `(user_id, host, target_id)` 的执行者（同 target 多连接后注册顶替，旧连接收 `demoted` 后失能）；页外调用方走 HTTP 入。后端为纯通道：离线/超时语义结构化返回，回退逻辑在前端工具层（画布结构 op 回退服务端 `/ops`、editor 回退既有 HTTP 实现、生成类报「页面未打开」）；超时/断连**绝不自动重试**（写操作可能已执行）。工具白名单（canvas 深度 13 项剔 `agent_delegate`；editor 两个写工具）与超时分级（`agent_run_generation` 600s 其余 60s）在 `app/services/relay_service.py`，与前端 `lib/agent/bridge.ts` 双侧维护。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| WS | `/api/agent/relay/ws?token=` | 页面执行者注册通道（JWT 查询参认证，无效以 4401 关闭）。上行：`{type:'register', host, target_id}`（换目标重注册自动迁移索引）/ `ping` / `{type:'relay_result', call_id, payload}`（payload=工具结果，不透明透传）。下行：`{type:'registered'}` / `pong` / `{type:'relay_call', call_id, tool, args}` / `{type:'demoted'}` / `register_rejected` |
+| POST | `/api/agent/relay/call` | 中继一次工具调用 `{ host, target_id, tool, args }`（登录态；host/tool 白名单校验 400/403；目标归属校验 404/403）。在线返回 `{ routed:'relay', result }`；离线/下发即断返回 `{ routed:'offline' }`（调用方可安全回退）；已下发未回执 504 `bridge_timeout`（不回退） |
+| GET | `/api/agent/relay/targets` | 当前用户在线执行目标 `[{ host, target_id }]`（登录级；前端深度工具注入条件与落画布解析链用） |
+

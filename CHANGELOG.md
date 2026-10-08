@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### Agent 一级公民 · 批次 2（通用反向控制桥）
+
+- **WS 中继通道**：目标页面（画布/剪辑器）经 `WS /api/agent/relay/ws` 注册为 `(user, host, target_id)` 执行者（JWT 查询参认证、25s 心跳保活、断线指数退避重连、画布切工作区自动重注册）；同 target 多 tab 后注册顶替（旧连接收 `demoted` 静默失能）；chat 内核的画布/剪辑器写·深度工具调用经 `POST /api/agent/relay/call` 下发页面用**页内同一份工具实现**执行并回执——跨页操作过程实时可见
+- **执行路由三分**（能力按可达性组装）：本页 scope 直执行（快路径）/ 跨页桥中继 / 离线回退。canvas 深度工具（13 项，剔 `agent_delegate`）bridge 态注入（本页 scope **或**桥上有画布页，`/targets` 20s 刷新）；画布结构 op（add_panels/connect）桥优先、离线回退服务端 `canvas_ops`（op 词表 TS/Python 本就锁一致）；editor 两个写工具（apply_ops/generate_subtitles）本地加载直执行+即时合并（免等 5s 轮询）、桥上中继页面执行、离线维持既有 HTTP 实现
+- **落画布解析链插层**：`_resolveCanvasTarget` 在「本页激活」之后、偏好之前插入「桥上画布页」级——用户开着画布页时，agent 生成落图/结构写入优先落到**看得见的画布**
+- **安全与可靠性**：中继前逐请求归属校验（工作区/工程非本人 403）+ 工具白名单硬编码（授权不靠提示词）；**超时/断连绝不自动重试**（写操作可能已执行防双执行），只有「确定未执行」（offline）才回退；超时分级 `agent_run_generation` 600s 其余 60s
+- **测试**：pytest 新增 relay 服务（注册/顶替/换目标迁移/回执分发/超时断连）+ 路由（离线路由/白名单 403/归属 404+403/三态鉴权/targets）+ WS 协议（坏 token 4401/register/ping/未知回执）共 14 例（277 绿）；vitest 新增 relayCall 路由语义/桥客户端收发分发重连/白名单一致性/深度工具三分派 13 例（606 绿）+ vue-tsc 零错 + build 过；dev 代理补 `ws: true` 透传 WS 升级
+- API.md 22 章；设计文档 `.zcode/plans/2026-10-07-agent-first-class-citizen-design.md`（批次 2 节）
+
 ### Agent 一级公民 · 批次 1（全局 Agent 宿主）
 
 - **全局侧边抽屉 `AgentDrawer`**：任意页面经顶栏按钮或 `Alt+A` 快捷键唤出（输入框聚焦同样生效），右侧 440px 抽屉内组合共享聊天组件（消息列表/输入条/技能清单/模型胶囊/待发附件预览），与对话页绑定同一 chat store——会话、流式输出、确认卡全量同源；首开兜底 `init()`（幂等）+ 滚底；画布型会话选中后跳画布续聊（同对话页规则）；登录后才渲染（与顶栏 auth gate 一致）

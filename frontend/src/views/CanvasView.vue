@@ -549,6 +549,10 @@ import { useI18n } from '@/i18n'
 import { createEditorProject } from '@/api/editor'
 import { useDownload } from '@/composables/useDownload'
 import { useCanvasStore } from '@/stores/canvas'
+
+import { startBridgeClient, BRIDGE_CANVAS_TOOLS } from '@/lib/agent/bridge'
+import type { BridgeClientHandle, BridgeExecutor } from '@/lib/agent/bridge'
+import { AGENT_TOOLS } from '@/lib/agent/tools'
 import { useUserStore } from '@/stores/user'
 import { useChatStore } from '@/stores/chat'
 import { canvasSaveStatus, flushSaveCanvas } from '@/lib/canvas-storage'
@@ -4019,7 +4023,29 @@ function handleGlobalClick(event: MouseEvent) {
 watch(() => store.activeWorkspaceId, () => {
   resumeLoadingCanvasNodes(store)
   remapAssetUrls()
+  // 桥执行者随工作区切换重注册（Agent 跨页操作落当前画布）
+  canvasBridge?.refresh()
 })
+
+// ==================== 反向控制桥（页面侧执行者） ====================
+// 本画布页注册为桥执行者：chat 内核在别的标签页/对话页发起的深度工具调用
+// 经后端中继到这里，用页内同一份 AGENT_TOOLS 实现执行——操作过程实时可见
+
+let canvasBridge: BridgeClientHandle | null = null
+
+function startCanvasBridge(): void {
+  const executors: Record<string, BridgeExecutor> = {}
+  for (const t of AGENT_TOOLS) {
+    if ((BRIDGE_CANVAS_TOOLS as readonly string[]).includes(t.name)) {
+      executors[t.name] = async (args) => await t.execute(args, store)
+    }
+  }
+  canvasBridge = startBridgeClient({
+    host: 'canvas',
+    getTargetId: () => store.activeWorkspaceId || '',
+    executors,
+  })
+}
 
 onMounted(async () => {
   // 从 localforage 加载持久化数据
@@ -4030,6 +4056,8 @@ onMounted(async () => {
   store.startRemotePoll()
   // 画布页激活：统一 Agent 注册 canvas scope（深度工具随注册注入，离开画布页注销）
   chatStore.registerAgentScope({ host: 'canvas' })
+  // 反向控制桥：本页注册为画布执行者（跨页 Agent 操作实时可见）
+  startCanvasBridge()
   // 刷新后节点里的 blob object URL 已失效，按 assetId 从素材库重建
   await remapAssetUrls()
   // 统一资产层：旧 uid 型 assetId 懒迁移为数字 id（幂等）
@@ -4058,9 +4086,11 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  // 停止远端 revision 轻轮询；注销画布深度工具 scope
+  // 停止远端 revision 轻轮询；注销画布深度工具 scope 与桥执行者
   store.stopRemotePoll()
   chatStore.unregisterAgentScope('canvas')
+  canvasBridge?.stop()
+  canvasBridge = null
   // 移除全局事件监听
   window.removeEventListener('keydown', handleKeyDown)
   window.removeEventListener('keyup', handleKeyUp)

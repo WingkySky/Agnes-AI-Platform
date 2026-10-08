@@ -43,6 +43,12 @@ vi.mock('../subagent', () => ({
   runSubagent: vi.fn(),
   subagentHostFromParent: vi.fn(),
 }))
+vi.mock('../bridge', () => ({
+  listBridgeTargets: vi.fn(async () => []),
+  relayCall: vi.fn(),
+  BRIDGE_CANVAS_TOOLS: [],
+  BRIDGE_EDITOR_TOOLS: ['editor_apply_ops', 'editor_generate_subtitles'],
+}))
 
 import {
   getEditorProject,

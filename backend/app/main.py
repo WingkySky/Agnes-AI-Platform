@@ -62,6 +62,7 @@ from app.routes import prompt_presets as prompt_presets_route
 from app.routes import prompts as prompts_route
 from app.routes import admin_api_calls as admin_api_calls_route
 from app.routes import uploads as uploads_route
+from app.routes import agent_relay as agent_relay_route
 from app.routes import admin_review as admin_review_route
 from app.routes import asset as asset_route
 from app.routes import assets as assets_route
@@ -339,6 +340,7 @@ app.include_router(canvas_workspace_route.router, prefix="/api", tags=["画布�
 app.include_router(works_route.router, prefix="/api", tags=["作品"])
 app.include_router(work_entities_route.router, prefix="/api", tags=["作品实体库"])
 app.include_router(editor_route.router, prefix="/api", tags=["剪辑器"])
+app.include_router(agent_relay_route.router, prefix="/api", tags=["Agent 反向控制桥"])
 
 
 # ---------- 健康检查 ----------

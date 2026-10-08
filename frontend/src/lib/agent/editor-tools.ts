@@ -11,6 +11,7 @@
  * ===================================================== */
 
 import { Type } from 'typebox'
+import type { TSchema } from 'typebox'
 import {
   createEditorProject,
   getEditorProject,
@@ -27,6 +28,8 @@ import { probeMediaDuration, probeElementDuration } from '@/lib/editor-media'
 import type { EditorClip, EditorDocument, EditorTrack } from '@/lib/editor-types'
 import type { AgentToolResult } from './tools'
 import { autoPlacePref, resolveTarget, type CanvasTarget } from './chat-tools'
+import { relayCall, listBridgeTargets } from './bridge'
+import { useEditorStore } from '@/stores/editor'
 
 const IMAGE_DEFAULT_DURATION = 3.0
 const RENDER_POLL_MS = 3000
@@ -115,7 +118,7 @@ async function fetchAssetMap(ids: number[]): Promise<Map<number, UnifiedAsset>> 
 }
 
 /** apply_ops 核心链路：探测补全 → 命令表 fail-closed 校验（任一失败不落盘）→ PUT（写前快照） */
-async function applyOpsToProject(
+export async function applyOpsToProject(
   uid: string,
   ops: ToolOp[],
   snapshotReason: string,
@@ -214,7 +217,7 @@ async function applyOpsToProject(
   return { ok: true, doc: next, revision: saved.revision }
 }
 
-function applyOpsSummary(doc: EditorDocument, revision: number, okMessage: string): AgentToolResult {
+export function applyOpsSummary(doc: EditorDocument, revision: number, okMessage: string): AgentToolResult {
   return {
     ok: true,
     data: {
@@ -225,6 +228,39 @@ function applyOpsSummary(doc: EditorDocument, revision: number, okMessage: strin
       message: okMessage,
     },
   }
+}
+
+/** 写类工具执行路由（批次 2 反向控制桥）：
+ *  本地已加载该工程（聊天宿主开在剪辑器页）→ 现实现 + 即时远端合并（免等 5s 轮询）；
+ *  桥上有该工程（剪辑器页在别的标签页开着）→ 中继到页面执行（页面侧同函数，实时可见）；
+ *  离线 → 现实现（editor 工具本就页外可执行，3A 语义不变）。 */
+async function runEditorWrite(
+  uid: string,
+  bridgeTool: string,
+  bridgeArgs: Record<string, unknown>,
+  httpImpl: () => Promise<AgentToolResult>,
+): Promise<AgentToolResult> {
+  let store: ReturnType<typeof useEditorStore> | null = null
+  try {
+    store = useEditorStore()
+  } catch {
+    // 无活动 pinia（单测环境）按离线路径走
+  }
+  if (store && store.uid === uid) {
+    const r = await httpImpl()
+    if (r.ok) store.pollRemoteNow()
+    return r
+  }
+  try {
+    const targets = await listBridgeTargets()
+    if (targets.some((t) => t.host === 'editor' && t.target_id === uid)) {
+      const outcome = await relayCall('editor', uid, bridgeTool, bridgeArgs)
+      if (outcome.routed === 'relay') return outcome.result
+    }
+  } catch {
+    // targets 不可用退回直连实现
+  }
+  return httpImpl()
 }
 
 // ---------- editor_list_projects ----------
@@ -405,13 +441,11 @@ const editorApplyOpsTool = {
       payload: isRecord(o.payload) ? o.payload : {},
     }))
     if (!ops.length) return { ok: false, error: '缺少 ops 参数' }
-    try {
+    return runEditorWrite(target.uid, 'editor_apply_ops', { editing_project_id: target.uid, ops }, async () => {
       const r = await applyOpsToProject(target.uid, ops, 'agent_edit')
       if (!r.ok) return { ok: false, error: r.error }
       return applyOpsSummary(r.doc, r.revision, `已应用 ${ops.length} 条命令并保存（revision ${r.revision}）`)
-    } catch (e) {
-      return { ok: false, error: e instanceof Error ? e.message : String(e) }
-    }
+    })
   },
 }
 
@@ -430,7 +464,7 @@ const editorGenerateSubtitlesTool = {
   execute: async (args: Record<string, unknown>): Promise<AgentToolResult> => {
     const target = await resolveEditorTarget(args.editing_project_id)
     if (!hasTarget(target)) return { ok: false, error: target.error }
-    try {
+    return runEditorWrite(target.uid, 'editor_generate_subtitles', { editing_project_id: target.uid, track_id: args.track_id }, async () => {
       const uid = target.uid
       const detail = await getEditorProject(uid)
       const audioTracks = detail.document.tracks.filter((t) => t.kind === 'audio')
@@ -461,9 +495,7 @@ const editorGenerateSubtitlesTool = {
       ], 'agent_subtitles')
       if (!r.ok) return { ok: false, error: r.error }
       return applyOpsSummary(r.doc, r.revision, `已按转写生成 ${cues.length} 条字幕（轨 ${subtitleTrack.id}，revision ${r.revision}）`)
-    } catch (e) {
-      return { ok: false, error: e instanceof Error ? e.message : String(e) }
-    }
+    })
   },
 }
 
@@ -571,8 +603,17 @@ const editorGetRenderStatusTool = {
   },
 }
 
+/** 剪辑器工具组统一形状（ctx 可选：页外 HTTP 路径不依赖宿主上下文；桥执行器按名单分发用） */
+export interface EditorHostTool {
+  name: string
+  group: 'read' | 'write' | 'generation'
+  description: string
+  parameters: TSchema
+  execute: (args: Record<string, unknown>, ctx?: unknown) => Promise<AgentToolResult>
+}
+
 /** 剪辑器工具组（追加到 CHAT_TOOLS 末尾，测试按索引取用） */
-export const EDITOR_TOOLS = [
+export const EDITOR_TOOLS: EditorHostTool[] = [
   editorListProjectsTool,
   editorGetOverviewTool,
   editorCreateProjectTool,

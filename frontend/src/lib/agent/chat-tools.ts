@@ -18,6 +18,7 @@ import { getPreset } from '@/api/presets'
 import { applyCanvasOps, getWorkspace, listWorkspaces } from '@/api/canvasWorkspace'
 import { generateCanvasTts } from '@/api/canvas'
 import { createAsset } from '@/api/assets'
+import { relayCall } from './bridge'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useModelsStore } from '@/stores/models'
 import { useCanvasStore } from '@/stores/canvas'
@@ -60,6 +61,21 @@ export interface ChatToolContext {
 
 const NO_CANVAS_WORKSPACE_HINT =
   '没有可用的云端画布工作区：请先让用户在画布页登录并选择工作区，或不指定落画布直接生成'
+
+/** 画布深度工具不可达提示（既无本页画布上下文、桥上也没有打开着的画布页） */
+const CANVAS_UNREACHABLE_HINT =
+  '画布页未打开：画布深度工具需要在画布页内使用，或先让用户打开目标画布页（实时桥可达后本工具即可用）'
+
+/** 深度工具执行路由（chat store toolContext 提供；无 ctx 视为本页执行） */
+export type CanvasExecutionRoute =
+  | { mode: 'local' }
+  | { mode: 'bridge'; targetId: string }
+  | { mode: 'none' }
+
+async function resolveCanvasExecutionRoute(ctx: unknown): Promise<CanvasExecutionRoute> {
+  const fn = (ctx as { resolveCanvasExecution?: () => CanvasExecutionRoute } | null)?.resolveCanvasExecution
+  return typeof fn === 'function' ? fn() : { mode: 'local' }
+}
 
 function isChatCtx(ctx: unknown): ctx is ChatToolContext {
   return typeof ctx === 'object' && ctx !== null && 'getRecentMediaUrl' in ctx
@@ -115,6 +131,26 @@ async function runCanvasOps(
 ): Promise<AgentToolResult> {
   const target = await resolveTarget(ctx, workspaceIdArg)
   if (!target) return { ok: false, error: NO_CANVAS_WORKSPACE_HINT }
+  // 桥优先：目标画布页开着 → 中继到页面实时执行（过程可见，与页面 agent_apply_ops 同一 op 表）
+  // 离线/调用失败 → 服务端 canvas_ops 回退（既有行为，add_panel/add_connection 词表一致）
+  const outcome = await relayCall('canvas', target.workspaceId, 'agent_apply_ops', { ops }).catch(() => null)
+  if (outcome && outcome.routed === 'relay') {
+    const r = outcome.result
+    if (!r.ok) return { ok: false, error: r.error || '画布页执行失败' }
+    const where = targetWhere(target)
+    const data = (r.data ?? {}) as { results?: unknown; new_panel_ids?: string[] }
+    const results = Array.isArray(data.results) ? data.results : []
+    const failed = results.filter((x) => (x as { ok?: boolean })?.ok === false).length
+    return {
+      ok: true,
+      data: {
+        workspace_id: target.workspaceId,
+        results,
+        new_panel_ids: Array.isArray(data.new_panel_ids) ? data.new_panel_ids : [],
+        message: failed ? `${okMessage}（${where}，${failed} 条失败详见 results）` : `${okMessage}（${where}）`,
+      },
+    }
+  }
   try {
     const r = await applyCanvasOps(target.workspaceId, ops)
     const where = targetWhere(target)
@@ -696,14 +732,26 @@ export const CHAT_TOOLS = [
 /** 工具名清单（allowed-tools 白名单映射目标） */
 export const CHAT_TOOL_NAMES = CHAT_TOOLS.map((t) => t.name)
 
-/** 画布深度工具 → 宿主工具适配（Agent 统一宿主：仅画布页挂载）。
+/** 画布深度工具 → 宿主工具适配（Agent 统一宿主：能力按可达性组装）。
  *  AGENT_TOOLS 的 execute 第二参吃画布 store，而 chat 内核传 toolContext，故在此改写；
- *  剔除与 CHAT_TOOLS 重名的四个通用工具，避免内核按名冲突；callId/parent 透传（delegate/子代理进度用）。 */
+ *  剔除与 CHAT_TOOLS 重名的四个通用工具，避免内核按名冲突；callId/parent 透传（delegate/子代理进度用）。
+ *  执行路由三分（批次 2 反向控制桥）：本页画布 scope 直执行 / 跨页桥中继到打开着的画布页 /
+ *  不可达结构化报错。 */
 export function canvasHostTools(): HostTool[] {
   return AGENT_TOOLS.filter((t) => !CHAT_TOOL_NAMES.includes(t.name)).map((t) => ({
     name: t.name,
     description: t.description,
     parameters: t.parameters,
-    execute: (args, _ctx, callId, parent) => t.execute(args, useCanvasStore(), callId, parent),
+    execute: async (args, _ctx, callId, parent) => {
+      const route = await resolveCanvasExecutionRoute(_ctx)
+      if (route.mode === 'local') return t.execute(args, useCanvasStore(), callId, parent)
+      if (route.mode === 'bridge') {
+        const outcome = await relayCall('canvas', route.targetId, t.name, args)
+        return outcome.routed === 'relay'
+          ? outcome.result
+          : { ok: false, error: CANVAS_UNREACHABLE_HINT }
+      }
+      return { ok: false, error: CANVAS_UNREACHABLE_HINT }
+    },
   }))
 }

@@ -17,6 +17,9 @@ import EditorTimeline from '@/views/editor/EditorTimeline.vue'
 import EditorInspector from '@/views/editor/EditorInspector.vue'
 import { useEditorStore } from '@/stores/editor'
 import { useChatStore } from '@/stores/chat'
+import { startBridgeClient, BRIDGE_EDITOR_TOOLS } from '@/lib/agent/bridge'
+import type { BridgeClientHandle } from '@/lib/agent/bridge'
+import { EDITOR_TOOLS } from '@/lib/agent/editor-tools'
 import { updateEditorProject } from '@/api/editor'
 import { useRename } from '@/composables/useRename'
 import { useUserStore } from '@/stores/user'
@@ -27,6 +30,9 @@ const route = useRoute()
 const router = useRouter()
 const store = useEditorStore()
 const chatStore = useChatStore()
+
+// 反向控制桥执行者句柄（onMounted 启动、onBeforeUnmount 停止）
+let editorBridge: BridgeClientHandle | null = null
 const { rename } = useRename()
 const { t } = useI18n()
 const userStore = useUserStore()
@@ -200,12 +206,24 @@ onMounted(() => {
   store.startRemotePoll()
   // Agent scope 注册（批次 2 反向控制桥路由元数据；editor_* 工具本身常驻）
   chatStore.registerAgentScope({ host: 'editor', projectId: String(route.params.uid || '') })
+  // 反向控制桥：本页注册为剪辑工程执行者（跨页 Agent 排时间线实时可见）
+  editorBridge = startBridgeClient({
+    host: 'editor',
+    getTargetId: () => store.uid || '',
+    executors: Object.fromEntries(
+      EDITOR_TOOLS
+        .filter((t) => (BRIDGE_EDITOR_TOOLS as readonly string[]).includes(t.name))
+        .map((t) => [t.name, (args: Record<string, unknown>) => t.execute(args)]),
+    ),
+  })
   window.addEventListener('keydown', onKeydown)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
   chatStore.unregisterAgentScope('editor')
+  editorBridge?.stop()
+  editorBridge = null
   store.stopRemotePoll()
   void store.saveNow()
   store.reset()

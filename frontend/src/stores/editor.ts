@@ -289,6 +289,11 @@ export const useEditorStore = defineStore('editor', () => {
     remotePollTimer = setInterval(() => void pollRemote(), REMOTE_POLL_MS)
   }
 
+  /** 立即触发一轮远端合并（桥/本页工具链写完后即时可见，不等 5s 周期） */
+  function pollRemoteNow(): void {
+    void pollRemote()
+  }
+
   function stopRemotePoll(): void {
     if (remotePollTimer) {
       clearInterval(remotePollTimer)
@@ -574,7 +579,7 @@ export const useEditorStore = defineStore('editor', () => {
     placeAsset, appendAssetToTrack, createTopTrackOfKind, setCoverUrl, detachAudio, splitSelectedAtPlayhead, duplicateClip,
     probeMediaDuration,
     saveNow, scheduleSave, submitRender, rename,
-    startRemotePoll, stopRemotePoll,
+    startRemotePoll, stopRemotePoll, pollRemoteNow,
     select, selectTrack, reset, newId,
   }
 })

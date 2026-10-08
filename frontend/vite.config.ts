@@ -24,11 +24,12 @@ export default defineConfig({
     port: 5174,
     open: true,
     proxy: {
-      // 所有 /api 请求转发给后端 FastAPI
+      // 所有 /api 请求转发给后端 FastAPI（ws:true 透传反向控制桥 WS 升级）
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
         secure: false,
+        ws: true,
         // SSE 流式响应需要禁用缓冲和压缩
         configure: (proxy) => {
           proxy.on('proxyRes', (proxyRes) => {

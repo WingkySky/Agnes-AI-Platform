@@ -29,7 +29,7 @@ import { AgentKernel } from '@/lib/agent/kernel'
 import type { KernelEvent, AgentImageAttachment, HostTool } from '@/lib/agent/kernel'
 import { createAgentModel } from '@/lib/agent/provider'
 import { CHAT_TOOLS, canvasHostTools } from '@/lib/agent/chat-tools'
-import type { CanvasPlacementPlan, CanvasTarget } from '@/lib/agent/chat-tools'
+import type { CanvasPlacementPlan, CanvasTarget, CanvasExecutionRoute } from '@/lib/agent/chat-tools'
 import { applyCanvasOps, createWorkspace, getWorkspaceRevision, listWorkspaces } from '@/api/canvasWorkspace'
 import { getPreferences, patchPreferences } from '@/api/preferences'
 import { useCanvasStore } from '@/stores/canvas'
@@ -42,6 +42,8 @@ import { setDelegateProgressSink } from '@/lib/agent/subagent'
 import { fetchMcpBundle } from '@/lib/agent/mcp'
 import type { McpCapability } from '@/lib/agent/mcp'
 import { fetchMemoryState } from '@/lib/agent/memory'
+import { listBridgeTargets } from '@/lib/agent/bridge'
+import type { BridgeTarget } from '@/lib/agent/bridge'
 import { deleteMemoryPreference, clearMemoryPreferences } from '@/api/mcp'
 import type { AgentMode } from '@/lib/agent/policy'
 import type {
@@ -75,6 +77,9 @@ export interface AgentScope {
 const HOST_CONTEXT_SECTIONS: Partial<Record<AgentHostKind, string>> = {
   canvas: CANVAS_CONTEXT_SECTION,
 }
+
+/** 桥目标轮询定时器（进程级单例，store 重建不叠加） */
+let bridgeRefreshTimer: ReturnType<typeof setInterval> | null = null
 
 /** 内核投影消息（对话页时间线；落库/渲染共用） */
 export interface ChatKernelMessage {
@@ -373,6 +378,8 @@ export const useChatStore = defineStore('chat', {
     memoryPreferences: string[]
     /** 已注册的 Agent 执行 scope（页面挂载注册：画布页=canvas、剪辑器页=editor） */
     agentScopes: Partial<Record<AgentHostKind, AgentScope>>
+    /** 反向控制桥在线执行目标（画布/剪辑器页在别的标签页开着；20s 刷新） */
+    bridgeTargets: BridgeTarget[]
     /** 全局 Agent 抽屉开关（顶栏按钮 / Alt+A / 抽屉内关闭共用同一事实源） */
     agentDrawerOpen: boolean
     // 是否已完成初始化（配合 keep-alive）
@@ -398,6 +405,7 @@ export const useChatStore = defineStore('chat', {
     memoryAvailable: false,
     memoryPreferences: [],
     agentScopes: {},
+    bridgeTargets: [],
     agentDrawerOpen: false,
     _initialized: false,
   }),
@@ -452,6 +460,13 @@ export const useChatStore = defineStore('chat', {
         toolContext: {
           getRecentMediaUrl: (type: 'image' | 'video') => this.recentMediaUrl(sessionId, type),
           resolveCanvasTarget: (explicitId?: string) => this._resolveCanvasTarget(explicitId),
+          resolveCanvasExecution: (): CanvasExecutionRoute => {
+            // 深度工具执行路由三分：本页画布直执行 / 跨页桥中继 / 不可达
+            if (this.agentScopes.canvas) return { mode: 'local' }
+            const bridgeCanvas = this.bridgeTargets.find((t) => t.host === 'canvas')
+            if (bridgeCanvas) return { mode: 'bridge', targetId: bridgeCanvas.target_id }
+            return { mode: 'none' }
+          },
           isAutoPlaceMedia: () => this._isAutoPlaceMedia(),
           registerCanvasPlacement: (plan: CanvasPlacementPlan) => {
             this.canvasPlacements[plan.taskId] = plan
@@ -559,11 +574,29 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    /** extraTools 装配：MCP 工具 + 已注册 scope 的宿主深度工具（统一注入通道） */
+    /** extraTools 装配：MCP 工具 + 画布深度工具（本页 scope 或桥上有画布页，能力按可达性组装） */
     _extraTools(): HostTool[] {
       const tools = [...mcpToolsCache]
-      if (this.agentScopes.canvas) tools.push(...canvasHostTools())
+      if (this.agentScopes.canvas || this.bridgeTargets.some((t) => t.host === 'canvas')) {
+        tools.push(...canvasHostTools())
+      }
       return tools
+    },
+
+    /** 桥目标刷新（init 时启动 + 20s 周期；失败清空——陈旧目标只会导致中继失败走回退） */
+    async refreshBridgeTargets(): Promise<void> {
+      if (!isCloudChannel()) {
+        this.bridgeTargets = []
+        return
+      }
+      try {
+        this.bridgeTargets = await listBridgeTargets()
+      } catch {
+        this.bridgeTargets = []
+      }
+      if (!bridgeRefreshTimer) {
+        bridgeRefreshTimer = setInterval(() => void this.refreshBridgeTargets(), 20000)
+      }
     },
 
     /**
@@ -580,6 +613,12 @@ export const useChatStore = defineStore('chat', {
       if (canvas.activeWorkspaceId && canvas.workspaces.some((w) => w.id === canvas.activeWorkspaceId)) {
         const ws = canvas.workspaces.find((w) => w.id === canvas.activeWorkspaceId)
         return { workspaceId: canvas.activeWorkspaceId, workspaceName: ws?.name || '' }
+      }
+      // 2.5) 反向控制桥：画布页在别的标签页开着（实时可见的落点优先于偏好/最近）
+      const bridgeCanvas = this.bridgeTargets.find((t) => t.host === 'canvas')
+      if (bridgeCanvas) {
+        const ws = canvas.workspaces.find((w) => w.id === bridgeCanvas.target_id)
+        return { workspaceId: bridgeCanvas.target_id, workspaceName: ws?.name || '' }
       }
       // 3) 偏好现拉现读（画布页 patchPreferences 不回写本端 Pinia，旧快照不可信）
       try {
@@ -1256,6 +1295,8 @@ export const useChatStore = defineStore('chat', {
 
       this._restoreFromStorage()
       await this.loadSessions()
+      // 反向控制桥目标：启动即拉取并进入 20s 周期刷新（未登录时静默清空）
+      void this.refreshBridgeTargets()
 
       if (this.activeSessionId) {
         const exists = this.sessions.some(s => s.id === this.activeSessionId)

@@ -75,6 +75,11 @@ vi.mock('@/lib/agent/memory', () => ({
   fetchMemoryState: vi.fn(async () => ({ section: 'MEM', available: true, preferences: ['p1'] })),
 }))
 
+vi.mock('@/lib/agent/bridge', () => ({
+  listBridgeTargets: vi.fn(async () => []),
+  relayCall: vi.fn(),
+}))
+
 vi.mock('@/lib/agent/session-store', () => ({
   toBackendMessages: () => [],
 }))
