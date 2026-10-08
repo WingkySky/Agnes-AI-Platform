@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Agent 一级公民 · 批次 3（过程可视化）
+
+- **对话流执行态标识**：工具卡步骤行补执行来源小标签（本页执行 / 页面实时执行 / 服务端执行）——工具 execute 经 `toolContext.noteToolRoute(callId, route)` 按 callId 回填步骤行（并发安全），三分派各处接入（画布深度工具/结构 op 桥优先与离线回退/剪辑器写工具三路）；标记随步骤落库，历史会话回看仍可见
+- **页面侧「Agent 正在操作」徽标**：画布/剪辑器页新增底部居中浮动胶囊——本页被跨页 Agent 操作时亮起（spinner + 用户可读操作文案），回执后淡出熄灭；`startBridgeClient` 新增 `onActivity` 活动回调（真实分发执行才触发，内部计数器处理并发，demoted 与白名单兜底不触发）；本页直执行不亮（操作本身在眼前）
+- **完成回执结果摘要**：工具卡完成态下方新增一行用户可读摘要（结果 message + 白名单产物 URL 可点击「打开」，如配音 audio_url/成片 final_url）；纯函数 `stepSummaryOf` 从结果 JSON 提取（data 一层内 message、`url/audio_url/video_url/final_url` 白名单 + http(s) 协议校验防注入），对话页与全局抽屉共用
+- **顺带修复**：桥客户端 `demoted` 存量缺口——后端顶替消息前端从未处理，被顶替的旧标签页仍会继续执行操作（双执行风险），现正确置位失能
+- **测试**：vitest 新增 onActivity 亮灭/并发计数/demoted、执行来源回填、routeLabel/stepSummaryOf、toStepView 投影共 11 例（617 绿）+ vue-tsc 零错 + build 过；后端零改动
+
 ### Agent 一级公民 · 批次 2（通用反向控制桥）
 
 - **WS 中继通道**：目标页面（画布/剪辑器）经 `WS /api/agent/relay/ws` 注册为 `(user, host, target_id)` 执行者（JWT 查询参认证、25s 心跳保活、断线指数退避重连、画布切工作区自动重注册）；同 target 多 tab 后注册顶替（旧连接收 `demoted` 静默失能）；chat 内核的画布/剪辑器写·深度工具调用经 `POST /api/agent/relay/call` 下发页面用**页内同一份工具实现**执行并回执——跨页操作过程实时可见

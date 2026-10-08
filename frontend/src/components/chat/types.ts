@@ -16,6 +16,10 @@ export interface ChatStepView {
   result?: string | null
   /** 运行态实时进度文本（agent_delegate 子任务进度，宿主 i18n 组装） */
   progress?: string
+  /** 执行来源文案（批次 3 过程可视化：本页执行/页面实时执行/服务端执行，宿主 i18n 组装） */
+  routeLabel?: string
+  /** 完成回执摘要（批次 3：结果 message + 可选产物链接） */
+  summary?: { text: string; url?: string }
 }
 
 /** 用户消息附图（缩略图，点击预览） */

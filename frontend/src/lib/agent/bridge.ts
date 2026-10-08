@@ -97,6 +97,9 @@ export interface BridgeClientOptions {
   getTargetId: () => string
   /** 本页可执行的桥工具集（超出后端白名单的调用会被后端拒绝，这里兜底防御） */
   executors: Record<string, BridgeExecutor>
+  /** 执行活动回调（批次 3 过程可视化）：真实分发给 executor 才触发（demoted/白名单兜底不触发）；
+   *  并发由客户端内部计数，0→1 亮、1→0 灭，页面无需自己计数 */
+  onActivity?: (active: boolean, tool: string, args: Record<string, unknown>) => void
 }
 
 /** 启动页面侧执行者：注册/心跳/断线重连/分发执行；返回 stop/refresh 句柄 */
@@ -108,6 +111,7 @@ export function startBridgeClient(opts: BridgeClientOptions): BridgeClientHandle
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null
   let backoffMs = 1000
   let registeredTarget = ''
+  let activityDepth = 0
 
   function clearTimers(): void {
     if (heartbeatTimer) {
@@ -156,8 +160,10 @@ export function startBridgeClient(opts: BridgeClientOptions): BridgeClientHandle
         void dispatch(msg.call_id, msg.tool, msg.args ?? {})
       } else if (msg.type === 'register_rejected') {
         console.warn('[bridge] register_rejected:', msg)
+      } else if (msg.type === 'demoted') {
+        // 被其他标签页顶替后静默失能（不自动抢回，避免双 tab 乒乓）；页面刷新/重连时重置
+        demoted = true
       }
-      // demoted：被其他标签页顶替后静默失能（不自动抢回，避免双 tab 乒乓）；页面刷新/重连时重置
     }
     ws.onclose = () => {
       clearTimers()
@@ -178,10 +184,15 @@ export function startBridgeClient(opts: BridgeClientOptions): BridgeClientHandle
     } else if (!executor) {
       payload = { ok: false, error: `工具 ${tool} 不在本页执行器清单内` }
     } else {
+      activityDepth++
+      if (activityDepth === 1) opts.onActivity?.(true, tool, args)
       try {
         payload = await executor(args)
       } catch (e) {
         payload = { ok: false, error: e instanceof Error ? e.message : String(e) }
+      } finally {
+        activityDepth = Math.max(0, activityDepth - 1)
+        if (activityDepth === 0) opts.onActivity?.(false, '', {})
       }
     }
     send({ type: 'relay_result', call_id: callId, payload })

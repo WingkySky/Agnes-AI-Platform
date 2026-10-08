@@ -26,6 +26,7 @@ vi.mock('../subagent', () => ({ runSubagent: vi.fn(), subagentHostFromParent: vi
 
 import client from '@/api/client'
 import { AGENT_TOOLS } from '../tools'
+import type { AgentToolResult } from '../tools'
 import { canvasHostTools, CHAT_TOOL_NAMES } from '../chat-tools'
 import {
   relayCall,
@@ -194,6 +195,94 @@ describe('startBridgeClient', () => {
     handle.stop()
     vi.useRealTimers()
   })
+
+  it('onActivity：真实执行前亮、回执后灭；executor 缺失不触发', async () => {
+    let release!: (r: AgentToolResult) => void
+    const executor = vi.fn(
+      () => new Promise<AgentToolResult>((resolve) => { release = resolve }),
+    )
+    const activity = vi.fn()
+    const handle = startBridgeClient({
+      host: 'canvas',
+      getTargetId: () => 'ws_x',
+      executors: { agent_get_state: executor },
+      onActivity: activity,
+    })
+    await Promise.resolve()
+    const ws = FakeWebSocket.instances[0]
+    ws.onopen?.()
+    ws.serverSend({ type: 'relay_call', call_id: 'c1', tool: 'agent_get_state', args: { a: 1 } })
+    await vi.waitFor(() => expect(executor).toHaveBeenCalled())
+    expect(activity).toHaveBeenCalledTimes(1)
+    expect(activity).toHaveBeenNthCalledWith(1, true, 'agent_get_state', { a: 1 })
+
+    // 白名单外工具：兜底回执失败，不触发活动
+    ws.serverSend({ type: 'relay_call', call_id: 'c2', tool: 'agent_delegate', args: {} })
+    await vi.waitFor(() => {
+      const result = ws.sent.map((s) => JSON.parse(s)).find((m) => m.call_id === 'c2')
+      expect(result?.payload.ok).toBe(false)
+    })
+    expect(activity).toHaveBeenCalledTimes(1)
+
+    release({ ok: true, data: {} })
+    await vi.waitFor(() => expect(activity).toHaveBeenNthCalledWith(2, false, '', {}))
+    handle.stop()
+  })
+
+  it('onActivity：并发调用计数，最后一个回执才灭', async () => {
+    const releases: Array<(r: AgentToolResult) => void> = []
+    const executor = vi.fn(
+      () => new Promise<AgentToolResult>((resolve) => { releases.push(resolve) }),
+    )
+    const activity = vi.fn()
+    const handle = startBridgeClient({
+      host: 'editor',
+      getTargetId: () => 'p1',
+      executors: { editor_apply_ops: executor },
+      onActivity: activity,
+    })
+    await Promise.resolve()
+    const ws = FakeWebSocket.instances[0]
+    ws.onopen?.()
+    ws.serverSend({ type: 'relay_call', call_id: 'a', tool: 'editor_apply_ops', args: {} })
+    ws.serverSend({ type: 'relay_call', call_id: 'b', tool: 'editor_apply_ops', args: {} })
+    await vi.waitFor(() => expect(executor).toHaveBeenCalledTimes(2))
+    expect(activity).toHaveBeenCalledTimes(1)
+
+    releases[0]({ ok: true, data: {} })
+    await vi.waitFor(() => {
+      const result = ws.sent.map((s) => JSON.parse(s)).find((m) => m.call_id === 'a')
+      expect(result?.payload.ok).toBe(true)
+    })
+    expect(activity).toHaveBeenCalledTimes(1)
+
+    releases[1]({ ok: true, data: {} })
+    await vi.waitFor(() => expect(activity).toHaveBeenNthCalledWith(2, false, '', {}))
+    handle.stop()
+  })
+
+  it('demoted：置位后 relay_call 直接回执失败且不触发 onActivity', async () => {
+    const executor = vi.fn(async () => ({ ok: true, data: {} }))
+    const activity = vi.fn()
+    const handle = startBridgeClient({
+      host: 'canvas',
+      getTargetId: () => 'ws_x',
+      executors: { agent_get_state: executor },
+      onActivity: activity,
+    })
+    await Promise.resolve()
+    const ws = FakeWebSocket.instances[0]
+    ws.onopen?.()
+    ws.serverSend({ type: 'demoted' })
+    ws.serverSend({ type: 'relay_call', call_id: 'd1', tool: 'agent_get_state', args: {} })
+    await vi.waitFor(() => {
+      const result = ws.sent.map((s) => JSON.parse(s)).find((m) => m.call_id === 'd1')
+      expect(result?.payload.ok).toBe(false)
+    })
+    expect(executor).not.toHaveBeenCalled()
+    expect(activity).not.toHaveBeenCalled()
+    handle.stop()
+  })
 })
 
 describe('桥白名单一致性', () => {
@@ -240,5 +329,24 @@ describe('canvasHostTools 深度工具三分派', () => {
     expect(r.ok).toBe(false)
     expect(r.error).toContain('画布页未打开')
     expect(postMock).not.toHaveBeenCalled()
+  })
+
+  it('执行来源回填：local/bridge 经 noteToolRoute 写入，none 不回填', async () => {
+    const notes: Array<[string, string]> = []
+    const ctxWithNotes = (route: Record<string, unknown>) => ({
+      resolveCanvasExecution: () => route,
+      noteToolRoute: (callId: string, r: string) => notes.push([callId, r]),
+    })
+    await getStateTool.execute({}, ctxWithNotes({ mode: 'local' }), 'call_l')
+    expect(notes).toEqual([['call_l', 'local']])
+
+    notes.length = 0
+    postMock.mockResolvedValueOnce({ routed: 'relay', result: { ok: true, data: {} } })
+    await getStateTool.execute({}, ctxWithNotes({ mode: 'bridge', targetId: 'ws_r' }), 'call_b')
+    expect(notes).toEqual([['call_b', 'bridge']])
+
+    notes.length = 0
+    await getStateTool.execute({}, ctxWithNotes({ mode: 'none' }), 'call_n')
+    expect(notes).toEqual([])
   })
 })

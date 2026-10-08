@@ -526,6 +526,14 @@
         @change="handleFileSelect"
       />
     </main>
+
+    <!-- Agent 跨页操作徽标（批次 3 过程可视化）：桥执行期间亮起、回执后熄灭 -->
+    <Transition name="agent-badge">
+      <div v-if="bridgeBadge.on" class="agent-activity-badge">
+        <el-icon class="is-loading"><Loading /></el-icon>
+        <span>{{ t('agent.pageBadge') }}{{ bridgeBadge.label }}</span>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -542,6 +550,8 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { Loading } from '@element-plus/icons-vue'
+import { toolStepLabel } from '@/lib/agent/tool-labels'
 import { useConfirm } from '@/composables/useConfirm'
 import { useCopyText } from '@/composables/useCopyText'
 import { Download, Pencil, Plus, LayoutGrid, Link2 } from 'lucide-vue-next'
@@ -4033,6 +4043,9 @@ watch(() => store.activeWorkspaceId, () => {
 
 let canvasBridge: BridgeClientHandle | null = null
 
+// Agent 跨页操作徽标状态：亮灭与内容由桥客户端 onActivity 驱动（并发计数在桥内）
+const bridgeBadge = reactive({ on: false, label: '' })
+
 function startCanvasBridge(): void {
   const executors: Record<string, BridgeExecutor> = {}
   for (const t of AGENT_TOOLS) {
@@ -4044,6 +4057,14 @@ function startCanvasBridge(): void {
     host: 'canvas',
     getTargetId: () => store.activeWorkspaceId || '',
     executors,
+    onActivity: (active, tool, args) => {
+      if (active) {
+        bridgeBadge.label = toolStepLabel(tool, args)
+        bridgeBadge.on = true
+      } else {
+        bridgeBadge.on = false
+      }
+    },
   })
 }
 
@@ -4455,5 +4476,44 @@ async function handleUserLogout() {
 /* ==================== 隐藏文件输入 ==================== */
 .hidden-file-input {
   display: none;
+}
+
+/* ==================== Agent 跨页操作徽标（批次 3） ==================== */
+.agent-activity-badge {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: var(--agnes-bg-card, var(--el-bg-color, #fff));
+  border: 1px solid var(--agnes-border, var(--el-border-color, #dcdfe6));
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+  font-size: 13px;
+  color: var(--agnes-text-primary, var(--el-text-color-primary, #303133));
+  max-width: min(72vw, 520px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-activity-badge .el-icon {
+  color: var(--agnes-primary, var(--el-color-primary, #409eff));
+  flex-shrink: 0;
+}
+
+.agent-badge-enter-active,
+.agent-badge-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.agent-badge-enter-from,
+.agent-badge-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(8px);
 }
 </style>

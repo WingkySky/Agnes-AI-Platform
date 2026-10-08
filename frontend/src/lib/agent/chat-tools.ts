@@ -24,7 +24,7 @@ import { useModelsStore } from '@/stores/models'
 import { useCanvasStore } from '@/stores/canvas'
 import type { ImageGenerationRequest, VideoGenerationRequest } from '@/types'
 import type { AgentToolResult } from './tools'
-import { AGENT_TOOLS } from './tools'
+import { AGENT_TOOLS, noteToolRoute } from './tools'
 import type { AgentKernel, HostTool } from './kernel'
 import { runSubagent, subagentHostFromParent } from './subagent'
 import { loadAgentSkillFull, readSkillResource, saveAgentSkill, SKILL_CONTENT_MAX_CHARS } from './skills'
@@ -72,9 +72,13 @@ export type CanvasExecutionRoute =
   | { mode: 'bridge'; targetId: string }
   | { mode: 'none' }
 
-async function resolveCanvasExecutionRoute(ctx: unknown): Promise<CanvasExecutionRoute> {
+async function resolveCanvasExecutionRoute(ctx: unknown, callId?: string): Promise<CanvasExecutionRoute> {
   const fn = (ctx as { resolveCanvasExecution?: () => CanvasExecutionRoute } | null)?.resolveCanvasExecution
-  return typeof fn === 'function' ? fn() : { mode: 'local' }
+  const route = typeof fn === 'function' ? fn() : { mode: 'local' as const }
+  // 执行来源回填（批次 3）：none = 不可达无执行，不回填
+  if (route.mode === 'local') noteToolRoute(ctx, callId, 'local')
+  else if (route.mode === 'bridge') noteToolRoute(ctx, callId, 'bridge')
+  return route
 }
 
 function isChatCtx(ctx: unknown): ctx is ChatToolContext {
@@ -128,11 +132,13 @@ async function runCanvasOps(
   workspaceIdArg: unknown,
   ops: Record<string, unknown>[],
   okMessage: string,
+  callId?: string,
 ): Promise<AgentToolResult> {
   const target = await resolveTarget(ctx, workspaceIdArg)
   if (!target) return { ok: false, error: NO_CANVAS_WORKSPACE_HINT }
   // 桥优先：目标画布页开着 → 中继到页面实时执行（过程可见，与页面 agent_apply_ops 同一 op 表）
   // 离线/调用失败 → 服务端 canvas_ops 回退（既有行为，add_panel/add_connection 词表一致）
+  noteToolRoute(ctx, callId, 'bridge')
   const outcome = await relayCall('canvas', target.workspaceId, 'agent_apply_ops', { ops }).catch(() => null)
   if (outcome && outcome.routed === 'relay') {
     const r = outcome.result
@@ -151,6 +157,7 @@ async function runCanvasOps(
       },
     }
   }
+  noteToolRoute(ctx, callId, 'server')
   try {
     const r = await applyCanvasOps(target.workspaceId, ops)
     const where = targetWhere(target)
@@ -614,7 +621,7 @@ const canvasAddPanelsTool = {
       height: Type.Optional(Type.Number()),
     }), { minItems: 1, maxItems: 20, description: '要新建的节点列表' }),
   }),
-  execute: async (args: Record<string, unknown>, ctx: unknown): Promise<AgentToolResult> => {
+  execute: async (args: Record<string, unknown>, ctx: unknown, callId?: string): Promise<AgentToolResult> => {
     const arr = Array.isArray(args.panels) ? args.panels.filter(isRecord) : []
     if (!arr.length) return { ok: false, error: '缺少 panels 参数' }
     const ops = arr.map((p) => {
@@ -635,7 +642,7 @@ const canvasAddPanelsTool = {
         height: typeof p.height === 'number' ? p.height : undefined,
       }
     })
-    return runCanvasOps(ctx, args.canvas_workspace_id, ops, '节点已添加到画布')
+    return runCanvasOps(ctx, args.canvas_workspace_id, ops, '节点已添加到画布', callId)
   },
 }
 
@@ -652,7 +659,7 @@ const canvasConnectTool = {
       target_panel_id: Type.String({ description: '下游节点 id 或名称' }),
     }), { minItems: 1, maxItems: 20, description: '要创建的连线列表' }),
   }),
-  execute: async (args: Record<string, unknown>, ctx: unknown): Promise<AgentToolResult> => {
+  execute: async (args: Record<string, unknown>, ctx: unknown, callId?: string): Promise<AgentToolResult> => {
     const arr = Array.isArray(args.connections) ? args.connections.filter(isRecord) : []
     if (!arr.length) return { ok: false, error: '缺少 connections 参数' }
     const ops = arr.map((c) => ({
@@ -660,7 +667,7 @@ const canvasConnectTool = {
       source_panel_id: typeof c.source_panel_id === 'string' ? c.source_panel_id : '',
       target_panel_id: typeof c.target_panel_id === 'string' ? c.target_panel_id : '',
     }))
-    return runCanvasOps(ctx, args.canvas_workspace_id, ops, '连线已创建')
+    return runCanvasOps(ctx, args.canvas_workspace_id, ops, '连线已创建', callId)
   },
 }
 
@@ -743,7 +750,7 @@ export function canvasHostTools(): HostTool[] {
     description: t.description,
     parameters: t.parameters,
     execute: async (args, _ctx, callId, parent) => {
-      const route = await resolveCanvasExecutionRoute(_ctx)
+      const route = await resolveCanvasExecutionRoute(_ctx, callId)
       if (route.mode === 'local') return t.execute(args, useCanvasStore(), callId, parent)
       if (route.mode === 'bridge') {
         const outcome = await relayCall('canvas', route.targetId, t.name, args)

@@ -5,9 +5,9 @@
  * 所有区域直读 editor store，不层层传 props
  * ===================================================== */
 
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Download, Edit, VideoPlay } from '@element-plus/icons-vue'
+import { ArrowLeft, Download, Edit, Loading, VideoPlay } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import type { Ref } from 'vue'
 
@@ -19,6 +19,7 @@ import { useEditorStore } from '@/stores/editor'
 import { useChatStore } from '@/stores/chat'
 import { startBridgeClient, BRIDGE_EDITOR_TOOLS } from '@/lib/agent/bridge'
 import type { BridgeClientHandle } from '@/lib/agent/bridge'
+import { toolStepLabel } from '@/lib/agent/tool-labels'
 import { EDITOR_TOOLS } from '@/lib/agent/editor-tools'
 import { updateEditorProject } from '@/api/editor'
 import { useRename } from '@/composables/useRename'
@@ -33,6 +34,8 @@ const chatStore = useChatStore()
 
 // 反向控制桥执行者句柄（onMounted 启动、onBeforeUnmount 停止）
 let editorBridge: BridgeClientHandle | null = null
+// Agent 跨页操作徽标状态：亮灭与内容由桥客户端 onActivity 驱动（并发计数在桥内）
+const bridgeBadge = reactive({ on: false, label: '' })
 const { rename } = useRename()
 const { t } = useI18n()
 const userStore = useUserStore()
@@ -215,6 +218,14 @@ onMounted(() => {
         .filter((t) => (BRIDGE_EDITOR_TOOLS as readonly string[]).includes(t.name))
         .map((t) => [t.name, (args: Record<string, unknown>) => t.execute(args)]),
     ),
+    onActivity: (active, tool, args) => {
+      if (active) {
+        bridgeBadge.label = toolStepLabel(tool, args)
+        bridgeBadge.on = true
+      } else {
+        bridgeBadge.on = false
+      }
+    },
   })
   window.addEventListener('keydown', onKeydown)
 })
@@ -266,6 +277,14 @@ onBeforeUnmount(() => {
         <EditorTimeline :total-duration="totalDuration" />
       </div>
     </div>
+
+    <!-- Agent 跨页操作徽标（批次 3 过程可视化）：桥执行期间亮起、回执后熄灭 -->
+    <Transition name="agent-badge">
+      <div v-if="bridgeBadge.on" class="agent-activity-badge">
+        <el-icon class="is-loading"><Loading /></el-icon>
+        <span>{{ t('agent.pageBadge') }}{{ bridgeBadge.label }}</span>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -354,5 +373,44 @@ onBeforeUnmount(() => {
 }
 .splitter:hover {
   background: var(--el-color-primary-light-5);
+}
+
+/* ==================== Agent 跨页操作徽标（批次 3） ==================== */
+.agent-activity-badge {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: var(--el-bg-color, #fff);
+  border: 1px solid var(--el-border-color, #dcdfe6);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+  font-size: 13px;
+  color: var(--el-text-color-primary, #303133);
+  max-width: min(72vw, 520px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-activity-badge .el-icon {
+  color: var(--el-color-primary, #409eff);
+  flex-shrink: 0;
+}
+
+.agent-badge-enter-active,
+.agent-badge-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.agent-badge-enter-from,
+.agent-badge-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(8px);
 }
 </style>

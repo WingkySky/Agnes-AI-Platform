@@ -1707,6 +1707,7 @@ const enUS = {
     stepDone: 'Done',
     stepFailed: 'Failed',
     stepRejected: 'Rejected',
+    stepOpenLink: 'Open',
     canvasSession: 'Canvas session (click to continue on canvas)',
   },
 
@@ -4102,6 +4103,10 @@ const enUS = {
     actExtractEntities: 'Extract entity designs',
     actSplitStoryboard: 'Split storyboard',
     mcpToolLabel: 'External tool · {tool}',
+    routeLocal: 'This page',
+    routeBridge: 'Live on page',
+    routeServer: 'Server-side',
+    pageBadge: 'Agent working: ',
     confirmStageGen: 'Agent is about to start the "{stage}" generation stage, please confirm',
     confirmMcpTool: 'Agent is about to call external MCP tool "{tool}", please confirm',
     confirmGenerationTool: 'Agent is about to run "{tool}" (long-running operation), please confirm',

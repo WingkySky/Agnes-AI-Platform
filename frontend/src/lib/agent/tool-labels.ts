@@ -111,3 +111,47 @@ export function toolStepLabel(tool: string, args?: Record<string, unknown>, opts
   if (!entry) return tool
   return entry.detail ? entry.detail(args ?? {}, opts ?? {}) : t(entry.key)
 }
+
+/** 步骤执行来源文案（批次 3 过程可视化）；未回填 route 返回 undefined 不占位 */
+export function toolRouteLabel(route?: string): string | undefined {
+  if (route === 'local') return t('agent.routeLocal')
+  if (route === 'bridge') return t('agent.routeBridge')
+  if (route === 'server') return t('agent.routeServer')
+  return undefined
+}
+
+/** 完成回执摘要（批次 3）：取结果 JSON 的 message（顶层或 data 一层内）+ 白名单产物 URL；
+ *  非 JSON / ok:false / 无可展示内容返回 undefined（失败态沿用既有 error 渲染） */
+export interface StepSummary {
+  text: string
+  url?: string
+}
+
+const SUMMARY_URL_KEYS = ['url', 'audio_url', 'video_url', 'final_url']
+
+function summaryUrlOf(source: Record<string, unknown>): string | undefined {
+  for (const key of SUMMARY_URL_KEYS) {
+    const v = source[key]
+    if (typeof v === 'string' && /^https?:\/\//.test(v)) return v
+  }
+  return undefined
+}
+
+export function stepSummaryOf(result?: string | null): StepSummary | undefined {
+  if (!result) return undefined
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(result)
+  } catch {
+    return undefined
+  }
+  if (!isRecord(parsed) || parsed.ok === false) return undefined
+  const data = isRecord(parsed.data) ? parsed.data : undefined
+  const text =
+    (data && typeof data.message === 'string' && data.message) ||
+    (typeof parsed.message === 'string' && parsed.message) ||
+    ''
+  const url = data ? summaryUrlOf(data) ?? summaryUrlOf(parsed) : summaryUrlOf(parsed)
+  if (!text && !url) return undefined
+  return { text, url }
+}

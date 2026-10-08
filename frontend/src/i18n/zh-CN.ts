@@ -1692,6 +1692,7 @@ const zhCN = {
     stepDone: '完成',
     stepFailed: '失败',
     stepRejected: '已拒绝',
+    stepOpenLink: '打开',
     canvasSession: '画布会话（点击进入画布续聊）',
   },
 
@@ -4094,6 +4095,10 @@ const zhCN = {
     actExtractEntities: '提取实体设定',
     actSplitStoryboard: '拆分分镜',
     mcpToolLabel: '外部工具 · {tool}',
+    routeLocal: '本页执行',
+    routeBridge: '页面实时执行',
+    routeServer: '服务端执行',
+    pageBadge: 'Agent 正在',
     confirmStageGen: 'Agent 即将开始「{stage}」阶段的生成，请确认',
     confirmMcpTool: 'Agent 即将调用外部 MCP 工具「{tool}」，请确认',
     confirmGenerationTool: 'Agent 即将执行「{tool}」（耗时操作），请确认',

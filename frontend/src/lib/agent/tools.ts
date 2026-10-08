@@ -40,6 +40,17 @@ export interface AgentToolResult {
 /** 工具权限组 */
 export type AgentToolGroup = 'read' | 'write' | 'generation'
 
+/** 工具执行路由（批次 3 过程可视化：本页直执行 / 跨页桥中继 / 离线回退服务端） */
+export type ToolRoute = 'local' | 'bridge' | 'server'
+
+/** 把执行路由回填给宿主（chat store 经 toolContext 提供 noteToolRoute 写入步骤行）；
+ *  callId 由内核 execute 第三参透传，并发调用各自定位，无"当前步骤"歧义 */
+export function noteToolRoute(ctx: unknown, callId: string | undefined, route: ToolRoute): void {
+  if (!callId || !ctx || typeof ctx !== 'object') return
+  const fn = (ctx as { noteToolRoute?: (callId: string, route: ToolRoute) => void }).noteToolRoute
+  if (typeof fn === 'function') fn(callId, route)
+}
+
 /** 工具层所需的最小画布 store 结构（真实 canvas store 结构化兼容） */
 export interface AgentCanvasStore {
   panels: CanvasPanel[]

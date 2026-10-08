@@ -1,6 +1,6 @@
 /* Chat store 内核投影单测：发送流/生成工具挂占位与轮询回填/切换恢复/存量上下文重建 */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 const mocks = vi.hoisted(() => {
@@ -51,7 +51,8 @@ vi.mock('@/lib/agent/skills', () => ({
   getActiveSkillScope: vi.fn(() => null),
 }))
 
-import { useChatStore, chatContextFromRows } from '../chat'
+import { useChatStore, chatContextFromRows, toStepView } from '../chat'
+import { setLocale } from '@/i18n'
 import {
   createChatSession, getChatSessions, summarizeChatSession,
   getChatMessages, getMediaStatus, getAgentSession, syncAgentSession,
@@ -88,6 +89,25 @@ beforeEach(() => {
   api.getAgentSession.mockReset().mockRejectedValue(new Error('no ctx'))
   api.syncAgentSession.mockReset().mockResolvedValue({ id: 1, title: '', created_at: '', updated_at: '' })
   vi.mocked(createImageTask).mockReset().mockResolvedValue({ task_id: 'img_1', status: 'pending' } as never)
+})
+
+describe('toStepView：执行来源与结果摘要（批次 3 过程可视化）', () => {
+  beforeAll(() => setLocale('zh-CN'))
+
+  it('route 映射执行来源文案', () => {
+    expect(toStepView({ callId: 'c1', tool: 'agent_apply_ops', status: 'running', route: 'bridge' }).routeLabel).toBe('页面实时执行')
+    expect(toStepView({ callId: 'c2', tool: 'editor_apply_ops', status: 'running', route: 'local' }).routeLabel).toBe('本页执行')
+    expect(toStepView({ callId: 'c3', tool: 'canvas_add_panels', status: 'running', route: 'server' }).routeLabel).toBe('服务端执行')
+    expect(toStepView({ callId: 'c4', tool: 'agent_get_state', status: 'running' }).routeLabel).toBeUndefined()
+  })
+
+  it('done 步骤提取结果摘要，运行中不提取', () => {
+    const result = JSON.stringify({ ok: true, data: { message: '配音已生成', audio_url: 'https://cdn/a.mp3' } })
+    expect(toStepView({ callId: 'd1', tool: 'generate_tts', status: 'done', result }).summary)
+      .toEqual({ text: '配音已生成', url: 'https://cdn/a.mp3' })
+    expect(toStepView({ callId: 'd2', tool: 'generate_tts', status: 'running', result }).summary).toBeUndefined()
+    expect(toStepView({ callId: 'd3', tool: 'generate_tts', status: 'error', result: '直接失败文本' }).summary).toBeUndefined()
+  })
 })
 
 describe('chat store：内核投影', () => {

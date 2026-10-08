@@ -24,7 +24,8 @@ import {
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { isMediaSuccess, isMediaFailed } from '@/lib/media-status'
 import { t } from '@/i18n'
-import { toolStepLabel } from '@/lib/agent/tool-labels'
+import { toolStepLabel, toolRouteLabel, stepSummaryOf } from '@/lib/agent/tool-labels'
+import type { ToolRoute } from '@/lib/agent/tools'
 import { AgentKernel } from '@/lib/agent/kernel'
 import type { KernelEvent, AgentImageAttachment, HostTool } from '@/lib/agent/kernel'
 import { createAgentModel } from '@/lib/agent/provider'
@@ -173,8 +174,17 @@ function imageDataUrl(img: { data: string; mimeType: string }): string {
   return `data:${img.mimeType};base64,${img.data}`
 }
 
-function toStepView(s: AgentStepRecord): ChatStepView {
-  return { callId: s.callId, label: toolStepLabel(s.tool, s.args), tooltip: s.tool, status: toStepStatus(s.status), progress: delegateProgressText(s) }
+/** 步骤记录 → 视图行（导出供测试；routeLabel/summary 为批次 3 过程可视化字段） */
+export function toStepView(s: AgentStepRecord): ChatStepView {
+  return {
+    callId: s.callId,
+    label: toolStepLabel(s.tool, s.args),
+    tooltip: s.tool,
+    status: toStepStatus(s.status),
+    progress: delegateProgressText(s),
+    routeLabel: toolRouteLabel(s.route),
+    summary: s.status === 'done' ? stepSummaryOf(s.result) : undefined,
+  }
 }
 
 /** agent_delegate 步骤的实时进度文本（running 态渲染，i18n 组装） */
@@ -466,6 +476,11 @@ export const useChatStore = defineStore('chat', {
             const bridgeCanvas = this.bridgeTargets.find((t) => t.host === 'canvas')
             if (bridgeCanvas) return { mode: 'bridge', targetId: bridgeCanvas.target_id }
             return { mode: 'none' }
+          },
+          // 执行来源回填（批次 3 过程可视化）：工具 execute 内按 callId 定位步骤行写入
+          noteToolRoute: (callId: string, route: ToolRoute) => {
+            const step = this._findStep(this._messagesOf(sessionId), callId)
+            if (step) step.route = route
           },
           isAutoPlaceMedia: () => this._isAutoPlaceMedia(),
           registerCanvasPlacement: (plan: CanvasPlacementPlan) => {

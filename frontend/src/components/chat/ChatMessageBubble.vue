@@ -85,9 +85,14 @@
                 <el-icon v-else-if="step.status === 'error'" class="cb-step-error"><CircleClose /></el-icon>
                 <el-icon v-else class="cb-step-rejected"><Remove /></el-icon>
                 <span class="cb-step-label">{{ step.label }}</span>
+                <span v-if="step.routeLabel" class="cb-step-route">{{ step.routeLabel }}</span>
                 <span class="cb-step-status">{{ statusText(step.status) }}</span>
               </div>
               <div v-if="step.progress" class="cb-step-progress">{{ step.progress }}</div>
+              <div v-if="step.summary" class="cb-step-summary">
+                <span>{{ step.summary.text }}</span>
+                <a v-if="step.summary.url" :href="step.summary.url" target="_blank" rel="noopener">{{ t('chat.stepOpenLink') }}</a>
+              </div>
               <slot name="step-extra" :step="step" />
             </template>
           </div>
@@ -379,6 +384,35 @@ function mediaImageIndex(currentIdx: number): number {
 
 .cb-step-status {
   opacity: 0.8;
+}
+
+.cb-step-route {
+  font-size: 11px;
+  color: var(--cb-muted, var(--agnes-text-muted, #8b93a8));
+  background: var(--cb-step-route-bg, var(--agnes-surface-hover, rgba(139, 147, 168, 0.14)));
+  border-radius: 4px;
+  padding: 0 5px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.cb-step-summary {
+  font-size: 11px;
+  color: var(--cb-muted, var(--agnes-text-muted, #8b93a8));
+  padding-left: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cb-step-summary a {
+  color: var(--cb-link, var(--agnes-primary, var(--el-color-primary, #409eff)));
+  margin-left: 4px;
+  text-decoration: none;
+}
+
+.cb-step-summary a:hover {
+  text-decoration: underline;
 }
 
 /* ---- 用户附图 ---- */

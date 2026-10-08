@@ -27,6 +27,7 @@ import { applyCommand, cmd, EditorCommandError, EDITOR_OPS, type EditorOp } from
 import { probeMediaDuration, probeElementDuration } from '@/lib/editor-media'
 import type { EditorClip, EditorDocument, EditorTrack } from '@/lib/editor-types'
 import type { AgentToolResult } from './tools'
+import { noteToolRoute } from './tools'
 import { autoPlacePref, resolveTarget, type CanvasTarget } from './chat-tools'
 import { relayCall, listBridgeTargets } from './bridge'
 import { useEditorStore } from '@/stores/editor'
@@ -239,6 +240,8 @@ async function runEditorWrite(
   bridgeTool: string,
   bridgeArgs: Record<string, unknown>,
   httpImpl: () => Promise<AgentToolResult>,
+  callId?: string,
+  ctx?: unknown,
 ): Promise<AgentToolResult> {
   let store: ReturnType<typeof useEditorStore> | null = null
   try {
@@ -247,10 +250,12 @@ async function runEditorWrite(
     // 无活动 pinia（单测环境）按离线路径走
   }
   if (store && store.uid === uid) {
+    noteToolRoute(ctx, callId, 'local')
     const r = await httpImpl()
     if (r.ok) store.pollRemoteNow()
     return r
   }
+  noteToolRoute(ctx, callId, 'bridge')
   try {
     const targets = await listBridgeTargets()
     if (targets.some((t) => t.host === 'editor' && t.target_id === uid)) {
@@ -260,6 +265,7 @@ async function runEditorWrite(
   } catch {
     // targets 不可用退回直连实现
   }
+  noteToolRoute(ctx, callId, 'server')
   return httpImpl()
 }
 
@@ -433,7 +439,7 @@ const editorApplyOpsTool = {
       payload: Type.Record(Type.String(), Type.Unknown(), { description: '命令参数（addClip 传 {"clip":{...}}）' }),
     }), { minItems: 1, maxItems: 40, description: '按顺序执行的批量命令' }),
   }),
-  execute: async (args: Record<string, unknown>): Promise<AgentToolResult> => {
+  execute: async (args: Record<string, unknown>, ctx: unknown, callId?: string): Promise<AgentToolResult> => {
     const target = await resolveEditorTarget(args.editing_project_id)
     if (!hasTarget(target)) return { ok: false, error: target.error }
     const ops = (Array.isArray(args.ops) ? args.ops : []).filter(isRecord).map((o) => ({
@@ -445,7 +451,7 @@ const editorApplyOpsTool = {
       const r = await applyOpsToProject(target.uid, ops, 'agent_edit')
       if (!r.ok) return { ok: false, error: r.error }
       return applyOpsSummary(r.doc, r.revision, `已应用 ${ops.length} 条命令并保存（revision ${r.revision}）`)
-    })
+    }, callId, ctx)
   },
 }
 
@@ -461,7 +467,7 @@ const editorGenerateSubtitlesTool = {
     editing_project_id: Type.Optional(Type.String({ description: '剪辑工程 uid（缺省=用户名下唯一工程）' })),
     track_id: Type.Optional(Type.String({ description: '要转写的音频轨 id（缺省=唯一音频轨）' })),
   }),
-  execute: async (args: Record<string, unknown>): Promise<AgentToolResult> => {
+  execute: async (args: Record<string, unknown>, ctx: unknown, callId?: string): Promise<AgentToolResult> => {
     const target = await resolveEditorTarget(args.editing_project_id)
     if (!hasTarget(target)) return { ok: false, error: target.error }
     return runEditorWrite(target.uid, 'editor_generate_subtitles', { editing_project_id: target.uid, track_id: args.track_id }, async () => {
@@ -495,7 +501,7 @@ const editorGenerateSubtitlesTool = {
       ], 'agent_subtitles')
       if (!r.ok) return { ok: false, error: r.error }
       return applyOpsSummary(r.doc, r.revision, `已按转写生成 ${cues.length} 条字幕（轨 ${subtitleTrack.id}，revision ${r.revision}）`)
-    })
+    }, callId, ctx)
   },
 }
 

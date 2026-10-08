@@ -333,6 +333,9 @@ export interface AgentStepRecord {
   result?: string | null
   /** agent_delegate 步骤的实时子任务进度（运行态内存字段，不参与落库语义） */
   delegateProgress?: { round: number; tool: string | null }
+  /** 执行来源（批次 3 过程可视化）：local=本页直执行 / bridge=跨页桥中继 / server=离线回退服务端；
+   *  工具 execute 内经 toolContext.noteToolRoute(callId) 回填，随 steps 自然落库 */
+  route?: 'local' | 'bridge' | 'server'
 }
 
 /** 画布 Agent 会话全量同步载荷（POST 创建 / PUT 同步共用形状） */
