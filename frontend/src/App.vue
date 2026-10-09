@@ -207,7 +207,7 @@
       <TaskQueuePanel v-if="!isStandaloneRoute" />
 
       <!-- 全局 Agent 侧边抽屉（Agent 一级公民：任意页面唤出，与会话页同源） -->
-      <AgentDrawer v-if="!isStandaloneRoute && userStore.isAuthenticated" />
+      <AgentHostPanel v-if="!isStandaloneRoute && userStore.isAuthenticated" />
 
       <!-- 页脚（独立全屏页面不显示） -->
       <footer v-if="!isStandaloneRoute" class="app-footer">
@@ -228,7 +228,7 @@ import {
 } from '@element-plus/icons-vue'
 import { getIconByName as getIcon } from '@/lib/icons'
 import TaskQueuePanel from './components/TaskQueuePanel.vue'
-import AgentDrawer from './components/chat/AgentDrawer.vue'
+import AgentHostPanel from './components/chat/AgentHostPanel.vue'
 import LanguageSwitcher from './components/LanguageSwitcher.vue'
 import { useI18n, getElementPlusLocale } from '@/i18n'
 import { useModelsStore } from '@/stores/models'

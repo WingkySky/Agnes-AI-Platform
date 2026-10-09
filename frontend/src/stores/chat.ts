@@ -174,7 +174,7 @@ function imageDataUrl(img: { data: string; mimeType: string }): string {
   return `data:${img.mimeType};base64,${img.data}`
 }
 
-/** 步骤记录 → 视图行（导出供测试；routeLabel/summary 为批次 3 过程可视化字段） */
+/** 步骤记录 → 视图行（导出供测试；routeLabel/summary 为批次 3 过程可视化字段，result 供宿主领域插槽用） */
 export function toStepView(s: AgentStepRecord): ChatStepView {
   return {
     callId: s.callId,
@@ -182,6 +182,7 @@ export function toStepView(s: AgentStepRecord): ChatStepView {
     tooltip: s.tool,
     status: toStepStatus(s.status),
     progress: delegateProgressText(s),
+    result: s.result,
     routeLabel: toolRouteLabel(s.route),
     summary: s.status === 'done' ? stepSummaryOf(s.result) : undefined,
   }

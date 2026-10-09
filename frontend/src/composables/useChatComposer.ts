@@ -1,7 +1,7 @@
 /* =====================================================
  * useChatComposer — 聊天输入组合式（多聊天面共享）
  *
- * 消费方：对话页 ChatView / 全局抽屉 AgentDrawer。
+ * 消费方：对话页 ChatView / 全局宿主 AgentHostPanel。
  * 收口发送链路共有的输入状态与副作用：待发附件（粘贴识别/上传/URL 提取）、
  * 发送、"/" 技能快速清单（useSlashSkills）。
  * enabled 守卫用于多聊天面共存时互斥收集全局粘贴（抽屉开着只收抽屉的）。
@@ -13,6 +13,7 @@ import type { MessageAttachment } from '@/types'
 import { useI18n } from '@/i18n'
 import { useChatStore } from '@/stores/chat'
 import { useSlashSkills } from '@/composables/useSlashSkills'
+import { isImageFile, isSupportedFile, extractFileText } from '@/lib/agent/attachments'
 
 export interface UseChatComposerOptions {
   /** 全局粘贴监听生效条件（false 时事件直接放行）；多面共存时用于互斥 */
@@ -110,19 +111,27 @@ export function useChatComposer(options: UseChatComposerOptions = {}) {
   onMounted(() => window.addEventListener('paste', handleGlobalPaste))
   onBeforeUnmount(() => window.removeEventListener('paste', handleGlobalPaste))
 
-  /** 附件按钮选择本地文件（共享输入条 pick-files 事件） */
+  /** 附件按钮选择本地文件（共享输入条 pick-files 事件）：
+   *  图片收 base64 附件；文本类文档（md/pdf/docx 等）解析为文本拼进输入框 */
   function onFilesPicked(files: File[]) {
     for (const file of files) {
-      if (!file.type.startsWith('image/')) continue
-      fileToBase64(file).then(base64 => {
-        pendingAttachments.value.push({
-          name: file.name,
-          base64,
-          url: undefined,
-          size: file.size,
-          mime_type: file.type,
+      if (isImageFile(file)) {
+        fileToBase64(file).then(base64 => {
+          pendingAttachments.value.push({
+            name: file.name,
+            base64,
+            url: undefined,
+            size: file.size,
+            mime_type: file.type,
+          })
         })
-      })
+      } else if (isSupportedFile(file)) {
+        extractFileText(file)
+          .then(({ name, text }) => {
+            inputText.value = (inputText.value ? inputText.value + '\n\n' : '') + `【文件：${name}】\n${text}`
+          })
+          .catch(() => ElMessage.warning(t('agent.unsupportedType')))
+      }
     }
   }
 
