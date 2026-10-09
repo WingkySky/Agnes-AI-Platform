@@ -196,7 +196,7 @@
         :show-image-info="store.showImageInfo"
         :auto-place-media="store.autoPlaceMedia"
         :active-tool="activeTool"
-        :show-agent-panel="agentPanelOpen"
+        :show-agent-panel="chatStore.agentDrawerOpen"
         @select-tool="handleSelectTool"
         @undo="store.undo()"
         @redo="store.redo()"
@@ -205,7 +205,7 @@
         @open-asset-library="handleOpenAssetLibrary"
         @show-history="historyVisible = true"
         @toggle-appearance-panel="showAppearancePanel = !showAppearancePanel"
-        @toggle-agent-panel="agentPanelOpen = !agentPanelOpen"
+        @toggle-agent-panel="chatStore.toggleAgentDrawer()"
         @delete-selected="handleDeleteSelected"
         @clear-canvas="handleClearCanvas"
         @set-theme="(mode) => store.setThemeMode(mode)"
@@ -241,9 +241,6 @@
         :canvas-size="canvasSize"
         @locate="handleMinimapLocate"
       />
-
-      <!-- ============ 画布 Agent 面板（右侧抽屉） ============ -->
-      <CanvasAgentPanel v-if="agentPanelOpen" :theme="store.canvasTheme" @close="agentPanelOpen = false" />
 
       <!-- ============ 节点工具栏（选中节点后常驻显示在节点上方） ============ -->
       <div
@@ -584,7 +581,6 @@ import CanvasContextMenu from '@/components/canvas/CanvasContextMenu.vue'
 import CanvasQuickMenu from '@/components/canvas/CanvasQuickMenu.vue'
 import type { QuickMenuItem } from '@/lib/canvas-quick-menu'
 import CanvasAssetLibrary from '@/components/canvas/CanvasAssetLibrary.vue'
-import CanvasAgentPanel from '@/components/canvas/CanvasAgentPanel.vue'
 import GenerationQuickPanel from '@/components/canvas/GenerationQuickPanel.vue'
 import MaskEditDialog from '@/components/canvas/MaskEditDialog.vue'
 import CanvasImageCropDialog from '@/components/canvas/CanvasImageCropDialog.vue'
@@ -663,7 +659,6 @@ const { copyText } = useCopyText()
 const { downloadViaProxy, downloadWatermarkedImage } = useDownload()
 
 const store = useCanvasStore()
-const agentPanelOpen = ref(false)
 const chatStore = useChatStore()
 const taskQueue = useTaskQueueStore()
 const route = useRoute()
@@ -716,7 +711,8 @@ async function handleSessionJumpQuery(): Promise<void> {
   if (typeof session === 'string' && session) {
     const backendId = Number(session)
     if (Number.isFinite(backendId) && backendId > 0) {
-      agentPanelOpen.value = true
+      // 画布 Agent 会话跳转：唤出全局宿主并切到该会话（面板已退役）
+      chatStore.setAgentDrawerOpen(true)
       await chatStore.init()
       if (chatStore.sessions.some((x) => x.id === backendId)) {
         await chatStore.switchSession(backendId)

@@ -29,15 +29,6 @@ export interface BuiltInMenuItem {
 export const BUILT_IN_MENUS: BuiltInMenuItem[] = [
   // ========== 创作工具类 ==========
   {
-    key: 'chat',
-    label_zh: 'AI 对话',
-    label_en: 'AI Chat',
-    icon: 'ChatDotRound',
-    path: '/chat',
-    require_admin: false,
-    is_group: false,
-  },
-  {
     key: 'images',
     label_zh: '图片生成',
     label_en: 'Image Generation',
@@ -341,8 +332,7 @@ export interface MenuItemConfig {
  */
 export const DEFAULT_MENU_CONFIG: MenuItemConfig[] = [
   // ---------- 创作工具类：顶部 + 侧边栏都显示 ----------
-  { key: 'chat', show_in_top: true, show_in_sidebar: true, top_group_key: 'create', sidebar_group_key: 'create', top_sort_order: 1, sidebar_sort_order: 1 },
-  { key: 'images', show_in_top: true, show_in_sidebar: true, top_group_key: 'create', sidebar_group_key: 'create', top_sort_order: 2, sidebar_sort_order: 2 },
+  { key: 'images', show_in_top: true, show_in_sidebar: true, top_group_key: 'create', sidebar_group_key: 'create', top_sort_order: 1, sidebar_sort_order: 1 },
   { key: 'videos', show_in_top: true, show_in_sidebar: true, top_group_key: 'create', sidebar_group_key: 'create', top_sort_order: 3, sidebar_sort_order: 3 },
   { key: 'canvas', show_in_top: true, show_in_sidebar: true, top_group_key: 'create', sidebar_group_key: 'create', top_sort_order: 4, sidebar_sort_order: 4 },
   { key: 'projects', show_in_top: true, show_in_sidebar: true, top_group_key: 'create', sidebar_group_key: 'create', top_sort_order: 5, sidebar_sort_order: 5 },

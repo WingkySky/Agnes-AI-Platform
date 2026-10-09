@@ -162,7 +162,6 @@ const enUS = {
 
   // ------ Top navigation ------
   nav: {
-    chat: 'Agent',
     images: 'Image Generation',
     videos: 'Video Generation',
     history: 'Generation History',
@@ -1235,7 +1234,6 @@ const enUS = {
     home: 'Home',
     login: 'Login',
     setup: 'Initial Setup',
-    chat: 'Agent',
     images: 'Image Generation',
     videos: 'Video Generation',
     history: 'Generation History',
@@ -1750,7 +1748,7 @@ const enUS = {
       toolAssets: 'My Assets',
       toolHistory: 'History',
       toolStyle: 'Canvas Appearance',
-      toolAgent: 'Canvas Agent',
+      toolAgent: 'Agent',
       toolDelete: 'Delete Selected',
       toolClear: 'Clear Canvas',
       toolHelp: 'Shortcuts',

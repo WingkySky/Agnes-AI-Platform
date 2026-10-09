@@ -36,12 +36,6 @@ const routes: RouteRecordRaw[] = [
     meta: { titleKey: 'router.login', requiresAuth: false }
   },
   {
-    path: '/chat',
-    name: 'chat',
-    component: () => import('@/views/ChatView.vue'),
-    meta: { titleKey: 'router.chat', requiresAuth: true }
-  },
-  {
     path: '/images',
     name: 'images',
     component: () => import('@/views/ImageView.vue'),
@@ -288,12 +282,12 @@ router.beforeEach(async (to) => {
 
   // 需要管理员角色但当前用户不是管理员 — 跳转首页
   if (requiresAdmin && !userStore.isAdmin) {
-    return '/chat'
+    return '/images'
   }
 
   // 需要特定权限但当前用户没有 — 跳转首页
   if (requiredPermission && !permissionStore.hasPermission(requiredPermission)) {
-    return '/chat'
+    return '/images'
   }
 
   return true

@@ -310,7 +310,7 @@ const isAdminRouteActive = computed(() => {
 })
 
 // keep-alive 缓存的路由组件名称（切换标签页时保持状态不销毁）
-const cachedViews = ['ChatView', 'ImageView', 'VideoView', 'HistoryView', 'PlazaView', 'CanvasView', 'SettingsView', 'UsersAdminView', 'CreditRulesView', 'ProfileView', 'PreferencesView', 'CreditsView']
+const cachedViews = ['ImageView', 'VideoView', 'HistoryView', 'PlazaView', 'CanvasView', 'SettingsView', 'UsersAdminView', 'CreditRulesView', 'ProfileView', 'PreferencesView', 'CreditsView']
 
 // 积分显示：数字千分位格式化
 const creditsText = computed(() => {

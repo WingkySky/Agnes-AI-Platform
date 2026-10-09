@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### Agent 宿主统一 · 批次 2（退役对话页与画布面板，全局宿主唯一化）
+
+- **退役 `ChatView` 对话页**：删 `/chat` 路由与组件、导航「AI 对话」菜单项（BUILT_IN_MENUS/DEFAULT_MENU_CONFIG）、keep-alive 缓存清单、路由守卫两处 `return '/chat'` 兜底改 `/images`；无独有功能损失（多会话侧栏/输入链/画布会话跳转已全部在全局宿主）
+- **退役 `CanvasAgentPanel` 画布面板**：删组件与 CanvasView 挂载（theme 传递/几何记忆一并清理）；画布工具栏 Agent 按钮语义改为**唤出全局宿主**（激活态跟随 `agentDrawerOpen`）；画布会话跳转 query（`?session=`）改为唤出全局宿主并切换会话
+- **Agent 宿主唯一化达成**：全局 `AgentHostPanel` 成为唯一 Agent 界面（Alt+A/顶栏/画布工具栏三入口），能力此前已全量对齐（确认卡/三档/风格卡/会话侧栏）
+- **测试**：vitest 625 + vue-tsc 零错 + build 过；浏览器冒烟（画布工具栏唤出/宿主悬浮画布无遮罩//chat 失效/导航清理）通过；净删约 1,850 行
+
 ### Agent 宿主统一 · 批次 1（全局宿主双形态 AgentHostPanel）
 
 - **自绘浮层双形态**：新全局宿主 `AgentHostPanel`（替代 el-drawer 抽屉）——小态右停靠 360px ⇄ 展开态居中 86%×86%（头部拖动 + 拉伸把手 + 双击切换 + 位置记忆），**无遮罩**：小态点外部收起（页面仍可交互）、展开态 Esc/按钮退出；Alt+A/顶栏按钮/`agentDrawerOpen` 状态语义不变

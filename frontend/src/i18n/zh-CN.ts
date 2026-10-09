@@ -161,7 +161,6 @@ const zhCN = {
 
   // ------ 顶部导航 ------
   nav: {
-    chat: 'Agent',
     images: '图片生成',
     videos: '视频生成',
     history: '生成历史',
@@ -1217,7 +1216,6 @@ const zhCN = {
     home: '首页',
     login: '登录',
     setup: '首次初始化',
-    chat: 'Agent',
     images: '图片生成',
     videos: '视频生成',
     history: '生成历史',
@@ -1735,7 +1733,7 @@ const zhCN = {
       toolAssets: '我的素材',
       toolHistory: '历史版本',
       toolStyle: '画布外观',
-      toolAgent: '画布 Agent',
+      toolAgent: 'Agent',
       toolDelete: '删除选中',
       toolClear: '清空画布',
       toolHelp: '快捷键',
