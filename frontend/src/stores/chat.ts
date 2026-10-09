@@ -760,10 +760,11 @@ export const useChatStore = defineStore('chat', {
           if (e.error) this.errors[String(sessionId)] = e.error
           if (this.pendingConfirm?.sessionId === sessionId) this.pendingConfirm = null
           void this._persist(sessionId, arr)
-          // 自动总结标题：首轮回复后标题仍为默认时调一次（读已落库消息行）
+          // 自动总结标题：首轮回复后标题仍为默认（空或「新对话」）时调一次（读已落库消息行）；
+          // 后端建会话默认 title='新对话'，只判空会恒假跳过
           if (!e.error) {
             const session = this.sessions.find((s) => s.id === sessionId)
-            if (session && !session.title) void this.autoSummarizeSession(sessionId).catch(() => {})
+            if (session && (!session.title || session.title === '新对话')) void this.autoSummarizeSession(sessionId).catch(() => {})
           }
           break
         }

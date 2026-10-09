@@ -129,6 +129,22 @@ describe('chat store：内核投影', () => {
     expect(payload.context).toHaveProperty('messages')
   })
 
+  it('done 后默认标题自动总结；自定义标题不被覆盖', async () => {
+    // 默认标题（后端建会话返回「新对话」）→ done 触发总结
+    mocks.script.push(textTurn('你好'))
+    const chat = useChatStore()
+    await chat.send('你好')
+    expect(api.summarizeChatSession).toHaveBeenCalledWith(1)
+
+    // 用户已改标题 → done 不再总结（防覆盖）
+    api.summarizeChatSession.mockClear()
+    const session = chat.sessions.find((s) => s.id === 1)
+    if (session) session.title = '自定义标题'
+    mocks.script.push(textTurn('再来一轮'))
+    await chat.send('第二问')
+    expect(api.summarizeChatSession).not.toHaveBeenCalled()
+  })
+
   it('生成工具：tool_end 挂 pending 占位，轮询 success 回填 URL', async () => {
     mocks.script.push(
       toolTurn([{ id: 't1', name: 'generate_image', args: { prompt: 'a cat', mode: 'text2image' } }]),
