@@ -301,6 +301,9 @@
             <el-icon :size="48" :color="'var(--agnes-error)'"><CircleCloseFilled /></el-icon>
             <div class="failed-text">{{ t('status.imageGenerateFailed') }}</div>
             <div class="failed-sub">{{ activeTask.errorMessage || '' }}</div>
+            <div v-if="activeTask.errorCategory" class="failed-category">
+              {{ t('errors.category_' + activeTask.errorCategory) }}
+            </div>
             <el-button type="primary" size="small" class="retry-btn" @click="retryActiveTask">
               {{ t('status.retryWithSame') }}
             </el-button>
@@ -1075,6 +1078,7 @@ async function copyImageUrl() {
 }
 .failed-text { margin-top: 16px; font-size: 16px; color: var(--agnes-error); }
 .failed-sub { font-size: 12px; color: var(--agnes-text-muted); margin-top: 6px; }
+.failed-category { font-size: 12px; color: var(--agnes-warning); margin-top: 4px; max-width: 420px; }
 .retry-btn { margin-top: 20px; }
 
 .empty-state {

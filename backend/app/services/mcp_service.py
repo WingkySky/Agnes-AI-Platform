@@ -93,7 +93,14 @@ class _ServerSession:
             extra_client = None
             if self._server.transport == "stdio":
                 args = [self._apply_user_template(a) for a in McpServer.parse_json(self._server.args_json, [])]
-                env = {k: self._apply_user_template(v) for k, v in (McpServer.parse_json(self._server.env_json, None) or {}).items()}
+                env = {}
+                for k, raw_v in (McpServer.parse_json(self._server.env_json, None) or {}).items():
+                    v = self._apply_user_template(raw_v)
+                    # per_user 数据文件路径转绝对：部分官方服务器（如新版 memory）把相对 env
+                    # 路径解析到自身模块目录而非进程 CWD，落进 npx 缓存既写不进也随升级丢失
+                    if v and raw_v and "{user_id}" in raw_v and "://" not in v and not v.startswith("-"):
+                        v = os.path.abspath(v)
+                    env[k] = v
                 if self.user_id is not None:
                     _ensure_user_dirs(args + list(env.values()))
                 params = StdioServerParameters(
@@ -206,8 +213,9 @@ def _get_session(server: McpServer, user_id: int | None = None) -> _ServerSessio
 _tools_cache: dict[int, tuple[str, list[dict]]] = {}
 
 
-async def agent_tools(db: AsyncSession) -> list[dict]:
-    """聚合启用服务器的工具清单（登录用户；单服务器失败跳过不阻塞整体）"""
+async def agent_tools(db: AsyncSession, user_id: int | None = None) -> list[dict]:
+    """聚合启用服务器的工具清单（登录用户；单服务器失败跳过不阻塞整体）。
+    user_id 必须透传：per_user 服务器（记忆/文件系统）按用户身份拉起实例，缺身份会被跳过。"""
     out: list[dict] = []
     for server in await list_servers(db, enabled_only=True):
         fp = _config_fingerprint(server)
@@ -216,7 +224,7 @@ async def agent_tools(db: AsyncSession) -> list[dict]:
             tools = cached[1]
         else:
             try:
-                tools = await _get_session(server).list_tools()
+                tools = await _get_session(server, user_id).list_tools()
                 _tools_cache[server.id] = (fp, tools)
             except Exception as e:  # noqa: BLE001 —— 单服务器故障不影响其余工具注入
                 logger.warning("MCP 服务器「%s」工具清单获取失败：%s", server.name, e)

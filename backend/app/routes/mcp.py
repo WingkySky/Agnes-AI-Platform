@@ -200,7 +200,7 @@ async def agent_tools(
     db: AsyncSession = Depends(get_async_db),
     _user: User = Depends(get_current_user),
 ):
-    return ok(await mcp_service.agent_tools(db))
+    return ok(await mcp_service.agent_tools(db, user_id=_user.id))
 
 
 # ---------- Agent 工具调用（登录用户 BFF） ----------
@@ -326,7 +326,10 @@ async def memory_delete_preference(
     db: AsyncSession = Depends(get_async_db),
     _user: User = Depends(get_current_user),
 ):
-    done = await memory_service.delete_preference(db, user_id=_user.id, observation=body.observation)
+    try:
+        done = await memory_service.delete_preference(db, user_id=_user.id, observation=body.observation)
+    except Exception as e:  # noqa: BLE001 —— 记忆服务器故障转可读错误
+        raise HTTPException(status_code=502, detail=f"删除偏好失败：{e}")
     if not done:
         raise HTTPException(status_code=404, detail="记忆服务器未安装或未启用")
     return ok(None, "已删除")
@@ -337,7 +340,10 @@ async def memory_clear_preferences(
     db: AsyncSession = Depends(get_async_db),
     _user: User = Depends(get_current_user),
 ):
-    done = await memory_service.clear_preferences(db, user_id=_user.id)
+    try:
+        done = await memory_service.clear_preferences(db, user_id=_user.id)
+    except Exception as e:  # noqa: BLE001 —— 记忆服务器故障转可读错误
+        raise HTTPException(status_code=502, detail=f"清空偏好失败：{e}")
     if not done:
         raise HTTPException(status_code=404, detail="记忆服务器未安装或未启用")
     return ok(None, "偏好记忆已清空")

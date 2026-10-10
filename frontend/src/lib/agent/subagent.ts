@@ -138,8 +138,8 @@ export async function runSubagent(input: DelegateInput, host: SubagentHost): Pro
   const source = `子任务:${task.slice(0, 12)}`
   const release = await acquireSlot()
   try {
-    const tools = host
-      .getTools()
+    // 宿主工具 + 父内核动态注入工具（MCP 等）一起过 gateChildTool 门：子内核内不存在免门工具
+    const tools = [...host.getTools(), ...host.parent.extraToolList]
       .filter((t) => t.name !== 'agent_delegate')
       .filter((t) => !input.tools_allowed?.length || input.tools_allowed.includes(t.name))
       .map((t) => gateChildTool(t, host, source))

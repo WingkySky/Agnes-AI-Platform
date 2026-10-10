@@ -47,7 +47,7 @@ export type KernelEvent =
 
 /** 宿主自带工具（chat 宿主等）：结构与画布 AgentTool 对齐，execute 的 ctx 由 deps.toolContext 提供；
  *  callId 为机制层工具调用 id（子代理进度定位用），parent 为执行本工具的内核实例（agent_delegate 构建子代理宿主用）。
- *  group 仅 generation 有门语义（耗时动作：readonly 拒绝 / confirm 每工具首次过门），其余组宿主模式放行 */
+ *  group='generation' 有耗时门语义（readonly 拒绝 / confirm 每工具首次过门）；mcp__ 前缀工具走 'mcp' 组门（见 authorizeTool），其余组宿主模式放行 */
 export interface HostTool {
   name: string
   description: string
@@ -61,6 +61,8 @@ export interface AgentKernelDeps {
   getCanvas?: () => AgentCanvasStore
   /** 档位实时读取（画布宿主三档权限；宿主工具组模式可省略） */
   getMode?: () => AgentMode
+  /** 子内核标记（agent_delegate 派生）：门全前移父内核（gateChildTool），本地 authorizeTool 一律放行防双门死锁 */
+  isChildKernel?: boolean
   systemPrompt: string
   getAuthToken: () => Promise<string | null>
   /** LLM 流函数（缺省用 provider 适配；测试注入假流） */
@@ -154,17 +156,23 @@ export class AgentKernel {
     }
   }
 
+  /** 动态注入工具只读视图（子代理组装用：MCP 等注入工具须与宿主工具一起过 gateChildTool 门） */
+  get extraToolList(): HostTool[] {
+    return this.extraTools
+  }
+
   /** 创建子代理内核：继承父的 LLM 通道/当前模型/鉴权/工具上下文/动态注入组，并注册进 children（requestStop 传导）。
    *  调用方在子任务结束时调用返回的 unregister 注销。 */
   createChildKernel(input: { systemPrompt: string; maxTurns?: number; tools: HostTool[]; toolContext?: unknown }): { kernel: AgentKernel; unregister: () => void } {
     const child = new AgentKernel({
       systemPrompt: input.systemPrompt,
       maxTurns: input.maxTurns,
-      tools: [...input.tools, ...this.extraTools],
+      tools: input.tools,
       toolContext: input.toolContext ?? this.deps.toolContext ?? this.deps.getCanvas?.(),
       getAuthToken: this.deps.getAuthToken,
       streamFn: this.deps.streamFn,
       model: this.agent.state.model,
+      isChildKernel: true,
     })
     return { kernel: child, unregister: this.registerChild(child) }
   }
@@ -247,17 +255,20 @@ export class AgentKernel {
    *  宿主工具组模式无档位策略（围栏由各宿主 beforeToolCall 负责）；画布宿主走 policy 三档，
    *  阶段门确认卡入 FIFO 队列，confirm 按序唤醒。source 标记来自子任务的请求，确认卡据此展示来源。 */
   async authorizeTool(toolName: string, args: Record<string, unknown>, source?: string): Promise<{ allowed: boolean; reason?: string; stop: boolean }> {
+    // 子内核门全前移：工具 execute 包装（gateChildTool）已调父内核 authorizeTool 决策，
+    // 本地再设门会与父门互相等待（父等子回执、子等父确认）造成死锁，故一律放行
+    if (this.deps.isChildKernel) return { allowed: true, stop: false }
     const hostTool = this.deps.tools?.find((t) => t.name === toolName)
-    // 宿主工具组模式默认放行（围栏由各宿主 beforeToolCall 负责）；仅 generation 组走确认门
-    if (this.deps.tools && hostTool?.group !== 'generation') return { allowed: true, stop: false }
+    const isMcpTool = toolName.startsWith('mcp__')
+    // 宿主工具组模式默认放行（围栏由各宿主 beforeToolCall 负责）；generation 组与 MCP 外部工具走确认门
+    if (this.deps.tools && hostTool?.group !== 'generation' && !isMcpTool) return { allowed: true, stop: false }
     // mcp__ 前缀 = 外部 MCP 工具（命名约定，见 lib/agent/mcp.ts），走独立 'mcp' 组策略
-    const toolGroup = toolName.startsWith('mcp__') ? 'mcp' : (hostTool?.group ?? AGENT_TOOLS.find((t) => t.name === toolName)?.group ?? 'write')
+    const toolGroup = isMcpTool ? 'mcp' : (hostTool?.group ?? AGENT_TOOLS.find((t) => t.name === toolName)?.group ?? 'write')
     const panelId = typeof args.panel_id === 'string' ? args.panel_id : ''
     const panelType = panelId ? this.deps.getCanvas?.().panels.find((p) => p.id === panelId)?.type : undefined
 
-    const decision = this.deps.tools
-      ? resolveHostGenerationGate(toolName, this.deps.getMode?.() ?? 'confirm', this.gatedKinds)
-      : resolveToolCall({
+    const decision = isMcpTool
+      ? resolveToolCall({
           mode: this.deps.getMode?.() ?? 'confirm',
           toolName,
           toolGroup,
@@ -265,6 +276,16 @@ export class AgentKernel {
           gatedKinds: this.gatedKinds,
           panelType,
         })
+      : this.deps.tools
+        ? resolveHostGenerationGate(toolName, this.deps.getMode?.() ?? 'confirm', this.gatedKinds)
+        : resolveToolCall({
+            mode: this.deps.getMode?.() ?? 'confirm',
+            toolName,
+            toolGroup,
+            args,
+            gatedKinds: this.gatedKinds,
+            panelType,
+          })
 
     if (decision.action === 'allow') {
       this.recordGatedKind(toolName, args, panelType)

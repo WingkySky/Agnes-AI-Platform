@@ -51,7 +51,7 @@ vi.mock('@/lib/agent/skills', () => ({
   getActiveSkillScope: vi.fn(() => null),
 }))
 
-import { useChatStore, chatContextFromRows, toStepView } from '../chat'
+import { useChatStore, chatContextFromRows, toStepView, _resetKernelPoolsForTest } from '../chat'
 import { setLocale } from '@/i18n'
 import {
   createChatSession, getChatSessions, summarizeChatSession,
@@ -79,6 +79,7 @@ const api = vi.mocked({
 
 beforeEach(() => {
   setActivePinia(createPinia())
+  _resetKernelPoolsForTest()
   mocks.script.length = 0
   mocks.calls.length = 0
   api.createChatSession.mockReset().mockResolvedValue({ id: 1, title: '新对话', created_at: '', updated_at: '' })

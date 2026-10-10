@@ -4,6 +4,23 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **MCP 工具确认门被宿主短路吞掉**：chat 宿主内核的 authorizeTool 对「自带工具组」一律放行（仅 generation 组走门），MCP 外部工具（mcp__ 前缀）从此不再过 confirm 档门——补上独立分支：MCP 工具在宿主模式下同样走 'mcp' 组策略（readonly 拒绝 / confirm 每工具首次过门 / auto 直通）；回归测试锁死三档语义（3 例）
+- **子代理内 MCP 工具双门死锁**：子内核此前直接继承父 extraTools 且不过门；补门后子内核本地门与父内核 execute 层门（gateChildTool 前移）互相等待造成死锁（确认卡批准后永不执行）。修复：子内核标记 isChildKernel 一律跳过本地门，且父 extraTools 经 runSubagent 与宿主工具一起过 gateChildTool（子内核内不存在免门工具）；回归测试锁死（1 例）
+- **内核池被 pinia action 的 this 二相性拆裂**：poolOf 以 store 对象身份作 WeakMap 键，而 pinia action 的 this 在「代理对象/原始对象」间不一致（`fn.apply(this && this.$id === $id ? this : store)`）——同一池被拆成两份，确认卡 confirmPending 按池查内核永远落空（门批准后工具永不执行，冒烟实测卡死）。改为按 store $id 分桶（模块级 Map），并提供测试专用复位 `_resetKernelPoolsForTest`（模块级池跨用例共享）
+- **MCP 工具清单缺失 per_user 服务器**：`GET /api/mcp/tools` 聚合时未传 user_id，per_user 服务器（记忆库/本地文件系统）抛「必须携带用户身份」被静默跳过，Agent 从未拿到这两家的工具——user_id 贯通到网关会话层
+- **记忆库删除/清空假成功**：新版 server-memory（2026.8.31）把 delete_observations 入参键从 observations 改为 deletions，旧载荷被工具静默拒绝；且 memory_service 未检查 is_error，工具报错也返回「已删除」。修正键名 + is_error 升级为 502 可读错误；pytest 补 is_error 抛错用例（278 绿）
+- **memory 服务器数据落进 npx 缓存**：官方目录的 `MEMORY_FILE_PATH` 为相对路径，新版 server-memory 将其解析到自身模块目录（npx 缓存内）而非进程 CWD，写入 ENOENT 且升级即丢——网关对 `{user_id}` 模板替换后的 env 路径值转绝对路径
+- **生成页错误类目透出（收尾批次 2 遗留 UI）**：QueueTask 增加 errorCategory，轮询/提交失败捕获后端 error_category；失败卡（ImageView/VideoView）与任务卡（TaskCard）显示类目文案（`errors.category_*`）；自动重试按类目 can_retry 语义阻断（审核拒绝/额度不足/参数无效等不再白烧 3 次重试，重试执行时清空类目）；vitest 新增 4 例（634 绿）
+
+### 冒烟（自动化浏览器实测，MCP 桥/市场/用户记忆库/子代理四件 2026-09-13 存量待验清账）
+
+- 用户记忆库全链路：种偏好 → 摘要端点 → Agent 对话注入（凭记忆精准答出画幅/题材偏好）→ Agent 按守则自主 add_observations 写入 → 能力胶囊（角标/列表/单删/清空）与后端双向同步
+- MCP 用户侧：Agent 调用 filesystem list_allowed_directories，confirm 档确认卡弹出 → 批准 → 网关执行 → 结果回显；管理页连接测试回显工具清单
+- MCP 市场：官方三卡已安装标记；自建源（静态 manifest HTTP 服务）添加 → 刷新（整源替换）→ 一键安装（market_slug 溯源入库）→ 清理
+- 子代理：agent_delegate 委派 → 步骤行实时进度（round 更新）→ MCP 工具门在父内核一次过 → 子任务结论摘要回传主对话，无死锁
+
 ## [0.0.10] - 2026-10-09
 
 ### 修复

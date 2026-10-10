@@ -81,7 +81,8 @@ async def test_delete_and_clear_routing(db, monkeypatch):
     done = await memory_service.delete_preference(db, user_id=7, observation="画幅：竖屏 9:16")
     assert done is True
     assert captured[-1]["tool"] == "delete_observations"
-    assert captured[-1]["arguments"]["observations"] == [
+    # 新版 server-memory 的 delete_observations 入参键为 deletions
+    assert captured[-1]["arguments"]["deletions"] == [
         {"entityName": "创作偏好", "observations": ["画幅：竖屏 9:16"]}
     ]
 
@@ -89,6 +90,21 @@ async def test_delete_and_clear_routing(db, monkeypatch):
     assert done is True
     assert captured[-1]["tool"] == "delete_entities"
     assert captured[-1]["arguments"]["entityNames"] == ["创作偏好"]
+
+
+@pytest.mark.asyncio
+async def test_delete_tool_error_raises(db, monkeypatch):
+    """工具级错误（is_error）必须抛出而非谎报成功（冒烟实测：旧版漏检导致「已删除」假成功）"""
+    await _seed_memory_server(db)
+
+    async def _error_call(server, tool, arguments, user_id=None):
+        return {"text": "Invalid arguments", "is_error": True}
+
+    monkeypatch.setattr(mcp_service, "call_server_tool", _error_call)
+    with pytest.raises(RuntimeError, match="delete_observations"):
+        await memory_service.delete_preference(db, user_id=7, observation="x")
+    with pytest.raises(RuntimeError, match="delete_entities"):
+        await memory_service.clear_preferences(db, user_id=7)
 
 
 @pytest.mark.asyncio

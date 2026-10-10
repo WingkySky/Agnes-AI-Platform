@@ -511,3 +511,75 @@ describe('AgentKernel：多模态输入', () => {
     expect(tl![1].images).toBeUndefined()
   })
 })
+
+describe('AgentKernel：MCP 工具门（宿主工具组模式）', () => {
+  /** 宿主工具组内核：普通 write 工具 + mcp__ 外部工具，验证宿主短路不吞掉 MCP 门 */
+  function mcpHostKernel(mode: AgentMode) {
+    const events: KernelEvent[] = []
+    const kernel = new AgentKernel({
+      systemPrompt: 'test',
+      getAuthToken: async () => null,
+      getMode: () => mode,
+      tools: [
+        {
+          name: 'host_write_tool',
+          description: '宿主写工具',
+          group: 'write',
+          parameters: Type.Object({}),
+          execute: async () => ({ ok: true, data: {} }),
+        },
+        {
+          name: 'mcp__2__add_observations',
+          description: '【MCP·知识记忆库】add observations',
+          parameters: Type.Object({}),
+          execute: async () => ({ ok: true, data: {} }),
+        },
+      ],
+    })
+    kernel.subscribe((e) => events.push(e))
+    return { kernel, events }
+  }
+
+  it('confirm 档：mcp__ 工具首次过门，放行后同工具直通；普通宿主工具不受影响', async () => {
+    const { kernel, events } = mcpHostKernel('confirm')
+
+    // 普通 write 宿主工具：宿主组短路放行，无门
+    const write = await kernel.authorizeTool('host_write_tool', {})
+    expect(write.allowed).toBe(true)
+    expect(events.filter((e) => e.type === 'confirm_request').length).toBe(0)
+
+    // mcp__ 工具：首次过门
+    const gate = kernel.authorizeTool('mcp__2__add_observations', {})
+    await new Promise((r) => setTimeout(r, 0))
+    expect(events.some((e) => e.type === 'confirm_request' && e.tool === 'mcp__2__add_observations')).toBe(true)
+    kernel.confirm(true)
+    expect((await gate).allowed).toBe(true)
+
+    // 同工具第二次：gatedKinds 已记录，直通
+    const second = await kernel.authorizeTool('mcp__2__add_observations', {})
+    expect(second.allowed).toBe(true)
+    expect(events.filter((e) => e.type === 'confirm_request').length).toBe(1)
+
+    // 其他 mcp__ 工具：仍需各自首次过门
+    const other = kernel.authorizeTool('mcp__1__list_directory', {})
+    await new Promise((r) => setTimeout(r, 0))
+    expect(events.some((e) => e.type === 'confirm_request' && e.tool === 'mcp__1__list_directory')).toBe(true)
+    kernel.confirm(true)
+    expect((await other).allowed).toBe(true)
+  })
+
+  it('readonly 档：mcp__ 工具拒绝（不停回合）', async () => {
+    const { kernel, events } = mcpHostKernel('readonly')
+    const decision = await kernel.authorizeTool('mcp__2__add_observations', {})
+    expect(decision.allowed).toBe(false)
+    expect(decision.stop).toBe(false)
+    expect(events.some((e) => e.type === 'confirm_request')).toBe(false)
+  })
+
+  it('auto 档：mcp__ 工具直通', async () => {
+    const { kernel, events } = mcpHostKernel('auto')
+    const decision = await kernel.authorizeTool('mcp__2__add_observations', {})
+    expect(decision.allowed).toBe(true)
+    expect(events.some((e) => e.type === 'confirm_request')).toBe(false)
+  })
+})

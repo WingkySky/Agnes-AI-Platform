@@ -133,15 +133,23 @@ function readAgentMode(): AgentMode {
     return 'confirm'
   }
 }
-// per-session 内核池（按 store 实例分池；类实例不进响应式 state，避免 Vue 类型解包破坏其私有结构）
-const kernelPools = new WeakMap<object, Map<string, AgentKernel>>()
-function poolOf(store: object): Map<string, AgentKernel> {
-  let m = kernelPools.get(store)
+// per-session 内核池（按 store $id 分池；类实例不进响应式 state，避免 Vue 类型解包破坏其私有结构）。
+// 不能用 store 对象身份作 WeakMap 键：pinia action 的 this 在「代理对象/原始对象」间可能不一致
+// （fn.apply(this && this.$id === $id ? this : store)），同一池会被拆成两份导致确认卡找不到运行中内核。
+const kernelPools = new Map<string, Map<string, AgentKernel>>()
+function poolOf(store: { $id?: string }): Map<string, AgentKernel> {
+  const id = store.$id || 'default'
+  let m = kernelPools.get(id)
   if (!m) {
     m = new Map()
-    kernelPools.set(store, m)
+    kernelPools.set(id, m)
   }
   return m
+}
+
+/** 测试专用：清空内核池（池按 $id 模块级分桶，跨用例不随 pinia 实例复位） */
+export function _resetKernelPoolsForTest(): void {
+  kernelPools.clear()
 }
 
 function uid(): string {

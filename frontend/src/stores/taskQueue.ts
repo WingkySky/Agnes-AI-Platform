@@ -12,7 +12,9 @@ import { defineStore } from 'pinia'
 import localforage from 'localforage'
 import { useUserStore } from '@/stores/user'
 import { usePreferencesStore } from '@/stores/preferences'
+import { useModelsStore } from '@/stores/models'
 import { isMediaSuccess, isMediaFailed } from '@/lib/media-status'
+import { getErrorCategory } from '@/lib/type-helpers'
 import {
   createVideoTask,
   getVideoStatus,
@@ -368,6 +370,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
         // TaskCard 通过 retryScheduledAt 字段判断显示"重试中 (n/3)"
         task.status = 'failed'
         task.errorMessage = message
+        task.errorCategory = getErrorCategory(err) || null
         task.updatedAt = Date.now()
         this._notifyTaskUpdate(taskId)
         this._saveToStorage()
@@ -482,11 +485,14 @@ export const useTaskQueueStore = defineStore('taskQueue', {
           this._stopPolling(taskId)
           this._saveToStorage()
         } else if (isFailed) {
-          // 后端返回失败状态，提取错误信息
-          const failMsg = (data as unknown as Record<string, unknown>).message as string || (data as unknown as Record<string, unknown>).error as string || 'Generation failed'
+          // 后端返回失败状态，提取错误信息与失败类目（错误归类合同）
+          const failData = data as unknown as Record<string, unknown>
+          const failMsg = failData.message as string || failData.error as string || 'Generation failed'
+          const failCategory = typeof failData.error_category === 'string' && failData.error_category ? failData.error_category : null
           this._stopPolling(taskId)
+          task.errorCategory = failCategory
           // 【自动重试】后端失败也尝试重试（如 5xx / 网络抖动导致后端任务失败）
-          if (this._scheduleRetry(taskId, { message: failMsg })) {
+          if (this._scheduleRetry(taskId, { message: failMsg, category: failCategory })) {
             task.status = 'failed'
             task.errorMessage = failMsg
             task.updatedAt = Date.now()
@@ -733,6 +739,17 @@ export const useTaskQueueStore = defineStore('taskQueue', {
       const currentRetry = task.retryCount ?? 0
       if (currentRetry >= maxRetries) return false
 
+      // 3.5 错误类目不可重试（后端错误归类合同：审核拒绝/参数无效/额度不足/结果不确定等）→ 不自动重试
+      const category = (error as { category?: string } | null)?.category || task.errorCategory
+      if (category) {
+        try {
+          const modelsStore = useModelsStore()
+          if (!modelsStore.canRetryCategory(category)) return false
+        } catch (_) {
+          // models store 未初始化时按类目未知处理，继续原判定
+        }
+      }
+
       // 4. 检查错误是否可重试
       if (!isRetryableError(error, task.type)) return false
 
@@ -767,6 +784,7 @@ export const useTaskQueueStore = defineStore('taskQueue', {
       // 重置任务状态，准备重新提交
       task.status = 'queued'
       task.errorMessage = ''
+      task.errorCategory = null
       task.progress = 0
       task.resultUrl = null
       task.posterUrl = null

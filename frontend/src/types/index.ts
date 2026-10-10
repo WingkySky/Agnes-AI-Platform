@@ -245,6 +245,7 @@ export interface ImageTaskStatusResponse {
   url?: string | null
   elapsed_sec?: number
   message?: string | null
+  error_category?: string | null
 }
 
 /** 图片任务取消响应 */
@@ -304,6 +305,7 @@ export interface VideoStatusResponse {
   progress: number
   video_url?: string | null
   message?: string | null
+  error_category?: string | null
   elapsed_sec: number
 }
 
@@ -548,6 +550,8 @@ export interface QueueTask {
   posterUrl: string | null
   progress: number
   errorMessage: string
+  /** 失败类目（后端错误归类合同 error_category；成功/重置时清空） */
+  errorCategory?: string | null
   createdAt: number
   updatedAt: number
   pollIntervalMs: number

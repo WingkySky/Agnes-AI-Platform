@@ -1,7 +1,9 @@
 /* agent_delegate 子代理直测：父内核真装配 + 假 LLM 流共享剧本（父/子按调用顺序消费） */
 
 import { describe, it, expect, vi } from 'vitest'
+import { Type } from 'typebox'
 import { AgentKernel } from '../kernel'
+import type { KernelEvent } from '../kernel'
 import { AGENT_SYSTEM_PROMPT_BASE } from '../system-prompt'
 import { createFakeStreamFn } from './fake-llm'
 import type { FakeTurn } from './fake-llm'
@@ -210,5 +212,43 @@ describe('runSubagent：入参守卫与并发信号量', () => {
     const first = results[0].data as { summary: string; turns: number }
     expect(first.summary).toMatch(/结论/)
     expect(first.turns).toBe(1)
+  })
+
+  it('子代理内 MCP 工具：门在父内核一次过，子内核不本地设门（防双门死锁）', async () => {
+    const { kernel, fake } = makeParent(
+      [
+        { toolCalls: [{ id: 'd1', name: 'agent_delegate', args: { task: '查目录' } }] },
+        { toolCalls: [{ id: 'c1', name: 'mcp__1__list_allowed_directories', args: {} }] },
+        { text: '目录：/tmp/x' },
+        { text: '父收尾' },
+      ],
+      'confirm',
+    )
+    // 注入假 MCP 工具（父 extraTools 随子代理进入子内核，必须与宿主工具同门）
+    kernel.setExtraTools([
+      {
+        name: 'mcp__1__list_allowed_directories',
+        description: '【MCP·本地文件系统】list allowed dirs',
+        parameters: Type.Object({}),
+        execute: async () => ({ ok: true, data: { dirs: ['/tmp/x'] } }),
+      },
+    ])
+    const gates = spyAuthorize(kernel)
+    const events: KernelEvent[] = []
+    kernel.subscribe((e) => events.push(e))
+    const done = kernel.send('委派查目录')
+    // MCP 门确认卡（confirm_request）弹出后放行
+    for (let i = 0; i < 100 && !events.some((e) => e.type === 'confirm_request'); i++) {
+      await new Promise((r) => setTimeout(r, 10))
+    }
+    expect(events.some((e) => e.type === 'confirm_request' && e.tool === 'mcp__1__list_allowed_directories')).toBe(true)
+    kernel.confirm(true)
+    await done
+
+    const mcpGates = gates.filter((g) => g.tool === 'mcp__1__list_allowed_directories')
+    expect(mcpGates.length).toBe(1)
+    expect(mcpGates[0].source).toBe('子任务:查目录')
+    expect(mcpGates[0].allowed).toBe(true)
+    expect(fake.calls.length).toBe(4)
   })
 })

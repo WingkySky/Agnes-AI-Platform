@@ -57,11 +57,16 @@
       <div v-else-if="task.status === 'failed'" class="task-failed" :class="{ 'is-retrying': isRetrying }">
         <el-icon v-if="isRetrying" class="retrying-icon"><Loading /></el-icon>
         <el-icon v-else class="failed-icon"><Close /></el-icon>
-        <span class="failed-text">
-          {{ isRetrying
-            ? t('taskStatus.retrying', { n: (task.retryCount ?? 0) + 1 })
-            : (task.errorMessage || t('taskStatus.failedText')) }}
-        </span>
+        <div class="failed-body">
+          <span class="failed-text">
+            {{ isRetrying
+              ? t('taskStatus.retrying', { n: (task.retryCount ?? 0) + 1 })
+              : (task.errorMessage || t('taskStatus.failedText')) }}
+          </span>
+          <span v-if="!isRetrying && task.errorCategory" class="failed-category">
+            {{ t('errors.category_' + task.errorCategory) }}
+          </span>
+        </div>
       </div>
 
       <!-- 已取消 -->
@@ -349,6 +354,9 @@ function handleRemove() {
 }
 .task-success { color: var(--agnes-success); }
 .task-failed { color: var(--agnes-error); }
+/* 失败类目提示行（错误归类合同的用户可读文案） */
+.failed-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.failed-category { color: var(--agnes-text-muted); font-size: 11px; }
 /* 重试中状态：失败区块用主色调（进行中）而非错误色 */
 .task-failed.is-retrying { color: var(--agnes-primary-soft); }
 .retrying-icon {

@@ -138,7 +138,7 @@ vi.mock('@/api/canvasWorkspace', () => ({
   createWorkspace: mocks.createWorkspaceApi,
 }))
 
-import { useChatStore, chatContextFromRows } from '../chat'
+import { useChatStore, chatContextFromRows, _resetKernelPoolsForTest } from '../chat'
 
 // node 测试环境无 localStorage：内存实现打桩（chat store 与档位记忆共用）
 const lsMap = new Map<string, string>()
@@ -153,6 +153,7 @@ beforeEach(() => {
   lsMap.clear()
   lsMap.set('agnes_agent_mode', 'auto')
   setActivePinia(createPinia())
+  _resetKernelPoolsForTest()
   mocks.kernels.length = 0
   mocks.canvasState.activeWorkspaceId = null
   mocks.canvasState.workspaces = []

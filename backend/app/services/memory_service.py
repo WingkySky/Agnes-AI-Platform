@@ -56,16 +56,18 @@ async def read_preferences(db: AsyncSession, user_id: int) -> dict:
 
 
 async def delete_preference(db: AsyncSession, user_id: int, observation: str) -> bool:
-    """删除单条偏好（delete_observations）"""
+    """删除单条偏好（delete_observations，入参键 deletions 见新版服务器 schema）"""
     server = await find_memory_server(db)
     if not server:
         return False
-    await mcp_service.call_server_tool(
+    result = await mcp_service.call_server_tool(
         server,
         "delete_observations",
-        {"observations": [{"entityName": PREFERENCE_ENTITY, "observations": [observation]}]},
+        {"deletions": [{"entityName": PREFERENCE_ENTITY, "observations": [observation]}]},
         user_id=user_id,
     )
+    if result.get("is_error"):
+        raise RuntimeError(f"delete_observations 失败：{result.get('text', '')}")
     return True
 
 
@@ -74,5 +76,7 @@ async def clear_preferences(db: AsyncSession, user_id: int) -> bool:
     server = await find_memory_server(db)
     if not server:
         return False
-    await mcp_service.call_server_tool(server, "delete_entities", {"entityNames": [PREFERENCE_ENTITY]}, user_id=user_id)
+    result = await mcp_service.call_server_tool(server, "delete_entities", {"entityNames": [PREFERENCE_ENTITY]}, user_id=user_id)
+    if result.get("is_error"):
+        raise RuntimeError(f"delete_entities 失败：{result.get('text', '')}")
     return True
