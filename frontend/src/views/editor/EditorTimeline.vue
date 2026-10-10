@@ -16,9 +16,10 @@ import { Eye, EyeOff, GripVertical, Headphones, Lock, LockOpen, Subtitles, Volum
 
 import { useEditorStore } from '@/stores/editor'
 import { useI18n } from '@/i18n'
-import { ImagePlay } from 'lucide-vue-next'
+import { ImagePlay, Wand2 } from 'lucide-vue-next'
 import EditorCoverDialog from './EditorCoverDialog.vue'
 import EditorSubtitleDialog from './EditorSubtitleDialog.vue'
+import EditorRoughCutDialog from './EditorRoughCutDialog.vue'
 import { MIN_CLIP_DURATION, clipEnd, type EditorClip, type EditorTrack, type TrackFlagKey, type TrackKind, type TrackTransition, type TransitionType } from '@/lib/editor-types'
 import { TRANSITION_TYPES } from '@/lib/editor-fx-registry'
 import { formatSrtCues, parseSrt } from '@/lib/canvas-media'
@@ -414,6 +415,7 @@ interface JunctionState { x: number; y: number; trackId: string; clipId: string;
 const junctionMenu = ref<JunctionState | null>(null)
 const coverDialogVisible = ref(false)
 const subtitleDialogVisible = ref(false)
+const roughCutDialogVisible = ref(false)
 
 function openJunctionMenu(e: MouseEvent, clip: EditorClip, transition: TrackTransition | null): void {
   junctionMenu.value = {
@@ -594,6 +596,7 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
     <div class="timeline-toolbar">
       <el-button size="small" text :icon="ImagePlay" :title="t('editor.coverButton')" @click="coverDialogVisible = true">{{ t('editor.coverButton') }}</el-button>
       <el-button size="small" text :icon="Subtitles" :title="t('editor.subtitleWorkspaceTitle')" @click="subtitleDialogVisible = true">{{ t('editor.subtitleWorkspace') }}</el-button>
+      <el-button size="small" text :icon="Wand2" :title="t('editor.roughCutTitle')" @click="roughCutDialogVisible = true">{{ t('editor.roughCutEntry') }}</el-button>
       <el-button size="small" text :icon="RefreshLeft" :disabled="!store.history.canUndo" :title="t('editor.undo')" @click="store.undo()" />
       <el-button size="small" text :icon="RefreshRight" :disabled="!store.history.canRedo" :title="t('editor.redo')" @click="store.redo()" />
       <span class="toolbar-divider" />
@@ -808,6 +811,7 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
 
     <EditorCoverDialog v-model="coverDialogVisible" />
     <EditorSubtitleDialog v-model="subtitleDialogVisible" />
+    <EditorRoughCutDialog v-model="roughCutDialogVisible" />
   </div>
 </template>
 

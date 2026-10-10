@@ -8,12 +8,15 @@
 # - GET  /api/editor/projects/{uid}/revision  远端 revision 轻查询（编辑器页轮询）
 # - GET  /api/editor/projects/{uid}/snapshots[/{id}]  agent 写前快照列表/全量（还原走正常保存链路）
 # - POST /api/editor/projects/{uid}/subtitles/preview  whisper 转写字幕草稿
+# - POST /api/editor/assets/{asset_id}/analyze  AI 粗剪分析（静音剔除/场景切分 → segments）
 #   （渲染端点在 render_service 落地阶段接入）
 #
 # 鉴权双挂：router 级 dependencies + 端点显式 Depends（401/403/200 三态测试锁死）
 # =====================================================
 
-from typing import Optional
+import asyncio
+import tempfile
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,9 +31,12 @@ from app.schemas.editor import (
     EditorProjectCreate,
     EditorProjectListResponse,
     EditorProjectUpdate,
+    RoughCutAnalyzeRequest,
     SubtitlePreviewRequest,
 )
-from app.services.editor import project_service, render_service, transcribe_bridge
+from app.services.asset_library import get_asset_by_id
+from app.services.editor import project_service, render_service, rough_cut_service, transcribe_bridge
+from app.services.editor.media_source import resolve_asset_local_file
 
 router = APIRouter(
     prefix="/editor/projects",
@@ -195,3 +201,70 @@ async def subtitles_preview(
     project = await project_service.get_owned_project(db, uid, current_user)
     segments = await transcribe_bridge.preview_subtitle_segments(db, project, body.track_id)
     return ok(data={"segments": segments})
+
+
+# ---------- AI 粗剪分析（素材级，登录用户；独立 router：前缀 /editor/assets） ----------
+
+router_assets = APIRouter(
+    prefix="/editor/assets",
+    tags=["剪辑器"],
+    dependencies=[Depends(get_current_user)],
+)
+
+# 同步分析上限（秒）：解码全片 CPU 型，超时明确报错引导用户改用手动剪辑
+ANALYZE_TIMEOUT_SEC = 120
+
+
+@router_assets.post("/{asset_id}/analyze", summary="AI 粗剪分析（静音剔除/场景切分 → 有声段/镜头段）")
+async def analyze_asset(
+    asset_id: int,
+    body: RoughCutAnalyzeRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    asset = await get_asset_by_id(db, asset_id)
+    if not asset or asset.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="素材不存在")
+    if (asset.kind or "") not in ("video", "audio"):
+        raise HTTPException(status_code=400, detail="仅支持视频/音频素材分析")
+    if body.mode not in ("silence", "scenes"):
+        raise HTTPException(status_code=400, detail="mode 仅支持 silence / scenes")
+
+    tmp_dir = tempfile.mkdtemp(prefix="rough-cut-")
+    local_path = await resolve_asset_local_file(asset, tmp_dir)
+    if not local_path:
+        raise HTTPException(status_code=502, detail="素材源文件不可用（本地缺失且远程转存失败）")
+
+    params: dict[str, Any] = body.params or {}
+    try:
+        if body.mode == "silence":
+            result = await asyncio.wait_for(
+                asyncio.to_thread(
+                    rough_cut_service.detect_silence_speech,
+                    local_path,
+                    threshold_db=float(params.get("threshold_db", -30.0)),
+                    min_silence=float(params.get("min_silence", 0.5)),
+                ),
+                timeout=ANALYZE_TIMEOUT_SEC,
+            )
+        elif body.mode == "scenes":
+            result = await asyncio.wait_for(
+                asyncio.to_thread(
+                    rough_cut_service.detect_scenes,
+                    local_path,
+                    threshold=float(params.get("threshold", 14.0)),
+                    min_scene=float(params.get("min_scene", 0.5)),
+                ),
+                timeout=ANALYZE_TIMEOUT_SEC,
+            )
+        else:  # 上面已校验 mode 白名单，此分支防御性兜底
+            raise HTTPException(status_code=400, detail="mode 仅支持 silence / scenes")
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=503, detail="分析超时（素材过长），请改用手动剪辑")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"素材无法分析：{e}")
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001 —— 解码失败转可读错误
+        raise HTTPException(status_code=502, detail=f"分析失败：{e}")
+    return ok(data={"asset_id": asset.id, "mode": body.mode, **result})

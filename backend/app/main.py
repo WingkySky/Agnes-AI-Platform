@@ -340,6 +340,7 @@ app.include_router(canvas_workspace_route.router, prefix="/api", tags=["画布�
 app.include_router(works_route.router, prefix="/api", tags=["作品"])
 app.include_router(work_entities_route.router, prefix="/api", tags=["作品实体库"])
 app.include_router(editor_route.router, prefix="/api", tags=["剪辑器"])
+app.include_router(editor_route.router_assets, prefix="/api", tags=["剪辑器"])
 app.include_router(agent_relay_route.router, prefix="/api", tags=["Agent 反向控制桥"])
 
 

@@ -28,5 +28,8 @@ edge-tts>=7.0.0      # Edge TTS 语音合成
 boto3>=1.34.0             # AWS SDK for Python，支持任何 S3 兼容服务商
 # 语音转字幕（剪辑器/画布字幕转写，faster-whisper 本地推理）
 faster-whisper>=1.2.0  # 首次转写自动下载 whisper 模型（默认 small，约 460MB），HF_HOME 指向数据卷避免重复下载；其依赖 PyAV 19 移除 metadata_errors 参数的兼容垫片在 transcribe_service
+# AI 粗剪检测层（静音剔除 / 场景切分，rough_cut_service）
+numpy>=2.0.0  # 音频 RMS / 帧差检测
+PyAV>=14.0.0  # 媒体解码（与 faster-whisper 共享同一 wheel；直接 import 故显式声明）
 # MCP 网关（Agent 外部工具桥，stdio / streamable HTTP 客户端）
 mcp>=2.2.0  # 依赖 2.x API（streamable_http_client / create_mcp_http_client）

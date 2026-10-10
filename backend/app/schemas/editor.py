@@ -59,3 +59,9 @@ class EditorProjectListResponse(BaseModel):
 class SubtitlePreviewRequest(BaseModel):
     """whisper 转写预览：指定音频轨，返回字幕片段草稿（入轨走 rebuildSubtitleClips 命令）"""
     track_id: str
+
+
+class RoughCutAnalyzeRequest(BaseModel):
+    """AI 粗剪分析：silence=剔除静音（输出有声段），scenes=场景切分（输出镜头段）"""
+    mode: str  # 'silence' | 'scenes'
+    params: dict[str, Any] = {}

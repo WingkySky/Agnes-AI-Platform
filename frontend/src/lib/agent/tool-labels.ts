@@ -94,6 +94,7 @@ export const TOOL_LABELS: Record<string, ToolLabelEntry> = {
   editor_get_overview: { key: 'agent.actEditorOverview' },
   editor_create_project: { key: 'agent.actEditorCreateProject', detail: (a) => withName(t('agent.actEditorCreateProject'), typeof a.title === 'string' ? a.title : '') },
   editor_apply_ops: { key: 'agent.actEditorApplyOps', detail: (a) => `${t('agent.actEditorApplyOps')} ×${Array.isArray(a.ops) ? a.ops.length : 0}` },
+  editor_ai_rough_cut: { key: 'agent.actEditorRoughCut', detail: (a) => `${t('agent.actEditorRoughCut')}${typeof a.asset_id === 'number' ? ` #${a.asset_id}` : ''}` },
   editor_generate_subtitles: { key: 'agent.actEditorGenSubtitles' },
   editor_render: { key: 'agent.actEditorRender' },
   editor_get_render_status: { key: 'agent.actEditorRenderStatus' },

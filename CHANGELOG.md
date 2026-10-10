@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### AI 辅助粗剪（静音剔除 / 场景切分 → 一键草稿时间线）
+
+- **检测层（纯 Python 零 CLI 依赖）**：新 `rough_cut_service`——PyAV 解码 + numpy，规避生产镜像无 ffmpeg 可执行的存量假设（scenedetect pyav 后端有上游 bug 故自写）：silence=音频帧 RMS 阈值游程（帧级起止秒推进，不假设固定帧长）→ 有声段补集；scenes=降采样灰度帧相邻平均绝对差超阈值切开 → 碎镜头并入前段；统一 segments 合同（钳位/去重叠/剔碎段——**合并条件严格 `<`，相邻切点不吞并**）
+- **端点**：`POST /api/editor/assets/{asset_id}/analyze`（登录级 router + 归属 404/非媒体 400/非法 mode 400/超时 503）；阻塞解码经 `asyncio.to_thread` + 120s 超时；素材本地缺失时走既有 `resolve_asset_local_file` 远程收口；requirements 显式声明 numpy/PyAV（直接 import 而非仅传递依赖）
+- **剪辑器 UI**：时间线工具栏「AI 粗剪」→ 弹窗（选视频/音频素材 + 模式 + 阈值滑条）→ 分析 → 段列表预览（保留占比）→ 落当前工程（同类型轨尾顺序排布，每段一条 addClip 独立可撤销）；**素材媒体种类取 `media_type`**（`type` 是容器类型 material/clip——实测抓出的错）
+- **Agent 工具 `editor_ai_rough_cut`**：分析 + 默认新建「AI 粗剪 · 素材名」工程或落指定工程，回复段数/保留比/工程 uid + 后续动作指引；TOOL_LABELS 完整性测试同步
+- **测试**：pytest 288（+10：真实编码视频端到端三段切分/中段静音剔除、norm 合并钳位边界、三态鉴权/归属/非媒体/非法 mode）；vitest 648（+4：segmentsToClips 顺序排布/offset/碎段过滤/毫秒圆整）+ vue-tsc 0 错 + build 过
+- 浏览器实测：真实成片场景切分 3 段 UI 预览落时间线、agent 一轮对话完成分析+建工程+落段（工程冒烟后清理）；设计档 `.zcode/plans/2026-10-10-ai-rough-cut-design.md`（引擎选型实施偏差：scenedetect→自写，已记录）
+
 ### 画布体验打磨（视频悬停预览 + 读工具上下文预算）
 
 - **视频节点悬停预览**：悬停 350ms 静音播放前 3 秒（到点暂停复位、移出即停复位），不点开就能看内容；全画布单例（新预览自动停旧）；用户 pointerdown（含原生 controls）立即交还播放权且停预览后恢复原静音态（预览不遗留 muted，用户后续点播放有声）；拖拽画布/框选经过不触发；`lib/canvas-video-preview` 单例启停 + CanvasNode 接线

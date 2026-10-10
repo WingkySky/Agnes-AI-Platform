@@ -104,6 +104,26 @@ export function previewSubtitleSegments(uid: string, trackId: string): Promise<{
   return client.post(`/api/editor/projects/${uid}/subtitles/preview`, { track_id: trackId })
 }
 
+// ---------- AI 粗剪分析 ----------
+
+export interface RoughCutSegment {
+  start: number
+  end: number
+}
+
+export interface RoughCutAnalysis {
+  asset_id: number
+  mode: 'silence' | 'scenes'
+  segments: RoughCutSegment[]
+  duration_total: number
+  kept_ratio?: number
+}
+
+/** AI 粗剪分析（静音剔除/场景切分 → 保留段列表） */
+export function analyzeAsset(assetId: number, mode: 'silence' | 'scenes', params?: Record<string, number>): Promise<RoughCutAnalysis> {
+  return client.post(`/api/editor/assets/${assetId}/analyze`, { mode, params: params ?? {} })
+}
+
 // ---------- 渲染 ----------
 
 export interface RenderStatus {

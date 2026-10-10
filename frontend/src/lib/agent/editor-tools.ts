@@ -13,6 +13,7 @@
 import { Type } from 'typebox'
 import type { TSchema } from 'typebox'
 import {
+  analyzeAsset,
   createEditorProject,
   getEditorProject,
   getEditorRenderStatus,
@@ -25,6 +26,7 @@ import { getAsset, listAssets, type UnifiedAsset } from '@/api/assets'
 import { applyCanvasOps } from '@/api/canvasWorkspace'
 import { applyCommand, cmd, EditorCommandError, EDITOR_OPS, type EditorOp } from '@/lib/editor-commands'
 import { probeMediaDuration, probeElementDuration } from '@/lib/editor-media'
+import { segmentsDuration, segmentsToClips } from '@/lib/editor-rough-cut'
 import type { EditorClip, EditorDocument, EditorTrack } from '@/lib/editor-types'
 import type { AgentToolResult } from './tools'
 import { noteToolRoute } from './tools'
@@ -609,6 +611,87 @@ const editorGetRenderStatusTool = {
   },
 }
 
+// ---------- editor_ai_rough_cut ----------
+
+const editorAiRoughCutTool = {
+  name: 'editor_ai_rough_cut',
+  group: 'write' as const,
+  description:
+    'AI 粗剪：分析素材库视频/音频素材并生成草稿时间线。mode=silence 剔除静音（输出有声段，适合口播/vlog）；' +
+    'mode=scenes 场景切分（按镜头边界切段）。segments 顺序排布为新片段（trimStart=段起点），默认新建工程' +
+    '「AI 粗剪 · 素材名」，也可 target_project_uid 落到已有工程（追加为同类型轨尾新片段）。' +
+    '返回段数/保留占比/工程 uid，可继续 editor_apply_ops 微调或 editor_render 成片。',
+  parameters: Type.Object({
+    asset_id: Type.Number({ description: '素材库 asset_id（视频/音频）' }),
+    mode: Type.String({ description: "分析模式：'silence' 剔除静音 / 'scenes' 场景切分" }),
+    params: Type.Optional(Type.Record(Type.String(), Type.Number(), { description: "可选参数：silence 传 {threshold_db:-30, min_silence:0.5}；scenes 传 {threshold:14, min_scene:0.5}" })),
+    target_project_uid: Type.Optional(Type.String({ description: '落到已有剪辑工程（缺省新建工程）' })),
+    title: Type.Optional(Type.String({ description: '新建工程标题（缺省「AI 粗剪 · 素材名」）' })),
+  }),
+  execute: async (args: Record<string, unknown>): Promise<AgentToolResult> => {
+    const assetId = typeof args.asset_id === 'number' ? args.asset_id : 0
+    const mode = args.mode === 'scenes' ? 'scenes' : args.mode === 'silence' ? 'silence' : ''
+    if (!assetId) return { ok: false, error: '缺少 asset_id' }
+    if (!mode) return { ok: false, error: "mode 仅支持 'silence' / 'scenes'" }
+    try {
+      const asset = await getAsset(assetId)
+      if (!asset) return { ok: false, error: `素材 ${assetId} 不存在` }
+      // media_type 是媒体种类（video/audio/image）；type 是容器类型（material/clip）
+      if (asset.media_type !== 'video' && asset.media_type !== 'audio') {
+        return { ok: false, error: '仅支持视频/音频素材' }
+      }
+      const params = (args.params && typeof args.params === 'object' && !(args.params instanceof Array))
+        ? Object.fromEntries(
+            Object.entries(args.params as Record<string, unknown>)
+              .filter((entry): entry is [string, number] => typeof entry[1] === 'number'),
+          )
+        : undefined
+      const analysis = await analyzeAsset(assetId, mode, params)
+      if (!analysis.segments.length) {
+        return { ok: true, data: { segments: 0, message: '分析完成但没有保留段（阈值过严或素材无声/无镜头变化），可放宽参数重试' } }
+      }
+      // 定工程：已有工程追加（同类型轨尾），否则新建（asset_ids 草稿随建随排，粗剪片段以 addClip 覆盖式追加）
+      let uid = typeof args.target_project_uid === 'string' ? args.target_project_uid : ''
+      let created = false
+      if (!uid) {
+        const title = typeof args.title === 'string' && args.title.trim() ? args.title.trim() : `AI 粗剪 · ${asset.name}`
+        const project = await createEditorProject({ title, asset_ids: [assetId] })
+        uid = project.uid
+        created = true
+      }
+      const projectDetail = await getEditorProject(uid)
+      if (!projectDetail) return { ok: false, error: `剪辑工程 ${uid} 不存在` }
+      const trackKind = asset.media_type === 'audio' ? 'audio' : 'video'
+      const doc = projectDetail.document
+      const track = doc.tracks.find((tr) => tr.kind === trackKind && !tr.flags.locked)
+        ?? doc.tracks.find((tr) => tr.kind === trackKind)
+      if (!track) return { ok: false, error: `工程 ${uid} 没有可用的${trackKind === 'audio' ? '音频' : '视频'}轨（且无法自动建轨）` }
+      const tail = doc.clips
+        .filter((c) => c.trackId === track.id)
+        .reduce((end, c) => Math.max(end, c.start + c.duration), 0)
+      const clips = segmentsToClips(analysis.segments, { trackId: track.id, assetId, offset: tail }, (p) => `${p}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`)
+      const ops = clips.map((clip) => ({ op: 'addClip', payload: { clip } }))
+      const r = await applyOpsToProject(uid, ops, 'ai_rough_cut')
+      if (!r.ok) return { ok: false, error: r.error }
+      const kept = segmentsDuration(analysis.segments)
+      return {
+        ok: true,
+        data: {
+          editing_project_id: uid,
+          created,
+          mode,
+          segments: clips.length,
+          kept_seconds: Math.round(kept * 10) / 10,
+          kept_ratio: analysis.kept_ratio,
+          message: `AI 粗剪完成：${clips.length} 段落至工程「${asset.name}」${created ? '（新建）' : ''}（uid ${uid}），保留 ${kept.toFixed(1)} 秒${analysis.kept_ratio != null ? ` / 占比 ${Math.round(analysis.kept_ratio * 100)}%` : ''}。可继续 editor_apply_ops 微调或 editor_render 成片`,
+        },
+      }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  },
+}
+
 /** 剪辑器工具组统一形状（ctx 可选：页外 HTTP 路径不依赖宿主上下文；桥执行器按名单分发用） */
 export interface EditorHostTool {
   name: string
@@ -624,6 +707,7 @@ export const EDITOR_TOOLS: EditorHostTool[] = [
   editorGetOverviewTool,
   editorCreateProjectTool,
   editorApplyOpsTool,
+  editorAiRoughCutTool,
   editorGenerateSubtitlesTool,
   editorRenderTool,
   editorGetRenderStatusTool,
