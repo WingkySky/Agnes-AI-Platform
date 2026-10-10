@@ -157,15 +157,19 @@
             <Video :size="28" />
             <span class="empty-text empty-text-sm">{{ t('canvas.node.emptyVideo') }}</span>
           </div>
-          <!-- 有视频：video 播放器 -->
+          <!-- 有视频：video 播放器（悬停 350ms 静音预览前 3 秒，点击/移出交还） -->
           <video
             v-else
+            ref="videoElRef"
             :src="metadata.content"
             controls
             class="video-player"
             data-canvas-no-zoom
             @loadedmetadata="onVideoMetadataLoaded"
             @timeupdate="onVideoTimeUpdate"
+            @pointerenter="onVideoPointerEnter"
+            @pointerleave="onVideoPointerLeave"
+            @pointerdown="onVideoPointerDown"
           />
         </div>
 
@@ -433,11 +437,12 @@
  *   - content.freeResize：是否自由缩放（不保持比例）
  * ===================================================== */
 
-import { computed, ref, nextTick, watch, onMounted, onUnmounted } from 'vue'
+import { computed, ref, nextTick, watch, onMounted, onUnmounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Image as ImageIcon, Video, Music2, RefreshCw, Play } from 'lucide-vue-next'
 import { useI18n } from '@/i18n'
 import { useCanvasStore } from '@/stores/canvas'
+import { PREVIEW_SECONDS, startPreview, stopPreview, stopActivePreview } from '@/lib/canvas-video-preview'
 import ImageWithWatermark from '@/components/ImageWithWatermark.vue'
 import ScriptNodeContent from '@/components/canvas/nodes/ScriptNodeContent.vue'
 import TableNodeContent from '@/components/canvas/nodes/TableNodeContent.vue'
@@ -934,10 +939,64 @@ function onImageLoad(e: Event) {
   })
 }
 
-/** 播放位置变化：记录最近时间，供"截取当前帧"使用 */
+/** 播放位置变化：记录最近时间，供"截取当前帧"使用；预览播到上限即停 */
 function onVideoTimeUpdate(e: Event) {
-  registerVideoTime(props.panel.id, (e.target as HTMLVideoElement).currentTime)
+  const video = e.target as HTMLVideoElement
+  registerVideoTime(props.panel.id, video.currentTime)
+  if (previewing.value && video.currentTime >= PREVIEW_SECONDS) stopVideoPreview(video)
 }
+
+// ---------- 悬停预览（静音播前 3 秒；全画布单例） ----------
+
+const videoElRef = ref<HTMLVideoElement | null>(null)
+const previewing = ref(false)
+let previewTimer: number | null = null
+
+function onVideoPointerEnter(e: PointerEvent) {
+  if (e.pointerType !== 'mouse' || e.buttons !== 0) return
+  const video = videoElRef.value
+  if (!video || previewTimer !== null) return
+  previewTimer = window.setTimeout(() => {
+    previewTimer = null
+    if (!videoElRef.value) return
+    if (startPreview(videoElRef.value)) previewing.value = true
+  }, 350)
+}
+
+function onVideoPointerLeave() {
+  cancelPreviewTimer()
+  const video = videoElRef.value
+  if (video && previewing.value) {
+    stopVideoPreview(video)
+  }
+}
+
+/** 用户点击（含原生 controls）即交还播放权：取消 pending 预览，中止预览态（用户播放有声不受影响） */
+function onVideoPointerDown() {
+  cancelPreviewTimer()
+  const video = videoElRef.value
+  if (video && previewing.value) {
+    previewing.value = false
+    stopActivePreview()
+  }
+}
+
+function cancelPreviewTimer() {
+  if (previewTimer !== null) {
+    window.clearTimeout(previewTimer)
+    previewTimer = null
+  }
+}
+
+function stopVideoPreview(video: HTMLVideoElement) {
+  previewing.value = false
+  stopPreview(video)
+}
+
+onBeforeUnmount(() => {
+  cancelPreviewTimer()
+  if (videoElRef.value && previewing.value) stopPreview(videoElRef.value)
+})
 
 /** 视频元数据加载完成：读取原始像素尺寸写回 store */
 function onVideoMetadataLoaded(e: Event) {

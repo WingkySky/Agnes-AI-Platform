@@ -4,7 +4,14 @@
 
 ## [Unreleased]
 
-### 修复
+### 画布体验打磨（视频悬停预览 + 读工具上下文预算）
+
+- **视频节点悬停预览**：悬停 350ms 静音播放前 3 秒（到点暂停复位、移出即停复位），不点开就能看内容；全画布单例（新预览自动停旧）；用户 pointerdown（含原生 controls）立即交还播放权且停预览后恢复原静音态（预览不遗留 muted，用户后续点播放有声）；拖拽画布/框选经过不触发；`lib/canvas-video-preview` 单例启停 + CanvasNode 接线
+- **canvas_get_overview 上下文预算**：新增 `cursor`/`page_size`（默认 60，钳 10~100）游标分页——大画布不再静默截断 80 条，响应带 `next_cursor` 续读指引；**连线只返回两端至少一端在当页的**（原全量连线是大画布上下文炸弹，当页做 target 的连线其后各页自然出现）；小画布（≤page_size）单页全量行为等价；工具描述教模型续读；纯函数 `overviewPage`/`parseOverviewCursor`（游标越界=画布收缩回第一页重读）vitest 直测
+- **测试**：vitest 新增 10 例（overview 分页/相关连线/execute 端到端两页 + 预览单例互斥/静音态恢复/play 拒绝兜底），644 绿 + vue-tsc 0 错 + build 过；浏览器实测：悬停静音播放/3 秒停复位/移出复位/点击接管/预览后原生播放有声，agent 实读画布正确报节点
+- 时间线音波波形/视频缩略图已随 P3 素材条批次（4585737）上线，本层收口
+
+### 冒烟清账修复（同日提交 33a57b2）
 
 - **MCP 工具确认门被宿主短路吞掉**：chat 宿主内核的 authorizeTool 对「自带工具组」一律放行（仅 generation 组走门），MCP 外部工具（mcp__ 前缀）从此不再过 confirm 档门——补上独立分支：MCP 工具在宿主模式下同样走 'mcp' 组策略（readonly 拒绝 / confirm 每工具首次过门 / auto 直通）；回归测试锁死三档语义（3 例）
 - **子代理内 MCP 工具双门死锁**：子内核此前直接继承父 extraTools 且不过门；补门后子内核本地门与父内核 execute 层门（gateChildTool 前移）互相等待造成死锁（确认卡批准后永不执行）。修复：子内核标记 isChildKernel 一律跳过本地门，且父 extraTools 经 runSubagent 与宿主工具一起过 gateChildTool（子内核内不存在免门工具）；回归测试锁死（1 例）

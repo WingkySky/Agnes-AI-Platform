@@ -551,13 +551,49 @@ const canvasListWorkspacesTool = {
   },
 }
 
+// ---------- overview 分页纯函数（上下文预算：大画布游标续读，连线只带当页相关） ----------
+
+/** 解析游标为起始索引（非法/负值回退 0） */
+export function parseOverviewCursor(cursor: string | undefined): number {
+  if (!cursor) return 0
+  const n = Number.parseInt(cursor, 10)
+  return Number.isFinite(n) && n > 0 ? n : 0
+}
+
+export interface OverviewPage<T> {
+  items: T[]
+  /** 下一页起始索引字符串；已到末页省略 */
+  nextCursor?: string
+  pageRange: [number, number]
+  total: number
+}
+
+/** 面板分页：pageSize 钳 10~100，cursor 为起始索引（LLM 原样透传 next_cursor；游标越过末尾视为画布已收缩，回第一页重读） */
+export function overviewPage<T>(panels: T[], cursor: string | undefined, pageSize: number): OverviewPage<T> {
+  const size = Math.min(100, Math.max(10, Math.floor(pageSize) || 60))
+  const raw = parseOverviewCursor(cursor)
+  const start = raw < panels.length ? raw : 0
+  const end = Math.min(panels.length, start + size)
+  const items = panels.slice(start, end)
+  return {
+    items,
+    ...(end < panels.length ? { nextCursor: String(end) } : {}),
+    pageRange: [start, end],
+    total: panels.length,
+  }
+}
+
 const canvasGetOverviewTool = {
   name: 'canvas_get_overview',
   description:
     '读取云端画布工作区概要：节点（id/类型/名称/坐标/内容摘要）与连线关系（按名称标注上下游）。' +
-    '在引用已有节点、连线或回答画布内容问题前先调用；不返回图片/视频的二进制内容。',
+    '在引用已有节点、连线或回答画布内容问题前先调用；不返回图片/视频的二进制内容。' +
+    '大画布分页读取：响应含 next_cursor 且还需要更多节点时，把 cursor=next_cursor 传回继续读；' +
+    '每页只带与当页节点相关的连线。',
   parameters: Type.Object({
     canvas_workspace_id: Type.Optional(Type.String({ description: '工作区 id（缺省用当前激活工作区）' })),
+    cursor: Type.Optional(Type.String({ description: '续读游标：上一页响应的 next_cursor 原样传回（缺省从第一页读）' })),
+    page_size: Type.Optional(Type.Number({ description: '每页节点数，缺省 60（10~100）' })),
   }),
   execute: async (args: Record<string, unknown>, ctx: unknown): Promise<AgentToolResult> => {
     const target = await resolveTarget(ctx, args.canvas_workspace_id)
@@ -571,14 +607,16 @@ const canvasGetOverviewTool = {
         const found = panels.find((p) => p.id === id)
         return found ? String(found.name || found.id) : String(id ?? '')
       }
-      const OVERVIEW_LIMIT = 80
+      const page = overviewPage(panels, typeof args.cursor === 'string' ? args.cursor : undefined, typeof args.page_size === 'number' ? args.page_size : 60)
+      const pageIds = new Set(page.items.map((p) => String(p.id ?? '')))
+      const pageConnections = connections.filter((c) => pageIds.has(String(c.source_panel_id ?? '')) || pageIds.has(String(c.target_panel_id ?? '')))
       return {
         ok: true,
         data: {
           workspace_id: target.workspaceId,
           name: detail.name,
-          panel_count: panels.length,
-          panels: panels.slice(0, OVERVIEW_LIMIT).map((p) => ({
+          panel_count: page.total,
+          panels: page.items.map((p) => ({
             id: p.id,
             type: typeof p.type === 'string' ? p.type : 'text',
             name: typeof p.name === 'string' ? p.name : '',
@@ -586,8 +624,8 @@ const canvasGetOverviewTool = {
             y: p.y,
             summary: panelContentSummary(p),
           })),
-          ...(panels.length > OVERVIEW_LIMIT ? { note: `仅列前 ${OVERVIEW_LIMIT} 个节点，共 ${panels.length} 个` } : {}),
-          connections: connections.map((c) => ({
+          ...(page.nextCursor ? { next_cursor: page.nextCursor, note: `本页第 ${page.pageRange[0] + 1}~${page.pageRange[1]} / 共 ${page.total} 个节点；还需要更多节点时把 cursor="${page.nextCursor}" 传回继续读` } : {}),
+          connections: pageConnections.map((c) => ({
             id: c.id,
             source: nameOf(c.source_panel_id),
             target: nameOf(c.target_panel_id),

@@ -32,7 +32,7 @@ import { createImageTask } from '@/api/images'
 import { createVideoTask } from '@/api/videos'
 import { getPreset } from '@/api/presets'
 import { applyCanvasOps, getWorkspace, listWorkspaces } from '@/api/canvasWorkspace'
-import { CHAT_TOOLS } from '../chat-tools'
+import { CHAT_TOOLS, overviewPage, parseOverviewCursor } from '../chat-tools'
 import { AgentKernel } from '../kernel'
 import { createFakeStreamFn, fakeModel } from './fake-llm'
 
@@ -350,5 +350,78 @@ describe('generate_image place_on_canvas（落画布计划）', () => {
       taskId: 'vid_1', workspaceId: 'ws_active', workspaceName: '主画布', created: false,
       mediaType: 'video', prompt: 'a dog runs',
     })
+  })
+})
+
+describe('canvas_get_overview 上下文预算（分页 + 相关连线）', () => {
+  it('overviewPage：默认 60 条、钳位 10~100、游标续读、末页无 nextCursor', () => {
+    const panels = Array.from({ length: 130 }, (_, i) => ({ id: `p${i + 1}` }))
+    const p1 = overviewPage(panels, undefined, 999)
+    expect(p1.items).toHaveLength(100)
+    expect(p1.nextCursor).toBe('100')
+    expect(p1.pageRange).toEqual([0, 100])
+    expect(p1.total).toBe(130)
+
+    const p2 = overviewPage(panels, p1.nextCursor, 60)
+    expect(p2.items).toHaveLength(30)
+    expect(p2.nextCursor).toBeUndefined()
+    expect(p2.pageRange).toEqual([100, 130])
+
+    const small = overviewPage(panels.slice(0, 10), undefined, 60)
+    expect(small.items).toHaveLength(10)
+    expect(small.nextCursor).toBeUndefined()
+  })
+
+  it('parseOverviewCursor：非法/负数回退 0，正常解析', () => {
+    expect(parseOverviewCursor(undefined)).toBe(0)
+    expect(parseOverviewCursor('')).toBe(0)
+    expect(parseOverviewCursor('abc')).toBe(0)
+    expect(parseOverviewCursor('-5')).toBe(0)
+    expect(parseOverviewCursor('40')).toBe(40)
+  })
+
+  it('overviewPage：cursor 超出末尾钳到最后一页起点，空集安全', () => {
+    const panels = Array.from({ length: 5 }, (_, i) => ({ id: `p${i}` }))
+    const p = overviewPage(panels, '999', 60)
+    expect(p.pageRange).toEqual([0, 5])
+    expect(overviewPage([], undefined, 60).items).toEqual([])
+  })
+
+  it('execute：大画布分页只带当页相关连线，note 带 next_cursor 指引', async () => {
+    const panels = Array.from({ length: 70 }, (_, i) => ({ id: `p${i + 1}`, type: 'text', name: `节点${i + 1}` }))
+    const connections = [
+      { id: 'c1', source_panel_id: 'p1', target_panel_id: 'p2' },
+      { id: 'c2', source_panel_id: 'p60', target_panel_id: 'p61' }, // 跨页边界：source 在当页
+      { id: 'c3', source_panel_id: 'p65', target_panel_id: 'p66' }, // 双外当页（61~70 之外? 65/66 都不在第一页）
+      { id: 'c4', source_panel_id: 'p69', target_panel_id: 'p70' },
+    ]
+    vi.mocked(getWorkspace).mockResolvedValue({
+      id: 'ws1', name: '大画布', data: { panels, connections },
+    } as never)
+    const r = await canvasOverviewTool.execute({ canvas_workspace_id: 'ws1' }, canvasCtx())
+    expect(r.ok).toBe(true)
+    const data = (r as { data: Record<string, unknown> }).data
+    expect(data.panel_count).toBe(70)
+    expect((data.panels as unknown[]).length).toBe(60)
+    expect(data.next_cursor).toBe('60')
+    const conns = data.connections as Array<{ id: string }>
+    expect(conns.map((c) => c.id).sort()).toEqual(['c1', 'c2'])
+  })
+
+  it('execute：续读第二页拿剩余节点与剩余连线，末页无 next_cursor', async () => {
+    const panels = Array.from({ length: 70 }, (_, i) => ({ id: `p${i + 1}`, type: 'text', name: `节点${i + 1}` }))
+    const connections = [
+      { id: 'c2', source_panel_id: 'p60', target_panel_id: 'p61' },
+      { id: 'c4', source_panel_id: 'p69', target_panel_id: 'p70' },
+    ]
+    vi.mocked(getWorkspace).mockResolvedValue({
+      id: 'ws1', name: '大画布', data: { panels, connections },
+    } as never)
+    const r = await canvasOverviewTool.execute({ canvas_workspace_id: 'ws1', cursor: '60' }, canvasCtx())
+    expect(r.ok).toBe(true)
+    const data = (r as { data: Record<string, unknown> }).data
+    expect((data.panels as unknown[]).length).toBe(10)
+    expect(data.next_cursor).toBeUndefined()
+    expect((data.connections as unknown[]).map((c) => (c as { id: string }).id)).toEqual(['c2', 'c4'])
   })
 })
