@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### MCP 接入指引入口（产品内露出）
+
+- 个人中心「API 访问令牌」卡片新增**「接入指引」弹窗**：按当前环境自动推导端点 URL（dev→后端 8000 直连，vite 不代理 /mcp；生产→同源；配 `VITE_API_BASE_URL`→用之）+ 可复制的 MCP client 配置 JSON（令牌占位）+ 档位说明与工具面提示
+- 创建令牌成功态新增**「复制接入配置」**：真实令牌直接嵌入配置 JSON，复制后粘贴到客户端即用，不再需要手工拼 Authorization 头
+- 文案 i18n 中英同步；vue-tsc 0 错 / vitest 651 / build 过
+
 ### 平台 MCP Server 批次 2+3（编辑器与生成全量工具面 · 文档收尾）
 
 - **编辑器七工具**：`editor_list_projects` / `editor_create_project` / `editor_get_document` / `editor_put_document`（revision 乐观锁）/ `editor_render_submit`（client_operation_id 幂等）/ `editor_render_status` / `editor_rough_cut_analyze`——全部直调既有 `project_service`/`render_service`/`rough_cut_service`，零业务逻辑复制；**AI 粗剪编排从路由体抽到 `rough_cut_service.analyze_asset`**（HTTP 路由与 MCP 工具共用，顺带补上临时目录 finally 清理）

@@ -3478,6 +3478,16 @@ const zhCN = {
     patTokenOnce: '关闭弹窗后将无法再次查看',
     patCopy: '复制',
     patCreateFailed: '令牌创建失败',
+    patGuide: '接入指引',
+    patGuideTitle: 'MCP 接入指引',
+    patGuideStep1: '第 1 步：复制接入端点（MCP Server URL）',
+    patGuideStep2: '第 2 步：在外部 Agent（zcode / Claude Code 等）的 MCP 配置中添加服务器，粘贴以下内容并把令牌替换为你的 PAT',
+    patGuideStep3: '第 3 步：重载客户端后即可看到 16 个工具（画布 canvas_* / 剪辑器 editor_* / 生成类）',
+    patGuideTierNote: '只读档仅能调用查询类工具；建画布、落节点、生成、渲染等写操作需要「完全」档令牌。',
+    patGuideHint: '完整说明见仓库 docs/mcp-server-guide.md',
+    patCopyConfig: '复制接入配置',
+    patConfigCopied: '接入配置已复制，粘贴到客户端 MCP 配置即可',
+    patConfigHint: '下方接入配置已嵌入刚创建的令牌，直接粘贴即可使用：',
   },
 
   // ------ 用户管理页 ------

@@ -3494,6 +3494,16 @@ const enUS = {
     patTokenOnce: 'It cannot be viewed again after this dialog closes',
     patCopy: 'Copy',
     patCreateFailed: 'Failed to create token',
+    patGuide: 'Setup Guide',
+    patGuideTitle: 'MCP Setup Guide',
+    patGuideStep1: 'Step 1: Copy the endpoint (MCP Server URL)',
+    patGuideStep2: "Step 2: Add a server in your external agent's MCP config (zcode / Claude Code etc.), paste the snippet below and replace the token with your PAT",
+    patGuideStep3: 'Step 3: Reload the client — 16 tools will appear (canvas_* / editor_* / generation)',
+    patGuideTierNote: 'Read-only tokens can call query tools only. Creating canvases, applying ops, generating and rendering require a Full token.',
+    patGuideHint: 'Full documentation: docs/mcp-server-guide.md in the repository',
+    patCopyConfig: 'Copy Config',
+    patConfigCopied: 'Config copied — paste it into your client MCP settings',
+    patConfigHint: 'The config below already embeds the token you just created — paste it as-is:',
   },
 
   // ------ User admin page ------

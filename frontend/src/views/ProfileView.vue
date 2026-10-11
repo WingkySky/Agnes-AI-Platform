@@ -117,10 +117,16 @@
     <section class="profile-card pat-card">
       <div class="pat-header">
         <h3 class="card-title">{{ t('profile.patSection') }}</h3>
-        <el-button type="primary" size="small" @click="patDialogVisible = true">
-          <el-icon><Plus /></el-icon>
-          {{ t('profile.patNew') }}
-        </el-button>
+        <div class="pat-header-actions">
+          <el-button size="small" @click="guideVisible = true">
+            <el-icon><Guide /></el-icon>
+            {{ t('profile.patGuide') }}
+          </el-button>
+          <el-button type="primary" size="small" @click="patDialogVisible = true">
+            <el-icon><Plus /></el-icon>
+            {{ t('profile.patNew') }}
+          </el-button>
+        </div>
       </div>
       <p class="pat-subtitle">{{ t('profile.patSubtitle') }}</p>
 
@@ -187,12 +193,49 @@
               {{ t('profile.patCopy') }}
             </el-button>
           </div>
+          <el-divider class="pat-divider" />
+          <p class="pat-config-hint">{{ t('profile.patConfigHint') }}</p>
+          <div class="pat-token-row">
+            <code class="pat-token pat-token-tall">{{ createdConfig }}</code>
+            <el-button size="small" type="primary" @click="copyCreatedConfig">
+              <el-icon><CopyDocument /></el-icon>
+              {{ t('profile.patCopyConfig') }}
+            </el-button>
+          </div>
         </template>
         <template #footer>
           <el-button @click="patDialogVisible = false">{{ t('common.close') }}</el-button>
           <el-button v-if="!createdToken" type="primary" :loading="patCreating" @click="handleCreatePat">
             {{ t('profile.patCreate') }}
           </el-button>
+        </template>
+      </el-dialog>
+
+      <!-- 接入指引弹窗 -->
+      <el-dialog v-model="guideVisible" :title="t('profile.patGuideTitle')" width="560px">
+        <div class="pat-guide">
+          <p class="pat-guide-step">{{ t('profile.patGuideStep1') }}</p>
+          <div class="pat-token-row">
+            <code class="pat-token">{{ mcpUrl }}</code>
+            <el-button size="small" @click="copyMcpUrl">
+              <el-icon><CopyDocument /></el-icon>
+              {{ t('profile.patCopy') }}
+            </el-button>
+          </div>
+          <p class="pat-guide-step">{{ t('profile.patGuideStep2') }}</p>
+          <div class="pat-token-row">
+            <code class="pat-token pat-token-tall pat-token-block">{{ guideConfig }}</code>
+            <el-button size="small" @click="copyGuideConfig">
+              <el-icon><CopyDocument /></el-icon>
+              {{ t('profile.patCopy') }}
+            </el-button>
+          </div>
+          <p class="pat-guide-step">{{ t('profile.patGuideStep3') }}</p>
+          <el-alert type="info" :title="t('profile.patGuideTierNote')" :closable="false" class="pat-token-alert" />
+          <p class="pat-guide-more">{{ t('profile.patGuideHint') }}</p>
+        </div>
+        <template #footer>
+          <el-button type="primary" @click="guideVisible = false">{{ t('common.close') }}</el-button>
         </template>
       </el-dialog>
     </section>
@@ -203,7 +246,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  UserFilled, User, Message, Camera, Loading, Check, Plus, CopyDocument,
+  UserFilled, User, Message, Camera, Loading, Check, Plus, CopyDocument, Guide,
 } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { formatTime } from '@/lib/format'
@@ -336,6 +379,46 @@ async function handleCreatePat() {
 
 function copyCreatedToken() {
   copyText(createdToken.value, t('common.copied'))
+}
+
+// ============ 接入指引（端点按环境推导 + 配置 JSON 一键复制） ============
+const guideVisible = ref(false)
+
+// 端点 URL：dev 由后端直连（vite 只代理 /api，不代理 /mcp）；配了 API base 用之；生产同源
+const mcpUrl = computed(() => {
+  const envBase = import.meta.env.VITE_API_BASE_URL as string | undefined
+  if (envBase) return `${envBase.replace(/\/+$/, '')}/mcp`
+  if (import.meta.env.DEV) return 'http://localhost:8000/mcp'
+  return `${window.location.origin}/mcp`
+})
+
+function mcpConfigSnippet(token: string): string {
+  return JSON.stringify(
+    {
+      mcpServers: {
+        'agnes-platform': {
+          type: 'http',
+          url: mcpUrl.value,
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      },
+    },
+    null,
+    2,
+  )
+}
+
+const guideConfig = computed(() => mcpConfigSnippet('agn_pat_<你的令牌>'))
+const createdConfig = computed(() => mcpConfigSnippet(createdToken.value))
+
+function copyMcpUrl() {
+  copyText(mcpUrl.value, t('common.copied'))
+}
+function copyGuideConfig() {
+  copyText(guideConfig.value, t('common.copied'))
+}
+function copyCreatedConfig() {
+  copyText(createdConfig.value, t('profile.patConfigCopied'))
 }
 
 async function handleRevokePat(row: PatInfo) {
@@ -530,5 +613,45 @@ async function handleRevokePat(row: PatInfo) {
   font-size: 12px;
   word-break: break-all;
   color: var(--agnes-text-primary);
+}
+.pat-token-tall {
+  padding: 10px 12px;
+  line-height: 1.5;
+  white-space: pre;
+  overflow-x: auto;
+}
+.pat-token-block {
+  max-height: 180px;
+  overflow-y: auto;
+}
+.pat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pat-divider {
+  margin: 14px 0 10px;
+}
+.pat-config-hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--agnes-text-muted);
+}
+.pat-guide-step {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--agnes-text-primary);
+}
+.pat-guide .pat-guide-step:first-child {
+  margin-top: 0;
+}
+.pat-guide .pat-token-row {
+  margin-bottom: 16px;
+}
+.pat-guide-more {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--agnes-text-faint);
 }
 </style>
