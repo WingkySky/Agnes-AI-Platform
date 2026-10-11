@@ -39,3 +39,4 @@ from app.models.editing_project import (
     RENDER_FAILED,
 )
 from app.models.api_call_log import ApiCallLog
+from app.models.pat_token import PatToken

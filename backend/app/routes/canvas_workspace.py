@@ -10,7 +10,6 @@
 
 import hashlib
 import json
-import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -42,7 +41,11 @@ from app.schemas.canvas_workspace import (
     WorkspaceWorkBind,
 )
 from app.services import work_service
-from app.services.canvas_ops import apply_canvas_ops
+from app.services import canvas_workspace_service
+from app.services.canvas_workspace_service import (
+    create_workspace as create_workspace_record,
+    get_owned_workspace as _get_owned_workspace,
+)
 
 router = APIRouter(prefix="/canvas/workspaces", tags=["画布工作区"])
 
@@ -56,14 +59,7 @@ def _data_hash(data: dict) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-async def _get_owned_workspace(db: AsyncSession, workspace_id: str, user: User) -> CanvasWorkspace:
-    """按 id 取当前用户的工作区；不存在 404 / 非本人 403"""
-    ws = (await db.scalars(select(CanvasWorkspace).where(CanvasWorkspace.id == workspace_id))).first()
-    if not ws:
-        raise HTTPException(status_code=404, detail="画布工作区不存在")
-    if ws.user_id != user.id:
-        raise HTTPException(status_code=403, detail="无权操作该画布工作区")
-    return ws
+# 归属校验收敛至 canvas_workspace_service.get_owned_workspace（HTTP 路由与 MCP 网关共用）
 
 
 async def _create_snapshot(
@@ -119,14 +115,7 @@ async def list_workspaces(
     current_user: User = Depends(get_current_user),
     work_id: Optional[int] = None,
 ):
-    stmt = (
-        select(CanvasWorkspace)
-        .where(CanvasWorkspace.user_id == current_user.id)
-        .order_by(CanvasWorkspace.updated_at.desc())
-    )
-    if work_id is not None:
-        stmt = stmt.where(CanvasWorkspace.work_id == work_id)
-    items = (await db.scalars(stmt)).all()
+    items = await canvas_workspace_service.list_workspaces(db, current_user.id, work_id=work_id)
     return ok(data=[WorkspaceBrief.model_validate(w).model_dump(mode="json") for w in items])
 
 
@@ -136,35 +125,9 @@ async def create_workspace(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    if payload.work_id is not None:
-        owned = (
-            await db.scalars(
-                select(Work.id).where(Work.id == payload.work_id, Work.user_id == current_user.id)
-            )
-        ).first()
-        if not owned:
-            raise HTTPException(status_code=403, detail="无权挂靠该作品")
-    if payload.id:
-        existing = (
-            await db.scalars(
-                select(CanvasWorkspace).where(CanvasWorkspace.id == payload.id)
-            )
-        ).first()
-        if existing:
-            if existing.user_id != current_user.id:
-                # id 是全局主键：被其他用户占用时明确拒绝，不落地 IntegrityError
-                raise HTTPException(status_code=409, detail="画布工作区 id 已被占用")
-            return ok(data=WorkspaceDetail.model_validate(existing).model_dump(mode="json"))
-    ws = CanvasWorkspace(
-        id=payload.id or uuid.uuid4().hex,
-        user_id=current_user.id,
-        name=payload.name,
-        work_id=payload.work_id,
-        data=payload.data,
+    ws = await create_workspace_record(
+        db, current_user.id, payload.name, work_id=payload.work_id, data=payload.data, workspace_id=payload.id
     )
-    db.add(ws)
-    await db.commit()
-    await db.refresh(ws)
     return ok(data=WorkspaceDetail.model_validate(ws).model_dump(mode="json"))
 
 
@@ -174,7 +137,7 @@ async def get_workspace(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    ws = await _get_owned_workspace(db, workspace_id, current_user)
+    ws = await _get_owned_workspace(db, workspace_id, current_user.id)
     return ok(data=WorkspaceDetail.model_validate(ws).model_dump(mode="json"))
 
 
@@ -185,7 +148,7 @@ async def bind_workspace_work(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    ws = await _get_owned_workspace(db, workspace_id, current_user)
+    ws = await _get_owned_workspace(db, workspace_id, current_user.id)
     if payload.name is not None:
         ws.name = payload.name.strip() or ws.name
     if payload.work_id is not None:
@@ -208,7 +171,7 @@ async def save_workspace(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    ws = await _get_owned_workspace(db, workspace_id, current_user)
+    ws = await _get_owned_workspace(db, workspace_id, current_user.id)
     if payload.base_revision != ws.revision:
         raise HTTPException(
             status_code=409,
@@ -234,15 +197,9 @@ async def apply_workspace_ops(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    ws = await _get_owned_workspace(db, workspace_id, current_user)
-    new_data, outcome = apply_canvas_ops(ws.data or {}, payload.ops, workspace_id=ws.id)
-    if outcome["failed"] and outcome["failed"] == len(outcome["results"]):
-        raise HTTPException(status_code=400, detail={"message": "全部操作失败", "results": outcome["results"]})
-    # 全量赋值新对象：SQLAlchemy JSON 列需重新赋值才会被变更跟踪
-    ws.data = new_data
-    ws.revision += 1
-    await db.commit()
-    return ok(data={**outcome, "revision": ws.revision})
+    ws = await _get_owned_workspace(db, workspace_id, current_user.id)
+    outcome = await canvas_workspace_service.apply_workspace_ops(db, ws, payload.ops)
+    return ok(data=outcome)
 
 
 @router.get("/{workspace_id}/revision", summary="工作区当前版本号（轻轮询用）")
@@ -251,7 +208,7 @@ async def get_workspace_revision(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    ws = await _get_owned_workspace(db, workspace_id, current_user)
+    ws = await _get_owned_workspace(db, workspace_id, current_user.id)
     return ok(data={"revision": ws.revision, "updated_at": ws.updated_at})
 
 
@@ -261,7 +218,7 @@ async def delete_workspace(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    ws = await _get_owned_workspace(db, workspace_id, current_user)
+    ws = await _get_owned_workspace(db, workspace_id, current_user.id)
     snaps = (
         await db.scalars(select(CanvasSnapshot).where(CanvasSnapshot.workspace_id == ws.id))
     ).all()
@@ -281,7 +238,7 @@ async def create_snapshot(
 ):
     if payload.kind not in MANUAL_SNAPSHOT_KINDS:
         raise HTTPException(status_code=400, detail="快照类型仅支持 manual / pre_danger")
-    ws = await _get_owned_workspace(db, workspace_id, current_user)
+    ws = await _get_owned_workspace(db, workspace_id, current_user.id)
     snap = await _create_snapshot(db, ws, kind=payload.kind, name=payload.name)
     await db.commit()
     await db.refresh(snap)
@@ -294,7 +251,7 @@ async def list_snapshots(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    ws = await _get_owned_workspace(db, workspace_id, current_user)
+    ws = await _get_owned_workspace(db, workspace_id, current_user.id)
     items = (
         await db.scalars(
             select(CanvasSnapshot)
@@ -314,7 +271,7 @@ async def get_snapshot(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    ws = await _get_owned_workspace(db, workspace_id, current_user)
+    ws = await _get_owned_workspace(db, workspace_id, current_user.id)
     snap = (
         await db.scalars(
             select(CanvasSnapshot).where(
@@ -334,7 +291,7 @@ async def delete_snapshot(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    ws = await _get_owned_workspace(db, workspace_id, current_user)
+    ws = await _get_owned_workspace(db, workspace_id, current_user.id)
     snap = (
         await db.scalars(
             select(CanvasSnapshot).where(

@@ -37,6 +37,9 @@ from app.core.security import (
     verify_password,
 )
 from app.models.user import User, ROLE_ADMIN, ROLE_USER
+from app.models.pat_token import PatToken
+from app.services import mcp_gateway
+from app.schemas.pat import PatCreate
 from app.schemas.user import (
     LoginRequest,
     RegisterRequest,
@@ -698,3 +701,61 @@ async def update_user_active(
         _admin.username, user.id, req.is_active,
     )
     return ok(data={"id": user.id, "is_active": user.is_active})
+
+
+# =====================================================
+# 个人访问令牌（PAT）—— 外部 Agent/CLI 经 MCP Server 接入的凭据
+# 明文仅创建响应返回一次；吊销即时生效（MCP 网关每次请求实时查表）
+# =====================================================
+
+@router.get("/pat", summary="PAT 令牌清单（脱敏，无 token 材料）")
+async def list_pats(
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    rows = (
+        await db.scalars(
+            select(PatToken)
+            .where(PatToken.user_id == current_user.id)
+            .order_by(PatToken.created_at.desc())
+        )
+    ).all()
+    return ok(data=[r.to_safe_dict() for r in rows])
+
+
+@router.post("/pat", summary="创建 PAT（明文仅此一次返回，请立即保存）")
+async def create_pat(
+    payload: PatCreate,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    plain = mcp_gateway.new_token()
+    row = PatToken(
+        user_id=current_user.id,
+        name=payload.name.strip(),
+        token_hash=mcp_gateway.hash_token(plain),
+        permission=payload.permission,
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    logger.info("PAT 创建 user_id=%s name=%s permission=%s", current_user.id, row.name, row.permission)
+    return ok(data={**row.to_safe_dict(), "token": plain}, message="令牌已创建，明文仅此一次展示，请立即保存")
+
+
+@router.delete("/pat/{pat_id}", summary="吊销 PAT（软删保留记录，即时生效）")
+async def revoke_pat(
+    pat_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    row = (
+        await db.scalars(select(PatToken).where(PatToken.id == pat_id, PatToken.user_id == current_user.id))
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="令牌不存在")
+    if not row.revoked_at:
+        row.revoked_at = datetime.utcnow()
+        await db.commit()
+        logger.info("PAT 吊销 user_id=%s pat_id=%s", current_user.id, pat_id)
+    return ok(data={"revoked": True})

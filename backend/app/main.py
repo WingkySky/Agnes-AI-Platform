@@ -78,6 +78,7 @@ from app.services.agnes_client import agnes_client
 from app.services.provider_registry import provider_registry
 from app.routes import mcp as mcp_route
 from app.routes import setup as setup_route
+from app.core.mcp_endpoint import mcp_asgi_app, mcp_session_manager
 from app.seed.ensure import (
     ensure_default_admin,
     ensure_default_credit_rules,
@@ -173,7 +174,9 @@ async def lifespan(app: FastAPI):
 
     logger.info("🚀 Agnes AI Platform（全异步架构）后端服务已启动")
 
-    yield  # 应用在此期间运行
+    # MCP streamable HTTP 会话管理器（挂载子应用的 lifespan 不被传播，需在主应用 lifespan 启停）
+    async with mcp_session_manager.run():
+        yield  # 应用在此期间运行
 
     # ---------- 【关闭阶段】----------
     logger.info("👋 正在优雅关闭服务...")
@@ -408,7 +411,7 @@ def register_spa_fallback(target_app: FastAPI, dist_dir: str) -> bool:
         return False
 
     # {full_path:path} 参数不含前导斜杠，统一补上后做精确段匹配（避免误伤 dist 内 apix.png 类文件名）
-    reserved_segments = ("/api", "/uploads", "/seed-assets", "/docs", "/redoc", "/health", "/openapi.json")
+    reserved_segments = ("/api", "/uploads", "/seed-assets", "/docs", "/redoc", "/health", "/openapi.json", "/mcp")
 
     @target_app.get("/{full_path:path}", include_in_schema=False)
     async def spa_fallback(full_path: str):
@@ -426,3 +429,8 @@ def register_spa_fallback(target_app: FastAPI, dist_dir: str) -> bool:
 
 
 register_spa_fallback(app, FRONTEND_DIST_DIR)
+
+# ---------- MCP Server：外部 Agent/CLI 经 PAT 接入（streamable HTTP，鉴权在 ASGI 包裹层） ----------
+# 必须挂在路由表末尾：Mount("/") 是兜底挂载，放前面会劫持 SPA fallback 等未匹配路径；
+# 子应用内部只承接 /mcp 精确路径，其余请求（经鉴权中间件放行）仍回落 404
+app.mount("/", mcp_asgi_app)

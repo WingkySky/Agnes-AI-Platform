@@ -112,18 +112,105 @@
         </el-form>
       </section>
     </div>
+
+    <!-- ============ API 访问令牌（外部 Agent/CLI 经 MCP 接入） ============ -->
+    <section class="profile-card pat-card">
+      <div class="pat-header">
+        <h3 class="card-title">{{ t('profile.patSection') }}</h3>
+        <el-button type="primary" size="small" @click="patDialogVisible = true">
+          <el-icon><Plus /></el-icon>
+          {{ t('profile.patNew') }}
+        </el-button>
+      </div>
+      <p class="pat-subtitle">{{ t('profile.patSubtitle') }}</p>
+
+      <el-table :data="pats" size="small" class="pat-table">
+        <el-table-column prop="name" :label="t('profile.patColName')" min-width="140" show-overflow-tooltip />
+        <el-table-column :label="t('profile.patColPermission')" width="100">
+          <template #default="{ row }">
+            <el-tag :type="row.permission === 'full' ? 'warning' : 'info'" effect="plain" size="small">
+              {{ row.permission === 'full' ? t('profile.patPermissionFull') : t('profile.patPermissionReadonly') }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('profile.patColCreatedAt')" width="170">
+          <template #default="{ row }">{{ formatTime(row.created_at, { emptyText: '-' }) }}</template>
+        </el-table-column>
+        <el-table-column :label="t('profile.patColLastUsed')" width="170">
+          <template #default="{ row }">{{ row.last_used_at ? formatTime(row.last_used_at, { emptyText: t('profile.patNever') }) : t('profile.patNever') }}</template>
+        </el-table-column>
+        <el-table-column :label="t('profile.patColStatus')" width="90">
+          <template #default="{ row }">
+            <el-tag :type="row.revoked_at ? 'danger' : 'success'" effect="plain" size="small">
+              {{ row.revoked_at ? t('profile.patStatusRevoked') : t('profile.patStatusActive') }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('common.actions')" width="80" align="right">
+          <template #default="{ row }">
+            <el-button v-if="!row.revoked_at" link type="danger" size="small" @click="handleRevokePat(row)">
+              {{ t('profile.patRevoke') }}
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <!-- 新建弹窗：创建后展示一次性明文 -->
+      <el-dialog v-model="patDialogVisible" :title="t('profile.patCreateTitle')" width="460px" @closed="resetPatDialog">
+        <template v-if="!createdToken">
+          <el-form label-position="top">
+            <el-form-item :label="t('profile.patNameLabel')">
+              <el-input v-model="patName" :placeholder="t('profile.patNamePlaceholder')" maxlength="100" />
+            </el-form-item>
+            <el-form-item :label="t('profile.patPermissionLabel')">
+              <el-radio-group v-model="patPermission">
+                <el-radio value="readonly">{{ t('profile.patPermissionReadonly') }}</el-radio>
+                <el-radio value="full">{{ t('profile.patPermissionFull') }}</el-radio>
+              </el-radio-group>
+              <p class="form-hint">{{ patPermission === 'full' ? t('profile.patPermissionFullHint') : t('profile.patPermissionReadonlyHint') }}</p>
+            </el-form-item>
+          </el-form>
+        </template>
+        <template v-else>
+          <el-alert
+            type="warning"
+            :title="t('profile.patCreateSuccess')"
+            :description="t('profile.patTokenOnce')"
+            show-icon
+            :closable="false"
+            class="pat-token-alert"
+          />
+          <div class="pat-token-row">
+            <code class="pat-token">{{ createdToken }}</code>
+            <el-button size="small" @click="copyCreatedToken">
+              <el-icon><CopyDocument /></el-icon>
+              {{ t('profile.patCopy') }}
+            </el-button>
+          </div>
+        </template>
+        <template #footer>
+          <el-button @click="patDialogVisible = false">{{ t('common.close') }}</el-button>
+          <el-button v-if="!createdToken" type="primary" :loading="patCreating" @click="handleCreatePat">
+            {{ t('profile.patCreate') }}
+          </el-button>
+        </template>
+      </el-dialog>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  UserFilled, User, Message, Camera, Loading, Check,
+  UserFilled, User, Message, Camera, Loading, Check, Plus, CopyDocument,
 } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { formatTime } from '@/lib/format'
 import { useUserStore } from '@/stores/user'
+import { useCopyText } from '@/composables/useCopyText'
+import { useConfirm } from '@/composables/useConfirm'
+import { createPat, listPats, revokePat, type PatInfo } from '@/api/pat'
 
 const { t } = useI18n()
 const userStore = useUserStore()
@@ -204,6 +291,61 @@ async function handleSaveProfile() {
     ElMessage.error(t('profile.saveFailed'))
   } finally {
     saving.value = false
+  }
+}
+
+// ============ API 访问令牌（PAT，MCP 接入凭据） ============
+const pats = ref<PatInfo[]>([])
+const patDialogVisible = ref(false)
+const patName = ref('')
+const patPermission = ref<'readonly' | 'full'>('readonly')
+const patCreating = ref(false)
+const createdToken = ref('')
+
+const { copyText } = useCopyText()
+const { confirm } = useConfirm()
+
+onMounted(loadPats)
+
+async function loadPats() {
+  try {
+    pats.value = await listPats()
+  } catch {
+    ElMessage.error(t('profile.patLoadFailed'))
+  }
+}
+
+function resetPatDialog() {
+  patName.value = ''
+  patPermission.value = 'readonly'
+  createdToken.value = ''
+}
+
+async function handleCreatePat() {
+  patCreating.value = true
+  try {
+    const created = await createPat(patName.value.trim() || 'CLI', patPermission.value)
+    createdToken.value = created.token
+    await loadPats()
+  } catch {
+    ElMessage.error(t('profile.patCreateFailed'))
+  } finally {
+    patCreating.value = false
+  }
+}
+
+function copyCreatedToken() {
+  copyText(createdToken.value, t('common.copied'))
+}
+
+async function handleRevokePat(row: PatInfo) {
+  await confirm(t('profile.patRevokeConfirm'))
+  try {
+    await revokePat(row.id)
+    ElMessage.success(t('profile.patRevokeSuccess'))
+    await loadPats()
+  } catch {
+    ElMessage.error(t('profile.patLoadFailed'))
   }
 }
 
@@ -348,5 +490,45 @@ async function handleSaveProfile() {
   font-size: 14px;
   color: var(--agnes-text-primary);
   line-height: 32px;
+}
+
+/* ---- API 访问令牌 ---- */
+.pat-card {
+  margin-top: 20px;
+}
+.pat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.pat-header .card-title {
+  margin-bottom: 0;
+  border-bottom: none;
+  padding-bottom: 0;
+}
+.pat-subtitle {
+  margin: 8px 0 14px;
+  font-size: 12px;
+  color: var(--agnes-text-muted);
+  line-height: 1.5;
+}
+.pat-token-alert {
+  margin-bottom: 12px;
+}
+.pat-token-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.pat-token {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid var(--agnes-border);
+  border-radius: 8px;
+  background: var(--agnes-bg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  word-break: break-all;
+  color: var(--agnes-text-primary);
 }
 </style>

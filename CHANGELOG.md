@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### 平台 MCP Server 批次 1（外部 Agent/CLI 经 PAT 接入 · 画布四工具）
+
+- **PAT（个人访问令牌）**：新 `pat_tokens` 表（sha256 哈希落库、明文仅创建响应返回一次、软删吊销即时生效）；`GET/POST /api/auth/pat` + `DELETE /api/auth/pat/{id}` 登录级端点；个人中心新增「API 访问令牌」卡片（清单/新建/一次性明文复制/吊销确认）；两档权限 readonly/full
+- **`/mcp` streamable HTTP 端点**：mcp SDK 2.x `MCPServer` 进程内挂主应用（零新进程/零部署概念）；PAT 鉴权在 ASGI 包裹层（401 + `WWW-Authenticate`），身份经 ContextVar 传入工具；stateless + JSON 响应模式（CLI 场景免会话保持）；挂载点置于路由表末尾且 `/mcp` 加入 SPA fallback 保留前缀（精确路径 307 陷阱 + GET fallback 劫持双坑规避）；主应用 lifespan 手动启停 session manager（挂载子应用 lifespan 不传播）
+- **画布四工具（v1 纯服务端资源型工具面首批）**：`canvas_list` / `canvas_create` / `canvas_get_overview`（游标分页与前端 overviewPage 对齐，连线只带当页相关）/ `canvas_apply_ops`（add_panel/add_connection，按名引用批内新建节点）；写类工具 readonly 档统一拦截，归属校验复用 user-scoped 查询
+- **画布工作区逻辑收敛**：list/create/归属校验/ops 应用从 `canvas_workspace.py` 路由内联抽到 `canvas_workspace_service`（HTTP 路由与 MCP 网关共用同一实现）
+- **测试**：pytest 303（+15：PAT 三态/明文一次性/吊销即时失效、overview 分页与 TS 对齐、工具 impl 归属与全部失败 400、进程内 uvicorn e2e——鉴权 401/协议握手/工具闭环/readonly 拦截）；vitest 651（+3 api 层）+ vue-tsc 0 错 + build 过；dev 服务真实冒烟（401/tools/call 读到真实画布）
+- 设计档 `.zcode/plans/2026-10-11-mcp-server-design.md`（纯服务端 16 工具路线：批次 2 编辑器 7+素材/生成 5、批次 3 文档+冒烟）
+
 ### AI 辅助粗剪（静音剔除 / 场景切分 → 一键草稿时间线）
 
 - **检测层（纯 Python 零 CLI 依赖）**：新 `rough_cut_service`——PyAV 解码 + numpy，规避生产镜像无 ffmpeg 可执行的存量假设（scenedetect pyav 后端有上游 bug 故自写）：silence=音频帧 RMS 阈值游程（帧级起止秒推进，不假设固定帧长）→ 有声段补集；scenes=降采样灰度帧相邻平均绝对差超阈值切开 → 碎镜头并入前段；统一 segments 合同（钳位/去重叠/剔碎段——**合并条件严格 `<`，相邻切点不吞并**）
