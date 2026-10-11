@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### 平台 MCP Server 批次 2+3（编辑器与生成全量工具面 · 文档收尾）
+
+- **编辑器七工具**：`editor_list_projects` / `editor_create_project` / `editor_get_document` / `editor_put_document`（revision 乐观锁）/ `editor_render_submit`（client_operation_id 幂等）/ `editor_render_status` / `editor_rough_cut_analyze`——全部直调既有 `project_service`/`render_service`/`rough_cut_service`，零业务逻辑复制；**AI 粗剪编排从路由体抽到 `rough_cut_service.analyze_asset`**（HTTP 路由与 MCP 工具共用，顺带补上临时目录 finally 清理）
+- **素材/生成五工具**：`asset_list`（统一素材库清单）/ `model_list`（image/video/chat）/ `image_generate` / `video_generate`（直调既有路由函数，敏感链路零复制：内容审核/积分扣减/任务轮询注册/生成落库全继承）/ `generation_get`（image+video 任务通用批量状态查询，内存实时态→DB 完成态回退双继承）
+- **工具面达 16 个**（画布 4 + 编辑器 7 + 素材/生成 5），写类工具 readonly 档统一拦截
+- **文档**：`docs/mcp-server-guide.md`（PAT 创建/client 配置/工具清单/画布与剪辑闭环示例/边界说明）；API.md 新增第 23 章（PAT 三端点 + /mcp 协议）；README 新增 Documentation 入口
+- **测试**：pytest 309（+6：编辑器文档闭环与乐观锁 409/素材清单筛选/模型清单/生成请求映射 text2video↔image2video/generation_get 三分支/e2e 编辑器闭环+空时间线 fail-closed+readonly 四写类拦截）；vitest 651 不变
+
 ### 平台 MCP Server 批次 1（外部 Agent/CLI 经 PAT 接入 · 画布四工具）
 
 - **PAT（个人访问令牌）**：新 `pat_tokens` 表（sha256 哈希落库、明文仅创建响应返回一次、软删吊销即时生效）；`GET/POST /api/auth/pat` + `DELETE /api/auth/pat/{id}` 登录级端点；个人中心新增「API 访问令牌」卡片（清单/新建/一次性明文复制/吊销确认）；两档权限 readonly/full

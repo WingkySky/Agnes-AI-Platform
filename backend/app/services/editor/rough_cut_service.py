@@ -8,11 +8,19 @@
 # - 场景检测 = 降采样灰度帧相邻平均绝对差 → 差值超阈值处切开 → 碎镜头并入前段
 # =====================================================
 
+import asyncio
 import logging
+import shutil
+import tempfile
 from typing import Any
 
 import av
 import numpy as np
+from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.services.asset_library import get_asset_by_id
+from app.services.editor.media_source import resolve_asset_local_file
 
 logger = logging.getLogger("agnes_platform.editor.rough_cut")
 
@@ -171,3 +179,65 @@ def detect_scenes(
         raw.append((cursor, duration))
     segments = _norm_segments(raw, duration, min_scene)
     return {"segments": segments, "duration_total": round(duration, 3)}
+
+
+# =====================================================
+# 分析编排（HTTP 路由与 MCP 工具共用入口）
+# =====================================================
+
+# 同步分析上限（秒）：解码全片 CPU 型，超时明确报错引导用户改用手动剪辑
+ANALYZE_TIMEOUT_SEC = 120
+
+
+async def analyze_asset(
+    db: AsyncSession, user_id: int, asset_id: int, mode: str, params: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """归属/类型/mode 校验 → 源文件就位 → 检测（线程池 + 超时）→ segments"""
+    asset = await get_asset_by_id(db, asset_id)
+    if not asset or asset.user_id != user_id:
+        raise HTTPException(status_code=404, detail="素材不存在")
+    if (asset.kind or "") not in ("video", "audio"):
+        raise HTTPException(status_code=400, detail="仅支持视频/音频素材分析")
+    if mode not in ("silence", "scenes"):
+        raise HTTPException(status_code=400, detail="mode 仅支持 silence / scenes")
+
+    tmp_dir = tempfile.mkdtemp(prefix="rough-cut-")
+    try:
+        local_path = await resolve_asset_local_file(asset, tmp_dir)
+        if not local_path:
+            raise HTTPException(status_code=502, detail="素材源文件不可用（本地缺失且远程转存失败）")
+
+        params = params or {}
+        try:
+            if mode == "silence":
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        detect_silence_speech,
+                        local_path,
+                        threshold_db=float(params.get("threshold_db", -30.0)),
+                        min_silence=float(params.get("min_silence", 0.5)),
+                    ),
+                    timeout=ANALYZE_TIMEOUT_SEC,
+                )
+            else:
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        detect_scenes,
+                        local_path,
+                        threshold=float(params.get("threshold", 14.0)),
+                        min_scene=float(params.get("min_scene", 0.5)),
+                    ),
+                    timeout=ANALYZE_TIMEOUT_SEC,
+                )
+        except asyncio.TimeoutError:
+            raise HTTPException(status_code=503, detail="分析超时（素材过长），请改用手动剪辑")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"素材无法分析：{e}")
+        except HTTPException:
+            raise
+        except Exception as e:  # noqa: BLE001 —— 解码失败转可读错误
+            raise HTTPException(status_code=502, detail=f"分析失败：{e}")
+        return {"asset_id": asset.id, "mode": mode, **result}
+    finally:
+        # resolve_asset_local_file 远程转存/本地缺失时的临时副本都落这里；素材本就在本地时路径在外，rmtree 无害
+        shutil.rmtree(tmp_dir, ignore_errors=True)

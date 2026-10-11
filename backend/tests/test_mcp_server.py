@@ -149,6 +149,10 @@ async def test_initialize_and_tools_list(mcp_env):
     tools = unwrap(await rpc(client, FULL_TOKEN, 2, "tools/list"))["tools"]
     assert {t["name"] for t in tools} == {
         "canvas_list", "canvas_create", "canvas_get_overview", "canvas_apply_ops",
+        "editor_list_projects", "editor_create_project", "editor_get_document",
+        "editor_put_document", "editor_render_submit", "editor_render_status",
+        "editor_rough_cut_analyze", "asset_list", "model_list",
+        "image_generate", "video_generate", "generation_get",
     }
 
 
@@ -187,15 +191,56 @@ async def test_canvas_tool_closed_loop(mcp_env):
     assert [w["id"] for w in listing["items"]] == [ws_id]
 
 
+# ---------- 编辑器闭环：create → get → put（乐观锁）→ render 空时间线 fail-closed → status ----------
+@pytest.mark.asyncio
+async def test_editor_tool_closed_loop(mcp_env):
+    client = mcp_env["client"]
+
+    created = tool_data(unwrap(await rpc(client, FULL_TOKEN, 1, "tools/call", {
+        "name": "editor_create_project", "arguments": {"title": "CLI 工程"},
+    })))
+    assert created["ok"] is True and created["title"] == "CLI 工程"
+    uid = created["uid"]
+
+    detail = tool_data(unwrap(await rpc(client, FULL_TOKEN, 2, "tools/call", {
+        "name": "editor_get_document", "arguments": {"uid": uid},
+    })))
+    assert detail["ok"] is True and "revision" in detail and "document" in detail
+
+    saved = tool_data(unwrap(await rpc(client, FULL_TOKEN, 3, "tools/call", {
+        "name": "editor_put_document",
+        "arguments": {
+            "uid": uid,
+            "document": {"timebase": 30, "width": 1280, "height": 720, "tracks": [], "clips": []},
+            "base_revision": detail["revision"],
+        },
+    })))
+    assert saved["ok"] is True and saved["revision"] == detail["revision"] + 1
+
+    refused = tool_data(unwrap(await rpc(client, FULL_TOKEN, 4, "tools/call", {
+        "name": "editor_render_submit", "arguments": {"uid": uid},
+    })))
+    assert refused["ok"] is False and "时间线为空" in refused["error"]  # 空时间线 fail-closed
+
+    status = tool_data(unwrap(await rpc(client, FULL_TOKEN, 5, "tools/call", {
+        "name": "editor_render_status", "arguments": {"uid": uid},
+    })))
+    assert status["ok"] is True and "render_status" in status
+
+
 # ---------- 档位门：readonly 调写类被拦（读类放行） ----------
 @pytest.mark.asyncio
 async def test_readonly_gate(mcp_env):
     client = mcp_env["client"]
 
-    denied = tool_data(unwrap(await rpc(client, READ_TOKEN, 1, "tools/call", {
-        "name": "canvas_create", "arguments": {"name": "不该被建出来"},
-    })))
-    assert denied["ok"] is False and "只读" in denied["error"]
+    for name, args in (
+        ("canvas_create", {"name": "不该被建出来"}),
+        ("editor_put_document", {"uid": "x", "document": {}, "base_revision": 1}),
+        ("image_generate", {"prompt": "p"}),
+        ("video_generate", {"prompt": "p"}),
+    ):
+        denied = tool_data(unwrap(await rpc(client, READ_TOKEN, 1, "tools/call", {"name": name, "arguments": args})))
+        assert denied["ok"] is False and "只读" in denied["error"], name
 
     allowed = tool_data(unwrap(await rpc(client, READ_TOKEN, 2, "tools/call", {"name": "canvas_list", "arguments": {}})))
     assert allowed["ok"] is True and allowed["items"] == []  # 只读档可读，且确认上面的写没有发生

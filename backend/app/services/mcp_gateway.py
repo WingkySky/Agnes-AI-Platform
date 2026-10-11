@@ -19,18 +19,26 @@ from datetime import datetime
 from typing import Annotated, Any, Dict, List, Optional
 
 from fastapi import HTTPException
-from pydantic import Field
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.database import async_session
 from app.models.pat_token import PatToken
+from app.models.user import User
+from app.routes.images import create_image_task_async, get_image_task_status
+from app.routes.videos import create_video_task, get_video_status
+from app.schemas.images import ImageGenerationRequest
+from app.schemas.videos import VideoGenerationRequest
+from app.services.asset_library import list_assets
 from app.services.canvas_workspace_service import (
     apply_workspace_ops,
     create_workspace,
     get_owned_workspace,
     list_workspaces,
 )
+from app.services.editor import project_service, render_service, rough_cut_service
+from app.services.model_registry import get_all_models, get_models_by_type
 
 # last_used_at 更新节流（秒）
 _LAST_USED_THROTTLE_SEC = 60
@@ -222,6 +230,161 @@ async def canvas_apply_ops_impl(
 
 
 # =====================================================
+# 编辑器工具实现（复用 project_service / render_service / rough_cut_service）
+# =====================================================
+
+def _brief_project(p) -> Dict[str, Any]:
+    return {k: v for k, v in project_service._to_dict(p).items() if k != "document"}
+
+
+async def _load_user(db: AsyncSession, user_id: int) -> User:
+    """MCP 场景只有 user_id：同一 session 内加载真实 User（编辑器/生成 service 吃 User 对象）"""
+    user = await db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=401, detail="令牌对应用户不存在")
+    return user
+
+
+async def editor_list_projects_impl(db: AsyncSession, user_id: int, work_id: Optional[int]) -> Dict[str, Any]:
+    items = await project_service.list_projects(db, user_id, work_id)
+    return {"ok": True, "items": [_brief_project(p) for p in items]}
+
+
+async def editor_create_project_impl(
+    db: AsyncSession, user_id: int, title: Optional[str], work_id: Optional[int]
+) -> Dict[str, Any]:
+    user = await _load_user(db, user_id)
+    project = await project_service.create_project(db, user, title or f"外部工程 {datetime.utcnow():%Y-%m-%d %H:%M}", work_id=work_id)
+    return {"ok": True, **project_service._to_dict(project)}
+
+
+async def editor_get_document_impl(db: AsyncSession, user_id: int, uid: str) -> Dict[str, Any]:
+    user = await _load_user(db, user_id)
+    project = await project_service.get_owned_project(db, uid, user)
+    return {"ok": True, **project_service._to_dict(project)}
+
+
+async def editor_put_document_impl(
+    db: AsyncSession, user_id: int, uid: str, document: Dict[str, Any], base_revision: int,
+    snapshot_reason: Optional[str],
+) -> Dict[str, Any]:
+    user = await _load_user(db, user_id)
+    project = await project_service.get_owned_project(db, uid, user)
+    if project.render_status == render_service.RENDER_RENDERING:
+        raise HTTPException(status_code=409, detail="渲染进行中（使用提交时快照），渲染完成后可继续保存")
+    project = await project_service.save_document(
+        db, project, document, base_revision, snapshot_reason=snapshot_reason
+    )
+    return {"ok": True, "revision": project.revision, "saved_at": project.updated_at.isoformat() if project.updated_at else None}
+
+
+async def editor_render_submit_impl(
+    db: AsyncSession, user_id: int, uid: str, client_operation_id: Optional[str]
+) -> Dict[str, Any]:
+    user = await _load_user(db, user_id)
+    project = await project_service.get_owned_project(db, uid, user)
+    body = {"client_operation_id": client_operation_id} if client_operation_id else {}
+    result = await render_service.submit_render(db, project, body)
+    return {"ok": True, **result}
+
+
+async def editor_render_status_impl(db: AsyncSession, user_id: int, uid: str) -> Dict[str, Any]:
+    user = await _load_user(db, user_id)
+    project = await project_service.get_owned_project(db, uid, user)
+    return {"ok": True, **render_service.render_status_payload(project)}
+
+
+async def editor_rough_cut_analyze_impl(
+    db: AsyncSession, user_id: int, asset_id: int, mode: str, params: Optional[Dict[str, Any]]
+) -> Dict[str, Any]:
+    result = await rough_cut_service.analyze_asset(db, user_id, asset_id, mode, params)
+    return {"ok": True, **result}
+
+
+# =====================================================
+# 素材 / 模型 / 生成工具实现
+# =====================================================
+
+def _envelope_data(resp: Dict[str, Any]) -> Any:
+    """内部路由函数返回 ok() 信封 → data；pydantic 模型转 dict"""
+    data = resp.get("data")
+    if isinstance(data, BaseModel):
+        data = data.model_dump(mode="json")
+    return data
+
+
+async def asset_list_impl(
+    db: AsyncSession, user_id: int, kind: Optional[str], work_id: Optional[int],
+    keyword: Optional[str], page: int, page_size: int,
+) -> Dict[str, Any]:
+    result = await list_assets(
+        db, user_id=user_id, media_type=kind, work_id=work_id, keyword=keyword,
+        page=page, page_size=min(page_size, 100),
+    )
+    return {"ok": True, "total": result["total"], "page": result["page"], "page_size": result["page_size"], "items": result["items"]}
+
+
+async def model_list_impl(kind: Optional[str]) -> Dict[str, Any]:
+    if kind in ("image", "video", "chat"):
+        models = await get_models_by_type(kind)
+    else:
+        models = await get_all_models()
+    return {
+        "ok": True,
+        "items": [
+            {"id": m.id, "name": m.name, "type": m.type, "provider": m.provider, "capabilities": m.capabilities}
+            for m in models
+        ],
+    }
+
+
+async def image_generate_impl(
+    db: AsyncSession, user: User, prompt: str, model: Optional[str], size: Optional[str],
+    ref_image_urls: Optional[List[str]],
+) -> Dict[str, Any]:
+    req = ImageGenerationRequest(
+        prompt=prompt, model=model or "", size=size or "1024x1024",
+        image_urls=ref_image_urls or None,
+    )
+    data = _envelope_data(await create_image_task_async(req, db, user))
+    return {"ok": True, **data}
+
+
+async def video_generate_impl(
+    db: AsyncSession, user: User, prompt: str, model: Optional[str], aspect_ratio: Optional[str],
+    seconds: Optional[float], ref_image_urls: Optional[List[str]],
+) -> Dict[str, Any]:
+    req = VideoGenerationRequest(
+        prompt=prompt, model=model or "",
+        aspect_ratio=aspect_ratio or "16:9", seconds=seconds,
+        mode="image2video" if ref_image_urls else "text2video",
+        images=ref_image_urls or None,
+    )
+    data = _envelope_data(await create_video_task(req, db, user))
+    return {"ok": True, **data}
+
+
+async def generation_get_impl(db: AsyncSession, user: User, task_ids: List[str]) -> Dict[str, Any]:
+    """逐任务复用既有状态端点（内存实时态 → DB 完成态回退，双类型 + 用户隔离全继承）"""
+    items: List[Dict[str, Any]] = []
+    for tid in task_ids:
+        kind, data = None, None
+        for getter, k in ((get_image_task_status, "image"), (get_video_status, "video")):
+            try:
+                data = _envelope_data(await getter(task_id=tid, db=db, current_user=user))
+                kind = k
+                break
+            except HTTPException as e:
+                if e.status_code != 404:
+                    raise
+        if kind:
+            items.append({"kind": kind, **data})
+        else:
+            items.append({"task_id": tid, "status": "not_found"})
+    return {"ok": True, "items": items}
+
+
+# =====================================================
 # 工具注册（薄壳：取 PAT 身份 → 档位门 → 开 session → impl → 错误合同）
 # =====================================================
 
@@ -318,5 +481,238 @@ def register_tools(mcp) -> None:
         try:
             async with async_session() as db:
                 return await canvas_apply_ops_impl(db, principal.user_id, canvas_workspace_id, ops)
+        except Exception as e:
+            return _tool_error(e)
+
+    # ---------- 编辑器 ----------
+
+    @mcp.tool(
+        name="editor_list_projects",
+        description="列出剪辑工程（uid/标题/版本/渲染状态/更新时间，不含文档）。要编辑某工程的时间线前先调用确定 uid。",
+    )
+    async def editor_list_projects(
+        work_id: Annotated[Optional[int], Field(description="按所属作品 id 筛选")] = None,
+    ) -> Dict[str, Any]:
+        principal = _principal()
+        try:
+            async with async_session() as db:
+                return await editor_list_projects_impl(db, principal.user_id, work_id)
+        except Exception as e:
+            return _tool_error(e)
+
+    @mcp.tool(name="editor_create_project", description="新建剪辑工程，返回 uid。title 缺省自动命名。")
+    async def editor_create_project(
+        title: Annotated[Optional[str], Field(description="工程标题")] = None,
+        work_id: Annotated[Optional[int], Field(description="挂靠作品 id")] = None,
+    ) -> Dict[str, Any]:
+        principal = _principal()
+        denied = _denied(principal, write=True)
+        if denied:
+            return {"ok": False, "error": denied}
+        try:
+            async with async_session() as db:
+                return await editor_create_project_impl(db, principal.user_id, title, work_id)
+        except Exception as e:
+            return _tool_error(e)
+
+    @mcp.tool(
+        name="editor_get_document",
+        description="读取剪辑工程全量（含时间线 document JSON 与 revision）。改时间线前先读，保存时把原 revision 传回 base_revision。",
+    )
+    async def editor_get_document(
+        uid: Annotated[str, Field(description="剪辑工程 uid（editor_list_projects 获得）")],
+    ) -> Dict[str, Any]:
+        principal = _principal()
+        try:
+            async with async_session() as db:
+                return await editor_get_document_impl(db, principal.user_id, uid)
+        except Exception as e:
+            return _tool_error(e)
+
+    @mcp.tool(
+        name="editor_put_document",
+        description=(
+            "保存剪辑工程时间线 document（revision 乐观锁：base_revision 传 editor_get_document 返回的 revision，"
+            "不符报冲突需重读）。snapshot_reason 非空时保存前自动拍快照（可还原）。"
+        ),
+    )
+    async def editor_put_document(
+        uid: Annotated[str, Field(description="剪辑工程 uid")],
+        document: Annotated[Dict[str, Any], Field(description="完整时间线文档 JSON")],
+        base_revision: Annotated[int, Field(description="客户端持有的版本号（乐观锁）")],
+        snapshot_reason: Annotated[Optional[str], Field(description="写前快照原因（触发自动快照）")] = None,
+    ) -> Dict[str, Any]:
+        principal = _principal()
+        denied = _denied(principal, write=True)
+        if denied:
+            return {"ok": False, "error": denied}
+        try:
+            async with async_session() as db:
+                return await editor_put_document_impl(db, principal.user_id, uid, document, base_revision, snapshot_reason)
+        except Exception as e:
+            return _tool_error(e)
+
+    @mcp.tool(
+        name="editor_render_submit",
+        description=(
+            "提交剪辑工程渲染成片（异步）。重试时带同一 client_operation_id 即幂等（返回上次结果）；"
+            "提交后用 editor_render_status 轮询。时间线为空会报错。"
+        ),
+    )
+    async def editor_render_submit(
+        uid: Annotated[str, Field(description="剪辑工程 uid")],
+        client_operation_id: Annotated[Optional[str], Field(description="幂等键：重试时传同一值")] = None,
+    ) -> Dict[str, Any]:
+        principal = _principal()
+        denied = _denied(principal, write=True)
+        if denied:
+            return {"ok": False, "error": denied}
+        try:
+            async with async_session() as db:
+                return await editor_render_submit_impl(db, principal.user_id, uid, client_operation_id)
+        except Exception as e:
+            return _tool_error(e)
+
+    @mcp.tool(
+        name="editor_render_status",
+        description="查询剪辑工程渲染状态（status/progress/video_url）。render 完成后 video_url 即成片地址。",
+    )
+    async def editor_render_status(
+        uid: Annotated[str, Field(description="剪辑工程 uid")],
+    ) -> Dict[str, Any]:
+        principal = _principal()
+        try:
+            async with async_session() as db:
+                return await editor_render_status_impl(db, principal.user_id, uid)
+        except Exception as e:
+            return _tool_error(e)
+
+    @mcp.tool(
+        name="editor_rough_cut_analyze",
+        description=(
+            "AI 粗剪分析：对视频/音频素材做静音剔除（mode=silence，保留有声段）或场景切分（mode=scenes），"
+            "返回 segments [{start,end}]（秒）。拿到段后通常配合 editor_get/put_document 落成草稿时间线。"
+        ),
+    )
+    async def editor_rough_cut_analyze(
+        asset_id: Annotated[int, Field(description="素材 id（asset_list 获得）")],
+        mode: Annotated[str, Field(description="silence=静音剔除 / scenes=场景切分")],
+        threshold_db: Annotated[Optional[float], Field(description="silence：静音判定阈值 dB（默认 -30）")] = None,
+        min_gap: Annotated[Optional[float], Field(description="silence：最短静音秒（默认 0.5）")] = None,
+        threshold: Annotated[Optional[float], Field(description="scenes：画面差阈值（默认 14）")] = None,
+    ) -> Dict[str, Any]:
+        principal = _principal()
+        params: Dict[str, Any] = {}
+        if mode == "silence":
+            if threshold_db is not None:
+                params["threshold_db"] = threshold_db
+            if min_gap is not None:
+                params["min_silence"] = min_gap
+        elif mode == "scenes":
+            if threshold is not None:
+                params["threshold"] = threshold
+        try:
+            async with async_session() as db:
+                return await editor_rough_cut_analyze_impl(db, principal.user_id, asset_id, mode, params or None)
+        except Exception as e:
+            return _tool_error(e)
+
+    # ---------- 素材 / 模型 / 生成 ----------
+
+    @mcp.tool(
+        name="asset_list",
+        description="列出用户素材库（图片/视频/音频，含 URL 与媒体元信息）。粗剪分析、视频参考图取 asset 的 url 用。",
+    )
+    async def asset_list(
+        kind: Annotated[Optional[str], Field(description="image / video / audio")] = None,
+        work_id: Annotated[Optional[int], Field(description="按所属作品 id 筛选")] = None,
+        keyword: Annotated[Optional[str], Field(description="名称/描述关键词")] = None,
+        page: Annotated[int, Field(description="页码，从 1 起")] = 1,
+        page_size: Annotated[int, Field(description="每页数量（≤100）")] = 50,
+    ) -> Dict[str, Any]:
+        principal = _principal()
+        try:
+            async with async_session() as db:
+                return await asset_list_impl(db, principal.user_id, kind, work_id, keyword, page, page_size)
+        except Exception as e:
+            return _tool_error(e)
+
+    @mcp.tool(
+        name="model_list",
+        description="列出可用生成模型（id/名称/能力标签）。image_generate / video_generate 的 model 参数从此处取。",
+    )
+    async def model_list(
+        kind: Annotated[Optional[str], Field(description="image / video / chat，缺省全部")] = None,
+    ) -> Dict[str, Any]:
+        _principal()
+        try:
+            return await model_list_impl(kind)
+        except Exception as e:
+            return _tool_error(e)
+
+    @mcp.tool(
+        name="image_generate",
+        description=(
+            "创建图片生成异步任务（扣积分），返回 task_id；用 generation_get 轮询。"
+            "一次一张，多张请多次调用。ref_image_urls 给参考图 URL 即为图生图（可从 asset_list 或画布节点拿 URL）。"
+        ),
+    )
+    async def image_generate(
+        prompt: Annotated[str, Field(description="提示词")],
+        model: Annotated[Optional[str], Field(description="模型 id（model_list 获得，缺省用默认模型）")] = None,
+        size: Annotated[Optional[str], Field(description="尺寸 宽x高（默认 1024x1024）")] = None,
+        ref_image_urls: Annotated[Optional[List[str]], Field(description="参考图 URL 列表（给了就是图生图）")] = None,
+    ) -> Dict[str, Any]:
+        principal = _principal()
+        denied = _denied(principal, write=True)
+        if denied:
+            return {"ok": False, "error": denied}
+        try:
+            async with async_session() as db:
+                user = await _load_user(db, principal.user_id)
+                return await image_generate_impl(db, user, prompt, model, size, ref_image_urls)
+        except Exception as e:
+            return _tool_error(e)
+
+    @mcp.tool(
+        name="video_generate",
+        description=(
+            "创建视频生成异步任务（扣积分，耗时分钟级），返回 task_id；用 generation_get 轮询。"
+            "ref_image_urls 给参考图即为图生视频（首帧/多图参考）。"
+        ),
+    )
+    async def video_generate(
+        prompt: Annotated[str, Field(description="提示词")],
+        model: Annotated[Optional[str], Field(description="模型 id（model_list 获得）")] = None,
+        aspect_ratio: Annotated[Optional[str], Field(description="画面比例，默认 16:9")] = None,
+        seconds: Annotated[Optional[float], Field(description="时长（秒）")] = None,
+        ref_image_urls: Annotated[Optional[List[str]], Field(description="参考图 URL 列表（给了就是图生视频）")] = None,
+    ) -> Dict[str, Any]:
+        principal = _principal()
+        denied = _denied(principal, write=True)
+        if denied:
+            return {"ok": False, "error": denied}
+        try:
+            async with async_session() as db:
+                user = await _load_user(db, principal.user_id)
+                return await video_generate_impl(db, user, prompt, model, aspect_ratio, seconds, ref_image_urls)
+        except Exception as e:
+            return _tool_error(e)
+
+    @mcp.tool(
+        name="generation_get",
+        description=(
+            "批量查询生成任务状态（image/video 通用）：status/progress/result_url/error。"
+            "success 时 result_url 即成品地址；失败时读 error 与 error_category。"
+        ),
+    )
+    async def generation_get(
+        task_ids: Annotated[List[str], Field(description="任务 id 列表（image_generate / video_generate 返回）", min_length=1, max_length=20)],
+    ) -> Dict[str, Any]:
+        principal = _principal()
+        try:
+            async with async_session() as db:
+                user = await _load_user(db, principal.user_id)
+                return await generation_get_impl(db, user, task_ids)
         except Exception as e:
             return _tool_error(e)

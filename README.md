@@ -190,6 +190,11 @@ Visit http://localhost:5174 — you're ready to go.
 | Database | SQLite (default, zero-config) / PostgreSQL (optional) |
 | AI Provider | AIBridge SDK (38+ providers: Agnes, OpenAI, Anthropic, Claude, Gemini, Qwen, DeepSeek...) |
 
+## Documentation
+
+- [Deployment (public server)](docs/deployment.md) — reverse proxy / HTTPS / backups
+- [MCP Server](docs/mcp-server-guide.md) — connect external agents / CLIs (zcode, Claude Code...) to operate canvas, editor and generation via a personal access token
+
 ## FAQ
 
 **Q: Why a BFF layer instead of calling the AI API directly from the browser?**

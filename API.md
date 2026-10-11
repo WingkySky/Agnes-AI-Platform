@@ -1023,3 +1023,18 @@ Agent 一级公民批次 2：chat 内核（任意宿主/标签页）的画布/�
 | POST | `/api/agent/relay/call` | 中继一次工具调用 `{ host, target_id, tool, args }`（登录态；host/tool 白名单校验 400/403；目标归属校验 404/403）。在线返回 `{ routed:'relay', result }`；离线/下发即断返回 `{ routed:'offline' }`（调用方可安全回退）；已下发未回执 504 `bridge_timeout`（不回退） |
 | GET | `/api/agent/relay/targets` | 当前用户在线执行目标 `[{ host, target_id }]`（登录级；前端深度工具注入条件与落画布解析链用） |
 
+
+## 23. 平台 MCP Server（外部 Agent/CLI 接入）
+
+平台以 MCP streamable HTTP 形态对外暴露资源型工具面，外部 Agent（zcode / Claude Code 等任意 MCP client）经**个人访问令牌（PAT）**接入，直接操作云端画布/剪辑器/生成（浏览器不需要打开）。设计取舍：纯服务端资源型工具（显式 uid、无页面态），不复刻内部页面工具（分镜编排类工具由外部 agent 以自身 LLM 能力 + `canvas_apply_ops` 自行完成）；生成类为提交+轮询两段式。工具注册表/权限档在 `app/services/mcp_gateway.py`，端点装配与 PAT 鉴权 ASGI 层在 `app/core/mcp_endpoint.py`。
+
+**鉴权**：`Authorization: Bearer agn_pat_*`；无效/已吊销 401。PAT 两档：`readonly`（只读工具）/ `full`（全部工具，含写类；人工确认由外部 agent 自身交互层负责）。
+
+**工具面（16）**：画布 `canvas_list` / `canvas_create` / `canvas_get_overview`（游标分页，连线只带当页相关）/ `canvas_apply_ops`（add_panel/add_connection，按名引用批内新建节点）；编辑器 `editor_list_projects` / `editor_create_project` / `editor_get_document` / `editor_put_document`（revision 乐观锁）/ `editor_render_submit`（client_operation_id 幂等）/ `editor_render_status` / `editor_rough_cut_analyze`（静音剔除/场景切分）；素材与生成 `asset_list` / `model_list` / `image_generate` / `video_generate` / `generation_get`（image/video 任务通用状态查询）。写类工具：canvas_create / canvas_apply_ops / editor_create_project / editor_put_document / editor_render_submit / image_generate / video_generate。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| ANY | `/mcp` | MCP streamable HTTP 端点（PAT 鉴权 ASGI 层；stateless + JSON 响应模式；挂载于路由表末尾兜底，仅承接 `/mcp` 精确路径） |
+| GET | `/api/auth/pat` | PAT 清单（脱敏：无 token 材料；登录级） |
+| POST | `/api/auth/pat` | 创建 PAT `{ name, permission: readonly\|full }` → 明文 `agn_pat_*` **仅此一次返回**（sha256 落库） |
+| DELETE | `/api/auth/pat/{id}` | 吊销 PAT（软删保留记录，即时生效——网关每次请求实时查表；他人令牌 404） |
