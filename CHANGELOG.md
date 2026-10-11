@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.0.11] - 2026-10-12
+
 ### MCP 接入独立页（信息架构：个人资料页 → 侧边栏一等条目）
 
 - 参照 Cherry Studio/LobeChat（MCP 一级条目）、Claude Desktop（Connectors）、GitHub（Developer settings）惯例，MCP/PAT 设置从「个人资料」页迁出为**独立页面 `/mcp`**：侧边栏「个人」分组新增「MCP 接入」菜单项（图标 Connection，顶栏不显示，菜单缓存版本 7→8）
