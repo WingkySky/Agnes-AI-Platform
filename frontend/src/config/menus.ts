@@ -132,6 +132,15 @@ export const BUILT_IN_MENUS: BuiltInMenuItem[] = [
     is_group: false,
   },
   {
+    key: 'mcp-access',
+    label_zh: 'MCP 接入',
+    label_en: 'MCP Access',
+    icon: 'Connection',
+    path: '/mcp',
+    require_admin: false,
+    is_group: false,
+  },
+  {
     key: 'preferences',
     label_zh: '偏好设置',
     label_en: 'Preferences',
@@ -348,6 +357,7 @@ export const DEFAULT_MENU_CONFIG: MenuItemConfig[] = [
   { key: 'credits', show_in_top: false, show_in_sidebar: true, top_group_key: null, sidebar_group_key: 'personal', top_sort_order: 99, sidebar_sort_order: 2 },
   { key: 'profile', show_in_top: false, show_in_sidebar: true, top_group_key: null, sidebar_group_key: 'personal', top_sort_order: 99, sidebar_sort_order: 3 },
   { key: 'preferences', show_in_top: false, show_in_sidebar: true, top_group_key: null, sidebar_group_key: 'personal', top_sort_order: 99, sidebar_sort_order: 4 },
+  { key: 'mcp-access', show_in_top: false, show_in_sidebar: true, top_group_key: null, sidebar_group_key: 'personal', top_sort_order: 99, sidebar_sort_order: 5 },
 
   // ---------- 管理类：只在侧边栏显示（仅管理员可见） ----------
   { key: 'admin-models', show_in_top: false, show_in_sidebar: true, top_group_key: null, sidebar_group_key: 'admin', top_sort_order: 99, sidebar_sort_order: 1 },

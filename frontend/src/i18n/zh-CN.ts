@@ -1241,6 +1241,7 @@ const zhCN = {
     assets: '资产库',
     settings: '配置管理',
     profile: '个人中心',
+    mcpAccess: 'MCP 接入',
     preferences: '偏好设置',
     cameraPresets: '摄像机预设',
     presets: '预设中心',
@@ -3501,6 +3502,17 @@ const zhCN = {
     patGuideTabPrompt: '发给 Agent 自主添加',
     patCliHint: '在终端执行（Claude Code / ZCode 等 CLI；--scope user 写入用户级配置，所有项目可用）',
     patPromptHint: '把下面整段复制发给你的 Agent（对话里粘贴发送），它会自行完成添加与验证：',
+  },
+
+  // ------ MCP 接入页 ------
+  mcpAccess: {
+    title: 'MCP 接入',
+    subtitle: '把画布、剪辑器与生成能力以 MCP Server 形态开放给外部 Agent（zcode / Claude Code 等），浏览器无需打开',
+    toolsTitle: '开放的工具面（16）',
+    toolsHint: '只读令牌仅可调用查询类；写操作（建画布/落节点/生成/渲染）需要「完全」档令牌',
+    groupCanvas: '画布',
+    groupEditor: '剪辑器',
+    groupGeneration: '素材与生成',
   },
 
   // ------ 用户管理页 ------

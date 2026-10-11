@@ -124,6 +124,12 @@ const routes: RouteRecordRaw[] = [
     meta: { titleKey: 'router.profile', requiresAuth: true }
   },
   {
+    path: '/mcp',
+    name: 'mcp-access',
+    component: () => import('@/views/McpAccessView.vue'),
+    meta: { titleKey: 'router.mcpAccess', requiresAuth: true }
+  },
+  {
     path: '/preferences',
     name: 'preferences',
     component: () => import('@/views/PreferencesView.vue'),

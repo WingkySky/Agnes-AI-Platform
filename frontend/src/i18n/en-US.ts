@@ -1259,6 +1259,7 @@ const enUS = {
     assets: 'Asset Library',
     settings: 'Settings',
     profile: 'Profile',
+    mcpAccess: 'MCP Access',
     preferences: 'Preferences',
     cameraPresets: 'Camera Presets',
     presets: 'Preset Center',
@@ -3517,6 +3518,17 @@ const enUS = {
     patGuideTabPrompt: 'Ask your agent',
     patCliHint: 'Run in a terminal (Claude Code / ZCode CLIs; --scope user stores it in user-level config, available in all projects)',
     patPromptHint: 'Copy the whole block below and send it to your agent in chat — it will add and verify by itself:',
+  },
+
+  // ------ MCP Access page ------
+  mcpAccess: {
+    title: 'MCP Access',
+    subtitle: 'Expose canvas, editor and generation to external agents (zcode / Claude Code etc.) via MCP — no browser needed',
+    toolsTitle: 'Exposed tools (16)',
+    toolsHint: 'Read-only tokens can call query tools only; writes (create canvas / apply ops / generate / render) need a Full token',
+    groupCanvas: 'Canvas',
+    groupEditor: 'Editor',
+    groupGeneration: 'Assets & Generation',
   },
 
   // ------ User admin page ------

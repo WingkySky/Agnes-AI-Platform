@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### MCP 接入独立页（信息架构：个人资料页 → 侧边栏一等条目）
+
+- 参照 Cherry Studio/LobeChat（MCP 一级条目）、Claude Desktop（Connectors）、GitHub（Developer settings）惯例，MCP/PAT 设置从「个人资料」页迁出为**独立页面 `/mcp`**：侧边栏「个人」分组新增「MCP 接入」菜单项（图标 Connection，顶栏不显示，菜单缓存版本 7→8）
+- 页面三块：页头说明 + PAT 管理卡（清单/新建/一次性明文/吊销/复制即用指引/无明文快捷创建，逻辑自 ProfileView 整体迁入）+ **工具面简介卡**（16 工具按画布/剪辑器/素材生成分组摘要，写类档位提示）
+- ProfileView 回归纯身份信息（净 -426 行）；与管理员「MCP 服务器」（平台作为 client，/admin/mcp）靠命名区分；i18n 中英；vue-tsc 0 错 / vitest 651 / build 过
+
 ### MCP 接入指引入口（产品内露出）
 
 - 个人中心「API 访问令牌」卡片新增**「接入指引」弹窗**：按当前环境自动推导端点 URL（dev→后端 8000 直连，vite 不代理 /mcp；生产→同源；配 `VITE_API_BASE_URL`→用之）+ 三方式接入标签页（**配置文件 JSON / 命令行一键添加 `claude mcp add --transport http` / 发给 Agent 自主添加的自然语言指令**）+ 档位说明与工具面提示

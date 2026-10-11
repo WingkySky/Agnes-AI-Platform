@@ -40,7 +40,7 @@ import { useI18n } from '@/i18n'
 
 // 缓存 key 和版本号（版本升级以强制刷新缓存）
 const MENU_CONFIG_CACHE_KEY = 'agnes.platform.menu.configs'
-const MENU_CACHE_VERSION = 7
+const MENU_CACHE_VERSION = 8
 
 export const useMenuStore = defineStore('menu', () => {
   // ================ state ================
