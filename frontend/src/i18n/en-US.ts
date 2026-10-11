@@ -3504,6 +3504,15 @@ const enUS = {
     patCopyConfig: 'Copy Config',
     patConfigCopied: 'Config copied — paste it into your client MCP settings',
     patConfigHint: 'The config below already embeds the token you just created — paste it as-is:',
+    patAgentRowHint: 'Or paste the whole instruction to your agent and let it set itself up:',
+    patCopyPrompt: 'Copy Prompt',
+    patPromptCopied: 'Prompt copied — paste it to your agent',
+    patCliCopied: 'Command copied — paste it in your terminal',
+    patGuideTabConfig: 'Config file',
+    patGuideTabCli: 'One-line CLI',
+    patGuideTabPrompt: 'Ask your agent',
+    patCliHint: 'Run in a terminal (Claude Code / ZCode CLIs; --scope user stores it in user-level config, available in all projects)',
+    patPromptHint: 'Copy the whole block below and send it to your agent in chat — it will add and verify by itself:',
   },
 
   // ------ User admin page ------

@@ -202,6 +202,14 @@
               {{ t('profile.patCopyConfig') }}
             </el-button>
           </div>
+          <p class="pat-config-hint">{{ t('profile.patAgentRowHint') }}</p>
+          <div class="pat-token-row">
+            <code class="pat-token pat-token-tall pat-token-block">{{ createdPrompt }}</code>
+            <el-button size="small" type="primary" @click="copyCreatedPrompt">
+              <el-icon><CopyDocument /></el-icon>
+              {{ t('profile.patCopyPrompt') }}
+            </el-button>
+          </div>
         </template>
         <template #footer>
           <el-button @click="patDialogVisible = false">{{ t('common.close') }}</el-button>
@@ -223,13 +231,37 @@
             </el-button>
           </div>
           <p class="pat-guide-step">{{ t('profile.patGuideStep2') }}</p>
-          <div class="pat-token-row">
-            <code class="pat-token pat-token-tall pat-token-block">{{ guideConfig }}</code>
-            <el-button size="small" @click="copyGuideConfig">
-              <el-icon><CopyDocument /></el-icon>
-              {{ t('profile.patCopy') }}
-            </el-button>
-          </div>
+          <el-tabs v-model="guideTab" class="pat-guide-tabs">
+            <el-tab-pane :label="t('profile.patGuideTabConfig')" name="config">
+              <div class="pat-token-row">
+                <code class="pat-token pat-token-tall pat-token-block">{{ guideConfig }}</code>
+                <el-button size="small" @click="copyGuideConfig">
+                  <el-icon><CopyDocument /></el-icon>
+                  {{ t('profile.patCopy') }}
+                </el-button>
+              </div>
+            </el-tab-pane>
+            <el-tab-pane :label="t('profile.patGuideTabCli')" name="cli">
+              <p class="pat-guide-hint">{{ t('profile.patCliHint') }}</p>
+              <div class="pat-token-row">
+                <code class="pat-token pat-token-tall pat-token-block">{{ guideCli }}</code>
+                <el-button size="small" @click="copyGuideCli">
+                  <el-icon><CopyDocument /></el-icon>
+                  {{ t('profile.patCopy') }}
+                </el-button>
+              </div>
+            </el-tab-pane>
+            <el-tab-pane :label="t('profile.patGuideTabPrompt')" name="prompt">
+              <p class="pat-guide-hint">{{ t('profile.patPromptHint') }}</p>
+              <div class="pat-token-row">
+                <code class="pat-token pat-token-tall pat-token-block">{{ guidePrompt }}</code>
+                <el-button size="small" @click="copyGuidePrompt">
+                  <el-icon><CopyDocument /></el-icon>
+                  {{ t('profile.patCopy') }}
+                </el-button>
+              </div>
+            </el-tab-pane>
+          </el-tabs>
           <p class="pat-guide-step">{{ t('profile.patGuideStep3') }}</p>
           <el-alert type="info" :title="t('profile.patGuideTierNote')" :closable="false" class="pat-token-alert" />
           <p class="pat-guide-more">{{ t('profile.patGuideHint') }}</p>
@@ -408,8 +440,23 @@ function mcpConfigSnippet(token: string): string {
   )
 }
 
+function agentPromptSnippet(token: string): string {
+  return [
+    '请把以下 MCP 服务器添加到你的配置中（streamable HTTP），添加后重载并调用 tools/list 列出工具确认接入成功：',
+    '- 名称：agnes-platform',
+    `- URL：${mcpUrl.value}`,
+    `- 请求头：Authorization: Bearer ${token}`,
+  ].join('\n')
+}
+
+const guideTab = ref('config')
 const guideConfig = computed(() => mcpConfigSnippet('agn_pat_<你的令牌>'))
+const guideCli = computed(() =>
+  `claude mcp add --transport http --scope user agnes-platform ${mcpUrl.value} --header "Authorization: Bearer agn_pat_<你的令牌>"`,
+)
+const guidePrompt = computed(() => agentPromptSnippet('agn_pat_<你的令牌>'))
 const createdConfig = computed(() => mcpConfigSnippet(createdToken.value))
+const createdPrompt = computed(() => agentPromptSnippet(createdToken.value))
 
 function copyMcpUrl() {
   copyText(mcpUrl.value, t('common.copied'))
@@ -417,8 +464,17 @@ function copyMcpUrl() {
 function copyGuideConfig() {
   copyText(guideConfig.value, t('common.copied'))
 }
+function copyGuideCli() {
+  copyText(guideCli.value, t('profile.patCliCopied'))
+}
+function copyGuidePrompt() {
+  copyText(guidePrompt.value, t('profile.patPromptCopied'))
+}
 function copyCreatedConfig() {
   copyText(createdConfig.value, t('profile.patConfigCopied'))
+}
+function copyCreatedPrompt() {
+  copyText(createdPrompt.value, t('profile.patPromptCopied'))
 }
 
 async function handleRevokePat(row: PatInfo) {
@@ -642,6 +698,18 @@ async function handleRevokePat(row: PatInfo) {
   font-size: 13px;
   font-weight: 600;
   color: var(--agnes-text-primary);
+}
+.pat-guide-tabs :deep(.el-tabs__header) {
+  margin-bottom: 10px;
+}
+.pat-guide-tabs :deep(.el-tabs__content) {
+  overflow: visible;
+}
+.pat-guide-hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--agnes-text-muted);
+  line-height: 1.5;
 }
 .pat-guide .pat-guide-step:first-child {
   margin-top: 0;

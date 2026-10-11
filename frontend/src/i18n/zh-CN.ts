@@ -3488,6 +3488,15 @@ const zhCN = {
     patCopyConfig: '复制接入配置',
     patConfigCopied: '接入配置已复制，粘贴到客户端 MCP 配置即可',
     patConfigHint: '下方接入配置已嵌入刚创建的令牌，直接粘贴即可使用：',
+    patAgentRowHint: '或者把整段指令贴给你的 Agent，让它自主完成添加：',
+    patCopyPrompt: '复制指令',
+    patPromptCopied: '指令已复制，粘贴给 Agent 即可',
+    patCliCopied: '命令已复制，到终端粘贴执行即可',
+    patGuideTabConfig: '配置文件',
+    patGuideTabCli: '命令行一键添加',
+    patGuideTabPrompt: '发给 Agent 自主添加',
+    patCliHint: '在终端执行（Claude Code / ZCode 等 CLI；--scope user 写入用户级配置，所有项目可用）',
+    patPromptHint: '把下面整段复制发给你的 Agent（对话里粘贴发送），它会自行完成添加与验证：',
   },
 
   // ------ 用户管理页 ------

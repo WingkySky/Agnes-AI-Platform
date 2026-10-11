@@ -10,9 +10,30 @@
    - **完全（full）**：可执行全部工具（含写操作）。危险确认由外部 Agent 自己的交互层负责（例如 CLI 的权限系统），平台侧不再弹确认。
 3. 创建成功后**明文只显示一次**，立即复制保存（`agn_pat_` 开头）。令牌可随时吊销，吊销即时生效。
 
-## 2. 配置 MCP client
+## 2. 接入方式（三选一）
 
-在 MCP client 的配置里添加一个 streamable HTTP 类型的服务器：
+个人中心「API 访问令牌」卡片的「接入指引」弹窗会按当前环境自动生成以下内容并可一键复制。
+
+### 方式 A：发给 Agent 自主添加（最省事）
+
+把下面整段复制发给你的 Agent（对话里粘贴发送），它会自行完成添加与验证：
+
+```
+请把以下 MCP 服务器添加到你的配置中（streamable HTTP），添加后重载并调用 tools/list 列出工具确认接入成功：
+- 名称：agnes-platform
+- URL：http://<你的平台地址>/mcp
+- 请求头：Authorization: Bearer agn_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+### 方式 B：命令行一键添加
+
+在终端执行（Claude Code / ZCode 等 CLI；`--scope user` 写入用户级配置，所有项目可用）：
+
+```bash
+claude mcp add --transport http --scope user agnes-platform http://<你的平台地址>/mcp --header "Authorization: Bearer agn_pat_xxx"
+```
+
+### 方式 C：手工配置 MCP client
 
 ```json
 {
