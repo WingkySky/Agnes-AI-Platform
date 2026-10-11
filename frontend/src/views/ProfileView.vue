@@ -195,21 +195,37 @@
           </div>
           <el-divider class="pat-divider" />
           <p class="pat-config-hint">{{ t('profile.patConfigHint') }}</p>
-          <div class="pat-token-row">
-            <code class="pat-token pat-token-tall">{{ createdConfig }}</code>
-            <el-button size="small" type="primary" @click="copyCreatedConfig">
-              <el-icon><CopyDocument /></el-icon>
-              {{ t('profile.patCopyConfig') }}
-            </el-button>
-          </div>
-          <p class="pat-config-hint">{{ t('profile.patAgentRowHint') }}</p>
-          <div class="pat-token-row">
-            <code class="pat-token pat-token-tall pat-token-block">{{ createdPrompt }}</code>
-            <el-button size="small" type="primary" @click="copyCreatedPrompt">
-              <el-icon><CopyDocument /></el-icon>
-              {{ t('profile.patCopyPrompt') }}
-            </el-button>
-          </div>
+          <el-tabs v-model="guideTab" class="pat-guide-tabs">
+            <el-tab-pane :label="t('profile.patGuideTabConfig')" name="config">
+              <div class="pat-token-row">
+                <code class="pat-token pat-token-tall pat-token-block">{{ liveConfig }}</code>
+                <el-button size="small" type="primary" @click="copyLiveConfig">
+                  <el-icon><CopyDocument /></el-icon>
+                  {{ t('profile.patCopyConfig') }}
+                </el-button>
+              </div>
+            </el-tab-pane>
+            <el-tab-pane :label="t('profile.patGuideTabCli')" name="cli">
+              <p class="pat-guide-hint">{{ t('profile.patCliHint') }}</p>
+              <div class="pat-token-row">
+                <code class="pat-token pat-token-tall pat-token-block">{{ liveCli }}</code>
+                <el-button size="small" type="primary" @click="copyLiveCli">
+                  <el-icon><CopyDocument /></el-icon>
+                  {{ t('profile.patCopy') }}
+                </el-button>
+              </div>
+            </el-tab-pane>
+            <el-tab-pane :label="t('profile.patGuideTabPrompt')" name="prompt">
+              <p class="pat-guide-hint">{{ t('profile.patPromptHint') }}</p>
+              <div class="pat-token-row">
+                <code class="pat-token pat-token-tall pat-token-block">{{ livePrompt }}</code>
+                <el-button size="small" type="primary" @click="copyLivePrompt">
+                  <el-icon><CopyDocument /></el-icon>
+                  {{ t('profile.patCopyPrompt') }}
+                </el-button>
+              </div>
+            </el-tab-pane>
+          </el-tabs>
         </template>
         <template #footer>
           <el-button @click="patDialogVisible = false">{{ t('common.close') }}</el-button>
@@ -219,8 +235,26 @@
         </template>
       </el-dialog>
 
-      <!-- 接入指引弹窗 -->
+      <!-- 接入指引弹窗：无可用明文时先一键创建并填入，所有复制项嵌入真实令牌 -->
       <el-dialog v-model="guideVisible" :title="t('profile.patGuideTitle')" width="560px">
+        <el-alert
+          v-if="hasLiveToken"
+          type="success"
+          :title="t('profile.patGuideHasToken')"
+          :closable="false"
+          class="pat-token-alert"
+        />
+        <el-alert v-else type="warning" :title="t('profile.patGuideNeedToken')" :closable="false" class="pat-token-alert">
+          <div class="pat-guide-quick">
+            <el-button size="small" type="primary" :loading="quickCreating" @click="quickCreatePat('readonly')">
+              {{ t('profile.patQuickCreateReadonly') }}
+            </el-button>
+            <el-button size="small" type="warning" :loading="quickCreating" @click="quickCreatePat('full')">
+              {{ t('profile.patQuickCreateFull') }}
+            </el-button>
+          </div>
+        </el-alert>
+
         <div class="pat-guide">
           <p class="pat-guide-step">{{ t('profile.patGuideStep1') }}</p>
           <div class="pat-token-row">
@@ -230,39 +264,41 @@
               {{ t('profile.patCopy') }}
             </el-button>
           </div>
-          <p class="pat-guide-step">{{ t('profile.patGuideStep2') }}</p>
-          <el-tabs v-model="guideTab" class="pat-guide-tabs">
-            <el-tab-pane :label="t('profile.patGuideTabConfig')" name="config">
-              <div class="pat-token-row">
-                <code class="pat-token pat-token-tall pat-token-block">{{ guideConfig }}</code>
-                <el-button size="small" @click="copyGuideConfig">
-                  <el-icon><CopyDocument /></el-icon>
-                  {{ t('profile.patCopy') }}
-                </el-button>
-              </div>
-            </el-tab-pane>
-            <el-tab-pane :label="t('profile.patGuideTabCli')" name="cli">
-              <p class="pat-guide-hint">{{ t('profile.patCliHint') }}</p>
-              <div class="pat-token-row">
-                <code class="pat-token pat-token-tall pat-token-block">{{ guideCli }}</code>
-                <el-button size="small" @click="copyGuideCli">
-                  <el-icon><CopyDocument /></el-icon>
-                  {{ t('profile.patCopy') }}
-                </el-button>
-              </div>
-            </el-tab-pane>
-            <el-tab-pane :label="t('profile.patGuideTabPrompt')" name="prompt">
-              <p class="pat-guide-hint">{{ t('profile.patPromptHint') }}</p>
-              <div class="pat-token-row">
-                <code class="pat-token pat-token-tall pat-token-block">{{ guidePrompt }}</code>
-                <el-button size="small" @click="copyGuidePrompt">
-                  <el-icon><CopyDocument /></el-icon>
-                  {{ t('profile.patCopy') }}
-                </el-button>
-              </div>
-            </el-tab-pane>
-          </el-tabs>
-          <p class="pat-guide-step">{{ t('profile.patGuideStep3') }}</p>
+          <template v-if="hasLiveToken">
+            <p class="pat-guide-step">{{ t('profile.patGuideStep2') }}</p>
+            <el-tabs v-model="guideTab" class="pat-guide-tabs">
+              <el-tab-pane :label="t('profile.patGuideTabConfig')" name="config">
+                <div class="pat-token-row">
+                  <code class="pat-token pat-token-tall pat-token-block">{{ liveConfig }}</code>
+                  <el-button size="small" @click="copyLiveConfig">
+                    <el-icon><CopyDocument /></el-icon>
+                    {{ t('profile.patCopyConfig') }}
+                  </el-button>
+                </div>
+              </el-tab-pane>
+              <el-tab-pane :label="t('profile.patGuideTabCli')" name="cli">
+                <p class="pat-guide-hint">{{ t('profile.patCliHint') }}</p>
+                <div class="pat-token-row">
+                  <code class="pat-token pat-token-tall pat-token-block">{{ liveCli }}</code>
+                  <el-button size="small" @click="copyLiveCli">
+                    <el-icon><CopyDocument /></el-icon>
+                    {{ t('profile.patCopy') }}
+                  </el-button>
+                </div>
+              </el-tab-pane>
+              <el-tab-pane :label="t('profile.patGuideTabPrompt')" name="prompt">
+                <p class="pat-guide-hint">{{ t('profile.patPromptHint') }}</p>
+                <div class="pat-token-row">
+                  <code class="pat-token pat-token-tall pat-token-block">{{ livePrompt }}</code>
+                  <el-button size="small" @click="copyLivePrompt">
+                    <el-icon><CopyDocument /></el-icon>
+                    {{ t('profile.patCopyPrompt') }}
+                  </el-button>
+                </div>
+              </el-tab-pane>
+            </el-tabs>
+            <p class="pat-guide-step">{{ t('profile.patGuideStep3') }}</p>
+          </template>
           <el-alert type="info" :title="t('profile.patGuideTierNote')" :closable="false" class="pat-token-alert" />
           <p class="pat-guide-more">{{ t('profile.patGuideHint') }}</p>
         </div>
@@ -413,8 +449,11 @@ function copyCreatedToken() {
   copyText(createdToken.value, t('common.copied'))
 }
 
-// ============ 接入指引（端点按环境推导 + 配置 JSON 一键复制） ============
+// ============ 接入指引（令牌明文只在创建时存在：所有复制项统一嵌入「本次创建」的真实令牌，
+// 没有可用明文时先走一键创建并填入，绝不展示占位符——复制出来必须整套可直接使用） ============
 const guideVisible = ref(false)
+const guideTab = ref('config')
+const quickCreating = ref(false)
 
 // 端点 URL：dev 由后端直连（vite 只代理 /api，不代理 /mcp）；配了 API base 用之；生产同源
 const mcpUrl = computed(() => {
@@ -449,32 +488,39 @@ function agentPromptSnippet(token: string): string {
   ].join('\n')
 }
 
-const guideTab = ref('config')
-const guideConfig = computed(() => mcpConfigSnippet('agn_pat_<你的令牌>'))
-const guideCli = computed(() =>
-  `claude mcp add --transport http --scope user agnes-platform ${mcpUrl.value} --header "Authorization: Bearer agn_pat_<你的令牌>"`,
+const hasLiveToken = computed(() => !!createdToken.value)
+const liveConfig = computed(() => mcpConfigSnippet(createdToken.value))
+const liveCli = computed(() =>
+  `claude mcp add --transport http --scope user agnes-platform ${mcpUrl.value} --header "Authorization: Bearer ${createdToken.value}"`,
 )
-const guidePrompt = computed(() => agentPromptSnippet('agn_pat_<你的令牌>'))
-const createdConfig = computed(() => mcpConfigSnippet(createdToken.value))
-const createdPrompt = computed(() => agentPromptSnippet(createdToken.value))
+const livePrompt = computed(() => agentPromptSnippet(createdToken.value))
+
+/** 指引内快捷创建（免表单）：创建后真实令牌自动填入全部复制项 */
+async function quickCreatePat(permission: 'readonly' | 'full') {
+  quickCreating.value = true
+  try {
+    const created = await createPat(t('profile.patQuickName'), permission)
+    createdToken.value = created.token
+    guideTab.value = 'config'
+    await loadPats()
+  } catch {
+    ElMessage.error(t('profile.patCreateFailed'))
+  } finally {
+    quickCreating.value = false
+  }
+}
 
 function copyMcpUrl() {
   copyText(mcpUrl.value, t('common.copied'))
 }
-function copyGuideConfig() {
-  copyText(guideConfig.value, t('common.copied'))
+function copyLiveConfig() {
+  copyText(liveConfig.value, t('profile.patConfigCopied'))
 }
-function copyGuideCli() {
-  copyText(guideCli.value, t('profile.patCliCopied'))
+function copyLiveCli() {
+  copyText(liveCli.value, t('profile.patCliCopied'))
 }
-function copyGuidePrompt() {
-  copyText(guidePrompt.value, t('profile.patPromptCopied'))
-}
-function copyCreatedConfig() {
-  copyText(createdConfig.value, t('profile.patConfigCopied'))
-}
-function copyCreatedPrompt() {
-  copyText(createdPrompt.value, t('profile.patPromptCopied'))
+function copyLivePrompt() {
+  copyText(livePrompt.value, t('profile.patPromptCopied'))
 }
 
 async function handleRevokePat(row: PatInfo) {
@@ -710,6 +756,11 @@ async function handleRevokePat(row: PatInfo) {
   font-size: 12px;
   color: var(--agnes-text-muted);
   line-height: 1.5;
+}
+.pat-guide-quick {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
 }
 .pat-guide .pat-guide-step:first-child {
   margin-top: 0;
