@@ -94,7 +94,8 @@ jobs:
             $(printf '${{ env.IMAGE }}@sha256:%s ' *)
 
       - name: 校验 manifest 双架构齐全
-        run: docker buildx imagetools inspect ${{ env.IMAGE }}:${{ github.ref_name }} | grep -E "Platform: linux/(amd64|arm64)"
+        run: |
+          docker buildx imagetools inspect ${{ env.IMAGE }}:${{ github.ref_name }} | grep -E "Platform: linux/(amd64|arm64)"
 
   # 免 Docker 便携包：自包含 Python 运行时 + 预装依赖 + 前端产物 + 双击启动脚本
   # 未签名（无开发者账号）：Windows 首次运行过一次 SmartScreen，macOS 首次需 xattr -cr（包内 README-PORTABLE 说明）
