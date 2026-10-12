@@ -95,7 +95,16 @@ jobs:
 
       - name: 校验 manifest 双架构齐全
         run: |
-          docker buildx imagetools inspect ${{ env.IMAGE }}:${{ github.ref_name }} | grep -E "Platform: linux/(amd64|arm64)"
+          docker buildx imagetools inspect ${{ env.IMAGE }}:${{ github.ref_name }} --raw > manifest.json
+          python3 - <<'PYEOF'
+          import json, sys
+          m = json.load(open("manifest.json"))
+          arches = {x["platform"]["architecture"] for x in m.get("manifests", []) if "platform" in x}
+          missing = {"amd64", "arm64"} - arches
+          if missing:
+              sys.exit(f"manifest 缺少架构: {missing}")
+          print("✓ 双架构齐全:", sorted(arches))
+          PYEOF
 
   # 免 Docker 便携包：自包含 Python 运行时 + 预装依赖 + 前端产物 + 双击启动脚本
   # 未签名（无开发者账号）：Windows 首次运行过一次 SmartScreen，macOS 首次需 xattr -cr（包内 README-PORTABLE 说明）
