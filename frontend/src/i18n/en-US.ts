@@ -219,6 +219,8 @@ const enUS = {
     refresh: 'Refresh',
     autoRefresh: 'Auto refresh',
     download: 'Download',
+    exportDiagnostics: 'Export diagnostics',
+    exportDiagnosticsDone: 'Diagnostics bundle exported',
     clear: 'Clear',
     clearConfirmTitle: 'Clear log',
     clearConfirmText: 'Clear {file}? Rotated backups of this file will also be deleted. This cannot be undone.',

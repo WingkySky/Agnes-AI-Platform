@@ -8,6 +8,14 @@
 
 - pydantic-settings 对 List 类型复杂字段做严格 JSON 预解码，`.env`/环境变量写逗号分隔格式（`FRONTEND_ORIGINS=http://a,http://b`）会在解码阶段直接抛 SettingsError（`parse_origins` validator 无机会运行）。`frontend_origins` 加 `NoDecode` 跳过预解码，交由既有 `parse_origins` 统一兼容 JSON 数组/逗号分隔两种格式；`.env.example` 注释同步。四场景实测：逗号分隔（环境变量/.env 文件）、JSON 数组、默认值全部正常，pytest 310 绿
 
+### 诊断包导出（可靠性三件套 ③：管理员一键脱敏诊断 ZIP）
+
+- **端点**：`GET /api/admin/diagnostics/export`（显式挂 `get_current_admin_user`）→ 内存组装 ZIP 流式返回，`agnes-diagnostics-YYYYMMDD-HHMMSS.zip`（UTC 命名，ZIP 注释标注 sanitized）
+- **九项内容**（全部脱敏+封顶）：`meta.txt`（VERSION/Python/OS/进程运行时长/库引擎名——连接串打码只留 sqlite 文件名）；`config_sanitized.json`（系统配置全键值——**键名含 password/secret/token/key 的值整段打码 `***<len>`**，.env 只列键名不列值，Provider 清单 api_key 只报已配置/未配置）；主日志尾 2000 行 + frontend.jsonl 1000 行 + errors.jsonl 500 行（文件尾 seek 读不整读大文件）；`generations_recent.json` 最近 100 条（**任务账本口径含 pending/uncertain，prompt 截 200 字/错误截 500 字**，不导 params/context/result_url）；`api_calls_recent.json` 最近 100 条（不导 endpoint/payload）；`storage_summary.json`（复用②概览）+ `table_stats.json` 核心表行数
+- **脱敏红线**：用户身份内容不入包（无用户名/邮箱，top_users 仅 user_id）；secret 整值打码；文本字段截断
+- **前端**：/admin/logs 工具栏新增「导出诊断包」按钮（复用 downloadViaProxy 带鉴权下载，loading 态，成功/失败提示），i18n 中英
+- 测试 pytest 329（+2：鉴权三态 + ZIP 内容清单/打码断言含原文不入包/截断上限/meta 结构）；vitest 657 + vue-tsc + build 绿
+
 ### 存储配额（可靠性三件套 ②：台账记账 + 两阶段预留）
 
 - **新表 storage_objects 用户存储台账**（只增不删，storage_key 唯一索引幂等）：user_id/bytes/kind/source(upload/generation/render)/created_at；用量 = SUM(bytes) per user；S3 转存件不占本地账

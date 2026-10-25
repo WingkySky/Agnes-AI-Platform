@@ -66,6 +66,7 @@
           <el-switch v-model="autoRefresh" />
         </span>
         <el-button :icon="Download" :disabled="!state.file" @click="download">{{ t('logs.download') }}</el-button>
+        <el-button :icon="FolderOpened" :loading="diagExporting" @click="exportDiagnostics">{{ t('logs.exportDiagnostics') }}</el-button>
         <el-button type="danger" plain :icon="Delete" :disabled="!state.file" @click="clear">
           {{ t('logs.clear') }}
         </el-button>
@@ -137,7 +138,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Delete, Download, Refresh } from '@element-plus/icons-vue'
+import { Delete, Download, FolderOpened, Refresh } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { clearLog, getLogStats, queryLogs } from '@/api/logs'
 import type { LogEntry, LogQueryParams } from '@/api/logs'
@@ -300,6 +301,20 @@ function trackRequest(row: LogEntry): void {
 }
 
 // ---------- 下载与清空 ----------
+const diagExporting = ref(false)
+
+async function exportDiagnostics(): Promise<void> {
+  diagExporting.value = true
+  try {
+    await downloadViaProxy('/api/admin/diagnostics/export', `agnes-diagnostics-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '')}.zip`)
+    ElMessage.success(t('logs.exportDiagnosticsDone'))
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : t('logs.downloadFailed'))
+  } finally {
+    diagExporting.value = false
+  }
+}
+
 async function download(): Promise<void> {
   const file = state.value.file
   try {

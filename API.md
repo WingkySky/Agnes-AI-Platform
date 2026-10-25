@@ -1053,3 +1053,9 @@ Agent 一级公民批次 2：chat 内核（任意宿主/标签页）的画布/�
 | GET | `/api/admin/storage/overview?limit=` | 平台总量 + 用量 top N 用户（管理员级，显式鉴权） |
 
 **超限行为**：用户主动上传预检失败返回 **413**（`detail` 区分「存储空间已满」/「已达到滚动 24 小时上传上限」）；生成归档/渲染输出为软处理——超限仅告警跳过记账，不阻断生成主流程。存量归档文件按 `assets.storage_key` 在启动时幂等回填台账。
+
+## 25. 诊断包导出（管理员）
+
+`GET /api/admin/diagnostics/export` —— 管理员一键导出脱敏诊断 ZIP（`application/zip`，`Content-Disposition: attachment`，文件名 `agnes-diagnostics-YYYYMMDD-HHMMSS.zip` UTC）。显式挂 `get_current_admin_user`，普通用户 403。
+
+**ZIP 内容（9 项，全部脱敏 + 行数封顶）**：`meta.txt`（版本/运行环境/库引擎）、`config_sanitized.json`（系统配置键值——secret 类键值打码、.env 仅键名、Provider 清单无密钥材料）、三份日志尾部（backend 2000 行 / frontend 1000 行 / errors 500 行）、`generations_recent.json`（最近 100 条，prompt 截 200 字，含任务账本 pending/uncertain）、`api_calls_recent.json`（最近 100 条，无 payload）、`storage_summary.json`、`table_stats.json`。用户身份内容（用户名/邮箱）不入包。

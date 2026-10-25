@@ -49,6 +49,7 @@ from app.routes import providers as providers_route
 from app.routes import admin as admin_route
 from app.routes import credits as credits_route
 from app.routes import storage as storage_route
+from app.routes import diagnostics as diagnostics_route
 from app.routes import proxy as proxy_route
 from app.routes import preferences as preferences_route
 from app.routes import plaza as plaza_route
@@ -332,6 +333,7 @@ app.include_router(history_route.router, prefix="/api", tags=["生成历史"])
 app.include_router(chat_route.router, prefix="/api", tags=["AI 聊天"])
 app.include_router(logs_route.router, prefix="/api", tags=["日志查询"])
 app.include_router(storage_route.router, prefix="/api", tags=["存储"])
+app.include_router(diagnostics_route.router, prefix="/api", tags=["诊断"])
 app.include_router(auth_route.router, prefix="/api", tags=["用户认证"])
 app.include_router(admin_route.router, prefix="/api", tags=["管理员-积分规则"])
 app.include_router(credits_route.router, prefix="/api", tags=["积分明细"])

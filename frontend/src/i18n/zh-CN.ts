@@ -218,6 +218,8 @@ const zhCN = {
     refresh: '刷新',
     autoRefresh: '自动刷新',
     download: '下载',
+    exportDiagnostics: '导出诊断包',
+    exportDiagnosticsDone: '诊断包已导出',
     clear: '清空',
     clearConfirmTitle: '清空日志',
     clearConfirmText: '确定清空 {file} 吗？该文件的轮转备份也会一并删除，操作不可恢复。',
