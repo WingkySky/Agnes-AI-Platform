@@ -387,6 +387,7 @@ async def get_video_status(
             video_url=cached_task.video_url,
             message=cached_task.error_message,
             error_category=getattr(cached_task, "error_category", None),
+            provider_name=(cached_task.context or {}).get("route_used", {}).get("provider_name"),
             elapsed_sec=cached_task.to_dict()["elapsed_sec"],
         ))
 
@@ -413,6 +414,7 @@ async def get_video_status(
             video_url=record.result_url,
             message=record.error_message if resp_status == "failed" else None,
             error_category=record.error_category,
+            provider_name=(record.context or {}).get("route_used", {}).get("provider_name"),
             elapsed_sec=elapsed,
         ))
 

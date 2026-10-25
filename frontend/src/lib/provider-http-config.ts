@@ -58,6 +58,7 @@ export const HTTP_CONFIG_PROMPT_DOC = `输出一个 JSON 对象（http_config）
     "timeout_sec": 15
   }
 }
+可选字段 "headers"（每个动作上）：非 Bearer 鉴权时必须配置，把鉴权头映射为 {{api_key}} 占位，如 "headers": { "<鉴权头名>": "{{api_key}}" }（默认已自动带 Authorization: Bearer）。
 占位符：图片 {{prompt}} {{model}} {{size}} {{image}} {{images}}；视频 {{prompt}} {{model}} {{width}} {{height}} {{seconds}} {{aspect_ratio}} {{image}} {{images}} {{negative_prompt}}；轮询路径 {{task_id}}。字符串占位在模板中带引号、数组占位不带引号。`
 
 /** 空表单（新建声明式渠道的默认值） */

@@ -186,4 +186,5 @@ class VideoStatusResponse(BaseModel):
     video_url: str | None = None             # 生成成功时返回的视频 URL
     message: str | None = None               # 状态信息或错误消息
     error_category: str | None = None        # 失败类目（error_taxonomy.CATEGORIES；成功/旧任务为 NULL）
+    provider_name: str | None = None         # 实际使用渠道名（多渠道路由 failover 透出）
     elapsed_sec: int = 0                        # 已耗时（秒）

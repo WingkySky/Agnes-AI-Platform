@@ -233,6 +233,7 @@ async def get_image_task_status(
                     "url": record.result_url,
                     "message": record.error_message if resp_status == "failed" else None,
                     "error_category": record.error_category,
+                    "provider_name": (record.context or {}).get("route_used", {}).get("provider_name"),
                     "credits_consumed": record.credits_consumed,
                     "elapsed_sec": elapsed,
                 })
