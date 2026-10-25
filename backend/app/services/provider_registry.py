@@ -36,6 +36,7 @@ from app.schemas.common import ModelGenParams, ModelInfo
 from app.services.agn_sdk_client import AGNSDKClientWrapper
 from app.services.agnes_client import AgnesAIClient, agnes_client
 from app.services.capability_service import resolve_capabilities
+from app.services.declarative_client import DeclarativeHttpClient
 
 logger = logging.getLogger("agnes_platform")
 
@@ -43,6 +44,7 @@ logger = logging.getLogger("agnes_platform")
 # "agnes" 走现有 AgnesAIClient（业务适配层 + 协议层一体）
 # 其他 provider_type 走 AGNSDKClientWrapper（aibridge 统一协议层）
 _PROVIDER_TYPE_AGNES = "agnes"
+_PROVIDER_TYPE_HTTP_CUSTOM = "http_custom"
 
 # ---------- 模型类型推断规则（与原 model_registry 保持一致） ----------
 
@@ -226,6 +228,10 @@ class ProviderRegistry:
             )
             return result.scalars().first()
 
+    async def get_provider(self, provider_id: int) -> ApiProvider | None:
+        """根据 ID 加载单个 Provider（公开方法，路由层测试连接等使用）"""
+        return await self._load_provider_by_id(provider_id)
+
     async def _create_default_provider_from_settings(self) -> list[ApiProvider]:
         """
         首次启动时用 settings 中的引导配置创建默认 Provider。
@@ -266,10 +272,17 @@ class ProviderRegistry:
 
         if provider_type == _PROVIDER_TYPE_AGNES:
             # Agnes 走现有业务适配层 + 协议层一体实现
-            client: AgnesAIClient | AGNSDKClientWrapper = AgnesAIClient(
+            client: AgnesAIClient | AGNSDKClientWrapper | DeclarativeHttpClient = AgnesAIClient(
                 base_url=provider.base_url,
                 api_key=decrypted_key,
                 poll_url=provider.poll_url or "",
+            )
+        elif provider_type == _PROVIDER_TYPE_HTTP_CUSTOM:
+            # 声明式 HTTP 渠道：HTTP 模板配置驱动，不写代码接长尾渠道
+            client = DeclarativeHttpClient(
+                base_url=provider.base_url,
+                api_key=decrypted_key,
+                http_config=provider.http_config or {},
             )
         else:
             # 其他 provider_type 走 aibridge 统一协议层
@@ -654,6 +667,7 @@ class ProviderRegistry:
         is_default: bool = False,
         sort_order: int = 0,
         billing_tier: str = "paid",
+        http_config: dict | None = None,
     ) -> ApiProvider:
         """
         新增 Provider。
@@ -682,6 +696,7 @@ class ProviderRegistry:
                 is_default=is_default,
                 sort_order=sort_order,
                 billing_tier=billing_tier if billing_tier in ("free", "paid") else "paid",
+                http_config=http_config,
             )
             session.add(provider)
             await session.commit()
@@ -712,6 +727,7 @@ class ProviderRegistry:
         is_default: bool | None = None,
         sort_order: int | None = None,
         billing_tier: str | None = None,
+        http_config: dict | None = None,
     ) -> ApiProvider | None:
         """
         更新 Provider 配置。
@@ -753,6 +769,9 @@ class ProviderRegistry:
                 need_rebuild = True
             if poll_url is not None and poll_url != provider.poll_url:
                 provider.poll_url = poll_url
+                need_rebuild = True
+            if http_config is not None and http_config != provider.http_config:
+                provider.http_config = http_config
                 need_rebuild = True
             if is_active is not None:
                 provider.is_active = is_active

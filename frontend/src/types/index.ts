@@ -600,6 +600,8 @@ export interface ApiProvider {
   sort_order: number
   /** 计费档位：free(免费) / paid(付费) */
   billing_tier: 'free' | 'paid'
+  /** 声明式 HTTP 渠道模板（provider_type=http_custom 时存在） */
+  http_config?: Record<string, unknown> | null
   created_at?: string | null
   updated_at?: string | null
 }
@@ -623,6 +625,8 @@ export interface ProviderCreateRequest {
   sort_order?: number
   /** 计费档位：free(免费) / paid(付费)，默认 paid */
   billing_tier?: 'free' | 'paid'
+  /** 声明式 HTTP 渠道模板（provider_type=http_custom） */
+  http_config?: Record<string, unknown>
 }
 
 /** 更新 Provider 请求 — 对齐 ProviderUpdateRequest */
@@ -638,6 +642,8 @@ export interface ProviderUpdateRequest {
   is_default?: boolean
   sort_order?: number
   billing_tier?: 'free' | 'paid'
+  /** 声明式 HTTP 渠道模板（None=不修改） */
+  http_config?: Record<string, unknown>
 }
 
 /** 模型备用路由条目 — 对齐 ModelRouteItemResponse */

@@ -291,8 +291,80 @@
           </el-radio-group>
           <div class="form-item-hint">{{ t('settings.billingTierHint') }}</div>
         </el-form-item>
+
+        <!-- 声明式 HTTP 渠道模板（provider_type=http_custom） -->
+        <template v-if="providerForm.provider_type === 'http_custom'">
+          <el-divider content-position="left">{{ t('settings.httpSectionTitle') }}</el-divider>
+          <el-form-item :label="t('settings.httpModelsMode')">
+            <el-radio-group v-model="httpForm.models_mode">
+              <el-radio value="openai">OpenAI /models</el-radio>
+              <el-radio value="static">{{ t('settings.httpModelsStatic') }}</el-radio>
+              <el-radio value="custom">{{ t('settings.httpModelsCustom') }}</el-radio>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item v-if="httpForm.models_mode === 'static'" :label="t('settings.httpStaticModels')">
+            <el-input v-model="httpForm.static_models" type="textarea" :rows="3" placeholder='[{"id": "model-id", "type": "image"}]' />
+          </el-form-item>
+          <el-form-item v-if="httpForm.models_mode === 'custom'" :label="t('settings.httpModelsEndpoint')">
+            <el-input v-model="httpForm.models_path" placeholder="/models/list" />
+          </el-form-item>
+
+          <el-form-item :label="t('settings.httpAiGenerate')">
+            <div class="http-ai-box">
+              <el-input v-model="httpAiInput" type="textarea" :rows="3" :placeholder="t('settings.httpAiPlaceholder')" />
+              <el-button :loading="httpAiLoading" @click="generateHttpConfigWithAI">{{ t('settings.httpAiGenerateBtn') }}</el-button>
+            </div>
+          </el-form-item>
+
+          <div class="http-card">
+            <div class="http-card-title">{{ t('settings.httpImageCard') }}</div>
+            <div class="http-grid">
+              <el-input v-model="httpForm.image_create.path" :placeholder="t('settings.httpFieldPath') + '，如 /v1/images/generations'" />
+              <el-input v-model="httpForm.image_create.url_path" :placeholder="t('settings.httpFieldUrlPath') + '，如 data.0.url'" />
+              <el-input v-model="httpForm.image_create.b64_path" :placeholder="t('settings.httpFieldB64Path')" />
+              <el-input-number v-model="httpForm.image_create.timeout_sec" :min="1" :max="600" controls-position="right" style="width: 100%" />
+            </div>
+            <el-input v-model="httpForm.image_create.body" type="textarea" :rows="4" :placeholder="'{\n  &quot;model&quot;: &quot;{{model}}&quot;,\n  &quot;prompt&quot;: &quot;{{prompt}}&quot;\n}'"
+                      class="http-body-input" />
+            <el-input v-model="httpForm.image_create.headers" type="textarea" :rows="1" :placeholder="t('settings.httpFieldHeaders')" />
+          </div>
+
+          <div class="http-card">
+            <div class="http-card-title">{{ t('settings.httpVideoCreateCard') }}</div>
+            <div class="http-grid">
+              <el-input v-model="httpForm.video_create.path" :placeholder="t('settings.httpFieldPath')" />
+              <el-input v-model="httpForm.video_create.task_id_path" :placeholder="t('settings.httpFieldTaskIdPath') + '，如 data.task_id'" />
+              <el-input v-model="httpForm.video_create.video_id_path" :placeholder="t('settings.httpFieldVideoIdPath')" />
+              <el-input-number v-model="httpForm.video_create.timeout_sec" :min="1" :max="600" controls-position="right" style="width: 100%" />
+            </div>
+            <el-input v-model="httpForm.video_create.body" type="textarea" :rows="4" :placeholder="'{\n  &quot;prompt&quot;: &quot;{{prompt}}&quot;,\n  &quot;width&quot;: {{width}}\n}'"
+                      class="http-body-input" />
+            <el-input v-model="httpForm.video_create.headers" type="textarea" :rows="1" :placeholder="t('settings.httpFieldHeaders')" />
+          </div>
+
+          <div class="http-card">
+            <div class="http-card-title">{{ t('settings.httpVideoPollCard') }}</div>
+            <div class="http-grid">
+              <el-input v-model="httpForm.video_poll.path" placeholder="/video/status?task_id={{task_id}}" />
+              <el-input v-model="httpForm.video_poll.status_path" :placeholder="t('settings.httpFieldStatusPath') + '，如 data.status'" />
+              <el-input v-model="httpForm.video_poll.video_url_path" :placeholder="t('settings.httpFieldVideoUrlPath')" />
+              <el-input v-model="httpForm.video_poll.progress_path" :placeholder="t('settings.httpFieldProgressPath')" />
+              <el-input v-model="httpForm.video_poll.error_path" :placeholder="t('settings.httpFieldErrorPath')" />
+              <el-input-number v-model="httpForm.video_poll.timeout_sec" :min="1" :max="600" controls-position="right" style="width: 100%" />
+            </div>
+            <el-input v-model="httpForm.video_poll.status_map" type="textarea" :rows="3" :placeholder="'{&quot;SUCCESS&quot;: &quot;success&quot;, &quot;RUNNING&quot;: &quot;processing&quot;, &quot;FAILED&quot;: &quot;failed&quot;}'" />
+            <el-input v-model="httpForm.video_poll.headers" type="textarea" :rows="1" :placeholder="t('settings.httpFieldHeaders')" />
+            <div class="form-item-hint">{{ t('settings.httpStatusMapHint') }}</div>
+          </div>
+        </template>
       </el-form>
       <template #footer>
+        <el-button
+          v-if="providerForm.provider_type === 'http_custom' && editingProvider"
+          :loading="testingHttp"
+          @click="testHttpConnection">
+          {{ t('settings.httpTestBtn') }}
+        </el-button>
         <el-button @click="providerDialogVisible = false">{{ t('common.cancel') }}</el-button>
         <el-button type="primary" :loading="submitting" @click="submitProvider">{{ t('common.save') }}</el-button>
       </template>
@@ -445,8 +517,17 @@ import { Plus, Edit, Delete, Refresh, Setting, Open, TurnOff } from '@element-pl
 import { useI18n } from '@/i18n'
 import { useProvidersStore } from '@/stores/providers'
 import { useModelsStore } from '@/stores/models'
-import { listModelRoutes, saveModelRoutes } from '@/api/providers'
+import { listModelRoutes, saveModelRoutes, testHttpProvider } from '@/api/providers'
 import { appendModelRoute, buildRouteSavePayload, moveModelRoute, type EditableModelRoute } from '@/lib/model-routes'
+import {
+  HTTP_CONFIG_PROMPT_DOC,
+  buildHttpConfigPayload,
+  emptyHttpForm,
+  formFromHttpConfig,
+  parseHttpConfigFromAI,
+  type HttpFormState,
+} from '@/lib/provider-http-config'
+import { sseChatComplete } from '@/lib/storyboard/transport'
 import type { ApiProvider, ModelDefinition } from '@/types'
 
 const { t } = useI18n()
@@ -514,6 +595,12 @@ const PROVIDER_TYPE_GROUPS: { label: string; options: { value: string; label: st
     ],
   },
   {
+    label: t('settings.declarativeGroup'),
+    options: [
+      { value: 'http_custom', label: t('settings.providerTypeHttpCustom') },
+    ],
+  },
+  {
     label: t('settings.vendorGroup'),
     options: [
       { value: 'agnes', label: 'Agnes AI（默认）' },
@@ -558,6 +645,58 @@ const providerRules: FormRules = {
   name: [{ required: true, message: t('settings.formName'), trigger: 'blur' }],
   provider_type: [{ required: true, message: t('settings.formProviderType'), trigger: 'change' }],
   base_url: [{ required: true, message: t('settings.formBaseUrl'), trigger: 'blur' }],
+}
+
+// ---------- 声明式 HTTP 渠道（provider_type=http_custom） ----------
+const httpForm = reactive<HttpFormState>(emptyHttpForm())
+const httpAiInput = ref('')
+const httpAiLoading = ref(false)
+const testingHttp = ref(false)
+
+/** AI 生成声明式配置：粘贴文档/cURL → LLM 透传生成 → 校验 → 填入表单 */
+async function generateHttpConfigWithAI() {
+  const docs = httpAiInput.value.trim()
+  if (!docs) {
+    ElMessage.warning(t('settings.httpAiPlaceholder'))
+    return
+  }
+  httpAiLoading.value = true
+  try {
+    const text = await sseChatComplete([
+      { role: 'system', content: `你是 API 接入配置专家。根据用户提供的渠道 API 文档片段或 cURL 示例，生成声明式 HTTP 渠道配置 JSON。只输出 JSON 本体，不要任何解释、注释或代码围栏。\n${HTTP_CONFIG_PROMPT_DOC}` },
+      { role: 'user', content: docs },
+    ], { temperature: 0.1 })
+    const { config, error } = parseHttpConfigFromAI(text)
+    if (error || !config) {
+      ElMessage.error(`${t('settings.httpAiFailed')}：${error}`)
+      return
+    }
+    Object.assign(httpForm, formFromHttpConfig(config))
+    ElMessage.success(t('settings.httpAiFilled'))
+  } catch (e) {
+    ElMessage.error(`${t('settings.httpAiFailed')}：${e instanceof Error ? e.message : String(e)}`)
+  } finally {
+    httpAiLoading.value = false
+  }
+}
+
+/** 测试声明式渠道连接（须先保存，按已存配置真实请求模型目录） */
+async function testHttpConnection() {
+  if (!editingProvider.value) {
+    ElMessage.warning(t('settings.httpTestSaveFirst'))
+    return
+  }
+  testingHttp.value = true
+  try {
+    const r = await testHttpProvider(editingProvider.value.id)
+    if (r.ok) {
+      ElMessage.success(t('settings.httpTestOk').replace('{count}', String(r.count)))
+    } else {
+      ElMessage.error(`${t('settings.httpAiFailed')}：${r.error || 'unknown'}`)
+    }
+  } finally {
+    testingHttp.value = false
+  }
 }
 
 // ---------- 模型弹窗 ----------
@@ -636,6 +775,8 @@ function typeLabel(type: string): string {
 // ---------- Provider 操作 ----------
 function openProviderDialog(provider?: ApiProvider) {
   editingProvider.value = provider || null
+  httpAiInput.value = ''
+  Object.assign(httpForm, formFromHttpConfig(provider?.http_config))
   if (provider) {
     // 编辑：回填 provider_type（数据库保证非空，此处兜底为 'agnes'）
     Object.assign(providerForm, {
@@ -687,6 +828,16 @@ async function submitProvider() {
   if (!providerFormRef.value) return
   await providerFormRef.value.validate(async (valid) => {
     if (!valid) return
+    // 声明式 HTTP 渠道：表单 → http_config 载荷（校验失败直接提示）
+    let httpConfigPayload: Record<string, unknown> | undefined
+    if (providerForm.provider_type === 'http_custom') {
+      const { config, error } = buildHttpConfigPayload(httpForm)
+      if (error || !config) {
+        ElMessage.warning(error)
+        return
+      }
+      httpConfigPayload = config
+    }
     submitting.value = true
     try {
       if (editingProvider.value) {
@@ -700,6 +851,9 @@ async function submitProvider() {
           is_default: providerForm.is_default,
           sort_order: providerForm.sort_order,
           billing_tier: providerForm.billing_tier,
+        }
+        if (providerForm.provider_type === 'http_custom') {
+          data.http_config = httpConfigPayload
         }
         if (providerForm.api_key) {
           data.api_key = providerForm.api_key
@@ -722,6 +876,7 @@ async function submitProvider() {
           is_default: providerForm.is_default,
           sort_order: providerForm.sort_order,
           billing_tier: providerForm.billing_tier,
+          http_config: httpConfigPayload,
         })
         ElMessage.success(t('settings.providerCreated'))
       }
@@ -1309,5 +1464,43 @@ async function handleDeleteModel(model: ModelDefinition) {
   margin-top: 6px;
   align-items: center;
   flex-wrap: wrap;
+}
+
+/* ---------- 声明式 HTTP 渠道配置区 ---------- */
+.http-card {
+  width: 100%;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
+.http-card-title {
+  font-weight: 500;
+  margin-bottom: 8px;
+  color: var(--el-text-color-primary);
+}
+
+.http-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.http-body-input {
+  margin-bottom: 8px;
+}
+
+.http-body-input :deep(textarea) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.http-ai-box {
+  width: 100%;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
 }
 </style>

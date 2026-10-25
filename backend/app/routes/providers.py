@@ -31,6 +31,21 @@ from app.services.provider_registry import provider_registry
 router = APIRouter(dependencies=[Depends(get_current_admin_user)])
 
 
+def _validate_http_config_bodies(http_config: dict) -> None:
+    """保存前用样例值试渲染请求体模板，占位符漏写/JSON 结构错在保存时即暴露"""
+    from app.services.declarative_http import (
+        render_and_parse_body,
+        sample_template_values,
+    )
+    for key in ("image_create", "video_create"):
+        action = http_config.get(key) if isinstance(http_config, dict) else None
+        if isinstance(action, dict) and action.get("body"):
+            try:
+                render_and_parse_body(str(action["body"]), sample_template_values(key))
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=f"{key} 模板校验失败：{e}")
+
+
 # =====================================================
 # Provider 管理接口
 # =====================================================
@@ -51,6 +66,8 @@ async def create_provider(req: ProviderCreateRequest):
         raise HTTPException(status_code=400, detail="base_url 不能为空")
     if not req.api_key.strip():
         raise HTTPException(status_code=400, detail="api_key 不能为空")
+    if req.http_config is not None:
+        _validate_http_config_bodies(req.http_config.model_dump())
 
     provider = await provider_registry.create_provider(
         name=req.name.strip(),
@@ -62,6 +79,7 @@ async def create_provider(req: ProviderCreateRequest):
         is_default=req.is_default,
         sort_order=req.sort_order,
         billing_tier=req.billing_tier if req.billing_tier in ("free", "paid") else "paid",
+        http_config=req.http_config.model_dump() if req.http_config else None,
     )
     # 返回脱敏后的 Provider 信息
     from app.core.security import decrypt_api_key, mask_api_key
@@ -77,6 +95,7 @@ async def create_provider(req: ProviderCreateRequest):
         is_default=provider.is_default,
         sort_order=provider.sort_order,
         billing_tier=provider.billing_tier or "paid",
+        http_config=provider.http_config,
         created_at=provider.created_at,
         updated_at=provider.updated_at,
     ))
@@ -85,6 +104,8 @@ async def create_provider(req: ProviderCreateRequest):
 @router.put("/providers/{provider_id}", summary="更新 Provider")
 async def update_provider(provider_id: int, req: ProviderUpdateRequest):
     """更新 Provider 配置（api_key 留空表示不修改）"""
+    if req.http_config is not None:
+        _validate_http_config_bodies(req.http_config.model_dump())
     provider = await provider_registry.update_provider(
         provider_id=provider_id,
         name=req.name,
@@ -96,6 +117,7 @@ async def update_provider(provider_id: int, req: ProviderUpdateRequest):
         is_default=req.is_default,
         sort_order=req.sort_order,
         billing_tier=req.billing_tier,
+        http_config=req.http_config.model_dump() if req.http_config is not None else None,
     )
     if provider is None:
         raise HTTPException(status_code=404, detail=f"Provider {provider_id} 不存在")
@@ -113,6 +135,7 @@ async def update_provider(provider_id: int, req: ProviderUpdateRequest):
         is_default=provider.is_default,
         sort_order=provider.sort_order,
         billing_tier=provider.billing_tier or "paid",
+        http_config=provider.http_config,
         created_at=provider.created_at,
         updated_at=provider.updated_at,
     ))
@@ -291,3 +314,46 @@ async def sync_all_providers_models():
     """同步所有已激活 Provider 的模型列表"""
     results = await provider_registry.sync_all_providers()
     return ok(data=SyncAllResponse(results=[SyncModelsResponse(**r) for r in results]))
+
+
+@router.post(
+    "/providers/{provider_id}/test-http",
+    summary="测试声明式 HTTP 渠道连接（按模型目录模板真实请求一次）",
+)
+async def test_http_provider(provider_id: int):
+    """
+    按已保存的 http_config 真实调用一次模型目录（static 校验完整性 / openai、custom 真实请求）。
+    诊断性质：无论成败都返回 200，由 data.ok 区分，错误文案直接透出给管理员。
+    """
+    from app.core.security import decrypt_api_key
+    from app.services.declarative_client import DeclarativeHttpClient
+
+    provider = await provider_registry.get_provider(provider_id)
+    if provider is None:
+        raise HTTPException(status_code=404, detail=f"Provider {provider_id} 不存在")
+    if (provider.provider_type or "") != "http_custom" or not provider.http_config:
+        raise HTTPException(status_code=400, detail="该渠道不是声明式 HTTP 渠道（provider_type=http_custom）或未配置 http_config")
+
+    client = DeclarativeHttpClient(
+        base_url=provider.base_url,
+        api_key=decrypt_api_key(provider.api_key_encrypted or ""),
+        http_config=provider.http_config,
+    )
+    client.provider_id = provider.id
+    client.provider_name = provider.name
+    await client.start()
+    try:
+        mode = provider.http_config.get("models_mode") or "openai"
+        models = await client.list_models()
+        return ok(data={
+            "ok": True,
+            "mode": mode,
+            "count": len(models),
+            "sample": [m.get("id") for m in models[:5]],
+            "error": None,
+        })
+    except Exception as e:
+        return ok(data={"ok": False, "mode": (provider.http_config or {}).get("models_mode") or "openai",
+                        "count": 0, "sample": [], "error": str(e)[:500]})
+    finally:
+        await client.shutdown()

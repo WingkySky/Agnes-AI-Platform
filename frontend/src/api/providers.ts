@@ -99,6 +99,17 @@ export function saveModelRoutes(modelId: string, data: ModelRouteSaveRequest): P
   return client.put(`/api/models/${encodeURIComponent(modelId)}/routes`, data)
 }
 
+/** 测试声明式 HTTP 渠道连接（按模型目录模板真实请求一次） */
+export function testHttpProvider(providerId: number): Promise<{
+  ok: boolean
+  mode: string
+  count: number
+  sample: string[]
+  error: string | null
+}> {
+  return client.post(`/api/providers/${providerId}/test-http`)
+}
+
 // =====================================================
 // 模型同步
 // =====================================================
