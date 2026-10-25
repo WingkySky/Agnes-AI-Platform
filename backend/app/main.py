@@ -66,6 +66,7 @@ from app.routes import images, videos
 from app.routes import logs as logs_route
 from app.routes import mcp as mcp_route
 from app.routes import menu as menu_route
+from app.routes import model_routes as model_routes_route
 from app.routes import pipeline as pipeline_route
 from app.routes import plaza as plaza_route
 from app.routes import preferences as preferences_route
@@ -330,6 +331,7 @@ async def global_exception_handler(request, exc):
 # ---------- 注册路由 ----------
 app.include_router(config_route.router, prefix="/api", tags=["配置"])
 app.include_router(providers_route.router, prefix="/api", tags=["Provider 与模型管理"])
+app.include_router(model_routes_route.router, prefix="/api", tags=["模型备用路由"])
 app.include_router(images.router, prefix="/api", tags=["图片生成"])
 app.include_router(videos.router, prefix="/api", tags=["视频生成"])
 app.include_router(history_route.router, prefix="/api", tags=["生成历史"])

@@ -38,6 +38,7 @@ from app.services._generation_persist import create_pending_generation
 from app.services.agnes_client import agnes_client
 from app.services.credits_service import consume_credits, get_video_cost_async
 from app.services.error_taxonomy import classify
+from app.services.model_routing import execute_with_failover, resolve_route_chain
 from app.services.provider_registry import _detect_capabilities, provider_registry
 from app.services.video_poller import poller_manager
 
@@ -179,25 +180,33 @@ async def create_video_task(
             prompt = prompt + suffix
 
     try:
-        client = await provider_registry.get_client_for_model(req.model)
-        result = await client.create_video_task(
-            prompt=prompt,
-            model=req.model,
-            num_frames=req.num_frames,
-            frame_rate=req.frame_rate,
-            width=req.width,
-            height=req.height,
-            aspect_ratio=req.aspect_ratio,
-            seconds=req.seconds,
-            negative_prompt=req.negative_prompt,
-            mode=req.mode,
-            image=req.image,
-            images=req.images,
-            image_mime_type=req.image_mime_type,
-            image_mime_types=req.image_mime_types,
-            seed=req.seed,
-            reference_videos=req.reference_videos,
-            reference_audios=req.reference_audios,
+        # 多渠道路由：按锚点模型解析路由链（锚点自身渠道恒链首 + 显式备用），
+        # 提交阶段明确失败可按错误类目切换候选；网络中断类按 submission_uncertain 不切
+        targets = await resolve_route_chain(req.model)
+        result, used_route = await execute_with_failover(
+            lambda client, target: client.create_video_task(
+                prompt=prompt,
+                model=target.model_id,
+                num_frames=req.num_frames,
+                frame_rate=req.frame_rate,
+                width=req.width,
+                height=req.height,
+                aspect_ratio=req.aspect_ratio,
+                seconds=req.seconds,
+                negative_prompt=req.negative_prompt,
+                mode=req.mode,
+                image=req.image,
+                images=req.images,
+                image_mime_type=req.image_mime_type,
+                image_mime_types=req.image_mime_types,
+                seed=req.seed,
+                reference_videos=req.reference_videos,
+                reference_audios=req.reference_audios,
+            ),
+            targets,
+            submitted=False,
+            receipt=True,
+            log_prefix="[视频生成]",
         )
     except Exception as e:
         logger.exception("[视频生成] 创建任务失败（上游 Agnes 响应异常）: %s", e)
@@ -211,8 +220,15 @@ async def create_video_task(
                 )
         except Exception as refund_err:
             logger.error("[视频生成] 退还预扣积分失败: %s", refund_err)
-        # 归类：视频是异步任务（receipt=True），提交回执丢失 → submission_uncertain
-        category, message = classify(e, submitted=False, receipt=True)
+        # 归因：failover 执行器已按提交阶段语义归类（明确 HTTP 拒绝≠结果未知），无则回退全局合同
+        category = getattr(e, "_route_category", None)
+        if not category:
+            category, _ = classify(e, submitted=False, receipt=True)
+        message = str(e)
+        # 多渠道路由：发生过切换时在失败文案里透出尝试渠道数
+        attempts = getattr(e, "_route_attempts", 1) or 1
+        if attempts > 1:
+            message = f"{message}（已在 {attempts} 个渠道间尝试）"
         return JSONResponse(
             status_code=502,
             content={"detail": message, "category": category},
@@ -286,6 +302,14 @@ async def create_video_task(
         "is_public": req.is_public,
     }
     # 任务账本：提交即落 pending 行（重启恢复事实源；凭据 task_id+video_id 双存，终态由轮询器幂等 upsert 覆盖）
+    # context 附实际路由快照 route_used：轮询锁定提交渠道 + 任务详情透出实际渠道
+    context = req.context.model_dump() if req.context else {}
+    context["route_used"] = {
+        "provider_id": used_route.provider_id,
+        "provider_name": used_route.provider_name,
+        "model_id": used_route.model_id,
+        "billing_tier": used_route.billing_tier,
+    }
     await create_pending_generation(
         kind="video",
         user_id=user_id,
@@ -297,7 +321,7 @@ async def create_video_task(
         video_id=video_id,
         credits_consumed=cost,
         preset_id=req.preset_id,
-        context=req.context.model_dump() if req.context else None,
+        context=context,
         log_prefix="[视频生成]",
     )
     await poller_manager.start_polling(
@@ -308,7 +332,7 @@ async def create_video_task(
         user_id=user_id,
         credits_consumed=cost,
         preset_id=req.preset_id,
-        context=req.context.model_dump() if req.context else None,
+        context=context,
     )
 
     return ok(

@@ -82,6 +82,7 @@ class VideoTask:
             "message": self.error_message,
             "error_category": self.error_category,
             "credits_consumed": self.credits_consumed,
+            "provider_name": (self.context or {}).get("route_used", {}).get("provider_name"),
             "elapsed_sec": int(time.time() - self.created_at),
         }
 
@@ -202,12 +203,25 @@ class VideoPollerManager:
                     return
 
                 try:
-                    # 按模型 ID 路由到对应 Provider 的 client
+                    # 轮询锁定提交渠道（route_used 快照）：上游 task_id 绑定渠道，
+                    # 多渠道路由下轮询绝不能重新路由到其他候选
                     model_id = task.params.get("model", "")
-                    client = await provider_registry.get_client_for_model(model_id)
+                    route_used = (task.context or {}).get("route_used") or {}
+                    poll_model = route_used.get("model_id") or model_id
+                    client = None
+                    if route_used.get("provider_id"):
+                        try:
+                            client = provider_registry.get_client(int(route_used["provider_id"]))
+                        except Exception as route_err:
+                            logger.warning(
+                                "[视频轮询器] 锁定渠道 %s 不可用，回退按模型路由: %s",
+                                route_used.get("provider_id"), route_err,
+                            )
+                    if client is None:
+                        client = await provider_registry.get_client_for_model(model_id)
                     status_data = await client.poll_video_status(
                         video_id=task.video_id, task_id=task.task_id,
-                        model_name=model_id,
+                        model_name=poll_model,
                     )
 
                     status = status_data.get("status", "unknown")

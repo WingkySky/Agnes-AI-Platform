@@ -284,6 +284,13 @@
         <el-form-item :label="t('settings.formIsDefault')">
           <el-switch v-model="providerForm.is_default" />
         </el-form-item>
+        <el-form-item :label="t('settings.formBillingTier')">
+          <el-radio-group v-model="providerForm.billing_tier">
+            <el-radio value="paid">{{ t('settings.billingPaid') }}</el-radio>
+            <el-radio value="free">{{ t('settings.billingFree') }}</el-radio>
+          </el-radio-group>
+          <div class="form-item-hint">{{ t('settings.billingTierHint') }}</div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="providerDialogVisible = false">{{ t('common.cancel') }}</el-button>
@@ -375,6 +382,52 @@
           <el-input-number v-model="modelForm.cost_multiplier" :min="0.1" :max="100" :step="0.1" :precision="2" />
           <div class="form-item-hint">{{ t('settings.costMultiplierTip') }}</div>
         </el-form-item>
+        <!-- 备用路由（多渠道路由 failover）：仅已保存模型可配置（锚点须存在） -->
+        <el-form-item v-if="editingModel" :label="t('settings.modelRoutes')">
+          <div class="route-editor">
+            <div v-for="(route, idx) in modelRoutes" :key="`${route.provider_id}-${route.model_id}`" class="route-row">
+              <span class="route-order">{{ idx + 1 }}</span>
+              <span class="route-name">{{ providerNameById.get(route.provider_id) || route.provider_id }}</span>
+              <span class="route-model">{{ route.model_id }}</span>
+              <el-tag
+                v-if="providerTierById.get(route.provider_id) !== anchorBillingTier"
+                size="small" type="warning">
+                {{ tierLabel(providerTierById.get(route.provider_id)) }}
+              </el-tag>
+              <el-switch v-model="route.is_enabled" size="small" :title="t('settings.routeEnabled')" />
+              <span class="route-actions">
+                <el-button size="small" :disabled="idx === 0" @click="moveRoute(idx, -1)">↑</el-button>
+                <el-button size="small" :disabled="idx === modelRoutes.length - 1" @click="moveRoute(idx, 1)">↓</el-button>
+                <el-button size="small" type="danger" plain @click="modelRoutes.splice(idx, 1)">{{ t('common.delete') }}</el-button>
+              </span>
+            </div>
+            <div v-if="modelRoutes.length === 0" class="route-empty">{{ t('settings.routeEmpty') }}</div>
+            <div class="route-add">
+              <el-select v-model="routeAddProviderId" filterable :placeholder="t('settings.routeProvider')" style="width: 150px">
+                <el-option v-for="p in routeCandidateProviders" :key="p.id" :label="p.name" :value="p.id" />
+              </el-select>
+              <el-select
+                v-model="routeAddModelId"
+                filterable allow-create default-first-option
+                :placeholder="t('settings.routeModel')"
+                style="width: 220px">
+                <el-option
+                  v-for="m in routeCandidateModels"
+                  :key="`${m.provider_id}-${m.model_id}`"
+                  :label="m.display_name || m.model_id"
+                  :value="m.model_id" />
+              </el-select>
+              <el-button @click="addRoute">{{ t('settings.routeAdd') }}</el-button>
+              <el-button v-if="sameModelAlternatives.length" link type="primary" @click="addSameModelRoutes">
+                {{ t('settings.routeSameModel') }}
+              </el-button>
+            </div>
+            <div class="form-item-hint">{{ t('settings.modelRoutesHint') }}</div>
+          </div>
+        </el-form-item>
+        <el-form-item v-else :label="t('settings.modelRoutes')">
+          <div class="form-item-hint">{{ t('settings.routeNewModelHint') }}</div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="modelDialogVisible = false">{{ t('common.cancel') }}</el-button>
@@ -392,6 +445,8 @@ import { Plus, Edit, Delete, Refresh, Setting, Open, TurnOff } from '@element-pl
 import { useI18n } from '@/i18n'
 import { useProvidersStore } from '@/stores/providers'
 import { useModelsStore } from '@/stores/models'
+import { listModelRoutes, saveModelRoutes } from '@/api/providers'
+import { appendModelRoute, buildRouteSavePayload, moveModelRoute, type EditableModelRoute } from '@/lib/model-routes'
 import type { ApiProvider, ModelDefinition } from '@/types'
 
 const { t } = useI18n()
@@ -497,6 +552,7 @@ const providerForm = reactive({
   is_active: true,
   is_default: false,
   sort_order: 0,
+  billing_tier: 'paid' as 'free' | 'paid',
 })
 const providerRules: FormRules = {
   name: [{ required: true, message: t('settings.formName'), trigger: 'blur' }],
@@ -591,6 +647,7 @@ function openProviderDialog(provider?: ApiProvider) {
       is_active: provider.is_active,
       is_default: provider.is_default,
       sort_order: provider.sort_order,
+      billing_tier: provider.billing_tier || 'paid',
     })
   } else {
     // 新增：默认 agnes 类型，走业务适配层
@@ -603,6 +660,7 @@ function openProviderDialog(provider?: ApiProvider) {
       is_active: true,
       is_default: false,
       sort_order: 0,
+      billing_tier: 'paid',
     })
   }
   providerDialogVisible.value = true
@@ -641,6 +699,7 @@ async function submitProvider() {
           is_active: providerForm.is_active,
           is_default: providerForm.is_default,
           sort_order: providerForm.sort_order,
+          billing_tier: providerForm.billing_tier,
         }
         if (providerForm.api_key) {
           data.api_key = providerForm.api_key
@@ -662,6 +721,7 @@ async function submitProvider() {
           is_active: providerForm.is_active,
           is_default: providerForm.is_default,
           sort_order: providerForm.sort_order,
+          billing_tier: providerForm.billing_tier,
         })
         ElMessage.success(t('settings.providerCreated'))
       }
@@ -731,8 +791,89 @@ const providerNameById = computed(() => {
   return new Map(providersStore.providers.map((p) => [p.id, p.name]))
 })
 
+// ---------- 模型备用路由（多渠道路由 failover） ----------
+const modelRoutes = ref<EditableModelRoute[]>([])
+const routeAddProviderId = ref<number>(0)
+const routeAddModelId = ref('')
+
+// 渠道档位反查表（跨档警示用）
+const providerTierById = computed(() => {
+  return new Map(providersStore.providers.map((p) => [p.id, (p.billing_tier || 'paid') as 'free' | 'paid']))
+})
+const anchorBillingTier = computed<'free' | 'paid'>(() => {
+  const tier = editingModel.value ? providerTierById.value.get(editingModel.value.provider_id) : undefined
+  return tier || 'paid'
+})
+// 备用渠道候选：排除锚点自身渠道
+const routeCandidateProviders = computed(() => {
+  return providersStore.providers.filter((p) => p.id !== editingModel.value?.provider_id)
+})
+// 备用模型候选：所选渠道下与锚点同类型的已同步模型（allow-create 支持手填未同步模型）
+const routeCandidateModels = computed(() => {
+  const anchorType = editingModel.value?.type || modelForm.model_type
+  return providersStore.modelDefinitions.filter(
+    (m) => m.provider_id === routeAddProviderId.value
+      && m.type === anchorType
+      && m.model_id !== editingModel.value?.model_id,
+  )
+})
+// 同款其他渠道（一键加入）
+const sameModelAlternatives = computed(() => {
+  return providersStore.modelDefinitions.filter(
+    (m) => m.model_id === editingModel.value?.model_id && m.provider_id !== editingModel.value?.provider_id,
+  )
+})
+
+function tierLabel(tier?: string): string {
+  return tier === 'free' ? t('settings.billingFree') : t('settings.billingPaid')
+}
+
+async function loadModelRoutes(modelId: string) {
+  try {
+    const resp = await listModelRoutes(modelId)
+    modelRoutes.value = resp.items.map((i) => ({
+      provider_id: i.provider_id,
+      model_id: i.model_id,
+      is_enabled: i.is_enabled,
+    }))
+  } catch {
+    modelRoutes.value = []
+  }
+}
+
+function moveRoute(idx: number, delta: number) {
+  modelRoutes.value = moveModelRoute(modelRoutes.value, idx, delta)
+}
+
+function addRoute() {
+  const result = appendModelRoute(modelRoutes.value, routeAddProviderId.value, routeAddModelId.value)
+  if (result.duplicate) {
+    ElMessage.warning(t('settings.routeDuplicate'))
+    return
+  }
+  modelRoutes.value = result.routes
+  routeAddModelId.value = ''
+}
+
+/** 一键加入同款其他渠道（同 model_id 的其他 Provider 已同步定义） */
+function addSameModelRoutes() {
+  let next = modelRoutes.value
+  for (const m of sameModelAlternatives.value) {
+    next = appendModelRoute(next, m.provider_id, m.model_id).routes
+  }
+  modelRoutes.value = next
+}
+
+/** 备用路由整表保存（priority 由列表顺序决定） */
+async function persistModelRoutes(modelId: string) {
+  await saveModelRoutes(modelId, buildRouteSavePayload(modelRoutes.value))
+}
+
 function openModelDialog(model?: ModelDefinition, presetProviderId?: number) {
   editingModel.value = model || null
+  routeAddProviderId.value = 0
+  routeAddModelId.value = ''
+  modelRoutes.value = []
   if (model) {
     Object.assign(modelForm, {
       provider_id: model.provider_id,
@@ -753,6 +894,8 @@ function openModelDialog(model?: ModelDefinition, presetProviderId?: number) {
       default_size: model.gen_params?.default_size ?? '',
       video_durations: model.gen_params?.video_durations?.join(',') ?? '',
     })
+    // 已保存模型：加载备用路由（锚点已存在才可配置）
+    void loadModelRoutes(model.model_id)
   } else {
     Object.assign(modelForm, {
       // 从 Provider 行「添加模型」进入时预选该 Provider
@@ -856,6 +999,8 @@ async function submitModel() {
           cost_multiplier: modelForm.cost_multiplier,
           gen_params: collectGenParams(),
         })
+        // 备用路由随模型保存一起提交（整表替换）
+        await persistModelRoutes(editingModel.value.model_id)
         ElMessage.success(t('settings.modelUpdated'))
       } else {
         await providersStore.addModel({
@@ -1109,5 +1254,55 @@ async function handleDeleteModel(model: ModelDefinition) {
   .section-header {
     flex-direction: column;
   }
+}
+
+/* ---------- 模型备用路由编辑区 ---------- */
+.route-editor {
+  width: 100%;
+}
+
+.route-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.route-order {
+  width: 18px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  text-align: center;
+}
+
+.route-name {
+  font-weight: 500;
+}
+
+.route-model {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.route-actions {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.route-empty {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  padding: 4px 0;
+}
+
+.route-add {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 </style>

@@ -159,6 +159,7 @@ async def persist_generation_failure(
                 record.error_category = getattr(task, "error_category", None)
                 record.error_message = (task.error_message or "")[:2000] or None
                 record.credits_consumed = 0  # 失败已退还预扣积分
+                record.context = task.context
             else:
                 record = Generation(
                     type=kind,
@@ -174,6 +175,7 @@ async def persist_generation_failure(
                     task_id=record_task_id,
                     is_public=False,
                     preset_id=task.preset_id,
+                    context=task.context,
                     source=(task.context or {}).get("source") or "independent",
                     container_type=(task.context or {}).get("container_type"),
                     container_id=as_container_id((task.context or {}).get("container_id")),
@@ -241,6 +243,7 @@ async def persist_generation(
                 record.source = (task.context or {}).get("source") or "independent"
                 record.container_type = (task.context or {}).get("container_type")
                 record.container_id = as_container_id((task.context or {}).get("container_id"))
+                record.context = task.context  # 含 route_used（实际渠道快照，多渠道路由）
             else:
                 record = Generation(
                     type=kind,
@@ -259,6 +262,7 @@ async def persist_generation(
                     moderation_flags=moderation_flags,
                     moderation_reason=moderation_reason,
                     preset_id=task.preset_id,
+                    context=task.context,  # 含 route_used（实际渠道快照，多渠道路由）
                     # 创作归属：画布/项目生成打标，历史页据此默认过滤
                     source=(task.context or {}).get("source") or "independent",
                     container_type=(task.context or {}).get("container_type"),

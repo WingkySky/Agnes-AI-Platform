@@ -51,6 +51,7 @@
       <div v-else-if="task.status === 'success' && task.resultUrl" class="task-success">
         <el-icon class="success-icon"><Check /></el-icon>
         <span class="success-text">{{ t('taskStatus.successText') }} · {{ formatTime(task.updatedAt) }}</span>
+        <span v-if="task.providerName" class="success-channel" :title="task.providerName">{{ task.providerName }}</span>
       </div>
 
       <!-- 失败状态：重试中 或 最终失败 -->
@@ -357,6 +358,15 @@ function handleRemove() {
 /* 失败类目提示行（错误归类合同的用户可读文案） */
 .failed-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .failed-category { color: var(--agnes-text-muted); font-size: 11px; }
+/* 实际使用渠道（多渠道路由 failover 透出） */
+.success-channel {
+  color: var(--agnes-text-muted);
+  font-size: 11px;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* 重试中状态：失败区块用主色调（进行中）而非错误色 */
 .task-failed.is-retrying { color: var(--agnes-primary-soft); }
 .retrying-icon {

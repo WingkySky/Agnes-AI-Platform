@@ -48,6 +48,9 @@ class ApiProvider(Base):
     is_active = Column(Boolean, default=True, nullable=False, comment="是否启用")
     is_default = Column(Boolean, default=False, nullable=False, comment="是否默认 Provider")
     sort_order = Column(Integer, default=0, nullable=False, comment="排序权重")
+    # 渠道计费档位：仅用于路由配置时的跨档警示与展示，不做运行时硬闸。
+    # 存量库升级：ALTER TABLE api_providers ADD COLUMN billing_tier VARCHAR(20) NOT NULL DEFAULT 'paid';
+    billing_tier = Column(String(20), default="paid", nullable=False, server_default="paid", comment="计费档位: free(免费) / paid(付费)")
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -68,6 +71,7 @@ class ApiProvider(Base):
             "is_active": self.is_active,
             "is_default": self.is_default,
             "sort_order": self.sort_order,
+            "billing_tier": self.billing_tier or "paid",
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

@@ -61,6 +61,7 @@ async def create_provider(req: ProviderCreateRequest):
         is_active=req.is_active,
         is_default=req.is_default,
         sort_order=req.sort_order,
+        billing_tier=req.billing_tier if req.billing_tier in ("free", "paid") else "paid",
     )
     # 返回脱敏后的 Provider 信息
     from app.core.security import decrypt_api_key, mask_api_key
@@ -75,6 +76,7 @@ async def create_provider(req: ProviderCreateRequest):
         is_active=provider.is_active,
         is_default=provider.is_default,
         sort_order=provider.sort_order,
+        billing_tier=provider.billing_tier or "paid",
         created_at=provider.created_at,
         updated_at=provider.updated_at,
     ))
@@ -93,6 +95,7 @@ async def update_provider(provider_id: int, req: ProviderUpdateRequest):
         is_active=req.is_active,
         is_default=req.is_default,
         sort_order=req.sort_order,
+        billing_tier=req.billing_tier,
     )
     if provider is None:
         raise HTTPException(status_code=404, detail=f"Provider {provider_id} 不存在")
@@ -109,6 +112,7 @@ async def update_provider(provider_id: int, req: ProviderUpdateRequest):
         is_active=provider.is_active,
         is_default=provider.is_default,
         sort_order=provider.sort_order,
+        billing_tier=provider.billing_tier or "paid",
         created_at=provider.created_at,
         updated_at=provider.updated_at,
     ))

@@ -15,6 +15,8 @@ import type {
   ModelUpdateRequest,
   ModelBatchUpdateRequest,
   ModelBatchDeleteRequest,
+  ModelRoutesResponse,
+  ModelRouteSaveRequest,
   SyncModelsResponse,
   SyncAllResponse,
 } from '@/types'
@@ -81,6 +83,20 @@ export function batchDeleteModels(data: ModelBatchDeleteRequest): Promise<{ dele
 /** 批量设置模型积分倍率（实扣=基准价×倍率） */
 export function batchSetCostMultiplier(data: { model_ids: string[]; cost_multiplier: number }): Promise<{ updated: number }> {
   return client.put('/api/models/batch-cost-multiplier', data)
+}
+
+// =====================================================
+// 模型备用路由（多渠道路由 failover）
+// =====================================================
+
+/** 查询模型备用路由列表 */
+export function listModelRoutes(modelId: string): Promise<ModelRoutesResponse> {
+  return client.get(`/api/models/${encodeURIComponent(modelId)}/routes`)
+}
+
+/** 保存模型备用路由（整表替换） */
+export function saveModelRoutes(modelId: string, data: ModelRouteSaveRequest): Promise<ModelRoutesResponse> {
+  return client.put(`/api/models/${encodeURIComponent(modelId)}/routes`, data)
 }
 
 // =====================================================

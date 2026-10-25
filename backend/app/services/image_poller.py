@@ -29,7 +29,7 @@ from app.services._generation_persist import (
     refund_generation_credits,
 )
 from app.services.error_taxonomy import classify, classify_message
-from app.services.provider_registry import provider_registry
+from app.services.model_routing import execute_with_failover, resolve_route_chain
 
 logger = logging.getLogger("agnes_platform")
 
@@ -80,6 +80,7 @@ class ImageTask:
             "message": self.error_message,
             "error_category": self.error_category,
             "credits_consumed": self.credits_consumed,
+            "provider_name": (self.context or {}).get("route_used", {}).get("provider_name"),
             "elapsed_sec": int(time.time() - self.created_at),
         }
 
@@ -160,21 +161,36 @@ class ImagePollerManager:
             task.progress = 10
             task.last_updated = time.time()
 
-            # 按模型 ID 自动路由到对应 Provider 的 client
-            # （agnes → AgnesAIClient 业务适配层；volcengine_cv 等 → AGNSDKClientWrapper 统一协议层）
+            # 多渠道路由：按锚点模型解析路由链（锚点自身渠道恒链首 + 显式备用），
+            # 提交阶段失败按错误类目切换候选渠道（图片为同步接口，失败即无产物，可安全切换）
             model_id = task.params.get("model", "")
-            client = await provider_registry.get_client_for_model(model_id)
-            result = await client.create_image(
-                prompt=task.prompt,
-                model=model_id,
-                size=task.params.get("size", "1024x1024"),
-                response_format=task.params.get("response_format", "url"),
-                base64_image=task.params.get("base64_image"),
-                image_url=task.params.get("image_url"),
-                base64_images=task.params.get("base64_images"),
-                image_urls=task.params.get("image_urls"),
-                mask=task.params.get("mask"),
+            targets = await resolve_route_chain(model_id)
+            if task.context is None:
+                task.context = {}
+            result, used_route = await execute_with_failover(
+                lambda client, target: client.create_image(
+                    prompt=task.prompt,
+                    model=target.model_id,
+                    size=task.params.get("size", "1024x1024"),
+                    response_format=task.params.get("response_format", "url"),
+                    base64_image=task.params.get("base64_image"),
+                    image_url=task.params.get("image_url"),
+                    base64_images=task.params.get("base64_images"),
+                    image_urls=task.params.get("image_urls"),
+                    mask=task.params.get("mask"),
+                ),
+                targets,
+                submitted=True,
+                receipt=False,
+                log_prefix=LOG_PREFIX,
             )
+            # 实际路由快照：随账本 context 落库（任务详情透出实际渠道）
+            task.context["route_used"] = {
+                "provider_id": used_route.provider_id,
+                "provider_name": used_route.provider_name,
+                "model_id": used_route.model_id,
+                "billing_tier": used_route.billing_tier,
+            }
 
             output_url = None
             output_b64 = None
@@ -231,6 +247,10 @@ class ImagePollerManager:
         except Exception as e:
             task.status = "failed"
             task.error_category, task.error_message = classify(e, submitted=True, receipt=False)
+            # 多渠道路由：发生过切换时在失败文案里透出尝试渠道数
+            attempts = getattr(e, "_route_attempts", 1) or 1
+            if attempts > 1:
+                task.error_message = f"{task.error_message}（已在 {attempts} 个渠道间尝试）"
             task.last_updated = time.time()
             logger.error(
                 "[图片任务器] 任务失败: task_id=%s error=%s",

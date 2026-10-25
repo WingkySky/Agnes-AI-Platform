@@ -3701,6 +3701,20 @@ const enUS = {
     // Credit multiplier (dynamic pricing)
     formCostMultiplier: 'Credit Multiplier',
     costMultiplierTip: 'Actual charge for this model = platform base price × multiplier (1.0 = unchanged); takes effect immediately after saving, for per-model differentiated pricing',
+    // Provider billing tier + model fallback routes (multi-channel routing failover)
+    formBillingTier: 'Billing Tier',
+    billingPaid: 'Paid',
+    billingFree: 'Free',
+    billingTierHint: 'Only used for cross-tier hints in fallback route config; does not affect actual billing',
+    modelRoutes: 'Fallback Routes',
+    modelRoutesHint: 'When the primary channel fails, fallbacks are tried in order (rate-limit/network/upstream errors only); list order = priority',
+    routeAdd: 'Add',
+    routeProvider: 'Select channel',
+    routeModel: 'Select or type model ID',
+    routeEmpty: 'No fallback channels (primary only, failures stay failed)',
+    routeDuplicate: 'This fallback already exists',
+    routeSameModel: 'Add same model from other channels',
+    routeNewModelHint: 'Save the model first to configure fallback routes (auto channel switching on failure)',
     // Generation capability config (per-model constraints, empty = auto by model family)
     formMaxRefImages: 'Max ref images',
     formMaxRefImagesHint: 'Max reference images per generation, truncated automatically; leave empty for family auto-detection',

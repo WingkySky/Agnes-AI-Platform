@@ -249,7 +249,8 @@ class AgnesAIClient:
             from app.services.api_call_log_service import record_api_call
             usage = data.get("usage") or {} if isinstance(data, dict) else {}
             await record_api_call(
-                provider_name="Agnes",
+                provider_id=getattr(self, "provider_id", None),
+                provider_name=getattr(self, "provider_name", None) or "Agnes",
                 model=str((data or {}).get("model") or "") or None,
                 call_type=self._infer_call_type(method, url),
                 endpoint=url,

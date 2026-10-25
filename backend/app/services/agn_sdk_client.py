@@ -245,7 +245,8 @@ class AGNSDKClientWrapper:
         try:
             from app.services.api_call_log_service import record_api_call
             await record_api_call(
-                provider_name=self.provider_type,
+                provider_id=getattr(self, "provider_id", None),
+                provider_name=getattr(self, "provider_name", None) or self.provider_type,
                 model=model or None,
                 call_type=call_type,
                 status=status,

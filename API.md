@@ -976,6 +976,22 @@ AI 提示词优化（登录用户），返回结构化正负提示词。
 - 管理端「配置管理 → 模型编辑」新增「积分倍率」输入，保存立即生效。
 - 批量设置：`PUT /api/models/batch-cost-multiplier`（body `{model_ids, cost_multiplier}`，倍率 0.1~100），管理端模型列表勾选多行后「批量设倍率」一次生效，立即生效。
 
+### 多渠道路由 failover（生成任务）
+
+一个锚点模型可配置多条备用渠道（同款渠道或等价模型），提交阶段失败时按错误类目自动切换。新表 `model_routes`（anchor_model_id / provider_id / model_id / priority / is_enabled，启动 create_all 自动建；模型同步不触碰；删除锚点模型级联清理）；`api_providers` 新增 `billing_tier`（free/paid，默认 paid，存量库手动 ALTER，见模型文件注释）。
+
+- **路由链**：锚点自身渠道恒链首 + 启用备用按 `priority` 升序（前端列表顺序即优先级）；目标渠道停用或 client 不可用自动跳过。
+- **切换判定**（复用 error_taxonomy）：`rate_limited / network_transient / upstream_server / timeout / unknown` 五类且未拿到上游凭据 → 切换；参数/审核/账户类直接抛；`submission_uncertain` 永不切换。视频提交阶段明确 HTTP 拒绝（429/5xx、无 task_id）按未接单可切，网络中断类保守不切；候选耗尽抛最后一个错误并归因真实类目。
+- **轮询锁定**：视频提交成功后把实际渠道写入账本 `context.route_used`（provider_id/provider_name/model_id/billing_tier 快照），轮询期锁定该渠道不重路由（存量行回退按模型路由）。
+- **留痕**：`api_call_logs` 补齐 `provider_id`/真实渠道名归因（每渠道一行即尝试留痕）；失败消息附「已在 N 个渠道间尝试」；任务轮询响应新增 `provider_name`（实际渠道）。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/models/{model_id}/routes` | 查询备用路由列表（含渠道名/档位/目标显示名快照） |
+| PUT | `/api/models/{model_id}/routes` | 整表替换保存（空列表=清空）；校验锚点存在（404）、目标渠道存在（400）、`(provider, model)` 去重（400）、目标定义类型一致（400） |
+
+均挂管理员鉴权（401/403/200 三态测试锁死）。管理界面：配置管理 → 模型编辑弹窗「备用路由」区（候选选择/手填/排序/启停/跨档警示/一键加入同款其他渠道）；Provider 编辑弹窗新增「计费档位」。
+
 ## 20. 作品容器（轻容器）+ 画布轻成片
 
 ### 作品 works（用户自助，登录态；非本人 403 / 不存在 404）

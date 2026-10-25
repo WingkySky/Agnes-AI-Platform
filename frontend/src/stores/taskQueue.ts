@@ -460,6 +460,8 @@ export const useTaskQueueStore = defineStore('taskQueue', {
             ''
           task.resultUrl = url
           task.progress = 100
+          // 实际使用渠道（多渠道路由 failover 透出）
+          task.providerName = (d.provider_name as string) || null
           this._stopPolling(taskId)
           this._notifyTaskComplete(task)
           this._saveToStorage()

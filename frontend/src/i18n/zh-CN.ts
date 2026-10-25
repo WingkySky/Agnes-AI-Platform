@@ -3690,6 +3690,20 @@ const zhCN = {
     // 积分倍率（动态定价）
     formCostMultiplier: '积分倍率',
     costMultiplierTip: '该模型的实扣积分 = 平台基准价 × 此倍率（1.0 = 不变），保存后立即生效；用于按模型差异化定价',
+    // 渠道计费档位 + 模型备用路由（多渠道路由 failover）
+    formBillingTier: '计费档位',
+    billingPaid: '付费渠道',
+    billingFree: '免费渠道',
+    billingTierHint: '仅用于备用路由配置时的跨档提醒，不影响实际计费',
+    modelRoutes: '备用路由',
+    modelRoutesHint: '主渠道生成失败时按顺序尝试备用渠道（仅限限流/网络/上游故障类错误）；列表顺序即优先级',
+    routeAdd: '添加备用',
+    routeProvider: '选择渠道',
+    routeModel: '选择或输入模型 ID',
+    routeEmpty: '暂无备用渠道（仅主渠道，失败即失败）',
+    routeDuplicate: '该备用渠道已存在',
+    routeSameModel: '一键加入同款其他渠道',
+    routeNewModelHint: '保存模型后可配置备用路由（故障时自动切换渠道）',
     // 生成能力配置（按模型差异化的约束，留空=按模型名自动识别）
     formMaxRefImages: '参考图上限',
     formMaxRefImagesHint: '单次生成最多携带的参考图数量，超出自动截断；留空按模型族自动识别',

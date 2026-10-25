@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### 多渠道路由 failover（生成任务：主渠道失败自动切备用渠道）
+
+- **数据模型**：新表 `model_routes`（锚点模型 → 备用渠道裸对 (provider_id, model_id)，priority 越小越优先，启动 create_all 自动建；模型同步不触碰，删除锚点模型/渠道级联清理）——目标为裸对不要求存在定义行，同款渠道与等价模型均可作备用；`api_providers` 新增 `billing_tier`（free/paid，默认 paid，存量库手动 ALTER），仅用于配置时跨档警示不做硬闸（显式配置即授权，免费渠道永远不会被切到未配置的付费渠道）
+- **路由与切换**（新 `services/model_routing.py`）：路由链 = 锚点自身渠道恒链首 + 启用备用按 priority 升序；切换判定复用 error_taxonomy——`rate_limited/network_transient/upstream_server/timeout/unknown` 五类且未拿到上游凭据才切换，参数/审核/账户类直接抛，**submission_uncertain 永不切换**（防重复扣费红线）；视频提交阶段明确 HTTP 拒绝（429/5xx 无 task_id）按未接单可切、网络中断类保守不切（failover 局部语义，不改全局合同）；候选耗尽抛最后一个错误并归因真实类目
+- **链路接入**：图片 `_gen_loop` 与视频提交段替换为 failover 执行器（积分只预扣一次不变）；**视频轮询锁定提交渠道**（route_used 快照进账本 context，轮询期不重路由——顺带修掉存量「每轮 get_client_for_model 重路由」的多渠道隐患，无快照存量行回退旧行为）
+- **留痕与透出**：`api_call_logs` 补齐 provider_id/真实渠道名归因（原硬编码 "Agnes"，每渠道一行即尝试留痕）；失败消息附「已在 N 个渠道间尝试」；任务轮询响应新增 `provider_name`，TaskCard 成功态显示实际渠道
+- **管理端与前端**：`GET/PUT /api/models/{model_id}/routes`（管理员，401/403/200 三态测试锁死，校验锚点 404/渠道不存在/重复/目标类型一致均 400）；模型编辑弹窗「备用路由」区（候选选择/手填未同步模型/排序/启停/跨档黄条警示/一键加入同款其他渠道，`lib/model-routes.ts` 纯函数层）；Provider 弹窗「计费档位」；i18n 中英
+- 测试 pytest 361（+32：路由链解析/failover 类目判定/执行器切换行为/图片视频链路集成含 route_used 落账本/轮询锁定与回退/CRUD 鉴权三态与校验/唯一约束/级联清理）；vitest 665（+8 路由编辑纯函数）；vue-tsc + build + 双端 lint 绿
+
 ## [0.0.12] - 2026-10-25
 
 ### 修复 FRONTEND_ORIGINS 逗号分隔格式启动崩溃

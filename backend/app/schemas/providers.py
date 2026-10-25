@@ -26,6 +26,7 @@ class ProviderCreateRequest(BaseModel):
     is_active: bool = Field(default=True, description="是否激活")
     is_default: bool = Field(default=False, description="是否设为默认 Provider")
     sort_order: int = Field(default=0, description="排序权重（越小越靠前）")
+    billing_tier: str = Field(default="paid", description="计费档位: free(免费) / paid(付费)")
 
 
 class ProviderUpdateRequest(BaseModel):
@@ -40,6 +41,7 @@ class ProviderUpdateRequest(BaseModel):
     is_active: bool | None = Field(default=None, description="是否激活")
     is_default: bool | None = Field(default=None, description="是否设为默认 Provider")
     sort_order: int | None = Field(default=None, description="排序权重")
+    billing_tier: str | None = Field(default=None, description="计费档位: free/paid")
 
 
 class ProviderResponse(BaseModel):
@@ -53,6 +55,7 @@ class ProviderResponse(BaseModel):
     is_active: bool
     is_default: bool
     sort_order: int
+    billing_tier: str = "paid"
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -167,3 +170,40 @@ class SyncModelsResponse(BaseModel):
 class SyncAllResponse(BaseModel):
     """同步所有 Provider 模型的响应"""
     results: list[SyncModelsResponse]
+
+
+# =====================================================
+# 模型备用路由 Schema（多渠道路由 failover）
+# =====================================================
+
+class ModelRouteItemRequest(BaseModel):
+    """备用路由条目（保存请求）"""
+    provider_id: int = Field(..., description="目标渠道 Provider ID")
+    model_id: str = Field(..., min_length=1, max_length=100, description="目标模型 ID（同款渠道或等价模型）")
+    priority: int = Field(default=0, ge=0, description="优先级：越小越优先")
+    is_enabled: bool = Field(default=True, description="是否启用")
+
+
+class ModelRouteSaveRequest(BaseModel):
+    """保存锚点模型的备用路由列表（整表替换语义）"""
+    routes: list[ModelRouteItemRequest] = Field(default_factory=list, description="备用路由列表（空=清空）")
+
+
+class ModelRouteItemResponse(BaseModel):
+    """备用路由条目（含渠道信息快照）"""
+    id: int
+    provider_id: int
+    provider_name: str = ""
+    billing_tier: str = "paid"
+    model_id: str
+    display_name: str = ""
+    priority: int
+    is_enabled: bool
+
+
+class ModelRoutesResponse(BaseModel):
+    """锚点模型备用路由响应"""
+    anchor_model_id: str
+    anchor_type: str = ""
+    anchor_provider_id: int | None = None
+    items: list[ModelRouteItemResponse]

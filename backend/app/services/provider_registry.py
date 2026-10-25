@@ -31,6 +31,7 @@ from app.core.database import new_async_session
 from app.core.security import decrypt_api_key, encrypt_api_key
 from app.models.api_provider import ApiProvider
 from app.models.model_definition import ModelDefinition
+from app.models.model_route import ModelRoute
 from app.schemas.common import ModelGenParams, ModelInfo
 from app.services.agn_sdk_client import AGNSDKClientWrapper
 from app.services.agnes_client import AgnesAIClient, agnes_client
@@ -278,6 +279,9 @@ class ProviderRegistry:
                 api_key=decrypted_key,
             )
         await client.start()
+        # 调用记账归因（ApiCallLog.provider_id/provider_name）
+        client.provider_id = provider.id
+        client.provider_name = provider.name
         self._clients[provider.id] = client
         logger.info(
             "[ProviderRegistry] Provider %s (id=%s, type=%s) client 已启动: base_url=%s",
@@ -344,6 +348,9 @@ class ProviderRegistry:
             api_key=decrypted_key,
             poll_url=default_provider.poll_url or "",
         )
+        # 单例调用记账归因
+        agnes_client.provider_id = default_provider.id
+        agnes_client.provider_name = default_provider.name
         # 确保 agnes_client 的连接池已启动
         await agnes_client.start()
         logger.info(
@@ -646,6 +653,7 @@ class ProviderRegistry:
         is_active: bool = True,
         is_default: bool = False,
         sort_order: int = 0,
+        billing_tier: str = "paid",
     ) -> ApiProvider:
         """
         新增 Provider。
@@ -673,6 +681,7 @@ class ProviderRegistry:
                 is_active=is_active,
                 is_default=is_default,
                 sort_order=sort_order,
+                billing_tier=billing_tier if billing_tier in ("free", "paid") else "paid",
             )
             session.add(provider)
             await session.commit()
@@ -702,6 +711,7 @@ class ProviderRegistry:
         is_active: bool | None = None,
         is_default: bool | None = None,
         sort_order: int | None = None,
+        billing_tier: str | None = None,
     ) -> ApiProvider | None:
         """
         更新 Provider 配置。
@@ -750,6 +760,8 @@ class ProviderRegistry:
                 provider.is_default = is_default
             if sort_order is not None:
                 provider.sort_order = sort_order
+            if billing_tier is not None and billing_tier in ("free", "paid"):
+                provider.billing_tier = billing_tier
 
             await session.commit()
             await session.refresh(provider)
@@ -941,10 +953,13 @@ class ProviderRegistry:
         return defn
 
     async def delete_model(self, model_id: str) -> bool:
-        """删除模型定义（包括自定义和 API 同步的）"""
+        """删除模型定义（包括自定义和 API 同步的）；级联清理该锚点的备用路由"""
         async with new_async_session() as session:
             result = await session.execute(
                 delete(ModelDefinition).where(ModelDefinition.model_id == model_id)
+            )
+            await session.execute(
+                delete(ModelRoute).where(ModelRoute.anchor_model_id == model_id)
             )
             await session.commit()
             deleted = result.rowcount > 0

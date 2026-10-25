@@ -523,6 +523,8 @@ export interface QueueTask {
   errorMessage: string
   /** 失败类目（后端错误归类合同 error_category；成功/重置时清空） */
   errorCategory?: string | null
+  /** 实际使用的渠道名（多渠道路由 failover；来自轮询响应 provider_name） */
+  providerName?: string | null
   createdAt: number
   updatedAt: number
   pollIntervalMs: number
@@ -596,6 +598,8 @@ export interface ApiProvider {
   is_active: boolean
   is_default: boolean
   sort_order: number
+  /** 计费档位：free(免费) / paid(付费) */
+  billing_tier: 'free' | 'paid'
   created_at?: string | null
   updated_at?: string | null
 }
@@ -617,6 +621,8 @@ export interface ProviderCreateRequest {
   is_active?: boolean
   is_default?: boolean
   sort_order?: number
+  /** 计费档位：free(免费) / paid(付费)，默认 paid */
+  billing_tier?: 'free' | 'paid'
 }
 
 /** 更新 Provider 请求 — 对齐 ProviderUpdateRequest */
@@ -631,6 +637,37 @@ export interface ProviderUpdateRequest {
   is_active?: boolean
   is_default?: boolean
   sort_order?: number
+  billing_tier?: 'free' | 'paid'
+}
+
+/** 模型备用路由条目 — 对齐 ModelRouteItemResponse */
+export interface ModelRouteItem {
+  id: number
+  provider_id: number
+  provider_name: string
+  billing_tier: 'free' | 'paid'
+  model_id: string
+  display_name: string
+  priority: number
+  is_enabled: boolean
+}
+
+/** 模型备用路由响应 — 对齐 ModelRoutesResponse */
+export interface ModelRoutesResponse {
+  anchor_model_id: string
+  anchor_type: string
+  anchor_provider_id: number | null
+  items: ModelRouteItem[]
+}
+
+/** 保存模型备用路由请求 — 对齐 ModelRouteSaveRequest */
+export interface ModelRouteSaveRequest {
+  routes: Array<{
+    provider_id: number
+    model_id: string
+    priority: number
+    is_enabled: boolean
+  }>
 }
 
 /** 模型定义 — 对齐 ModelDefinitionResponse */
