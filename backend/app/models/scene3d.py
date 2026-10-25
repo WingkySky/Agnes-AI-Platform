@@ -55,6 +55,8 @@ class Scene3D(Base):
     description = Column(Text, nullable=True)
     scene_data = Column(JSON, default=dict, nullable=False)
     is_public = Column(Boolean, default=False, nullable=False)
+    # 视口截图封面（通用上传端点的 URL；存量库升级：ALTER TABLE scene3d ADD COLUMN cover_url VARCHAR(500)）
+    cover_url = Column(String(500), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

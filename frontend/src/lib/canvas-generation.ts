@@ -21,8 +21,11 @@ import { createVideoTask, getVideoStatus } from '@/api/videos'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useModelsStore } from '@/stores/models'
 import { usePreferencesStore } from '@/stores/preferences'
+import { useScenesStore } from '@/stores/scenes'
 import { isMediaSuccess, isMediaFailed } from '@/lib/media-status'
 import { captureVideoFrame, getVideoTime } from '@/lib/canvas-image-ops'
+import { composeSceneSuffix, sceneCameraParams } from '@/lib/scene-mount'
+import { appendPromptText } from '@/utils/presetApply'
 import type { ChatMessage } from '@/lib/storyboard/transport'
 import type { CanvasPanel, CanvasConnection } from '@/stores/canvas'
 import type { ImageGenerationRequest, VideoGenerationRequest, GenerationContextPayload } from '@/types'
@@ -550,6 +553,9 @@ export async function createGenerationTask(
   const { prompt, referenceImages } = ctx
   const modelsStore = useModelsStore()
   const model = config.model || modelsStore.defaultImageModel
+  // 挂载的 3D 场景（导演台）：提交时拼接镜头语言后缀，提示词输入框保持纯用户内容
+  const sceneSuffix = composeSceneSuffix(useScenesStore().mountedFor('image'))
+  const effectivePrompt = appendPromptText(prompt, sceneSuffix)
   // 参考图按所选模型生成能力配置截断（gen_params.max_ref_images，后端仍兜底），无配置不截断；
   // 参考图数组已按「锚点/底图 > 角色 > 场景」优先级排序，截断保留前 N 张
   const imageRefLimit = modelsStore.getModelGenParams(model)?.max_ref_images ?? undefined
@@ -560,7 +566,7 @@ export async function createGenerationTask(
 
   const hasReferenceImages = effectiveRefs && effectiveRefs.length > 0
   const params: ImageGenerationRequest = {
-    prompt,
+    prompt: effectivePrompt,
     model,
     size: config.size || '1024x1024',
     response_format: config.response_format || 'url',
@@ -1354,10 +1360,18 @@ export async function createVideoGenerationTask(
     mode = 'text2video'  // 无图 → 文生视频
   }
 
+  // 挂载的 3D 场景（导演台）：拼接镜头语言后缀 + 相机映射（视角/焦段进 camera_params）
+  const scenesStore = useScenesStore()
+  const sceneMount = scenesStore.mountedFor('video')
+  const sceneCam = sceneCameraParams(sceneMount?.camera)
+
   const params: VideoGenerationRequest = {
-    prompt,
+    prompt: appendPromptText(prompt, composeSceneSuffix(sceneMount)),
     model: config.model || useModelsStore().defaultVideoModel,
     mode: mode as 'text2video' | 'image2video' | 'keyframes' | 'video2video',
+  }
+  if (sceneCam) {
+    params.camera_params = sceneCam
   }
 
   // 视频帧率

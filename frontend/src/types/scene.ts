@@ -68,6 +68,7 @@ export interface Scene3D {
   description?: string | null
   scene_data: SceneData | Record<string, never>
   is_public: boolean
+  cover_url?: string | null
   created_at?: string | null
   updated_at?: string | null
 }
@@ -86,6 +87,7 @@ export interface UpdateSceneRequest {
   description?: string
   scene_data?: SceneData | Record<string, never>
   is_public?: boolean
+  cover_url?: string
 }
 
 /** 场景列表响应 */

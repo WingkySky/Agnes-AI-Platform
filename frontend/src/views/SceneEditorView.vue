@@ -37,6 +37,22 @@
           <el-button plain @click="onNew">{{ t('scene3d.newScene') }}</el-button>
           <el-button
             v-if="currentId"
+            plain
+            :type="scenesStore.isMountedIn('image', currentId) ? 'warning' : 'default'"
+            @click="onMountScene('image')"
+          >
+            {{ t('scene3d.mountToImage') }}
+          </el-button>
+          <el-button
+            v-if="currentId"
+            plain
+            :type="scenesStore.isMountedIn('video', currentId) ? 'warning' : 'default'"
+            @click="onMountScene('video')"
+          >
+            {{ t('scene3d.mountToVideo') }}
+          </el-button>
+          <el-button
+            v-if="currentId"
             type="danger"
             plain
             :loading="deleting"
@@ -52,7 +68,7 @@
       <!-- 左侧：3D 编辑器 -->
       <el-col :xs="24" :lg="16">
         <el-card shadow="never" class="editor-card">
-          <Scene3DEditor v-model="sceneData" />
+          <Scene3DEditor v-model="sceneData" @captured="onCaptured" />
         </el-card>
       </el-col>
 
@@ -121,22 +137,43 @@
               :class="['scene-item', { active: s.id === currentId }]"
               @click="onSelectScene(s)"
             >
-              <div class="scene-item-name">
-                {{ s.name }}
-                <el-tag v-if="s.is_public" size="small" type="success">
-                  {{ t('scene3d.publicTag') }}
-                </el-tag>
-                <el-tag v-if="s.user_id !== userId && s.is_public" size="small" type="info">
-                  {{ t('scene3d.sharedTag') }}
-                </el-tag>
+              <img v-if="s.cover_url" :src="s.cover_url" class="scene-item-cover" />
+              <div class="scene-item-body">
+                <div class="scene-item-name">
+                  {{ s.name }}
+                  <el-tag v-if="s.is_public" size="small" type="success">
+                    {{ t('scene3d.publicTag') }}
+                  </el-tag>
+                  <el-tag v-if="s.user_id !== userId && s.is_public" size="small" type="info">
+                    {{ t('scene3d.sharedTag') }}
+                  </el-tag>
+                </div>
+                <div class="scene-item-desc">{{ s.description || '—' }}</div>
               </div>
-              <div class="scene-item-desc">{{ s.description || '—' }}</div>
             </div>
             <el-empty v-if="!listLoading && scenes.length === 0" :description="t('common.empty')" :image-size="60" />
           </div>
         </el-card>
       </el-col>
     </el-row>
+
+    <!-- 视口拍照弹窗：下载 / 复制 / 设为场景封面 -->
+    <el-dialog v-model="captureVisible" :title="t('scene3d.captureTitle')" width="560px">
+      <img v-if="captureDataUrl" :src="captureDataUrl" class="capture-preview" />
+      <template #footer>
+        <el-button @click="downloadCapture">{{ t('common.download') }}</el-button>
+        <el-button @click="copyCapture">{{ t('scene3d.copyImage') }}</el-button>
+        <el-button
+          type="primary"
+          :loading="settingCover"
+          :disabled="!currentId"
+          :title="currentId ? '' : t('scene3d.captureSaveFirst')"
+          @click="setAsCover"
+        >
+          {{ t('scene3d.setCover') }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -150,6 +187,8 @@ import { ElMessage } from 'element-plus'
 import { useConfirm } from '@/composables/useConfirm'
 import { useI18n } from '@/i18n'
 import { useUserStore } from '@/stores/user'
+import { useScenesStore } from '@/stores/scenes'
+import { uploadImage } from '@/api/uploads'
 import Scene3DEditor from '@/components/scene/Scene3DEditor.vue'
 import {
   getScenes,
@@ -163,6 +202,67 @@ import type { Scene3D, SceneData } from '@/types/scene'
 const { t } = useI18n()
 const { confirm } = useConfirm()
 const userStore = useUserStore()
+const scenesStore = useScenesStore()
+
+// ---------- 视口拍照（下载 / 复制 / 设为封面） ----------
+const captureVisible = ref(false)
+const captureDataUrl = ref('')
+const settingCover = ref(false)
+
+function onCaptured(dataUrl: string) {
+  captureDataUrl.value = dataUrl
+  captureVisible.value = true
+}
+
+function downloadCapture() {
+  if (!captureDataUrl.value) return
+  const a = document.createElement('a')
+  a.href = captureDataUrl.value
+  a.download = `scene-${currentId.value || 'draft'}-${Date.now()}.png`
+  a.click()
+}
+
+async function copyCapture() {
+  try {
+    const blob = await (await fetch(captureDataUrl.value)).blob()
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+    ElMessage.success(t('scene3d.copied'))
+  } catch {
+    ElMessage.error(t('scene3d.copyFailed'))
+  }
+}
+
+async function setAsCover() {
+  if (!currentId.value || !captureDataUrl.value) return
+  settingCover.value = true
+  try {
+    const blob = await (await fetch(captureDataUrl.value)).blob()
+    const file = new File([blob], `scene-cover-${currentId.value}.png`, { type: 'image/png' })
+    const { url } = await uploadImage(file)
+    await updateScene(currentId.value, { cover_url: url })
+    ElMessage.success(t('scene3d.setCoverOk'))
+    captureVisible.value = false
+    await loadScenes()
+  } catch {
+    ElMessage.error(t('scene3d.setCoverFailed'))
+  } finally {
+    settingCover.value = false
+  }
+}
+
+/** 挂载/取消当前场景到图片或视频生成（提交时自动拼接镜头语言） */
+async function onMountScene(context: 'image' | 'video') {
+  if (!currentId.value) return
+  try {
+    const mounted = await scenesStore.mountScene(
+      { id: currentId.value, name: currentName.value, scene_data: sceneData.value } as Scene3D,
+      context,
+    )
+    ElMessage.success(t(mounted ? (context === 'image' ? 'scene3d.mountedImage' : 'scene3d.mountedVideo') : 'scene3d.unmounted'))
+  } catch {
+    ElMessage.error(t('scene3d.applyFailed'))
+  }
+}
 
 // ---------- 默认场景数据 ----------
 function defaultSceneData(): SceneData {
@@ -453,6 +553,30 @@ onMounted(() => {
   border-radius: 6px;
   cursor: pointer;
   transition: background 0.2s;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.scene-item-cover {
+  width: 64px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 4px;
+  flex-shrink: 0;
+  border: 1px solid var(--agnes-border-light, rgba(255, 255, 255, 0.12));
+}
+
+.scene-item-body {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 视口拍照预览 */
+.capture-preview {
+  width: 100%;
+  border-radius: 6px;
+  border: 1px solid var(--agnes-border-light, rgba(255, 255, 255, 0.12));
 }
 
 .scene-item:hover {

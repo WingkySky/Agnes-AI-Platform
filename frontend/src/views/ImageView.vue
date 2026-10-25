@@ -116,7 +116,7 @@
             </el-button>
 
             <!-- 已挂载预设（生图模块独立，风格单选/特效叠加，提交时自动拼接） -->
-            <div v-if="presetStore.mountedFor('image').length" class="mounted-row">
+            <div v-if="presetStore.mountedFor('image').length || scenesStore.mountedFor('image')" class="mounted-row">
               <el-tag
                 v-for="mp in presetStore.mountedFor('image')"
                 :key="mp.id"
@@ -126,15 +126,25 @@
               >
                 {{ mountTagLabel(mp) }}
               </el-tag>
+              <el-tag
+                v-if="scenesStore.mountedFor('image')"
+                closable
+                size="small"
+                type="warning"
+                @close="scenesStore.unmountScene('image')"
+              >
+                🎬 {{ scenesStore.mountedFor('image')!.name }}
+              </el-tag>
             </div>
 
-            <!-- 3D 场景快捷面板：从导演台选择场景，追加镜头语言到 prompt -->
+            <!-- 3D 场景快捷面板：从导演台选择场景，挂载后提交时自动拼接镜头语言 -->
             <el-popover
+              ref="sceneQuickPopover"
               placement="bottom-start"
               :width="340"
               trigger="click"
               :teleported="true"
-              v-model:visible="scenePopoverVisible"
+              @show="loadScenes"
             >
               <template #reference>
                 <el-button
@@ -383,6 +393,7 @@ import { usePreferencesStore } from '@/stores/preferences'
 import { useAssetStore } from '@/stores/asset'
 import { usePresetStore } from '@/stores/presets'
 import { appendPromptText, composeMounted } from '@/utils/presetApply'
+import { composeSceneSuffix } from '@/lib/scene-mount'
 import { getErrorCategory } from '@/lib/type-helpers'
 import { useCopyText } from '@/composables/useCopyText'
 import { usePromptLength } from '@/composables/usePromptLength'
@@ -393,7 +404,8 @@ import { useRouter } from 'vue-router'
 import { useCreditEstimate } from '@/composables/useCreditEstimate'
 import { useDownload } from '@/composables/useDownload'
 import { matchImageSize, matchSizeByRatio, getImageSizeLabel, autoMatchImageSize, AUTO_RATIO_VALUE } from '@/config/model-params'
-import { getScenes, previewScenePrompt } from '@/api/scenes'
+import { getScenes } from '@/api/scenes'
+import { useScenesStore } from '@/stores/scenes'
 import type { FileInfo } from '@/types'
 import type { Scene3D, SceneData } from '@/types/scene'
 
@@ -425,6 +437,7 @@ function openViewerWithUrl(url: string) {
 const plazaVisible = ref(false)
 const optimizeVisible = ref(false)
 const presetStore = usePresetStore()
+const scenesStore = useScenesStore()
 
 /** 广场应用回调：风格/特效挂载（一键使用，提交时自动拼接）；脚本复制；提示词追加 */
 async function onPresetApply(preset: PromptPreset) {
@@ -579,8 +592,8 @@ const canSubmit = computed(() => {
   return true
 })
 
-// ---------- 3D 场景快捷应用：从导演台选择场景，将镜头语言追加到 prompt ----------
-const scenePopoverVisible = ref(false)
+// ---------- 3D 场景快捷挂载：从导演台选择场景，挂载后提交时自动拼接镜头语言 ----------
+const sceneQuickPopover = ref()
 const sceneList = ref<Scene3D[]>([])
 const sceneLoading = ref(false)
 const sceneApplying = ref(false)
@@ -598,31 +611,20 @@ async function loadScenes() {
   }
 }
 
-/** 选中场景后调用预览接口拿到 prompt_suffix，追加到提示词末尾 */
+/** 选中场景 = 挂载/取消（再点同场景取消）；提交时自动拼接镜头语言，提示词输入框保持纯用户内容 */
 async function onSceneSelect(scene: Scene3D) {
   if (sceneApplying.value) return
   sceneApplying.value = true
   try {
-    const res = await previewScenePrompt(scene.scene_data as SceneData)
-    const suffix = (res.prompt_suffix || '').trim()
-    if (suffix) {
-      // prompt_suffix 已含句号边界，直接以空格拼接
-      const base = prompt.value.trim()
-      prompt.value = base ? `${base} ${suffix}` : suffix
-      ElMessage.success(t('scene3d.appliedToImage'))
-    }
-    scenePopoverVisible.value = false
+    const mounted = await scenesStore.mountScene(scene, 'image')
+    ElMessage.success(t(mounted ? 'scene3d.mountedImage' : 'scene3d.unmounted'))
+    sceneQuickPopover.value?.hide()
   } catch {
     ElMessage.error(t('scene3d.applyFailed'))
   } finally {
     sceneApplying.value = false
   }
 }
-
-// 面板打开时自动加载场景列表
-watch(scenePopoverVisible, (v) => {
-  if (v) loadScenes()
-})
 
 // 参考图变化（含「用于生成」v-model 预填）：「自动」模式下跟随第一张参考图重新适配
 watch(referenceFileList, (list) => {
@@ -691,6 +693,8 @@ async function handleGenerate() {
   // 已挂载预设（风格/特效）在提交时自动拼接，提示词输入框保持纯用户内容
   const composition = composeMounted(presetStore.mountedFor('image'))
   params.prompt = appendPromptText(prompt.value.trim(), composition.promptSuffix)
+  // 挂载的 3D 场景：提交时拼接镜头语言后缀（视角/焦段/构图/灯位/环境）
+  params.prompt = appendPromptText(params.prompt, composeSceneSuffix(scenesStore.mountedFor('image')))
   // 【多图】图生图时：区分为 base64_images 与 image_urls
   if (mode.value === 'image2image' && referenceFileList.value.length > 0) {
     const b64Imgs = referenceFileList.value

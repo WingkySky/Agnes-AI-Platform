@@ -158,7 +158,7 @@
             </el-button>
 
             <!-- 已挂载预设（生视频模块独立，风格单选/特效与运镜叠加，提交时自动拼接） -->
-            <div v-if="presetStore.mountedFor('video').length" class="mounted-row">
+            <div v-if="presetStore.mountedFor('video').length || scenesStore.mountedFor('video')" class="mounted-row">
               <el-tag
                 v-for="mp in presetStore.mountedFor('video')"
                 :key="mp.id"
@@ -168,7 +168,54 @@
               >
                 {{ mountTagLabel(mp) }}
               </el-tag>
+              <el-tag
+                v-if="scenesStore.mountedFor('video')"
+                closable
+                size="small"
+                type="warning"
+                @close="scenesStore.unmountScene('video')"
+              >
+                🎬 {{ scenesStore.mountedFor('video')!.name }}
+              </el-tag>
             </div>
+
+            <!-- 3D 场景快捷面板：挂载/取消导演台场景，提交时自动拼接镜头语言 -->
+            <el-popover
+              ref="sceneQuickPopover"
+              placement="bottom-start"
+              :width="340"
+              trigger="click"
+              :teleported="true"
+              @show="loadScenes"
+            >
+              <template #reference>
+                <el-button :icon="Aim" size="small" plain style="margin-top: 6px; margin-left: 8px">
+                  {{ t('scene3d.useSceneBtn') }}
+                </el-button>
+              </template>
+              <div class="scene-quick-panel">
+                <h5 class="panel-title">{{ t('scene3d.quickPanelTitle') }}</h5>
+                <div v-loading="sceneLoading" class="scene-list">
+                  <button
+                    v-for="scene in sceneList"
+                    :key="scene.id"
+                    type="button"
+                    class="scene-item"
+                    :class="{ active: scenesStore.isMountedIn('video', scene.id) }"
+                    :disabled="sceneApplying"
+                    @click="onSceneSelect(scene)"
+                  >
+                    <div class="scene-item-info">
+                      <span class="scene-item-name">{{ scene.name }}</span>
+                      <span v-if="scene.is_public" class="scene-item-tag">{{ t('scene3d.publicTag') }}</span>
+                    </div>
+                  </button>
+                  <p v-if="!sceneLoading && sceneList.length === 0" class="panel-empty">
+                    {{ t('scene3d.quickPanelEmpty') }}
+                  </p>
+                </div>
+              </div>
+            </el-popover>
 
             <!-- 紧凑参数选择：尺寸 + 时长 + 帧率 + 模型，一行标签搞定 -->
             <el-form-item :label="t('params.size')">
@@ -384,7 +431,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   VideoPlay, Download, CopyDocument, CircleCloseFilled, VideoCameraFilled, MagicStick, EditPen,
-  Edit, PictureFilled, Share, InfoFilled
+  Edit, PictureFilled, Share, InfoFilled, Aim
 } from '@element-plus/icons-vue'
 import PresetPlazaDialog from '@/components/presets/PresetPlazaDialog.vue'
 import PromptOptimizeDialog from '@/components/PromptOptimizeDialog.vue'
@@ -394,6 +441,10 @@ import { useTaskQueueStore } from '@/stores/taskQueue'
 import { useAssetStore } from '@/stores/asset'
 import { usePresetStore } from '@/stores/presets'
 import { appendPromptText, composeMounted } from '@/utils/presetApply'
+import { composeSceneSuffix, sceneCameraParams } from '@/lib/scene-mount'
+import { useScenesStore } from '@/stores/scenes'
+import { getScenes } from '@/api/scenes'
+import type { Scene3D } from '@/types/scene'
 import { getErrorCategory } from '@/lib/type-helpers'
 import type { PromptPreset } from '@/types/preset'
 import { useAsset } from '@/api/pipeline'
@@ -423,6 +474,40 @@ const modelsStore = useModelsStore()
 const mode = ref('text2video')
 const prompt = ref('')
 const negativePrompt = ref('')
+
+// ---------- 3D 场景挂载（导演台第一批） ----------
+const scenesStore = useScenesStore()
+const sceneQuickPopover = ref()
+const sceneList = ref<Scene3D[]>([])
+const sceneLoading = ref(false)
+const sceneApplying = ref(false)
+
+async function loadScenes() {
+  sceneLoading.value = true
+  try {
+    const res = await getScenes({ page: 1, page_size: 20 })
+    sceneList.value = res.items || []
+  } catch {
+    sceneList.value = []
+  } finally {
+    sceneLoading.value = false
+  }
+}
+
+/** 选中场景 = 挂载/取消（再点同场景取消）；提交时自动拼接镜头语言 + 相机参数 */
+async function onSceneSelect(scene: Scene3D) {
+  if (sceneApplying.value) return
+  sceneApplying.value = true
+  try {
+    const mounted = await scenesStore.mountScene(scene, 'video')
+    ElMessage.success(t(mounted ? 'scene3d.mountedVideo' : 'scene3d.unmounted'))
+    sceneQuickPopover.value?.hide()
+  } catch {
+    ElMessage.error(t('scene3d.applyFailed'))
+  } finally {
+    sceneApplying.value = false
+  }
+}
 
 // ---------- 提示词长度分阶提示（视频：0-2000 适中，2000-6000 较长，6000+ 过长） ----------
 const { levelClass: promptLengthLevel, text: promptLengthText } = usePromptLength(prompt, 2000, 6000)
@@ -749,6 +834,13 @@ async function startGenerate() {
   // 已挂载预设（风格/特效/运镜）在提交时自动拼接，提示词输入框保持纯用户内容
   const composition = composeMounted(presetStore.mountedFor('video'))
   params.prompt = appendPromptText(prompt.value.trim(), composition.promptSuffix)
+  // 挂载的 3D 场景：拼接镜头语言后缀 + 相机映射（视角/焦段进 camera_params，与运镜预设合并）
+  const sceneMount = scenesStore.mountedFor('video')
+  params.prompt = appendPromptText(params.prompt, composeSceneSuffix(sceneMount))
+  const sceneCam = sceneCameraParams(sceneMount?.camera)
+  if (sceneCam) {
+    params.camera_params = { ...(composition.cameraParams || {}), ...sceneCam }
+  }
   // 负面词：用户输入 + 挂载预设的负面词合并
   const mergedNegative = [negativePrompt.value.trim(), composition.negativePrompt]
     .filter(Boolean)

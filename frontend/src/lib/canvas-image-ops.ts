@@ -363,3 +363,28 @@ export async function captureVideoFrame(source: string, time: VideoFrameTime): P
     return videoToDataUrl(await loadVideoAt(proxied, time))
   }
 }
+
+/**
+ * 把 dataURL 图片按目标宽高比居中裁剪（导演台画幅框截图用）。
+ * ratio = 宽/高（如 16/9）；源图不足比例时以高度为界。
+ */
+export async function cropDataUrlToAspect(dataUrl: string, ratio: number): Promise<string> {
+  const img = new Image()
+  img.src = dataUrl
+  await img.decode()
+  const srcW = img.naturalWidth
+  const srcH = img.naturalHeight
+  let w = srcW
+  let h = srcW / ratio
+  if (h > srcH) {
+    h = srcH
+    w = srcH * ratio
+  }
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.round(w))
+  canvas.height = Math.max(1, Math.round(h))
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return dataUrl
+  ctx.drawImage(img, (srcW - w) / 2, (srcH - h) / 2, w, h, 0, 0, canvas.width, canvas.height)
+  return canvas.toDataURL('image/png')
+}

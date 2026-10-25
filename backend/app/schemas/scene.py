@@ -85,6 +85,7 @@ class SceneUpdate(BaseModel):
     description: str | None = None
     scene_data: dict | None = None
     is_public: bool | None = None
+    cover_url: str | None = Field(None, max_length=500, description="视口截图封面 URL")
 
 
 class ScenePromptPreviewRequest(BaseModel):
@@ -102,6 +103,7 @@ class SceneResponse(BaseModel):
     description: str | None = None
     scene_data: dict
     is_public: bool
+    cover_url: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
 
@@ -117,6 +119,7 @@ class SceneResponse(BaseModel):
             description=m.description,
             scene_data=m.scene_data or {},
             is_public=m.is_public,
+            cover_url=getattr(m, "cover_url", None),
             created_at=m.created_at.isoformat() if m.created_at else None,
             updated_at=m.updated_at.isoformat() if m.updated_at else None,
         )

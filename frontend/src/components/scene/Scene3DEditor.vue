@@ -20,7 +20,14 @@
 <template>
   <div class="scene3d-editor">
     <!-- 3D 渲染容器 -->
-    <div ref="containerEl" class="scene3d-canvas" @click="onCanvasClick" />
+    <div ref="containerEl" class="scene3d-canvas" @click="onCanvasClick">
+      <!-- 画幅取景框（纯参考叠加，不拦截交互） -->
+      <div v-if="aspectRatio" class="aspect-frame-overlay">
+        <div class="aspect-frame-box" :style="frameBoxStyle">
+          <div class="aspect-frame-safe"></div>
+        </div>
+      </div>
+    </div>
 
     <!-- 工具栏：切换元素类型 + 元素选择 + 添加/删除 + 模式 + FOV -->
     <div class="scene3d-toolbar">
@@ -100,6 +107,29 @@
       </div>
 
       <el-button size="small" plain @click="resetView">{{ t('scene3d.resetView') }}</el-button>
+      <el-select
+        v-model="aspectRatio"
+        size="small"
+        clearable
+        :placeholder="t('scene3d.aspectFrame')"
+        style="width: 96px"
+        @change="onResize"
+      >
+        <el-option label="16:9" value="16:9" />
+        <el-option label="9:16" value="9:16" />
+        <el-option label="1:1" value="1:1" />
+        <el-option label="2.35:1" value="2.35:1" />
+      </el-select>
+      <el-checkbox
+        v-model="followSubject"
+        size="small"
+        :title="t('scene3d.followSubjectHint')"
+      >
+        {{ t('scene3d.followSubject') }}
+      </el-checkbox>
+      <el-button size="small" plain :icon="Camera" @click="captureViewport">
+        {{ t('scene3d.capture') }}
+      </el-button>
       <el-button size="small" plain :icon="QuestionFilled" @click="showHelp = true" />
     </div>
 
@@ -142,7 +172,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
-import { Plus, Minus, QuestionFilled } from '@element-plus/icons-vue'
+import { Plus, Minus, QuestionFilled, Camera } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { useThemeStore } from '@/stores/theme'
 import type { LightData, PropData, SceneData, Vec3 } from '@/types/scene'
@@ -156,6 +186,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:modelValue': [value: SceneData]
+  /** 视口拍照完成（已按画幅裁剪） */
+  captured: [dataUrl: string]
 }>()
 
 const containerEl = ref<HTMLDivElement>()
@@ -170,6 +202,48 @@ const transformMode = ref<'translate' | 'rotate'>('translate')
 const canvasMode = ref<'orbit' | 'pan'>('orbit')
 const showHelp = ref(false)
 const selectedPreset = ref<string>('')
+// ---------- 导演感基础（第一批）：画幅框 / 镜头跟随 / 视口拍照 ----------
+const aspectRatio = ref<string>('')
+const followSubject = ref(false)
+const containerSize = ref({ w: 0, h: 0 })
+const aspectRatioValue = computed(() => {
+  if (!aspectRatio.value) return 0
+  const [w, h] = aspectRatio.value.split(':').map(Number)
+  return w > 0 && h > 0 ? w / h : 0
+})
+/** 取景框盒尺寸：容器内等比内接最大矩形 */
+const frameBoxStyle = computed(() => {
+  const ratio = aspectRatioValue.value
+  if (!ratio || !containerSize.value.w || !containerSize.value.h) return {}
+  let w = containerSize.value.w
+  let h = w / ratio
+  if (h > containerSize.value.h) {
+    h = containerSize.value.h
+    w = h * ratio
+  }
+  return { width: `${Math.round(w)}px`, height: `${Math.round(h)}px` }
+})
+
+/** 视口拍照：同步渲染后抓帧（preserveDrawingBuffer=false 时必须紧跟 render），画幅激活时按比例居中裁剪 */
+async function captureViewport() {
+  if (!renderer || !scene || !viewCamera) return
+  renderer.render(scene, viewCamera)
+  let dataUrl = renderer.domElement.toDataURL('image/png')
+  if (aspectRatioValue.value) {
+    const { cropDataUrlToAspect } = await import('@/lib/canvas-image-ops')
+    dataUrl = await cropDataUrlToAspect(dataUrl, aspectRatioValue.value)
+  }
+  emit('captured', dataUrl)
+}
+
+/** 镜头跟随目标：当前选中的主体（未选则第一个主体），无主体返回 null */
+function followTargetPosition(): THREE.Vector3 | null {
+  const idx = activeTarget.value === 'subject' && subjectMeshes[activeIndex.value]
+    ? activeIndex.value
+    : 0
+  const mesh = subjectMeshes[idx]
+  return mesh ? mesh.position.clone() : null
+}
 
 // ---------- Three.js 内部对象（非响应式）----------
 let renderer: THREE.WebGLRenderer | null = null
@@ -607,6 +681,7 @@ function onResize() {
   renderer.setSize(w, h)
   viewCamera.aspect = w / h
   viewCamera.updateProjectionMatrix()
+  containerSize.value = { w, h }
 }
 
 // ---------- 点击 3D 元素直接选中 ----------
@@ -873,6 +948,19 @@ function syncToModel() {
       }
     }
   })
+  // 镜头跟随：开启后相机始终朝向选中主体（覆盖由朝向推导的 lookAt）
+  if (followSubject.value && cameraMesh) {
+    const target = followTargetPosition()
+    if (target) {
+      cameraMesh.lookAt(target)
+      newData.camera.lookAt = {
+        x: round(target.x),
+        y: round(target.y),
+        z: round(target.z),
+      }
+      updateCameraArrow(newData.camera.lookAt)
+    }
+  }
   emit('update:modelValue', newData)
 }
 
@@ -1109,6 +1197,36 @@ onUnmounted(() => {
   width: 100%;
   min-height: 420px;
   cursor: pointer;
+  position: relative;
+}
+
+/* 画幅取景框叠加层（纯参考，不拦截交互） */
+.aspect-frame-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+}
+
+.aspect-frame-box {
+  position: relative;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
+  outline: 1px solid rgba(255, 255, 255, 0.65);
+}
+
+/* 安全框（95% 内框）+ 三分线 */
+.aspect-frame-safe {
+  position: absolute;
+  inset: 2.5%;
+  border: 1px dashed rgba(255, 255, 255, 0.35);
+  background:
+    linear-gradient(to right, transparent 33.3%, rgba(255, 255, 255, 0.18) 33.3%, rgba(255, 255, 255, 0.18) 33.4%, transparent 33.4%),
+    linear-gradient(to right, transparent 66.6%, rgba(255, 255, 255, 0.18) 66.6%, rgba(255, 255, 255, 0.18) 66.7%, transparent 66.7%),
+    linear-gradient(to bottom, transparent 33.3%, rgba(255, 255, 255, 0.18) 33.3%, rgba(255, 255, 255, 0.18) 33.4%, transparent 33.4%),
+    linear-gradient(to bottom, transparent 66.6%, rgba(255, 255, 255, 0.18) 66.6%, rgba(255, 255, 255, 0.18) 66.7%, transparent 66.7%);
 }
 
 .scene3d-toolbar {
