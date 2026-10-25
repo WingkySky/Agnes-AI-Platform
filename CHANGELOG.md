@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### Provider 智能接入（声明式 HTTP 渠道：不写代码接长尾渠道）
+
+- **声明式执行器**：`api_providers` 新增 `http_config` JSON 列 + provider_type 新值 `http_custom`（前端新分组「声明式接入」），管理员以模板配置接入任意 HTTP 渠道，无需写代码。新 `DeclarativeHttpClient` 实现统一客户端四方法契约（list_models / create_image / create_video_task / poll_video_status），返回形状严格合成现有消费方硬契约——**failover 路由、任务账本、积分、转存、出口记账全部零改动兼容**
+- **配置 schema**（`HttpConfigModel` 严格校验 extra=forbid）：模型目录三模式（static 静态列表 / openai 兼容 /models / custom 自定义端点）、同步图片单 POST（`url_path`/`b64_path` 点路径响应映射）、视频两段式（提交拿 task_id + 轮询 `status_map` 状态归一，未知状态保守按 processing 续轮到超时）；请求体 `{{prompt}}/{{model}}/{{size}}/{{images}}…` 占位符模板（JSON 转义渲染），超时按动作区分；视频 create 与 poll 强制成对
+- **健壮性**：非 2xx 翻译为 `UpstreamError`（带 status_code/error_kind，与 error_taxonomy/failover 判定语义一致）、网络异常与 5xx 指数退避重试、success 但无有效视频 URL 判失败；保存前用样例值试渲染请求体模板（占位符漏写保存即报）；`POST /api/providers/{id}/test-http` 真实请求模型目录验证配置；`http_config` 变更自动重建渠道客户端。内网地址故意放行（自托管接本地 LiteLLM/one-api 代理是核心场景）
+- **AI 生成配置**（纯前端零后端新增）：Provider 弹窗「AI 生成配置」区——粘贴渠道 API 文档片段或 cURL 示例 → 走现有 LLM 前端透传通道生成配置 JSON（内嵌 schema 说明与占位符清单）→ 剥代码围栏+括号配对解析+轻校验 → 一键填入表单可手动微调。实测生成质量：端点路径、嵌套响应映射（`result.images.0`）、数字占位不带引号均正确
+- **管理端**：Provider 弹窗三动作卡结构化表单（`lib/provider-http-config.ts` 纯函数双向转换）+「测试连接」按钮；任务状态响应与账本回退补齐 `provider_name` 实际渠道透出
+- 测试 pytest 386（+24：模板渲染转义/点路径提取/图片与视频映射/轮询状态机/未知状态保守处理/非 2xx 翻译/重试/list_models 三模式/HttpConfigModel 校验/API 保存与 test-http）；vitest 676（+11：表单⇄配置双向转换/AI 输出解析围栏剥离）；vue-tsc + 双端 lint 绿
+
 ## [0.0.13] - 2026-10-25
 
 ### 多渠道路由 failover（生成任务：主渠道失败自动切备用渠道）
