@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.0.14] - 2026-10-25
+
 ### Provider 智能接入（声明式 HTTP 渠道：不写代码接长尾渠道）
 
 - **声明式执行器**：`api_providers` 新增 `http_config` JSON 列 + provider_type 新值 `http_custom`（前端新分组「声明式接入」），管理员以模板配置接入任意 HTTP 渠道，无需写代码。新 `DeclarativeHttpClient` 实现统一客户端四方法契约（list_models / create_image / create_video_task / poll_video_status），返回形状严格合成现有消费方硬契约——**failover 路由、任务账本、积分、转存、出口记账全部零改动兼容**
