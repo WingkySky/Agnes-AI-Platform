@@ -4,223 +4,216 @@
 
 **🌐 Language / 语言**
 
-[**English** ](README.md) | [中文](README_zh.md)
+[**中文**](README.md) | [English](README_en.md)
 
-**An all-in-one AI creation platform — chat with AI, generate images & videos, and compose on an infinite canvas.** Powered by Agnes AI, with a Vue 3 + FastAPI full-stack architecture that keeps your API key secure on the server.
+**一站式 AI 创作平台 —— 与 AI 对话、生成图片与视频、在无限画布上自由编排。** 基于 Agnes AI，采用 Vue 3 + FastAPI 全栈架构，API Key 安全地保存在服务端。
 
-## What Is Agnes AI Platform
+## Agnes AI Platform 是什么
 
-Agnes AI Platform is a self-hosted web application that brings together multiple AI capabilities into a single, cohesive experience:
+Agnes AI Platform 是一个可自部署的 Web 应用，将多种 AI 能力整合为统一体验：
 
-- **AI Chat** — Conversational AI with tool calling. Chat naturally, and the AI can automatically trigger image or video generation when it detects your intent.
-- **Image Generation** — Text-to-image and image-to-image, with multiple models and size options.
-- **Video Generation** — Text-to-video, image-to-video, and keyframe animation, with async polling and real-time progress.
-- **Infinite Canvas** — A free-form workspace where you can place generated images as nodes, connect them, and re-generate or remix with context-aware operations. A built-in Canvas Agent can operate the canvas for you — just describe what you want.
-- **Preset Center** — Reusable creation configs (styles, effects, camera moves, prompts, scripts, skills) with cover previews, categories, and one-click apply.
-- **Multi-Provider Management** — Add and switch between multiple AI API providers (different base URLs, API keys) from the settings page. No need to edit `.env` files after initial setup.
-- **Generation History** — Persistent history with thumbnails, GIF previews, filtering, and batch operations.
-- **Community Plaza** — Browse community-shared creations for inspiration, or share your own works.
+- **AI 对话** — 支持工具调用的对话式 AI。自然聊天，AI 检测到你的意图时会自动触发生图或生视频。
+- **图片生成** — 文生图、图生图，支持多种模型和尺寸选择。
+- **视频生成** — 文生视频、图生视频、关键帧动画，异步轮询 + 实时进度。
+- **无限画布** — 自由工作区，将生成的图片放置为节点、连线、基于上下文重新生成或混合创作。内置画布 Agent，用对话就能让它替你操作画布。
+- **预设中心** — 可复用的创作配置（风格、特效、运镜、提示词、脚本、技能），带封面预览、分类筛选，一键套用。
+- **多 Provider 管理** — 在设置页面添加和切换多个 AI API 提供商（不同 base URL、API Key），首次配置后无需再改 `.env` 文件。
+- **生成历史** — 持久化历史记录，缩略图、GIF 预览、筛选、批量操作。
+- **社区广场** — 浏览社区分享的作品寻找灵感，也可以分享自己的创作。
 
-All API keys are encrypted and stored on the server — they never reach the browser.
+所有 API Key 均加密存储在服务端，不会暴露到浏览器。
 
-## Screenshots
+## 平台截图
 
-| Infinite Canvas | AI Chat with Tool Calling |
+| 无限画布 | AI 对话（工具调用） |
 |---|---|
-| ![Infinite Canvas](docs/images/canvas.jpg) | ![AI Chat](docs/images/chat.jpg) |
-| **Image Generation** | **Preset Center** |
-| ![Image Generation](docs/images/image-generation.jpg) | ![Preset Center](docs/images/preset-center.jpg) |
-| **Generation History** | **Multi-Provider Management** |
-| ![Generation History](docs/images/history.jpg) | ![Provider Management](docs/images/settings.jpg) |
+| ![无限画布](docs/images/canvas.jpg) | ![AI 对话](docs/images/chat.jpg) |
+| **图片生成** | **预设中心** |
+| ![图片生成](docs/images/image-generation.jpg) | ![预设中心](docs/images/preset-center.jpg) |
+| **生成历史** | **多 Provider 管理** |
+| ![生成历史](docs/images/history.jpg) | ![Provider 管理](docs/images/settings.jpg) |
 
-## How We Got Here
+## 项目演进
 
-Agnes AI Platform started as a simple image & video generation tool. Here's how it evolved:
+Agnes AI Platform 最初只是一个简单的图片和视频生成工具，逐步演化为现在的综合 AI 创作平台：
 
-| Phase | What Changed |
+| 阶段 | 变化 |
 |---|---|
-| **v1 — Generator** | Text-to-image, image-to-image, text-to-video, image-to-video. A clean tool with async polling and history. |
-| **v2 — Multi-Provider** | Replaced the single `.env` API key with a database-backed provider system. Add, edit, and switch providers from the UI. API keys encrypted at rest. |
-| **v3 — AI Chat** | Added a conversational AI interface with tool calling. The AI can detect your intent and trigger image/video generation automatically. Full SSE streaming. |
-| **v4 — Infinite Canvas** | Introduced a free-form canvas for composing and remixing generated images. Nodes, connections, mask editing, and context-aware re-generation. |
-| **v5 — Agent & Presets** | Canvas Agent that operates the canvas through conversation (create nodes, connect them, batch-generate), a Preset Center for reusable styles/effects/skills, and a community Plaza for sharing creations. |
+| **v1 — 生成器** | 文生图、图生图、文生视频、图生视频。一个干净的生成工具，带异步轮询和历史记录。 |
+| **v2 — 多 Provider** | 用数据库驱动的 Provider 系统替代了单一的 `.env` API Key。可在前端界面增删改查 Provider，API Key 加密存储。 |
+| **v3 — AI 对话** | 加入对话式 AI 界面，支持工具调用。AI 能识别意图并自动触发生图/生视频，完整 SSE 流式输出。 |
+| **v4 — 无限画布** | 引入自由画布，用于编排和混合已生成的图片。节点、连线、蒙版编辑、上下文感知的重新生成。 |
+| **v5 — Agent 与预设** | 画布 Agent 通过对话操作画布（创建节点、连线、批量生成），预设中心沉淀可复用的风格/特效/技能，社区广场支持作品分享。 |
 
-The platform continues to grow, but the core principle remains the same: **a self-hosted, secure, all-in-one AI creation workspace.**
+平台仍在持续演进，但核心理念始终不变：**一个自部署、安全、一站式 AI 创作工作台。**
 
-## Quick Start
+## 快速开始
 
-### Prerequisites
+### 前置条件
 
-| Tool | Version | Why |
+| 工具 | 版本 | 用途 |
 |---|---|---|
-| **Docker** (recommended) | 20+ | Container deployment, no Python/Node needed |
-| **Python** | 3.10+ (3.11+ recommended) | Backend runtime (source start) |
-| **Node.js** | 18+ (20+ LTS recommended) | Frontend build (source start) |
+| **Docker**（推荐） | 20+ | 容器化部署，无需以下两项 |
+| **Python** | 3.10+（推荐 3.11+） | 后端运行时（源码启动） |
+| **Node.js** | 18+（推荐 20+ LTS） | 前端构建（源码启动） |
 
-### 1. Docker / Portable Deployment (Recommended)
+### 1. Docker / 便携包部署（推荐）
 
-The only prerequisite: [Docker](https://docs.docker.com/get-docker/) (the portable packages don't even need Docker).
+前置条件只有一个：安装 [Docker](https://docs.docker.com/get-docker/)（便携包方式连 Docker 都不需要）。
 
-**Option A: docker run**
+**方式一：docker run**
 
 ```bash
 docker run -d --name agnes-platform -p 8080:8000 -v agnes-data:/app/data ghcr.io/wingkysky/agnes-ai-platform:latest
 ```
 
-**Option B: docker compose** (after cloning the repo, from the repo root)
+**方式二：docker compose**（克隆仓库后，在仓库根目录执行）
 
 ```bash
 docker compose up -d
 ```
 
-**Option C: Portable packages (no Docker, Windows / macOS)**
+**方式三：便携包（免 Docker，Windows / macOS）**
 
-Download the zip for your platform from [Releases](https://github.com/WingkySky/Agnes-AI-Platform/releases), extract, and double-click `start-windows.bat` (Windows) or `start-macos.command` (macOS) — the browser opens automatically.
+从 [Releases](https://github.com/WingkySky/Agnes-AI-Platform/releases) 下载对应平台 zip，解压后双击 `start-windows.bat`（Windows）或 `start-macos.command`（macOS），浏览器自动打开。
 
-- One-time prompts for unsigned apps are expected: on Windows click "More info → Run anyway" at SmartScreen; on macOS run `xattr -cr <extracted-folder>` in Terminal first (Apple Silicon only — Intel Macs should use Docker or run from source)
-- All data lives inside the extracted folder (backup = copy the folder); to upgrade, download the new package and copy your old `backend/` folder over it
+- 未签名应用的一次性提示属正常：Windows 首次运行遇 SmartScreen 点「更多信息 → 仍要运行」；macOS 首次先在终端执行 `xattr -cr <解压目录>`（仅支持 Apple Silicon，Intel Mac 请用 Docker 或源码）
+- 数据全部在解压目录内（备份 = 复制文件夹）；升级 = 下载新包解压后，把旧包的 `backend/` 目录整个拷入覆盖
 
-Then open http://localhost:8080 and follow the first-run wizard — that's it.
+启动后访问 http://localhost:8080，按首启向导完成管理员密码与 AI 服务配置即可使用。
 
-- All data (database / uploads / logs / auto-generated secrets) lives in the `agnes-data` volume. Upgrading = pull the new image and recreate the container, nothing is lost.
-- For public server deployment (reverse proxy / HTTPS / backups), see [docs/deployment.md](docs/deployment.md).
+- 数据（数据库 / 上传素材 / 日志 / 自动生成的密钥）全部保存在 `agnes-data` 卷中，升级只需拉取新镜像并重建容器，数据不丢失
+- 公网服务器部署（反向代理 / HTTPS / 数据备份）见 [docs/deployment.md](docs/deployment.md)
 
-### 2. One-Click Start (Without Docker)
+### 2. 一键启动（无 Docker 时）
 
-Open a terminal in the project root and run:
+在项目根目录下打开终端，运行：
 
 ```bash
-# macOS / Linux — first time: grant execute permission
+# macOS / Linux — 首次运行需授予执行权限
 chmod +x start.sh
 ./start.sh
 
 # Windows
 start.bat
 
-# Or use the Python launcher (cross-platform, no permission needed)
+# 或使用跨平台 Python 启动器（无需额外授权）
 python start.py
 ```
 
-> **macOS / Linux first run**: Shell scripts (`.sh`) downloaded from Git or copied between machines may not have execute permission. Run `chmod +x start.sh` once before the first `./start.sh`. If you skip this, you'll get a "permission denied" error.
+> **macOS / Linux 首次运行**：从 Git 下载或跨机器拷贝的 `.sh` 脚本可能没有执行权限，直接运行会报 "permission denied"。首次运行前需执行一次 `chmod +x start.sh` 授权。
 >
-> **macOS Gatekeeper**: If macOS blocks the script with "cannot be opened because it is from an unidentified developer", go to **System Settings → Privacy & Security** and click "Open Anyway", or run `xattr -d com.apple.quarantine start.sh` in Terminal.
+> **macOS Gatekeeper 拦截**：如果 macOS 提示"无法打开，因为来自身份不明的开发者"，前往 **系统设置 → 隐私与安全性** 点击"仍要打开"，或在终端执行 `xattr -d com.apple.quarantine start.sh`。
 >
-> **Windows**: `.bat` files run directly without extra permission. If Windows SmartScreen blocks it, click "More info → Run anyway".
+> **Windows**：`.bat` 文件可直接运行，无需额外授权。若被 SmartScreen 拦截，点击"更多信息 → 仍要运行"即可。
 
-This automatically starts both the backend and frontend in one command. On first run it will create `.env` from the example (auto-generating random `JWT_SECRET` / `ENCRYPTION_KEY` if missing), initialize the database with all official seed data, and open the browser.
+脚本会自动启动后端和前端，首次运行会提示你配置 API Key。
 
-> **First-Run Wizard**: No default account exists. The first time you open the app you'll be guided to create your own admin account (pick your username and password) and connect an AI model service — generation works as soon as that's done. You can complete the same setup later from Admin → Model Config if you skip it.
+> **默认管理员账号**：启动脚本会自动初始化数据库并创建超级管理员：
+> - 用户名：`admin`
+> - 密码：`admin123`
 >
-> **Automated deployments**: set both `ADMIN_USERNAME` and `ADMIN_PASSWORD` before first start to pre-provision the admin instead (optional `ADMIN_EMAIL` / `ADMIN_CREDITS`). When these are set, the account-creation step is skipped.
+> 可在首次运行前通过环境变量 `ADMIN_USERNAME` / `ADMIN_PASSWORD` / `ADMIN_EMAIL` / `ADMIN_CREDITS` 自定义。首次登录后请及时修改默认密码。
 
-### 3. Manual Start
+### 3. 手动启动
 
-#### Backend
+#### 后端
 
 ```bash
 cd backend
 
-# Create virtual environment
+# 创建虚拟环境
 python -m venv .venv
 source .venv/bin/activate      # macOS / Linux
 # Windows: .venv\Scripts\activate
 
-# Install dependencies
+# 安装依赖
 pip install -r requirements.txt
 
-# Configure environment
+# 配置环境变量
 cp .env.example .env
-# Optional: set AGNES_API_KEY to auto-create a default provider on first launch.
-# JWT_SECRET / ENCRYPTION_KEY are auto-generated by ./start.sh if left empty.
-# After first launch, you can manage providers from the frontend settings page.
+# 编辑 .env — 至少填入 AGNES_API_KEY 作为初始默认 Provider。
+# 首次启动后，可在前端设置页面管理 Provider，无需再改 .env。
 ```
 
-Start the backend (macOS/Linux):
+启动后端（macOS / Linux）：
 
 ```bash
 ./start.sh
 ```
 
-Start the backend (Windows):
+启动后端（Windows）：
 
 ```batch
 start.bat
 ```
 
-Or manually:
+或手动启动：
 
 ```bash
-# Generate secrets into .env first (skipped when already configured)
-python ensure_secrets.py
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Verify: http://localhost:8000/health or http://localhost:8000/docs
+验证：http://localhost:8000/health 或 http://localhost:8000/docs
 
-#### Frontend
+#### 前端
 
-Open a **new terminal**:
+打开一个**新终端**：
 
 ```bash
 cd frontend
 
-# Install dependencies
+# 安装依赖
 npm install
 
-# Start dev server (port 5174, auto-proxies /api → backend:8000)
+# 启动开发服务器（端口 5174，自动代理 /api → 后端:8000）
 npm run dev
 ```
 
-Visit http://localhost:5174 — you're ready to go.
+访问 http://localhost:5174 即可使用。
 
-### 4. First-Time Setup
+### 4. 首次配置
 
-1. Log in and the **setup wizard** opens automatically — change the default password, and add an AI provider if none exists (skippable).
-2. Your `.env` API key (if set) is automatically loaded as the default provider on first launch.
-3. All official content (preset center styles/effects/cameras/skills, pipeline templates, built-in roles & credit rules) is seeded automatically at startup.
-4. Add more providers anytime in **Admin → Model Config** — each with its own base URL and API key.
-5. Start creating — chat, generate images/videos, or open the canvas.
+1. 打开**设置**页面（`/settings`）。
+2. `.env` 中的 API Key 会自动加载为默认 Provider。
+3. 如需添加更多 Provider，直接在设置页面操作 — 每个 Provider 可配置独立的 base URL 和 API Key。
+4. 开始创作 — 对话、生成图片/视频、或打开画布。
 
-## Tech Stack
+## 技术栈
 
-| Layer | Technology |
+| 层级 | 技术 |
 |---|---|
-| Frontend | Vue 3 (Composition API) + Vite + TypeScript + Vue Router + Pinia + Element Plus |
-| Backend | Python 3.10+ · FastAPI · SQLAlchemy 2.0 (async) · httpx (async HTTP client) |
-| Database | SQLite (default, zero-config) / PostgreSQL (optional) |
-| AI Provider | AIBridge SDK (38+ providers: Agnes, OpenAI, Anthropic, Claude, Gemini, Qwen, DeepSeek...) |
+| 前端 | Vue 3（Composition API）+ Vite + TypeScript + Vue Router + Pinia + Element Plus |
+| 后端 | Python 3.10+ · FastAPI · SQLAlchemy 2.0（异步）· httpx（异步 HTTP 客户端） |
+| 数据库 | SQLite（默认，零配置）/ PostgreSQL（可选） |
+| AI 服务 | AIBridge SDK（38+ 提供商：Agnes、OpenAI、Anthropic、Claude、Gemini、Qwen、DeepSeek...） |
 
-## Documentation
+## 常见问题
 
-- [Deployment (public server)](docs/deployment.md) — reverse proxy / HTTPS / backups
-- [MCP Server](docs/mcp-server-guide.md) — connect external agents / CLIs (zcode, Claude Code...) to operate canvas, editor and generation via a personal access token
+**Q：为什么需要 BFF 层，而不是直接在浏览器调用 AI API？**
 
-## FAQ
+A：两个原因 — (1) API Key 始终留在服务端，不会暴露到浏览器；(2) 服务端负责异步任务轮询、历史持久化和媒体处理，这些纯前端无法可靠完成。
 
-**Q: Why a BFF layer instead of calling the AI API directly from the browser?**
+**Q：视频生成需要多长时间？**
 
-A: Two reasons — (1) your API key stays on the server and never reaches the browser, (2) the server handles async task polling, history persistence, and media processing that a pure frontend can't do reliably.
+A：通常 2–6 分钟。平台在后台自动轮询，你可以离开当前页面，稍后回来查看结果。
 
-**Q: How long does video generation take?**
+**Q：可以使用其他兼容 OpenAI 的 API 吗？**
 
-A: Usually 2–6 minutes. The platform polls in the background — you can navigate away and check back later.
+A：可以。在设置页面添加新 Provider，填入自定义 base URL 和 API Key 即可。平台支持任何兼容 OpenAI 格式的对话、图片和视频接口。
 
-**Q: Can I use other OpenAI-compatible APIs?**
+**Q：可以部署到生产环境吗？**
 
-A: Yes. Add a new provider in Settings with your custom base URL and API key. The platform supports any OpenAI-compatible chat, image, and video endpoints.
+A：可以。构建前端（`npm run build`）后以静态文件方式部署，后端使用任何 ASGI 宿主部署。设置 `FRONTEND_ORIGINS` 和 `DATABASE_URL` 为生产环境值即可。
 
-**Q: Can I deploy this to production?**
+## 参与贡献
 
-A: Yes. Build the frontend (`npm run build`) and serve it statically. Deploy the backend with any ASGI host. Set `FRONTEND_ORIGINS` and `DATABASE_URL` for your production environment.
+欢迎参与贡献——从最顺手的方式开始：
 
-## Contributing
+- **发现 Bug？** 用[模板提交 Bug 反馈](https://github.com/WingkySky/Agnes-AI-Platform/issues/new?template=bug_report.yml)。
+- **有功能想法？** 先到 [Discussions - Ideas](https://github.com/WingkySky/Agnes-AI-Platform/discussions/categories/ideas) 发起讨论，方向对齐后再落地为 issue。
+- **想写代码？** 阅读[贡献指南](CONTRIBUTING.md)。明确欢迎 AI 辅助贡献——本项目本身就用 AI 协作开发，[AGENTS.md](AGENTS.md) 是人类与 AI 助手共用的规范。
 
-Contributions are welcome — start where it's easiest for you:
+## 许可证
 
-- **Found a bug?** [Open a bug report](https://github.com/WingkySky/Agnes-AI-Platform/issues/new?template=bug_report.yml) with the template.
-- **Have an idea?** [Start a discussion](https://github.com/WingkySky/Agnes-AI-Platform/discussions/categories/ideas) in Ideas first, then turn it into an issue once the direction is aligned.
-- **Want to code?** Read the [Contributing Guide](CONTRIBUTING.md) (in Chinese). AI-assisted contributions are explicitly welcome — the project itself is built with AI, and [AGENTS.md](AGENTS.md) is the shared spec for both humans and AI agents.
-
-## License
-
-Apache License 2.0 with Commons Clause — source code is open and free to use for personal, educational, and research purposes. **Commercial use is prohibited.** See [LICENSE](LICENSE) for details.
+Apache License 2.0 + Commons Clause — 源码开放，个人、教育和研究用途可自由使用。**禁止商用。** 详见 [LICENSE](LICENSE)。

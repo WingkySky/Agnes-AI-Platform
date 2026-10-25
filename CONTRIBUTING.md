@@ -21,7 +21,7 @@
 
 ## 开发环境
 
-按 [README - 3. 手动启动](README_zh.md#3-手动启动)从源码启动后端与前端，然后运行测试：
+按 [README - 3. 手动启动](README.md#3-手动启动)从源码启动后端与前端，然后运行测试：
 
 ```bash
 cd backend && python -m pytest    # 后端测试
