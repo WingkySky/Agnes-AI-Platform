@@ -1040,3 +1040,16 @@ Agent 一级公民批次 2：chat 内核（任意宿主/标签页）的画布/�
 | GET | `/api/auth/pat` | PAT 清单（脱敏：无 token 材料；登录级） |
 | POST | `/api/auth/pat` | 创建 PAT `{ name, permission: readonly\|full }` → 明文 `agn_pat_*` **仅此一次返回**（sha256 落库） |
 | DELETE | `/api/auth/pat/{id}` | 吊销 PAT（软删保留记录，即时生效——网关每次请求实时查表；他人令牌 404） |
+
+## 24. 存储配额（台账记账 + 两阶段预留）
+
+用户级本地存储计量与限额。台账表 `storage_objects`（只增不删，storage_key 唯一幂等）：计入用户上传（canvas 素材等）、生成产物本地归档、剪辑渲染输出；不计官方产物（preset-covers/preset-videos）、头像与 S3 转存件。
+
+**配额配置（管理员系统配置，0 = 不限制）**：`storage_quota_mb`（默认 5120，总配额）/ `daily_upload_quota_mb`（默认 2048，滚动 24h 上传上限，仅计用户主动上传）。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/storage/usage` | 我的用量 `{ total_used, total_quota(null=不限), daily_used, daily_quota }`（登录级） |
+| GET | `/api/admin/storage/overview?limit=` | 平台总量 + 用量 top N 用户（管理员级，显式鉴权） |
+
+**超限行为**：用户主动上传预检失败返回 **413**（`detail` 区分「存储空间已满」/「已达到滚动 24 小时上传上限」）；生成归档/渲染输出为软处理——超限仅告警跳过记账，不阻断生成主流程。存量归档文件按 `assets.storage_key` 在启动时幂等回填台账。

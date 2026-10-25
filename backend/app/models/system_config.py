@@ -25,6 +25,9 @@ DEFAULT_SYSTEM_CONFIGS = {
     "model.chat_default": {"value": "", "category": "model", "description": "系统默认对话模型（用户未设置偏好时的兜底，留空用注册表第一个 chat 模型）"},
     "model.moderation_chat": {"value": "", "category": "model", "description": "内容审核对话模型（留空跟随系统默认对话模型）"},
     "model.title_summary_chat": {"value": "", "category": "model", "description": "会话标题总结模型（留空跟随系统默认对话模型）"},
+    # ---------- 存储配额（管理员后台，0 = 不限制） ----------
+    "storage_quota_mb": {"value": "5120", "category": "site", "description": "每用户总存储配额 MB（含上传/生成归档/渲染输出，0 = 不限制）"},
+    "daily_upload_quota_mb": {"value": "2048", "category": "site", "description": "每用户滚动 24h 上传上限 MB（仅用户主动上传，0 = 不限制）"},
 }
 
 

@@ -149,6 +149,11 @@ async def ingest_generation_asset(
     await db.commit()
     await db.refresh(asset)
 
+    # 存储配额记账（best-effort；S3 件/文件缺失时内部跳过）
+    if storage_key:
+        from app.services.storage_quota import record_file, SOURCE_GENERATION
+        await record_file(user_id=generation.user_id, storage_key=storage_key, source=SOURCE_GENERATION)
+
     logger.info(
         "[资产入库] generation_id=%s asset_id=%s work_id=%s type=%s kind=%s",
         generation.id, asset.id, asset.work_id, asset_type, kind,
@@ -213,6 +218,15 @@ async def archive_final_video(
     db.add(asset)
     await db.commit()
     await db.refresh(asset)
+
+    # 存储配额记账（best-effort）
+    if final_video_url.startswith("/uploads/"):
+        from app.services.storage_quota import record_file, SOURCE_RENDER
+        await record_file(
+            user_id=user_id,
+            storage_key=final_video_url.removeprefix("/uploads/"),
+            source=SOURCE_RENDER,
+        )
 
     logger.info(
         "[创作归档] 成片已归档: project_id=%s asset_id=%s", project_id, asset.id,

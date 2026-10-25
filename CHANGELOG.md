@@ -8,6 +8,16 @@
 
 - pydantic-settings 对 List 类型复杂字段做严格 JSON 预解码，`.env`/环境变量写逗号分隔格式（`FRONTEND_ORIGINS=http://a,http://b`）会在解码阶段直接抛 SettingsError（`parse_origins` validator 无机会运行）。`frontend_origins` 加 `NoDecode` 跳过预解码，交由既有 `parse_origins` 统一兼容 JSON 数组/逗号分隔两种格式；`.env.example` 注释同步。四场景实测：逗号分隔（环境变量/.env 文件）、JSON 数组、默认值全部正常，pytest 310 绿
 
+### 存储配额（可靠性三件套 ②：台账记账 + 两阶段预留）
+
+- **新表 storage_objects 用户存储台账**（只增不删，storage_key 唯一索引幂等）：user_id/bytes/kind/source(upload/generation/render)/created_at；用量 = SUM(bytes) per user；S3 转存件不占本地账
+- **两阶段预留**：用户主动上传先预检（每用户总配额 + 滚动 24h 上传量，双维度）→ 落盘成功记账；预检不预占行，单实例并发同检的少量超卖可接受；超限 **413**（detail 区分「存储空间已满」/「24 小时上传上限」）
+- **三路接入**：`save_upload_file` 加 user_id/source 可选参（canvas 素材上传接线；preset-covers 官方目录不计）；生成产物归档 `ingest_generation_asset`（source=generation）与成片归档（source=render）；剪辑渲染成片落盘记账（软处理：记账失败仅告警，绝不阻断已扣积分的生成/渲染主链路）
+- **配置**：系统配置新增 `storage_quota_mb`（默认 5120）/`daily_upload_quota_mb`（默认 2048），**0 = 不限制**；v1 不做 per-user 覆盖
+- **存量回填**：`ensure_storage_ledger` 挂 lifespan ensure 链路（幂等），按 assets.storage_key 补台账（本地文件存在才计）；canvas 历史孤儿文件无法归属不回填
+- **端点与前端**：`GET /api/storage/usage`（登录级，used/quota + 24h 上传）+ `GET /api/admin/storage/overview`（管理员，平台总量 + top N 用户，显式挂鉴权）；个人资料页新增「存储用量」卡（总量/每日两行 + 进度条，quota 为 null 显示未启用）
+- 测试 pytest 327（+8：预检三态/每日只计上传且滚动窗口/记账幂等与 S3 跳过/回填幂等/端点鉴权三态/canvas 超限 413 集成）；vitest 657 + vue-tsc + build 绿；**坑：system_config 60s 内存缓存会跨测试泄漏配额值，测试后须清 `_config_cache`**；Mimosa 新文件拦 `db.execute` 聚合 → 实体取回 Python 聚合（概览低频可承受）
+
 ### 任务恢复体系（可靠性三件套 ①：重启不丢任务、积分对账退款）
 
 - **generations 表升级为任务账本**：提交即落 `pending` 行（新增 `video_id` 恢复凭据列——上游可能只返回 video_id 无 task_id、`context` 完整创作上下文列——恢复续轮询回填用；dev 库已 ALTER），终态由轮询器按 (user_id, task_id, type) **幂等 upsert** 同一行（`persist_generation`/`persist_generation_failure` 改 fetch-or-create，重放不重复插行不重复退款）；pending 行保守初值 `is_public=False`+`moderation_status='approved'`（不泄漏进广场/审核队列）

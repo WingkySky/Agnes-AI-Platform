@@ -48,6 +48,7 @@ from app.routes import logs as logs_route
 from app.routes import providers as providers_route
 from app.routes import admin as admin_route
 from app.routes import credits as credits_route
+from app.routes import storage as storage_route
 from app.routes import proxy as proxy_route
 from app.routes import preferences as preferences_route
 from app.routes import plaza as plaza_route
@@ -180,6 +181,12 @@ async def lifespan(app: FastAPI):
     # 剪辑渲染：复位上次进程中断遗留的 rendering 态
     from app.services.editor import render_service as editor_render_service
     await editor_render_service.reset_stale_rendering()
+
+    # 存储配额：存量归档文件回填台账（幂等，按 assets.storage_key）
+    from app.services.storage_quota import ensure_storage_ledger
+    async with async_session() as db:
+        await ensure_storage_ledger(db)
+    logger.info("✓ 存储台账已就绪")
 
     logger.info("🚀 Agnes AI Platform（全异步架构）后端服务已启动")
 
@@ -324,6 +331,7 @@ app.include_router(videos.router, prefix="/api", tags=["视频生成"])
 app.include_router(history_route.router, prefix="/api", tags=["生成历史"])
 app.include_router(chat_route.router, prefix="/api", tags=["AI 聊天"])
 app.include_router(logs_route.router, prefix="/api", tags=["日志查询"])
+app.include_router(storage_route.router, prefix="/api", tags=["存储"])
 app.include_router(auth_route.router, prefix="/api", tags=["用户认证"])
 app.include_router(admin_route.router, prefix="/api", tags=["管理员-积分规则"])
 app.include_router(credits_route.router, prefix="/api", tags=["积分明细"])

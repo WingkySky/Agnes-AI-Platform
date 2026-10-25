@@ -53,6 +53,8 @@ async def save_upload_file(
     *,
     allowed_types: Optional[set] = None,
     max_size: int = MAX_FILE_BYTES,
+    user_id: Optional[int] = None,
+    source: str = "upload",
 ) -> str:
     """
     保存上传文件到本地 uploads 目录
@@ -62,6 +64,8 @@ async def save_upload_file(
         folder: 子目录（如 projects/123/characters）
         allowed_types: 允许的 MIME 类型集合，None 则用 ALLOWED_ALL
         max_size: 最大字节数
+        user_id: 传入时启用存储配额（预检 + 落盘记账），官方/系统目录不传
+        source: 台账来源（upload/generation/render）
     Returns:
         可访问的 URL（如 /uploads/projects/123/...）
     """
@@ -79,6 +83,11 @@ async def save_upload_file(
             status_code=400,
             detail=f"文件过大，最大 {max_size // 1024 // 1024}MB",
         )
+
+    # 存储配额预检（总量 + 滚动 24h 上传量），超限 413
+    if user_id:
+        from app.services.storage_quota import check_upload_quota
+        await check_upload_quota(user_id, len(content))
 
     # 确保目录存在（folder 含穿越成分时拒绝）
     try:
@@ -111,6 +120,17 @@ async def save_upload_file(
 
     url = f"/uploads/{folder}/{filename}"
     logger.info(f"[文件上传] 保存到 {filepath}, url={url}")
+
+    # 落盘成功后记账（best-effort）
+    if user_id:
+        from app.services.storage_quota import record_file
+        await record_file(
+            user_id=user_id,
+            storage_key=f"{folder}/{filename}",
+            source=source,
+            bytes_size=len(content),
+        )
+
     return url
 
 

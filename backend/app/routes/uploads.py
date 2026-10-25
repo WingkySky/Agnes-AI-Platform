@@ -61,5 +61,5 @@ async def upload_canvas_asset(
     - 复用 upload_service：图片+视频白名单、单文件 100MB
     - 上传后节点直接引用返回 URL，换设备打开不依赖浏览器本地数据
     """
-    url = await save_upload_file(file, folder="canvas/assets")
+    url = await save_upload_file(file, folder="canvas/assets", user_id=current_user.id)
     return ok(data={"url": url})

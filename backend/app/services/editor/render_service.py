@@ -212,6 +212,11 @@ async def _render_project(db: AsyncSession, project: EditingProject) -> None:
     project.render_progress = None
     project.render_error = None
     await db.commit()
+
+    # 存储配额记账（best-effort，软处理：失败不影响渲染结果）
+    from app.services.storage_quota import record_file, SOURCE_RENDER
+    await record_file(user_id=project.user_id, storage_key=storage_key, source=SOURCE_RENDER, kind="video")
+
     logger.info("[剪辑渲染] 完成 uid=%s → %s", project.uid, storage_key)
 
 

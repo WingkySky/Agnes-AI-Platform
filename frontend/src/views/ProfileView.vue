@@ -112,12 +112,33 @@
           </el-form-item>
         </el-form>
       </section>
+
+      <!-- ============ 存储用量区 ============ -->
+      <section class="profile-card storage-card">
+        <h3 class="card-title">{{ t('profile.storageTitle') }}</h3>
+        <div v-if="usage" class="storage-body">
+          <div class="storage-line">
+            <span class="storage-label">{{ t('profile.storageTotal') }}</span>
+            <span class="storage-value">{{ storageText }}</span>
+          </div>
+          <el-progress
+            v-if="usage.total_quota"
+            :percentage="storagePercent"
+            :stroke-width="8"
+          />
+          <div v-if="usage.daily_quota" class="storage-line storage-daily">
+            <span class="storage-label">{{ t('profile.storageDaily') }}</span>
+            <span class="storage-value">{{ dailyText }}</span>
+          </div>
+          <p v-if="!usage.total_quota" class="form-hint">{{ t('profile.storageUnlimited') }}</p>
+        </div>
+      </section>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   UserFilled, User, Message, Camera, Loading, Check,
@@ -125,9 +146,43 @@ import {
 import { useI18n } from '@/i18n'
 import { formatTime } from '@/lib/format'
 import { useUserStore } from '@/stores/user'
+import { getStorageUsage, formatBytes, type StorageUsage } from '@/api/storage'
 
 const { t } = useI18n()
 const userStore = useUserStore()
+
+// ============ 存储用量 ============
+const usage = ref<StorageUsage | null>(null)
+
+onMounted(async () => {
+  try {
+    usage.value = await getStorageUsage()
+  } catch {
+    // 用量加载失败静默（非关键信息）
+  }
+})
+
+const storagePercent = computed(() => {
+  const q = usage.value?.total_quota
+  if (!q) return 0
+  return Math.min(100, Math.round(((usage.value?.total_used ?? 0) / q) * 100))
+})
+
+const storageText = computed(() => {
+  const u = usage.value
+  if (!u) return '—'
+  return u.total_quota
+    ? `${formatBytes(u.total_used)} / ${formatBytes(u.total_quota)}`
+    : formatBytes(u.total_used)
+})
+
+const dailyText = computed(() => {
+  const u = usage.value
+  if (!u) return '—'
+  return u.daily_quota
+    ? `${formatBytes(u.daily_used)} / ${formatBytes(u.daily_quota)}`
+    : formatBytes(u.daily_used)
+})
 
 // ============ 头像上传 ============
 const fileInputRef = ref<HTMLInputElement | null>(null)
@@ -349,5 +404,26 @@ async function handleSaveProfile() {
   font-size: 14px;
   color: var(--agnes-text-primary);
   line-height: 32px;
+}
+.storage-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.storage-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 13px;
+}
+.storage-label {
+  color: var(--agnes-text-muted);
+}
+.storage-value {
+  color: var(--agnes-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.storage-daily {
+  margin-top: 2px;
 }
 </style>
