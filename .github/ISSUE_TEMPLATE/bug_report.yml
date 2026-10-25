@@ -1,0 +1,58 @@
+name: Bug 反馈
+description: 报告一个可以复现的问题
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！信息填得越全，问题修得越快。
+  - type: dropdown
+    id: environment
+    attributes:
+      label: 环境方式
+      description: 你是怎么部署/运行本项目的？
+      options:
+        - Docker
+        - 便携包（Windows / macOS）
+        - 源码启动
+        - 其他
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本号
+      description: 设置页「关于」可查，或仓库根目录 VERSION 文件
+      placeholder: 例如 v0.0.11
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 从哪一步开始、做了什么操作
+      placeholder: |
+        1. 打开 xx 页面
+        2. 点击 xx
+        3. 出现 xx
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为 vs 实际行为
+      placeholder: 我期望……，实际却……
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志片段（可选）
+      description: backend/logs/ 下的相关日志，或浏览器控制台报错
+      render: shell
+  - type: input
+    id: contact
+    attributes:
+      label: 联系方式（可选）
+      placeholder: 邮箱等，方便进一步沟通

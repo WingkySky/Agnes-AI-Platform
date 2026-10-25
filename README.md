@@ -213,6 +213,14 @@ A: Yes. Add a new provider in Settings with your custom base URL and API key. Th
 
 A: Yes. Build the frontend (`npm run build`) and serve it statically. Deploy the backend with any ASGI host. Set `FRONTEND_ORIGINS` and `DATABASE_URL` for your production environment.
 
+## Contributing
+
+Contributions are welcome — start where it's easiest for you:
+
+- **Found a bug?** [Open a bug report](https://github.com/WingkySky/Agnes-AI-Platform/issues/new?template=bug_report.yml) with the template.
+- **Have an idea?** [Start a discussion](https://github.com/WingkySky/Agnes-AI-Platform/discussions/categories/ideas) in Ideas first, then turn it into an issue once the direction is aligned.
+- **Want to code?** Read the [Contributing Guide](CONTRIBUTING.md) (in Chinese). AI-assisted contributions are explicitly welcome — the project itself is built with AI, and [AGENTS.md](AGENTS.md) is the shared spec for both humans and AI agents.
+
 ## License
 
 Apache License 2.0 with Commons Clause — source code is open and free to use for personal, educational, and research purposes. **Commercial use is prohibited.** See [LICENSE](LICENSE) for details.

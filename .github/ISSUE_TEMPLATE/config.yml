@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 功能建议 / 想法
+    url: https://github.com/WingkySky/Agnes-AI-Platform/discussions/categories/ideas
+    about: 新功能想法请先到 Discussions 的 Ideas 区发起讨论，方向对齐后再转 issue
+  - name: 使用问题
+    url: https://github.com/WingkySky/Agnes-AI-Platform/discussions/categories/q-a
+    about: 安装、部署、使用中的疑问请到 Q&A 区提问

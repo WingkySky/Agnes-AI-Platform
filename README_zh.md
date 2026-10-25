@@ -206,6 +206,14 @@ A：可以。在设置页面添加新 Provider，填入自定义 base URL 和 AP
 
 A：可以。构建前端（`npm run build`）后以静态文件方式部署，后端使用任何 ASGI 宿主部署。设置 `FRONTEND_ORIGINS` 和 `DATABASE_URL` 为生产环境值即可。
 
+## 参与贡献
+
+欢迎参与贡献——从最顺手的方式开始：
+
+- **发现 Bug？** 用[模板提交 Bug 反馈](https://github.com/WingkySky/Agnes-AI-Platform/issues/new?template=bug_report.yml)。
+- **有功能想法？** 先到 [Discussions - Ideas](https://github.com/WingkySky/Agnes-AI-Platform/discussions/categories/ideas) 发起讨论，方向对齐后再落地为 issue。
+- **想写代码？** 阅读[贡献指南](CONTRIBUTING.md)。明确欢迎 AI 辅助贡献——本项目本身就用 AI 协作开发，[AGENTS.md](AGENTS.md) 是人类与 AI 助手共用的规范。
+
 ## 许可证
 
 Apache License 2.0 + Commons Clause — 源码开放，个人、教育和研究用途可自由使用。**禁止商用。** 详见 [LICENSE](LICENSE)。
