@@ -101,7 +101,7 @@ import { useCanvasStore } from '@/stores/canvas'
 import { useModelsStore } from '@/stores/models'
 import ComposerParamBar from '@/components/canvas/ComposerParamBar.vue'
 import PromptOptimizeDialog from '@/components/PromptOptimizeDialog.vue'
-import { createChatSession, sendMessageStream } from '@/api/chat'
+import { sseChatComplete } from '@/lib/storyboard/transport'
 import { getErrorMessage } from '@/lib/type-helpers'
 import { getUpstreamNodes } from '@/lib/canvas-generation'
 import { mergeExtractedAssets, readAssets, readShots } from '@/lib/canvas-storyboard'
@@ -333,33 +333,49 @@ async function sendScript() {
   }
 }
 
-/** text：提示词 → 聊天 SSE 流式回填节点内容（会话 id 存节点复用） */
+/** text 节点对话轻量 system：直接输出正文不寒暄（随请求前插，不落节点存储） */
+const TEXT_NODE_SYSTEM = '你是画布文本节点的写作助手。根据用户指示直接输出正文内容，不要寒暄，不要额外解释。'
+
+type ChatHistoryEntry = { role: 'user' | 'assistant'; content: string }
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null
+}
+
+/** 守卫式校验节点存储的历史条目（画布 JSON 可能被手工编辑，坏条目直接剔除） */
+function isHistoryEntry(m: unknown): m is ChatHistoryEntry {
+  if (!isRecord(m)) return false
+  return (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.length > 0
+}
+
+/** text：提示词 → LLM 透传通道流式回填节点内容（多轮历史随节点 content.messages 存画布） */
 async function sendText() {
   if (!panel.value) return
+  const targetId = panel.value.id
   busy.value = true
   try {
-    let sessionId = typeof panel.value.content?.chat_session_id === 'number'
-      ? panel.value.content.chat_session_id
-      : null
-    if (!sessionId) {
-      const session = await createChatSession({ title: panel.value.name || 'Canvas Text' })
-      sessionId = session.id
-      updateContent({ chat_session_id: sessionId })
-    }
+    const raw = panel.value.content?.messages
+    const history = Array.isArray(raw) ? raw.filter(isHistoryEntry) : []
+    const userMsg: ChatHistoryEntry = { role: 'user', content: text.value.trim() }
     let acc = ''
-    updateContent({ content: '', status: 'loading' })
-    await sendMessageStream(sessionId, text.value.trim(), [], (event) => {
-      if (event.type === 'text' && event.content) {
-        acc += event.content
-        updateContent({ content: acc, status: 'loading' })
-      } else if (event.type === 'error') {
-        throw new Error(event.content || t('canvas.composer.generateFailed'))
-      }
+    store.updatePanel(targetId, { content: { content: '', status: 'loading' } })
+    const reply = await sseChatComplete(
+      [{ role: 'system', content: TEXT_NODE_SYSTEM }, ...history, userMsg],
+      {
+        model: modelsStore.getDefaultModel('chat') || undefined,
+        onDelta: (chunk) => {
+          acc += chunk
+          store.updatePanel(targetId, { content: { content: acc, status: 'loading' } })
+        },
+      },
+    )
+    const assistantMsg: ChatHistoryEntry = { role: 'assistant', content: reply }
+    store.updatePanel(targetId, {
+      content: { content: reply, status: 'idle', messages: [...history, userMsg, assistantMsg] },
     })
-    updateContent({ content: acc, status: 'idle' })
-    text.value = ''
+    if (panel.value?.id === targetId) text.value = ''
   } catch (err) {
-    updateContent({ status: 'idle' })
+    store.updatePanel(targetId, { content: { status: 'idle' } })
     ElMessage.error(getErrorMessage(err) || t('canvas.composer.generateFailed'))
   } finally {
     busy.value = false

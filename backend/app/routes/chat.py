@@ -1,21 +1,20 @@
 # =====================================================
-# 聊天路由（全异步 + SSE 流式响应）
+# 聊天路由（全异步）
 #
 # POST   /api/chat/sessions              - 创建新会话
 # GET    /api/chat/sessions              - 获取会话列表
 # GET    /api/chat/sessions/{id}         - 获取会话详情（含消息）
 # DELETE /api/chat/sessions/{id}         - 删除会话
-# POST   /api/chat/sessions/{id}/messages - 发送消息（SSE 流式响应）
 # GET    /api/chat/sessions/{id}/messages - 获取会话消息列表
 # POST   /api/chat/media-callback        - 媒体生成完成回调（更新消息中的 media_items）
 # GET    /api/chat/media-status/{task_id} - 查询媒体生成状态
 # POST   /api/chat/agent-sessions        - 创建画布 Agent 会话（type=canvas）
 # PUT    /api/chat/agent-sessions/{id}   - 全量同步画布会话（context + 消息行）
 # GET    /api/chat/agent-sessions/{id}   - 读取画布会话（context + 消息，恢复单请求）
+# POST   /api/chat/completions           - LLM 流式透传（前端内核/管线/节点对话共用）
 #
 # 关键设计：
-#   - 发送消息使用 SSE（Server-Sent Events）流式返回 AI 回复
-#   - 工具调用（生图/生视频）结果通过 SSE 事件实时推送
+#   - LLM 编排全部住前端（pi 内核/透传通道），旧服务端编排端点已退役
 #   - 消息持久化到数据库，刷新页面后可恢复历史
 #   - 媒体项使用 media_items JSON 数组，支持多图/多视频
 #   - 媒体生成完成后，前端通过回调接口更新消息的 media_items
@@ -34,7 +33,6 @@ from sqlalchemy import delete, desc, func
 
 from app.core.database import get_async_db, async_session
 from app.core.response import ok
-from app.core.config import settings
 from app.core.security import get_current_user_optional
 from app.models.chat import ChatSession, ChatMessage
 from app.models.user import User
@@ -97,28 +95,6 @@ class CreateSessionRequest(BaseModel):
 class UpdateSessionRequest(BaseModel):
     """修改会话标题请求"""
     title: str = Field(..., min_length=1, max_length=200, description="新的会话标题")
-
-
-class SendMessageRequest(BaseModel):
-    """发送消息请求
-    - content: 消息文本（可为空字符串，此时以附件为主）
-    - attachments: 可选的参考图列表（单张 ≤ 5MB，总数 ≤ 10）
-    - camera_params: 可选的摄像机参数，前端 camera store 当前值
-    - preset_ref: 可选，用户选择的预设 ID（仅当前轮有效）
-    """
-    content: str = Field(default="", description="消息内容（可为空字符串）")
-    attachments: Optional[List[Dict[str, Any]]] = Field(
-        default=None,
-        description="参考图列表，每项: {name, base64_image, size, mime_type"
-    )
-    camera_params: Optional[Dict[str, Any]] = Field(
-        default=None,
-        description="摄像机参数，含 enabled(bool) 及各摄像参数字段"
-    )
-    preset_ref: Optional[int] = Field(
-        default=None,
-        description="用户选择的预设 ID（仅当前轮有效）"
-    )
 
 
 class MediaCallbackRequest(BaseModel):
@@ -396,51 +372,6 @@ async def get_agent_session(
     data["context"] = session.context
     data["messages"] = [m.to_dict() for m in msgs.scalars().all()]
     return ok(data=data)
-
-
-@router.post("/chat/sessions/{session_id}/messages", summary="发送消息（SSE 流式响应）")
-async def send_message(
-    req: SendMessageRequest,
-    _api_key: None = Depends(require_agnes_api_key),
-    session: ChatSession = Depends(get_owned_session),
-    db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
-):
-    """
-    发送消息并获取 AI 流式回复（SSE，按用户隔离）。
-
-    SSE 事件格式（每行以 "data: " 开头）：
-    - {"type": "user_message", "message": {...}} — 用户消息已保存
-    - {"type": "text", "content": "..."} — AI 文本增量
-    - {"type": "tool_call", "tool": "generate_image", "args": {...}} — 工具调用
-    - {"type": "tool_result", "tool": "generate_image", "result": {...}} — 工具结果
-    - {"type": "assistant_message", "message": {...}} — AI 消息已保存
-    - {"type": "done"} — 结束
-    """
-    # 附件校验与清洗（大小/数量/格式，非法格式跳过并告警）
-    validated_attachments = chat_service.validate_attachments(req.attachments)
-
-    # 允许 content 为空但有附件（用户可以"只甩一张图说画图"）
-    if not req.content.strip() and not validated_attachments:
-        raise HTTPException(status_code=400, detail="消息内容不能为空")
-
-    return StreamingResponse(
-        await chat_service.stream_reply(
-            db,
-            session,
-            content=req.content,
-            attachments=validated_attachments,
-            user_id=current_user.id if current_user else None,
-            camera_params=req.camera_params,
-            preset_ref=req.preset_ref,
-        ),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
 
 
 # =====================================================

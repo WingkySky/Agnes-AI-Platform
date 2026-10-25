@@ -1,21 +1,28 @@
 /* =====================================================
- * 分镜管线 LLM 子调用通道（lib/storyboard）
+ * 通用 LLM 透传通道（lib/storyboard）
  *
  * - 走后端 /api/chat/completions 流式透传（与画布 Agent 内核同一通道）
+ * - 消费方：分镜管线（transport 注入单测）、画布 text 节点对话、图片反推
  * - SSE 行解析累积 delta.content；model 可选（后端校验聊天注册表，未命中走默认解析链）
- * - pipeline 函数全部接受 transport 参数：单测注入假 transport，不经网络
  * ===================================================== */
 
 import { getAuthHeaders } from '@/api/chat'
 
+/** OpenAI 多模态内容块（透传端点原样转发） */
+export type ChatContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } }
+
 export interface ChatMessage {
   role: 'user' | 'system' | 'assistant'
-  content: string
+  content: string | ChatContentPart[]
 }
 
 export interface ChatCallOptions {
   temperature?: number
   model?: string
+  /** 增量回调：每收到一段 delta.content 触发一次 */
+  onDelta?: (chunk: string) => void
 }
 
 /** LLM 子调用通道：输入消息序列，返回全文 */
@@ -65,7 +72,11 @@ export const sseChatComplete: ChatTransport = async (messages, opts) => {
       const payload = trimmed.slice(6)
       if (payload === '[DONE]') continue
       try {
-        text += deltaText(JSON.parse(payload))
+        const chunk = deltaText(JSON.parse(payload))
+        if (chunk) {
+          text += chunk
+          opts?.onDelta?.(chunk)
+        }
       } catch {
         // 非 JSON 行忽略
       }

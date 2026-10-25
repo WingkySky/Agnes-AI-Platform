@@ -608,7 +608,8 @@ import {
   createWorkspaceFromTemplate,
 } from '@/lib/canvas-templates'
 // 画布生成：上游节点查找（用于配置节点 prompt 为空时检查上游文本）+ 生成归档上下文
-import { getUpstreamNodes, buildCanvasContext, resumeLoadingCanvasNodes, resolvePromptMentions, executeSourceImageGeneration, executeSourceVideoGeneration, entityCardLinkId, type CanvasGenerationStore, type GenerationContext } from '@/lib/canvas-generation'
+import { getUpstreamNodes, buildCanvasContext, resumeLoadingCanvasNodes, resolvePromptMentions, executeSourceImageGeneration, executeSourceVideoGeneration, entityCardLinkId, buildReversePromptMessages, type CanvasGenerationStore, type GenerationContext } from '@/lib/canvas-generation'
+import { sseChatComplete } from '@/lib/storyboard/transport'
 import { createBatchContent, fillCellFromNode, readBatchContent } from '@/lib/canvas-batch-table'
 // 分镜派生：单镜头图生视频 + 整组重跑的批量积分确认
 import { confirmGroupedCost, deriveVideoForShot, deriveTailFrameFromImageNode, derivePrevFrameFromImageNode, deriveChainVideosFromImageNode, getShotLineageInfo, readShots } from '@/lib/canvas-storyboard'
@@ -2618,62 +2619,19 @@ async function handleHoverDescribe() {
   })
 
   try {
-    const { createChatSession, sendMessageStream, deleteChatSession } = await import('@/api/chat')
-
-    // 创建临时会话
-    const session = await createChatSession({ title: '图片反推' })
-    const sessionId = session.id
-
-    // 反推指令：让 AI 描述图片并输出适合 AI 绘画的英文提示词
-    // 措辞要点：明确这是"看图描述"任务，不是"生成图片"任务，避免 AI 误触发生图工具
-    const prompt = [
-      '【任务】图片反推（Image Captioning / Reverse Prompting）',
-      '附件中已提供一张图片，请你仔细观察这张图片，然后用英文写一段详细的提示词（prompt），',
-      '让另一个 AI 绘画模型能根据这段提示词重新生成类似的图片。',
-      '',
-      '要求：',
-      '1. 这是图片理解任务，不要生成任何新图片，不要调用 generate_image 等工具',
-      '2. 只输出一段英文提示词，不要输出中文，不要解释，不要客套话',
-      '3. 提示词应包含：主体内容、风格、构图、光线、色彩、细节等关键信息',
-      '4. 以英文逗号分隔的关键词或短语为主，类似 "a cat sitting on a wooden table, warm lighting, ..."',
-    ].join('\n')
-    // 附件格式根据图片来源选择：
-    //   - data: URL（base64）→ base64_image 字段，传完整 data URI（后端要求以 "data:image/" 开头）
-    //   - http(s) URL → image_url 字段（后端拉取后传给 AI）
-    let attachments: any[]
-    if (imageUrl.startsWith('data:')) {
-      // 直接传完整 data URL，后端会作为多模态 image_url 注入给 AI
-      attachments = [{
-        name: 'image.png',
-        base64_image: imageUrl,
-        size: imageUrl.length,
-        mime_type: 'image/png',
-        source: 'base64' as const,
-      }]
-    } else {
-      // 远程 http(s) URL —— 直接传给后端，后端再传给 AI 服务
-      // （代理只用于浏览器 canvas 像素操作，AI 服务能直接访问远程 URL）
-      attachments = [{ source: 'url' as const, url: imageUrl, name: 'image', size: 0, mime_type: 'image/url' }]
-    }
-
     let resultText = ''
 
-    // SSE 流式接收：text 事件携带 event.content 增量文本
-    await sendMessageStream(
-      sessionId,
-      prompt,
-      attachments,
-      (event) => {
-        if (event.type === 'text' && event.content) {
-          resultText += event.content
-          // 实时更新文字节点内容，让用户看到生成过程
-          store.updatePanel(textNodeId, { content: { content: resultText } })
-          // 同步写入图片节点的 prompt 字段（供 Copy Prompt 使用）
-          store.updatePanel(panel.id, { content: { prompt: resultText } })
-        }
-        // done / 其他事件类型无需额外处理
-      }
-    )
+    // SSE 流式接收：增量双写文字节点与图片节点 prompt（模型走偏好默认对话链）
+    await sseChatComplete(buildReversePromptMessages(imageUrl), {
+      model: useModelsStore().getDefaultModel('chat') || undefined,
+      onDelta: (chunk) => {
+        resultText += chunk
+        // 实时更新文字节点内容，让用户看到生成过程
+        store.updatePanel(textNodeId, { content: { content: resultText } })
+        // 同步写入图片节点的 prompt 字段（供 Copy Prompt 使用）
+        store.updatePanel(panel.id, { content: { prompt: resultText } })
+      },
+    })
 
     // 最终写入 prompt 并清除 loading 状态
     const finalText = resultText.trim()
@@ -2687,13 +2645,6 @@ async function handleHoverDescribe() {
     store.updatePanel(textNodeId, { content: { content: finalText, status: 'success' } })
     store.pushSnapshot()
     ElMessage.success(t('canvas.messages.promptGenerated'))
-
-    // 删除临时会话（失败可忽略）
-    try {
-      await deleteChatSession(sessionId)
-    } catch (e) {
-      // 忽略删除失败
-    }
   } catch (err) {
     console.error('[canvas] describe error:', err)
     store.updatePanel(panel.id, { content: { describing: false } })

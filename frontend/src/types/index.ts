@@ -399,13 +399,6 @@ export interface MessageAttachment {
 
 /** 创建会话请求 — 对齐 CreateSessionRequest */
 /** 更新会话标题请求 — 对齐 UpdateSessionRequest */
-/** 发送消息请求 — 对齐 SendMessageRequest */
-export interface SendMessageRequest {
-  content: string
-  attachments?: MessageAttachment[] | null
-  camera_params?: Record<string, any> | null
-  preset_ref?: number | null
-}
 
 /** 媒体回调请求 — 对齐 MediaCallbackRequest */
 export interface MediaCallbackRequest {
@@ -424,28 +417,6 @@ export interface MediaStatusResponse {
   image_url?: string | null
   progress?: number
   message?: string | null
-}
-
-/** SSE 事件类型 */
-export interface SSEEvent {
-  type: 'user_message' | 'text' | 'tool_call' | 'tool_result' | 'assistant_message' | 'assistant_message_created' | 'title_updated' | 'error' | 'done'
-  content?: string
-  message?: ChatMessage
-  tool?: string
-  args?: Record<string, unknown>
-  result?: ToolResult
-  title?: string
-}
-
-/** 工具调用结果 */
-export interface ToolResult {
-  media_type: 'image' | 'video'
-  url?: string
-  task_id?: string
-  video_id?: string
-  status?: string
-  prompt?: string
-  error?: string
 }
 
 /** 会话列表响应 */

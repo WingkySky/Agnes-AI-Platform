@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### 对话编排端点退役（画布两处 LLM 调用迁前端透传通道，chat_service -1700 行）
+
+- **历史归属改随节点存画布**：text 节点多轮对话历史从后端 `chat_sessions` 表迁到节点 `content.messages`（user/assistant 条目，守卫式校验剔除坏行），随画布本地+云端持久化、跟着节点复制/删除/跨设备走；旧 `chat_session_id` 字段废弃（项目未上线不兼容）。宿主会话列表不再混入以节点名命名的「幽灵会话」，聊天表回归宿主单一职责
+- **通用透传通道**：`lib/storyboard/transport.ts` 扩展为通用 LLM 通道（分镜管线/text 节点对话/图片反推共用）——`ChatMessage.content` 支持 OpenAI 多模态 content parts（text/image_url）、`ChatCallOptions` 加 `onDelta` 增量回调，接口向后兼容
+- **text 节点对话重写**（CanvasNodeComposer）：`sseChatComplete` 流式调用（模型走 `getDefaultModel('chat')` 偏好链，与宿主同链）+ 固定轻量 system（直接输出正文不寒暄，随请求前插不落存储）；捕获目标节点 id，切换节点不再把流式内容串写到别的节点（旧链路存量隐患顺带修复）
+- **图片反推重写**（CanvasView 悬停工具栏）：单次 `sseChatComplete` 调用（data: URI 与 http URL 同走 image_url 形状），反推指令抽 `buildReversePromptMessages` 纯函数（lib/canvas-generation）；不再建/删临时会话，流式双写两个节点的 UI 行为与原来一致
+- **后端删除**：`POST /api/chat/sessions/{id}/messages` 编排端点 + `SendMessageRequest` 退役；chat_service 从 2046 行减至 ~340 行（删 `stream_reply`/`_reply_event_stream`/`chat_stream`/`_stream_chat_api`/`_execute_tool`/`_execute_generate_image`/`_execute_generate_video`/`build_history`/`validate_attachments` 等整条服务端编排与工具执行链 + CHAT_TOOLS/SYSTEM_PROMPT），保留 `open_completions_stream`（透传）/`summarize_session_title`（宿主标题）/`refresh_message_media_items`（宿主历史恢复）；前端删 `sendMessageStream` 与孤儿类型（SendMessageRequest/SSEEvent/ToolResult）；GET messages（宿主恢复在用）与会话 CRUD 全保留
+- **测试**：pytest 310（+1：编排端点退役 404 + GET messages 存活双向锁死）；vitest 657（+6：transport 消息组装/多模态形状/onDelta 增量/空回复报错/非 200 报错 + 反推消息构造）；vue-tsc 0 错 + build 过
+
 ## [0.0.11] - 2026-10-12
 
 ### MCP 接入独立页（信息架构：个人资料页 → 侧边栏一等条目）

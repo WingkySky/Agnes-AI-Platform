@@ -723,11 +723,11 @@ multipart 上传，支持 jpeg/png/webp，≤5MB，存 `uploads/preset-covers/`�
 
 仅管理员可用；用户自建卡通过上传或「从生成记录选图」设置封面。
 
-## 12. 画布 Agent LLM 透传
+## 12. LLM 流式透传
 
-### POST /api/chat/completions — LLM 透传（画布 Agent 前端内核专用，SSE 流式）
+### POST /api/chat/completions — LLM 透传（前端内核/分镜管线/画布节点对话共用，SSE 流式）
 
-代理 Agnes Chat API 的流式调用。工具循环由前端驱动（画布 Agent 内核 `lib/agent/kernel.ts`），本端点**不落会话库**；API key 仅存后端 `.env`，前端不接触。请求为 OpenAI Chat Completions 形状的子集：
+代理 Agnes Chat API 的流式调用。LLM 编排全部住前端（Agent 内核 `lib/agent/kernel.ts`、分镜管线、画布 text 节点对话与图片反推走 `lib/storyboard/transport`），本端点**不落会话库**；API key 仅存后端 `.env`，前端不接触。请求为 OpenAI Chat Completions 形状的子集：
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|

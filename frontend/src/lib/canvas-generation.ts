@@ -23,6 +23,7 @@ import { useModelsStore } from '@/stores/models'
 import { usePreferencesStore } from '@/stores/preferences'
 import { isMediaSuccess, isMediaFailed } from '@/lib/media-status'
 import { captureVideoFrame, getVideoTime } from '@/lib/canvas-image-ops'
+import type { ChatMessage } from '@/lib/storyboard/transport'
 import type { CanvasPanel, CanvasConnection } from '@/stores/canvas'
 import type { ImageGenerationRequest, VideoGenerationRequest, GenerationContextPayload } from '@/types'
 import { getErrorMessage, getErrorCategory } from '@/lib/type-helpers'
@@ -1491,4 +1492,32 @@ export function resumeLoadingCanvasNodes(store: CanvasGenerationStore): void {
         resumingPanelIds.delete(panel.id)
       })
   }
+}
+
+// ---------- 图片反推（悬停工具栏「反推提示词」，CanvasView 调用） ----------
+
+/** 反推指令：让 AI 看图输出适合 AI 绘画的英文提示词（LLM 指令非 UI 文案） */
+const REVERSE_PROMPT_INSTRUCTION = [
+  '【任务】图片反推（Image Captioning / Reverse Prompting）',
+  '附件中已提供一张图片，请你仔细观察这张图片，然后用英文写一段详细的提示词（prompt），',
+  '让另一个 AI 绘画模型能根据这段提示词重新生成类似的图片。',
+  '',
+  '要求：',
+  '1. 这是图片理解任务，不要生成任何新图片，不要调用 generate_image 等工具',
+  '2. 只输出一段英文提示词，不要输出中文，不要解释，不要客套话',
+  '3. 提示词应包含：主体内容、风格、构图、光线、色彩、细节等关键信息',
+  '4. 以英文逗号分隔的关键词或短语为主，类似 "a cat sitting on a wooden table, warm lighting, ..."',
+].join('\n')
+
+/** 构造图片反推请求消息（data: URI 与 http(s) URL 均走 image_url 形状，透传原样转发） */
+export function buildReversePromptMessages(imageUrl: string): ChatMessage[] {
+  return [
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: REVERSE_PROMPT_INSTRUCTION },
+        { type: 'image_url', image_url: { url: imageUrl } },
+      ],
+    },
+  ]
 }

@@ -2,7 +2,7 @@
  * （分镜图连剧本节点仅作派生溯源，剧本全文混入会把单帧提示词变成叙事多格构图） */
 
 import { describe, it, expect } from 'vitest'
-import { buildGenerationContext } from '../canvas-generation'
+import { buildGenerationContext, buildReversePromptMessages } from '../canvas-generation'
 
 function panel(id: string, type: string, content: Record<string, unknown>, name?: string) {
   return { id, type, name: name ?? type, x: 0, y: 0, width: 100, height: 80, zIndex: 0, content, created_at: '', updated_at: '' }
@@ -41,5 +41,20 @@ describe('buildGenerationContext 上游合并策略', () => {
     const ctx = buildGenerationContext(image, [scriptPanel, image], [conn('c1', 'script', 'img1')])
     expect(ctx?.prompt).toContain('场景一')
     expect(ctx?.prompt).toContain('【文本1】')
+  })
+})
+
+describe('buildReversePromptMessages 图片反推消息构造', () => {
+  it('data URI 与 http URL 同走 image_url 形状，指令在文本块', () => {
+    for (const url of ['data:image/png;base64,QQ==', 'http://example.com/a.png']) {
+      const msgs = buildReversePromptMessages(url)
+      expect(msgs).toHaveLength(1)
+      expect(msgs[0].role).toBe('user')
+      const parts = msgs[0].content
+      if (!Array.isArray(parts)) throw new Error('content 应为多模态数组')
+      const textPart = parts.find((p) => p.type === 'text')
+      expect(textPart && 'text' in textPart && textPart.text).toContain('图片反推')
+      expect(parts.find((p) => p.type === 'image_url')).toEqual({ type: 'image_url', image_url: { url } })
+    }
   })
 })

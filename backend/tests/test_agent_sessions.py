@@ -171,3 +171,18 @@ async def test_agent_session_sync_persists_media_items(auth_client):
     detail = (await auth_client.get(f"/api/chat/agent-sessions/{sid}")).json()["data"]
     items = detail["messages"][0]["media_items"]
     assert items == [{"type": "image", "url": "http://x/a.png", "task_id": "img_1", "status": "pending"}]
+
+
+@pytest.mark.asyncio
+async def test_legacy_send_message_endpoint_retired(auth_client):
+    """旧服务端编排端点已退役（编排迁前端透传通道）：POST messages 必须 404，
+    GET messages（宿主恢复历史）必须仍然存活"""
+    sid = (await auth_client.post("/api/chat/sessions", json={})).json()["data"]["id"]
+
+    gone = await auth_client.post(
+        f"/api/chat/sessions/{sid}/messages", json={"content": "你好"}
+    )
+    assert gone.status_code == 404
+
+    alive = await auth_client.get(f"/api/chat/sessions/{sid}/messages")
+    assert alive.status_code == 200
