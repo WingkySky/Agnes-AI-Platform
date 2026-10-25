@@ -1,161 +1,127 @@
 <!-- =====================================================
-     SceneEditorView —— 3D 场景导演台页面
-     功能：
-       - 3D 编辑器（拖动相机/主体/灯光）
-       - 场景列表：加载/保存/删除/新建
-       - 实时预览翻译后的镜头语言 prompt
-       - 各维度明细（视角/焦段/构图/光位）
-     路由：/scene-editor
+     SceneEditorView —— 3D 导演台全屏工作台
+     布局：顶栏(场景 CRUD/挂载) + 左栏(场景树+场景库) + 中央视口 +
+     右栏(属性/Shot 检查器/翻译器预览) + 底部序列器 + 状态栏。
+     面板全部可拖拽缩放/可折叠（布局记忆 localStorage），F 一键全屏视口。
+     路由：/scene-editor（workbench 变体：藏应用壳、保留浮层面板）
      ===================================================== -->
 
 <template>
-  <div class="scene-editor-view">
-    <h2 class="page-title">{{ t('scene3d.title') }}</h2>
-    <p class="page-desc">{{ t('scene3d.desc') }}</p>
-
-    <!-- 顶部工具栏：场景名称 + 操作按钮 -->
-    <el-card shadow="never" class="toolbar-card">
-      <div class="toolbar">
-        <el-input
-          v-model="currentName"
-          :placeholder="t('scene3d.namePlaceholder')"
-          style="width: 240px"
-        />
-        <el-input
-          v-model="currentDesc"
-          :placeholder="t('scene3d.descPlaceholder')"
-          style="width: 280px"
-        />
-        <el-switch
-          v-model="currentIsPublic"
-          :active-text="t('scene3d.isPublic')"
-        />
-        <div class="toolbar-actions">
-          <el-button type="primary" :loading="saving" @click="onSave">
-            {{ currentId ? t('common.save') : t('scene3d.create') }}
-          </el-button>
-          <el-button plain @click="onNew">{{ t('scene3d.newScene') }}</el-button>
-          <el-button
-            v-if="currentId"
-            plain
-            :type="scenesStore.isMountedIn('image', currentId) ? 'warning' : 'default'"
-            @click="onMountScene('image')"
-          >
-            {{ t('scene3d.mountToImage') }}
-          </el-button>
-          <el-button
-            v-if="currentId"
-            plain
-            :type="scenesStore.isMountedIn('video', currentId) ? 'warning' : 'default'"
-            @click="onMountScene('video')"
-          >
-            {{ t('scene3d.mountToVideo') }}
-          </el-button>
-          <el-button
-            v-if="currentId"
-            type="danger"
-            plain
-            :loading="deleting"
-            @click="onDelete"
-          >
-            {{ t('common.delete') }}
-          </el-button>
-        </div>
+  <div ref="rootEl" class="scene-workbench">
+    <!-- 顶栏：返回 + 场景信息 + 保存/挂载 -->
+    <header class="wb-topbar">
+      <el-button text :icon="Back" class="back-btn" @click="goBack">{{ t('common.back') }}</el-button>
+      <span class="topbar-divider" />
+      <el-input v-model="currentName" size="small" style="width: 200px" :placeholder="t('scene3d.namePlaceholder')" />
+      <el-input v-model="currentDesc" size="small" style="width: 240px" :placeholder="t('scene3d.descPlaceholder')" />
+      <el-switch v-model="currentIsPublic" size="small" :active-text="t('scene3d.isPublic')" />
+      <div class="topbar-actions">
+        <el-button size="small" type="primary" :loading="saving" @click="onSave">
+          {{ currentId ? t('common.save') : t('scene3d.create') }}
+        </el-button>
+        <el-button size="small" plain @click="onNew">{{ t('scene3d.newScene') }}</el-button>
+        <el-button
+          v-if="currentId"
+          size="small"
+          plain
+          :type="scenesStore.isMountedIn('image', currentId) ? 'warning' : 'default'"
+          @click="onMountScene('image')"
+        >
+          {{ t('scene3d.mountToImage') }}
+        </el-button>
+        <el-button
+          v-if="currentId"
+          size="small"
+          plain
+          :type="scenesStore.isMountedIn('video', currentId) ? 'warning' : 'default'"
+          @click="onMountScene('video')"
+        >
+          {{ t('scene3d.mountToVideo') }}
+        </el-button>
+        <el-button v-if="currentId" size="small" type="danger" plain :loading="deleting" @click="onDelete">
+          {{ t('common.delete') }}
+        </el-button>
+        <el-tooltip :content="t('scene3d.fullViewportHint') + ' (F)'">
+          <el-button size="small" plain :icon="FullScreen" @click="toggleFullscreenViewport" />
+        </el-tooltip>
       </div>
-    </el-card>
+    </header>
 
-    <el-row :gutter="16" class="main-row">
-      <!-- 左侧：3D 编辑器 -->
-      <el-col :xs="24" :lg="16">
-        <el-card shadow="never" class="editor-card">
-          <Scene3DEditor v-model="sceneData" @captured="onCaptured" />
-        </el-card>
-      </el-col>
+    <!-- 主区：左栏 / 视口 / 右栏 -->
+    <div class="wb-main">
+      <aside v-if="showPanel('left')" class="wb-aside" :style="{ width: layout.leftWidth + 'px' }">
+        <SceneTreePanel
+          v-model="sceneData"
+          :selected="selected"
+          :scenes="scenes"
+          :current-scene-id="currentId"
+          :loading="listLoading"
+          :search="searchKeyword"
+          @select="onSelect"
+          @select-scene="onSelectScene"
+          @update:search="searchKeyword = $event"
+          @search-scenes="loadScenes"
+        />
+        <div class="aside-collapse left" :title="t('scene3d.collapseLeft') + ' ( [ )'" @click="togglePanel('left')">
+          <el-icon><ArrowLeft /></el-icon>
+        </div>
+      </aside>
+      <div v-if="showPanel('left')" class="v-grip" @mousedown="startDrag('left', $event)" />
 
-      <!-- 右侧：场景列表 + prompt 预览 -->
-      <el-col :xs="24" :lg="8">
-        <!-- 环境布景设置 -->
-        <el-card shadow="never" class="env-card">
-          <template #header>
-            <span>{{ t('scene3d.environmentTitle') }}</span>
-          </template>
-          <el-select
-            :model-value="sceneData.environment?.type || 'studio'"
-            size="small"
-            style="width: 100%"
-            @change="onEnvironmentChange"
-          >
-            <el-option
-              v-for="opt in environmentOptions"
-              :key="opt.value"
-              :label="opt.label"
-              :value="opt.value"
-            />
-          </el-select>
-        </el-card>
+      <main class="wb-viewport">
+        <Scene3DEditor ref="viewportRef" v-model="sceneData" @captured="onCaptured" @select="onSelect" />
+      </main>
 
-        <!-- prompt 预览 -->
-        <el-card shadow="never" class="preview-card">
-          <template #header>
-            <span>{{ t('scene3d.promptPreview') }}</span>
-          </template>
-          <div v-if="promptSuffix" class="prompt-suffix">
-            {{ promptSuffix }}
-          </div>
-          <el-empty v-else :description="t('scene3d.noPrompt')" :image-size="60" />
+      <div v-if="showPanel('right')" class="v-grip" @mousedown="startDrag('right', $event)" />
+      <aside v-if="showPanel('right')" class="wb-aside" :style="{ width: layout.rightWidth + 'px' }">
+        <SceneInspector
+          v-model="sceneData"
+          :selected="selected"
+          :shot="activeShot"
+          :prompt-suffix="promptSuffix"
+          :prompt-details="promptDetails"
+          @add-keyframe="addKeyframeFromViewport"
+        />
+        <div class="aside-collapse right" :title="t('scene3d.collapseRight') + ' ( ] )'" @click="togglePanel('right')">
+          <el-icon><ArrowRight /></el-icon>
+        </div>
+      </aside>
 
-          <!-- 各维度明细 -->
-          <div v-if="promptDetails && Object.keys(promptDetails).length" class="details-list">
-            <div class="details-title">{{ t('scene3d.details') }}</div>
-            <div v-for="(val, key) in promptDetails" :key="key" class="detail-item">
-              <span class="detail-key">{{ detailLabel(String(key)) }}</span>
-              <span class="detail-val">{{ val }}</span>
-            </div>
-          </div>
-        </el-card>
+      <!-- 折叠后的展开把手 -->
+      <div v-if="!layout.leftOpen && !fullscreenViewport" class="expand-tab left" :title="t('scene3d.expandLeft')" @click="togglePanel('left')">
+        <el-icon><ArrowRight /></el-icon>
+      </div>
+      <div v-if="!layout.rightOpen && !fullscreenViewport" class="expand-tab right" :title="t('scene3d.expandRight')" @click="togglePanel('right')">
+        <el-icon><ArrowLeft /></el-icon>
+      </div>
+    </div>
 
-        <!-- 场景列表 -->
-        <el-card shadow="never" class="list-card">
-          <template #header>
-            <div class="list-header">
-              <span>{{ t('scene3d.sceneList') }}</span>
-              <el-input
-                v-model="searchKeyword"
-                :placeholder="t('common.search')"
-                size="small"
-                style="width: 140px"
-                clearable
-                @change="loadScenes"
-                @clear="loadScenes"
-              />
-            </div>
-          </template>
-          <div v-loading="listLoading" class="scene-list">
-            <div
-              v-for="s in scenes"
-              :key="s.id"
-              :class="['scene-item', { active: s.id === currentId }]"
-              @click="onSelectScene(s)"
-            >
-              <img v-if="s.cover_url" :src="s.cover_url" class="scene-item-cover" />
-              <div class="scene-item-body">
-                <div class="scene-item-name">
-                  {{ s.name }}
-                  <el-tag v-if="s.is_public" size="small" type="success">
-                    {{ t('scene3d.publicTag') }}
-                  </el-tag>
-                  <el-tag v-if="s.user_id !== userId && s.is_public" size="small" type="info">
-                    {{ t('scene3d.sharedTag') }}
-                  </el-tag>
-                </div>
-                <div class="scene-item-desc">{{ s.description || '—' }}</div>
-              </div>
-            </div>
-            <el-empty v-if="!listLoading && scenes.length === 0" :description="t('common.empty')" :image-size="60" />
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
+    <!-- 底部 dock：序列器 -->
+    <div v-if="showPanel('dock')" class="h-grip" @mousedown="startDrag('dock', $event)" />
+    <footer v-if="showPanel('dock')" class="wb-dock" :style="{ height: layout.dockHeight + 'px' }">
+      <div class="dock-collapse" :title="t('scene3d.collapseDock') + ' (B)'" @click="togglePanel('dock')">
+        <el-icon><ArrowDown /></el-icon>
+      </div>
+      <ShotSequencer
+        v-model="sceneData"
+        :playing-shot-id="playingShotId"
+        @select-shot="onSelectShot"
+        @add-shot="addShot"
+        @play-all="playAll"
+        @derive="deriveVisible = true"
+        @focus-shot="onFocusShot"
+      />
+    </footer>
+    <div v-if="!layout.dockOpen && !fullscreenViewport" class="expand-tab dock" :title="t('scene3d.expandDock')" @click="togglePanel('dock')">
+      <el-icon><ArrowUp /></el-icon>
+    </div>
+
+    <!-- 状态栏 -->
+    <div class="wb-statusbar">
+      <span>{{ statusSelection }}</span>
+      <span class="status-hint">{{ t('scene3d.statusHint') }}</span>
+      <span v-if="savedAt" class="status-saved">{{ t('scene3d.savedAt') }} {{ savedAt }}</span>
+    </div>
 
     <!-- 视口拍照弹窗：下载 / 复制 / 设为场景封面 -->
     <el-dialog v-model="captureVisible" :title="t('scene3d.captureTitle')" width="560px">
@@ -174,22 +140,69 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 批量派生弹窗 -->
+    <el-dialog v-model="deriveVisible" :title="t('scene3d.deriveTitle')" width="520px">
+      <el-form label-width="120px" label-position="left">
+        <el-form-item :label="t('scene3d.deriveKind')">
+          <el-radio-group v-model="deriveKind">
+            <el-radio-button value="image">{{ t('scene3d.deriveImage') }}</el-radio-button>
+            <el-radio-button value="video">{{ t('scene3d.deriveVideo') }}</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item :label="t('scene3d.deriveModel')">
+          <el-select v-model="deriveModel" style="width: 100%">
+            <el-option
+              v-for="m in deriveKind === 'image' ? modelsStore.imageModels : modelsStore.videoModels"
+              :key="m.id"
+              :label="m.name"
+              :value="m.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item :label="t('scene3d.derivePrompt')">
+          <el-input v-model="derivePrompt" type="textarea" :rows="3" :placeholder="t('scene3d.derivePromptPlaceholder')" />
+        </el-form-item>
+        <el-form-item v-if="deriveKind === 'video'" :label="t('scene3d.deriveCoverFirst')">
+          <el-switch v-model="deriveUseCover" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="deriveVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="deriving" :disabled="!deriveModel" @click="runDerive">
+          {{ t('scene3d.deriveSubmit') }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 /**
- * SceneEditorView —— 3D 场景导演台页面
- * 管理场景 CRUD，并通过 3D 编辑器实时预览翻译后的 prompt。
+ * SceneEditorView —— 导演台工作台编排层：
+ * 场景 CRUD / 面板布局（拖拽+折叠+记忆）/ 预演播放协调 / 批量派生 / 挂载生成。
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { useConfirm } from '@/composables/useConfirm'
+import {
+  Back,
+  FullScreen,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  ArrowDown,
+} from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
-import { useUserStore } from '@/stores/user'
+import { useConfirm } from '@/composables/useConfirm'
 import { useScenesStore } from '@/stores/scenes'
-import { uploadImage } from '@/api/uploads'
+import { useModelsStore } from '@/stores/models'
+import { useTaskQueueStore } from '@/stores/taskQueue'
 import Scene3DEditor from '@/components/scene/Scene3DEditor.vue'
+import SceneTreePanel from '@/components/scene/SceneTreePanel.vue'
+import SceneInspector from '@/components/scene/SceneInspector.vue'
+import ShotSequencer from '@/components/scene/ShotSequencer.vue'
+import { uploadImage } from '@/api/uploads'
 import {
   getScenes,
   createScene,
@@ -197,12 +210,261 @@ import {
   deleteScene,
   previewScenePrompt,
 } from '@/api/scenes'
-import type { Scene3D, SceneData } from '@/types/scene'
+import {
+  activeCamera as pickActiveCamera,
+  defaultShot,
+  newSceneData,
+  normalizeSceneData,
+} from '@/lib/scene/normalize'
+import { buildShotDeriveParams } from '@/lib/scene/derive'
+import {
+  loadWorkbenchLayout,
+  saveWorkbenchLayout,
+  type WorkbenchLayout,
+} from '@/lib/scene/workbench-layout'
+import type { Scene3D, SceneData, ShotData } from '@/types/scene'
+
+type TreeType = 'camera' | 'subject' | 'light' | 'prop'
 
 const { t } = useI18n()
 const { confirm } = useConfirm()
-const userStore = useUserStore()
+const router = useRouter()
 const scenesStore = useScenesStore()
+const modelsStore = useModelsStore()
+const queue = useTaskQueueStore()
+
+// ---------- 面板布局（拖拽缩放 + 折叠 + 记忆 + 全屏视口） ----------
+const layout = reactive<WorkbenchLayout>(loadWorkbenchLayout())
+const fullscreenViewport = ref(false)
+
+function showPanel(key: 'left' | 'right' | 'dock'): boolean {
+  if (fullscreenViewport.value) return false
+  return key === 'left' ? layout.leftOpen : key === 'right' ? layout.rightOpen : layout.dockOpen
+}
+
+function togglePanel(key: 'left' | 'right' | 'dock') {
+  if (key === 'left') layout.leftOpen = !layout.leftOpen
+  else if (key === 'right') layout.rightOpen = !layout.rightOpen
+  else layout.dockOpen = !layout.dockOpen
+  persistLayout()
+}
+
+function toggleFullscreenViewport() {
+  fullscreenViewport.value = !fullscreenViewport.value
+}
+
+function persistLayout() {
+  saveWorkbenchLayout({ ...layout })
+}
+
+type DragKey = 'left' | 'right' | 'dock'
+let dragState: { key: DragKey; startPos: number; startSize: number } | null = null
+
+function startDrag(key: DragKey, e: MouseEvent) {
+  e.preventDefault()
+  dragState = {
+    key,
+    startPos: key === 'dock' ? e.clientY : e.clientX,
+    startSize: key === 'left' ? layout.leftWidth : key === 'right' ? layout.rightWidth : layout.dockHeight,
+  }
+  window.addEventListener('mousemove', onDragMove)
+  window.addEventListener('mouseup', onDragEnd)
+}
+
+function onDragMove(e: MouseEvent) {
+  if (!dragState) return
+  const cur = dragState.key === 'dock' ? e.clientY : e.clientX
+  const delta = cur - dragState.startPos
+  const dir = dragState.key === 'right' ? -1 : 1 // 右栏把手往左拖变宽
+  const size = Math.round(dragState.startSize + delta * dir)
+  if (dragState.key === 'left') layout.leftWidth = clamp(size, 220, 480)
+  else if (dragState.key === 'right') layout.rightWidth = clamp(size, 220, 480)
+  else layout.dockHeight = clamp(size, 180, 520)
+}
+
+function onDragEnd() {
+  if (dragState) persistLayout()
+  dragState = null
+  window.removeEventListener('mousemove', onDragMove)
+  window.removeEventListener('mouseup', onDragEnd)
+}
+
+function clamp(n: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, n))
+}
+
+// ---------- 场景数据与选中 ----------
+const currentId = ref<number | null>(null)
+const currentName = ref('')
+const currentDesc = ref('')
+const currentIsPublic = ref(false)
+const sceneData = ref<SceneData>(newSceneData({ subject: t('scene3d.subjectDefaultLabel'), environment: t('scene3d.envStudio') }))
+const saving = ref(false)
+const deleting = ref(false)
+const savedAt = ref('')
+const selected = ref<{ type: TreeType; index: number } | null>(null)
+const viewportRef = ref<InstanceType<typeof Scene3DEditor>>()
+
+const activeShot = computed<ShotData | null>(
+  () => sceneData.value.shots.find(s => s.id === sceneData.value.activeShotId) ?? null,
+)
+
+const statusSelection = computed(() => {
+  if (playingShotId.value) return `${t('scene3d.playbackPlaying')} · ${activeShotLabel(playingShotId.value)}`
+  const sel = selected.value
+  if (!sel) return t('scene3d.statusNoSelection')
+  const names: Record<TreeType, string> = {
+    camera: t('scene3d.targetCamera'),
+    subject: t('scene3d.targetSubject'),
+    light: t('scene3d.targetLight'),
+    prop: t('scene3d.targetProp'),
+  }
+  return `${names[sel.type]} #${sel.index + 1}`
+})
+
+function activeShotLabel(shotId: string): string {
+  const idx = sceneData.value.shots.findIndex(s => s.id === shotId)
+  return t('scene3d.shotN', { n: idx + 1 })
+}
+
+function onSelect(payload: { type: TreeType; index: number }) {
+  selected.value = payload
+}
+
+// ---------- 场景列表 ----------
+const scenes = ref<Scene3D[]>([])
+const listLoading = ref(false)
+const searchKeyword = ref('')
+
+async function loadScenes() {
+  listLoading.value = true
+  try {
+    const res = await getScenes({ page: 1, page_size: 50, search: searchKeyword.value || undefined })
+    scenes.value = res.items || []
+  } catch {
+    // 错误已由 client 统一提示
+  } finally {
+    listLoading.value = false
+  }
+}
+
+// ---------- prompt 预览（防抖；选中镜头时按镜头编译） ----------
+const promptSuffix = ref('')
+const promptDetails = ref<Record<string, unknown>>({})
+let previewTimer: ReturnType<typeof setTimeout> | null = null
+
+async function fetchPreview() {
+  try {
+    const shot = activeShot.value
+    const res = await previewScenePrompt(sceneData.value, shot || undefined)
+    promptSuffix.value = res.prompt_suffix || ''
+    promptDetails.value = res.details || {}
+  } catch {
+    // 静默失败
+  }
+}
+
+watch(
+  () => [sceneData.value, sceneData.value.activeShotId] as const,
+  () => {
+    if (previewTimer) clearTimeout(previewTimer)
+    previewTimer = setTimeout(fetchPreview, 300)
+  },
+  { deep: true },
+)
+
+// ---------- 操作：新建/选择/保存/删除 ----------
+function onNew() {
+  currentId.value = null
+  currentName.value = ''
+  currentDesc.value = ''
+  currentIsPublic.value = false
+  sceneData.value = newSceneData({ subject: t('scene3d.subjectDefaultLabel'), environment: t('scene3d.envStudio') })
+  selected.value = null
+  savedAt.value = ''
+}
+
+async function onSelectScene(s: Scene3D) {
+  currentId.value = s.id
+  currentName.value = s.name
+  currentDesc.value = s.description || ''
+  currentIsPublic.value = s.is_public
+  sceneData.value = normalizeSceneData(s.scene_data)
+  selected.value = null
+}
+
+async function onSave() {
+  if (!currentName.value.trim()) {
+    ElMessage.warning(t('scene3d.nameRequired'))
+    return
+  }
+  saving.value = true
+  const data = normalizeSceneData(sceneData.value)
+  sceneData.value = data
+  try {
+    if (currentId.value) {
+      await updateScene(currentId.value, {
+        name: currentName.value,
+        description: currentDesc.value,
+        scene_data: data,
+        is_public: currentIsPublic.value,
+      })
+      ElMessage.success(t('scene3d.saveSuccess'))
+    } else {
+      const created = await createScene({
+        name: currentName.value,
+        description: currentDesc.value,
+        scene_data: data,
+        is_public: currentIsPublic.value,
+      })
+      currentId.value = created.id
+      ElMessage.success(t('scene3d.createSuccess'))
+    }
+    savedAt.value = new Date().toLocaleTimeString()
+    await loadScenes()
+  } catch {
+    // 错误已由 client 统一提示
+  } finally {
+    saving.value = false
+  }
+}
+
+async function onDelete() {
+  if (!currentId.value) return
+  await confirm(t('scene3d.deleteConfirm'), t('common.confirm'))
+  deleting.value = true
+  try {
+    await deleteScene(currentId.value)
+    ElMessage.success(t('scene3d.deleteSuccess'))
+    onNew()
+    await loadScenes()
+  } catch {
+    // 错误已由 client 统一提示
+  } finally {
+    deleting.value = false
+  }
+}
+
+function goBack() {
+  if (window.history.length > 1) router.back()
+  else router.push('/')
+}
+
+// ---------- 挂载生成（复用全局挂载范式） ----------
+async function onMountScene(context: 'image' | 'video') {
+  if (!currentId.value) return
+  try {
+    const scene = {
+      id: currentId.value,
+      name: currentName.value,
+      scene_data: normalizeSceneData(sceneData.value),
+    } as Scene3D
+    const mounted = await scenesStore.mountScene(scene, context)
+    ElMessage.success(t(mounted ? (context === 'image' ? 'scene3d.mountedImage' : 'scene3d.mountedVideo') : 'scene3d.unmounted'))
+  } catch {
+    ElMessage.error(t('scene3d.applyFailed'))
+  }
+}
 
 // ---------- 视口拍照（下载 / 复制 / 设为封面） ----------
 const captureVisible = ref(false)
@@ -236,9 +498,7 @@ async function setAsCover() {
   if (!currentId.value || !captureDataUrl.value) return
   settingCover.value = true
   try {
-    const blob = await (await fetch(captureDataUrl.value)).blob()
-    const file = new File([blob], `scene-cover-${currentId.value}.png`, { type: 'image/png' })
-    const { url } = await uploadImage(file)
+    const url = await uploadDataUrl(captureDataUrl.value, `scene-cover-${currentId.value}.png`)
     await updateScene(currentId.value, { cover_url: url })
     ElMessage.success(t('scene3d.setCoverOk'))
     captureVisible.value = false
@@ -250,354 +510,398 @@ async function setAsCover() {
   }
 }
 
-/** 挂载/取消当前场景到图片或视频生成（提交时自动拼接镜头语言） */
-async function onMountScene(context: 'image' | 'video') {
-  if (!currentId.value) return
-  try {
-    const mounted = await scenesStore.mountScene(
-      { id: currentId.value, name: currentName.value, scene_data: sceneData.value } as Scene3D,
-      context,
-    )
-    ElMessage.success(t(mounted ? (context === 'image' ? 'scene3d.mountedImage' : 'scene3d.mountedVideo') : 'scene3d.unmounted'))
-  } catch {
-    ElMessage.error(t('scene3d.applyFailed'))
-  }
+async function uploadDataUrl(dataUrl: string, filename: string): Promise<string> {
+  const blob = await (await fetch(dataUrl)).blob()
+  const file = new File([blob], filename, { type: 'image/png' })
+  const { url } = await uploadImage(file)
+  return url
 }
 
-// ---------- 默认场景数据 ----------
-function defaultSceneData(): SceneData {
-  return {
-    subjects: [{ x: 0, y: 0, z: 0, label: t('scene3d.subjectDefaultLabel'), rotation: { x: 0, y: 0, z: 0 } }],
-    camera: {
-      position: { x: 0, y: 1.6, z: 5 },
-      lookAt: { x: 0, y: 0, z: 0 },
-      fov: 50,
-    },
-    lights: [{ type: 'directional', x: 5, y: 8, z: 5, intensity: 1.0, direction: { x: -0.47, y: -0.75, z: -0.47 } }],
-    props: [],
-    environment: { type: 'studio', label: t('scene3d.envStudio') },
-  }
-}
-
-// ---------- 环境类型选项 ----------
-const environmentOptions = computed(() => [
-  { value: 'studio', label: t('scene3d.envStudio') },
-  { value: 'indoor', label: t('scene3d.envIndoor') },
-  { value: 'outdoor', label: t('scene3d.envOutdoor') },
-  { value: 'night', label: t('scene3d.envNight') },
-  { value: 'custom', label: t('scene3d.envCustom') },
-])
-
-/** 环境类型切换时同步到 sceneData */
-function onEnvironmentChange(envType: string) {
-  const opt = environmentOptions.value.find(o => o.value === envType)
+// ---------- 镜头序列：新增/选中/关键帧/聚焦 ----------
+function addShot() {
+  const cam = pickActiveCamera(sceneData.value) || sceneData.value.cameras[0]
+  if (!cam) return
+  const shot = defaultShot(cam)
   sceneData.value = {
     ...sceneData.value,
-    environment: {
-      type: envType as 'studio' | 'indoor' | 'outdoor' | 'night' | 'custom',
-      label: opt?.label || '',
+    shots: [...sceneData.value.shots, shot],
+    activeShotId: shot.id,
+  }
+}
+
+function onSelectShot(shotId: string) {
+  sceneData.value = { ...sceneData.value, activeShotId: shotId }
+}
+
+function onFocusShot(shotId: string) {
+  const shot = sceneData.value.shots.find(s => s.id === shotId)
+  if (!shot) return
+  const idx = sceneData.value.cameras.findIndex(c => c.id === shot.cameraId)
+  if (idx >= 0) viewportRef.value?.focusCamera(idx)
+}
+
+/** 记录当前选中机位姿态为 activeShot 的关键帧（时间=上一帧+2s 起） */
+function addKeyframeFromViewport() {
+  const shot = activeShot.value
+  if (!shot) return
+  const pose = viewportRef.value?.activeCameraPose()
+  if (!pose) return
+  const lastTime = shot.keyframes.length ? shot.keyframes[shot.keyframes.length - 1].time : -2
+  const frame = {
+    time: Math.max(0, Math.round((lastTime + 2) * 10) / 10),
+    position: pose.position,
+    target: pose.target,
+    fov: pose.fov,
+    easing: 'smooth' as const,
+  }
+  sceneData.value = {
+    ...sceneData.value,
+    shots: sceneData.value.shots.map(s =>
+      s.id === shot.id ? { ...s, keyframes: [...s.keyframes, frame].sort((a, b) => a.time - b.time) } : s,
+    ),
+  }
+}
+
+// ---------- 预演播放 ----------
+const playingShotId = ref<string | null>(null)
+const pendingCovers = new Map<string, string>()
+
+function playAll(captureCovers: boolean) {
+  const shots = sceneData.value.shots
+  if (!shots.length) return
+  playingShotId.value = null
+  pendingCovers.clear()
+  viewportRef.value?.playShots(shots, {
+    captureCovers,
+    onShotStart: (shot: ShotData) => {
+      playingShotId.value = shot.id
     },
-  }
+    onShotCover: (shotId: string, dataUrl: string) => {
+      pendingCovers.set(shotId, dataUrl)
+    },
+    onDone: () => {
+      playingShotId.value = null
+      applyPendingCovers()
+    },
+  })
 }
 
-// ---------- 当前编辑状态 ----------
-const currentId = ref<number | null>(null)
-const currentName = ref('')
-const currentDesc = ref('')
-const currentIsPublic = ref(false)
-const sceneData = ref<SceneData>(defaultSceneData())
-const saving = ref(false)
-const deleting = ref(false)
-
-const userId = computed(() => userStore.user?.id ?? 0)
-
-// ---------- 场景列表 ----------
-const scenes = ref<Scene3D[]>([])
-const listLoading = ref(false)
-const searchKeyword = ref('')
-
-async function loadScenes() {
-  listLoading.value = true
-  try {
-    const res = await getScenes({ page: 1, page_size: 50, search: searchKeyword.value || undefined })
-    scenes.value = res.items || []
-  } catch (e) {
-    // 错误已由 client 统一提示
-  } finally {
-    listLoading.value = false
-  }
-}
-
-// ---------- prompt 预览（防抖）----------
-const promptSuffix = ref('')
-const promptDetails = ref<Record<string, unknown>>({})
-let previewTimer: ReturnType<typeof setTimeout> | null = null
-
-async function fetchPreview() {
-  try {
-    const res = await previewScenePrompt(sceneData.value)
-    promptSuffix.value = res.prompt_suffix || ''
-    promptDetails.value = res.details || {}
-  } catch (e) {
-    // 静默失败
-  }
-}
-
-watch(
-  () => sceneData.value,
-  () => {
-    if (previewTimer) clearTimeout(previewTimer)
-    previewTimer = setTimeout(fetchPreview, 300)
-  },
-  { deep: true },
-)
-
-// ---------- 操作：新建/选择/保存/删除 ----------
-function onNew() {
-  currentId.value = null
-  currentName.value = ''
-  currentDesc.value = ''
-  currentIsPublic.value = false
-  sceneData.value = defaultSceneData()
-}
-
-async function onSelectScene(s: Scene3D) {
-  currentId.value = s.id
-  currentName.value = s.name
-  currentDesc.value = s.description || ''
-  currentIsPublic.value = s.is_public
-  // 深拷贝避免直接改列表数据
-  sceneData.value = JSON.parse(JSON.stringify(s.scene_data || defaultSceneData()))
-}
-
-async function onSave() {
-  if (!currentName.value.trim()) {
-    ElMessage.warning(t('scene3d.nameRequired'))
-    return
-  }
-  saving.value = true
-  try {
-    if (currentId.value) {
-      await updateScene(currentId.value, {
-        name: currentName.value,
-        description: currentDesc.value,
-        scene_data: sceneData.value,
-        is_public: currentIsPublic.value,
-      })
-      ElMessage.success(t('scene3d.saveSuccess'))
-    } else {
-      const created = await createScene({
-        name: currentName.value,
-        description: currentDesc.value,
-        scene_data: sceneData.value,
-        is_public: currentIsPublic.value,
-      })
-      currentId.value = created.id
-      ElMessage.success(t('scene3d.createSuccess'))
+async function applyPendingCovers() {
+  if (!pendingCovers.size) return
+  const shots = [...sceneData.value.shots]
+  for (let i = 0; i < shots.length; i++) {
+    const dataUrl = pendingCovers.get(shots[i].id)
+    if (!dataUrl) continue
+    let cover: string = dataUrl
+    try {
+      cover = await uploadDataUrl(dataUrl, `shot-${shots[i].id}.png`)
+    } catch {
+      // 上传失败退回 dataURL（下次保存会被覆盖或重试）
     }
-    await loadScenes()
-  } catch (e) {
-    // 错误已由 client 统一提示
-  } finally {
-    saving.value = false
+    shots[i] = { ...shots[i], coverUrl: cover }
+  }
+  pendingCovers.clear()
+  sceneData.value = { ...sceneData.value, shots }
+  if (currentId.value) {
+    try {
+      await updateScene(currentId.value, { scene_data: normalizeSceneData(sceneData.value) })
+      savedAt.value = new Date().toLocaleTimeString()
+    } catch {
+      // 错误已由 client 统一提示
+    }
   }
 }
 
-async function onDelete() {
-  if (!currentId.value) return
-  await confirm(t('scene3d.deleteConfirm'), t('common.confirm'))
-  deleting.value = true
+// ---------- 批量派生 ----------
+const deriveVisible = ref(false)
+const deriveKind = ref<'image' | 'video'>('image')
+const deriveModel = ref('')
+const derivePrompt = ref('')
+const deriveUseCover = ref(true)
+const deriving = ref(false)
+
+watch(deriveVisible, (open) => {
+  if (!open) return
+  if (!modelsStore.loaded) modelsStore.fetchConfig()
+  if (!deriveModel.value) deriveModel.value = modelsStore.getDefaultModel(deriveKind.value)
+})
+
+watch(deriveKind, () => {
+  deriveModel.value = modelsStore.getDefaultModel(deriveKind.value)
+})
+
+async function runDerive() {
+  const shots = sceneData.value.shots
+  if (!shots.length || !deriveModel.value) return
+  deriving.value = true
+  const derivedPairs: { shotId: string; taskId: string }[] = []
   try {
-    await deleteScene(currentId.value)
-    ElMessage.success(t('scene3d.deleteSuccess'))
-    onNew()
-    await loadScenes()
-  } catch (e) {
+    const scene = normalizeSceneData(sceneData.value)
+    for (const shot of shots) {
+      const cam = scene.cameras.find(c => c.id === shot.cameraId) || pickActiveCamera(scene)
+      if (!cam) continue
+      let suffix = ''
+      try {
+        const res = await previewScenePrompt(scene, shot)
+        suffix = res.prompt_suffix || ''
+      } catch {
+        // 预览失败退化为纯用户提示词
+      }
+      const params = buildShotDeriveParams({
+        shot,
+        camera: cam,
+        suffix,
+        userPrompt: derivePrompt.value,
+        model: deriveModel.value,
+        kind: deriveKind.value,
+        useCoverAsFirstFrame: deriveUseCover.value,
+        aspectRatio: scene.stage.aspect_ratio || undefined,
+      })
+      const taskId =
+        deriveKind.value === 'image' ? queue.submitImageTask(params) : queue.submitVideoTask(params)
+      derivedPairs.push({ shotId: shot.id, taskId })
+    }
+    // 任务 id 回写留痕
+    const idByShot = new Map(derivedPairs.map(p => [p.shotId, p.taskId]))
+    sceneData.value = {
+      ...sceneData.value,
+      shots: sceneData.value.shots.map(s => {
+        const taskId = idByShot.get(s.id)
+        return taskId ? { ...s, derivedTaskIds: [...(s.derivedTaskIds || []), taskId] } : s
+      }),
+    }
+    if (currentId.value) {
+      await updateScene(currentId.value, { scene_data: normalizeSceneData(sceneData.value) })
+    }
+    deriveVisible.value = false
+    ElMessage.success(t('scene3d.deriveDone', { n: derivedPairs.length }))
+  } catch {
     // 错误已由 client 统一提示
   } finally {
-    deleting.value = false
+    deriving.value = false
   }
 }
 
-// ---------- 维度明细标签 ----------
-function detailLabel(key: string): string {
-  const map: Record<string, string> = {
-    distance: t('scene3d.detailDistance'),
-    angle: t('scene3d.detailAngle'),
-    focal: t('scene3d.detailFocal'),
-    fov_desc: t('scene3d.detailFov'),
-    composition: t('scene3d.detailComposition'),
-    camera_facing: t('scene3d.detailCameraFacing'),
-    subjects: t('scene3d.detailSubjects'),
-    orientation: t('scene3d.detailOrientation'),
-    light: t('scene3d.detailLight'),
-    props: t('scene3d.detailProps'),
-    environment: t('scene3d.detailEnvironment'),
-  }
-  return map[key] || key
+// ---------- 工作台级快捷键：[ ] B F ----------
+function onKeydown(e: KeyboardEvent) {
+  const target = e.target as HTMLElement
+  if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+  if (e.key === '[') togglePanel('left')
+  else if (e.key === ']') togglePanel('right')
+  else if (e.key.toLowerCase() === 'b') togglePanel('dock')
+  else if (e.key.toLowerCase() === 'f') toggleFullscreenViewport()
+  else if (e.key === 'Escape' && fullscreenViewport.value) fullscreenViewport.value = false
 }
 
 onMounted(() => {
+  window.addEventListener('keydown', onKeydown)
   loadScenes()
   fetchPreview()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeydown)
+  onDragEnd()
 })
 </script>
 
 <style scoped>
-.scene-editor-view {
-  padding: 16px 24px;
+.scene-workbench {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100vh;
+  min-height: 480px;
+  background: var(--agnes-bg-base);
+  overflow: hidden;
+  position: relative; /* 折叠把手的绝对定位基准 */
 }
 
-.page-title {
-  margin: 0 0 4px;
-  font-size: 20px;
-}
-
-.page-desc {
-  margin: 0 0 16px;
-  color: var(--agnes-text-secondary);
-  font-size: 13px;
-}
-
-.toolbar-card {
-  margin-bottom: 16px;
-}
-
-.toolbar {
+/* 顶栏 */
+.wb-topbar {
+  height: 44px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
+  gap: 10px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--agnes-border-faint);
+  background: var(--agnes-bg-elevated);
 }
 
-.toolbar-actions {
+.back-btn { flex-shrink: 0; }
+
+.topbar-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--agnes-border);
+}
+
+.topbar-actions {
   margin-left: auto;
   display: flex;
-  gap: 8px;
-}
-
-.main-row {
-  margin-top: 0;
-}
-
-.editor-card :deep(.el-card__body) {
-  padding: 0;
-}
-
-.editor-card {
-  height: 560px;
-}
-
-.editor-card :deep(.scene3d-editor) {
-  height: 560px;
-  border: none;
-  border-radius: 0;
-}
-
-.preview-card,
-.list-card,
-.env-card {
-  margin-bottom: 16px;
-}
-
-.prompt-suffix {
-  padding: 12px;
-  background: var(--agnes-bg-inset);
-  border-radius: 6px;
-  font-size: 14px;
-  line-height: 1.6;
-  color: var(--agnes-text-primary);
-  word-break: break-all;
-}
-
-.details-list {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px dashed var(--agnes-border);
-}
-
-.details-title {
-  font-size: 13px;
-  color: var(--agnes-text-secondary);
-  margin-bottom: 8px;
-}
-
-.detail-item {
-  display: flex;
-  justify-content: space-between;
-  font-size: 13px;
-  padding: 3px 0;
-}
-
-.detail-key {
-  color: var(--agnes-text-secondary);
-}
-
-.detail-val {
-  color: var(--agnes-text-primary);
-}
-
-.list-header {
-  display: flex;
+  gap: 6px;
   align-items: center;
-  justify-content: space-between;
 }
 
-.scene-list {
-  max-height: 320px;
-  overflow-y: auto;
-}
-
-.scene-item {
-  padding: 8px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 0.2s;
+/* 主区 */
+.wb-main {
+  flex: 1;
   display: flex;
-  gap: 10px;
-  align-items: flex-start;
+  min-height: 0;
+  position: relative;
 }
 
-.scene-item-cover {
-  width: 64px;
-  height: 40px;
-  object-fit: cover;
-  border-radius: 4px;
+.wb-aside {
+  position: relative;
   flex-shrink: 0;
-  border: 1px solid var(--agnes-border-light, rgba(255, 255, 255, 0.12));
+  min-height: 0;
+  display: flex;
+  overflow: visible;
 }
 
-.scene-item-body {
+.wb-aside > :first-child {
   flex: 1;
   min-width: 0;
 }
 
-/* 视口拍照预览 */
+.wb-viewport {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+/* 拖拽手柄 */
+.v-grip {
+  width: 5px;
+  cursor: col-resize;
+  flex-shrink: 0;
+  background: transparent;
+  transition: background 0.15s;
+  z-index: 6;
+}
+
+.v-grip:hover,
+.v-grip:active {
+  background: var(--el-color-primary-light-7);
+}
+
+.h-grip {
+  height: 5px;
+  cursor: row-resize;
+  flex-shrink: 0;
+  transition: background 0.15s;
+  z-index: 6;
+}
+
+.h-grip:hover,
+.h-grip:active {
+  background: var(--el-color-primary-light-7);
+}
+
+/* 折叠/展开把手 */
+.aside-collapse {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--agnes-text-faint);
+  background: var(--agnes-bg-elevated);
+  border: 1px solid var(--agnes-border-faint);
+  z-index: 7;
+}
+
+.aside-collapse:hover { color: var(--agnes-text-primary); }
+.aside-collapse.left { right: -9px; border-radius: 0 6px 6px 0; }
+.aside-collapse.right { left: -9px; border-radius: 6px 0 0 6px; }
+
+.expand-tab {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--agnes-text-faint);
+  background: var(--agnes-bg-elevated);
+  border: 1px solid var(--agnes-border-faint);
+  z-index: 7;
+}
+
+.expand-tab:hover { color: var(--agnes-text-primary); }
+.expand-tab.left { left: 0; border-radius: 0 6px 6px 0; border-left: none; }
+.expand-tab.right { right: 0; border-radius: 6px 0 0 6px; border-right: none; }
+
+/* 底部 dock */
+.wb-dock {
+  position: relative;
+  flex-shrink: 0;
+  min-height: 0;
+  border-top: 1px solid var(--agnes-border-faint);
+  display: flex;
+}
+
+.dock-collapse {
+  position: absolute;
+  top: -1px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 44px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--agnes-text-faint);
+  background: var(--agnes-bg-elevated);
+  border: 1px solid var(--agnes-border-faint);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  z-index: 7;
+}
+
+.dock-collapse:hover { color: var(--agnes-text-primary); }
+
+.expand-tab.dock {
+  top: auto;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  height: 18px;
+  width: 44px;
+  border-radius: 6px 6px 0 0;
+  border-bottom: none;
+}
+
+/* 状态栏 */
+.wb-statusbar {
+  height: 24px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 12px;
+  font-size: 11px;
+  color: var(--agnes-text-faint);
+  border-top: 1px solid var(--agnes-border-faint);
+  background: var(--agnes-bg-elevated);
+}
+
+.status-hint { margin-left: auto; }
+
+.status-saved { color: var(--el-color-success); }
+
 .capture-preview {
   width: 100%;
   border-radius: 6px;
   border: 1px solid var(--agnes-border-light, rgba(255, 255, 255, 0.12));
-}
-
-.scene-item:hover {
-  background: var(--agnes-bg-hover);
-}
-
-.scene-item.active {
-  background: var(--agnes-nav-hover-bg);
-}
-
-.scene-item-name {
-  font-size: 14px;
-  color: var(--agnes-text-primary);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.scene-item-desc {
-  font-size: 12px;
-  color: var(--agnes-text-secondary);
-  margin-top: 2px;
 }
 </style>

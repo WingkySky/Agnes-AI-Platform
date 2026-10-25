@@ -14,7 +14,7 @@ import type { Scene3D } from '../../types/scene'
 describe('sceneCameraParams', () => {
   const cam = (y: number, px = 0, pz = 5, lx = 0, lz = 0) => ({
     position: { x: px, y, z: pz },
-    lookAt: { x: lx, y: 0, z: lz },
+    target: { x: lx, y: 0, z: lz },
     fov: 50,
   })
 

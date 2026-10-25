@@ -11,12 +11,12 @@
 
 <template>
   <el-config-provider :locale="epLocale">
-    <div class="app-root" :class="{ 'no-header': isStandaloneRoute, 'sidebar-open': sidebarOpen }">
+    <div class="app-root" :class="{ 'no-header': isStandaloneRoute || isWorkbenchRoute, 'sidebar-open': sidebarOpen }">
       <!-- 侧边栏遮罩层 -->
       <div v-if="!isStandaloneRoute && sidebarOpen" class="sidebar-overlay" @click="sidebarOpen = false"></div>
 
       <!-- 左侧可展开侧边栏（全部功能菜单） -->
-      <aside v-if="!isStandaloneRoute" class="app-sidebar" :class="{ open: sidebarOpen }">
+      <aside v-if="!isStandaloneRoute && !isWorkbenchRoute" class="app-sidebar" :class="{ open: sidebarOpen }">
         <div class="sidebar-header">
           <div class="sidebar-brand">
             <el-icon class="brand-icon"><MagicStick /></el-icon>
@@ -60,7 +60,7 @@
       </aside>
 
       <!-- 顶部栏（登录页 / 首页等独立全屏页面不显示） -->
-      <header v-if="!isStandaloneRoute" class="app-header">
+      <header v-if="!isStandaloneRoute && !isWorkbenchRoute" class="app-header">
         <!-- 左上角：菜单按钮 + 品牌 -->
         <div class="app-header-left">
           <button class="menu-toggle-btn" @click="sidebarOpen = !sidebarOpen">
@@ -194,8 +194,8 @@
       </header>
 
       <!-- 主内容区（keep-alive 保持组件状态，切换标签页时不丢失流式输出等内容） -->
-      <!-- canvas 路由时去掉 padding/max-width，让画布全屏工作 -->
-      <main class="app-main" :class="{ 'canvas-mode': isCanvasRoute, 'standalone': isStandaloneRoute, 'sidebar-shift': !isStandaloneRoute && sidebarOpen }">
+      <!-- canvas 路由时去掉 padding/max-width，让画布全屏工作；workbench（导演台）藏壳全屏 -->
+      <main class="app-main" :class="{ 'canvas-mode': isCanvasRoute, 'standalone': isStandaloneRoute || isWorkbenchRoute, 'sidebar-shift': !isStandaloneRoute && !isWorkbenchRoute && sidebarOpen }">
         <router-view v-slot="{ Component }">
           <keep-alive :include="cachedViews">
             <component :is="Component" />
@@ -203,14 +203,14 @@
         </router-view>
       </main>
 
-      <!-- 全局任务队列悬浮面板（路由切换时不销毁） -->
+      <!-- 全局任务队列悬浮面板（路由切换时不销毁；workbench 页保留） -->
       <TaskQueuePanel v-if="!isStandaloneRoute" />
 
-      <!-- 全局 Agent 侧边抽屉（Agent 一级公民：任意页面唤出，与会话页同源） -->
+      <!-- 全局 Agent 侧边抽屉（Agent 一级公民：任意页面唤出，与会话页同源；workbench 页保留） -->
       <AgentHostPanel v-if="!isStandaloneRoute && userStore.isAuthenticated" />
 
       <!-- 页脚（独立全屏页面不显示） -->
-      <footer v-if="!isStandaloneRoute" class="app-footer">
+      <footer v-if="!isStandaloneRoute && !isWorkbenchRoute" class="app-footer">
         <span>{{ t('app.footer') }}</span>
       </footer>
     </div>
@@ -299,6 +299,11 @@ const isCanvasRoute = computed(() => route.name === 'canvas')
 // 独立全屏页面（登录页 / 首页）：不显示标题栏、页脚、任务队列面板
 const isStandaloneRoute = computed(() => {
   return route.name === 'login' || route.name === 'home'
+})
+
+// 工作台页（导演台）：藏侧栏/顶栏/页脚但保留任务队列与 Agent 宿主浮层面板
+const isWorkbenchRoute = computed(() => {
+  return route.name === 'scene-editor'
 })
 
 // keep-alive 缓存的路由组件名称（切换标签页时保持状态不销毁）

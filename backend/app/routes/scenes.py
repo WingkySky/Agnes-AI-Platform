@@ -61,7 +61,8 @@ async def create_scene(
     """创建新的 3D 场景"""
     scene = await svc.create_scene(
         db, user_id=current_user.id, name=payload.name,
-        description=payload.description, scene_data=payload.scene_data,
+        description=payload.description,
+        scene_data=payload.scene_data.model_dump(by_alias=True, exclude_none=True),
         is_public=payload.is_public,
     )
     return ok(data=SceneResponse.from_model(scene))
@@ -75,9 +76,13 @@ async def preview_prompt(
 ):
     """
     把 3D 场景数据翻译为镜头语言描述，便于前端实时预览。
+    可选携带 shot：按该镜头机位编译并追加景别/运镜。
     不需要持久化，纯计算接口。
     """
-    suffix, details = scene_to_prompt_suffix(payload.scene_data)
+    suffix, details = scene_to_prompt_suffix(
+        payload.scene_data.model_dump(by_alias=True, exclude_none=True),
+        payload.shot.model_dump(by_alias=True, exclude_none=True) if payload.shot else None,
+    )
     return ok(data=ScenePromptPreviewResponse(prompt_suffix=suffix, details=details))
 
 
@@ -110,6 +115,9 @@ async def update_scene(
     if scene.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="无权修改")
     update_data = payload.model_dump(exclude_unset=True)
+    if payload.scene_data is not None:
+        # 嵌套模型按 camelCase 别名落库（与前端/存储形态一致）
+        update_data["scene_data"] = payload.scene_data.model_dump(by_alias=True, exclude_none=True)
     updated = await svc.update_scene(db, scene_id, **update_data)
     return ok(data=SceneResponse.from_model(updated))
 

@@ -407,7 +407,7 @@ import { matchImageSize, matchSizeByRatio, getImageSizeLabel, autoMatchImageSize
 import { getScenes } from '@/api/scenes'
 import { useScenesStore } from '@/stores/scenes'
 import type { FileInfo } from '@/types'
-import type { Scene3D, SceneData } from '@/types/scene'
+import type { Scene3D } from '@/types/scene'
 
 const { t } = useI18n()
 const router = useRouter()

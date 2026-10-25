@@ -1,7 +1,7 @@
 /* =====================================================
  * 3D 场景（导演台）API 封装
- * - 场景 CRUD：list / get / create / update / delete
- * - prompt 预览：previewPrompt
+ * - 场景 CRUD：list / create / update / delete
+ * - prompt 预览：previewPrompt（可携带 shot 按镜头机位编译）
  * 对齐后端 REST API：/api/scenes
  * ===================================================== */
 
@@ -13,6 +13,7 @@ import type {
   SceneListResponse,
   SceneData,
   ScenePromptPreviewResponse,
+  ShotData,
 } from '@/types/scene'
 
 /** 列表查询参数 */
@@ -28,7 +29,6 @@ export function getScenes(params: SceneListParams = {}): Promise<SceneListRespon
   return client.get('/api/scenes', { params })
 }
 
-/** 获取单个场景详情 */
 /** 创建场景 */
 export function createScene(data: CreateSceneRequest): Promise<Scene3D> {
   return client.post('/api/scenes', data)
@@ -44,7 +44,14 @@ export function deleteScene(id: number): Promise<null> {
   return client.delete(`/api/scenes/${id}`)
 }
 
-/** 预览 3D 场景翻译后的 prompt 后缀 */
-export function previewScenePrompt(sceneData: SceneData): Promise<ScenePromptPreviewResponse> {
-  return client.post('/api/scenes/preview-prompt', { scene_data: sceneData }, { silent: true })
+/** 预览 3D 场景翻译后的 prompt 后缀（shot 可选：按该镜头机位编译并追加景别/运镜） */
+export function previewScenePrompt(
+  sceneData: SceneData,
+  shot?: ShotData | null,
+): Promise<ScenePromptPreviewResponse> {
+  return client.post(
+    '/api/scenes/preview-prompt',
+    { scene_data: sceneData, shot: shot || undefined },
+    { silent: true },
+  )
 }

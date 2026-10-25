@@ -428,6 +428,46 @@ _ENV_KEYWORDS = {
 }
 
 
+# 景别（6 档）→ 镜头语言
+_SHOT_SIZE_TERMS = {
+    "extreme_wide": "大远景",
+    "wide": "全景",
+    "medium": "中景",
+    "medium_close": "中近景",
+    "close_up": "特写",
+    "extreme_close_up": "大特写",
+}
+
+# 运镜（9 种）→ 镜头语言
+_CAMERA_MOVE_TERMS = {
+    "static": "固定机位",
+    "push_in": "推镜",
+    "pull_out": "拉镜",
+    "pan": "横摇运镜",
+    "tilt": "纵摇运镜",
+    "orbit": "环绕运镜",
+    "tracking": "跟随运镜",
+    "crane": "升降运镜",
+    "handheld": "手持运镜",
+}
+
+
+def _pick_camera(scene_data: dict, shot: dict | None) -> dict:
+    """选取编译用机位：shot 指定时按 cameraId，否则激活机位，再退第一个"""
+    cameras = scene_data.get("cameras") or []
+    if not cameras:
+        return {}
+    if shot:
+        cid = shot.get("cameraId") or shot.get("camera_id")
+        for c in cameras:
+            if c.get("id") == cid:
+                return c
+    for c in cameras:
+        if c.get("active"):
+            return c
+    return cameras[0]
+
+
 def _environment_desc(env: dict) -> str:
     """环境布景 → 环境关键词描述"""
     if not env:
@@ -442,10 +482,14 @@ def _environment_desc(env: dict) -> str:
     return keyword or label or ""
 
 
-def scene_to_prompt_suffix(scene_data: dict) -> tuple[str, dict]:
+def scene_to_prompt_suffix(scene_data: dict, shot: dict | None = None) -> tuple[str, dict]:
     """
-    把 3D 场景数据翻译为镜头语言描述字符串。
+    把 3D 场景数据翻译为镜头语言描述字符串（SceneData v2：多机位/stage.environment）。
     支持多主体关系、多灯光叠加、道具布景、环境描述。
+
+    Args:
+        shot: 可选镜头（Shot）。提供时按 shot.cameraId 机位编译，
+              并追加景别/运镜与镜头附加描述。
 
     返回:
         (suffix, details)
@@ -455,9 +499,9 @@ def scene_to_prompt_suffix(scene_data: dict) -> tuple[str, dict]:
     if not scene_data or not isinstance(scene_data, dict):
         return "", {}
 
-    cam = scene_data.get("camera", {}) or {}
+    cam = _pick_camera(scene_data, shot)
     cam_pos = cam.get("position", {}) or {}
-    cam_look = cam.get("lookAt", {}) or {}
+    cam_look = cam.get("target", {}) or {}
     fov = float(cam.get("fov", 50))
     cam_x = float(cam_pos.get("x", 0))
     cam_y = float(cam_pos.get("y", 1.6))
@@ -466,7 +510,7 @@ def scene_to_prompt_suffix(scene_data: dict) -> tuple[str, dict]:
     subjects = scene_data.get("subjects", []) or []
     lights = scene_data.get("lights", []) or []
     props = scene_data.get("props", []) or []
-    environment = scene_data.get("environment", {}) or {}
+    environment = (scene_data.get("stage", {}) or {}).get("environment", {}) or {}
 
     # 以第一个主体作为相机距离/构图参考（若无主体则用原点）
     primary = subjects[0] if subjects else {"x": 0, "z": 0}
@@ -503,7 +547,7 @@ def scene_to_prompt_suffix(scene_data: dict) -> tuple[str, dict]:
         "environment": env_d,
     }
 
-    # 组装：视角/焦段/视野/构图/相机朝向 + 主体关系 + 主体朝向 + 灯光 + 道具 + 环境
+    # 组装：视角/焦段/视野/构图/相机朝向 + 主体关系 + 主体朝向 + 灯光 + 道具 + 环境 + 镜头（可选）
     parts = [angle, focal, fov_desc, composition]
     if camera_facing:
         parts.append(camera_facing)
@@ -517,6 +561,15 @@ def scene_to_prompt_suffix(scene_data: dict) -> tuple[str, dict]:
         parts.append(props_d)
     if env_d:
         parts.append(env_d)
+
+    if shot:
+        size_term = _SHOT_SIZE_TERMS.get(shot.get("shotSize") or shot.get("shot_size") or "", "")
+        move_term = _CAMERA_MOVE_TERMS.get(shot.get("cameraMove") or shot.get("camera_move") or "", "")
+        shot_prompt = str(shot.get("prompt") or "").strip()
+        shot_terms = [p for p in (size_term, move_term, shot_prompt) if p]
+        parts.extend(shot_terms)
+        details["shot_size"] = size_term
+        details["camera_move"] = move_term
 
     suffix = "。" + "，".join(p for p in parts if p) + "。"
     return suffix, details
