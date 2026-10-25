@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 修复 FRONTEND_ORIGINS 逗号分隔格式启动崩溃
+
+- pydantic-settings 对 List 类型复杂字段做严格 JSON 预解码，`.env`/环境变量写逗号分隔格式（`FRONTEND_ORIGINS=http://a,http://b`）会在解码阶段直接抛 SettingsError（`parse_origins` validator 无机会运行）。`frontend_origins` 加 `NoDecode` 跳过预解码，交由既有 `parse_origins` 统一兼容 JSON 数组/逗号分隔两种格式；`.env.example` 注释同步。四场景实测：逗号分隔（环境变量/.env 文件）、JSON 数组、默认值全部正常，pytest 310 绿
+
 ### 全局宿主头部新增「新建对话」按钮
 
 - Agent 宿主面板头部按钮组最左新增新建对话钮（lucide MessageSquarePlus，title/aria 复用既有 `agent.drawerNew` 中英文案），点击与展开态会话侧栏的「新建」同入口（`handleNewSession`：画布页自动带当前工作区上下文标记）；`@dblclick.stop` 防连点误触头部的双击档位切换

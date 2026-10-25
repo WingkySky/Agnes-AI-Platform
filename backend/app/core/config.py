@@ -8,8 +8,8 @@
 # 由前端配置页面管理。此处仅保留首次启动初始化用的引导配置。
 # =====================================================
 
-from typing import List, Optional
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Annotated, List, Optional
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from pydantic import Field, field_validator
 
 
@@ -72,7 +72,8 @@ class Settings(BaseSettings):
     )
 
     # ---------- 服务配置 ----------
-    frontend_origins: List[str] = Field(
+    # NoDecode 跳过 pydantic-settings 对复杂字段的 JSON 预解码（逗号分隔值否则在解码阶段直接启动报错），由 parse_origins 统一兼容两种格式
+    frontend_origins: Annotated[List[str], NoDecode] = Field(
         default=["http://localhost:5173", "http://127.0.0.1:5173"],
         description="允许跨域访问的前端来源列表",
     )
@@ -220,8 +221,7 @@ class Settings(BaseSettings):
     def parse_origins(cls, v):
         """
         兼容多种配置格式：
-        - JSON 数组字符串（pydantic-settings 对 dotenv 复杂字段按 JSON 解析）：
-          '["http://localhost:5173", "http://127.0.0.1:5173"]'
+        - JSON 数组字符串：'["http://localhost:5173", "http://127.0.0.1:5173"]'
         - 逗号分隔字符串："http://localhost:5173,http://127.0.0.1:5173"
         """
         if isinstance(v, str):
