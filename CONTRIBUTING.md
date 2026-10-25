@@ -21,10 +21,12 @@
 
 ## 开发环境
 
-按 [README - 3. 手动启动](README.md#3-手动启动)从源码启动后端与前端，然后运行测试：
+按 [README - 3. 手动启动](README.md#3-手动启动)从源码启动后端与前端，然后运行检查：
 
 ```bash
 cd backend && python -m pytest    # 后端测试
+cd backend && ruff check .        # 后端 lint（先 pip install ruff）
+cd frontend && npm run lint       # 前端 lint
 cd frontend && npm run test       # 前端测试（vitest）
 ```
 

@@ -189,7 +189,7 @@ export function useI18n(): {
   return {
     // 每次调用都读取 state.locale，使依赖项与 Vue 响应式系统关联
     t(key: string, values?: InterpolateValues): string {
-      // eslint-disable-next-line no-unused-expressions
+       
       state.locale
       return t(key, values)
     },

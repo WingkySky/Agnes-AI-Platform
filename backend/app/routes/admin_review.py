@@ -14,9 +14,9 @@
 # =====================================================
 
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Body
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import and_, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -24,10 +24,10 @@ from sqlalchemy.future import select
 from app.core.database import get_async_db
 from app.core.response import ok
 from app.core.security import get_current_reviewer
-from app.models.user import User
 from app.models.asset import Asset
 from app.models.generation import Generation
 from app.models.prompt_preset import PresetIndex, PromptPreset
+from app.models.user import User
 
 logger = logging.getLogger("agnes_platform")
 router = APIRouter(prefix="/admin/review", tags=["管理员-统一审核"])
@@ -48,12 +48,12 @@ AI_MODERATION_STATUSES = ("pending", "passed", "violated", "failed", "none", "al
 async def list_review_items(
     review_type: str = Query("all", description="类型筛选：work / preset / asset / all"),
     status: str = Query("pending", description="状态：pending / approved / rejected / all"),
-    keyword: Optional[str] = Query(None, description="关键词搜索（名称/描述/提示词）"),
-    item_id: Optional[int] = Query(None, description="按内容 ID 精确搜索"),
-    user_id: Optional[int] = Query(None, description="按创作者用户 ID 搜索"),
-    username: Optional[str] = Query(None, description="按用户名模糊搜索（仅作品类型生效）"),
-    work_type: Optional[str] = Query(None, description="作品子类型筛选：image / video"),
-    ai_status: Optional[str] = Query(None, description="AI 预审结果筛选：pending / passed / violated / failed / none / all（仅作品类型生效）"),
+    keyword: str | None = Query(None, description="关键词搜索（名称/描述/提示词）"),
+    item_id: int | None = Query(None, description="按内容 ID 精确搜索"),
+    user_id: int | None = Query(None, description="按创作者用户 ID 搜索"),
+    username: str | None = Query(None, description="按用户名模糊搜索（仅作品类型生效）"),
+    work_type: str | None = Query(None, description="作品子类型筛选：image / video"),
+    ai_status: str | None = Query(None, description="AI 预审结果筛选：pending / passed / violated / failed / none / all（仅作品类型生效）"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
@@ -78,7 +78,7 @@ async def list_review_items(
         raise HTTPException(status_code=400, detail=f"ai_status 必须是 {', '.join(AI_MODERATION_STATUSES)} 之一")
 
     # ---------- 分类型查询 ----------
-    all_items: List[Dict[str, Any]] = []
+    all_items: list[dict[str, Any]] = []
 
     # 1. 作品审核
     if review_type in ("all", "work"):
@@ -367,7 +367,7 @@ async def approve_item(
 async def reject_item(
     review_type: str,
     item_id: int,
-    payload: Dict[str, Any] = Body(default_factory=dict),
+    payload: dict[str, Any] = Body(default_factory=dict),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_reviewer),
 ):
@@ -436,7 +436,7 @@ async def reject_item(
 
 @router.post("/batch-approve", summary="批量审核通过")
 async def batch_approve(
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_reviewer),
 ):
@@ -473,7 +473,7 @@ async def batch_approve(
 
 @router.post("/batch-reject", summary="批量驳回")
 async def batch_reject(
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_reviewer),
 ):
@@ -522,13 +522,13 @@ async def _load_authors_map(db: AsyncSession, user_ids) -> dict:
 async def _query_work_reviews(
     db: AsyncSession,
     status: str,
-    keyword: Optional[str],
-    item_id: Optional[int],
-    user_id: Optional[int],
-    username: Optional[str] = None,
-    work_type: Optional[str] = None,
-    ai_status: Optional[str] = None,
-) -> List[Dict[str, Any]]:
+    keyword: str | None,
+    item_id: int | None,
+    user_id: int | None,
+    username: str | None = None,
+    work_type: str | None = None,
+    ai_status: str | None = None,
+) -> list[dict[str, Any]]:
     """查询作品审核列表（仅展示公开到广场的作品，与旧 ModerationView 行为一致）"""
     query = select(Generation)
 
@@ -622,10 +622,10 @@ async def _query_work_reviews(
 async def _query_preset_reviews(
     db: AsyncSession,
     status: str,
-    keyword: Optional[str],
-    item_id: Optional[int],
-    user_id: Optional[int],
-) -> List[Dict[str, Any]]:
+    keyword: str | None,
+    item_id: int | None,
+    user_id: int | None,
+) -> list[dict[str, Any]]:
     """查询预设审核列表"""
     query = select(PresetIndex)
 
@@ -715,12 +715,12 @@ ASSET_TYPE_LABELS = {
 async def _query_asset_reviews(
     db: AsyncSession,
     status: str,
-    keyword: Optional[str],
-    item_id: Optional[int],
-    user_id: Optional[int],
-    username: Optional[str] = None,
-    work_type: Optional[str] = None,
-) -> List[Dict[str, Any]]:
+    keyword: str | None,
+    item_id: int | None,
+    user_id: int | None,
+    username: str | None = None,
+    work_type: str | None = None,
+) -> list[dict[str, Any]]:
     """查询资产审核列表（仅展示公开到广场的创作资产；work_type 复用为 image/video 筛选）"""
     query = select(Asset).filter(Asset.is_public == True)  # noqa: E712
 

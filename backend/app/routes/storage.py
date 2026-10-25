@@ -4,7 +4,6 @@
 # GET /api/admin/storage/overview - 全平台存储概览（管理员级，显式挂鉴权）
 # =====================================================
 
-from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 
@@ -28,7 +27,7 @@ async def get_storage_usage(
 @router.get("/admin/storage/overview", summary="全平台存储概览（管理员）")
 async def get_storage_overview(
     limit: int = Query(10, ge=1, le=50),
-    _admin: Optional[User] = Depends(get_current_admin_user),
+    _admin: User | None = Depends(get_current_admin_user),
 ):
     """平台总用量 + 用量 top N 用户（台账口径，S3 件不计）"""
     data = await admin_overview(limit=limit)

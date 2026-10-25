@@ -352,7 +352,6 @@ import {
   derivePrevFrameForShot,
   deriveChainVideosForShot,
   findDerivedPanels,
-  findPrevFramePanel,
   getDerivedShotIds,
   readRefAssets,
   readShotVideoMode,
@@ -495,11 +494,10 @@ function entityIdOf(id: string): number | null {
 }
 
 /** 实体库模式：名称/描述失焦直写实体 */
-async function onAssetMetaChange(asset: ShotAsset, kind: 'characters' | 'scenes' | 'props') {
+async function onAssetMetaChange(asset: ShotAsset, _kind: 'characters' | 'scenes' | 'props') {
   if (!libraryMode.value) return
   const eid = entityIdOf(asset.id)
   if (!eid || !asset.name.trim()) return
-  const entityKind: EntityKind = kind === 'characters' ? 'character' : kind === 'scenes' ? 'scene' : 'prop'
   try {
     await updateWorkEntity(eid, { name: asset.name.trim(), description: asset.description.trim() || undefined })
   } catch (err) {

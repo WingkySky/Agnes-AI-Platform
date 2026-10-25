@@ -13,7 +13,6 @@ import os
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 from urllib.parse import urlparse
 
 import httpx
@@ -32,7 +31,7 @@ def _new_name(ext: str) -> str:
     return f"{uuid.uuid4().hex}.{ext or 'bin'}"
 
 
-def _infer_ext(url: str, content_type: Optional[str], media_type: str) -> str:
+def _infer_ext(url: str, content_type: str | None, media_type: str) -> str:
     """URL 路径后缀优先，其次 Content-Type，最后按媒体类型兜底"""
     if url:
         suffix = Path(urlparse(url).path).suffix.lower().lstrip(".")

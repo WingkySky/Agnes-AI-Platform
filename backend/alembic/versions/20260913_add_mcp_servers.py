@@ -9,9 +9,9 @@ Create Date: 2026-09-13
     注意：当前项目尚未实际启用 alembic（建表走 init_db.py 的 create_all），
     本文件作为迁移记录保留。
 """
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision = "20260913_add_mcp_servers"
 down_revision = "20260628_template_approval"

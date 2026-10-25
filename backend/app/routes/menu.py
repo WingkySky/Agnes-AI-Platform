@@ -10,10 +10,10 @@
 # =====================================================
 
 import logging
-from typing import List, Literal, Optional, Dict, Any
-from pydantic import BaseModel, Field
+from typing import Literal
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_db
@@ -32,9 +32,9 @@ class MenuGroupConfigItem(BaseModel):
     """分组自定义配置"""
     key: str = Field(..., description="分组唯一标识")
     type: Literal["top", "sidebar"] = Field(..., description="分组类型：top=顶部导航, sidebar=侧边栏")
-    label_zh: Optional[str] = Field(None, description="自定义中文名称")
-    label_en: Optional[str] = Field(None, description="自定义英文名称")
-    icon: Optional[str] = Field(None, description="自定义图标")
+    label_zh: str | None = Field(None, description="自定义中文名称")
+    label_en: str | None = Field(None, description="自定义英文名称")
+    icon: str | None = Field(None, description="自定义图标")
 
 
 class MenuItemConfigItem(BaseModel):
@@ -42,16 +42,16 @@ class MenuItemConfigItem(BaseModel):
     key: str = Field(..., description="菜单唯一标识（前端内置）")
     show_in_top: bool = Field(..., description="是否在顶部导航显示")
     show_in_sidebar: bool = Field(..., description="是否在侧边栏显示")
-    top_group_key: Optional[str] = Field(None, description="顶部导航分组key")
-    sidebar_group_key: Optional[str] = Field(None, description="侧边栏分组key")
+    top_group_key: str | None = Field(None, description="顶部导航分组key")
+    sidebar_group_key: str | None = Field(None, description="侧边栏分组key")
     top_sort_order: int = Field(..., ge=1, description="顶部导航排序序号")
     sidebar_sort_order: int = Field(..., ge=1, description="侧边栏排序序号")
 
 
 class SaveMenuConfigsRequest(BaseModel):
     """保存菜单配置请求（包含菜单项配置和分组自定义配置）"""
-    configs: List[MenuItemConfigItem]
-    groups: Optional[List[MenuGroupConfigItem]] = Field(default_factory=list, description="分组自定义配置")
+    configs: list[MenuItemConfigItem]
+    groups: list[MenuGroupConfigItem] | None = Field(default_factory=list, description="分组自定义配置")
 
 
 # ---------- 公开接口（所有用户可访问，用于获取菜单配置） ----------
@@ -59,7 +59,7 @@ class SaveMenuConfigsRequest(BaseModel):
 @router.get("/menu-configs", summary="获取当前菜单配置")
 async def get_menu_configs(
     db: AsyncSession = Depends(get_async_db),
-    _user: Optional[User] = Depends(get_current_user_optional),
+    _user: User | None = Depends(get_current_user_optional),
 ):
     """
     获取当前菜单配置。

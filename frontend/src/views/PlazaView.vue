@@ -454,7 +454,7 @@
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  Loading, Picture, VideoPlay, VideoCamera, User, UserFilled, Star, StarFilled,
+  Loading, Picture, VideoPlay, VideoCamera, UserFilled, Star, StarFilled,
   CopyDocument, View, ArrowDown, Clock,
 } from '@element-plus/icons-vue'
 import {

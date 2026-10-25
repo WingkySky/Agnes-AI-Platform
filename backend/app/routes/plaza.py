@@ -13,29 +13,28 @@
 # =====================================================
 
 import logging
-from datetime import datetime
-from typing import Optional, List
+from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import desc, func, or_
 
 from app.core.database import get_async_db
 from app.core.response import ok
 from app.core.security import get_current_user, get_current_user_optional
-from app.models.generation import Generation
-from app.models.plaza_like import PlazaLike
 from app.models.asset import Asset
 from app.models.asset_like import AssetLike
+from app.models.generation import Generation
+from app.models.plaza_like import PlazaLike
 from app.models.user import User
 from app.schemas.plaza import (
-    PlazaWork,
-    PlazaListResponse,
     LikeActionResponse,
     LikeStatusResponse,
     PlazaCreation,
     PlazaCreationListResponse,
+    PlazaListResponse,
+    PlazaWork,
 )
 
 logger = logging.getLogger("agnes_platform")
@@ -43,7 +42,7 @@ router = APIRouter()
 
 
 # ---------- 工具：生成公开昵称 ----------
-def _anonymize_nickname(user: Optional[User]) -> Optional[str]:
+def _anonymize_nickname(user: User | None) -> str | None:
     """获取公开昵称：优先 nickname，其次 username，最终回退到 User_id。
 
     在广场等公开场景下，昵称由用户主动设置，展示给其他用户。
@@ -64,8 +63,8 @@ def _anonymize_nickname(user: Optional[User]) -> Optional[str]:
 def _build_plaza_work(
     record: "Generation",
     author: Optional["User"],
-    current_user_id: Optional[int],
-    liked_ids: Optional[set] = None,
+    current_user_id: int | None,
+    liked_ids: set | None = None,
 ) -> PlazaWork:
     """从 Generation 记录构建广场作品响应"""
     # 向后兼容：mode 可能为空，从 params 回退
@@ -105,9 +104,9 @@ async def get_plaza_works(
     sort: str = Query("latest", description="排序: latest（最新）/ popular（最热门）"),
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
     page_size: int = Query(24, ge=1, le=100, description="每页数量"),
-    preset_id: Optional[int] = Query(None, description="按预设 ID 筛选作品（用于'按预设浏览'入口）"),
+    preset_id: int | None = Query(None, description="按预设 ID 筛选作品（用于'按预设浏览'入口）"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     """
     分页获取广场公开作品列表（未登录也可访问）。
@@ -193,7 +192,7 @@ async def get_plaza_works(
 async def get_plaza_work_detail(
     work_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     """
     获取广场单个作品详情（未登录也可访问）。
@@ -368,8 +367,8 @@ async def get_like_status(
 def _build_plaza_creation(
     asset: "Asset",
     author: Optional["User"],
-    current_user_id: Optional[int],
-    liked_ids: Optional[set] = None,
+    current_user_id: int | None,
+    liked_ids: set | None = None,
 ) -> PlazaCreation:
     """从 Asset 记录构建广场创作响应"""
     is_mine = current_user_id is not None and asset.user_id == current_user_id
@@ -402,7 +401,7 @@ async def get_plaza_creations(
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
     page_size: int = Query(24, ge=1, le=100, description="每页数量"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     """
     分页获取广场公开创作资产列表（未登录也可访问）。
@@ -500,7 +499,7 @@ async def get_creation_like_status(
 async def get_plaza_creation_detail(
     creation_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     """
     获取广场单个创作资产详情（未登录也可访问）。每次访问浏览数 +1。

@@ -3,8 +3,6 @@
 # 对齐 Scene3D 模型，用于接口参数校验与文档生成。
 # =====================================================
 
-from datetime import datetime
-from typing import Optional, List
 from pydantic import BaseModel, Field
 
 
@@ -64,10 +62,10 @@ class EnvironmentData(BaseModel):
 
 class SceneData(BaseModel):
     """3D 场景布局数据（支持多主体/多灯光/道具布景）"""
-    subjects: List[SubjectData] = Field(default_factory=list, description="主体列表")
+    subjects: list[SubjectData] = Field(default_factory=list, description="主体列表")
     camera: CameraData = Field(default_factory=CameraData)
-    lights: List[LightData] = Field(default_factory=list, description="灯光列表")
-    props: List[PropData] = Field(default_factory=list, description="道具占位列表")
+    lights: list[LightData] = Field(default_factory=list, description="灯光列表")
+    props: list[PropData] = Field(default_factory=list, description="道具占位列表")
     environment: EnvironmentData = Field(default_factory=EnvironmentData, description="环境布景")
 
 
@@ -76,17 +74,17 @@ class SceneData(BaseModel):
 class SceneCreate(BaseModel):
     """创建 3D 场景请求"""
     name: str = Field(..., min_length=1, max_length=200, description="场景名称")
-    description: Optional[str] = Field(None, description="场景描述")
+    description: str | None = Field(None, description="场景描述")
     scene_data: dict = Field(default_factory=dict, description="3D 布局数据")
     is_public: bool = Field(default=False, description="是否公开")
 
 
 class SceneUpdate(BaseModel):
     """更新 3D 场景请求（所有字段可选）"""
-    name: Optional[str] = Field(None, min_length=1, max_length=200)
-    description: Optional[str] = None
-    scene_data: Optional[dict] = None
-    is_public: Optional[bool] = None
+    name: str | None = Field(None, min_length=1, max_length=200)
+    description: str | None = None
+    scene_data: dict | None = None
+    is_public: bool | None = None
 
 
 class ScenePromptPreviewRequest(BaseModel):
@@ -99,13 +97,13 @@ class ScenePromptPreviewRequest(BaseModel):
 class SceneResponse(BaseModel):
     """3D 场景响应"""
     id: int
-    user_id: Optional[int] = None
+    user_id: int | None = None
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     scene_data: dict
     is_public: bool
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    created_at: str | None = None
+    updated_at: str | None = None
 
     class Config:
         from_attributes = True
@@ -126,7 +124,7 @@ class SceneResponse(BaseModel):
 
 class SceneListResponse(BaseModel):
     """场景列表响应"""
-    items: List[SceneResponse]
+    items: list[SceneResponse]
     total: int
 
 

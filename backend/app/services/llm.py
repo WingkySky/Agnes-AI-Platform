@@ -63,7 +63,10 @@ async def call_llm(
     if not body_model:
         body_model = fallback_model
     if not body_model:
-        from app.services.model_registry import resolve_system_chat_model_id, SYSTEM_CHAT_MODEL_KEYS
+        from app.services.model_registry import (
+            SYSTEM_CHAT_MODEL_KEYS,
+            resolve_system_chat_model_id,
+        )
         body_model = await resolve_system_chat_model_id(None, SYSTEM_CHAT_MODEL_KEYS["chat_default"])
     if not body_model:
         raise RuntimeError("未配置可用的对话模型，请先在配置页同步或添加对话模型")

@@ -122,7 +122,7 @@
 
     <!-- 右侧内容区（各页面自行渲染标题和操作按钮，避免重复标题） -->
     <main class="admin-content">
-      <router-view v-slot="{ Component, route: currentRoute }">
+      <router-view v-slot="{ Component }">
         <keep-alive :include="cachedViews">
           <component :is="Component" />
         </keep-alive>

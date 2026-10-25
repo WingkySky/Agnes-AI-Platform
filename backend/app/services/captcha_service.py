@@ -7,12 +7,11 @@
 
 import base64
 import io
+import logging
 import secrets
 import string
 import time
 import uuid
-import logging
-from typing import Optional, Tuple
 
 from app.core.config import settings
 
@@ -45,7 +44,7 @@ def _generate_captcha_image(code: str, width: int = 120, height: int = 40) -> by
     - 轻微旋转
     """
     try:
-        from PIL import Image, ImageDraw, ImageFont, ImageFilter
+        from PIL import Image, ImageDraw, ImageFilter, ImageFont
     except ImportError:
         # Pillow 未安装时，返回一个简单的占位图片（1x1 透明像素）
         logger.warning("[验证码] Pillow 未安装，无法生成图片验证码")
@@ -131,7 +130,7 @@ def base64_to_bytes(b64_str: str) -> bytes:
     return base64.b64decode(b64_str)
 
 
-def create_captcha(captcha_id: Optional[str] = None) -> Tuple[str, bytes]:
+def create_captcha(captcha_id: str | None = None) -> tuple[str, bytes]:
     """
     创建一个新的验证码。
 
@@ -227,7 +226,7 @@ def generate_email_code() -> str:
     return "".join(secrets.choice("0123456789") for _ in range(6))
 
 
-def can_send_email_code(email: str) -> Tuple[bool, str]:
+def can_send_email_code(email: str) -> tuple[bool, str]:
     """
     检查是否可以发送邮箱验证码（重发间隔限制）。
 
@@ -259,7 +258,7 @@ def set_email_code(email: str, code: str, purpose: str = "reset_password") -> No
     logger.info("[邮箱验证码] 已保存 email=%s purpose=%s", email, purpose)
 
 
-def verify_email_code(email: str, code: str, purpose: str = "reset_password", remove_after_verify: bool = True) -> Tuple[bool, str]:
+def verify_email_code(email: str, code: str, purpose: str = "reset_password", remove_after_verify: bool = True) -> tuple[bool, str]:
     """
     验证邮箱验证码。
 

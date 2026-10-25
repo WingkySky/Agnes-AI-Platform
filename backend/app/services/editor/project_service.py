@@ -6,13 +6,12 @@ import hashlib
 import json
 import uuid
 from datetime import datetime, timedelta
-from typing import Optional
 
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.models.editing_project import EditorSnapshot, EditingProject
+from app.models.editing_project import EditingProject, EditorSnapshot
 from app.models.user import User
 from app.services.editor.document_schema import (
     check_document_size,
@@ -76,9 +75,9 @@ async def create_project(
     db: AsyncSession,
     user: User,
     title: str,
-    work_id: Optional[int] = None,
-    document: Optional[dict] = None,
-    source_workspace_id: Optional[str] = None,
+    work_id: int | None = None,
+    document: dict | None = None,
+    source_workspace_id: str | None = None,
 ) -> EditingProject:
     if work_id is not None:
         from app.services import work_service
@@ -107,7 +106,7 @@ async def create_project(
 
 
 async def list_projects(
-    db: AsyncSession, user_id: int, work_id: Optional[int] = None
+    db: AsyncSession, user_id: int, work_id: int | None = None
 ) -> list[EditingProject]:
     stmt = select(EditingProject).where(EditingProject.user_id == user_id)
     if work_id is not None:
@@ -117,8 +116,8 @@ async def list_projects(
 
 
 async def update_project(
-    db: AsyncSession, project: EditingProject, title: Optional[str], work_id: Optional[int],
-    cover_url: Optional[str] = None,
+    db: AsyncSession, project: EditingProject, title: str | None, work_id: int | None,
+    cover_url: str | None = None,
 ) -> EditingProject:
     if cover_url is not None:
         project.cover_url = cover_url or None  # 空串=清空封面
@@ -145,7 +144,7 @@ def _document_hash(document: dict) -> str:
     ).hexdigest()
 
 
-async def maybe_snapshot(db: AsyncSession, project: EditingProject, reason: Optional[str]) -> Optional[EditorSnapshot]:
+async def maybe_snapshot(db: AsyncSession, project: EditingProject, reason: str | None) -> EditorSnapshot | None:
     """写前快照（当前文档未变时）：仅 agent 工具层携带 snapshot_reason 触发；
     去重窗口内内容哈希一致则跳过。与随后的保存同事务提交。"""
     since = datetime.utcnow() - SNAPSHOT_DEDUP_WINDOW
@@ -178,7 +177,7 @@ async def maybe_snapshot(db: AsyncSession, project: EditingProject, reason: Opti
 
 async def save_document(
     db: AsyncSession, project: EditingProject, document: dict, base_revision: int,
-    snapshot_reason: Optional[str] = None,
+    snapshot_reason: str | None = None,
 ) -> EditingProject:
     """保存时间线文档；base_revision 不符返回 409（仿画布冲突语义）；
     snapshot_reason 非空时写前快照（agent 兜底还原用）"""
@@ -242,8 +241,8 @@ async def delete_project(db: AsyncSession, project: EditingProject) -> None:
 
 
 async def build_draft_from_assets(
-    db: AsyncSession, user: User, asset_ids: list[int], source_workspace_id: Optional[str]
-) -> tuple[dict, Optional[str]]:
+    db: AsyncSession, user: User, asset_ids: list[int], source_workspace_id: str | None
+) -> tuple[dict, str | None]:
     """
     画布圈选素材 → 剪辑工程草稿 document（单向快照）。
 

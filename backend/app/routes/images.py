@@ -11,33 +11,40 @@
 #   - user_id / credits_consumed 写入 generations 表
 # =====================================================
 
-import base64
 import hashlib
 import logging
 import os
 import time
 import uuid
 from datetime import datetime
-from typing import Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.core.database import get_async_db
+from app.core.database import get_async_db, new_async_session
 from app.core.response import ok
 from app.core.security import get_current_user, get_current_user_optional
 from app.models.generation import Generation
 from app.models.user import User
-from app.schemas.images import ImageGenerationRequest, ImageGenerationResponse, ImageRecordResponse
-from app.services.agnes_client import agnes_client
-from app.services.provider_registry import provider_registry
+from app.schemas.images import (
+    ImageGenerationRequest,
+    ImageGenerationResponse,
+    ImageRecordResponse,
+)
 from app.services._generation_persist import create_pending_generation
-from app.services.credits_service import confirm_credits, consume_credits, get_image_cost_async, refund_credits
+from app.services.agnes_client import agnes_client
+from app.services.credits_service import (
+    confirm_credits,
+    consume_credits,
+    get_image_cost_async,
+    refund_credits,
+)
 from app.services.error_taxonomy import classify, classify_message
 from app.services.image_poller import image_poller_manager
+from app.services.provider_registry import provider_registry
 
 logger = logging.getLogger("agnes_platform")
 router = APIRouter()
@@ -188,7 +195,7 @@ async def create_image_task_async(
 async def get_image_task_status(
     task_id: str,
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     """查询图片任务状态（按用户隔离），前端用于轮询"""
     task = await image_poller_manager.get_status(task_id)
@@ -243,7 +250,7 @@ async def get_image_task_status(
 @router.delete("/images/tasks/{task_id}", summary="取消图片异步任务")
 async def cancel_image_task(
     task_id: str,
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     """取消指定图片任务（按用户隔离，仅允许任务创建者取消）"""
     task = await image_poller_manager.get_status(task_id)
@@ -423,7 +430,7 @@ async def create_image_generation(
 async def get_image_record(
     image_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     """根据 ID 获取单张图片生成历史记录（按用户隔离）"""
     stmt = select(Generation).filter(
@@ -460,7 +467,7 @@ async def get_image_record(
 async def download_watermarked_image(
     url: str = Query(..., description="原始图片 URL"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     """
     下载带水印的图片（动态处理，不保存到磁盘）。
@@ -475,7 +482,11 @@ async def download_watermarked_image(
 
     # 获取水印配置
     try:
-        from app.services.watermark_service import get_watermark_config, should_apply_watermark, apply_image_watermark
+        from app.services.watermark_service import (
+            apply_image_watermark,
+            get_watermark_config,
+            should_apply_watermark,
+        )
         wm_config = await get_watermark_config(db)
         need_watermark = should_apply_watermark(wm_config, current_user)
     except Exception as e:

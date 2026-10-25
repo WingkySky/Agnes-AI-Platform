@@ -3,12 +3,11 @@
 # 用于 /api/providers/* 和 /api/models/* 接口的请求/响应校验
 # =====================================================
 
-from typing import Optional, List, Dict, Any
 from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 from app.schemas.common import ModelGenParams
-
 
 # =====================================================
 # Provider 相关 Schema
@@ -31,16 +30,16 @@ class ProviderCreateRequest(BaseModel):
 
 class ProviderUpdateRequest(BaseModel):
     """更新 Provider 请求体（所有字段可选）"""
-    name: Optional[str] = Field(default=None, description="Provider 名称")
-    provider_type: Optional[str] = Field(
+    name: str | None = Field(default=None, description="Provider 名称")
+    provider_type: str | None = Field(
         default=None, description="aibridge adapter 标识"
     )
-    base_url: Optional[str] = Field(default=None, description="API 基础地址")
-    api_key: Optional[str] = Field(default=None, description="API Key（留空表示不修改）")
-    poll_url: Optional[str] = Field(default=None, description="异步任务轮询接口")
-    is_active: Optional[bool] = Field(default=None, description="是否激活")
-    is_default: Optional[bool] = Field(default=None, description="是否设为默认 Provider")
-    sort_order: Optional[int] = Field(default=None, description="排序权重")
+    base_url: str | None = Field(default=None, description="API 基础地址")
+    api_key: str | None = Field(default=None, description="API Key（留空表示不修改）")
+    poll_url: str | None = Field(default=None, description="异步任务轮询接口")
+    is_active: bool | None = Field(default=None, description="是否激活")
+    is_default: bool | None = Field(default=None, description="是否设为默认 Provider")
+    sort_order: int | None = Field(default=None, description="排序权重")
 
 
 class ProviderResponse(BaseModel):
@@ -54,8 +53,8 @@ class ProviderResponse(BaseModel):
     is_active: bool
     is_default: bool
     sort_order: int
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     class Config:
         from_attributes = True
@@ -64,7 +63,7 @@ class ProviderResponse(BaseModel):
 class ProviderListResponse(BaseModel):
     """Provider 列表响应"""
     total: int
-    items: List[ProviderResponse]
+    items: list[ProviderResponse]
 
 
 # =====================================================
@@ -78,8 +77,8 @@ class CustomModelCreateRequest(BaseModel):
     display_name: str = Field(default="", description="显示名称（留空自动推断）")
     model_type: str = Field(default="", description="模型类型：image / video / chat（留空自动推断）")
     provider_name: str = Field(default="", description="供应商名称（留空自动推断）")
-    capabilities: Optional[List[str]] = Field(default=None, description="能力标签列表")
-    gen_params: Optional[ModelGenParams] = Field(
+    capabilities: list[str] | None = Field(default=None, description="能力标签列表")
+    gen_params: ModelGenParams | None = Field(
         default=None,
         description="生成能力配置（参考图上限/水印/尺寸规则/默认尺寸等）；None=按模型名自动画像",
     )
@@ -89,22 +88,22 @@ class CustomModelCreateRequest(BaseModel):
 
 class ModelUpdateRequest(BaseModel):
     """更新模型定义请求体（所有字段可选）"""
-    display_name: Optional[str] = Field(default=None, description="显示名称")
-    model_type: Optional[str] = Field(default=None, description="模型类型")
-    provider_name: Optional[str] = Field(default=None, description="供应商名称")
-    capabilities: Optional[List[str]] = Field(default=None, description="能力标签列表")
-    gen_params: Optional[ModelGenParams] = Field(
+    display_name: str | None = Field(default=None, description="显示名称")
+    model_type: str | None = Field(default=None, description="模型类型")
+    provider_name: str | None = Field(default=None, description="供应商名称")
+    capabilities: list[str] | None = Field(default=None, description="能力标签列表")
+    gen_params: ModelGenParams | None = Field(
         default=None,
         description="生成能力配置（全默认值=清空显式配置回退自动画像）；None=不修改",
     )
-    is_active: Optional[bool] = Field(default=None, description="是否激活")
-    is_disabled: Optional[bool] = Field(
+    is_active: bool | None = Field(default=None, description="是否激活")
+    is_disabled: bool | None = Field(
         default=None,
         description="是否用户手动停用（停用后不出现在生成页模型列表，同步不会自动恢复）",
     )
-    sort_order: Optional[int] = Field(default=None, description="排序权重")
-    asset_storage_mode: Optional[str] = Field(default=None, description="资源存储策略: auto/keep/migrate")
-    cost_multiplier: Optional[float] = Field(default=None, ge=0.1, le=100, description="积分倍率（实扣=基准价×倍率；None=不修改）")
+    sort_order: int | None = Field(default=None, description="排序权重")
+    asset_storage_mode: str | None = Field(default=None, description="资源存储策略: auto/keep/migrate")
+    cost_multiplier: float | None = Field(default=None, ge=0.1, le=100, description="积分倍率（实扣=基准价×倍率；None=不修改）")
 
 
 class ModelDefinitionResponse(BaseModel):
@@ -115,8 +114,8 @@ class ModelDefinitionResponse(BaseModel):
     display_name: str = ""
     type: str
     provider_name: str = ""
-    capabilities: List[str] = Field(default_factory=list)
-    gen_params: Optional[ModelGenParams] = None
+    capabilities: list[str] = Field(default_factory=list)
+    gen_params: ModelGenParams | None = None
     is_active: bool
     is_disabled: bool = False
     is_custom: bool
@@ -131,23 +130,23 @@ class ModelDefinitionResponse(BaseModel):
 class ModelListResponse(BaseModel):
     """模型定义列表响应"""
     total: int
-    items: List[ModelDefinitionResponse]
+    items: list[ModelDefinitionResponse]
 
 
 class ModelBatchUpdateRequest(BaseModel):
     """批量更新模型请求体（当前仅支持停用/启用）"""
-    model_ids: List[str] = Field(..., description="模型 ID 列表")
+    model_ids: list[str] = Field(..., description="模型 ID 列表")
     is_disabled: bool = Field(..., description="是否停用")
 
 
 class ModelBatchDeleteRequest(BaseModel):
     """批量删除模型请求体"""
-    model_ids: List[str] = Field(..., description="模型 ID 列表")
+    model_ids: list[str] = Field(..., description="模型 ID 列表")
 
 
 class ModelBatchCostMultiplierRequest(BaseModel):
     """批量设置模型积分倍率请求体（实扣积分 = 基准价 × 倍率）"""
-    model_ids: List[str] = Field(..., description="模型 ID 列表")
+    model_ids: list[str] = Field(..., description="模型 ID 列表")
     cost_multiplier: float = Field(..., ge=0.1, le=100, description="积分倍率")
 
 
@@ -162,9 +161,9 @@ class SyncModelsResponse(BaseModel):
     updated: int = Field(description="更新的模型数量")
     deactivated: int = Field(description="被软删除（API 中已不存在）的模型数量")
     total: int = Field(description="API 返回的模型总数")
-    error: Optional[str] = Field(default=None, description="同步失败时的错误信息")
+    error: str | None = Field(default=None, description="同步失败时的错误信息")
 
 
 class SyncAllResponse(BaseModel):
     """同步所有 Provider 模型的响应"""
-    results: List[SyncModelsResponse]
+    results: list[SyncModelsResponse]

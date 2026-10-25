@@ -8,9 +8,9 @@ Create Date: 2026-09-13
     MCP 市场 v1：mcp_market_sources（管理员自建源）/ mcp_market_items（官方+远程市场项）
     / mcp_servers.market_slug（安装溯源）。建表实际走 init_db.py create_all。
 """
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision = "20260913_add_mcp_market"
 down_revision = "20260913_add_mcp_servers"

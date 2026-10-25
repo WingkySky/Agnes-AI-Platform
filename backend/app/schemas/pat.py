@@ -3,7 +3,6 @@
 # =====================================================
 
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -19,8 +18,8 @@ class PatInfo(BaseModel):
     id: int
     name: str
     permission: str
-    last_used_at: Optional[datetime] = None
-    revoked_at: Optional[datetime] = None
+    last_used_at: datetime | None = None
+    revoked_at: datetime | None = None
     created_at: datetime
 
 

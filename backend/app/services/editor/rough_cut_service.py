@@ -229,7 +229,7 @@ async def analyze_asset(
                     ),
                     timeout=ANALYZE_TIMEOUT_SEC,
                 )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise HTTPException(status_code=503, detail="分析超时（素材过长），请改用手动剪辑")
         except ValueError as e:
             raise HTTPException(status_code=400, detail=f"素材无法分析：{e}")

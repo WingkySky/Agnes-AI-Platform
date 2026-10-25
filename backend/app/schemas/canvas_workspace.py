@@ -3,36 +3,37 @@
 # =====================================================
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
 class WorkspaceCreate(BaseModel):
     """创建画布工作区（迁移场景可透传前端 uid 作 id，重复创建幂等返回已有）"""
-    id: Optional[str] = Field(None, max_length=64, description="工作区 id（不传则后端生成）")
+    id: str | None = Field(None, max_length=64, description="工作区 id（不传则后端生成）")
     name: str = Field(..., max_length=255, description="工作区名称")
-    work_id: Optional[int] = Field(None, description="所属作品（轻容器），NULL=自由画布")
-    data: Dict[str, Any] = Field(default_factory=dict, description="panels/connections/groups/viewport/styleConfig")
+    work_id: int | None = Field(None, description="所属作品（轻容器），NULL=自由画布")
+    data: dict[str, Any] = Field(default_factory=dict, description="panels/connections/groups/viewport/styleConfig")
 
 
 class WorkspaceWorkBind(BaseModel):
     """改名/挂靠/解绑（PATCH；name 与 work_id 二选一或同传；work_id=None 解绑为自由画布）"""
-    work_id: Optional[int] = Field(None, description="目标作品 id，None=解绑")
-    name: Optional[str] = Field(None, min_length=1, max_length=255, description="画布新名称")
+    work_id: int | None = Field(None, description="目标作品 id，None=解绑")
+    name: str | None = Field(None, min_length=1, max_length=255, description="画布新名称")
 
 
 class WorkspaceSave(BaseModel):
     """保存画布工作区（乐观锁：base_revision 不符返回 409）"""
-    data: Dict[str, Any] = Field(..., description="完整工作区数据")
+    data: dict[str, Any] = Field(..., description="完整工作区数据")
     base_revision: int = Field(..., ge=0, description="客户端持有的版本号")
-    name: Optional[str] = Field(None, max_length=255, description="可选同步改名")
+    name: str | None = Field(None, max_length=255, description="可选同步改名")
 
 
 class WorkspaceBrief(BaseModel):
     """工作区列表项（不含 data）"""
     id: str
     name: str
-    work_id: Optional[int] = None
+    work_id: int | None = None
     revision: int
     created_at: datetime
     updated_at: datetime
@@ -43,7 +44,7 @@ class WorkspaceBrief(BaseModel):
 
 class WorkspaceDetail(WorkspaceBrief):
     """工作区全量（含 data 与 revision）"""
-    data: Dict[str, Any] = Field(default_factory=dict)
+    data: dict[str, Any] = Field(default_factory=dict)
 
 
 class WorkspaceSaveResponse(BaseModel):
@@ -58,21 +59,21 @@ class ConflictResponse(BaseModel):
 
 class WorkspaceOpsCreate(BaseModel):
     """批量画布操作（外部宿主增量写入：对话 Agent / MCP / CLI 共用）"""
-    ops: List[Dict[str, Any]] = Field(..., min_length=1, max_length=50,
+    ops: list[dict[str, Any]] = Field(..., min_length=1, max_length=50,
                                       description="op 列表：add_panel / add_connection（支持按节点名引用）")
 
 
 class SnapshotCreate(BaseModel):
     """创建快照（auto 由保存链路内嵌生成，此端点仅接受 manual/pre_danger）"""
     kind: str = Field("manual", description="manual=手动命名 / pre_danger=危险操作前")
-    name: Optional[str] = Field(None, max_length=255, description="手动版本名")
+    name: str | None = Field(None, max_length=255, description="手动版本名")
 
 
 class SnapshotBrief(BaseModel):
     """快照列表项（不含 data）"""
     id: int
     kind: str
-    name: Optional[str] = None
+    name: str | None = None
     revision: int
     created_at: datetime
 
@@ -82,9 +83,9 @@ class SnapshotBrief(BaseModel):
 
 class SnapshotDetail(SnapshotBrief):
     """快照全量"""
-    data: Dict[str, Any] = Field(default_factory=dict)
+    data: dict[str, Any] = Field(default_factory=dict)
 
 
 class SnapshotListResponse(BaseModel):
     """快照列表响应"""
-    items: List[SnapshotBrief]
+    items: list[SnapshotBrief]

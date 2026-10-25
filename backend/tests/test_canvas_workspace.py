@@ -7,7 +7,6 @@
 # - 删除工作区连带删快照 / 列表不含 data
 # =====================================================
 
-import json
 from datetime import datetime, timedelta
 
 import pytest
@@ -19,7 +18,11 @@ from sqlalchemy.future import select
 from app.core.database import get_async_db
 from app.core.security import create_access_token
 from app.main import app
-from app.models.canvas_workspace import MAX_AUTO_SNAPSHOTS, CanvasSnapshot, CanvasWorkspace
+from app.models.canvas_workspace import (
+    MAX_AUTO_SNAPSHOTS,
+    CanvasSnapshot,
+    CanvasWorkspace,
+)
 from app.models.user import User
 from app.routes.canvas_workspace import _data_hash
 
@@ -263,7 +266,7 @@ async def test_auto_snapshot_rolls_over_20(owner_client, seeded_ws, memory_db):
             content_hash=f"old-{i}", data={},
             created_at=base + timedelta(seconds=400 * i)))
     await memory_db.commit()
-    rev = (await _save(owner_client, ws.revision, [{"id": "new"}], ws.id))["revision"]
+    await _save(owner_client, ws.revision, [{"id": "new"}], ws.id)
     autos = [s for s in await _all_snapshots(memory_db, ws.id) if s.kind == "auto"]
     assert len(autos) == MAX_AUTO_SNAPSHOTS
     hashes = {s.content_hash for s in autos}

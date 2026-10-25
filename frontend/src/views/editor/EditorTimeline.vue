@@ -63,7 +63,6 @@ const contentWidth = computed(() =>
   Math.max(600, TRACK_HEAD_W + timeToX(props.totalDuration + 6, PX_PER_SEC.value) + TIMELINE_PAD),
 )
 
-const timelineWidth = computed(() => (props.totalDuration + 6) * PX_PER_SEC.value)
 
 // ---------- 播放头 ----------
 

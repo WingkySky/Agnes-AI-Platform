@@ -10,9 +10,9 @@ Create Date: 2026-06-27
     实际建表通过 backend/init_db.py 的 Base.metadata.create_all 完成。
     本文件作为后续启用 alembic 时的迁移记录保留，down_revision 暂为 None。
 """
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision = "20260627_add_style_elements"
 down_revision = None  # 项目当前未启用 alembic，无前置 revision

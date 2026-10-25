@@ -177,7 +177,7 @@ async def generate_cover_video(preset: PromptPreset) -> str:
 
 async def generate_missing_official_covers(db: AsyncSession) -> int:
     """为官方预设批量补齐封面（批量脚本用）：effect/camera 生成动态封面，其余生成静态图。返回成功数"""
-    from sqlalchemy import select, not_
+    from sqlalchemy import select
 
     result = await db.execute(
         select(PromptPreset).filter(PromptPreset.is_official == True)  # noqa: E712

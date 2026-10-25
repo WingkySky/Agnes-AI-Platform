@@ -53,7 +53,7 @@ export async function migrateLocalToCloudIfNeeded(): Promise<MigrationResult> {
   try {
     briefs = await listWorkspaces()
   } catch (err) {
-    // eslint-disable-next-line no-console
+     
     console.warn('[canvas-migration] 云端不可达，跳过迁移', err)
     return result
   }
@@ -78,7 +78,7 @@ export async function migrateLocalToCloudIfNeeded(): Promise<MigrationResult> {
       })
     } catch (err) {
       result.failed++
-      // eslint-disable-next-line no-console
+       
       console.warn('[canvas-migration] 工作区迁移失败', ws?.id, err)
     }
   }

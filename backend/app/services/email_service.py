@@ -7,10 +7,10 @@
 import asyncio
 import logging
 import smtplib
-from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from email.utils import formataddr
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from app.core.config import settings
 
@@ -31,7 +31,7 @@ async def send_email(
     to_email: str,
     subject: str,
     html_content: str,
-    text_content: Optional[str] = None,
+    text_content: str | None = None,
     smtp_config: Optional["SmtpConfig"] = None,
 ) -> bool:
     """
@@ -71,7 +71,7 @@ def _send_email_sync(
     to_email: str,
     subject: str,
     html_content: str,
-    text_content: Optional[str] = None,
+    text_content: str | None = None,
     smtp_config: Optional["SmtpConfig"] = None,
 ) -> bool:
     """同步发送邮件（在线程池中执行）"""

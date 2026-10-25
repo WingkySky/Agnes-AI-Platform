@@ -7,16 +7,20 @@
 # =====================================================
 
 import logging
+
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_db
 from app.core.response import ok
 from app.core.security import get_current_admin_user
 from app.models.user import User
-from app.services.system_config_service import get_smtp_config, update_smtp_config, SmtpConfig
 from app.services.email_service import send_test_email
+from app.services.system_config_service import (
+    get_smtp_config,
+    update_smtp_config,
+)
 
 logger = logging.getLogger("agnes_platform")
 router = APIRouter(prefix="/admin/system-config", tags=["管理员-系统配置"])
@@ -117,8 +121,8 @@ async def test_smtp(
 # 留空 = 跟随兜底链（系统默认 > 注册表第一个 chat 模型）
 # =====================================================
 
+from app.services.model_registry import SYSTEM_CHAT_MODEL_KEYS, get_models_by_type
 from app.services.system_config_service import get_config_value, set_config_value
-from app.services.model_registry import get_models_by_type, SYSTEM_CHAT_MODEL_KEYS
 
 _MODEL_CONFIG_KEYS = list(SYSTEM_CHAT_MODEL_KEYS.values())
 

@@ -6,7 +6,8 @@
 # =====================================================
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, BigInteger, DateTime, ForeignKey
+
+from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Integer, String
 
 from app.core.database import Base
 

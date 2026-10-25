@@ -5,10 +5,10 @@
 # =====================================================
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, Index
+
+from sqlalchemy import Column, DateTime, Index, Integer, String, Text
 
 from app.core.database import Base
-
 
 # 默认系统配置（首次启动时初始化）
 # 分类：smtp / site / security / model

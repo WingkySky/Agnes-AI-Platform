@@ -11,42 +11,44 @@
 # GET    /api/history/video/{id}/preview   - 视频预览片段（悬停 GIF 效果）
 # =====================================================
 
+import asyncio
+import glob as glob_module
+import hashlib
+import io
 import logging
 import os
-import hashlib
 import tempfile
-import asyncio
-from pathlib import Path
-
-import httpx
-import glob as glob_module
 import zipfile
-import io
 from datetime import datetime
-from typing import Optional, List, Tuple
+from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, HTTPException, Depends, Query, Request
-from fastapi.responses import Response as FastAPIResponse, FileResponse
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import FileResponse
+from fastapi.responses import Response as FastAPIResponse
+from sqlalchemy import desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import desc, func
 
 from app.core.database import get_async_db
 from app.core.response import ok
-from app.core.security import get_current_user_optional, get_current_user
+from app.core.security import get_current_user, get_current_user_optional
 from app.models.generation import Generation
 from app.models.user import User
 from app.routes._media_proxy import proxy_video_stream
-from app.services.moderation_service import mark_pending_with_keyword_check, queue_ai_moderation
 from app.schemas.common import (
-    HistoryListResponse,
-    GenerationRecord,
     BatchDeleteRequest,
+    GenerationRecord,
+    HistoryListResponse,
 )
 from app.schemas.plaza import (
-    UpdateShareStatusRequest,
     BatchShareRequest,
+    UpdateShareStatusRequest,
+)
+from app.services.moderation_service import (
+    mark_pending_with_keyword_check,
+    queue_ai_moderation,
 )
 
 logger = logging.getLogger("agnes_platform")
@@ -74,7 +76,7 @@ _URL_EXT_RULES = (
 )
 
 
-def _sniff_url_ext(url: str) -> Optional[Tuple[str, str]]:
+def _sniff_url_ext(url: str) -> tuple[str, str] | None:
     """从 URL 路径中尝试提取更准确的扩展名与 MIME 类型，未命中返回 None。"""
     url_path = urlparse(url).path.lower()
     for suffix, ext, content_type in _URL_EXT_RULES:
@@ -106,10 +108,10 @@ async def _proxy_attachment(url: str) -> httpx.Response:
 
 async def _apply_watermark_if_needed(
     db: AsyncSession,
-    current_user: Optional[User],
+    current_user: User | None,
     file_type: str,
     file_content: bytes,
-) -> Tuple[bytes, bool]:
+) -> tuple[bytes, bool]:
     """
     图片类型：按水印配置动态应用水印（不保存到磁盘）。
     返回 (文件内容, 是否已加水印)；非图片、未启用或处理失败时返回原图。
@@ -117,7 +119,11 @@ async def _apply_watermark_if_needed(
     if file_type != "image":
         return file_content, False
     try:
-        from app.services.watermark_service import get_watermark_config, should_apply_watermark, apply_image_watermark
+        from app.services.watermark_service import (
+            apply_image_watermark,
+            get_watermark_config,
+            should_apply_watermark,
+        )
         wm_config = await get_watermark_config(db)
         if should_apply_watermark(wm_config, current_user):
             return apply_image_watermark(file_content, wm_config), True
@@ -137,14 +143,14 @@ def _download_response_headers(filename: str) -> dict:
 
 @router.get("/history", summary="获取生成历史列表")
 async def get_history(
-    type: Optional[str] = Query(None, description="筛选类型: image / video / all（默认）"),
-    source: Optional[str] = Query("all", description="来源筛选: all（默认，任务视图统一展示）/ independent / canvas / project"),
-    status: Optional[str] = Query(None, description="状态筛选: success / failed / pending（进行中含 pending）"),
-    task_id: Optional[str] = Query(None, description="按 task_id 精确匹配（用于从积分明细跳转）"),
+    type: str | None = Query(None, description="筛选类型: image / video / all（默认）"),
+    source: str | None = Query("all", description="来源筛选: all（默认，任务视图统一展示）/ independent / canvas / project"),
+    status: str | None = Query(None, description="状态筛选: success / failed / pending（进行中含 pending）"),
+    task_id: str | None = Query(None, description="按 task_id 精确匹配（用于从积分明细跳转）"),
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     """
     分页获取生成历史记录（按用户隔离，异步查询，不阻塞事件循环），按创建时间倒序排列。
@@ -230,7 +236,7 @@ async def get_history(
 async def delete_history_record(
     record_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     """
     根据 ID 删除一条生成历史记录（按用户隔离，异步操作，不阻塞事件循环）。
@@ -259,7 +265,7 @@ async def delete_history_record(
 async def batch_delete_history(
     body: BatchDeleteRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     """
     根据 ID 列表批量删除多条生成历史记录（按用户隔离，异步事务操作）。
@@ -321,7 +327,7 @@ async def batch_delete_history(
 async def batch_download_files(
     ids: str = Query(..., description="记录 ID 列表，逗号分隔"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     """
     批量下载图片/视频，打包为 zip 文件（按用户隔离）。
@@ -359,7 +365,10 @@ async def batch_download_files(
     wm_config = None
     need_watermark = False
     try:
-        from app.services.watermark_service import get_watermark_config, should_apply_watermark
+        from app.services.watermark_service import (
+            get_watermark_config,
+            should_apply_watermark,
+        )
         wm_config = await get_watermark_config(db)
         need_watermark = should_apply_watermark(wm_config, current_user)
     except Exception as e:
@@ -395,7 +404,9 @@ async def batch_download_files(
                         # 图片类型：动态应用水印
                         if record.type == "image" and need_watermark and wm_config:
                             try:
-                                from app.services.watermark_service import apply_image_watermark
+                                from app.services.watermark_service import (
+                                    apply_image_watermark,
+                                )
                                 file_content = apply_image_watermark(file_content, wm_config)
                                 # 水印后统一为 PNG，更新文件名
                                 filename = f"agnes-{record.type}-{record.id}.png"
@@ -430,7 +441,7 @@ async def batch_download_files(
 async def download_file(
     record_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     """
     通过后端代理下载图片或视频文件（按用户隔离）。
@@ -509,9 +520,9 @@ async def download_file(
 async def download_by_url(
     url: str,
     type: str = Query("image", description="文件类型：image 或 video"),
-    filename: Optional[str] = Query(None, description="自定义文件名（含扩展名），不传则自动生成"),
+    filename: str | None = Query(None, description="自定义文件名（含扩展名），不传则自动生成"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     """
     通过 URL 代理下载文件。
@@ -590,7 +601,7 @@ async def stream_video(
     request: Request,
     record_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     """
     代理播放历史视频资源（按用户隔离）。
@@ -716,7 +727,7 @@ async def _extract_frame_with_ffmpeg(input_path: str, output_path: str, time_off
             logger.warning("[缩略图] ffmpeg 提取帧失败 (offset=%s): %s", time_offset, stderr.decode(errors="ignore")[:200])
             return False
         return os.path.getsize(output_path) > 0
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning("[缩略图] ffmpeg 超时")
         return False
     except Exception as e:
@@ -748,7 +759,7 @@ async def _extract_gif_with_ffmpeg(input_path: str, output_path: str, duration: 
             logger.warning("[缩略图] ffmpeg 生成 GIF 失败: %s", stderr.decode(errors="ignore")[:200])
             return False
         return os.path.getsize(output_path) > 0
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning("[缩略图] ffmpeg GIF 生成超时")
         return False
     except Exception as e:
@@ -760,7 +771,7 @@ async def _extract_gif_with_ffmpeg(input_path: str, output_path: str, duration: 
 async def get_video_thumbnail(
     record_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     """
     提取视频首帧作为缩略图（JPEG 格式）。
@@ -860,7 +871,7 @@ async def get_video_thumbnail(
 async def get_video_preview(
     record_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     """
     生成视频前 3 秒的 GIF 预览，用于鼠标悬停时的动态效果。

@@ -7,7 +7,7 @@
 # =====================================================
 
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,8 +29,8 @@ async def get_owned_workspace(db: AsyncSession, workspace_id: str, user_id: int)
 
 
 async def list_workspaces(
-    db: AsyncSession, user_id: int, work_id: Optional[int] = None
-) -> List[CanvasWorkspace]:
+    db: AsyncSession, user_id: int, work_id: int | None = None
+) -> list[CanvasWorkspace]:
     """工作区列表（不含 data，更新时间倒序；可按作品筛选）"""
     stmt = (
         select(CanvasWorkspace)
@@ -46,9 +46,9 @@ async def create_workspace(
     db: AsyncSession,
     user_id: int,
     name: str,
-    work_id: Optional[int] = None,
-    data: Optional[Dict[str, Any]] = None,
-    workspace_id: Optional[str] = None,
+    work_id: int | None = None,
+    data: dict[str, Any] | None = None,
+    workspace_id: str | None = None,
 ) -> CanvasWorkspace:
     """创建工作区；透传 id 已存在幂等返回已有（被他人占用 409）；挂靠他人作品 403"""
     if work_id is not None:
@@ -80,8 +80,8 @@ async def create_workspace(
 
 
 async def apply_workspace_ops(
-    db: AsyncSession, ws: CanvasWorkspace, ops: List[Dict[str, Any]]
-) -> Dict[str, Any]:
+    db: AsyncSession, ws: CanvasWorkspace, ops: list[dict[str, Any]]
+) -> dict[str, Any]:
     """批量应用画布操作并落库（revision 自增）；全部操作失败时 400 且不写回
 
     返回 outcome = { results, new_panel_ids, failed, revision }

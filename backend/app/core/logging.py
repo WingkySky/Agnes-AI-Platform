@@ -17,15 +17,13 @@ import json
 import logging
 import os
 import sys
-from logging.handlers import RotatingFileHandler
 from contextvars import ContextVar
-from datetime import datetime, timezone
-from typing import Optional
-
+from datetime import UTC, datetime
+from logging.handlers import RotatingFileHandler
 
 # ---------- 请求 ID 上下文变量（全局共享）----------
 # 中间件写入，日志 Filter 读取，实现请求链路追踪
-request_id_var: ContextVar[Optional[str]] = ContextVar("request_id", default=None)
+request_id_var: ContextVar[str | None] = ContextVar("request_id", default=None)
 
 
 # =====================================================
@@ -54,7 +52,7 @@ class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         log_entry = {
             "timestamp": datetime.fromtimestamp(
-                record.created, tz=timezone.utc
+                record.created, tz=UTC
             ).isoformat(),
             "level": record.levelname,
             "request_id": getattr(record, "request_id", "-"),

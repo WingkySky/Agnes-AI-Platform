@@ -7,9 +7,9 @@
 #   3. 消息媒体项状态刷新（refresh_message_media_items，宿主恢复历史用）
 # =====================================================
 
-import logging
 import json
-from typing import Optional, Dict, Any, List
+import logging
+from typing import Any
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,7 +33,7 @@ class ChatService:
         """动态获取聊天 API 地址（从 agnes_client 读取最新的 base_url）"""
         return f"{agnes_client.base_url}/chat/completions"
 
-    async def _get_default_chat_model(self, user_id: Optional[int] = None) -> str:
+    async def _get_default_chat_model(self, user_id: int | None = None) -> str:
         """
         解析对话模型：用户偏好 default_chat_model_id > 系统默认（管理员配置 model.chat_default）> 注册表第一个 chat 模型。
         user_id 为空时跳过用户偏好层。
@@ -46,7 +46,7 @@ class ChatService:
             raise RuntimeError("未配置可用的对话模型，请先在配置页同步或添加对话模型")
         return model
 
-    async def _resolve_stream_model(self, model_hint: Any, user_id: Optional[int] = None) -> str:
+    async def _resolve_stream_model(self, model_hint: Any, user_id: int | None = None) -> str:
         """透传流式模型解析：显式 model 命中聊天注册表才用（分镜管线/对话选择），占位 id 走默认链"""
         if isinstance(model_hint, str) and model_hint.strip():
             from app.services.model_registry import get_models_by_type
@@ -56,11 +56,11 @@ class ChatService:
         return await self._get_default_chat_model(user_id)
 
     @staticmethod
-    def _sanitize_passthrough_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _sanitize_passthrough_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """透传消息清洗：剔除畸形 tool_call 与孤儿 tool 结果。
         上游推理模型偶发吐出 id/name 全空的 tool_call（arguments 为 {}），内核以"Tool not found"
         回填后，畸形 assistant 消息随历史重放会被上游 400（Invalid JSON data）拒绝并卡死后续回合。"""
-        out: List[Dict[str, Any]] = []
+        out: list[dict[str, Any]] = []
         for msg in messages:
             if not isinstance(msg, dict):
                 continue
@@ -85,7 +85,7 @@ class ChatService:
             out.append(msg)
         return out
 
-    async def open_completions_stream(self, payload: Dict[str, Any], user_id: Optional[int] = None):
+    async def open_completions_stream(self, payload: dict[str, Any], user_id: int | None = None):
         """
         LLM 透传流式连接（画布 Agent 前端内核专用）：不落会话库，工具循环由前端驱动，
         后端只负责代理 Agnes Chat API（API key 不出后端）。
@@ -95,7 +95,7 @@ class ChatService:
         建连失败抛异常由路由转 502；返回原始 SSE 行生成器（data: {...} / data: [DONE]），
         调用方需完整消费以释放连接。
         """
-        body: Dict[str, Any] = {
+        body: dict[str, Any] = {
             "model": await self._resolve_stream_model(payload.get("model"), user_id),
             "messages": self._sanitize_passthrough_messages(payload.get("messages") or []),
             "stream": True,
@@ -202,7 +202,10 @@ class ChatService:
         user_prompt += "\n标题："
 
         # 标题总结为系统级任务：管理员配置 model.title_summary_chat > 系统默认
-        from app.services.model_registry import resolve_system_chat_model_id, SYSTEM_CHAT_MODEL_KEYS
+        from app.services.model_registry import (
+            SYSTEM_CHAT_MODEL_KEYS,
+            resolve_system_chat_model_id,
+        )
         title_model = await resolve_system_chat_model_id(None, SYSTEM_CHAT_MODEL_KEYS["title_summary"])
         body = {
             "model": title_model,
@@ -241,7 +244,7 @@ class ChatService:
     # 【消息媒体项刷新】—— 宿主恢复历史时同步媒体任务最新状态
     # =====================================================
 
-    async def refresh_message_media_items(self, messages: List[ChatMessage], db: AsyncSession) -> None:
+    async def refresh_message_media_items(self, messages: list[ChatMessage], db: AsyncSession) -> None:
         """
         将消息里的 pending/processing 媒体项刷新为最新状态。
 

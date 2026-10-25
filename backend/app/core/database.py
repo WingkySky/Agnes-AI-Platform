@@ -2,14 +2,14 @@
 # 数据库连接与 SQLAlchemy 基础配置（全异步）
 # =====================================================
 
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.ext.declarative import declarative_base
 
 from app.core.config import settings
 

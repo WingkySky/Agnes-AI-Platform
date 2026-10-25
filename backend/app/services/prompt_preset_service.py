@@ -5,16 +5,19 @@
 # =====================================================
 
 from datetime import datetime
-from typing import Optional
 
 from fastapi import HTTPException
 from sqlalchemy import String, and_, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from app.models.prompt_preset import (
+    PresetFavorite,
+    PresetIndex,
+    PresetRecentUse,
+    PromptPreset,
+)
 from app.models.user import User
-from app.models.prompt_preset import PromptPreset, PresetIndex, PresetFavorite, PresetRecentUse
-
 
 # ---------- preset_index 同步辅助 ----------
 
@@ -84,18 +87,18 @@ async def create_preset(
     user_id: int,
     name: str,
     prompt_text: str = "",
-    description: Optional[str] = None,
+    description: str | None = None,
     preset_type: str = "prompt",
-    category: Optional[str] = None,
-    tags: Optional[list] = None,
-    camera_params: Optional[dict] = None,
-    style_params: Optional[dict] = None,
-    prompt_config: Optional[dict] = None,
-    cover_image: Optional[str] = None,
+    category: str | None = None,
+    tags: list | None = None,
+    camera_params: dict | None = None,
+    style_params: dict | None = None,
+    prompt_config: dict | None = None,
+    cover_image: str | None = None,
     is_official: bool = False,
-    script_text: Optional[str] = None,
-    pipeline_config: Optional[dict] = None,
-    source: Optional[str] = None,
+    script_text: str | None = None,
+    pipeline_config: dict | None = None,
+    source: str | None = None,
     is_public: bool = False,
 ) -> PromptPreset:
     """创建提示词预设，并同步写入 preset_index"""
@@ -125,7 +128,7 @@ async def create_preset(
     return preset
 
 
-async def get_preset(db: AsyncSession, preset_id: int) -> Optional[PromptPreset]:
+async def get_preset(db: AsyncSession, preset_id: int) -> PromptPreset | None:
     """按 ID 获取提示词预设"""
     result = await db.execute(
         select(PromptPreset).filter(PromptPreset.id == preset_id)
@@ -174,9 +177,9 @@ async def list_plaza(
     db: AsyncSession,
     user_id: int,
     tab: str = "plaza",
-    preset_types: Optional[list[str]] = None,
-    category: Optional[str] = None,
-    q: Optional[str] = None,
+    preset_types: list[str] | None = None,
+    category: str | None = None,
+    q: str | None = None,
     sort: str = "new",
     page: int = 1,
     page_size: int = 24,

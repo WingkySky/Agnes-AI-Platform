@@ -14,10 +14,10 @@
 #       旧 Pipeline 专用 fixture（seed_run_with_steps / _make_step 等）已移除。
 # =====================================================
 
+from collections.abc import AsyncIterator
+
 import pytest
 import pytest_asyncio
-from typing import AsyncIterator
-
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -141,9 +141,10 @@ async def auth_client(memory_db: AsyncSession, seed_user: User) -> AsyncIterator
     - 自动在请求头注入 Authorization: Bearer <token>（seed_user 的 JWT）
     - 使用 ASGITransport 直接调用 ASGI app，不触发 lifespan（不启动 poller 等后台任务）
     """
-    from httpx import AsyncClient, ASGITransport
-    from app.main import app
+    from httpx import ASGITransport, AsyncClient
+
     from app.core.security import create_access_token
+    from app.main import app
 
     # 覆盖 get_async_db 依赖：让路由使用 memory_db 的同一个 session
     async def _override_db():

@@ -16,9 +16,8 @@
 import logging
 import uuid
 from datetime import datetime
-from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -32,14 +31,14 @@ from app.models.user import User
 from app.routes._media_proxy import proxy_video_stream
 from app.schemas.videos import (
     VideoGenerationRequest,
-    VideoTaskCreatedResponse,
     VideoStatusResponse,
+    VideoTaskCreatedResponse,
 )
-from app.services.agnes_client import agnes_client
 from app.services._generation_persist import create_pending_generation
-from app.services.error_taxonomy import classify
-from app.services.provider_registry import provider_registry, _detect_capabilities
+from app.services.agnes_client import agnes_client
 from app.services.credits_service import consume_credits, get_video_cost_async
+from app.services.error_taxonomy import classify
+from app.services.provider_registry import _detect_capabilities, provider_registry
 from app.services.video_poller import poller_manager
 
 logger = logging.getLogger("agnes_platform")
@@ -259,8 +258,9 @@ async def create_video_task(
     # 这样后续 poller 的 confirm/refund 才能匹配到对应的预扣流水
     real_ref_id = task_id or video_id
     if real_ref_id != _pending_ref_id:
-        from app.models.credit_transaction import CreditTransaction
         from sqlalchemy import update as sa_update
+
+        from app.models.credit_transaction import CreditTransaction
         stmt = (
             sa_update(CreditTransaction)
             .where(CreditTransaction.user_id == user_id)
@@ -336,7 +336,7 @@ async def create_video_task(
 async def get_video_status(
     task_id: str,
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     """
     查询视频任务状态（按用户隔离）。
@@ -401,7 +401,7 @@ async def get_video_status(
 @router.delete("/videos/{task_id}", summary="中止视频任务")
 async def cancel_video_task(
     task_id: str,
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     """
     中止指定视频任务的后台轮询（按用户隔离，仅允许任务创建者取消）。
@@ -428,7 +428,7 @@ async def cancel_video_task(
 async def _find_video_url_by_task_id(
     task_id: str,
     db: AsyncSession,
-    current_user: Optional[User] = None,
+    current_user: User | None = None,
 ) -> str:
     """
     根据 task_id 查找视频 URL（按用户隔离）。
@@ -470,7 +470,7 @@ async def stream_video_by_task(
     request: Request,
     task_id: str,
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     """
     通过 task_id 代理播放视频资源（按用户隔离，解决 CORS 和 Range 请求问题）。

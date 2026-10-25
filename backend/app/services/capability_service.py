@@ -10,8 +10,6 @@
 # 新增画像 = 在 detect_model_profile 追加一条分支；模型特例数据化后不改生成代码。
 # =====================================================
 
-from typing import Optional
-
 import logging
 
 from app.schemas.common import ModelGenParams
@@ -19,7 +17,7 @@ from app.schemas.common import ModelGenParams
 logger = logging.getLogger("agnes_platform")
 
 
-def detect_model_profile(model_id: str) -> Optional[ModelGenParams]:
+def detect_model_profile(model_id: str) -> ModelGenParams | None:
     """
     根据模型 ID 推断生成能力画像（同族模型开箱即用；DB gen_params 显式配置优先于此推断）。
     """
@@ -34,7 +32,7 @@ def detect_model_profile(model_id: str) -> Optional[ModelGenParams]:
     return None
 
 
-def resolve_capabilities(model_id: str, explicit: Optional[dict]) -> Optional[ModelGenParams]:
+def resolve_capabilities(model_id: str, explicit: dict | None) -> ModelGenParams | None:
     """
     合并生成能力配置：DB 显式配置（gen_params 列）逐键覆盖自动画像，未设置的键（None）沿用画像；
     显式配置非法时整体忽略（回退画像）。

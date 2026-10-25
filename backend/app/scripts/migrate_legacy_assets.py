@@ -12,7 +12,6 @@ import argparse
 import asyncio
 import logging
 import sys
-from typing import List, Optional, Tuple
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,7 +41,7 @@ def is_agnes_url(url: str) -> bool:
     return any(kw in url for kw in AGNES_DOMAIN_KEYWORDS)
 
 
-async def fetch_pending_records(session: AsyncSession, limit: int) -> List[Generation]:
+async def fetch_pending_records(session: AsyncSession, limit: int) -> list[Generation]:
     """查询未转存的老记录：migrate_status IS NULL AND original_url IS NULL"""
     stmt = (
         select(Generation)
@@ -57,7 +56,7 @@ async def fetch_pending_records(session: AsyncSession, limit: int) -> List[Gener
     return result.scalars().all()
 
 
-async def migrate_record(record: Generation) -> Tuple[str, str, Optional[str]]:
+async def migrate_record(record: Generation) -> tuple[str, str, str | None]:
     """
     迁移单条记录
     返回 (status, message, new_result_url_or_none)

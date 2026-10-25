@@ -12,7 +12,6 @@ from httpx import ASGITransport, AsyncClient
 from app.core.database import get_async_db
 from app.core.security import create_access_token
 from app.main import app
-from app.models.user import User
 from app.services import upload_service
 
 
@@ -84,6 +83,7 @@ async def test_upload_rejects_oversize(owner_client, monkeypatch):
     # MAX_FILE_BYTES 是 save_upload_file 的默认参数（定义时绑定），改模块属性无效；
     # 用 partial 覆盖路由引用并显式收紧 max_size
     import functools
+
     from app.routes import uploads as uploads_route
 
     monkeypatch.setattr(

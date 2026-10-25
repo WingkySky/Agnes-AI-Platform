@@ -10,8 +10,7 @@
 import base64
 import hashlib
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 import bcrypt
 import jwt
@@ -110,7 +109,7 @@ def verify_password(plain_password: str, stored_hash: str) -> bool:
 ALGORITHM = "HS256"
 
 
-def create_access_token(user_id: int, expires_delta: Optional[timedelta] = None) -> str:
+def create_access_token(user_id: int, expires_delta: timedelta | None = None) -> str:
     """
     生成 access token（默认有效期取 settings.jwt_access_token_expire_minutes）
 
@@ -118,17 +117,17 @@ def create_access_token(user_id: int, expires_delta: Optional[timedelta] = None)
     - "exp"（expiry）
     """
     expire_minutes = expires_delta or timedelta(minutes=settings.jwt_access_token_expire_minutes)
-    expire = datetime.now(timezone.utc) + expire_minutes
+    expire = datetime.now(UTC) + expire_minutes
     payload = {
         "sub": str(user_id),  # sub: user_id
         "exp": expire,
-        "iat": datetime.now(timezone.utc),
+        "iat": datetime.now(UTC),
     }
     token = jwt.encode(payload, settings.jwt_secret, algorithm=ALGORITHM)
     return token
 
 
-def decode_access_token(token: str) -> Optional[int]:
+def decode_access_token(token: str) -> int | None:
     """
     解析 JWT，返回 user_id；若签名错误、失效则返回 None
     """
@@ -154,7 +153,7 @@ def decode_access_token(token: str) -> Optional[int]:
 # 四、FastAPI 依赖注入：get_current_user
 # =====================================================
 
-def _extract_token_from_header(auth_header: Optional[str]) -> Optional[str]:
+def _extract_token_from_header(auth_header: str | None) -> str | None:
     """从 Authorization: Bearer <token> 中提取纯 token 字符串"""
     if not auth_header:
         return None
@@ -167,7 +166,7 @@ def _extract_token_from_header(auth_header: Optional[str]) -> Optional[str]:
 async def get_current_user(
     request: Request,
     db: AsyncSession = Depends(get_async_db),
-) -> Optional[User]:
+) -> User | None:
     """
     FastAPI 依赖：从请求头解析 JWT 并返回当前登录用户。
 
@@ -200,7 +199,7 @@ async def get_current_user(
 async def get_current_user_optional(
     request: Request,
     db: AsyncSession = Depends(get_async_db),
-) -> Optional[User]:
+) -> User | None:
     """
     可选当前用户（用于允许匿名的场景）。未登录时返回 None。
     """

@@ -380,11 +380,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  VideoPlay, Download, CopyDocument, CircleCloseFilled, VideoCameraFilled, Loading, MagicStick, EditPen,
-  Edit, Film, PictureFilled, Picture, ArrowDownBold, Share, InfoFilled
+  VideoPlay, Download, CopyDocument, CircleCloseFilled, VideoCameraFilled, MagicStick, EditPen,
+  Edit, PictureFilled, Share, InfoFilled
 } from '@element-plus/icons-vue'
 import PresetPlazaDialog from '@/components/presets/PresetPlazaDialog.vue'
 import PromptOptimizeDialog from '@/components/PromptOptimizeDialog.vue'

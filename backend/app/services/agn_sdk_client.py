@@ -26,12 +26,8 @@
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from app.services.agnes_client import UpstreamError
-from app.services.error_taxonomy import classify
-
-from aibridge import Client as AIBridgeClient
 from aibridge import (
     AibridgeError,
     APIError,
@@ -42,6 +38,10 @@ from aibridge import (
     UnsupportedCapabilityError,
     ValidationError,
 )
+from aibridge import Client as AIBridgeClient
+
+from app.services.agnes_client import UpstreamError
+from app.services.error_taxonomy import classify
 
 logger = logging.getLogger("agnes_platform")
 
@@ -119,12 +119,12 @@ class AGNSDKClientWrapper:
         self.base_url = base_url
         self.api_key = api_key
         # aibridge Client 实例（start 后才可用）
-        self._client: Optional[AIBridgeClient] = None
+        self._client: AIBridgeClient | None = None
 
     def configure(
         self,
-        base_url: Optional[str] = None,
-        api_key: Optional[str] = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
     ) -> None:
         """
         运行时切换 Provider 配置（与 AgnesAIClient.configure 接口对齐）。
@@ -173,7 +173,7 @@ class AGNSDKClientWrapper:
 
     # ---------- 兼容 AgnesAIClient 的方法 ----------
 
-    async def list_models(self) -> List[Dict[str, Any]]:
+    async def list_models(self) -> list[dict[str, Any]]:
         """
         调用 aibridge Client.list_models() 获取模型列表。
 
@@ -190,7 +190,7 @@ class AGNSDKClientWrapper:
             raise _build_translated_error(e, action="获取模型列表") from e
 
         # 转成 OpenAI 风格的 dict 列表（与 AgnesAIClient.list_models 返回结构对齐）
-        result: List[Dict[str, Any]] = []
+        result: list[dict[str, Any]] = []
         for m in models:
             result.append(
                 {
@@ -240,7 +240,7 @@ class AGNSDKClientWrapper:
         best = min(cls._SEEDREAM_2K_PRESETS, key=lambda p: abs(ratio - p[0]))
         return f"{best[1]}x{best[2]}"
 
-    async def _record_call(self, call_type: str, model: str, started: float, status: str, error: Optional[BaseException] = None) -> None:
+    async def _record_call(self, call_type: str, model: str, started: float, status: str, error: BaseException | None = None) -> None:
         """出口记账 best-effort（绝不抛错）"""
         try:
             from app.services.api_call_log_service import record_api_call
@@ -262,12 +262,12 @@ class AGNSDKClientWrapper:
         model: str = "",
         size: str = "1024x1024",
         response_format: str = "url",
-        base64_image: Optional[str] = None,
-        image_url: Optional[str] = None,
-        base64_images: Optional[List[str]] = None,
-        image_urls: Optional[List[str]] = None,
-        mask: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        base64_image: str | None = None,
+        image_url: str | None = None,
+        base64_images: list[str] | None = None,
+        image_urls: list[str] | None = None,
+        mask: str | None = None,
+    ) -> dict[str, Any]:
         """
         调用 aibridge Client.image_generate() 生成图片。
 
@@ -278,7 +278,7 @@ class AGNSDKClientWrapper:
         client = self._get_client()
 
         # 合并参考图：新字段优先，回退到旧字段（与 AgnesAIClient.create_image 逻辑一致）
-        ref_images: List[str] = []
+        ref_images: list[str] = []
         if base64_images:
             ref_images.extend([img for img in base64_images if img and isinstance(img, str) and img.strip()])
         if image_urls:
@@ -339,23 +339,23 @@ class AGNSDKClientWrapper:
         self,
         prompt: str,
         model: str = "",
-        num_frames: Optional[int] = None,
-        frame_rate: Optional[int] = None,
-        width: Optional[int] = None,
-        height: Optional[int] = None,
-        aspect_ratio: Optional[str] = None,
-        seconds: Optional[float] = None,
-        negative_prompt: Optional[str] = None,
+        num_frames: int | None = None,
+        frame_rate: int | None = None,
+        width: int | None = None,
+        height: int | None = None,
+        aspect_ratio: str | None = None,
+        seconds: float | None = None,
+        negative_prompt: str | None = None,
         mode: str = "text2video",
-        image: Optional[str] = None,
-        images: Optional[list] = None,
-        image_mime_type: Optional[str] = None,
-        image_mime_types: Optional[list] = None,
-        seed: Optional[int] = None,
+        image: str | None = None,
+        images: list | None = None,
+        image_mime_type: str | None = None,
+        image_mime_types: list | None = None,
+        seed: int | None = None,
         # Video 2.5 new params
-        reference_videos: Optional[List[str]] = None,
-        reference_audios: Optional[List[str]] = None,
-    ) -> Dict[str, Any]:
+        reference_videos: list[str] | None = None,
+        reference_audios: list[str] | None = None,
+    ) -> dict[str, Any]:
         """
         调用 aibridge Client.video_create() 创建视频生成任务。
 
@@ -371,7 +371,7 @@ class AGNSDKClientWrapper:
         client = self._get_client()
 
         # 合并参考图：单图 + 多图统一转成 reference_images
-        ref_images: List[str] = []
+        ref_images: list[str] = []
         if image and isinstance(image, str) and image.strip():
             ref_images.append(image.strip())
         if images and isinstance(images, (list, tuple)):
@@ -421,10 +421,10 @@ class AGNSDKClientWrapper:
 
     async def poll_video_status(
         self,
-        video_id: Optional[str] = None,
-        task_id: Optional[str] = None,
+        video_id: str | None = None,
+        task_id: str | None = None,
         model_name: str = "",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         调用 aibridge Client.video_poll() 查询视频任务状态。
 

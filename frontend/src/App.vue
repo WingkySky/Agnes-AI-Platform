@@ -221,10 +221,9 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  Picture, VideoPlay, Clock, ChatDotRound, Grid, Setting,
-  User, UserFilled, Coin, CaretBottom, SwitchButton, Sunny, Moon, StarFilled, Histogram,
-  MagicStick, Fold, Expand, ArrowDown, Message, EditPen, Connection,
-  Menu, More,
+  ChatDotRound, 
+  User, UserFilled, Coin, CaretBottom, SwitchButton, Sunny, Moon, StarFilled, 
+  MagicStick, Fold, Expand, ArrowDown, 
 } from '@element-plus/icons-vue'
 import { getIconByName as getIcon } from '@/lib/icons'
 import TaskQueuePanel from './components/TaskQueuePanel.vue'
@@ -236,7 +235,6 @@ import { useUserStore } from '@/stores/user'
 import { useChatStore } from '@/stores/chat'
 import { useThemeStore } from '@/stores/theme'
 import { useCanvasStore } from '@/stores/canvas'
-import { usePermissionStore } from '@/stores/permission'
 import { useMenuStore } from '@/stores/menu'
 import type { ResolvedTopNavGroup } from '@/config/menus'
 
@@ -249,7 +247,6 @@ const userStore = useUserStore()
 const chatStore = useChatStore()
 const themeStore = useThemeStore()
 const canvasStore = useCanvasStore()
-const permissionStore = usePermissionStore()
 const menuStore = useMenuStore()
 
 // 侧边栏展开状态
@@ -304,11 +301,6 @@ const isStandaloneRoute = computed(() => {
   return route.name === 'login' || route.name === 'home'
 })
 
-// 管理员下拉是否高亮：当前路由命中任一管理类页面时高亮
-const isAdminRouteActive = computed(() => {
-  return route.path.startsWith('/admin/') || route.path === '/settings'
-})
-
 // keep-alive 缓存的路由组件名称（切换标签页时保持状态不销毁）
 const cachedViews = ['ImageView', 'VideoView', 'HistoryView', 'PlazaView', 'CanvasView', 'SettingsView', 'UsersAdminView', 'CreditRulesView', 'ProfileView', 'PreferencesView', 'CreditsView']
 
@@ -351,7 +343,7 @@ function isTopGroupActive(group: ResolvedTopNavGroup): boolean {
 
 // 每当 locale 变化时返回对应的 Element Plus 语言对象
 const epLocale = computed(() => {
-  const _ = locale.value // eslint-disable-line no-unused-vars
+  const _ = locale.value  
   return getElementPlusLocale()
 })
 </script>

@@ -193,7 +193,6 @@ def test_render_command_single_member_chain_consumed():
     # 每个产出的 ad/ac 标签都被 amix 引用（无悬空输出）
     import re
     produced = set(re.findall(r"\[(ad\d+)\]", graph))
-    consumed = set(re.findall(r"\[ad\d+\]\[", graph)) | {m for m in re.findall(r"amix=inputs=\d+(?:[^;]*)", graph)}
     assert f"amix=inputs={len(produced)}" in graph
 
 
@@ -245,7 +244,6 @@ def test_normalize_cmd_effects_filters():
 # ---------- 运镜：zoompan lowering（Ken Burns，归一化几何上施加） ----------
 
 def test_normalize_cmd_camera_zoompan():
-    from app.services.editor.render_service import _camera_zoompan
     seg = {"clip_id": "c1", "asset_path": "/tmp/a.mp4", "duration": 4, "trim_start": 0,
            "speed": 1, "rect": None,
            "camera": {"type": "zoomIn", "strength": 1}}

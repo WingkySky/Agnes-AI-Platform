@@ -9,13 +9,12 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 
 import pytest
-from httpx import AsyncClient, ASGITransport
-
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
-from app.main import app
 from app.core.database import get_async_db
 from app.core.security import create_access_token
+from app.main import app
 from app.models.asset import Asset
 from app.models.storage_object import StorageObject
 from app.models.user import User

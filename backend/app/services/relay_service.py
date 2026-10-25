@@ -14,12 +14,12 @@
 
 import asyncio
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import WebSocket
 
 # 中继执行器白名单（host → 工具名清单；新增工具前后端各加一行）
-BRIDGE_CANVAS_TOOLS: List[str] = [
+BRIDGE_CANVAS_TOOLS: list[str] = [
     "agent_get_state",
     "agent_get_selection",
     "agent_get_models",
@@ -34,17 +34,17 @@ BRIDGE_CANVAS_TOOLS: List[str] = [
     "agent_run_generation",
     "agent_stage_review",
 ]
-BRIDGE_EDITOR_TOOLS: List[str] = [
+BRIDGE_EDITOR_TOOLS: list[str] = [
     "editor_apply_ops",
     "editor_generate_subtitles",
 ]
-BRIDGE_HOSTS: Dict[str, List[str]] = {
+BRIDGE_HOSTS: dict[str, list[str]] = {
     "canvas": BRIDGE_CANVAS_TOOLS,
     "editor": BRIDGE_EDITOR_TOOLS,
 }
 
 # 中继超时分级（秒）：生成类内部含任务轮询给长窗，其余结构/查询操作短窗
-RELAY_TOOL_TIMEOUTS: Dict[str, float] = {"agent_run_generation": 600.0}
+RELAY_TOOL_TIMEOUTS: dict[str, float] = {"agent_run_generation": 600.0}
 RELAY_DEFAULT_TIMEOUT = 60.0
 
 
@@ -67,16 +67,16 @@ class BridgeConnection:
         self.target_id: str = ""
         self.superseded = False                # 被更新的连接顶替后失能
         self.send_lock = asyncio.Lock()        # WS 并发发送互斥
-        self.pending: Dict[str, asyncio.Future] = {}
+        self.pending: dict[str, asyncio.Future] = {}
 
-    async def _send(self, payload: Dict[str, Any]) -> None:
+    async def _send(self, payload: dict[str, Any]) -> None:
         async with self.send_lock:
             await self.ws.send_json(payload)
 
 
 # (user_id, host, target_id) → conn_id；进程内注册表（单实例部署语义）
-_connections: Dict[str, BridgeConnection] = {}
-_target_index: Dict[tuple, str] = {}
+_connections: dict[str, BridgeConnection] = {}
+_target_index: dict[tuple, str] = {}
 
 
 def reset_registry() -> None:
@@ -85,7 +85,7 @@ def reset_registry() -> None:
     _target_index.clear()
 
 
-def get_connection(user_id: int, host: str, target_id: str) -> Optional[BridgeConnection]:
+def get_connection(user_id: int, host: str, target_id: str) -> BridgeConnection | None:
     conn_id = _target_index.get((user_id, host, target_id))
     if not conn_id:
         return None
@@ -95,7 +95,7 @@ def get_connection(user_id: int, host: str, target_id: str) -> Optional[BridgeCo
     return conn
 
 
-def list_targets(user_id: int) -> List[Dict[str, str]]:
+def list_targets(user_id: int) -> list[dict[str, str]]:
     return [
         {"host": c.host, "target_id": c.target_id}
         for c in _connections.values()
@@ -141,7 +141,7 @@ def unregister(conn: BridgeConnection) -> None:
     conn.pending.clear()
 
 
-def handle_relay_result(conn: BridgeConnection, data: Dict[str, Any]) -> bool:
+def handle_relay_result(conn: BridgeConnection, data: dict[str, Any]) -> bool:
     """页面回执（payload=工具结果，不透明透传）→ resolve 在途 future；返回是否命中在途调用"""
     call_id = str(data.get("call_id") or "")
     fut = conn.pending.pop(call_id, None)
@@ -151,7 +151,7 @@ def handle_relay_result(conn: BridgeConnection, data: Dict[str, Any]) -> bool:
     return True
 
 
-async def relay_call(conn: BridgeConnection, tool: str, args: Dict[str, Any], timeout: float) -> Dict[str, Any]:
+async def relay_call(conn: BridgeConnection, tool: str, args: dict[str, Any], timeout: float) -> dict[str, Any]:
     """下发工具调用并等回执；页面执行结果（AgentToolResult）原样返回"""
     if conn.superseded:
         raise BridgeOffline("执行者已被顶替")
@@ -166,7 +166,7 @@ async def relay_call(conn: BridgeConnection, tool: str, args: Dict[str, Any], ti
             raise BridgeOffline(f"执行者连接不可用: {e}")
         try:
             return await asyncio.wait_for(fut, timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise BridgeTimeout(f"执行者 {timeout}s 内未回执")
     finally:
         conn.pending.pop(call_id, None)

@@ -659,7 +659,7 @@ async function downloadAsset(a: UnifiedAsset): Promise<void> {
     ElMessage.success(t('history.downloadStarted'))
   } catch (e: unknown) {
     ElMessage.error(t('assets.loadFailed'))
-    // eslint-disable-next-line no-console
+     
     console.warn('[assets] 下载失败:', e)
   }
 }

@@ -12,7 +12,6 @@
 import logging
 import shutil
 import tempfile
-from typing import List
 
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,7 +46,7 @@ def _audio_clips_on_track(project: EditingProject, track_id: str) -> list[dict]:
 
 async def preview_subtitle_segments(
     db: AsyncSession, project: EditingProject, track_id: str
-) -> List[dict]:
+) -> list[dict]:
     """转写音频轨 → 字幕片段草稿 [{start, end, text}]（时间线时间，秒）"""
     clips = _audio_clips_on_track(project, track_id)
     if not is_whisper_available():
@@ -59,7 +58,7 @@ async def preview_subtitle_segments(
         raise HTTPException(status_code=400, detail="目标音频轨上没有可转写的音频片段")
 
     tmp_dir = tempfile.mkdtemp(prefix="editor_subtitle_")
-    out: List[dict] = []
+    out: list[dict] = []
     try:
         for clip in clips:
             asset = await get_asset_by_id(db, int(clip["assetId"]))

@@ -10,14 +10,14 @@
 import json
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 # 节点缺省尺寸（对齐 lib/agent/tools.ts applyOps）
 PANEL_DEFAULT_WIDTH = 240
 PANEL_DEFAULT_HEIGHT = 180
 
 # 连线校验的目标类型白名单（对齐前端 validateConnectionTypes 的 ALLOWED_INPUTS）
-_ALLOWED_INPUTS: Dict[str, List[str]] = {
+_ALLOWED_INPUTS: dict[str, list[str]] = {
     "tts": ["text"],
     "subtitle": ["text"],
     "compose": ["video", "tts", "subtitle"],
@@ -41,11 +41,11 @@ def _as_number(v: Any, fallback: float) -> float:
     return v if isinstance(v, (int, float)) and not isinstance(v, bool) else fallback
 
 
-def panel_type(panel: Dict[str, Any]) -> str:
+def panel_type(panel: dict[str, Any]) -> str:
     return panel.get("type") or "text"
 
 
-def validate_connection_types(source_type: str, target_type: str) -> Optional[str]:
+def validate_connection_types(source_type: str, target_type: str) -> str | None:
     """连线类型级校验（复刻前端 validateConnectionTypes；返回 None 表示通过）"""
     if source_type == "script" and target_type not in ("image", "video"):
         return "脚本节点只能连接到图片/视频节点"
@@ -60,8 +60,8 @@ def validate_connection_types(source_type: str, target_type: str) -> Optional[st
 
 
 def apply_canvas_ops(
-    data: Dict[str, Any], ops: List[Dict[str, Any]], workspace_id: Optional[str] = None
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    data: dict[str, Any], ops: list[dict[str, Any]], workspace_id: str | None = None
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """对工作区 data 应用批量增量操作，返回 (new_data, outcome)。
 
     - new_data 为深拷贝后的新对象（调用方整体赋值回 ORM JSON 列，保证变更被跟踪）
@@ -69,15 +69,15 @@ def apply_canvas_ops(
       全部失败时调用方不写回（路由层返回 400）
     """
     new_data = json.loads(json.dumps(data or {}))
-    panels: List[Dict[str, Any]] = new_data.setdefault("panels", [])
-    connections: List[Dict[str, Any]] = new_data.setdefault("connections", [])
+    panels: list[dict[str, Any]] = new_data.setdefault("panels", [])
+    connections: list[dict[str, Any]] = new_data.setdefault("connections", [])
 
-    results: List[Dict[str, Any]] = []
-    new_panel_ids: List[str] = []
+    results: list[dict[str, Any]] = []
+    new_panel_ids: list[str] = []
     # 批内新建 name → id：后续 op 可按名引用本批新建节点（一拍完成建点 + 连线）
-    batch_by_name: Dict[str, str] = {}
+    batch_by_name: dict[str, str] = {}
 
-    def resolve_ref(ref: Any) -> Optional[str]:
+    def resolve_ref(ref: Any) -> str | None:
         if not isinstance(ref, str) or not ref:
             return None
         batch_id = batch_by_name.get(ref)
@@ -98,7 +98,7 @@ def apply_canvas_ops(
             if kind == "add_panel":
                 n = len(panels)
                 name = str(op.get("name") or "").strip()
-                panel: Dict[str, Any] = {
+                panel: dict[str, Any] = {
                     "id": _uid(),
                     "type": str(op.get("type") or "text"),
                     "x": _as_number(op.get("x"), 120 + (n % 8) * 40),
@@ -138,7 +138,7 @@ def apply_canvas_ops(
                 if err:
                     results.append({"index": i, "op": kind, "ok": False, "error": err})
                     continue
-                conn: Dict[str, Any] = {
+                conn: dict[str, Any] = {
                     "id": _uid(),
                     "source_panel_id": source_id,
                     "target_panel_id": target_id,

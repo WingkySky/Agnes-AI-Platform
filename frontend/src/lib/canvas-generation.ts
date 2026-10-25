@@ -117,9 +117,6 @@ export interface PanelGenParams {
 
 // ---------- 常量 ----------
 
-/** 节点类型中文名映射 */
-const TYPE_NAME_MAP: Record<string, string> = { image: '图片', text: '文本', video: '视频', audio: '音频' }
-
 /**
  * @图片1 / @文本2 等可读标签的正则匹配模式
  * 匹配：@图片1、@文本2、@视频3、@音频4
@@ -128,10 +125,6 @@ const TYPE_NAME_MAP: Record<string, string> = { image: '图片', text: '文本',
 const MENTION_PATTERN = /@(图片|文本|视频|音频)(\d+)/g
 
 /** 资源类型标签生成器：图片1、图片2、文本1、视频1...（与节点显示序号一致） */
-function resourceLabel(type: string, index: number): string {
-  return `${TYPE_NAME_MAP[type] || '资源'}${index}`
-}
-
 /**
  * 构建画布创作上下文
  * - 分镜派生节点（content.lineage 含 scriptPanelId）归档到其「剧本」容器，命名 #镜头号
@@ -246,8 +239,7 @@ export function getUpstreamNodesWithIndex(nodeId: string, panels: GenerationPane
 function extractResourceContent(panel: GenerationPanel): ResourceContent | null {
   if (!panel) return null
   const c = panel.content || {}
-  const title = (panel.name || panel.type || 'Untitled') as string
-
+  
   switch (panel.type) {
     case 'image':
       return {

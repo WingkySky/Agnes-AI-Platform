@@ -7,7 +7,7 @@ import json
 import httpx
 import pytest
 
-from app.models.mcp_market import McpMarketItem, McpMarketSource
+from app.models.mcp_market import McpMarketItem
 from app.services import mcp_market_service
 
 

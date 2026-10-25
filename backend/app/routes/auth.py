@@ -21,7 +21,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -31,33 +31,33 @@ from app.core.pathsafe import ensure_within
 from app.core.response import ok
 from app.core.security import (
     create_access_token,
-    get_current_user,
     get_current_admin_user,
+    get_current_user,
     hash_password,
     verify_password,
 )
-from app.models.user import User, ROLE_ADMIN, ROLE_USER
 from app.models.pat_token import PatToken
-from app.services import mcp_gateway
+from app.models.user import ROLE_ADMIN, ROLE_USER, User
 from app.schemas.pat import PatCreate
 from app.schemas.user import (
+    CaptchaResponse,
+    ChangePasswordRequest,
     LoginRequest,
     RegisterRequest,
+    ResetPasswordRequest,
+    SendEmailCodeRequest,
+    ToggleFlagRequest,
     TokenResponse,
+    UpdateActiveRequest,
+    UpdateCreditsRequest,
+    UpdateProfileRequest,
+    UpdateRoleRequest,
+    UserAdminRow,
     UserCreditsResponse,
     UserInfoResponse,
     UserListResponse,
-    UserAdminRow,
-    UpdateRoleRequest,
-    UpdateCreditsRequest,
-    UpdateActiveRequest,
-    UpdateProfileRequest,
-    CaptchaResponse,
-    SendEmailCodeRequest,
-    ResetPasswordRequest,
-    ChangePasswordRequest,
-    ToggleFlagRequest,
 )
+from app.services import mcp_gateway
 
 logger = logging.getLogger("agnes_platform")
 router = APIRouter(prefix="/auth", tags=["用户认证"])
@@ -98,14 +98,18 @@ async def send_email_code(req: SendEmailCodeRequest):
     - 发送间隔限制：默认 60 秒
     - 只有已注册的邮箱才能收到验证码（避免泄漏哪些邮箱已注册）
     """
+    from app.core.config import settings
     from app.services.captcha_service import (
         can_send_email_code,
         generate_email_code,
         set_email_code,
     )
-    from app.services.email_service import send_email, build_reset_password_email, is_email_enabled
+    from app.services.email_service import (
+        build_reset_password_email,
+        is_email_enabled,
+        send_email,
+    )
     from app.services.system_config_service import get_smtp_config
-    from app.core.config import settings
 
     email = req.email.lower().strip()
 

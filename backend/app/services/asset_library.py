@@ -2,7 +2,6 @@
 # 资产库服务
 # =====================================================
 
-from typing import Optional
 
 from fastapi import HTTPException
 from sqlalchemy import func, or_, select
@@ -18,7 +17,7 @@ from app.services.asset_archive import ingest_generation_asset
 VALID_ASSET_TYPES = {"character", "prop", "scene", "brand", "material", "clip", "final"}
 
 
-async def get_asset_by_id(db: AsyncSession, asset_id: int) -> Optional[Asset]:
+async def get_asset_by_id(db: AsyncSession, asset_id: int) -> Asset | None:
     """根据 ID 获取资产"""
     result = await db.execute(select(Asset).filter(Asset.id == asset_id))
     return result.scalar_one_or_none()
@@ -83,7 +82,7 @@ async def save_asset_from_generation(
 async def delete_asset(
     db: AsyncSession,
     asset_id: int,
-    user_id: Optional[int] = None,
+    user_id: int | None = None,
     is_admin: bool = False,
 ) -> None:
     """删除资产"""
@@ -145,8 +144,8 @@ async def create_asset_from_upload(
     user_id: int,
     url: str,
     media_type: str,
-    name: Optional[str] = None,
-    work_id: Optional[int] = None,
+    name: str | None = None,
+    work_id: int | None = None,
 ) -> Asset:
     """
     画布/上传素材建统一资产行（画布素材 uid 退役的入库通道）。
@@ -168,7 +167,7 @@ async def create_asset_from_upload(
         if not owned:
             raise HTTPException(status_code=403, detail="无权挂靠该作品")
 
-    storage_key: Optional[str] = None
+    storage_key: str | None = None
     final_url = url
     if url.startswith("/uploads/"):
         storage_key = url.removeprefix("/uploads/")
@@ -209,11 +208,11 @@ async def list_assets(
     db: AsyncSession,
     *,
     user_id: int,
-    media_type: Optional[str] = None,
-    source: Optional[str] = None,
-    work_id: Optional[int] = None,
-    asset_type: Optional[str] = None,
-    keyword: Optional[str] = None,
+    media_type: str | None = None,
+    source: str | None = None,
+    work_id: int | None = None,
+    asset_type: str | None = None,
+    keyword: str | None = None,
     page: int = 1,
     page_size: int = 50,
 ) -> dict:

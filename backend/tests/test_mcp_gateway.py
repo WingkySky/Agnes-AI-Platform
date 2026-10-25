@@ -2,14 +2,12 @@
 # MCP 网关单测 —— overview 分页纯函数（TS 对齐）/ 内容摘要 / 工具 impl（db+user_id 直测）
 # =====================================================
 
-import json
 
 import pytest
 from fastapi import HTTPException
 
 from app.models.asset import Asset
 from app.models.canvas_workspace import CanvasWorkspace
-from app.models.editing_project import EditingProject
 from app.services import mcp_gateway
 from app.services.mcp_gateway import (
     asset_list_impl,

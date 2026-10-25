@@ -4,7 +4,8 @@
 # =====================================================
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, DateTime, UniqueConstraint, ForeignKey
+
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, UniqueConstraint
 
 from app.core.database import Base
 

@@ -13,8 +13,8 @@ from fastapi import HTTPException
 
 from app.core.urlsafe import is_safe_url
 from app.services import upload_service
-from app.services.upload_service import save_upload_file, save_audio_bytes
 from app.services.canvas_media_service import _resolve_local_media, compose_videos
+from app.services.upload_service import save_audio_bytes, save_upload_file
 
 
 class _FakeUpload:

@@ -8,14 +8,12 @@
 # =====================================================
 
 import math
-from typing import Optional, Tuple
 
-from sqlalchemy import and_, or_, func
+from sqlalchemy import and_, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.models.scene3d import Scene3D
-
 
 # =====================================================
 # CRUD
@@ -25,8 +23,8 @@ async def create_scene(
     db: AsyncSession,
     user_id: int,
     name: str,
-    description: Optional[str] = None,
-    scene_data: Optional[dict] = None,
+    description: str | None = None,
+    scene_data: dict | None = None,
     is_public: bool = False,
 ) -> Scene3D:
     """创建 3D 场景"""
@@ -43,7 +41,7 @@ async def create_scene(
     return scene
 
 
-async def get_scene(db: AsyncSession, scene_id: int) -> Optional[Scene3D]:
+async def get_scene(db: AsyncSession, scene_id: int) -> Scene3D | None:
     """按 ID 获取场景"""
     result = await db.execute(select(Scene3D).filter(Scene3D.id == scene_id))
     return result.scalar_one_or_none()
@@ -51,12 +49,12 @@ async def get_scene(db: AsyncSession, scene_id: int) -> Optional[Scene3D]:
 
 async def list_scenes(
     db: AsyncSession,
-    user_id: Optional[int] = None,
+    user_id: int | None = None,
     limit: int = 100,
     offset: int = 0,
-    search: Optional[str] = None,
-    is_public: Optional[bool] = None,
-) -> Tuple[list, int]:
+    search: str | None = None,
+    is_public: bool | None = None,
+) -> tuple[list, int]:
     """
     列出 3D 场景。
     - 指定 user_id：返回该用户的场景 + 公开场景
@@ -67,11 +65,11 @@ async def list_scenes(
         conditions.append(
             or_(
                 Scene3D.user_id == user_id,
-                Scene3D.is_public == True,
+                Scene3D.is_public.is_(True),
             )
         )
     else:
-        conditions.append(Scene3D.is_public == True)
+        conditions.append(Scene3D.is_public.is_(True))
 
     if is_public is not None:
         conditions.append(Scene3D.is_public == is_public)
@@ -99,7 +97,7 @@ async def list_scenes(
     return list(result.scalars().all()), total
 
 
-async def update_scene(db: AsyncSession, scene_id: int, **kwargs) -> Optional[Scene3D]:
+async def update_scene(db: AsyncSession, scene_id: int, **kwargs) -> Scene3D | None:
     """更新场景（仅更新传入的非 None 字段）"""
     scene = await get_scene(db, scene_id)
     if not scene:
@@ -329,14 +327,14 @@ def _multi_light_desc(lights: list) -> str:
         return ""
 
     # 只处理方向光
-    dir_lights = [l for l in lights if l.get("type", "directional") == "directional"]
+    dir_lights = [light for light in lights if light.get("type", "directional") == "directional"]
     if not dir_lights:
         return ""
 
     # 按强度降序
     sorted_lights = sorted(
         dir_lights,
-        key=lambda l: float(l.get("intensity", 1.0)),
+        key=lambda light: float(light.get("intensity", 1.0)),
         reverse=True,
     )
 
@@ -444,7 +442,7 @@ def _environment_desc(env: dict) -> str:
     return keyword or label or ""
 
 
-def scene_to_prompt_suffix(scene_data: dict) -> Tuple[str, dict]:
+def scene_to_prompt_suffix(scene_data: dict) -> tuple[str, dict]:
     """
     把 3D 场景数据翻译为镜头语言描述字符串。
     支持多主体关系、多灯光叠加、道具布景、环境描述。

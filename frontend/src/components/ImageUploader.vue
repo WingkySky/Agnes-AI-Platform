@@ -107,7 +107,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, watch, type PropType } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch, type PropType } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Delete, UploadFilled, Document } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'

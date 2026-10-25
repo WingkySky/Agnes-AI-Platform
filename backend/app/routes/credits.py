@@ -9,18 +9,17 @@
 #     支持 image / video 两种类型，参数与生成接口保持一致
 # =====================================================
 
-from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func
 
 from app.core.database import get_async_db
 from app.core.response import ok
-from app.core.security import get_current_user, get_current_admin_user
-from app.models.user import User
+from app.core.security import get_current_admin_user, get_current_user
 from app.models.credit_transaction import CreditTransaction
+from app.models.user import User
 from app.services.credits_service import get_image_cost_async, get_video_cost_async
 
 router = APIRouter()
@@ -29,10 +28,10 @@ router = APIRouter()
 @router.get("/credits/estimate", summary="预估本次生成任务需要消耗的积分")
 async def estimate_cost(
     type: str = Query(..., description="任务类型：image / video"),
-    mode: Optional[str] = Query(None, description="生成模式：text2image / image2image / text2video / image2video / keyframes"),
-    size: Optional[str] = Query(None, description="图片尺寸，例如 1024x1024（type=image 时使用）"),
-    seconds: Optional[int] = Query(None, description="视频时长（秒，type=video 时使用）"),
-    num_frames: Optional[int] = Query(None, description="视频帧数（type=video 时使用）"),
+    mode: str | None = Query(None, description="生成模式：text2image / image2image / text2video / image2video / keyframes"),
+    size: str | None = Query(None, description="图片尺寸，例如 1024x1024（type=image 时使用）"),
+    seconds: int | None = Query(None, description="视频时长（秒，type=video 时使用）"),
+    num_frames: int | None = Query(None, description="视频帧数（type=video 时使用）"),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -62,7 +61,7 @@ async def estimate_cost(
 async def list_my_transactions(
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
-    type: Optional[str] = Query(None, description="按类型过滤：recharge/consume/refund/adjust"),
+    type: str | None = Query(None, description="按类型过滤：recharge/consume/refund/adjust"),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -99,8 +98,8 @@ async def list_my_transactions(
 async def list_all_transactions(
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
-    type: Optional[str] = Query(None, description="按类型过滤：recharge/consume/refund/adjust"),
-    user_id: Optional[int] = Query(None, description="按用户 ID 过滤"),
+    type: str | None = Query(None, description="按类型过滤：recharge/consume/refund/adjust"),
+    user_id: int | None = Query(None, description="按用户 ID 过滤"),
     db: AsyncSession = Depends(get_async_db),
     _admin: User = Depends(get_current_admin_user),
 ):

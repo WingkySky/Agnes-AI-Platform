@@ -7,7 +7,6 @@
 # =====================================================
 
 import logging
-from typing import Optional
 
 from app.core.database import new_async_session
 from app.models.api_call_log import ApiCallLog
@@ -17,18 +16,18 @@ logger = logging.getLogger("agnes_platform")
 
 async def record_api_call(
     *,
-    provider_name: Optional[str] = None,
-    provider_id: Optional[int] = None,
-    model: Optional[str] = None,
+    provider_name: str | None = None,
+    provider_id: int | None = None,
+    model: str | None = None,
     call_type: str = "other",
-    endpoint: Optional[str] = None,
+    endpoint: str | None = None,
     status: str = "success",
-    error_category: Optional[str] = None,
-    error_message: Optional[str] = None,
-    request_id: Optional[str] = None,
-    latency_ms: Optional[int] = None,
-    tokens_in: Optional[int] = None,
-    tokens_out: Optional[int] = None,
+    error_category: str | None = None,
+    error_message: str | None = None,
+    request_id: str | None = None,
+    latency_ms: int | None = None,
+    tokens_in: int | None = None,
+    tokens_out: int | None = None,
 ) -> None:
     """记一行上游调用日志；失败仅告警（可观测性不能拖垮业务）"""
     try:

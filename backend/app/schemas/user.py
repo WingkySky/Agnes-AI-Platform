@@ -5,10 +5,9 @@
 # - 积分规则（查询、更新）
 # =====================================================
 
-from typing import List, Optional
 from datetime import datetime
-from pydantic import BaseModel, Field, field_validator
 
+from pydantic import BaseModel, Field, field_validator
 
 # =====================================================
 # 一、请求体
@@ -19,8 +18,8 @@ class RegisterRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=32, description="用户名（3~32 字符）")
     email: str = Field(..., min_length=5, max_length=128, description="邮箱（必填）")
     password: str = Field(..., min_length=6, max_length=64, description="密码（6~64 字符）")
-    captcha_id: Optional[str] = Field(default=None, description="图片验证码 ID")
-    captcha_code: Optional[str] = Field(default=None, description="图片验证码")
+    captcha_id: str | None = Field(default=None, description="图片验证码 ID")
+    captcha_code: str | None = Field(default=None, description="图片验证码")
 
     @field_validator("username")
     @classmethod
@@ -44,8 +43,8 @@ class LoginRequest(BaseModel):
     """登录请求体"""
     username: str = Field(..., min_length=3, max_length=32, description="用户名")
     password: str = Field(..., min_length=6, max_length=64, description="密码")
-    captcha_id: Optional[str] = Field(default=None, description="图片验证码 ID")
-    captcha_code: Optional[str] = Field(default=None, description="图片验证码")
+    captcha_id: str | None = Field(default=None, description="图片验证码 ID")
+    captcha_code: str | None = Field(default=None, description="图片验证码")
 
 
 # =====================================================
@@ -108,17 +107,17 @@ class UserInfoResponse(BaseModel):
     """当前用户信息（不含 password_hash）"""
     id: int
     username: str
-    nickname: Optional[str] = None
-    email: Optional[str] = None
-    avatar_url: Optional[str] = None
+    nickname: str | None = None
+    email: str | None = None
+    avatar_url: str | None = None
     credits: int
     role: str           # admin / user
     is_active: bool
     is_admin: bool      # 向后兼容：等价于 role == 'admin'
     watermark_enabled: bool = False
     content_safety_strict: bool = False
-    created_at: Optional[datetime] = None
-    last_login_at: Optional[datetime] = None
+    created_at: datetime | None = None
+    last_login_at: datetime | None = None
 
     class Config:
         from_attributes = True
@@ -131,8 +130,8 @@ class UserCreditsResponse(BaseModel):
 
 class UpdateProfileRequest(BaseModel):
     """更新个人资料请求体（支持修改邮箱、昵称）"""
-    nickname: Optional[str] = Field(default=None, max_length=32, description="昵称（可选，广场等公开场景展示）")
-    email: Optional[str] = Field(default=None, max_length=128, description="新邮箱（可选，传 null 清空）")
+    nickname: str | None = Field(default=None, max_length=32, description="昵称（可选，广场等公开场景展示）")
+    email: str | None = Field(default=None, max_length=128, description="新邮箱（可选，传 null 清空）")
 
 
 # =====================================================
@@ -143,17 +142,17 @@ class UserAdminRow(BaseModel):
     """管理员在用户列表页看到的一行"""
     id: int
     username: str
-    nickname: Optional[str] = None
-    email: Optional[str] = None
-    avatar_url: Optional[str] = None
+    nickname: str | None = None
+    email: str | None = None
+    avatar_url: str | None = None
     credits: int
     role: str
     is_active: bool
     is_admin: bool
     watermark_enabled: bool = False
     content_safety_strict: bool = False
-    created_at: Optional[datetime] = None
-    last_login_at: Optional[datetime] = None
+    created_at: datetime | None = None
+    last_login_at: datetime | None = None
 
     class Config:
         from_attributes = True
@@ -161,7 +160,7 @@ class UserAdminRow(BaseModel):
 
 class UserListResponse(BaseModel):
     """用户列表响应"""
-    items: List[UserAdminRow]
+    items: list[UserAdminRow]
     total: int
 
 
@@ -204,7 +203,7 @@ class CreditRuleResponse(BaseModel):
     name: str
     value: int
     description: str
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
 
     class Config:
         from_attributes = True
@@ -212,6 +211,6 @@ class CreditRuleResponse(BaseModel):
 
 class CreditRuleUpdateRequest(BaseModel):
     """修改一条积分规则"""
-    name: Optional[str] = Field(default=None, description="中文名称（可选）")
+    name: str | None = Field(default=None, description="中文名称（可选）")
     value: int = Field(..., ge=0, description="积分值（>=0）")
-    description: Optional[str] = Field(default=None, description="说明（可选）")
+    description: str | None = Field(default=None, description="说明（可选）")

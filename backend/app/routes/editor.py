@@ -14,7 +14,6 @@
 # 鉴权双挂：router 级 dependencies + 端点显式 Depends（401/403/200 三态测试锁死）
 # =====================================================
 
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,7 +31,12 @@ from app.schemas.editor import (
     RoughCutAnalyzeRequest,
     SubtitlePreviewRequest,
 )
-from app.services.editor import project_service, render_service, rough_cut_service, transcribe_bridge
+from app.services.editor import (
+    project_service,
+    render_service,
+    rough_cut_service,
+    transcribe_bridge,
+)
 
 router = APIRouter(
     prefix="/editor/projects",
@@ -67,7 +71,7 @@ async def create_project(
 
 @router.get("", summary="剪辑工程列表（按 work_id 可筛）")
 async def list_projects(
-    work_id: Optional[int] = None,
+    work_id: int | None = None,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):

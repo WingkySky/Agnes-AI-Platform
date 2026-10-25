@@ -118,10 +118,6 @@ export function isTransitionType(v: unknown): v is TransitionType {
   return v === 'crossfade' || v === 'fade' || v === 'wipe'
 }
 
-function isNum(v: unknown): v is number {
-  return typeof v === 'number' && Number.isFinite(v)
-}
-
 /** 片段在时间线上的结束位置 */
 export function clipEnd(clip: EditorClip): number {
   return clip.start + clip.duration

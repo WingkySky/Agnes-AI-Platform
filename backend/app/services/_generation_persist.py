@@ -10,17 +10,15 @@ import asyncio
 import logging
 import time
 from datetime import datetime
-from typing import Dict, List, Optional
 
 from sqlalchemy import select
 
-from app.services.provider_registry import provider_registry
-from app.services import asset_storage
+from app.core.database import new_async_session
 from app.models.generation import Generation
 from app.models.model_definition import ModelDefinition
-from app.core.database import new_async_session
+from app.services import asset_archive, asset_storage, work_entity_service
 from app.services.credits_service import confirm_credits, refund_credits
-from app.services import asset_archive, work_entity_service
+from app.services.provider_registry import provider_registry
 
 logger = logging.getLogger("agnes_platform")
 
@@ -29,7 +27,7 @@ CLEANUP_INTERVAL_SEC = 300   # 每 5 分钟扫描一次过期缓存
 CLEANUP_TTL_SEC = 3600       # 已完成任务保留 1 小时后清除
 
 
-def as_container_id(value) -> Optional[str]:
+def as_container_id(value) -> str | None:
     """容器 ID 统一存字符串（项目 ID 是数字，剧本面板 ID 是字符串）"""
     return None if value is None or value == "" else str(value)
 
@@ -37,16 +35,16 @@ def as_container_id(value) -> Optional[str]:
 async def create_pending_generation(
     *,
     kind: str,                      # "image" / "video"（Generation.type）
-    user_id: Optional[int],
+    user_id: int | None,
     prompt: str,
     model: str,
-    params: Dict,                   # 最小化参数（严禁 b64 大字段）
-    mode: Optional[str],
+    params: dict,                   # 最小化参数（严禁 b64 大字段）
+    mode: str | None,
     task_id: str,                   # 账本匹配键（图片=本地 task_id，视频=上游 task_id or video_id）
-    video_id: Optional[str] = None,  # 上游视频任务 ID（恢复凭据，与 task_id 互补）
+    video_id: str | None = None,  # 上游视频任务 ID（恢复凭据，与 task_id 互补）
     credits_consumed: int = 0,
-    preset_id: Optional[int] = None,
-    context: Optional[Dict] = None,
+    preset_id: int | None = None,
+    context: dict | None = None,
     log_prefix: str = "[任务账本]",
 ) -> None:
     """
@@ -87,8 +85,8 @@ async def _fetch_pending_row(
     session,
     *,
     kind: str,
-    user_id: Optional[int],
-    record_task_id: Optional[str],
+    user_id: int | None,
+    record_task_id: str | None,
 ):
     """按 (user_id, task_id, type) 取进行中的账本行（终态行不匹配，重放安全）"""
     if not record_task_id:
@@ -140,8 +138,8 @@ async def persist_generation_failure(
     task,
     *,
     kind: str,                       # "image" / "video"（Generation.type）
-    record_params: Dict,             # Generation.params（最小化，避免多模态大字段入库）
-    record_task_id: Optional[str],   # Generation.task_id（视频侧 task.task_id or video_id）
+    record_params: dict,             # Generation.params（最小化，避免多模态大字段入库）
+    record_task_id: str | None,   # Generation.task_id（视频侧 task.task_id or video_id）
     log_prefix: str,                 # 日志前缀
 ) -> None:
     """
@@ -195,8 +193,8 @@ async def persist_generation(
     *,
     kind: str,                       # "image" / "video"（Generation.type）
     result_url: str,                 # 初始结果 URL（图片侧含 b64 data URI 兜底，视频侧为 video_url）
-    record_params: Dict,             # Generation.params（图片侧过滤多模态大字段后传入）
-    record_task_id: Optional[str],   # Generation.task_id（视频侧 task.task_id or video_id）
+    record_params: dict,             # Generation.params（图片侧过滤多模态大字段后传入）
+    record_task_id: str | None,   # Generation.task_id（视频侧 task.task_id or video_id）
     log_prefix: str,                 # 日志前缀 "[图片任务器]" / "[视频轮询器]"
 ) -> None:
     """
@@ -367,8 +365,8 @@ async def persist_generation(
 async def mark_row_cancelled(
     *,
     kind: str,
-    user_id: Optional[int],
-    record_task_id: Optional[str],
+    user_id: int | None,
+    record_task_id: str | None,
     log_prefix: str,
 ) -> None:
     """取消任务时把 pending 账本行同步置 cancelled（退款由调用方既有路径处理）。best-effort。"""
@@ -388,8 +386,8 @@ async def mark_row_cancelled(
 async def finalize_uncertain(
     *,
     kind: str,
-    user_id: Optional[int],
-    task_id: Optional[str],
+    user_id: int | None,
+    task_id: str | None,
     reason: str,
     log_prefix: str,
 ) -> bool:
@@ -439,7 +437,7 @@ async def cleanup_expired_tasks(
         await asyncio.sleep(CLEANUP_INTERVAL_SEC)
         try:
             now = time.time()
-            removed: List[str] = []
+            removed: list[str] = []
             async with lock:
                 for key, t in list(tasks.items()):
                     if t.status in ("success", "failed", "cancelled") and (

@@ -11,7 +11,6 @@
 import hashlib
 import json
 from datetime import datetime, timedelta
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,10 +39,11 @@ from app.schemas.canvas_workspace import (
     WorkspaceSave,
     WorkspaceWorkBind,
 )
-from app.services import work_service
-from app.services import canvas_workspace_service
+from app.services import canvas_workspace_service, work_service
 from app.services.canvas_workspace_service import (
     create_workspace as create_workspace_record,
+)
+from app.services.canvas_workspace_service import (
     get_owned_workspace as _get_owned_workspace,
 )
 
@@ -63,7 +63,7 @@ def _data_hash(data: dict) -> str:
 
 
 async def _create_snapshot(
-    db: AsyncSession, ws: CanvasWorkspace, kind: str, name: Optional[str] = None
+    db: AsyncSession, ws: CanvasWorkspace, kind: str, name: str | None = None
 ) -> CanvasSnapshot:
     snap = CanvasSnapshot(
         workspace_id=ws.id,
@@ -113,7 +113,7 @@ async def _maybe_auto_snapshot(db: AsyncSession, ws: CanvasWorkspace) -> None:
 async def list_workspaces(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
-    work_id: Optional[int] = None,
+    work_id: int | None = None,
 ):
     items = await canvas_workspace_service.list_workspaces(db, current_user.id, work_id=work_id)
     return ok(data=[WorkspaceBrief.model_validate(w).model_dump(mode="json") for w in items])

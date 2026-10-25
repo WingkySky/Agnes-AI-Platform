@@ -22,7 +22,6 @@ import os
 import secrets
 import time
 from pathlib import Path
-from typing import List, Optional, Dict
 
 from app.core.pathsafe import ensure_within
 
@@ -43,7 +42,7 @@ _BGM_DIR = os.path.join(
 # duration: 时长（秒）
 # filename: 文件名（相对于 _BGM_DIR）
 # =====================================================
-_BGM_REGISTRY: List[Dict] = [
+_BGM_REGISTRY: list[dict] = [
     {
         "id": "bgm_warm_piano",
         "name": "温暖钢琴",
@@ -82,7 +81,7 @@ _BGM_REGISTRY: List[Dict] = [
 ]
 
 
-def list_bgms(mood: Optional[str] = None) -> List[Dict]:
+def list_bgms(mood: str | None = None) -> list[dict]:
     """
     列出所有 BGM 元数据（内置 + 用户上传的自定义曲目）。
 
@@ -92,7 +91,7 @@ def list_bgms(mood: Optional[str] = None) -> List[Dict]:
     返回:
     - BGM 字典列表，每个含 id/name/mood/duration/available（文件是否存在）
     """
-    result: List[Dict] = []
+    result: list[dict] = []
     for bgm in _BGM_REGISTRY + _load_custom_bgms():
         if mood and bgm["mood"] != mood:
             continue
@@ -108,7 +107,7 @@ def list_bgms(mood: Optional[str] = None) -> List[Dict]:
     return result
 
 
-def get_bgm_path(bgm_id: str) -> Optional[str]:
+def get_bgm_path(bgm_id: str) -> str | None:
     """
     获取 BGM 文件的绝对路径。
 
@@ -129,7 +128,7 @@ def get_bgm_path(bgm_id: str) -> Optional[str]:
     return None
 
 
-def get_bgm_by_id(bgm_id: str) -> Optional[Dict]:
+def get_bgm_by_id(bgm_id: str) -> dict | None:
     """获取 BGM 元数据（含 available 字段）"""
     for bgm in _BGM_REGISTRY + _load_custom_bgms():
         if bgm["id"] == bgm_id:
@@ -153,16 +152,16 @@ _CUSTOM_REGISTRY_FILE = os.path.join(_BGM_DIR, "custom_bgms.json")
 VALID_MOODS = ("calm", "uplifting", "dramatic", "corporate", "sad")
 
 
-def _load_custom_bgms() -> List[Dict]:
+def _load_custom_bgms() -> list[dict]:
     try:
-        with open(_CUSTOM_REGISTRY_FILE, "r", encoding="utf-8") as f:
+        with open(_CUSTOM_REGISTRY_FILE, encoding="utf-8") as f:
             data = json.load(f)
         return data if isinstance(data, list) else []
     except Exception:
         return []
 
 
-def _save_custom_bgms(items: List[Dict]) -> None:
+def _save_custom_bgms(items: list[dict]) -> None:
     os.makedirs(_BGM_DIR, exist_ok=True)
     Path(_CUSTOM_REGISTRY_FILE).write_text(
         json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -184,7 +183,7 @@ async def _probe_duration_seconds(file_path: str) -> int:
         return 60
 
 
-async def save_uploaded_bgm(name: str, mood: str, content: bytes) -> Dict:
+async def save_uploaded_bgm(name: str, mood: str, content: bytes) -> dict:
     """
     保存用户上传的 BGM（mp3 字节）并登记元数据。
 
@@ -210,6 +209,6 @@ async def save_uploaded_bgm(name: str, mood: str, content: bytes) -> Dict:
     return {**item, "available": True}
 
 
-def list_moods() -> List[str]:
+def list_moods() -> list[str]:
     """列出所有情绪分类"""
     return list({bgm["mood"] for bgm in _BGM_REGISTRY})

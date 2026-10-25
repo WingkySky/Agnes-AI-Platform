@@ -18,11 +18,10 @@ import logging
 import mimetypes
 import os
 from datetime import datetime
-from typing import Optional, Tuple, Protocol
+from typing import Protocol
 from urllib.parse import urlparse
 
 import httpx
-from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.database import new_async_session
@@ -48,7 +47,7 @@ class StorageBackend(Protocol):
         """从上游 URL 下载并上传到对象存储，返回公共 URL"""
         ...
 
-    async def upload_fileobj(self, fileobj, key: str, content_type: Optional[str] = None) -> str:
+    async def upload_fileobj(self, fileobj, key: str, content_type: str | None = None) -> str:
         """上传文件对象到对象存储，返回公共 URL"""
         ...
 
@@ -150,7 +149,7 @@ class S3CompatBackend:
             ExtraArgs=extra_args if extra_args else None,
         )
 
-    async def upload_fileobj(self, fileobj, key: str, content_type: Optional[str] = None) -> str:
+    async def upload_fileobj(self, fileobj, key: str, content_type: str | None = None) -> str:
         """直接上传文件对象"""
         await asyncio.to_thread(self._upload_fileobj_sync, fileobj, key, content_type or "")
         return self.build_public_url(key)
@@ -160,11 +159,11 @@ class S3CompatBackend:
 # 工厂函数与单例缓存
 # =====================================================
 # 后端单例缓存
-_backend_instance: Optional[StorageBackend] = None
+_backend_instance: StorageBackend | None = None
 _backend_initialized: bool = False
 
 
-def get_storage_backend() -> Optional[StorageBackend]:
+def get_storage_backend() -> StorageBackend | None:
     """
     工厂函数：按 settings.storage_backend_type 返回对应后端实例
     - 缓存单例，首次创建后复用
@@ -252,7 +251,7 @@ async def _do_migrate(
     record_id: int,
     type: str,
     created_at: datetime,
-) -> Tuple[str, Optional[str], Optional[str]]:
+) -> tuple[str, str | None, str | None]:
     """
     实际执行转存（不含策略判断），返回 (result_url, original_url, migrate_status)
     - 转存成功：(r2_url, upstream_url, "done")
@@ -305,7 +304,7 @@ async def migrate_if_needed(
     model_id: str,
     asset_storage_mode: str,
     provider_type: str,
-) -> Tuple[str, Optional[str], Optional[str]]:
+) -> tuple[str, str | None, str | None]:
     """
     顶层转存入口（供轮询器调用）
     - 根据 asset_storage_mode 决定是否转存
@@ -343,7 +342,7 @@ async def migrate_if_needed(
     return await _do_migrate(upstream_url, record_id, type, created_at)
 
 
-async def migrate_pending_record(record_id: int) -> Tuple[bool, str]:
+async def migrate_pending_record(record_id: int) -> tuple[bool, str]:
     """
     重试 pending 状态的记录（供管理员接口和迁移脚本调用）
     - 从数据库读取 original_url 重试转存

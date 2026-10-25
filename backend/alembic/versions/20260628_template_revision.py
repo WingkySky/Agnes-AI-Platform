@@ -14,9 +14,9 @@ Create Date: 2026-06-28
 加上 _auto_migrate_missing_columns 自动补列），实际升级通过自动迁移兜底。
 本文件作为后续启用 alembic 时的迁移记录保留。
 """
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision = "20260628_template_revision"
 down_revision = "20260628_template_approval"

@@ -3,7 +3,6 @@
 # 供 ffmpeg 烧录与前端下载使用；字幕「生成」（LLM/whisper）仍在各业务域
 # =====================================================
 
-from typing import List, Optional
 
 # =====================================================
 # 默认字幕样式
@@ -37,9 +36,9 @@ def format_ass_time(seconds: float) -> str:
     return f"{hours}:{minutes:02d}:{secs:02d}.{centisecs:02d}"
 
 
-def build_srt(clips: List[dict]) -> str:
+def build_srt(clips: list[dict]) -> str:
     """构建 SRT 格式字幕文本"""
-    lines: List[str] = []
+    lines: list[str] = []
     for idx, clip in enumerate(clips, start=1):
         start = format_srt_time(clip["start_time"])
         end = format_srt_time(clip["start_time"] + clip["duration"])
@@ -50,7 +49,7 @@ def build_srt(clips: List[dict]) -> str:
     return "\n".join(lines)
 
 
-def build_ass(clips: List[dict], style: Optional[dict] = None) -> str:
+def build_ass(clips: list[dict], style: dict | None = None) -> str:
     """
     构建 ASS 格式字幕文件（含样式，供 ffmpeg subtitles 滤镜烧录）
 
@@ -86,7 +85,7 @@ Style: Default,{font_name},{font_size},{primary_color},{outline_color},&H0000000
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-    events: List[str] = []
+    events: list[str] = []
     for clip in clips:
         start = format_ass_time(clip["start_time"])
         end = format_ass_time(clip["start_time"] + clip["duration"])

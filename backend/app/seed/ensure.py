@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password
-from app.models.credit_rule import CreditRule, DEFAULT_CREDIT_RULES
+from app.models.credit_rule import DEFAULT_CREDIT_RULES, CreditRule
 from app.models.pipeline import PipelineTemplate, ScriptTemplate, StylePreset
 from app.models.prompt_preset import PromptPreset
 from app.models.user import ROLE_ADMIN, User

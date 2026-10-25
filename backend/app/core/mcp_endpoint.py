@@ -10,12 +10,11 @@
 # - DNS rebinding 防护面向浏览器 CSRF 场景，本端点 Bearer PAT 鉴权且供 CLI 使用，显式关闭
 # =====================================================
 
+from mcp.server.mcpserver import MCPServer
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Headers
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
-
-from mcp.server.mcpserver import MCPServer
-from mcp.server.transport_security import TransportSecuritySettings
 
 from app.services import mcp_gateway
 

@@ -1168,7 +1168,7 @@ export const useChatStore = defineStore('chat', {
     },
 
     /** 媒体终端态落库：按归属会话同步其消息数组 */
-    _persistMediaOwner(taskId: string, msg: ChatKernelMessage | null): void {
+    _persistMediaOwner(taskId: string, _msg: ChatKernelMessage | null): void {
       const owner = this.mediaTaskSession[taskId] ?? this.activeSessionId
       if (owner !== null && owner !== undefined) void this._persist(owner, this._messagesOf(owner))
     },

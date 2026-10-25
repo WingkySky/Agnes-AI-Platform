@@ -7,9 +7,8 @@
 # =====================================================
 
 import pytest
-import pytest_asyncio
-from sqlalchemy import select
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 
 from app.core.database import get_async_db
 from app.core.security import create_access_token

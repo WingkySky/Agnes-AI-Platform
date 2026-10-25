@@ -3,7 +3,7 @@
 # =====================================================
 
 from datetime import datetime
-from typing import List, Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -15,14 +15,14 @@ class EntityCreateRequest(BaseModel):
     """创建实体（可带首图资产 id，建首版本并采用）"""
     kind: EntityKind
     name: str = Field(..., min_length=1, max_length=64)
-    description: Optional[str] = Field(None, max_length=2000)
-    asset_id: Optional[int] = Field(None, description="首图资产 id，可选")
+    description: str | None = Field(None, max_length=2000)
+    asset_id: int | None = Field(None, description="首图资产 id，可选")
 
 
 class EntityUpdateRequest(BaseModel):
     """更新实体（全字段可选）"""
-    name: Optional[str] = Field(None, min_length=1, max_length=64)
-    description: Optional[str] = Field(None, max_length=2000)
+    name: str | None = Field(None, min_length=1, max_length=64)
+    description: str | None = Field(None, max_length=2000)
 
 
 class EntityVersionCreateRequest(BaseModel):
@@ -39,12 +39,12 @@ class EntityAdoptRequest(BaseModel):
 class EntityImageResponse(BaseModel):
     asset_id: int
     role: str
-    url: Optional[str] = None
+    url: str | None = None
 
 
 class EntityVersionResponse(BaseModel):
     id: int
-    images: List[EntityImageResponse] = []
+    images: list[EntityImageResponse] = []
     is_active: bool
     created_at: datetime
 
@@ -55,13 +55,13 @@ class EntityResponse(BaseModel):
     work_id: int
     kind: str
     name: str
-    description: Optional[str] = None
-    versions: List[EntityVersionResponse] = []
-    active_image_url: Optional[str] = None
+    description: str | None = None
+    versions: list[EntityVersionResponse] = []
+    active_image_url: str | None = None
     created_at: datetime
     updated_at: datetime
 
 
 class EntityListResponse(BaseModel):
     total: int
-    items: List[EntityResponse]
+    items: list[EntityResponse]

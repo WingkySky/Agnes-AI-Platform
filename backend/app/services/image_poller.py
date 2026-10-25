@@ -18,10 +18,7 @@ import asyncio
 import logging
 import time
 import uuid
-from typing import Dict, Optional
 
-from app.services.agnes_client import agnes_client
-from app.services.provider_registry import provider_registry
 from app.services._generation_persist import (
     CLEANUP_INTERVAL_SEC,
     cleanup_expired_tasks,
@@ -32,6 +29,7 @@ from app.services._generation_persist import (
     refund_generation_credits,
 )
 from app.services.error_taxonomy import classify, classify_message
+from app.services.provider_registry import provider_registry
 
 logger = logging.getLogger("agnes_platform")
 
@@ -45,11 +43,11 @@ class ImageTask:
         self,
         task_id: str,
         prompt: str,
-        params: Dict,
-        user_id: Optional[int] = None,
+        params: dict,
+        user_id: int | None = None,
         credits_consumed: int = 0,
-        preset_id: Optional[int] = None,
-        context: Optional[Dict] = None,
+        preset_id: int | None = None,
+        context: dict | None = None,
     ):
         self.task_id = task_id
         self.prompt = prompt
@@ -62,16 +60,16 @@ class ImageTask:
         self.context = context
         self.status = "queued"
         self.progress = 0
-        self.result_url: Optional[str] = None
-        self.image_b64: Optional[str] = None
-        self.error_message: Optional[str] = None
-        self.error_category: Optional[str] = None
+        self.result_url: str | None = None
+        self.image_b64: str | None = None
+        self.error_message: str | None = None
+        self.error_category: str | None = None
         self.created_at = time.time()
         self.last_updated = self.created_at
-        self._gen_task: Optional[asyncio.Task] = None
+        self._gen_task: asyncio.Task | None = None
         self._cancelled = False
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             "task_id": self.task_id,
             "status": self.status,
@@ -95,9 +93,9 @@ class ImagePollerManager:
     """
 
     def __init__(self):
-        self._tasks: Dict[str, ImageTask] = {}
+        self._tasks: dict[str, ImageTask] = {}
         self._lock = asyncio.Lock()
-        self._cleanup_task: Optional[asyncio.Task] = None
+        self._cleanup_task: asyncio.Task | None = None
         self._started = False
 
     async def start(self):
@@ -110,12 +108,12 @@ class ImagePollerManager:
     async def create_task(
         self,
         prompt: str,
-        params: Dict,
-        user_id: Optional[int] = None,
+        params: dict,
+        user_id: int | None = None,
         credits_consumed: int = 0,
-        task_id: Optional[str] = None,
-        preset_id: Optional[int] = None,
-        context: Optional[Dict] = None,
+        task_id: str | None = None,
+        preset_id: int | None = None,
+        context: dict | None = None,
     ) -> ImageTask:
         # 支持外部传入 task_id（便于路由层先扣分再创建任务时保持 ref_id 一致）
         if not task_id:
@@ -141,7 +139,7 @@ class ImagePollerManager:
         )
         return task
 
-    async def get_status(self, task_id: str) -> Optional[ImageTask]:
+    async def get_status(self, task_id: str) -> ImageTask | None:
         async with self._lock:
             return self._tasks.get(task_id)
 
@@ -283,7 +281,7 @@ class ImagePollerManager:
 
     async def shutdown(self):
         async with self._lock:
-            for key, task in self._tasks.items():
+            for task in self._tasks.values():
                 if task._gen_task and not task._gen_task.done():
                     task._gen_task.cancel()
         if self._cleanup_task and not self._cleanup_task.done():

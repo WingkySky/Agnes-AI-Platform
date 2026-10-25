@@ -12,9 +12,8 @@ import re
 import secrets
 import time
 from pathlib import Path
-from typing import Optional
 
-from fastapi import UploadFile, HTTPException
+from fastapi import HTTPException, UploadFile
 
 from app.core.pathsafe import ensure_within
 
@@ -51,9 +50,9 @@ async def save_upload_file(
     file: UploadFile,
     folder: str = "projects",
     *,
-    allowed_types: Optional[set] = None,
+    allowed_types: set | None = None,
     max_size: int = MAX_FILE_BYTES,
-    user_id: Optional[int] = None,
+    user_id: int | None = None,
     source: str = "upload",
 ) -> str:
     """

@@ -3,7 +3,7 @@
 # 登录用户可用；routes 层轻量（入参校验 → service → 统一响应）
 # =====================================================
 
-from typing import List, Literal, Optional
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -20,14 +20,14 @@ class PromptOptimizeContext(BaseModel):
     """优化上下文：model-adapt 按模型注入方言规则；reference 注入参考素材名"""
 
     model_id: str = ""
-    reference_asset_names: List[str] = []
+    reference_asset_names: list[str] = []
 
 
 class PromptOptimizeRequest(BaseModel):
     prompt: str
     mode: Literal["expand", "refine", "style", "model-adapt", "reference"] = "refine"
     target: Literal["image", "video"] = "image"
-    context: Optional[PromptOptimizeContext] = None
+    context: PromptOptimizeContext | None = None
 
 
 @router.post("/optimize", summary="优化提示词（结构化返回正负提示词）")

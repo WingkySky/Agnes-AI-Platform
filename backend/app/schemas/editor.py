@@ -2,7 +2,7 @@
 # 剪辑工程请求/响应模型
 # =====================================================
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -10,41 +10,41 @@ from pydantic import BaseModel, Field
 class EditorProjectCreate(BaseModel):
     """新建剪辑工程（document 可选：从画布送进剪辑器时携带草稿时间线）"""
     title: str = Field(..., min_length=1, max_length=200)
-    work_id: Optional[int] = None
-    source_workspace_id: Optional[str] = None
-    document: Optional[dict[str, Any]] = None
-    asset_ids: Optional[list[int]] = None   # 圈选素材：未入库的懒入库后按序排入主轨
+    work_id: int | None = None
+    source_workspace_id: str | None = None
+    document: dict[str, Any] | None = None
+    asset_ids: list[int] | None = None   # 圈选素材：未入库的懒入库后按序排入主轨
 
 
 class EditorProjectUpdate(BaseModel):
     """编辑剪辑工程元数据（仅更新提交项）"""
-    title: Optional[str] = Field(None, min_length=1, max_length=200)
-    work_id: Optional[int] = None
-    cover_url: Optional[str] = Field(None, max_length=1024, description="封面图 URL（帧截图/上传图）")
+    title: str | None = Field(None, min_length=1, max_length=200)
+    work_id: int | None = None
+    cover_url: str | None = Field(None, max_length=1024, description="封面图 URL（帧截图/上传图）")
 
 
 class EditorDocumentSave(BaseModel):
     """保存时间线文档（乐观锁）；snapshot_reason 仅 agent 工具层携带，触发写前快照"""
     document: dict[str, Any]
     base_revision: int = Field(..., ge=1)
-    snapshot_reason: Optional[str] = Field(None, max_length=255)
+    snapshot_reason: str | None = Field(None, max_length=255)
 
 
 class EditorProjectBrief(BaseModel):
     id: int
     uid: str
     user_id: int
-    work_id: Optional[int] = None
+    work_id: int | None = None
     title: str
     revision: int
-    final_url: Optional[str] = None
-    cover_url: Optional[str] = None
+    final_url: str | None = None
+    cover_url: str | None = None
     render_status: str
-    render_error: Optional[str] = None
-    render_progress: Optional[str] = None
-    source_workspace_id: Optional[str] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    render_error: str | None = None
+    render_progress: str | None = None
+    source_workspace_id: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 class EditorProjectDetail(EditorProjectBrief):

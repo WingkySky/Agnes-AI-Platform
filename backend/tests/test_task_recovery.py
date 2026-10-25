@@ -4,13 +4,11 @@
 # 启动恢复三态（视频续轮询/超限视频对账/图片对账）、轮询端点 DB 回退
 # =====================================================
 
-import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
-
 from sqlalchemy import select
 
 from app.models.generation import Generation

@@ -34,7 +34,7 @@ import { computed } from 'vue'
 import { useI18n, type Locale } from '@/i18n'
 import { LocationFilled, ArrowDown, Check } from '@element-plus/icons-vue'
 
-const { t, locale, setLocale, supportedLocales, localeLabels } = useI18n()
+const { locale, setLocale, supportedLocales, localeLabels } = useI18n()
 
 const currentLocale = computed(() => locale.value)
 // localeLabels 是常量对象（非 ref），直接按属性访问即可；访问 locale.value 触发响应式

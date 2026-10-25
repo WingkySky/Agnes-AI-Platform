@@ -92,7 +92,7 @@ interface VideoFrameState {
 
 const videoStates = new Map<string, VideoFrameState>()
 
-function ensureVideoState(clipId: string, url: string): VideoFrameState {
+function ensureVideoState(clipId: string, _url: string): VideoFrameState {
   let st = videoStates.get(clipId)
   if (!st) {
     st = { url: null, sink: null, canvas: null, reqT: -1, fetching: false }

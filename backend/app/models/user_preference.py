@@ -12,10 +12,10 @@
 # =====================================================
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, JSON, DateTime, ForeignKey
+
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer
 
 from app.core.database import Base
-
 
 # =====================================================
 # 偏好项默认值（用户首次注册时写入）

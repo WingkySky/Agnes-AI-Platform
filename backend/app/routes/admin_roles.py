@@ -18,10 +18,13 @@ from sqlalchemy.future import select
 from app.core.database import get_async_db
 from app.core.response import ok
 from app.core.security import require_permission
+from app.models.role import DEFAULT_ROLES, Role
 from app.models.user import User
-from app.models.role import Role, DEFAULT_ROLES
 from app.schemas.role import (
-    RoleResponse, RoleCreateRequest, RoleUpdateRequest, PermissionItem,
+    PermissionItem,
+    RoleCreateRequest,
+    RoleResponse,
+    RoleUpdateRequest,
 )
 
 logger = logging.getLogger("agnes_platform")

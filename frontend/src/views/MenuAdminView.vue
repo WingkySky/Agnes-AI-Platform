@@ -310,9 +310,6 @@ import { ElMessage } from 'element-plus'
 import { useConfirm } from '@/composables/useConfirm'
 import {
   RefreshRight, Check, ArrowDown, Menu, Grid,
-  EditPen, User, Connection, Setting, Picture, VideoPlay,
-  ChatDotRound, Clock, Coin, StarFilled, Histogram, Message,
-  UserFilled, MoreFilled,
 } from '@element-plus/icons-vue'
 import { useMenuStore } from '@/stores/menu'
 import { getIconByName as getIcon } from '@/lib/icons'

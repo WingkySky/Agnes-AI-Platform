@@ -6,7 +6,12 @@
 import pytest
 
 from app.services.agnes_client import UpstreamError
-from app.services.error_taxonomy import CATEGORIES, can_retry, classify, classify_message
+from app.services.error_taxonomy import (
+    CATEGORIES,
+    can_retry,
+    classify,
+    classify_message,
+)
 
 
 def _upstream(message, status=None, kind="http", body=""):

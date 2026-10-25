@@ -12,7 +12,6 @@
 import logging
 import os
 from datetime import datetime, timedelta
-from typing import Optional, Tuple
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
@@ -44,7 +43,7 @@ def _kind_of(storage_key: str) -> str:
     return _EXT_KIND.get(ext, "file")
 
 
-def _local_abs_path(storage_key: str) -> Optional[str]:
+def _local_abs_path(storage_key: str) -> str | None:
     """台账 key → 本地绝对路径；文件不存在（S3 件/已被清理）返回 None"""
     try:
         path = ensure_within(UPLOADS_DIR, storage_key)
@@ -60,7 +59,7 @@ def _parse_mb(value: str) -> int:
         return 0
 
 
-async def get_quota_limits(db) -> Tuple[Optional[int], Optional[int]]:
+async def get_quota_limits(db) -> tuple[int | None, int | None]:
     """读取配额上限（字节）；None = 不限制（配置 0 或空）"""
     total_mb = _parse_mb(await get_config_value(db, "storage_quota_mb", "5120"))
     daily_mb = _parse_mb(await get_config_value(db, "daily_upload_quota_mb", "2048"))
@@ -110,11 +109,11 @@ async def check_upload_quota(user_id: int, incoming_bytes: int) -> None:
 
 async def record_file(
     *,
-    user_id: Optional[int],
+    user_id: int | None,
     storage_key: str,
     source: str,
-    kind: Optional[str] = None,
-    bytes_size: Optional[int] = None,
+    kind: str | None = None,
+    bytes_size: int | None = None,
     log_prefix: str = LOG_PREFIX,
 ) -> None:
     """

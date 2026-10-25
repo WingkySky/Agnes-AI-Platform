@@ -31,7 +31,6 @@ import { getAsset } from '@/api/assets'
 import {
   EditorCommandError,
   applyCommand,
-  cmd,
   type EditorCommand,
 } from '@/lib/editor-commands'
 import { EditorHistory } from '@/lib/editor-history'

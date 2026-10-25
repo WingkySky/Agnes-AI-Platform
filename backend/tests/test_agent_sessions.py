@@ -5,11 +5,10 @@
 # =====================================================
 
 import pytest
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
-from app.main import app
-from app.core.database import get_async_db
 from app.core.security import create_access_token
+from app.main import app
 from app.models.user import User
 
 SYNC_PAYLOAD = {

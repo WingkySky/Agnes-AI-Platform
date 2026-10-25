@@ -18,17 +18,16 @@
 
 import logging
 import time
-from typing import Optional
 
 from fastapi import HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import update as sa_update
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.models.user import User
 from app.models.credit_rule import DEFAULT_CREDIT_RULES, CreditRule
-from app.models.model_definition import ModelDefinition
 from app.models.credit_transaction import CreditTransaction
+from app.models.model_definition import ModelDefinition
+from app.models.user import User
 
 logger = logging.getLogger("agnes_platform")
 
@@ -75,7 +74,7 @@ def _get_default_value(rule_key: str) -> int:
 
 
 # ---------- 尺寸解析 ----------
-def _parse_size_to_px(size: Optional[str]) -> float:
+def _parse_size_to_px(size: str | None) -> float:
     """将 '1024x768' 格式的尺寸字符串估算为总像素数，用于计算积分"""
     if not size:
         return 1024.0 * 1024.0
@@ -87,7 +86,7 @@ def _parse_size_to_px(size: Optional[str]) -> float:
 
 
 # ---------- 模型积分倍率（动态定价） ----------
-async def get_model_cost_multiplier(db: Optional[AsyncSession], model_id: Optional[str]) -> float:
+async def get_model_cost_multiplier(db: AsyncSession | None, model_id: str | None) -> float:
     """
     读取模型积分倍率（model_definitions.cost_multiplier，管理端可改立即生效）。
     取不到模型/无库上下文按 1.0（行为不变）。
@@ -108,9 +107,9 @@ async def get_model_cost_multiplier(db: Optional[AsyncSession], model_id: Option
 # ---------- 图片：计算一次任务的成本 ----------
 async def get_image_cost_async(
     db: AsyncSession,
-    mode: Optional[str] = "text2image",
-    size: Optional[str] = None,
-    model: Optional[str] = None,
+    mode: str | None = "text2image",
+    size: str | None = None,
+    model: str | None = None,
 ) -> int:
     """
     异步版本：从数据库读取积分规则，计算一次图片任务的消耗。
@@ -143,10 +142,10 @@ async def get_image_cost_async(
 # ---------- 视频：计算一次任务的成本 ----------
 async def get_video_cost_async(
     db: AsyncSession,
-    mode: Optional[str] = "text2video",
+    mode: str | None = "text2video",
     seconds: int = 5,
-    num_frames: Optional[int] = None,
-    model: Optional[str] = None,
+    num_frames: int | None = None,
+    model: str | None = None,
 ) -> int:
     """异步版本：读取数据库中的视频积分规则；传入 model 时按模型积分倍率放大结果"""
     # 每秒消耗基础积分（按模式选择规则与系数）
@@ -175,11 +174,11 @@ async def get_video_cost_async(
 # ---------- 预扣积分（生成任务创建时调用）----------
 async def consume_credits(
     db: AsyncSession,
-    user: Optional[User],
+    user: User | None,
     amount: int,
     description: str = "",
-    ref_type: Optional[str] = None,
-    ref_id: Optional[str] = None,
+    ref_type: str | None = None,
+    ref_id: str | None = None,
 ) -> int:
     """
     从用户账户预扣 amount 积分，返回扣除后的余额。
@@ -334,7 +333,7 @@ async def recharge_credits(
     db: AsyncSession,
     user_id: int,
     amount: int,
-    operator_id: Optional[int] = None,
+    operator_id: int | None = None,
     description: str = "",
 ) -> int:
     """

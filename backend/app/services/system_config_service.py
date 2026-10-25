@@ -6,12 +6,12 @@
 
 import logging
 import time
-from typing import Optional
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.models.system_config import SystemConfig, DEFAULT_SYSTEM_CONFIGS
 from app.core.config import settings
+from app.models.system_config import DEFAULT_SYSTEM_CONFIGS, SystemConfig
 
 logger = logging.getLogger("agnes_platform")
 

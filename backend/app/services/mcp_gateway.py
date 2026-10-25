@@ -16,7 +16,7 @@ import secrets
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
@@ -68,7 +68,7 @@ class PatPrincipal:
     token_id: int
 
 
-async def authenticate_pat(db: AsyncSession, token: str) -> Optional[PatPrincipal]:
+async def authenticate_pat(db: AsyncSession, token: str) -> PatPrincipal | None:
     """校验 Bearer token → PatPrincipal；无效/已吊销返回 None（每次实时查表，吊销即时生效）"""
     if not token or not token.startswith(TOKEN_PREFIX):
         return None
@@ -86,21 +86,21 @@ async def authenticate_pat(db: AsyncSession, token: str) -> Optional[PatPrincipa
     return PatPrincipal(user_id=row.user_id, permission=row.permission, token_id=row.id)
 
 
-async def authenticate_request(token: str) -> Optional[PatPrincipal]:
+async def authenticate_request(token: str) -> PatPrincipal | None:
     """开独立 session 完成校验（ASGI 鉴权层无请求级 session 可注入；测试 monkeypatch async_session 打桩）"""
     async with async_session() as db:
         return await authenticate_pat(db, token)
 
 
 # ASGI 中间件注入、工具函数读取的请求身份
-pat_principal: ContextVar[Optional[PatPrincipal]] = ContextVar("pat_principal", default=None)
+pat_principal: ContextVar[PatPrincipal | None] = ContextVar("pat_principal", default=None)
 
 
 # =====================================================
 # overview 分页纯函数（与前端 chat-tools.ts overviewPage/panelContentSummary 对齐）
 # =====================================================
 
-def parse_overview_cursor(cursor: Optional[str]) -> int:
+def parse_overview_cursor(cursor: str | None) -> int:
     """游标 → 起始索引（非法/负值回退 0）"""
     if not cursor:
         return 0
@@ -111,14 +111,14 @@ def parse_overview_cursor(cursor: Optional[str]) -> int:
     return n if n > 0 else 0
 
 
-def overview_page(panels: List[Dict[str, Any]], cursor: Optional[str], page_size: Optional[int]) -> Dict[str, Any]:
+def overview_page(panels: list[dict[str, Any]], cursor: str | None, page_size: int | None) -> dict[str, Any]:
     """面板分页：size 钳 10~100（缺省 60）；游标越过末尾视为画布已收缩，回第一页重读"""
     size = math.floor(page_size) if isinstance(page_size, (int, float)) else 0
     size = min(100, max(10, size or 60))
     raw = parse_overview_cursor(cursor)
     start = raw if raw < len(panels) else 0
     end = min(len(panels), start + size)
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "items": panels[start:end],
         "page_range": [start, end],
         "total": len(panels),
@@ -132,14 +132,14 @@ def _truncate(s: str, n: int = 120) -> str:
     return f"{s[:n]}…" if len(s) > n else s
 
 
-def panel_content_summary(p: Dict[str, Any]) -> str:
+def panel_content_summary(p: dict[str, Any]) -> str:
     """节点内容摘要：文本取正文；媒体取状态+prompt；有二进制内容标注「有媒体内容」"""
     content = p.get("content") if isinstance(p.get("content"), dict) else {}
     ptype = p.get("type") if isinstance(p.get("type"), str) else "text"
     if ptype == "text":
         body = content.get("content")
         return _truncate(body) if isinstance(body, str) else ""
-    parts: List[str] = []
+    parts: list[str] = []
     if isinstance(content.get("status"), str):
         parts.append(f"status={content['status']}")
     if isinstance(content.get("prompt"), str) and content.get("prompt"):
@@ -153,7 +153,7 @@ def panel_content_summary(p: Dict[str, Any]) -> str:
 # 工具实现（db + user_id 注入，可直测）
 # =====================================================
 
-def _brief(ws) -> Dict[str, Any]:
+def _brief(ws) -> dict[str, Any]:
     return {
         "id": ws.id,
         "name": ws.name,
@@ -163,19 +163,19 @@ def _brief(ws) -> Dict[str, Any]:
     }
 
 
-async def canvas_list_impl(db: AsyncSession, user_id: int) -> Dict[str, Any]:
+async def canvas_list_impl(db: AsyncSession, user_id: int) -> dict[str, Any]:
     items = await list_workspaces(db, user_id)
     return {"ok": True, "items": [_brief(w) for w in items]}
 
 
-async def canvas_create_impl(db: AsyncSession, user_id: int, name: Optional[str]) -> Dict[str, Any]:
+async def canvas_create_impl(db: AsyncSession, user_id: int, name: str | None) -> dict[str, Any]:
     ws = await create_workspace(db, user_id, name or f"外部画布 {datetime.utcnow():%Y-%m-%d %H:%M}")
     return {"ok": True, "workspace": _brief(ws)}
 
 
 async def canvas_overview_impl(
-    db: AsyncSession, user_id: int, workspace_id: str, cursor: Optional[str], page_size: Optional[int]
-) -> Dict[str, Any]:
+    db: AsyncSession, user_id: int, workspace_id: str, cursor: str | None, page_size: int | None
+) -> dict[str, Any]:
     ws = await get_owned_workspace(db, workspace_id, user_id)
     data = ws.data if isinstance(ws.data, dict) else {}
     panels = data.get("panels") if isinstance(data.get("panels"), list) else []
@@ -193,7 +193,7 @@ async def canvas_overview_impl(
         c for c in connections
         if str(c.get("source_panel_id")) in page_ids or str(c.get("target_panel_id")) in page_ids
     ]
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "ok": True,
         "workspace_id": ws.id,
         "name": ws.name,
@@ -222,8 +222,8 @@ async def canvas_overview_impl(
 
 
 async def canvas_apply_ops_impl(
-    db: AsyncSession, user_id: int, workspace_id: str, ops: List[Dict[str, Any]]
-) -> Dict[str, Any]:
+    db: AsyncSession, user_id: int, workspace_id: str, ops: list[dict[str, Any]]
+) -> dict[str, Any]:
     ws = await get_owned_workspace(db, workspace_id, user_id)
     outcome = await apply_workspace_ops(db, ws, ops)
     return {"ok": True, **outcome}
@@ -233,7 +233,7 @@ async def canvas_apply_ops_impl(
 # 编辑器工具实现（复用 project_service / render_service / rough_cut_service）
 # =====================================================
 
-def _brief_project(p) -> Dict[str, Any]:
+def _brief_project(p) -> dict[str, Any]:
     return {k: v for k, v in project_service._to_dict(p).items() if k != "document"}
 
 
@@ -245,29 +245,29 @@ async def _load_user(db: AsyncSession, user_id: int) -> User:
     return user
 
 
-async def editor_list_projects_impl(db: AsyncSession, user_id: int, work_id: Optional[int]) -> Dict[str, Any]:
+async def editor_list_projects_impl(db: AsyncSession, user_id: int, work_id: int | None) -> dict[str, Any]:
     items = await project_service.list_projects(db, user_id, work_id)
     return {"ok": True, "items": [_brief_project(p) for p in items]}
 
 
 async def editor_create_project_impl(
-    db: AsyncSession, user_id: int, title: Optional[str], work_id: Optional[int]
-) -> Dict[str, Any]:
+    db: AsyncSession, user_id: int, title: str | None, work_id: int | None
+) -> dict[str, Any]:
     user = await _load_user(db, user_id)
     project = await project_service.create_project(db, user, title or f"外部工程 {datetime.utcnow():%Y-%m-%d %H:%M}", work_id=work_id)
     return {"ok": True, **project_service._to_dict(project)}
 
 
-async def editor_get_document_impl(db: AsyncSession, user_id: int, uid: str) -> Dict[str, Any]:
+async def editor_get_document_impl(db: AsyncSession, user_id: int, uid: str) -> dict[str, Any]:
     user = await _load_user(db, user_id)
     project = await project_service.get_owned_project(db, uid, user)
     return {"ok": True, **project_service._to_dict(project)}
 
 
 async def editor_put_document_impl(
-    db: AsyncSession, user_id: int, uid: str, document: Dict[str, Any], base_revision: int,
-    snapshot_reason: Optional[str],
-) -> Dict[str, Any]:
+    db: AsyncSession, user_id: int, uid: str, document: dict[str, Any], base_revision: int,
+    snapshot_reason: str | None,
+) -> dict[str, Any]:
     user = await _load_user(db, user_id)
     project = await project_service.get_owned_project(db, uid, user)
     if project.render_status == render_service.RENDER_RENDERING:
@@ -279,8 +279,8 @@ async def editor_put_document_impl(
 
 
 async def editor_render_submit_impl(
-    db: AsyncSession, user_id: int, uid: str, client_operation_id: Optional[str]
-) -> Dict[str, Any]:
+    db: AsyncSession, user_id: int, uid: str, client_operation_id: str | None
+) -> dict[str, Any]:
     user = await _load_user(db, user_id)
     project = await project_service.get_owned_project(db, uid, user)
     body = {"client_operation_id": client_operation_id} if client_operation_id else {}
@@ -288,15 +288,15 @@ async def editor_render_submit_impl(
     return {"ok": True, **result}
 
 
-async def editor_render_status_impl(db: AsyncSession, user_id: int, uid: str) -> Dict[str, Any]:
+async def editor_render_status_impl(db: AsyncSession, user_id: int, uid: str) -> dict[str, Any]:
     user = await _load_user(db, user_id)
     project = await project_service.get_owned_project(db, uid, user)
     return {"ok": True, **render_service.render_status_payload(project)}
 
 
 async def editor_rough_cut_analyze_impl(
-    db: AsyncSession, user_id: int, asset_id: int, mode: str, params: Optional[Dict[str, Any]]
-) -> Dict[str, Any]:
+    db: AsyncSession, user_id: int, asset_id: int, mode: str, params: dict[str, Any] | None
+) -> dict[str, Any]:
     result = await rough_cut_service.analyze_asset(db, user_id, asset_id, mode, params)
     return {"ok": True, **result}
 
@@ -305,7 +305,7 @@ async def editor_rough_cut_analyze_impl(
 # 素材 / 模型 / 生成工具实现
 # =====================================================
 
-def _envelope_data(resp: Dict[str, Any]) -> Any:
+def _envelope_data(resp: dict[str, Any]) -> Any:
     """内部路由函数返回 ok() 信封 → data；pydantic 模型转 dict"""
     data = resp.get("data")
     if isinstance(data, BaseModel):
@@ -314,9 +314,9 @@ def _envelope_data(resp: Dict[str, Any]) -> Any:
 
 
 async def asset_list_impl(
-    db: AsyncSession, user_id: int, kind: Optional[str], work_id: Optional[int],
-    keyword: Optional[str], page: int, page_size: int,
-) -> Dict[str, Any]:
+    db: AsyncSession, user_id: int, kind: str | None, work_id: int | None,
+    keyword: str | None, page: int, page_size: int,
+) -> dict[str, Any]:
     result = await list_assets(
         db, user_id=user_id, media_type=kind, work_id=work_id, keyword=keyword,
         page=page, page_size=min(page_size, 100),
@@ -324,7 +324,7 @@ async def asset_list_impl(
     return {"ok": True, "total": result["total"], "page": result["page"], "page_size": result["page_size"], "items": result["items"]}
 
 
-async def model_list_impl(kind: Optional[str]) -> Dict[str, Any]:
+async def model_list_impl(kind: str | None) -> dict[str, Any]:
     if kind in ("image", "video", "chat"):
         models = await get_models_by_type(kind)
     else:
@@ -339,9 +339,9 @@ async def model_list_impl(kind: Optional[str]) -> Dict[str, Any]:
 
 
 async def image_generate_impl(
-    db: AsyncSession, user: User, prompt: str, model: Optional[str], size: Optional[str],
-    ref_image_urls: Optional[List[str]],
-) -> Dict[str, Any]:
+    db: AsyncSession, user: User, prompt: str, model: str | None, size: str | None,
+    ref_image_urls: list[str] | None,
+) -> dict[str, Any]:
     req = ImageGenerationRequest(
         prompt=prompt, model=model or "", size=size or "1024x1024",
         image_urls=ref_image_urls or None,
@@ -351,9 +351,9 @@ async def image_generate_impl(
 
 
 async def video_generate_impl(
-    db: AsyncSession, user: User, prompt: str, model: Optional[str], aspect_ratio: Optional[str],
-    seconds: Optional[float], ref_image_urls: Optional[List[str]],
-) -> Dict[str, Any]:
+    db: AsyncSession, user: User, prompt: str, model: str | None, aspect_ratio: str | None,
+    seconds: float | None, ref_image_urls: list[str] | None,
+) -> dict[str, Any]:
     req = VideoGenerationRequest(
         prompt=prompt, model=model or "",
         aspect_ratio=aspect_ratio or "16:9", seconds=seconds,
@@ -364,9 +364,9 @@ async def video_generate_impl(
     return {"ok": True, **data}
 
 
-async def generation_get_impl(db: AsyncSession, user: User, task_ids: List[str]) -> Dict[str, Any]:
+async def generation_get_impl(db: AsyncSession, user: User, task_ids: list[str]) -> dict[str, Any]:
     """逐任务复用既有状态端点（内存实时态 → DB 完成态回退，双类型 + 用户隔离全继承）"""
-    items: List[Dict[str, Any]] = []
+    items: list[dict[str, Any]] = []
     for tid in task_ids:
         kind, data = None, None
         for getter, k in ((get_image_task_status, "image"), (get_video_status, "video")):
@@ -395,7 +395,7 @@ def _principal() -> PatPrincipal:
     return principal
 
 
-def _tool_error(e: Exception) -> Dict[str, Any]:
+def _tool_error(e: Exception) -> dict[str, Any]:
     if isinstance(e, HTTPException):
         detail = e.detail
         if isinstance(detail, dict):
@@ -405,7 +405,7 @@ def _tool_error(e: Exception) -> Dict[str, Any]:
     return {"ok": False, "error": str(e)}
 
 
-def _denied(principal: PatPrincipal, write: bool) -> Optional[str]:
+def _denied(principal: PatPrincipal, write: bool) -> str | None:
     if write and principal.permission != "full":
         return "令牌为只读档（readonly），无权执行写操作；请在个人资料页换用 full 档令牌"
     return None
@@ -418,7 +418,7 @@ def register_tools(mcp) -> None:
     """把外部工具面注册到 MCPServer 实例（core/mcp_endpoint 装配时调用）"""
 
     @mcp.tool(name="canvas_list", description=CANVAS_LIST_DESC)
-    async def canvas_list() -> Dict[str, Any]:
+    async def canvas_list() -> dict[str, Any]:
         principal = _principal()
         try:
             async with async_session() as db:
@@ -428,8 +428,8 @@ def register_tools(mcp) -> None:
 
     @mcp.tool(name="canvas_create", description="新建云端画布工作区，返回新工作区 id。name 缺省自动命名。")
     async def canvas_create(
-        name: Annotated[Optional[str], Field(description="画布名称")] = None,
-    ) -> Dict[str, Any]:
+        name: Annotated[str | None, Field(description="画布名称")] = None,
+    ) -> dict[str, Any]:
         principal = _principal()
         denied = _denied(principal, write=True)
         if denied:
@@ -450,9 +450,9 @@ def register_tools(mcp) -> None:
     )
     async def canvas_get_overview(
         canvas_workspace_id: Annotated[str, Field(description="画布工作区 id（canvas_list 获得）")],
-        cursor: Annotated[Optional[str], Field(description="续读游标：上一页响应的 next_cursor 原样传回（缺省从第一页读）")] = None,
-        page_size: Annotated[Optional[int], Field(description="每页节点数，缺省 60（10~100）")] = None,
-    ) -> Dict[str, Any]:
+        cursor: Annotated[str | None, Field(description="续读游标：上一页响应的 next_cursor 原样传回（缺省从第一页读）")] = None,
+        page_size: Annotated[int | None, Field(description="每页节点数，缺省 60（10~100）")] = None,
+    ) -> dict[str, Any]:
         principal = _principal()
         try:
             async with async_session() as db:
@@ -472,8 +472,8 @@ def register_tools(mcp) -> None:
     )
     async def canvas_apply_ops(
         canvas_workspace_id: Annotated[str, Field(description="画布工作区 id（canvas_list 获得）")],
-        ops: Annotated[List[Dict[str, Any]], Field(description="op 列表", min_length=1, max_length=50)],
-    ) -> Dict[str, Any]:
+        ops: Annotated[list[dict[str, Any]], Field(description="op 列表", min_length=1, max_length=50)],
+    ) -> dict[str, Any]:
         principal = _principal()
         denied = _denied(principal, write=True)
         if denied:
@@ -491,8 +491,8 @@ def register_tools(mcp) -> None:
         description="列出剪辑工程（uid/标题/版本/渲染状态/更新时间，不含文档）。要编辑某工程的时间线前先调用确定 uid。",
     )
     async def editor_list_projects(
-        work_id: Annotated[Optional[int], Field(description="按所属作品 id 筛选")] = None,
-    ) -> Dict[str, Any]:
+        work_id: Annotated[int | None, Field(description="按所属作品 id 筛选")] = None,
+    ) -> dict[str, Any]:
         principal = _principal()
         try:
             async with async_session() as db:
@@ -502,9 +502,9 @@ def register_tools(mcp) -> None:
 
     @mcp.tool(name="editor_create_project", description="新建剪辑工程，返回 uid。title 缺省自动命名。")
     async def editor_create_project(
-        title: Annotated[Optional[str], Field(description="工程标题")] = None,
-        work_id: Annotated[Optional[int], Field(description="挂靠作品 id")] = None,
-    ) -> Dict[str, Any]:
+        title: Annotated[str | None, Field(description="工程标题")] = None,
+        work_id: Annotated[int | None, Field(description="挂靠作品 id")] = None,
+    ) -> dict[str, Any]:
         principal = _principal()
         denied = _denied(principal, write=True)
         if denied:
@@ -521,7 +521,7 @@ def register_tools(mcp) -> None:
     )
     async def editor_get_document(
         uid: Annotated[str, Field(description="剪辑工程 uid（editor_list_projects 获得）")],
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         principal = _principal()
         try:
             async with async_session() as db:
@@ -538,10 +538,10 @@ def register_tools(mcp) -> None:
     )
     async def editor_put_document(
         uid: Annotated[str, Field(description="剪辑工程 uid")],
-        document: Annotated[Dict[str, Any], Field(description="完整时间线文档 JSON")],
+        document: Annotated[dict[str, Any], Field(description="完整时间线文档 JSON")],
         base_revision: Annotated[int, Field(description="客户端持有的版本号（乐观锁）")],
-        snapshot_reason: Annotated[Optional[str], Field(description="写前快照原因（触发自动快照）")] = None,
-    ) -> Dict[str, Any]:
+        snapshot_reason: Annotated[str | None, Field(description="写前快照原因（触发自动快照）")] = None,
+    ) -> dict[str, Any]:
         principal = _principal()
         denied = _denied(principal, write=True)
         if denied:
@@ -561,8 +561,8 @@ def register_tools(mcp) -> None:
     )
     async def editor_render_submit(
         uid: Annotated[str, Field(description="剪辑工程 uid")],
-        client_operation_id: Annotated[Optional[str], Field(description="幂等键：重试时传同一值")] = None,
-    ) -> Dict[str, Any]:
+        client_operation_id: Annotated[str | None, Field(description="幂等键：重试时传同一值")] = None,
+    ) -> dict[str, Any]:
         principal = _principal()
         denied = _denied(principal, write=True)
         if denied:
@@ -579,7 +579,7 @@ def register_tools(mcp) -> None:
     )
     async def editor_render_status(
         uid: Annotated[str, Field(description="剪辑工程 uid")],
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         principal = _principal()
         try:
             async with async_session() as db:
@@ -597,12 +597,12 @@ def register_tools(mcp) -> None:
     async def editor_rough_cut_analyze(
         asset_id: Annotated[int, Field(description="素材 id（asset_list 获得）")],
         mode: Annotated[str, Field(description="silence=静音剔除 / scenes=场景切分")],
-        threshold_db: Annotated[Optional[float], Field(description="silence：静音判定阈值 dB（默认 -30）")] = None,
-        min_gap: Annotated[Optional[float], Field(description="silence：最短静音秒（默认 0.5）")] = None,
-        threshold: Annotated[Optional[float], Field(description="scenes：画面差阈值（默认 14）")] = None,
-    ) -> Dict[str, Any]:
+        threshold_db: Annotated[float | None, Field(description="silence：静音判定阈值 dB（默认 -30）")] = None,
+        min_gap: Annotated[float | None, Field(description="silence：最短静音秒（默认 0.5）")] = None,
+        threshold: Annotated[float | None, Field(description="scenes：画面差阈值（默认 14）")] = None,
+    ) -> dict[str, Any]:
         principal = _principal()
-        params: Dict[str, Any] = {}
+        params: dict[str, Any] = {}
         if mode == "silence":
             if threshold_db is not None:
                 params["threshold_db"] = threshold_db
@@ -624,12 +624,12 @@ def register_tools(mcp) -> None:
         description="列出用户素材库（图片/视频/音频，含 URL 与媒体元信息）。粗剪分析、视频参考图取 asset 的 url 用。",
     )
     async def asset_list(
-        kind: Annotated[Optional[str], Field(description="image / video / audio")] = None,
-        work_id: Annotated[Optional[int], Field(description="按所属作品 id 筛选")] = None,
-        keyword: Annotated[Optional[str], Field(description="名称/描述关键词")] = None,
+        kind: Annotated[str | None, Field(description="image / video / audio")] = None,
+        work_id: Annotated[int | None, Field(description="按所属作品 id 筛选")] = None,
+        keyword: Annotated[str | None, Field(description="名称/描述关键词")] = None,
         page: Annotated[int, Field(description="页码，从 1 起")] = 1,
         page_size: Annotated[int, Field(description="每页数量（≤100）")] = 50,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         principal = _principal()
         try:
             async with async_session() as db:
@@ -642,8 +642,8 @@ def register_tools(mcp) -> None:
         description="列出可用生成模型（id/名称/能力标签）。image_generate / video_generate 的 model 参数从此处取。",
     )
     async def model_list(
-        kind: Annotated[Optional[str], Field(description="image / video / chat，缺省全部")] = None,
-    ) -> Dict[str, Any]:
+        kind: Annotated[str | None, Field(description="image / video / chat，缺省全部")] = None,
+    ) -> dict[str, Any]:
         _principal()
         try:
             return await model_list_impl(kind)
@@ -659,10 +659,10 @@ def register_tools(mcp) -> None:
     )
     async def image_generate(
         prompt: Annotated[str, Field(description="提示词")],
-        model: Annotated[Optional[str], Field(description="模型 id（model_list 获得，缺省用默认模型）")] = None,
-        size: Annotated[Optional[str], Field(description="尺寸 宽x高（默认 1024x1024）")] = None,
-        ref_image_urls: Annotated[Optional[List[str]], Field(description="参考图 URL 列表（给了就是图生图）")] = None,
-    ) -> Dict[str, Any]:
+        model: Annotated[str | None, Field(description="模型 id（model_list 获得，缺省用默认模型）")] = None,
+        size: Annotated[str | None, Field(description="尺寸 宽x高（默认 1024x1024）")] = None,
+        ref_image_urls: Annotated[list[str] | None, Field(description="参考图 URL 列表（给了就是图生图）")] = None,
+    ) -> dict[str, Any]:
         principal = _principal()
         denied = _denied(principal, write=True)
         if denied:
@@ -683,11 +683,11 @@ def register_tools(mcp) -> None:
     )
     async def video_generate(
         prompt: Annotated[str, Field(description="提示词")],
-        model: Annotated[Optional[str], Field(description="模型 id（model_list 获得）")] = None,
-        aspect_ratio: Annotated[Optional[str], Field(description="画面比例，默认 16:9")] = None,
-        seconds: Annotated[Optional[float], Field(description="时长（秒）")] = None,
-        ref_image_urls: Annotated[Optional[List[str]], Field(description="参考图 URL 列表（给了就是图生视频）")] = None,
-    ) -> Dict[str, Any]:
+        model: Annotated[str | None, Field(description="模型 id（model_list 获得）")] = None,
+        aspect_ratio: Annotated[str | None, Field(description="画面比例，默认 16:9")] = None,
+        seconds: Annotated[float | None, Field(description="时长（秒）")] = None,
+        ref_image_urls: Annotated[list[str] | None, Field(description="参考图 URL 列表（给了就是图生视频）")] = None,
+    ) -> dict[str, Any]:
         principal = _principal()
         denied = _denied(principal, write=True)
         if denied:
@@ -707,8 +707,8 @@ def register_tools(mcp) -> None:
         ),
     )
     async def generation_get(
-        task_ids: Annotated[List[str], Field(description="任务 id 列表（image_generate / video_generate 返回）", min_length=1, max_length=20)],
-    ) -> Dict[str, Any]:
+        task_ids: Annotated[list[str], Field(description="任务 id 列表（image_generate / video_generate 返回）", min_length=1, max_length=20)],
+    ) -> dict[str, Any]:
         principal = _principal()
         try:
             async with async_session() as db:

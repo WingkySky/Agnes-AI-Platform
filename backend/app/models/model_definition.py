@@ -5,8 +5,17 @@
 # =====================================================
 
 from datetime import datetime
-from sqlalchemy import Column, Float, Integer, String, Text, DateTime, Boolean, JSON, ForeignKey
-from sqlalchemy.orm import relationship
+
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+)
 
 from app.core.database import Base
 

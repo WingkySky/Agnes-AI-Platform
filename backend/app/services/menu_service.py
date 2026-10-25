@@ -11,7 +11,7 @@
 
 import json
 import logging
-from typing import List, Dict, Any, Union
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,7 +22,7 @@ logger = logging.getLogger("agnes_platform")
 MENU_CONFIG_KEY = "menu_configs"
 
 
-async def get_menu_configs(db: AsyncSession) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
+async def get_menu_configs(db: AsyncSession) -> list[dict[str, Any]] | dict[str, Any]:
     """
     获取菜单配置
     - 如果数据库中没有配置，返回空数组（前端会使用内置默认配置）
@@ -39,7 +39,7 @@ async def get_menu_configs(db: AsyncSession) -> Union[List[Dict[str, Any]], Dict
         return []
 
 
-async def save_menu_configs(db: AsyncSession, config_data: Dict[str, Any]) -> None:
+async def save_menu_configs(db: AsyncSession, config_data: dict[str, Any]) -> None:
     """
     保存菜单配置（全量覆盖）
     - config_data 格式：{"items": [...], "groups": [...]}

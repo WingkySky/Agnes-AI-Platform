@@ -159,7 +159,7 @@ export const useAssetStore = defineStore('asset', {
      */
     async registerAsset(data: RegisterAssetData): Promise<AssetItem | null> {
       if (!data || (!data.url && !data.blob)) {
-        // eslint-disable-next-line no-console
+         
         console.warn('[asset] registerAsset 缺少 url 或 blob')
         return null
       }
@@ -179,7 +179,7 @@ export const useAssetStore = defineStore('asset', {
             const resp = await uploadCanvasAsset(data.blob, data.name || `${data.type ?? 'image'}.png`)
             url = resp.url
           } catch (err) {
-            // eslint-disable-next-line no-console
+             
             console.warn('[asset] 云端上传失败，降级为本地 blob', err)
           }
         }
@@ -197,7 +197,7 @@ export const useAssetStore = defineStore('asset', {
           })
           id = String(resp.id)
         } catch (err) {
-          // eslint-disable-next-line no-console
+           
           console.warn('[asset] 资产入库失败，降级为本地 uid', err)
         }
       }
@@ -294,7 +294,7 @@ export const useAssetStore = defineStore('asset', {
         await this._persist()
         return numericId
       } catch (err) {
-        // eslint-disable-next-line no-console
+         
         console.warn('[asset] uid 懒迁移失败（下次重试）:', uidId, err)
         return null
       }
@@ -338,7 +338,7 @@ export const useAssetStore = defineStore('asset', {
         const plain = JSON.parse(JSON.stringify(this.assets))
         await store.setItem(indexKey(), plain)
       } catch (e: unknown) {
-        // eslint-disable-next-line no-console
+         
         console.warn('[asset] 持久化失败:', e)
       }
     },

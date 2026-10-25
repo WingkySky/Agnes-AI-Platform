@@ -22,10 +22,10 @@ import os
 import re
 import time
 from collections import deque
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
@@ -51,7 +51,7 @@ _TEXT_TS_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}")
 RATE_LIMIT = 60
 RATE_WINDOW_SECONDS = 60.0
 RATE_MAX_IPS = 1000
-_rate_windows: Dict[str, deque] = {}
+_rate_windows: dict[str, deque] = {}
 
 
 def _rate_allow(ip: str, count: int) -> bool:
@@ -71,7 +71,7 @@ def _rate_allow(ip: str, count: int) -> bool:
 
 
 # ---------- frontend.jsonl 写入 logger（独立文件 + 轮转；模块级单例，测试可重置） ----------
-_fe_logger: Optional[logging.Logger] = None
+_fe_logger: logging.Logger | None = None
 
 
 def _get_frontend_logger() -> logging.Logger:
@@ -94,13 +94,13 @@ def _get_frontend_logger() -> logging.Logger:
     return _fe_logger
 
 
-def _append_frontend_events(events: List[Dict[str, Any]], user: Optional[User], ip: str, ua: str) -> int:
+def _append_frontend_events(events: list[dict[str, Any]], user: User | None, ip: str, ua: str) -> int:
     """把前端事件归一为与 errors.jsonl 对齐的 JSON 行写入 frontend.jsonl"""
     fe = _get_frontend_logger()
     written = 0
     for event in events:
         entry = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "level": event["level"].upper(),
             "request_id": "-",
             "module": "frontend",
@@ -135,14 +135,14 @@ def _append_frontend_events(events: List[Dict[str, Any]], user: Optional[User], 
 # =====================================================
 def _read_jsonl_logs(
     path: str,
-    level: Optional[str] = None,
-    request_id: Optional[str] = None,
-    keyword: Optional[str] = None,
-    module: Optional[str] = None,
-    since: Optional[str] = None,
-    before: Optional[str] = None,
+    level: str | None = None,
+    request_id: str | None = None,
+    keyword: str | None = None,
+    module: str | None = None,
+    since: str | None = None,
+    before: str | None = None,
     limit: int = 50,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     读取 JSON Lines 格式日志文件，支持多维度过滤。
 
@@ -151,9 +151,9 @@ def _read_jsonl_logs(
     if not os.path.exists(path):
         return []
 
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             for line in reversed(f.readlines()):
                 line = line.strip()
                 if not line:
@@ -206,21 +206,21 @@ def _read_jsonl_logs(
 # =====================================================
 def _read_text_logs(
     path: str,
-    level: Optional[str] = None,
-    keyword: Optional[str] = None,
-    since: Optional[str] = None,
-    before: Optional[str] = None,
+    level: str | None = None,
+    keyword: str | None = None,
+    since: str | None = None,
+    before: str | None = None,
     limit: int = 50,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     读取人类可读格式日志文件。返回结构化结果，每条包含 raw（原始行）与解析出的 timestamp / level。
     """
     if not os.path.exists(path):
         return []
 
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             for line in reversed(f.readlines()):
                 line = line.strip()
                 if not line:
@@ -230,7 +230,7 @@ def _read_text_logs(
                 if keyword and keyword.lower() not in line.lower():
                     continue
 
-                entry: Dict[str, Any] = {"raw": line}
+                entry: dict[str, Any] = {"raw": line}
 
                 # 解析行首时间戳与级别：2026-09-13 21:26:41.032 [INFO] [req] module ...
                 ts_match = _TEXT_TS_PATTERN.match(line)
@@ -283,12 +283,12 @@ def _resolve_log_path(file: str) -> str:
     dependencies=[Depends(require_permission("log:view"))],
 )
 async def query_logs(
-    level: Optional[str] = Query(None, description="按级别过滤：INFO / WARNING / ERROR / CRITICAL"),
-    request_id: Optional[str] = Query(None, description="按请求 ID 过滤，串联完整请求链路"),
-    keyword: Optional[str] = Query(None, description="关键词搜索（匹配消息和异常信息）"),
-    module: Optional[str] = Query(None, description="按模块名过滤（如 agnes_client、video_poller、frontend）"),
-    since: Optional[str] = Query(None, description="起始时间（ISO 格式，如 2024-01-01T00:00:00）"),
-    before: Optional[str] = Query(None, description="翻页游标：只返回早于该时间的条目（取上一页最后一条 timestamp）"),
+    level: str | None = Query(None, description="按级别过滤：INFO / WARNING / ERROR / CRITICAL"),
+    request_id: str | None = Query(None, description="按请求 ID 过滤，串联完整请求链路"),
+    keyword: str | None = Query(None, description="关键词搜索（匹配消息和异常信息）"),
+    module: str | None = Query(None, description="按模块名过滤（如 agnes_client、video_poller、frontend）"),
+    since: str | None = Query(None, description="起始时间（ISO 格式，如 2024-01-01T00:00:00）"),
+    before: str | None = Query(None, description="翻页游标：只返回早于该时间的条目（取上一页最后一条 timestamp）"),
     limit: int = Query(50, ge=1, le=200, description="返回条数限制（1-200）"),
     file: str = Query("errors.jsonl", description="日志文件名（白名单：agnes_platform.log[.1~.5] / errors.jsonl / frontend.jsonl）"),
 ):
@@ -337,7 +337,7 @@ async def query_logs(
 )
 async def get_recent_errors(
     limit: int = Query(20, ge=1, le=100, description="返回条数限制"),
-    keyword: Optional[str] = Query(None, description="关键词搜索"),
+    keyword: str | None = Query(None, description="关键词搜索"),
 ):
     """
     快速获取最近的错误日志（仅 ERROR 和 CRITICAL 级别）。
@@ -376,7 +376,7 @@ async def get_log_stats():
     if not os.path.exists(log_dir):
         return ok(data={"exists": False}, message="日志目录不存在")
 
-    stats: Dict[str, Any] = {"exists": True, "files": {}}
+    stats: dict[str, Any] = {"exists": True, "files": {}}
 
     for filename in os.listdir(log_dir):
         filepath = os.path.join(log_dir, filename)
@@ -384,18 +384,18 @@ async def get_log_stats():
             continue
 
         file_stat = os.stat(filepath)
-        file_info: Dict[str, Any] = {
+        file_info: dict[str, Any] = {
             "size_bytes": file_stat.st_size,
             "size_mb": round(file_stat.st_size / (1024 * 1024), 2),
             "modified": datetime.fromtimestamp(
-                file_stat.st_mtime, tz=timezone.utc
+                file_stat.st_mtime, tz=UTC
             ).isoformat(),
         }
 
         # JSON Lines 文件：统计行数
         if filename.endswith(".jsonl"):
             try:
-                with open(filepath, "r", encoding="utf-8") as f:
+                with open(filepath, encoding="utf-8") as f:
                     file_info["line_count"] = sum(1 for _ in f)
             except Exception:
                 pass
@@ -428,7 +428,7 @@ async def clear_log(
     file: str = Query(..., description="日志文件名（主文件清空并删除轮转备份；备份文件单独删除）"),
 ):
     log_path = _resolve_log_path(file)
-    removed: List[str] = []
+    removed: list[str] = []
 
     if file in LOG_FILES:
         # 主文件：删除轮转备份后截断当前文件（写入 handler 仍持有句柄，不能删除）
@@ -455,7 +455,7 @@ async def clear_log(
 async def report_frontend_logs(
     report: FrontendLogReport,
     request: Request,
-    user: Optional[User] = Depends(get_current_user_optional),
+    user: User | None = Depends(get_current_user_optional),
 ):
     """
     浏览器端错误批量上报。字段白名单 + 超长截断 + 每 IP 限频，

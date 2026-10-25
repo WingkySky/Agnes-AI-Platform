@@ -4,8 +4,8 @@
 # 查询统一 db.scalars(select(...)) 写法（项目惯例）
 # =====================================================
 
-from datetime import datetime, timedelta, date, time as dtime
-from typing import Optional
+from datetime import date, datetime, timedelta
+from datetime import time as dtime
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
@@ -26,13 +26,13 @@ async def list_api_calls(
     current_user: User = Depends(get_current_admin_user),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
-    provider_id: Optional[int] = Query(None, description="渠道 ID"),
-    model: Optional[str] = Query(None, description="模型 ID（精确）"),
-    call_type: Optional[str] = Query(None, description="调用类型"),
-    status: Optional[str] = Query(None, description="success / failed"),
-    error_category: Optional[str] = Query(None, description="错误类目"),
-    since: Optional[datetime] = Query(None, description="起始时间（ISO）"),
-    before: Optional[datetime] = Query(None, description="截止时间（ISO）"),
+    provider_id: int | None = Query(None, description="渠道 ID"),
+    model: str | None = Query(None, description="模型 ID（精确）"),
+    call_type: str | None = Query(None, description="调用类型"),
+    status: str | None = Query(None, description="success / failed"),
+    error_category: str | None = Query(None, description="错误类目"),
+    since: datetime | None = Query(None, description="起始时间（ISO）"),
+    before: datetime | None = Query(None, description="截止时间（ISO）"),
 ):
     del current_user  # 仅管理员门槛
     conditions = []

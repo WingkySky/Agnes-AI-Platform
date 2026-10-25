@@ -18,7 +18,6 @@ import logging
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple
 from urllib.parse import urlparse
 
 import httpx
@@ -32,9 +31,9 @@ from app.core.database import get_async_db
 from app.core.response import ok
 from app.core.security import get_current_user
 from app.models.asset import Asset
-from app.models.work import Work
 from app.models.asset_like import AssetLike
 from app.models.user import User
+from app.models.work import Work
 from app.schemas.assets import ASSET_TYPE_CHOICES, AssetUpdateRequest
 from app.services import asset_library
 from app.services.upload_service import UPLOADS_DIR
@@ -48,8 +47,8 @@ class AssetCreateRequest(BaseModel):
     """画布/上传素材建资产行请求体"""
     url: str = Field(..., min_length=1, description="素材地址（/uploads/ 本地路径或公网 http(s) URL）")
     media_type: str = Field(..., description="image / video / audio")
-    name: Optional[str] = Field(None, max_length=200, description="素材名")
-    work_id: Optional[int] = Field(None, description="所属作品标记（需归属当前用户）")
+    name: str | None = Field(None, max_length=200, description="素材名")
+    work_id: int | None = Field(None, description="所属作品标记（需归属当前用户）")
 
 
 @router.post("", summary="创建素材资产（画布素材入库通道）")
@@ -73,11 +72,11 @@ async def create_asset(
 async def list_assets(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
-    media_type: Optional[str] = Query(None, description="image / video / audio"),
-    source: Optional[str] = Query(None, description="generation / upload / canvas / compose / archive"),
-    work_id: Optional[int] = Query(None, description="按所属作品筛选"),
-    type: Optional[str] = Query(None, description="资产分类筛选：character / prop / scene / brand / material / clip / final"),
-    keyword: Optional[str] = Query(None, max_length=100, description="关键词（匹配名称/描述/视觉描述）"),
+    media_type: str | None = Query(None, description="image / video / audio"),
+    source: str | None = Query(None, description="generation / upload / canvas / compose / archive"),
+    work_id: int | None = Query(None, description="按所属作品筛选"),
+    type: str | None = Query(None, description="资产分类筛选：character / prop / scene / brand / material / clip / final"),
+    keyword: str | None = Query(None, max_length=100, description="关键词（匹配名称/描述/视觉描述）"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
 ):
@@ -118,17 +117,17 @@ async def backfill_assets(
 
 class AssetBatchShareRequest(BaseModel):
     """资产批量设置分享状态请求体"""
-    ids: List[int] = Field(..., description="资产 ID 列表")
+    ids: list[int] = Field(..., description="资产 ID 列表")
     is_public: bool = Field(..., description="true=公开（进入审核），false=私有")
 
 
 class AssetBatchDeleteRequest(BaseModel):
     """资产批量删除请求体"""
-    ids: List[int] = Field(..., description="资产 ID 列表")
+    ids: list[int] = Field(..., description="资产 ID 列表")
 
 
 # URL 后缀 → 扩展名嗅探规则
-_ASSET_URL_EXT_RULES: Tuple[Tuple[str, str], ...] = (
+_ASSET_URL_EXT_RULES: tuple[tuple[str, str], ...] = (
     (".png", ".png"), (".jpg", ".jpg"), (".jpeg", ".jpg"), (".webp", ".webp"),
     (".gif", ".gif"), (".mp4", ".mp4"), (".webm", ".webm"), (".mp3", ".mp3"),
     (".wav", ".wav"), (".m4a", ".m4a"),
@@ -166,8 +165,8 @@ async def batch_share_assets(
     ).all()
 
     now = datetime.utcnow()
-    updated_ids: List[int] = []
-    newly_public: List[Asset] = []
+    updated_ids: list[int] = []
+    newly_public: list[Asset] = []
     for asset in rows:
         # 被管理员屏蔽的资产不可再次公开
         if body.is_public and asset.moderation_status == "rejected":

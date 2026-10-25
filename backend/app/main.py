@@ -29,7 +29,6 @@
 #   - 图片与视频任务互不干扰，独立调度
 # =====================================================
 
-import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -42,51 +41,55 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import settings
 from app.core.database import Base, async_engine
 from app.core.logging import setup_logging
+from app.core.mcp_endpoint import mcp_asgi_app, mcp_session_manager
 from app.middleware.request_id import RequestIdMiddleware
-from app.routes import images, videos, history as history_route, config as config_route, chat as chat_route, auth as auth_route
-from app.routes import logs as logs_route
-from app.routes import providers as providers_route
 from app.routes import admin as admin_route
-from app.routes import credits as credits_route
-from app.routes import storage as storage_route
-from app.routes import diagnostics as diagnostics_route
-from app.routes import proxy as proxy_route
-from app.routes import preferences as preferences_route
-from app.routes import plaza as plaza_route
+from app.routes import admin_api_calls as admin_api_calls_route
+from app.routes import admin_review as admin_review_route
 from app.routes import admin_roles as admin_roles_route
 from app.routes import admin_sensitive_words as admin_sensitive_words_route
-from app.routes import admin_watermark as admin_watermark_route
 from app.routes import admin_system_config as admin_system_config_route
-from app.routes import menu as menu_route
-from app.routes import pipeline as pipeline_route
-from app.routes import style_elements as style_elements_route
-from app.routes import prompt_presets as prompt_presets_route
-from app.routes import prompts as prompts_route
-from app.routes import admin_api_calls as admin_api_calls_route
-from app.routes import uploads as uploads_route
+from app.routes import admin_watermark as admin_watermark_route
 from app.routes import agent_relay as agent_relay_route
-from app.routes import admin_review as admin_review_route
 from app.routes import asset as asset_route
 from app.routes import assets as assets_route
-from app.routes import scenes as scenes_route
+from app.routes import auth as auth_route
 from app.routes import canvas as canvas_route
 from app.routes import canvas_workspace as canvas_workspace_route
+from app.routes import chat as chat_route
+from app.routes import config as config_route
+from app.routes import credits as credits_route
+from app.routes import diagnostics as diagnostics_route
 from app.routes import editor as editor_route
-from app.routes import works as works_route
-from app.routes import work_entities as work_entities_route
-from app.services.video_poller import poller_manager
-from app.services.image_poller import image_poller_manager
-from app.services.agnes_client import agnes_client
-from app.services.provider_registry import provider_registry
+from app.routes import history as history_route
+from app.routes import images, videos
+from app.routes import logs as logs_route
 from app.routes import mcp as mcp_route
+from app.routes import menu as menu_route
+from app.routes import pipeline as pipeline_route
+from app.routes import plaza as plaza_route
+from app.routes import preferences as preferences_route
+from app.routes import prompt_presets as prompt_presets_route
+from app.routes import prompts as prompts_route
+from app.routes import providers as providers_route
+from app.routes import proxy as proxy_route
+from app.routes import scenes as scenes_route
 from app.routes import setup as setup_route
-from app.core.mcp_endpoint import mcp_asgi_app, mcp_session_manager
+from app.routes import storage as storage_route
+from app.routes import style_elements as style_elements_route
+from app.routes import uploads as uploads_route
+from app.routes import work_entities as work_entities_route
+from app.routes import works as works_route
 from app.seed.ensure import (
     ensure_default_admin,
     ensure_default_credit_rules,
     ensure_official_presets,
     ensure_pipeline_seed,
 )
+from app.services.agnes_client import agnes_client
+from app.services.image_poller import image_poller_manager
+from app.services.provider_registry import provider_registry
+from app.services.video_poller import poller_manager
 
 # ---------- 日志配置（替换原 logging.basicConfig）----------
 # 使用自定义日志系统：控制台 + 文件轮转 + JSON 错误日志 + Request ID 追踪

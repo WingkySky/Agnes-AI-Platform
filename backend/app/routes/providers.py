@@ -10,21 +10,20 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.response import ok
 from app.core.security import get_current_admin_user
-
 from app.schemas.providers import (
-    ProviderCreateRequest,
-    ProviderUpdateRequest,
-    ProviderResponse,
-    ProviderListResponse,
     CustomModelCreateRequest,
-    ModelUpdateRequest,
-    ModelBatchUpdateRequest,
-    ModelBatchDeleteRequest,
     ModelBatchCostMultiplierRequest,
+    ModelBatchDeleteRequest,
+    ModelBatchUpdateRequest,
     ModelDefinitionResponse,
     ModelListResponse,
-    SyncModelsResponse,
+    ModelUpdateRequest,
+    ProviderCreateRequest,
+    ProviderListResponse,
+    ProviderResponse,
+    ProviderUpdateRequest,
     SyncAllResponse,
+    SyncModelsResponse,
 )
 from app.services.provider_registry import provider_registry
 
@@ -64,7 +63,7 @@ async def create_provider(req: ProviderCreateRequest):
         sort_order=req.sort_order,
     )
     # 返回脱敏后的 Provider 信息
-    from app.core.security import mask_api_key, decrypt_api_key
+    from app.core.security import decrypt_api_key, mask_api_key
     decrypted = decrypt_api_key(provider.api_key_encrypted or "")
     return ok(data=ProviderResponse(
         id=provider.id,
@@ -98,7 +97,7 @@ async def update_provider(provider_id: int, req: ProviderUpdateRequest):
     if provider is None:
         raise HTTPException(status_code=404, detail=f"Provider {provider_id} 不存在")
 
-    from app.core.security import mask_api_key, decrypt_api_key
+    from app.core.security import decrypt_api_key, mask_api_key
     decrypted = decrypt_api_key(provider.api_key_encrypted or "")
     return ok(data=ProviderResponse(
         id=provider.id,

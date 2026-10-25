@@ -100,6 +100,7 @@ async def test_persistence_across_session_rollback(memory_db):
     """回归：写操作必须真实提交（get_async_db 不自动提交，请求结束会话关闭即回滚）。
     API 响应后手动 rollback，行仍须存活——曾因只 flush 不 commit 导致线上新建后 GET 404。"""
     from sqlalchemy.future import select as _select
+
     from app.models.editing_project import EditingProject
 
     user = await _seed_user(memory_db, "u1")

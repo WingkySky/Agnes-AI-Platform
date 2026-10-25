@@ -4,22 +4,20 @@
 # 本文件仅转发查询函数并提供对话模型解析链。
 # =====================================================
 
-from typing import List
 
 from app.schemas.common import ModelInfo
-
 
 # =====================================================
 # 兼容层：转发到 provider_registry
 # =====================================================
 
-async def get_all_models() -> List[ModelInfo]:
+async def get_all_models() -> list[ModelInfo]:
     """获取所有可用模型（带缓存）。实际由 provider_registry.list_all_models() 提供。"""
     from app.services.provider_registry import provider_registry
     return await provider_registry.list_all_models()
 
 
-async def get_models_by_type(model_type: str) -> List[ModelInfo]:
+async def get_models_by_type(model_type: str) -> list[ModelInfo]:
     """按类型筛选模型（转发到 provider_registry）"""
     from app.services.provider_registry import provider_registry
     return await provider_registry.list_models_by_type(model_type)
@@ -71,6 +69,7 @@ async def resolve_user_chat_model_id(db, user_id: int, explicit: str = "") -> st
         return explicit
     if user_id:
         from sqlalchemy.future import select
+
         from app.models.user_preference import UserPreference
         result = await db.execute(
             select(UserPreference).where(UserPreference.user_id == user_id)
@@ -118,6 +117,7 @@ async def resolve_user_media_model_id(db, user_id: int, model_type: str, explici
         return explicit
     if user_id:
         from sqlalchemy.future import select
+
         from app.models.user_preference import UserPreference
         result = await db.execute(
             select(UserPreference).where(UserPreference.user_id == user_id)

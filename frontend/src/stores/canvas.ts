@@ -1007,7 +1007,7 @@ export const useCanvasStore = defineStore('canvas', {
     },
 
     /** 完成连线：在源节点和目标节点之间创建一条连接 */
-    endConnecting(targetPanelId: string, targetAnchorType: string): void {
+    endConnecting(targetPanelId: string, _targetAnchorType: string): void {
       if (!this.connecting) return
       const sourceId = this.connecting.sourcePanelId
       const sourceAnchor = this.connecting.sourceAnchorType
@@ -1233,7 +1233,7 @@ export const useCanvasStore = defineStore('canvas', {
           this._syncCurrentWorkspace()
         }
       } catch (err: unknown) {
-        // eslint-disable-next-line no-console
+         
         console.warn('[canvas] 持久化加载失败', err)
       }
       this._storageReady = true

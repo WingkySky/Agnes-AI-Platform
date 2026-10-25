@@ -14,17 +14,16 @@
 import logging
 import re
 from datetime import datetime
-from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Body
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.database import get_async_db
 from app.core.response import ok
 from app.core.security import require_permission
+from app.models.sensitive_word import SENSITIVE_CATEGORIES, SensitiveWord
 from app.models.user import User
-from app.models.sensitive_word import SensitiveWord, SENSITIVE_CATEGORIES
 from app.services.moderation_service import invalidate_sensitive_words_cache
 
 logger = logging.getLogger("agnes_platform")
@@ -33,8 +32,8 @@ router = APIRouter(prefix="/admin/sensitive-words", tags=["管理员-敏感词�
 
 @router.get("", summary="[审核员] 敏感词列表")
 async def list_sensitive_words(
-    category: Optional[str] = None,
-    keyword: Optional[str] = None,
+    category: str | None = None,
+    keyword: str | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_async_db),
@@ -191,7 +190,6 @@ async def batch_import_sensitive_words(
     """
     raw_text = (data.get("words") or "").strip()
     category = data.get("category", "other")
-    skip_existing = data.get("skip_existing", True)
 
     if not raw_text:
         raise HTTPException(status_code=400, detail="请输入要导入的敏感词")

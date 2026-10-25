@@ -5,17 +5,15 @@
 # =====================================================
 
 import asyncio
-import hashlib
+import io
 import logging
 import os
-import io
-import tempfile
-from typing import Optional
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.models.watermark import WatermarkConfig
 from app.models.user import User
+from app.models.watermark import WatermarkConfig
 
 logger = logging.getLogger("agnes_platform")
 
@@ -34,7 +32,7 @@ async def get_watermark_config(db: AsyncSession) -> WatermarkConfig:
 
 
 # ---------- 判断是否需要加水印 ----------
-def should_apply_watermark(config: WatermarkConfig, user: Optional[User]) -> bool:
+def should_apply_watermark(config: WatermarkConfig, user: User | None) -> bool:
     """
     判断某用户的生成结果是否需要加水印"""
     if not config:
@@ -269,7 +267,7 @@ def _calc_ffmpeg_position(
     elif position_str == "bottom-left":
         return f"x={margin}:y=H-h-{margin}"
     elif position_str == "center":
-        return f"x=(W-w)/2:y=(H-h)/2"
+        return "x=(W-w)/2:y=(H-h)/2"
     else:  # bottom-right（默认）
         return f"x=W-w-{margin}:y=H-h-{margin}"
 
@@ -376,7 +374,7 @@ async def apply_video_watermark(
         elif position == "bottom-left":
             overlay_pos = f"x={margin}:y=H-h-{margin}"
         elif position == "center":
-            overlay_pos = f"x=(W-w)/2:y=(H-h)/2"
+            overlay_pos = "x=(W-w)/2:y=(H-h)/2"
         else:  # bottom-right
             overlay_pos = f"x=W-w-{margin}:y=H-h-{margin}"
 
@@ -416,7 +414,7 @@ async def apply_video_watermark(
         elif position == "bottom-left":
             pos = f"x={margin}:y=h-text_h-{margin}"
         elif position == "center":
-            pos = f"x=(w-text_w)/2:y=(h-text_h)/2"
+            pos = "x=(w-text_w)/2:y=(h-text_h)/2"
         else:  # bottom-right
             pos = f"x=w-text_w-{margin}:y=h-text_h-{margin}"
 
@@ -450,7 +448,7 @@ async def apply_video_watermark(
             return output_path
         _video_watermark_logger.warning("[视频水印] 输出文件为空")
         return video_path
-    except asyncio.TimeoutError:
+    except TimeoutError:
         _video_watermark_logger.warning("[视频水印] ffmpeg 超时（5min）")
         return video_path
     except Exception as e:

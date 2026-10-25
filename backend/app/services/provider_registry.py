@@ -22,18 +22,18 @@
 import logging
 import re
 import time
-from typing import Dict, List, Optional, Any, Union
+from typing import Any
 
-from sqlalchemy import select, update, delete, and_
+from sqlalchemy import and_, delete, select, update
 
 from app.core.config import settings
 from app.core.database import new_async_session
-from app.core.security import encrypt_api_key, decrypt_api_key
+from app.core.security import decrypt_api_key, encrypt_api_key
 from app.models.api_provider import ApiProvider
 from app.models.model_definition import ModelDefinition
-from app.schemas.common import ModelInfo, ModelGenParams
-from app.services.agnes_client import AgnesAIClient, agnes_client
+from app.schemas.common import ModelGenParams, ModelInfo
 from app.services.agn_sdk_client import AGNSDKClientWrapper
+from app.services.agnes_client import AgnesAIClient, agnes_client
 from app.services.capability_service import resolve_capabilities
 
 logger = logging.getLogger("agnes_platform")
@@ -45,12 +45,12 @@ _PROVIDER_TYPE_AGNES = "agnes"
 
 # ---------- 模型类型推断规则（与原 model_registry 保持一致） ----------
 
-_TYPE_KEYWORDS: Dict[str, List[str]] = {
+_TYPE_KEYWORDS: dict[str, list[str]] = {
     "image": ["image", "flux", "sd3", "sdxl", "dall", "seedream", "wanx", "ideogram", "midjourney"],
     "video": ["video", "veo", "seedance", "cogvideox", "wan", "kling", "runway", "pika", "luma"],
 }
 
-_PROVIDER_PREFIXES: Dict[str, str] = {
+_PROVIDER_PREFIXES: dict[str, str] = {
     "agnes-": "Agnes",
     "doubao-": "字节跳动",
     "qwen-": "阿里云",
@@ -61,7 +61,7 @@ _PROVIDER_PREFIXES: Dict[str, str] = {
     "glm-": "智谱AI",
 }
 
-_DEFAULT_CAPABILITIES: Dict[str, List[str]] = {
+_DEFAULT_CAPABILITIES: dict[str, list[str]] = {
     "image": ["text2image", "image2image"],
     "video": ["text2video", "image2video", "keyframes"],
     "chat": ["text"],
@@ -88,7 +88,7 @@ def _detect_provider(model_id: str) -> str:
     return "Unknown"
 
 
-def _detect_capabilities(model_id: str, model_type: str) -> List[str]:
+def _detect_capabilities(model_id: str, model_type: str) -> list[str]:
     """根据类型推断默认能力列表（Agnes Video 2.5 非 Flash 家族额外支持 video2video）"""
     caps = list(_DEFAULT_CAPABILITIES.get(model_type, []))
     lower = (model_id or "").lower()
@@ -145,11 +145,11 @@ class ProviderRegistry:
         # {provider_id: AgnesAIClient | AGNSDKClientWrapper} - 每个 Provider 一个独立 client
         # provider_type="agnes" 用 AgnesAIClient（保留业务适配层）
         # 其他 provider_type 用 AGNSDKClientWrapper（aibridge 统一协议层）
-        self._clients: Dict[int, Union[AgnesAIClient, AGNSDKClientWrapper]] = {}
+        self._clients: dict[int, AgnesAIClient | AGNSDKClientWrapper] = {}
         # 默认 Provider 的 ID（用于 agnes_client 单例兼容）
-        self._default_provider_id: Optional[int] = None
+        self._default_provider_id: int | None = None
         # 模型列表缓存（聚合所有 Provider 的 active 模型）
-        self._models_cache: Optional[List[ModelInfo]] = None
+        self._models_cache: list[ModelInfo] | None = None
         self._models_cache_time: float = 0
         self._models_cache_ttl: int = 300  # 5 分钟
         # 是否已初始化
@@ -207,17 +207,17 @@ class ProviderRegistry:
 
     # ---------- 数据库操作 ----------
 
-    async def _load_active_providers(self) -> List[ApiProvider]:
+    async def _load_active_providers(self) -> list[ApiProvider]:
         """从数据库加载所有 is_active=True 的 Provider，按 sort_order 排序"""
         async with new_async_session() as session:
             result = await session.execute(
                 select(ApiProvider)
-                .where(ApiProvider.is_active == True)
+                .where(ApiProvider.is_active.is_(True))
                 .order_by(ApiProvider.sort_order, ApiProvider.id)
             )
             return list(result.scalars().all())
 
-    async def _load_provider_by_id(self, provider_id: int) -> Optional[ApiProvider]:
+    async def _load_provider_by_id(self, provider_id: int) -> ApiProvider | None:
         """根据 ID 加载单个 Provider"""
         async with new_async_session() as session:
             result = await session.execute(
@@ -225,7 +225,7 @@ class ProviderRegistry:
             )
             return result.scalars().first()
 
-    async def _create_default_provider_from_settings(self) -> List[ApiProvider]:
+    async def _create_default_provider_from_settings(self) -> list[ApiProvider]:
         """
         首次启动时用 settings 中的引导配置创建默认 Provider。
         仅当 agnes_api_key 已配置时才创建。
@@ -265,7 +265,7 @@ class ProviderRegistry:
 
         if provider_type == _PROVIDER_TYPE_AGNES:
             # Agnes 走现有业务适配层 + 协议层一体实现
-            client: Union[AgnesAIClient, AGNSDKClientWrapper] = AgnesAIClient(
+            client: AgnesAIClient | AGNSDKClientWrapper = AgnesAIClient(
                 base_url=provider.base_url,
                 api_key=decrypted_key,
                 poll_url=provider.poll_url or "",
@@ -302,7 +302,7 @@ class ProviderRegistry:
         async with new_async_session() as session:
             result = await session.execute(
                 select(ApiProvider)
-                .where(and_(ApiProvider.is_active == True, ApiProvider.is_default == True))
+                .where(and_(ApiProvider.is_active.is_(True), ApiProvider.is_default.is_(True)))
                 .order_by(ApiProvider.sort_order)
                 .limit(1)
             )
@@ -313,7 +313,7 @@ class ProviderRegistry:
             async with new_async_session() as session:
                 result = await session.execute(
                     select(ApiProvider)
-                    .where(ApiProvider.is_active == True)
+                    .where(ApiProvider.is_active.is_(True))
                     .order_by(ApiProvider.sort_order, ApiProvider.id)
                     .limit(1)
                 )
@@ -353,7 +353,7 @@ class ProviderRegistry:
 
     # ---------- Client 获取 ----------
 
-    def get_client(self, provider_id: Optional[int] = None) -> Union[AgnesAIClient, AGNSDKClientWrapper]:
+    def get_client(self, provider_id: int | None = None) -> AgnesAIClient | AGNSDKClientWrapper:
         """
         获取指定 Provider 的 client。
         provider_id 为 None 时返回默认 Provider 的 client（即全局 agnes_client 单例）。
@@ -373,12 +373,12 @@ class ProviderRegistry:
     # 模型 ID → Provider ID 的内存缓存（避免每次生图都查库）
     # key: model_id (str), value: provider_id (int)
     # 启动时 refresh_models_cache 会自动填充；增删 Provider/模型时也会刷新
-    _model_provider_map: Dict[str, int] = {}
+    _model_provider_map: dict[str, int] = {}
 
     async def get_client_for_model(
         self,
         model_id: str,
-    ) -> Union[AgnesAIClient, AGNSDKClientWrapper]:
+    ) -> AgnesAIClient | AGNSDKClientWrapper:
         """
         根据模型 ID 自动路由到对应 Provider 的 client。
 
@@ -411,7 +411,7 @@ class ProviderRegistry:
                     result = await session.execute(
                         select(ModelDefinition.provider_id)
                         .where(and_(ModelDefinition.model_id == model_id,
-                                    ModelDefinition.is_active == True))
+                                    ModelDefinition.is_active.is_(True)))
                         .limit(1)
                     )
                     row = result.first()
@@ -460,7 +460,7 @@ class ProviderRegistry:
 
     # ---------- 模型列表管理 ----------
 
-    async def refresh_models_cache(self) -> List[ModelInfo]:
+    async def refresh_models_cache(self) -> list[ModelInfo]:
         """
         从数据库重新加载所有 active 模型到缓存。
         返回聚合后的模型列表（所有 Provider 的 active 模型）。
@@ -471,8 +471,8 @@ class ProviderRegistry:
         async with new_async_session() as session:
             result = await session.execute(
                 select(ModelDefinition)
-                .where(ModelDefinition.is_active == True)
-                .where(ModelDefinition.is_disabled == False)  # 用户手动停用的模型不进入生成页模型列表
+                .where(ModelDefinition.is_active.is_(True))
+                .where(ModelDefinition.is_disabled.is_(False))  # 用户手动停用的模型不进入生成页模型列表
                 .order_by(ModelDefinition.sort_order, ModelDefinition.id)
             )
             definitions = list(result.scalars().all())
@@ -483,7 +483,7 @@ class ProviderRegistry:
         # 同步刷新 模型→Provider 路由缓存
         # 注意：用类属性赋值而非 self._model_provider_map.clear() + update，
         # 避免多实例间共享可变状态时出现并发问题
-        new_map: Dict[str, int] = {}
+        new_map: dict[str, int] = {}
         for d in definitions:
             new_map[d.model_id] = d.provider_id
         ProviderRegistry._model_provider_map = new_map
@@ -494,7 +494,7 @@ class ProviderRegistry:
         )
         return self._models_cache
 
-    async def list_all_models(self, use_cache: bool = True) -> List[ModelInfo]:
+    async def list_all_models(self, use_cache: bool = True) -> list[ModelInfo]:
         """
         获取所有可用模型（带缓存）。
         缓存过期或 use_cache=False 时从数据库重新加载。
@@ -504,12 +504,12 @@ class ProviderRegistry:
                 return self._models_cache
         return await self.refresh_models_cache()
 
-    async def list_models_by_type(self, model_type: str) -> List[ModelInfo]:
+    async def list_models_by_type(self, model_type: str) -> list[ModelInfo]:
         """按类型筛选模型"""
         all_models = await self.list_all_models()
         return [m for m in all_models if m.type == model_type]
 
-    async def get_model_definition(self, model_id: str) -> Optional[ModelDefinition]:
+    async def get_model_definition(self, model_id: str) -> ModelDefinition | None:
         """根据 model_id 查询模型定义（用于校验模型是否存在）"""
         async with new_async_session() as session:
             result = await session.execute(
@@ -536,7 +536,7 @@ class ProviderRegistry:
 
     # ---------- Provider 同步模型（调用 /models API） ----------
 
-    async def sync_provider_models(self, provider_id: int) -> Dict[str, Any]:
+    async def sync_provider_models(self, provider_id: int) -> dict[str, Any]:
         """
         调用指定 Provider 的 /models API，同步模型列表到数据库。
         - 新增的模型自动添加（is_custom=False）
@@ -621,7 +621,7 @@ class ProviderRegistry:
         logger.info("[ProviderRegistry] Provider %s 模型同步完成: %s", provider_id, result_summary)
         return result_summary
 
-    async def sync_all_providers(self) -> List[Dict[str, Any]]:
+    async def sync_all_providers(self) -> list[dict[str, Any]]:
         """同步所有 active Provider 的模型列表"""
         results = []
         for provider_id in list(self._clients.keys()):
@@ -694,15 +694,15 @@ class ProviderRegistry:
     async def update_provider(
         self,
         provider_id: int,
-        name: Optional[str] = None,
-        provider_type: Optional[str] = None,
-        base_url: Optional[str] = None,
-        api_key: Optional[str] = None,
-        poll_url: Optional[str] = None,
-        is_active: Optional[bool] = None,
-        is_default: Optional[bool] = None,
-        sort_order: Optional[int] = None,
-    ) -> Optional[ApiProvider]:
+        name: str | None = None,
+        provider_type: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        poll_url: str | None = None,
+        is_active: bool | None = None,
+        is_default: bool | None = None,
+        sort_order: int | None = None,
+    ) -> ApiProvider | None:
         """
         更新 Provider 配置。
         - api_key 非空时才更新（避免误清空）
@@ -814,7 +814,7 @@ class ProviderRegistry:
         logger.info("[ProviderRegistry] Provider 已删除: id=%s", provider_id)
         return True
 
-    async def list_providers(self, include_key: bool = False) -> List[Dict[str, Any]]:
+    async def list_providers(self, include_key: bool = False) -> list[dict[str, Any]]:
         """
         列出所有 Provider（按 sort_order 排序）。
         - include_key=False: API Key 以掩码形式返回（如 sk-a****b123），前端展示用
@@ -844,10 +844,10 @@ class ProviderRegistry:
         display_name: str = "",
         model_type: str = "",
         provider_name: str = "",
-        capabilities: Optional[List[str]] = None,
+        capabilities: list[str] | None = None,
         sort_order: int = 0,
         asset_storage_mode: str = "auto",
-        gen_params: Optional[dict] = None,
+        gen_params: dict | None = None,
     ) -> ModelDefinition:
         """
         添加用户自定义模型。
@@ -892,17 +892,17 @@ class ProviderRegistry:
     async def update_model(
         self,
         model_id: str,
-        display_name: Optional[str] = None,
-        model_type: Optional[str] = None,
-        provider_name: Optional[str] = None,
-        capabilities: Optional[List[str]] = None,
-        is_active: Optional[bool] = None,
-        is_disabled: Optional[bool] = None,
-        sort_order: Optional[int] = None,
-        asset_storage_mode: Optional[str] = None,
-        gen_params: Optional[dict] = None,
-        cost_multiplier: Optional[float] = None,
-    ) -> Optional[ModelDefinition]:
+        display_name: str | None = None,
+        model_type: str | None = None,
+        provider_name: str | None = None,
+        capabilities: list[str] | None = None,
+        is_active: bool | None = None,
+        is_disabled: bool | None = None,
+        sort_order: int | None = None,
+        asset_storage_mode: str | None = None,
+        gen_params: dict | None = None,
+        cost_multiplier: float | None = None,
+    ) -> ModelDefinition | None:
         """更新模型定义"""
         async with new_async_session() as session:
             result = await session.execute(
@@ -954,7 +954,7 @@ class ProviderRegistry:
             logger.info("[ProviderRegistry] 模型已删除: model_id=%s", model_id)
         return deleted
 
-    async def batch_update_models(self, model_ids: List[str], is_disabled: bool) -> int:
+    async def batch_update_models(self, model_ids: list[str], is_disabled: bool) -> int:
         """
         批量停用/启用模型（一次 UPDATE，一次缓存刷新）。
         只修改 is_disabled（用户手动停用标记），不触碰同步管理的 is_active。
@@ -975,7 +975,7 @@ class ProviderRegistry:
         logger.info("[ProviderRegistry] 批量%s模型: %d 个", "停用" if is_disabled else "启用", updated)
         return updated
 
-    async def batch_update_cost_multiplier(self, model_ids: List[str], cost_multiplier: float) -> int:
+    async def batch_update_cost_multiplier(self, model_ids: list[str], cost_multiplier: float) -> int:
         """批量设置积分倍率（实扣=基准价×倍率），返回实际更新的行数"""
         if not model_ids:
             return 0
@@ -994,7 +994,7 @@ class ProviderRegistry:
         logger.info("[ProviderRegistry] 批量设置积分倍率: %d 个 -> %s", updated, cost_multiplier)
         return updated
 
-    async def batch_delete_models(self, model_ids: List[str]) -> int:
+    async def batch_delete_models(self, model_ids: list[str]) -> int:
         """批量删除模型定义（一次 DELETE，一次缓存刷新），返回实际删除的行数"""
         if not model_ids:
             return 0
@@ -1009,7 +1009,7 @@ class ProviderRegistry:
         logger.info("[ProviderRegistry] 批量删除模型: %d 个", deleted)
         return deleted
 
-    async def list_models(self, provider_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    async def list_models(self, provider_id: int | None = None) -> list[dict[str, Any]]:
         """
         列出模型定义（可按 Provider 过滤）。
         返回字典列表（包含 is_custom / is_active 等管理字段）。

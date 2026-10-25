@@ -3,7 +3,6 @@
 # =====================================================
 
 import os
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -14,15 +13,14 @@ from app.core.response import ok
 from app.core.security import get_current_user
 from app.models.user import User
 from app.schemas.style_element import (
-    StyleElementCreate,
-    StyleElementUpdate,
-    StyleElementResponse,
-    StyleElementListResponse,
     PromptPreviewRequest,
     PromptPreviewResponse,
+    StyleElementCreate,
+    StyleElementListResponse,
+    StyleElementResponse,
+    StyleElementUpdate,
 )
 from app.services import style_element_service as svc
-
 
 router = APIRouter(prefix="/style-elements", tags=["风格元素"])
 
@@ -36,11 +34,11 @@ _PREVIEW_DIR = os.path.join(
 
 @router.get("", summary="列出风格元素")
 async def list_style_elements(
-    layer: Optional[str] = Query(None, description="按层过滤"),
-    category: Optional[str] = Query(None, description="按分类过滤"),
-    is_builtin: Optional[bool] = Query(None, description="是否内置"),
-    is_public: Optional[bool] = Query(None, description="是否公开"),
-    search: Optional[str] = Query(None, description="搜索关键词"),
+    layer: str | None = Query(None, description="按层过滤"),
+    category: str | None = Query(None, description="按分类过滤"),
+    is_builtin: bool | None = Query(None, description="是否内置"),
+    is_public: bool | None = Query(None, description="是否公开"),
+    search: str | None = Query(None, description="搜索关键词"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_async_db),

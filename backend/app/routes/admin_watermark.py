@@ -9,15 +9,13 @@
 import logging
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Body, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 
 from app.core.database import get_async_db
+from app.core.response import ok
 from app.core.security import require_permission
 from app.models.user import User
-from app.models.watermark import WatermarkConfig
-from app.core.response import ok
 from app.services.watermark_service import get_watermark_config
 
 logger = logging.getLogger("agnes_platform")

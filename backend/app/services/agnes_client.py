@@ -20,7 +20,7 @@ import logging
 import re
 import struct
 import time
-from typing import List, Optional, Dict, Any
+from typing import Any
 
 import httpx
 
@@ -61,7 +61,7 @@ class UpstreamError(RuntimeError):
     def __init__(
         self,
         message: str,
-        status_code: Optional[int] = None,
+        status_code: int | None = None,
         upstream_body: str = "",
         request_id: str = "",
         error_kind: str = "http",
@@ -106,7 +106,7 @@ class AgnesAIClient:
         self.poll_timeout = settings.video_poll_timeout_sec
 
         # 通用 HTTP Headers（鉴权）
-        self._headers: Dict[str, str] = {
+        self._headers: dict[str, str] = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
@@ -114,13 +114,13 @@ class AgnesAIClient:
         # ---------- 持久化的 httpx.AsyncClient（连接池）
         # 连接池限制：默认 100 个并发连接
         # 超时：单请求 120s，允许 AI 生成较长时间
-        self._client: Optional[httpx.AsyncClient] = None
+        self._client: httpx.AsyncClient | None = None
 
     def configure(
         self,
-        base_url: Optional[str] = None,
-        api_key: Optional[str] = None,
-        poll_url: Optional[str] = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        poll_url: str | None = None,
     ) -> None:
         """
         运行时切换 Provider 配置（前端配置页修改后调用，无需重启服务）。
@@ -167,7 +167,7 @@ class AgnesAIClient:
             self._client = None
             logger.info("[AgnesAIClient] HTTP 连接池已释放")
 
-    async def list_models(self) -> List[Dict[str, Any]]:
+    async def list_models(self) -> list[dict[str, Any]]:
         """
         调用 GET /models 获取 API 提供商的所有可用模型列表。
         OpenAI 兼容 API 标准：返回 { "data": [{ "id": "model-id", ... }, ...] }
@@ -241,8 +241,8 @@ class AgnesAIClient:
         url: str,
         started: float,
         status: str,
-        data: Optional[Dict[str, Any]] = None,
-        error: Optional[BaseException] = None,
+        data: dict[str, Any] | None = None,
+        error: BaseException | None = None,
     ) -> None:
         """出口记账 best-effort（绝不抛错）"""
         try:
@@ -264,7 +264,7 @@ class AgnesAIClient:
         except Exception as e:  # 双保险：record_api_call 已兜底，这里防未来改动引入抛错
             logger.debug("[AgnesAIClient] 调用记账失败（忽略）: %s", e)
 
-    async def _request_with_retry(self, method: str, url: str, **kwargs) -> Dict[str, Any]:
+    async def _request_with_retry(self, method: str, url: str, **kwargs) -> dict[str, Any]:
         """
         发送 HTTP 请求到 Agnes AI API（使用连接池），带指数退避自动重试。
         对网络异常与 5xx 网关类错误做有限次重试，其余异常直接翻译为中文错误。
@@ -282,8 +282,8 @@ class AgnesAIClient:
         await self._record_call(method, url, started, "success", data=data)
         return data
 
-    async def _send_with_retry(self, method: str, url: str, **kwargs) -> Dict[str, Any]:
-        last_exc: Optional[BaseException] = None
+    async def _send_with_retry(self, method: str, url: str, **kwargs) -> dict[str, Any]:
+        last_exc: BaseException | None = None
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 response = await self.client.request(method, url, headers=self._headers, **kwargs)
@@ -320,17 +320,17 @@ class AgnesAIClient:
             raise UpstreamError(self._human_readable_error(last_exc), error_kind="network") from last_exc
         raise UpstreamError("调用 Agnes AI 失败：未知错误", error_kind="network")
 
-    async def _post(self, url: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    async def _post(self, url: str, body: dict[str, Any]) -> dict[str, Any]:
         """
         发送 POST 请求到 Agnes AI API（使用连接池）。
         为了避免把超长 base64 整段打进日志，这里对 extra_body.image / image 做摘要处理：
         只记录其前 120 字符与总长。
         """
         # ---------- 构造可安全打日志的摘要 body ----------
-        safe_body: Dict[str, Any] = {}
+        safe_body: dict[str, Any] = {}
         for k, v in body.items():
             if k == "extra_body" and isinstance(v, dict):
-                safe_extra: Dict[str, Any] = {}
+                safe_extra: dict[str, Any] = {}
                 for ek, ev in v.items():
                     if ek in ("image", "image_end") and isinstance(ev, str):
                         safe_extra[ek] = f"<str len={len(ev)}> {ev[:120]}..."
@@ -357,7 +357,7 @@ class AgnesAIClient:
 
         return await self._request_with_retry("POST", url, json=body)
 
-    async def _get(self, url: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def _get(self, url: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """
         发送 GET 请求到 Agnes AI API（使用连接池）。
         与 POST 一样做自动重试 + 中文错误信息。
@@ -374,7 +374,7 @@ class AgnesAIClient:
             return str(data.get("request_id") or data.get("requestId") or "")
         return ""
 
-    def _parse_response(self, response: httpx.Response) -> Dict[str, Any]:
+    def _parse_response(self, response: httpx.Response) -> dict[str, Any]:
         """
         统一处理响应：解析 JSON，处理错误（同步解析，不阻塞 I/O）。
         对 5xx / 非 JSON 响应给出更可读的中文错误；异常携带结构化事实
@@ -438,7 +438,7 @@ class AgnesAIClient:
         return b64
 
     @classmethod
-    def _detect_image_size(cls, data_uri_or_b64: str) -> Optional[tuple]:
+    def _detect_image_size(cls, data_uri_or_b64: str) -> tuple | None:
         """
         从 Data URI / 纯 base64 中解码头部，识别图片的真实宽高。
         支持 JPEG（SOF0/SOF1/SOF2 marker）和 PNG（IHDR chunk）。
@@ -560,7 +560,7 @@ class AgnesAIClient:
         调用 chat/completions 并返回首条回复文本。
         choices 为空时抛出 RuntimeError（与 script_service 原有最严格处理一致）。
         """
-        body: Dict[str, Any] = {"model": model, "messages": messages}
+        body: dict[str, Any] = {"model": model, "messages": messages}
         if temperature is not None:
             body["temperature"] = temperature
         if max_tokens is not None:
@@ -578,12 +578,12 @@ class AgnesAIClient:
         model: str = "",
         size: str = "1024x1024",
         response_format: str = "url",
-        base64_image: Optional[str] = None,           # 保留：向后兼容（单图）
-        image_url: Optional[str] = None,               # 保留：向后兼容（单图）
-        base64_images: Optional[List[str]] = None,     # 【新增】多图 base64 数组
-        image_urls: Optional[List[str]] = None,        # 【新增】多图 URL 数组
-        mask: Optional[str] = None,                    # 【新增】蒙版图 base64，用于局部编辑
-    ) -> Dict[str, Any]:
+        base64_image: str | None = None,           # 保留：向后兼容（单图）
+        image_url: str | None = None,               # 保留：向后兼容（单图）
+        base64_images: list[str] | None = None,     # 【新增】多图 base64 数组
+        image_urls: list[str] | None = None,        # 【新增】多图 URL 数组
+        mask: str | None = None,                    # 【新增】蒙版图 base64，用于局部编辑
+    ) -> dict[str, Any]:
         """
         调用 Agnes AI 生成图片（异步等待，不阻塞其他请求的事件循环）。
 
@@ -603,7 +603,7 @@ class AgnesAIClient:
         url = f"{self.base_url}/images/generations"
 
         # ── 收集参考图（新字段优先，回退到旧字段） ──
-        ref_images: List[str] = []
+        ref_images: list[str] = []
         if base64_images:
             for img in base64_images:
                 if img and isinstance(img, str) and img.strip():
@@ -701,23 +701,23 @@ class AgnesAIClient:
         self,
         prompt: str,
         model: str = "",
-        num_frames: Optional[int] = None,
-        frame_rate: Optional[int] = None,
-        width: Optional[int] = None,
-        height: Optional[int] = None,
-        aspect_ratio: Optional[str] = None,
-        seconds: Optional[float] = None,
-        negative_prompt: Optional[str] = None,
+        num_frames: int | None = None,
+        frame_rate: int | None = None,
+        width: int | None = None,
+        height: int | None = None,
+        aspect_ratio: str | None = None,
+        seconds: float | None = None,
+        negative_prompt: str | None = None,
         mode: str = "text2video",
-        image: Optional[str] = None,
-        images: Optional[list] = None,
-        image_mime_type: Optional[str] = None,
-        image_mime_types: Optional[list] = None,
-        seed: Optional[int] = None,
+        image: str | None = None,
+        images: list | None = None,
+        image_mime_type: str | None = None,
+        image_mime_types: list | None = None,
+        seed: int | None = None,
         # ── Video 2.5 新参数：视频参考 / 音频参考 ──
-        reference_videos: Optional[List[str]] = None,
-        reference_audios: Optional[List[str]] = None,
-    ) -> Dict[str, Any]:
+        reference_videos: list[str] | None = None,
+        reference_audios: list[str] | None = None,
+    ) -> dict[str, Any]:
         """
         创建视频生成异步任务（按模型版本自动分流双契约）。
 
@@ -884,7 +884,7 @@ class AgnesAIClient:
         b64_direct_count = 0
         url_pass_count = 0
         if refs_with_mime:
-            for idx, (raw, _mime) in enumerate(refs_with_mime):
+            for raw, _mime in refs_with_mime:
                 # 判断输入是否为 base64/Data URI（非 URL）
                 raw_stripped = raw.strip()
                 raw_lower = raw_stripped.lower()
@@ -934,7 +934,7 @@ class AgnesAIClient:
             _height = ((h + 7) // 8) * 8
 
         # ── 构建请求体 ──
-        body: Dict[str, Any] = {
+        body: dict[str, Any] = {
             "model": model,
             "prompt": prompt,
             "width": _width,
@@ -1014,23 +1014,23 @@ class AgnesAIClient:
         self,
         prompt: str,
         model: str,
-        width: Optional[int] = None,
-        height: Optional[int] = None,
-        aspect_ratio: Optional[str] = None,
-        seconds: Optional[float] = None,
+        width: int | None = None,
+        height: int | None = None,
+        aspect_ratio: str | None = None,
+        seconds: float | None = None,
         mode: str = "text2video",
-        image: Optional[str] = None,
-        images: Optional[list] = None,
-        seed: Optional[int] = None,
-        reference_videos: Optional[List[str]] = None,
-        reference_audios: Optional[List[str]] = None,
-    ) -> Dict[str, Any]:
+        image: str | None = None,
+        images: list | None = None,
+        seed: int | None = None,
+        reference_videos: list[str] | None = None,
+        reference_audios: list[str] | None = None,
+    ) -> dict[str, Any]:
         """构建 Agnes Video 2.5 契约请求体并发送（见上方模块注释）。"""
         is_flash = (model or "").strip().lower() == "agnes-video-2.5-flash"
         normalized_mode = (mode or "text2video").strip().lower()
 
         # ── 合并参考图：image 单图 + images 多图 → 统一列表 ──
-        ref_images: List[str] = []
+        ref_images: list[str] = []
         if image and isinstance(image, str) and image.strip():
             ref_images.append(image.strip())
         if images and isinstance(images, (list, tuple)):
@@ -1038,7 +1038,7 @@ class AgnesAIClient:
 
         # ── 参考图归一化：Data URI / 纯 base64 提纯后直传（经实测 2.5 上游接受纯 base64；
         #    原样透传带 data: 前缀的 Data URI 会被上游挂死直到超时）；URL 原样保留 ──
-        normalized_images: List[str] = []
+        normalized_images: list[str] = []
         for img in ref_images:
             uri, _size = self._normalize_image_input(img, return_pure_b64=True)
             if uri:
@@ -1095,7 +1095,7 @@ class AgnesAIClient:
             )
 
         # ── 构建请求体（顶层字段，不下发 width/height/num_frames/frame_rate） ──
-        body: Dict[str, Any] = {
+        body: dict[str, Any] = {
             "model": model,
             "prompt": prompt,
             "mode": v25_mode,
@@ -1251,8 +1251,8 @@ class AgnesAIClient:
 
     # ---------- 视频任务轮询 ----------
     async def poll_video_status(
-        self, video_id: Optional[str] = None, task_id: Optional[str] = None, model_name: str = ""
-    ) -> Dict[str, Any]:
+        self, video_id: str | None = None, task_id: str | None = None, model_name: str = ""
+    ) -> dict[str, Any]:
         """
         查询视频任务状态。
         优先使用 video_id 走 agnesapi 路径（推荐，响应更快），
@@ -1278,7 +1278,7 @@ class AgnesAIClient:
         raise RuntimeError("缺少 video_id 和 task_id，无法轮询视频状态")
 
     # ---------- 标准化视频状态 ----------
-    def _normalize_video_status(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _normalize_video_status(self, data: dict[str, Any]) -> dict[str, Any]:
         """
         将 Agnes AI 的视频状态响应标准化，便于上层业务逻辑处理。
 

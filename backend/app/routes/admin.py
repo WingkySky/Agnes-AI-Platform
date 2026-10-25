@@ -12,12 +12,11 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import update as sa_update
 
 from app.core.database import get_async_db
 from app.core.response import ok
 from app.core.security import get_current_admin_user
-from app.models.credit_rule import CreditRule, DEFAULT_CREDIT_RULES
+from app.models.credit_rule import DEFAULT_CREDIT_RULES, CreditRule
 from app.models.user import User
 from app.schemas.user import CreditRuleResponse, CreditRuleUpdateRequest
 from app.services.credits_service import invalidate_credit_rules_cache

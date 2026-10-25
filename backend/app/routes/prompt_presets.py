@@ -6,7 +6,6 @@
 # =====================================================
 
 from datetime import datetime
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -19,12 +18,11 @@ from app.core.response import ok
 from app.core.security import get_current_user, get_current_user_optional
 from app.models.generation import Generation
 from app.models.plaza_like import PlazaLike
-from app.models.user import User
 from app.models.prompt_preset import PromptPreset
+from app.models.user import User
 from app.routes.plaza import _build_plaza_work
-from app.services import prompt_preset_service as svc
 from app.services import preset_cover_service as cover_svc
-
+from app.services import prompt_preset_service as svc
 
 router = APIRouter(prefix="/presets", tags=["提示词预设"])
 
@@ -35,63 +33,63 @@ class PresetCreate(BaseModel):
     """创建提示词预设请求"""
     name: str = Field(..., description="预设名称")
     prompt_text: str = Field("", description="提示词文本")
-    description: Optional[str] = Field(None, description="预设描述")
+    description: str | None = Field(None, description="预设描述")
     type: str = Field("prompt", description="预设类型（style/effect/camera/prompt/script）")
-    category: Optional[str] = Field(None, description="分类（默认 '通用'）")
-    tags: Optional[list[str]] = Field(None, description="标签列表")
-    camera_params: Optional[dict] = Field(None, description="摄像机参数（JSON，camera 类型）")
-    style_params: Optional[dict] = Field(None, description="风格参数（JSON，兼容保留）")
-    prompt_config: Optional[dict] = Field(None, description="提示词配置（JSON：prefix/suffix/negative_prompt，style/effect 类型）")
-    cover_image: Optional[str] = Field(None, description="封面图 URL")
-    script_text: Optional[str] = Field(None, description="脚本文本")
-    pipeline_config: Optional[dict] = Field(None, description="流水线配置（JSON）")
-    source: Optional[str] = Field(None, description="来源标记（NULL=本地/官方，外部导入包记来源）")
+    category: str | None = Field(None, description="分类（默认 '通用'）")
+    tags: list[str] | None = Field(None, description="标签列表")
+    camera_params: dict | None = Field(None, description="摄像机参数（JSON，camera 类型）")
+    style_params: dict | None = Field(None, description="风格参数（JSON，兼容保留）")
+    prompt_config: dict | None = Field(None, description="提示词配置（JSON：prefix/suffix/negative_prompt，style/effect 类型）")
+    cover_image: str | None = Field(None, description="封面图 URL")
+    script_text: str | None = Field(None, description="脚本文本")
+    pipeline_config: dict | None = Field(None, description="流水线配置（JSON）")
+    source: str | None = Field(None, description="来源标记（NULL=本地/官方，外部导入包记来源）")
     is_public: bool = Field(False, description="是否公开")
 
 
 class PresetUpdate(BaseModel):
     """更新提示词预设请求（所有字段可选）"""
-    name: Optional[str] = Field(None, description="预设名称")
-    prompt_text: Optional[str] = Field(None, description="提示词文本")
-    description: Optional[str] = Field(None, description="预设描述")
-    category: Optional[str] = Field(None, description="分类")
-    tags: Optional[list[str]] = Field(None, description="标签列表")
-    camera_params: Optional[dict] = Field(None, description="摄像机参数（JSON）")
-    style_params: Optional[dict] = Field(None, description="风格参数（JSON）")
-    prompt_config: Optional[dict] = Field(None, description="提示词配置（JSON）")
-    cover_image: Optional[str] = Field(None, description="封面图 URL")
-    is_official: Optional[bool] = Field(None, description="官方标记（仅管理员生效）")
-    script_text: Optional[str] = Field(None, description="脚本文本")
-    pipeline_config: Optional[dict] = Field(None, description="流水线配置（JSON）")
-    source: Optional[str] = Field(None, description="来源标记（NULL=本地/官方，外部导入包记来源）")
-    is_public: Optional[bool] = Field(None, description="是否公开")
+    name: str | None = Field(None, description="预设名称")
+    prompt_text: str | None = Field(None, description="提示词文本")
+    description: str | None = Field(None, description="预设描述")
+    category: str | None = Field(None, description="分类")
+    tags: list[str] | None = Field(None, description="标签列表")
+    camera_params: dict | None = Field(None, description="摄像机参数（JSON）")
+    style_params: dict | None = Field(None, description="风格参数（JSON）")
+    prompt_config: dict | None = Field(None, description="提示词配置（JSON）")
+    cover_image: str | None = Field(None, description="封面图 URL")
+    is_official: bool | None = Field(None, description="官方标记（仅管理员生效）")
+    script_text: str | None = Field(None, description="脚本文本")
+    pipeline_config: dict | None = Field(None, description="流水线配置（JSON）")
+    source: str | None = Field(None, description="来源标记（NULL=本地/官方，外部导入包记来源）")
+    is_public: bool | None = Field(None, description="是否公开")
 
 
 class PresetResponse(BaseModel):
     """提示词预设响应"""
     id: int
-    user_id: Optional[int] = None
+    user_id: int | None = None
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     type: str
     category: str
     tags: list
     prompt_text: str
-    camera_params: Optional[dict] = None
-    style_params: Optional[dict] = None
-    prompt_config: Optional[dict] = None
-    cover_image: Optional[str] = None
-    cover_video: Optional[str] = None
+    camera_params: dict | None = None
+    style_params: dict | None = None
+    prompt_config: dict | None = None
+    cover_image: str | None = None
+    cover_video: str | None = None
     is_public: bool
     is_approved: bool
     is_official: bool = False
     usage_count: int = 0
-    source: Optional[str] = None
+    source: str | None = None
     # 广场列表附加字段
     author_nickname: str = ""
     is_favorite: bool = False
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     class Config:
         from_attributes = True
@@ -108,9 +106,9 @@ class PresetListResponse(BaseModel):
 @router.get("", summary="统一预设广场列表")
 async def list_presets(
     tab: str = Query("plaza", description="plaza（广场）/ favorites（我的收藏）/ recent（最近使用）/ mine（我的预设）"),
-    type: Optional[str] = Query(None, description="预设类型，逗号分隔多类型（style,effect,camera,prompt,script）"),
-    category: Optional[str] = Query(None, description="分类筛选"),
-    q: Optional[str] = Query(None, description="搜索名称/描述/标签/作者"),
+    type: str | None = Query(None, description="预设类型，逗号分隔多类型（style,effect,camera,prompt,script）"),
+    category: str | None = Query(None, description="分类筛选"),
+    q: str | None = Query(None, description="搜索名称/描述/标签/作者"),
     sort: str = Query("new", description="排序：new（最新）/ hot（官方优先+最热）/ name（名称）"),
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
     page_size: int = Query(24, ge=1, le=100, description="每页数量"),
@@ -422,7 +420,7 @@ async def get_preset_works(
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
     page_size: int = Query(24, ge=1, le=100, description="每页数量"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     """
     获取使用指定预设生成的公开作品列表（未登录也可访问）。

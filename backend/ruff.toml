@@ -1,0 +1,34 @@
+# =====================================================
+# ruff lint 配置
+# 范围：正确性（E4/E7/E9/F）+ import 排序（I）+ 现代语法（UP）+ bugbear（B）
+# 风格类（行长/引号/缩进）不查；DTZ 未启用（utcnow→now(UTC) 有 naive/aware 行为风险，待专项处理）
+# FastAPI 的 Depends/Query/Body 等在默认参数中调用是框架惯用法，B008 豁免见下
+# =====================================================
+target-version = "py312"
+
+[lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
+# B904：except 内 raise HTTPException 不强制 `from`——存量统一模式，异常链由 Python 隐式保留
+ignore = ["B904"]
+
+[lint.flake8-bugbear]
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Body",
+    "fastapi.Header",
+    "fastapi.Path",
+    "fastapi.File",
+    "fastapi.Form",
+    "fastapi.Cookie",
+    "app.core.security.require_permission",
+]
+
+[lint.per-file-ignores]
+# SQLAlchemy model 注册靠 __init__ 里的 re-export import
+"app/models/__init__.py" = ["F401"]
+# 以下均为故意的延迟导入（循环依赖规避 / 脚本 sys.path / 向后兼容引用）
+"app/routes/admin_system_config.py" = ["E402"]
+"app/routes/images.py" = ["E402"]
+"generate_style_previews.py" = ["E402"]
+"tests/test_agent_relay.py" = ["E402"]

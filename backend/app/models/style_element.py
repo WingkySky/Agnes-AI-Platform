@@ -5,11 +5,21 @@
 # =====================================================
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, JSON, Boolean, ForeignKey, Float, Index
-from sqlalchemy.orm import relationship
+
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+)
 
 from app.core.database import Base
-
 
 # 风格层级常量（与前端 Tab 一一对应）
 LAYER_VISUAL_STYLE = "visual_style"  # 画风层

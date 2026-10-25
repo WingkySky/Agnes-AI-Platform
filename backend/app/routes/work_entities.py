@@ -3,7 +3,6 @@
 # 用户自助功能：路由级挂登录依赖；归属校验非本人 403 / 不存在 404
 # =====================================================
 
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,7 +50,7 @@ async def _require_asset(db: AsyncSession, asset_id: int, user_id: int) -> None:
 @router.get("/works/{work_id}/entities", summary="作品实体列表")
 async def list_entities(
     work_id: int,
-    kind: Optional[str] = None,
+    kind: str | None = None,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):

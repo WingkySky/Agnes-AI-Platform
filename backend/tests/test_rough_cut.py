@@ -15,7 +15,11 @@ from app.core.security import create_access_token
 from app.main import app
 from app.models.asset import Asset
 from app.models.user import User
-from app.services.editor.rough_cut_service import _norm_segments, detect_scenes, detect_silence_speech
+from app.services.editor.rough_cut_service import (
+    _norm_segments,
+    detect_scenes,
+    detect_silence_speech,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -179,6 +183,7 @@ async def test_analyze_bad_mode_400(memory_db):
 async def test_analyze_scenes_local_file_200(memory_db, test_video):
     """本地路径素材（storage_key 指向 uploads 真实文件）→ 场景切分三段"""
     import shutil
+
     from app.services.upload_service import UPLOADS_DIR
 
     user = await _seed_user_test(memory_db)
@@ -201,6 +206,7 @@ async def test_analyze_scenes_local_file_200(memory_db, test_video):
 
 async def test_analyze_silence_local_file_200(memory_db, test_video):
     import shutil
+
     from app.services.upload_service import UPLOADS_DIR
 
     user = await _seed_user_test(memory_db)

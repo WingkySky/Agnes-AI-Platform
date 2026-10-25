@@ -7,13 +7,20 @@
 import logging
 
 from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.config import settings
+from app.core.database import get_async_db
 from app.core.response import ok
-from app.schemas.common import ConfigResponse, ImageSizeOption, VideoAspectRatioOption, VideoResolutionOption, WatermarkConfigPublic
+from app.schemas.common import (
+    ConfigResponse,
+    ImageSizeOption,
+    VideoAspectRatioOption,
+    VideoResolutionOption,
+    WatermarkConfigPublic,
+)
 from app.services.error_taxonomy import CATEGORIES
 from app.services.model_registry import get_all_models
-from sqlalchemy.ext.asyncio import AsyncSession
-from app.core.database import get_async_db
 
 router = APIRouter()
 

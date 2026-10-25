@@ -7,8 +7,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.core.database import get_async_db
-from app.main import app
 from app.core.security import create_access_token
+from app.main import app
 from app.models.api_call_log import ApiCallLog
 from app.models.user import User
 

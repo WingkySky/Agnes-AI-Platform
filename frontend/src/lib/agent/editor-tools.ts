@@ -30,7 +30,7 @@ import { segmentsDuration, segmentsToClips } from '@/lib/editor-rough-cut'
 import type { EditorClip, EditorDocument, EditorTrack } from '@/lib/editor-types'
 import type { AgentToolResult } from './tools'
 import { noteToolRoute } from './tools'
-import { autoPlacePref, resolveTarget, type CanvasTarget } from './chat-tools'
+import { autoPlacePref, resolveTarget } from './chat-tools'
 import { relayCall, listBridgeTargets } from './bridge'
 import { useEditorStore } from '@/stores/editor'
 
@@ -59,10 +59,6 @@ function round3(n: number): number {
 
 function totalDuration(doc: EditorDocument): number {
   return round3(doc.clips.reduce((max, c) => Math.max(max, c.start + c.duration), 0))
-}
-
-function trackOf(doc: EditorDocument, trackId: unknown): EditorTrack | undefined {
-  return doc.tracks.find((t) => t.id === trackId)
 }
 
 function trackEnd(doc: EditorDocument, trackId: string): number {
@@ -106,20 +102,6 @@ function hasTarget(r: { uid: string; title: string } | { error: string }): r is 
 }
 
 /** 拉素材详情（带缓存；404/无权按缺失败处理，由调用方报错） */
-async function fetchAssetMap(ids: number[]): Promise<Map<number, UnifiedAsset>> {
-  const map = new Map<number, UnifiedAsset>()
-  await Promise.all(
-    [...new Set(ids)].map(async (id) => {
-      try {
-        map.set(id, await getAsset(id))
-      } catch {
-        /* 素材缺失：调用方按 null 处理 */
-      }
-    }),
-  )
-  return map
-}
-
 /** apply_ops 核心链路：探测补全 → 命令表 fail-closed 校验（任一失败不落盘）→ PUT（写前快照） */
 export async function applyOpsToProject(
   uid: string,

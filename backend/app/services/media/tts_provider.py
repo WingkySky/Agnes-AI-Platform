@@ -9,7 +9,6 @@
 import asyncio
 import logging
 import os
-from typing import List, Optional
 
 import edge_tts
 
@@ -35,7 +34,7 @@ BUILTIN_VOICES = [
 ]
 
 
-def list_builtin_voices() -> List[dict]:
+def list_builtin_voices() -> list[dict]:
     """返回内置音色清单（供前端音色选择器）"""
     return BUILTIN_VOICES.copy()
 
@@ -60,7 +59,7 @@ def resolve_edge_voice(voice_id: str) -> str:
     return EDGE_VOICE_MAP.get(voice_id, "zh-CN-YunxiNeural")
 
 
-async def _probe_duration_ms(file_path: str) -> Optional[int]:
+async def _probe_duration_ms(file_path: str) -> int | None:
     """ffprobe 探测音频时长（毫秒），失败返回 None 不阻塞入库"""
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -78,9 +77,9 @@ async def _probe_duration_ms(file_path: str) -> Optional[int]:
 async def call_tts_provider(
     text: str,
     voice_id: str,
-    model: Optional[str] = None,
-    provider: Optional[str] = None,
-    save_folder: Optional[str] = None,
+    model: str | None = None,
+    provider: str | None = None,
+    save_folder: str | None = None,
     speed: float = 1.0,
 ) -> tuple:
     """
@@ -96,7 +95,7 @@ async def call_tts_provider(
     edge_voice = resolve_edge_voice(voice_id)
     rate = f"{int(round((speed - 1) * 100)):+d}%" if speed and abs(speed - 1.0) > 0.01 else None
     communicate = edge_tts.Communicate(text, edge_voice, rate=rate) if rate else edge_tts.Communicate(text, edge_voice)
-    chunks: List[bytes] = []
+    chunks: list[bytes] = []
     try:
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":

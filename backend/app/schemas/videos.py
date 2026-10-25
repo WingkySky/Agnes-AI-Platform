@@ -2,7 +2,8 @@
 # 视频生成相关的 Pydantic Schema
 # =====================================================
 
-from typing import Optional, List
+from typing import Optional
+
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.schemas.common import GenerationContext
@@ -25,43 +26,43 @@ class VideoGenerationRequest(BaseModel):
     """
 
     prompt: str = Field(..., min_length=1, max_length=15000, description="提示词")
-    negative_prompt: Optional[str] = Field(default=None, description="负向提示词")
+    negative_prompt: str | None = Field(default=None, description="负向提示词")
     model: str = Field(default="", description="模型名称（前端从 /api/config 获取可用模型列表）")
 
     # 视频参数（推荐使用 aspect_ratio，让服务端自动计算宽高）
     # 直接给 aspect_ratio 优先级高于 width/height
-    aspect_ratio: Optional[str] = Field(default="16:9", description="画面比例（如 16:9 / 9:16 / 1:1 / 4:3 / 3:4 / 3:2 / 2:3 / 21:9）")
-    seconds: Optional[float] = Field(default=None, gt=0, description="视频时长（秒，可与 num_frames/frame_rate 二选一）")
+    aspect_ratio: str | None = Field(default="16:9", description="画面比例（如 16:9 / 9:16 / 1:1 / 4:3 / 3:4 / 3:2 / 2:3 / 21:9）")
+    seconds: float | None = Field(default=None, gt=0, description="视频时长（秒，可与 num_frames/frame_rate 二选一）")
 
     # 视频参数（若提供 aspect_ratio，则 width/height 由服务端根据 aspect_ratio 确定）
-    num_frames: Optional[int] = Field(default=None, ge=9, le=441, description="帧数（需满足 8n+1）")
-    frame_rate: Optional[int] = Field(default=None, ge=1, le=60, description="帧率 1-60")
-    width: Optional[int] = Field(default=None, description="视频宽度")
-    height: Optional[int] = Field(default=None, description="视频高度")
+    num_frames: int | None = Field(default=None, ge=9, le=441, description="帧数（需满足 8n+1）")
+    frame_rate: int | None = Field(default=None, ge=1, le=60, description="帧率 1-60")
+    width: int | None = Field(default=None, description="视频宽度")
+    height: int | None = Field(default=None, description="视频高度")
 
     # 参考图 / 多图 / 首尾帧
-    mode: Optional[str] = Field(default="text2video", description="模式: text2video | image2video | keyframes | video2video")
-    image: Optional[str] = Field(default=None, description="图生视频时的单张参考图（base64 或 URL）")
-    images: Optional[List[str]] = Field(default=None, description="图生视频多图/关键帧模式时的图片列表")
+    mode: str | None = Field(default="text2video", description="模式: text2video | image2video | keyframes | video2video")
+    image: str | None = Field(default=None, description="图生视频时的单张参考图（base64 或 URL）")
+    images: list[str] | None = Field(default=None, description="图生视频多图/关键帧模式时的图片列表")
     # MIME 类型（前端传递，用于构建正确的 Data URI 前缀，避免统一用 image/png 导致格式不匹配）
-    image_mime_type: Optional[str] = Field(default=None, description="单张参考图的 MIME 类型（如 image/jpeg）")
-    image_mime_types: Optional[List[str]] = Field(default=None, description="多张图片各图片的 MIME 类型列表")
+    image_mime_type: str | None = Field(default=None, description="单张参考图的 MIME 类型（如 image/jpeg）")
+    image_mime_types: list[str] | None = Field(default=None, description="多张图片各图片的 MIME 类型列表")
 
     # ── Video 2.5 新功能：视频参考和音频参考 ──
-    reference_videos: Optional[List[str]] = Field(default=None, description="参考视频 URL 列表（video2video 模式使用）")
-    reference_audios: Optional[List[str]] = Field(default=None, description="参考音频 URL 列表（video2video 模式使用）")
+    reference_videos: list[str] | None = Field(default=None, description="参考视频 URL 列表（video2video 模式使用）")
+    reference_audios: list[str] | None = Field(default=None, description="参考音频 URL 列表（video2video 模式使用）")
 
     # 种子（可选）
-    seed: Optional[int] = Field(default=None, description="随机种子，不传则由 API 自动生成")
+    seed: int | None = Field(default=None, description="随机种子，不传则由 API 自动生成")
 
     # ── 摄像机参数：拼接到 prompt 末尾 ──
-    camera_params: Optional[dict] = Field(
+    camera_params: dict | None = Field(
         default=None,
         description="摄像机参数，含 enabled 子字段。enabled=True 时拼接到 prompt 末尾",
     )
 
     # ── 预设来源：用于追溯作品使用了哪个预设 ──
-    preset_id: Optional[int] = Field(
+    preset_id: int | None = Field(
         default=None,
         description="生成时使用的预设 ID（来自 PresetQuickPanel 选择），用于作品来源追溯",
     )
@@ -161,28 +162,28 @@ class VideoGenerationRequest(BaseModel):
 
 class VideoTaskCreatedResponse(BaseModel):
     """视频任务创建成功响应体"""
-    task_id: Optional[str] = None              # Agnes AI 任务 ID（用于轮询）
-    video_id: Optional[str] = None             # 如果 Agnes 直接返回了 video_id
+    task_id: str | None = None              # Agnes AI 任务 ID（用于轮询）
+    video_id: str | None = None             # 如果 Agnes 直接返回了 video_id
     status: str = "pending"                     # pending / processing / success / failed / cancelled
     prompt: str
     model: str
-    num_frames: Optional[int] = None            # Agnes Video V2.0 使用 aspect_ratio + seconds，此字段可选
-    frame_rate: Optional[int] = None            # 同上
-    width: Optional[int] = None                 # 同上
-    height: Optional[int] = None                # 同上
-    aspect_ratio: Optional[str] = None          # 画面比例（如 16:9）
-    seconds: Optional[float] = None             # 视频时长（秒）
+    num_frames: int | None = None            # Agnes Video V2.0 使用 aspect_ratio + seconds，此字段可选
+    frame_rate: int | None = None            # 同上
+    width: int | None = None                 # 同上
+    height: int | None = None                # 同上
+    aspect_ratio: str | None = None          # 画面比例（如 16:9）
+    seconds: float | None = None             # 视频时长（秒）
     mode: str
-    message: Optional[str] = None
+    message: str | None = None
 
 
 class VideoStatusResponse(BaseModel):
     """视频任务状态轮询响应体"""
-    task_id: Optional[str] = None
-    video_id: Optional[str] = None
+    task_id: str | None = None
+    video_id: str | None = None
     status: str                                 # pending / processing / success / failed / cancelled
     progress: int                               # 0-100，服务端估算的进度
-    video_url: Optional[str] = None             # 生成成功时返回的视频 URL
-    message: Optional[str] = None               # 状态信息或错误消息
-    error_category: Optional[str] = None        # 失败类目（error_taxonomy.CATEGORIES；成功/旧任务为 NULL）
+    video_url: str | None = None             # 生成成功时返回的视频 URL
+    message: str | None = None               # 状态信息或错误消息
+    error_category: str | None = None        # 失败类目（error_taxonomy.CATEGORIES；成功/旧任务为 NULL）
     elapsed_sec: int = 0                        # 已耗时（秒）

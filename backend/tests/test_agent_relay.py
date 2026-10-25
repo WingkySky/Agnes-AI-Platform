@@ -15,7 +15,7 @@ from starlette.websockets import WebSocketDisconnect
 pytestmark = pytest.mark.asyncio
 
 from app.core.database import get_async_db
-from app.core.security import create_access_token, decode_access_token
+from app.core.security import create_access_token
 from app.main import app
 from app.models.canvas_workspace import CanvasWorkspace
 from app.models.editing_project import EditingProject
@@ -27,12 +27,11 @@ from app.services.relay_service import (
     BridgeOffline,
     BridgeTimeout,
     handle_relay_result,
-    relay_call,
     register,
+    relay_call,
     run_ws,
     unregister,
 )
-
 
 # ---------- 测试替身：内存 WebSocket ----------
 

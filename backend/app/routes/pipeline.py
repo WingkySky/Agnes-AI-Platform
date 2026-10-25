@@ -19,36 +19,33 @@
 #   /api/pipeline/assets/{id}           - DELETE 删除资产（含归档影子记录）
 # =====================================================
 
-import logging
 import asyncio
+import logging
 from datetime import datetime
-from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException, Depends, Query
-from sqlalchemy import select, func, or_, delete
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_db
 from app.core.response import ok
 from app.core.security import get_current_user, get_current_user_optional
-from app.models.user import User
-from app.models.pipeline import StylePreset, ScriptTemplate
 from app.models.asset import Asset
 from app.models.asset_like import AssetLike
+from app.models.pipeline import ScriptTemplate, StylePreset
+from app.models.user import User
 from app.schemas.assets import (
-    StylePresetOut,
-    ScriptTemplateOut,
-    AssetOut,
-    AssetResponse,
+    AssetContainerDetailResponse,
     AssetContainerResponse,
     AssetContainersResponse,
-    AssetContainerDetailResponse,
+    AssetOut,
+    AssetResponse,
     AssetSaveFromGenerationRequest,
+    ScriptTemplateOut,
+    StylePresetOut,
 )
 from app.schemas.plaza import UpdateShareStatusRequest
-from app.services import style_service
-from app.services import script_template_service
-from app.services import asset_library
+from app.services import asset_library, script_template_service, style_service
 
 logger = logging.getLogger("agnes_platform")
 router = APIRouter()
@@ -60,12 +57,12 @@ router = APIRouter()
 
 @router.get("/pipeline/styles", summary="获取风格预设列表")
 async def get_style_presets(
-    category: Optional[str] = None,
-    search: Optional[str] = None,
+    category: str | None = None,
+    search: str | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_async_db),
-    _current_user: Optional[User] = Depends(get_current_user_optional),
+    _current_user: User | None = Depends(get_current_user_optional),
 ):
     """获取风格预设列表（内置 + 用户自定义公开的）"""
     query = select(StylePreset)
@@ -79,7 +76,7 @@ async def get_style_presets(
             StylePreset.description.ilike(search_pattern),
             StylePreset.key.ilike(search_pattern),
         ))
-    filters.append(or_(StylePreset.is_builtin == True, StylePreset.is_public == True))
+    filters.append(or_(StylePreset.is_builtin.is_(True), StylePreset.is_public.is_(True)))
 
     if filters:
         query = query.where(*filters)
@@ -109,7 +106,7 @@ async def get_style_presets(
 async def get_style_preset_detail(
     style_id: int,
     db: AsyncSession = Depends(get_async_db),
-    _current_user: Optional[User] = Depends(get_current_user_optional),
+    _current_user: User | None = Depends(get_current_user_optional),
 ):
     """获取单个风格预设详情"""
     style = await style_service.get_style_by_id(db, style_id)
@@ -125,12 +122,12 @@ async def get_style_preset_detail(
 
 @router.get("/pipeline/script-templates", summary="获取剧本模板列表")
 async def get_script_templates(
-    category: Optional[str] = None,
-    search: Optional[str] = None,
+    category: str | None = None,
+    search: str | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_async_db),
-    _current_user: Optional[User] = Depends(get_current_user_optional),
+    _current_user: User | None = Depends(get_current_user_optional),
 ):
     """获取剧本模板列表"""
     query = select(ScriptTemplate)
@@ -144,7 +141,7 @@ async def get_script_templates(
             ScriptTemplate.description.ilike(search_pattern),
             ScriptTemplate.key.ilike(search_pattern),
         ))
-    filters.append(or_(ScriptTemplate.is_builtin == True, ScriptTemplate.is_public == True))
+    filters.append(or_(ScriptTemplate.is_builtin.is_(True), ScriptTemplate.is_public.is_(True)))
 
     if filters:
         query = query.where(*filters)
@@ -173,7 +170,7 @@ async def get_script_templates(
 async def get_script_template_detail(
     tpl_id: int,
     db: AsyncSession = Depends(get_async_db),
-    _current_user: Optional[User] = Depends(get_current_user_optional),
+    _current_user: User | None = Depends(get_current_user_optional),
 ):
     """获取单个剧本模板详情"""
     tpl = await script_template_service.get_script_template_by_id(db, tpl_id)
@@ -189,14 +186,14 @@ async def get_script_template_detail(
 
 @router.get("/pipeline/assets", summary="获取资产库列表")
 async def get_assets(
-    asset_type: Optional[str] = None,
-    category: Optional[str] = None,
-    search: Optional[str] = None,
-    scope: Optional[str] = Query(None, description="market=公开资产(默认)；my=仅当前用户(需登录)，含私有传统资产"),
+    asset_type: str | None = None,
+    category: str | None = None,
+    search: str | None = None,
+    scope: str | None = Query(None, description="market=公开资产(默认)；my=仅当前用户(需登录)，含私有传统资产"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_async_db),
-    _current_user: Optional[User] = Depends(get_current_user_optional),
+    _current_user: User | None = Depends(get_current_user_optional),
 ):
     """获取资产库列表。
 
@@ -213,7 +210,7 @@ async def get_assets(
         filters.append(Asset.user_id == _current_user.id)
         filters.append(Asset.container_type.is_(None))
     else:
-        filters.append(Asset.is_public == True)
+        filters.append(Asset.is_public.is_(True))
 
     if asset_type:
         filters.append(Asset.type == asset_type)
@@ -361,7 +358,7 @@ async def get_container_assets(
 async def get_asset_detail(
     asset_id: int,
     db: AsyncSession = Depends(get_async_db),
-    _current_user: Optional[User] = Depends(get_current_user_optional),
+    _current_user: User | None = Depends(get_current_user_optional),
 ):
     """获取单个资产详情"""
     asset = await asset_library.get_asset_by_id(db, asset_id)
@@ -504,7 +501,7 @@ async def delete_asset_endpoint(
 async def use_asset_endpoint(
     asset_id: int,
     db: AsyncSession = Depends(get_async_db),
-    _current_user: Optional[User] = Depends(get_current_user_optional),
+    _current_user: User | None = Depends(get_current_user_optional),
 ):
     """
     记录一次「用于生成」使用，递增 assets.use_count。

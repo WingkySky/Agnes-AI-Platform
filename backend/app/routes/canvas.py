@@ -16,12 +16,12 @@ from app.core.response import ok
 from app.core.security import get_current_user
 from app.models.user import User
 from app.schemas.canvas import (
-    CanvasTtsRequest,
-    CanvasTtsResponse,
-    CanvasSubtitleRequest,
-    CanvasSubtitleResponse,
     CanvasComposeRequest,
     CanvasComposeResponse,
+    CanvasSubtitleRequest,
+    CanvasSubtitleResponse,
+    CanvasTtsRequest,
+    CanvasTtsResponse,
 )
 from app.services import canvas_media_service
 from app.services.media.bgm_library import list_bgms, list_moods

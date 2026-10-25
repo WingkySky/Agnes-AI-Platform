@@ -4,12 +4,12 @@
 
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.style_element import StyleElement, ALL_LAYERS
+from app.models.style_element import ALL_LAYERS, StyleElement
 
 
 @dataclass
@@ -25,7 +25,7 @@ class ResolvedStyleElement:
 
 async def get_element_by_id(
     db: AsyncSession, element_id: int
-) -> Optional[StyleElement]:
+) -> StyleElement | None:
     """按 ID 查询风格元素"""
     result = await db.execute(
         select(StyleElement).filter(StyleElement.id == element_id)
@@ -35,7 +35,7 @@ async def get_element_by_id(
 
 async def get_element_by_key(
     db: AsyncSession, key: str
-) -> Optional[StyleElement]:
+) -> StyleElement | None:
     """按 key 查询风格元素"""
     result = await db.execute(
         select(StyleElement).filter(StyleElement.key == key)
@@ -45,15 +45,15 @@ async def get_element_by_key(
 
 async def list_elements(
     db: AsyncSession,
-    layer: Optional[str] = None,
-    category: Optional[str] = None,
-    is_builtin: Optional[bool] = None,
-    is_public: Optional[bool] = None,
-    author_id: Optional[int] = None,
-    search: Optional[str] = None,
+    layer: str | None = None,
+    category: str | None = None,
+    is_builtin: bool | None = None,
+    is_public: bool | None = None,
+    author_id: int | None = None,
+    search: str | None = None,
     limit: int = 100,
     offset: int = 0,
-) -> Tuple[List[StyleElement], int]:
+) -> tuple[list[StyleElement], int]:
     """
     列出风格元素（支持按层、分类、内置、公开、作者过滤）
 
@@ -111,14 +111,14 @@ async def create_element(
     name: str,
     layer: str,
     content: str,
-    description: Optional[str] = None,
-    category: Optional[str] = None,
-    negative_content: Optional[str] = None,
-    preview_image: Optional[str] = None,
+    description: str | None = None,
+    category: str | None = None,
+    negative_content: str | None = None,
+    preview_image: str | None = None,
     weight_default: float = 1.0,
-    tags: Optional[List[str]] = None,
+    tags: list[str] | None = None,
     is_public: bool = False,
-    author_id: Optional[int] = None,
+    author_id: int | None = None,
 ) -> StyleElement:
     """创建风格元素（用户自建）"""
     element = StyleElement(
@@ -147,15 +147,15 @@ async def update_element(
     db: AsyncSession,
     element_id: int,
     *,
-    name: Optional[str] = None,
-    description: Optional[str] = None,
-    content: Optional[str] = None,
-    negative_content: Optional[str] = None,
-    preview_image: Optional[str] = None,
-    weight_default: Optional[float] = None,
-    tags: Optional[List[str]] = None,
-    is_public: Optional[bool] = None,
-) -> Optional[StyleElement]:
+    name: str | None = None,
+    description: str | None = None,
+    content: str | None = None,
+    negative_content: str | None = None,
+    preview_image: str | None = None,
+    weight_default: float | None = None,
+    tags: list[str] | None = None,
+    is_public: bool | None = None,
+) -> StyleElement | None:
     """更新风格元素（仅作者或管理员可操作）"""
     element = await get_element_by_id(db, element_id)
     if not element:
@@ -197,8 +197,8 @@ async def delete_element(db: AsyncSession, element_id: int) -> bool:
 
 async def resolve_elements(
     db: AsyncSession,
-    elements_input: List[Dict[str, Any]],
-) -> List[ResolvedStyleElement]:
+    elements_input: list[dict[str, Any]],
+) -> list[ResolvedStyleElement]:
     """
     将用户输入的 [{element_id, weight}, ...] 解析为 ResolvedStyleElement 列表
 
@@ -208,7 +208,7 @@ async def resolve_elements(
     Returns:
         已解析的风格元素列表（过滤掉不存在或权重为 0 的）
     """
-    resolved: List[ResolvedStyleElement] = []
+    resolved: list[ResolvedStyleElement] = []
     for item in elements_input:
         try:
             elem_id = int(item.get("element_id"))
@@ -230,8 +230,8 @@ async def resolve_elements(
 
 def build_prompt_with_elements(
     base_prompt: str,
-    resolved_elements: List[ResolvedStyleElement],
-) -> Tuple[str, str]:
+    resolved_elements: list[ResolvedStyleElement],
+) -> tuple[str, str]:
     """
     用分层风格元素组合构建 prompt（路径 B）。
 
@@ -249,12 +249,12 @@ def build_prompt_with_elements(
         (positive_prompt, negative_prompt)
     """
     # 按 layer 分组
-    layers: Dict[str, List[ResolvedStyleElement]] = defaultdict(list)
+    layers: dict[str, list[ResolvedStyleElement]] = defaultdict(list)
     for rse in resolved_elements:
         layers[rse.element.layer].append(rse)
 
-    parts: List[str] = [base_prompt] if base_prompt else []
-    negative_parts: List[str] = []
+    parts: list[str] = [base_prompt] if base_prompt else []
+    negative_parts: list[str] = []
 
     for layer_name in ALL_LAYERS:
         elements = layers.get(layer_name, [])
@@ -287,7 +287,7 @@ def build_prompt_with_elements(
 
 
 def build_negative_prompt_suffix_from_elements(
-    resolved_elements: List[ResolvedStyleElement],
+    resolved_elements: list[ResolvedStyleElement],
 ) -> str:
     """
     构建图片负面提示词后缀（路径 B，拼接到 prompt 末尾）。
@@ -303,8 +303,8 @@ def build_negative_prompt_suffix_from_elements(
 
 def preview_prompt(
     base_prompt: str,
-    resolved_elements: List[ResolvedStyleElement],
-) -> Dict[str, str]:
+    resolved_elements: list[ResolvedStyleElement],
+) -> dict[str, str]:
     """
     预览拼接后的完整 prompt（供前端实时展示，不存库）
 

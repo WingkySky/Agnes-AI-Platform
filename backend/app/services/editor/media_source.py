@@ -9,7 +9,6 @@
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 from app.services.media_storage import ingest_url
 from app.services.upload_service import UPLOADS_DIR
@@ -17,7 +16,7 @@ from app.services.upload_service import UPLOADS_DIR
 logger = logging.getLogger("agnes_platform.editor.media_source")
 
 
-def uploads_local_path(asset_url: Optional[str], storage_key: Optional[str]) -> Optional[Path]:
+def uploads_local_path(asset_url: str | None, storage_key: str | None) -> Path | None:
     """/uploads/ 地址或 storage_key → 磁盘绝对路径（文件存在才返回）"""
     rel = storage_key or (
         asset_url.removeprefix("/uploads/") if asset_url and asset_url.startswith("/uploads/") else None
@@ -28,7 +27,7 @@ def uploads_local_path(asset_url: Optional[str], storage_key: Optional[str]) -> 
     return path if path.is_file() else None
 
 
-async def resolve_asset_local_file(asset, tmp_dir: str) -> Optional[str]:
+async def resolve_asset_local_file(asset, tmp_dir: str) -> str | None:
     """资产 → 本地文件路径；本地缺失时远程收口转存（SSRF 校验失败/不可达返回 None）"""
     local = uploads_local_path(asset.asset_url, asset.storage_key)
     if local:

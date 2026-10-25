@@ -6,7 +6,6 @@
 # =====================================================
 
 import pytest
-import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from app.core.database import get_async_db

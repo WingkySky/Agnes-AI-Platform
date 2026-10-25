@@ -5,10 +5,10 @@
 # =====================================================
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime
+
+from sqlalchemy import Column, DateTime, Integer, String
 
 from app.core.database import Base
-
 
 # 默认敏感词列表（首次启动时初始化）
 DEFAULT_SENSITIVE_WORDS = [

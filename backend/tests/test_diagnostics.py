@@ -10,11 +10,11 @@ from datetime import datetime
 
 import pytest
 import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
-from app.main import app
 from app.core.database import get_async_db
 from app.core.security import create_access_token
+from app.main import app
 from app.models.generation import Generation
 from app.models.system_config import SystemConfig
 from app.models.user import User

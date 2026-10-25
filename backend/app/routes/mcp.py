@@ -20,11 +20,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_async_db
 from app.core.response import ok
 from app.core.security import get_current_admin_user, get_current_user
-from app.models.mcp_market import McpMarketItem, McpMarketSource
-from app.models.mcp_server import McpServer
+from app.models.mcp_market import McpMarketSource
 from app.models.user import User
-from app.services import mcp_market_service, mcp_service
-from app.services import memory_service
+from app.services import mcp_market_service, mcp_service, memory_service
 
 logger = logging.getLogger("agnes_platform")
 router = APIRouter(prefix="/mcp", tags=["MCP 服务器"])

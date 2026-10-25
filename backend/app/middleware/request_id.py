@@ -12,9 +12,9 @@
 #   - 支持前端传入 X-Request-ID 头复用已有 ID（可选）
 # =====================================================
 
+import logging
 import time
 import uuid
-import logging
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request

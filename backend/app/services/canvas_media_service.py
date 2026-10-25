@@ -14,35 +14,36 @@ import logging
 import os
 import shutil
 import tempfile
-from typing import List, Optional
+from pathlib import Path
 from uuid import uuid4
 
 import httpx
-
-from pathlib import Path
-
 from fastapi import HTTPException
 
 from app.core.pathsafe import ensure_within
 from app.core.urlsafe import is_safe_url
+from app.services.llm import call_llm, parse_json_loose
+from app.services.media.subtitle_format import (
+    DEFAULT_SUBTITLE_STYLE,
+    build_ass,
+    build_srt,
+)
+from app.services.media.tts_provider import call_tts_provider
 from app.services.media_compose import (
-    run_ffmpeg,
-    parse_resolution,
-    video_normalize_only_cmd,
-    stream_download,
-    probe_durations,
-    probe_video_resolution,
-    check_subtitles_filter_available,
-    check_drawtext_filter_available,
     build_drawtext_subtitles_filter,
+    check_drawtext_filter_available,
+    check_subtitles_filter_available,
     concat_normalized_videos,
     concat_with_xfade,
     ffmpeg_final_composite,
+    parse_resolution,
+    probe_durations,
+    probe_video_resolution,
+    run_ffmpeg,
+    stream_download,
+    video_normalize_only_cmd,
 )
 from app.services.upload_service import UPLOADS_DIR
-from app.services.media.tts_provider import call_tts_provider, resolve_edge_voice
-from app.services.media.subtitle_format import DEFAULT_SUBTITLE_STYLE, build_ass, build_srt
-from app.services.llm import parse_json_loose, call_llm
 
 logger = logging.getLogger("agnes_platform.canvas.media")
 
@@ -78,8 +79,8 @@ async def generate_tts(text: str, voice: str = "default", speed: float = 1.0) ->
 # =====================================================
 
 async def generate_subtitles(
-    text: str, max_chars: int = 20, style_hint: Optional[str] = None,
-    audio_url: Optional[str] = None,
+    text: str, max_chars: int = 20, style_hint: str | None = None,
+    audio_url: str | None = None,
 ) -> dict:
     """
     画布文案 → 字幕，返回 {srt, segments, total_duration}
@@ -101,7 +102,7 @@ async def generate_subtitles(
     return await _subtitles_from_llm(text, max_chars, style_hint)
 
 
-async def _subtitles_from_audio(audio_url: str) -> List[dict]:
+async def _subtitles_from_audio(audio_url: str) -> list[dict]:
     """音频 URL → faster-whisper 转写 → 字幕片段（真实时间戳）；未安装或无结果返回空"""
     from app.services.media import transcribe_service
 
@@ -117,7 +118,7 @@ async def _subtitles_from_audio(audio_url: str) -> List[dict]:
             resp.raise_for_status()
             Path(local_path).write_bytes(resp.content)
         segments = await transcribe_service.transcribe_audio(local_path, language="zh")
-        clips: List[dict] = []
+        clips: list[dict] = []
         for seg in segments:
             seg_text = (seg.get("text") or "").strip()
             duration = max(float(seg.get("end", 0)) - float(seg.get("start", 0)), 0.3)
@@ -133,7 +134,7 @@ async def _subtitles_from_audio(audio_url: str) -> List[dict]:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-async def _subtitles_from_llm(text: str, max_chars: int = 20, style_hint: Optional[str] = None) -> dict:
+async def _subtitles_from_llm(text: str, max_chars: int = 20, style_hint: str | None = None) -> dict:
     text = (text or "").strip()
     if not text:
         raise ValueError("文本内容为空，无法生成字幕")
@@ -153,7 +154,7 @@ async def _subtitles_from_llm(text: str, max_chars: int = 20, style_hint: Option
     if isinstance(parsed, dict):
         parsed = parsed.get("segments") or []
 
-    clips: List[dict] = []
+    clips: list[dict] = []
     cursor = 0.0
     for seg in parsed if isinstance(parsed, list) else []:
         seg_text = (seg.get("text") or "").strip() if isinstance(seg, dict) else ""
@@ -177,7 +178,7 @@ async def _subtitles_from_llm(text: str, max_chars: int = 20, style_hint: Option
 # 成片合成
 # =====================================================
 
-def _resolve_local_media(url: str) -> Optional[str]:
+def _resolve_local_media(url: str) -> str | None:
     """本地 /uploads/... URL 直接映射磁盘文件（上传素材无需绕 HTTP 下载）；越界 URL 一律视为非本地"""
     if url.startswith("/uploads/"):
         try:
@@ -189,14 +190,14 @@ def _resolve_local_media(url: str) -> Optional[str]:
 
 
 async def compose_videos(
-    video_urls: List[str],
-    audios: Optional[List[str]] = None,
-    subtitles: Optional[List[dict]] = None,
+    video_urls: list[str],
+    audios: list[str] | None = None,
+    subtitles: list[dict] | None = None,
     with_subtitle: bool = True,
-    bgm_id: Optional[str] = None,
+    bgm_id: str | None = None,
     aspect_ratio: str = "16:9",
     transition: str = "none",
-    audio_url: Optional[str] = None,
+    audio_url: str | None = None,
 ) -> dict:
     """
     多段视频 → 一条成片，返回 {video_url, duration_ms}
@@ -226,7 +227,7 @@ async def compose_videos(
     try:
         # 1. 下载视频片段（/uploads 本地文件直接映射，其余走 HTTP）
         async with httpx.AsyncClient(timeout=300) as client:
-            local_paths: List[str] = []
+            local_paths: list[str] = []
             for idx, url in enumerate(video_urls):
                 local_path = _resolve_local_media(url)
                 if not local_path:
@@ -236,7 +237,7 @@ async def compose_videos(
 
         # 2. 归一化
         width, height = parse_resolution(aspect_ratio)
-        normalized_paths: List[str] = []
+        normalized_paths: list[str] = []
         for idx, p in enumerate(local_paths):
             norm_path = os.path.join(tmp_dir, f"norm_{idx:04d}.mp4")
             await run_ffmpeg(
@@ -254,8 +255,8 @@ async def compose_videos(
         total_duration = (await probe_durations([composite_video_path]))[0]
 
         # 4. 混音（多段配音顺序拼接 + 可选 BGM）
-        composite_audio_path: Optional[str] = None
-        voice_paths: List[str] = []
+        composite_audio_path: str | None = None
+        voice_paths: list[str] = []
         for idx, url in enumerate(voice_urls):
             p = _resolve_local_media(url)
             if not p:
@@ -263,7 +264,7 @@ async def compose_videos(
                 async with httpx.AsyncClient(timeout=120) as client:
                     await stream_download(client, url, p)
             voice_paths.append(p)
-        bgm_path: Optional[str] = None
+        bgm_path: str | None = None
         if bgm_id:
             from app.services.media.bgm_library import get_bgm_path
             bgm_path = get_bgm_path(bgm_id)
@@ -271,9 +272,9 @@ async def compose_videos(
             composite_audio_path = await _mix_audio(voice_paths, bgm_path, total_duration, tmp_dir)
 
         # 5. 字幕（硬烧 ASS → drawtext 直烧 → 软字幕，三级降级）
-        subtitle_path: Optional[str] = None
-        subtitle_mode: Optional[str] = None
-        drawtext_filter: Optional[str] = None
+        subtitle_path: str | None = None
+        subtitle_mode: str | None = None
+        drawtext_filter: str | None = None
         clips = subtitles if (with_subtitle and subtitles) else None
         if clips:
             if await check_subtitles_filter_available():
@@ -313,12 +314,12 @@ async def compose_videos(
 
 
 async def _mix_audio(
-    voice_paths: List[str], bgm_path: Optional[str],
+    voice_paths: list[str], bgm_path: str | None,
     total_duration: float, tmp_dir: str,
 ) -> str:
     """多段配音顺序拼接后与 BGM 混音（BGM 音量 0.15 + 首尾淡入淡出），返回混音产物路径"""
     # 多段配音：顺序 concat 成一条音轨（与视频段顺序对应）
-    voice_track: Optional[str] = None
+    voice_track: str | None = None
     if len(voice_paths) == 1:
         voice_track = voice_paths[0]
     elif voice_paths:

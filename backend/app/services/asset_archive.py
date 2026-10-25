@@ -17,7 +17,7 @@
 
 import logging
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -68,8 +68,8 @@ def _fallback_name(generation: Generation) -> str:
 async def ingest_generation_asset(
     db: AsyncSession,
     generation: Generation,
-    context: Optional[Dict[str, Any]] = None,
-) -> Optional[Asset]:
+    context: dict[str, Any] | None = None,
+) -> Asset | None:
     """
     生成结果统一入库（影子转正）：所有成功生成都建真资产行（含独立生成）。
 
@@ -99,7 +99,7 @@ async def ingest_generation_asset(
         asset_type = _DEFAULT_TYPE_BY_GENERATION.get(generation.type, "material")
 
     url = generation.result_url
-    storage_key: Optional[str] = None
+    storage_key: str | None = None
     if url.startswith("/uploads/"):
         storage_key = url.removeprefix("/uploads/")
     elif getattr(generation, "migrate_status", None) == "migrated":
@@ -151,7 +151,7 @@ async def ingest_generation_asset(
 
     # 存储配额记账（best-effort；S3 件/文件缺失时内部跳过）
     if storage_key:
-        from app.services.storage_quota import record_file, SOURCE_GENERATION
+        from app.services.storage_quota import SOURCE_GENERATION, record_file
         await record_file(user_id=generation.user_id, storage_key=storage_key, source=SOURCE_GENERATION)
 
     logger.info(
@@ -165,9 +165,9 @@ async def archive_final_video(
     db: AsyncSession,
     project_id: int,
     project_name: str,
-    user_id: Optional[int],
+    user_id: int | None,
     final_video_url: str,
-) -> Optional[Asset]:
+) -> Asset | None:
     """
     项目合成成片归档：一个项目只保留一条 type=final 记录，重复合成时覆盖 URL。
 
@@ -221,7 +221,7 @@ async def archive_final_video(
 
     # 存储配额记账（best-effort）
     if final_video_url.startswith("/uploads/"):
-        from app.services.storage_quota import record_file, SOURCE_RENDER
+        from app.services.storage_quota import SOURCE_RENDER, record_file
         await record_file(
             user_id=user_id,
             storage_key=final_video_url.removeprefix("/uploads/"),

@@ -12,7 +12,6 @@ from app.models.mcp_server import McpServer
 from app.models.user import User
 from app.services import mcp_service
 
-
 # ---------- 模型脱敏 ----------
 
 @pytest.mark.asyncio
@@ -37,8 +36,9 @@ async def test_to_safe_dict_masks_secrets(db):
 # ---------- transport 校验 ----------
 
 def test_upsert_rejects_bad_transport():
-    from app.routes.mcp import McpServerUpsert
     import pydantic
+
+    from app.routes.mcp import McpServerUpsert
     with pytest.raises(pydantic.ValidationError):
         McpServerUpsert(name="x", transport="websocket")
     # stdio 缺 command 在 transport_fields 校验
@@ -148,7 +148,7 @@ def test_apply_user_template():
     conn = mcp_service._ServerSession(per_user, 42)
     assert conn._apply_user_template("data/mcp-memory/u_{user_id}.json") == "data/mcp-memory/u_42.json"
     assert conn._apply_user_template("no-template") == "no-template"
-    shared_conn = mcp_service._ServerSession(shared := McpServer(id=6, name="f", transport="http", url="http://x"))
+    shared_conn = mcp_service._ServerSession(McpServer(id=6, name="f", transport="http", url="http://x"))
     assert shared_conn._apply_user_template("data/u_{user_id}.json") == "data/u_{user_id}.json"  # shared 不替换
 
 

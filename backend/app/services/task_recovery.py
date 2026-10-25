@@ -12,9 +12,8 @@
 
 import asyncio
 import logging
-import time
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import select
 
@@ -35,15 +34,15 @@ def _max_age_sec() -> int:
     return 2 * int(settings.video_poll_timeout_sec or 600)
 
 
-def _age_sec(created_at: Optional[datetime]) -> float:
+def _age_sec(created_at: datetime | None) -> float:
     """账本行年龄（秒）。created_at 是 naive UTC（datetime.utcnow 惯例），
     必须显式挂 UTC 后再做差——直接 .timestamp() 会按本地时区解释产生时区偏移量级的偏差。"""
     if created_at is None:
         return float("inf")
-    return (datetime.now(timezone.utc) - created_at.replace(tzinfo=timezone.utc)).total_seconds()
+    return (datetime.now(UTC) - created_at.replace(tzinfo=UTC)).total_seconds()
 
 
-async def _pending_rows() -> List[Generation]:
+async def _pending_rows() -> list[Generation]:
     async with new_async_session() as db:
         stmt = select(Generation).filter(
             Generation.status.in_(("pending", "processing")),
@@ -53,7 +52,7 @@ async def _pending_rows() -> List[Generation]:
         return list((await db.scalars(stmt)).all())
 
 
-async def recover_pending_tasks() -> Dict[str, int]:
+async def recover_pending_tasks() -> dict[str, int]:
     """
     启动恢复：扫描账本未终态行，视频续轮询、其余对账退款。
 

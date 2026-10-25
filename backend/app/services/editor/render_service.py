@@ -31,11 +31,10 @@ import os
 import shutil
 import uuid
 from pathlib import Path
-from typing import Optional
 
 from fastapi import HTTPException
-from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 
 from app.core.database import async_session
 from app.models.asset import Asset
@@ -87,7 +86,7 @@ async def submit_render(db: AsyncSession, project: EditingProject, body: dict) -
     return render_status_payload(project)
 
 
-async def reset_stale_rendering(db: Optional[AsyncSession] = None) -> None:
+async def reset_stale_rendering(db: AsyncSession | None = None) -> None:
     """应用启动时把上次进程中断遗留的 rendering 复位为 failed（lifespan 调用；可注入会话便于测试）。"""
     if db is None:
         async with async_session() as db:
@@ -214,7 +213,7 @@ async def _render_project(db: AsyncSession, project: EditingProject) -> None:
     await db.commit()
 
     # 存储配额记账（best-effort，软处理：失败不影响渲染结果）
-    from app.services.storage_quota import record_file, SOURCE_RENDER
+    from app.services.storage_quota import SOURCE_RENDER, record_file
     await record_file(user_id=project.user_id, storage_key=storage_key, source=SOURCE_RENDER, kind="video")
 
     logger.info("[剪辑渲染] 完成 uid=%s → %s", project.uid, storage_key)
@@ -262,11 +261,11 @@ def _even(v: float) -> int:
     return max(2, int(round(v / 2)) * 2)
 
 
-def _is_full_frame(rect: Optional[dict]) -> bool:
+def _is_full_frame(rect: dict | None) -> bool:
     return not rect or (float(rect.get("w", 1)) >= 1 and float(rect.get("h", 1)) >= 1)
 
 
-def _camera_zoompan(camera: Optional[dict], duration: float, fps: int, width: int, height: int) -> Optional[str]:
+def _camera_zoompan(camera: dict | None, duration: float, fps: int, width: int, height: int) -> str | None:
     """运镜 → zoompan 滤镜（Ken Burns；与前端 editor-camera-registry 的 rectAt 数值同源，
     新增运镜前后端各加一行）。d=1 逐帧输出，in=帧号线性插值，strength 烘进常量。"""
     if not isinstance(camera, dict) or camera.get("type") not in _CAMERA_TYPES:
@@ -334,7 +333,7 @@ def _xfade_name(transition_type: str) -> str:
     return {"crossfade": "fade", "fade": "fadeblack", "wipe": "wipeleft"}.get(transition_type, "fade")
 
 
-def _effect_filter(effect_type: str, strength: float) -> Optional[str]:
+def _effect_filter(effect_type: str, strength: float) -> str | None:
     """效果器 → 归一化 vf 滤镜片段（与前端 editor-fx-registry 的 ffmpegFilter 对齐，新增效果器两处各加一行）"""
     if effect_type == "grayscale":
         return "hue=s=0"
@@ -379,7 +378,7 @@ def _audio_filter_for(seg: dict) -> str:
     return ",".join(parts) if parts else "anull"
 
 
-def _video_fade_chain(seg: dict, alpha: bool) -> Optional[str]:
+def _video_fade_chain(seg: dict, alpha: bool) -> str | None:
     """片段画面淡变滤镜（终版图内施加，输入为归一化片段、pts 自 0 起）。
     overlay 输入走 alpha 变体并需先补带 alpha 的像素格式——libx264 归一化
     中间产物（yuv420p）编不了 alpha，故 PIP 淡变只能在终版图内做。"""
@@ -398,7 +397,7 @@ def _video_fade_chain(seg: dict, alpha: bool) -> Optional[str]:
 def build_render_command(
     plan: dict,
     normalized: dict[str, str],
-    ass_path: Optional[str],
+    ass_path: str | None,
     output_path: str,
 ) -> list[str]:
     """Plan + 归一化产物 → 单条 ffmpeg 命令（黄金测试直测，不执行）。"""
@@ -436,7 +435,7 @@ def build_render_command(
         if segs and all(_is_full_frame(s.get("rect")) for s in segs):
             # 整轨一条链：xfade（有转场）/ concat；整链按轨锚点的时间线窗口开合，
             # 多轨互不遮盖（上层轨只在自身窗口内可见）
-            chain_in: Optional[str] = None
+            chain_in: str | None = None
             consumed = 0.0
             for i, seg in enumerate(segs):
                 cmd += ["-i", normalized[seg["clip_id"]]]
@@ -509,7 +508,7 @@ def build_render_command(
         chain_entries.append(entries)
 
     # —— overlay 链 ——
-    final_v: Optional[str] = None
+    final_v: str | None = None
     if has_video:
         if direct_single:
             current = overlay_items[0][0]  # 单条全帧轨：直接作为成片视频
@@ -557,7 +556,7 @@ def build_render_command(
         # 按成员顺序切子链
         subchains: list[list[tuple[int, dict]]] = []
         current: list[tuple[int, dict]] = []
-        prev_member: Optional[dict] = None
+        prev_member: dict | None = None
         for iidx, m in entries:
             linked = (
                 prev_member is not None
@@ -585,7 +584,7 @@ def build_render_command(
                 filters.append(f"[{iidx}:a]{','.join(parts)}{out_label}")
                 delayed.append(out_label)
             else:
-                cur_label: Optional[str] = None
+                cur_label: str | None = None
                 for k, (iidx, seg) in enumerate(sub):
                     mid = f"[am{audio_seq}_{k}]"
                     filters.append(f"[{iidx}:a]{','.join(_member_filter_parts(seg))}{mid}")

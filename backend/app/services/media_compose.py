@@ -16,15 +16,15 @@ import os
 import re
 import shutil
 from pathlib import Path
-from typing import Optional, List, Any
+from typing import Any
 
 logger = logging.getLogger("agnes_platform.media_compose")
 
 # 缓存 ffmpeg subtitles 滤镜可用性（避免每次合成重复检测）
-_subtitles_filter_cache: Optional[bool] = None
+_subtitles_filter_cache: bool | None = None
 
 # drawtext 滤镜可用性缓存
-_drawtext_filter_cache: Optional[bool] = None
+_drawtext_filter_cache: bool | None = None
 
 
 # ffmpeg -filters 输出中滤镜条目正则：匹配 "  T. subtitles  V->V  ..." 这类行
@@ -100,7 +100,7 @@ async def check_drawtext_filter_available() -> bool:
 
 
 def build_drawtext_subtitles_filter(
-    clips: List[dict],
+    clips: list[dict],
     style: dict,
     video_width: int = 1920,
     video_height: int = 1080,
@@ -119,7 +119,7 @@ def build_drawtext_subtitles_filter(
     返回:
     - drawtext 滤镜字符串，如 "drawtext=...:enable='between(t,0,2.5)',drawtext=...:enable='between(t,2.5,4.3)'"
     """
-    from app.services.watermark_service import _find_video_font, _escape_drawtext_text
+    from app.services.watermark_service import _escape_drawtext_text, _find_video_font
 
     fontfile = _find_video_font()
     font_opt = f":fontfile='{fontfile}'" if fontfile else ""
@@ -147,11 +147,11 @@ def build_drawtext_subtitles_filter(
     if position == "top":
         pos = f"x=(w-text_w)/2:y={margin_v}"
     elif position == "center":
-        pos = f"x=(w-text_w)/2:y=(h-text_h)/2"
+        pos = "x=(w-text_w)/2:y=(h-text_h)/2"
     else:  # bottom（默认）
         pos = f"x=(w-text_w)/2:y=h-text_h-{margin_v}"
 
-    filters: List[str] = []
+    filters: list[str] = []
     for clip in clips:
         text = (clip.get("text") or "").strip()
         if not text:
@@ -174,7 +174,7 @@ def build_drawtext_subtitles_filter(
     return ",".join(filters)
 
 
-async def run_ffmpeg(cmd: List[str], timeout: int = 900, error_label: str = "ffmpeg") -> None:
+async def run_ffmpeg(cmd: list[str], timeout: int = 900, error_label: str = "ffmpeg") -> None:
     """运行 ffmpeg 子进程，失败抛出可读错误（含完整 stderr）"""
     proc = await asyncio.create_subprocess_exec(
         *cmd,
@@ -204,7 +204,7 @@ def parse_resolution(aspect_ratio: str) -> tuple:
     return ratio_map.get(aspect_ratio, (1280, 720))
 
 
-def video_normalize_only_cmd(src_path: str, out_path: str, width: int, height: int) -> List[str]:
+def video_normalize_only_cmd(src_path: str, out_path: str, width: int, height: int) -> list[str]:
     """构造视频归一化命令（不裁剪，保留完整时长）。
 
     用于视频拼接前：各片段分辨率/编码/SAR 不一致时直接 concat 会失败或前几秒黑屏，
@@ -236,9 +236,9 @@ async def stream_download(client: Any, url: str, dest_path: str) -> None:
                 f.write(chunk)
 
 
-async def probe_durations(video_paths: List[str]) -> List[float]:
+async def probe_durations(video_paths: list[str]) -> list[float]:
     """用 ffprobe 获取每个视频的时长（秒）"""
-    durations: List[float] = []
+    durations: list[float] = []
     for p in video_paths:
         cmd = [
             "ffprobe", "-v", "error",
@@ -290,7 +290,7 @@ async def probe_video_resolution(video_path: str) -> tuple:
     return 1920, 1080
 
 
-async def concat_normalized_videos(normalized_paths: List[str], output_path: str) -> None:
+async def concat_normalized_videos(normalized_paths: list[str], output_path: str) -> None:
     """用 concat demuxer 拼接已归一化片段（-c copy，最快）"""
     if len(normalized_paths) == 1:
         shutil.copy2(normalized_paths[0], output_path)
@@ -308,11 +308,11 @@ async def concat_normalized_videos(normalized_paths: List[str], output_path: str
 
 async def ffmpeg_final_composite(
     video_path: str,
-    audio_path: Optional[str],
-    subtitle_path: Optional[str],
+    audio_path: str | None,
+    subtitle_path: str | None,
     output_path: str,
-    subtitle_mode: Optional[str] = None,
-    drawtext_filter: Optional[str] = None,
+    subtitle_mode: str | None = None,
+    drawtext_filter: str | None = None,
 ) -> None:
     """
     最终合成：视频 + 音频 + 字幕
@@ -322,7 +322,7 @@ async def ffmpeg_final_composite(
     - subtitle_mode="soft": 字幕作为软字幕嵌入（mov_text，播放器可选显示）
     - subtitle_mode=None: 无字幕
     """
-    cmd: List[str] = ["ffmpeg", "-y", "-i", video_path]
+    cmd: list[str] = ["ffmpeg", "-y", "-i", video_path]
 
     if audio_path:
         cmd.extend(["-i", audio_path])
@@ -332,7 +332,7 @@ async def ffmpeg_final_composite(
         cmd.extend(["-i", subtitle_path])
 
     # 视频滤镜（hard / drawtext 模式使用 -vf）
-    vf_filters: List[str] = []
+    vf_filters: list[str] = []
     if subtitle_mode == "hard" and subtitle_path:
         # 注意：ffmpeg 8.0 的 subtitles 滤镜不再支持 subtitles='path' 单引号包裹整个路径的写法
         # 改用 subtitles=filename=path 显式参数语法，路径中的冒号需转义
@@ -374,7 +374,7 @@ async def ffmpeg_final_composite(
 
 
 async def concat_with_xfade(
-    normalized_paths: List[str],
+    normalized_paths: list[str],
     output_path: str,
     transition: str = "fade",
     transition_duration: float = 0.5,
@@ -393,7 +393,7 @@ async def concat_with_xfade(
 
     durations = await probe_durations(normalized_paths)
 
-    filter_parts: List[str] = []
+    filter_parts: list[str] = []
     prev_label = "0:v"
     accumulated = 0.0
     for i in range(1, len(normalized_paths)):

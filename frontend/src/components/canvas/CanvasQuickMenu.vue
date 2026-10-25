@@ -82,7 +82,7 @@ import { useI18n } from '@/i18n'
 import { useCanvasStore } from '@/stores/canvas'
 import {
   resolveCreateGroups, resolveConnectMenu, filterQuickMenuGroups,
-  type QuickMenuItem, type ConnectMenuModel,
+  type ConnectMenuModel,
 } from '@/lib/canvas-quick-menu'
 
 const { t } = useI18n()

@@ -22,22 +22,22 @@
 
 import logging
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Any
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import delete, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import delete, desc, func
 
-from app.core.database import get_async_db, async_session
+from app.core.database import async_session, get_async_db
 from app.core.response import ok
 from app.core.security import get_current_user_optional
-from app.models.chat import ChatSession, ChatMessage
+from app.models.chat import ChatMessage, ChatSession
 from app.models.user import User
-from app.services.chat_service import chat_service
 from app.services.agnes_client import agnes_client
+from app.services.chat_service import chat_service
 from app.services.image_poller import image_poller_manager
 from app.services.video_poller import poller_manager as video_poller_manager
 
@@ -49,7 +49,7 @@ router = APIRouter()
 # 公共依赖
 # =====================================================
 
-def _ownership_filter(current_user: Optional[User]):
+def _ownership_filter(current_user: User | None):
     """会话归属过滤条件：登录用户只看自己的会话，未登录用户只看匿名会话。"""
     if current_user:
         return ChatSession.user_id == current_user.id
@@ -59,7 +59,7 @@ def _ownership_filter(current_user: Optional[User]):
 async def get_owned_session(
     session_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
 ) -> ChatSession:
     """会话归属校验依赖：登录用户匹配 user_id，匿名匹配 user_id IS NULL，否则 404。"""
     stmt = select(ChatSession).filter(
@@ -88,8 +88,8 @@ async def require_agnes_api_key() -> None:
 
 class CreateSessionRequest(BaseModel):
     """创建会话请求"""
-    title: Optional[str] = Field(default=None, description="会话标题（可选，默认取首条消息前 30 字）")
-    workspace_id: Optional[str] = Field(default=None, max_length=64, description="画布工作区 id（可选，画布面板创建时标记上下文）")
+    title: str | None = Field(default=None, description="会话标题（可选，默认取首条消息前 30 字）")
+    workspace_id: str | None = Field(default=None, max_length=64, description="画布工作区 id（可选，画布面板创建时标记上下文）")
 
 
 class UpdateSessionRequest(BaseModel):
@@ -113,7 +113,7 @@ class MediaCallbackRequest(BaseModel):
 async def create_session(
     req: CreateSessionRequest = None,
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     """创建一个新的聊天会话（登录用户的会话会绑定 user_id）"""
     session = ChatSession(
@@ -133,7 +133,7 @@ async def list_sessions(
     page: int = 1,
     page_size: int = 20,
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     """获取会话列表（按用户隔离）：未登录用户只能看到未绑定任何用户的匿名会话"""
     # 构造过滤条件：登录用户只看自己；未登录用户看 user_id 为 NULL 的记录
@@ -266,24 +266,24 @@ async def get_messages(
 class AgentSessionMessageIn(BaseModel):
     role: str = Field(..., description="user / assistant")
     content: str = Field(default="")
-    attachments: Optional[List[Dict[str, Any]]] = Field(default=None, description="输入附件（图片 base64_image 等）")
-    steps: Optional[List[Dict[str, Any]]] = Field(default=None, description="工具步骤时间线")
-    media_items: Optional[List[Dict[str, Any]]] = Field(default=None, description="生成产物（type/url/task_id/status），刷新后回读展示")
+    attachments: list[dict[str, Any]] | None = Field(default=None, description="输入附件（图片 base64_image 等）")
+    steps: list[dict[str, Any]] | None = Field(default=None, description="工具步骤时间线")
+    media_items: list[dict[str, Any]] | None = Field(default=None, description="生成产物（type/url/task_id/status），刷新后回读展示")
 
 
 class AgentSessionCreateRequest(BaseModel):
-    title: Optional[str] = Field(default=None, max_length=200)
-    workspace_id: Optional[str] = Field(default=None, max_length=64)
+    title: str | None = Field(default=None, max_length=200)
+    workspace_id: str | None = Field(default=None, max_length=64)
 
 
 class AgentSessionSyncRequest(BaseModel):
-    title: Optional[str] = Field(default=None, max_length=200)
-    workspace_id: Optional[str] = Field(default=None, max_length=64)
-    context: Optional[Dict[str, Any]] = Field(default=None, description="内核序列化状态")
-    messages: List[AgentSessionMessageIn] = Field(default_factory=list)
+    title: str | None = Field(default=None, max_length=200)
+    workspace_id: str | None = Field(default=None, max_length=64)
+    context: dict[str, Any] | None = Field(default=None, description="内核序列化状态")
+    messages: list[AgentSessionMessageIn] = Field(default_factory=list)
 
 
-def _require_user(current_user: Optional[User]) -> User:
+def _require_user(current_user: User | None) -> User:
     """画布会话端点要求登录（画布路由本身 requiresAuth）。"""
     if not current_user:
         raise HTTPException(status_code=401, detail="画布会话需要登录")
@@ -308,7 +308,7 @@ async def _get_owned_canvas_session(session_id: int, user: User, db: AsyncSessio
 async def create_agent_session(
     body: AgentSessionCreateRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     user = _require_user(current_user)
     session = ChatSession(
@@ -329,7 +329,7 @@ async def sync_agent_session(
     session_id: int,
     body: AgentSessionSyncRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     user = _require_user(current_user)
     session = await _get_owned_canvas_session(session_id, user, db)
@@ -361,7 +361,7 @@ async def sync_agent_session(
 async def get_agent_session(
     session_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     user = _require_user(current_user)
     session = await _get_owned_canvas_session(session_id, user, db)
@@ -382,7 +382,7 @@ async def get_agent_session(
 async def media_callback(
     req: MediaCallbackRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     """
     前端检测到媒体生成完成后，调用此接口更新消息中的 media_items。
@@ -480,17 +480,17 @@ class AgentCompletionsRequest(BaseModel):
     model 为前端模型选择提示（对话页模型胶囊/分镜管线）：命中聊天注册表才采用，
     占位 id（agnes-chat）或未命中走默认解析链。
     """
-    model: Optional[str] = Field(default=None, description="模型提示：命中聊天注册表才采用，未命中走默认解析链")
-    messages: List[Dict[str, Any]] = Field(..., min_length=1, description="OpenAI 格式消息数组（含工具结果回填）")
-    tools: Optional[List[Dict[str, Any]]] = Field(default=None, description="OpenAI function calling 工具定义")
-    tool_choice: Optional[Any] = Field(default=None, description="工具选择策略（auto 或具体函数）")
-    temperature: Optional[float] = Field(default=None, ge=0, le=2)
+    model: str | None = Field(default=None, description="模型提示：命中聊天注册表才采用，未命中走默认解析链")
+    messages: list[dict[str, Any]] = Field(..., min_length=1, description="OpenAI 格式消息数组（含工具结果回填）")
+    tools: list[dict[str, Any]] | None = Field(default=None, description="OpenAI function calling 工具定义")
+    tool_choice: Any | None = Field(default=None, description="工具选择策略（auto 或具体函数）")
+    temperature: float | None = Field(default=None, ge=0, le=2)
 
 
 @router.post("/chat/completions", summary="LLM 透传（画布 Agent 前端内核专用，SSE 流式，不落会话库）")
 async def chat_completions_passthrough(
     body: AgentCompletionsRequest,
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_current_user_optional),
     _: None = Depends(require_agnes_api_key),
 ):
     """

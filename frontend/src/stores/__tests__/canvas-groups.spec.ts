@@ -200,7 +200,7 @@ describe('撤销快照 / 工作区同步 / 导入导出', () => {
     const { store, ids } = setupStore(1)
     const wsA = store.activeWorkspaceId!
     const { id } = store.createGroup(ids)
-    const wsB = store.createWorkspace('画布 2').id
+    store.createWorkspace('画布 2')
     expect(store.groups).toHaveLength(0)
     store.switchWorkspace(wsA)
     expect(store.groups.map((g) => g.id)).toEqual([id])

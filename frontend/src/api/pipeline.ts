@@ -11,7 +11,6 @@ import type {
   StylePreset,
   ScriptTemplate,
   Asset,
-  AssetContainer,
   AssetContainersResponse,
   AssetContainerDetail,
   SaveAssetFromGenerationRequest,

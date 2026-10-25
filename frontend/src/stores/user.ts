@@ -16,12 +16,12 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { login as apiLogin, register as apiRegister, getMe, getCredits, updateMyProfile, uploadAvatar, getCaptcha } from '@/api/auth'
+import { login as apiLogin, register as apiRegister, getMe, getCredits, updateMyProfile, uploadAvatar } from '@/api/auth'
 import { bootstrapAdmin as apiBootstrapAdmin } from '@/api/setup'
 import { usePreferencesStore } from '@/stores/preferences'
 import { usePermissionStore } from '@/stores/permission'
 import { useSetupStore } from '@/stores/setup'
-import type { AuthLoginRequest, AuthRegisterRequest, UserInfoResponse, UpdateProfileRequest, CaptchaResponse } from '@/types'
+import type { AuthLoginRequest, AuthRegisterRequest, UserInfoResponse, UpdateProfileRequest } from '@/types'
 
 /** JWT 在 localStorage 中的 key（前端仅保存，不可篡改） */
 const TOKEN_STORAGE_KEY = 'agnes.platform.auth.token'

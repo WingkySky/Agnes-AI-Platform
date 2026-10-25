@@ -4,7 +4,6 @@
 # =====================================================
 
 import logging
-from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +17,7 @@ logger = logging.getLogger("agnes_platform")
 
 async def get_entity_owned(
     db: AsyncSession, entity_id: int, user_id: int
-) -> tuple[Optional[WorkEntity], Optional[Work], bool]:
+) -> tuple[WorkEntity | None, Work | None, bool]:
     """返回 (实体, 所属作品, 是否本人)；实体不存在时前两值为 None（路由层转 404）"""
     entity = (
         await db.scalars(select(WorkEntity).where(WorkEntity.id == entity_id))
@@ -32,7 +31,7 @@ async def get_entity_owned(
 
 
 async def list_entity_dicts(
-    db: AsyncSession, work_id: int, kind: Optional[str] = None
+    db: AsyncSession, work_id: int, kind: str | None = None
 ) -> list[dict]:
     """作品实体列表（含版本列表 + 采用图 url），按更新时间倒序"""
     query = select(WorkEntity).where(WorkEntity.work_id == work_id)
@@ -61,7 +60,7 @@ async def list_entity_dicts(
         for v in versions for img in (v.images or [])
         if isinstance(img, dict) and isinstance(img.get("asset_id"), int)
     }
-    url_map: dict[int, Optional[str]] = {}
+    url_map: dict[int, str | None] = {}
     if asset_ids:
         assets = (
             await db.scalars(select(Asset).where(Asset.id.in_(asset_ids)))
@@ -76,7 +75,7 @@ async def list_entity_dicts(
 def _entity_dict(
     entity: WorkEntity,
     versions: list[WorkEntityVersion],
-    url_map: dict[int, Optional[str]],
+    url_map: dict[int, str | None],
 ) -> dict:
     version_dicts = [
         {
@@ -128,7 +127,7 @@ def _entity_dict(
 
 async def find_by_name(
     db: AsyncSession, work_id: int, kind: str, name: str
-) -> Optional[WorkEntity]:
+) -> WorkEntity | None:
     """按作品+类型+名称查实体（向导/Agent 落卡按名 upsert 用）"""
     return (
         await db.scalars(
@@ -151,7 +150,7 @@ async def asset_owned(db: AsyncSession, asset_id: int, user_id: int) -> bool:
 
 async def create_entity(
     db: AsyncSession, work_id: int, kind: str, name: str,
-    description: Optional[str] = None, asset_id: Optional[int] = None,
+    description: str | None = None, asset_id: int | None = None,
 ) -> dict:
     entity = WorkEntity(work_id=work_id, kind=kind, name=name, description=description)
     db.add(entity)
@@ -168,7 +167,7 @@ async def create_entity(
     return _entity_dict(entity, versions, {asset_id: await _asset_url(db, asset_id)} if asset_id else {})
 
 
-async def _asset_url(db: AsyncSession, asset_id: Optional[int]) -> Optional[str]:
+async def _asset_url(db: AsyncSession, asset_id: int | None) -> str | None:
     if not asset_id:
         return None
     return (
@@ -178,7 +177,7 @@ async def _asset_url(db: AsyncSession, asset_id: Optional[int]) -> Optional[str]
 
 async def update_entity(
     db: AsyncSession, entity: WorkEntity,
-    name: Optional[str] = None, description: Optional[str] = None,
+    name: str | None = None, description: str | None = None,
 ) -> None:
     if name is not None:
         entity.name = name
@@ -194,7 +193,7 @@ async def delete_entity(db: AsyncSession, entity: WorkEntity) -> None:
     await db.commit()
 
 
-async def _active_version(db: AsyncSession, entity_id: int) -> Optional[WorkEntityVersion]:
+async def _active_version(db: AsyncSession, entity_id: int) -> WorkEntityVersion | None:
     return (
         await db.scalars(
             select(WorkEntityVersion)
@@ -206,7 +205,7 @@ async def _active_version(db: AsyncSession, entity_id: int) -> Optional[WorkEnti
 
 async def add_version(
     db: AsyncSession, entity: WorkEntity, asset_id: int, role: str = "design",
-    source_generation_id: Optional[int] = None,
+    source_generation_id: int | None = None,
 ) -> WorkEntityVersion:
     """
     新增表现图：
@@ -256,9 +255,9 @@ async def adopt_version(db: AsyncSession, entity: WorkEntity, version_id: int) -
 
 async def add_version_from_generation(
     db: AsyncSession, entity_id: int, asset_id: int,
-    source_generation_id: Optional[int], role: Optional[str] = None,
-    work_id: Optional[int] = None,
-) -> Optional[WorkEntityVersion]:
+    source_generation_id: int | None, role: str | None = None,
+    work_id: int | None = None,
+) -> WorkEntityVersion | None:
     """
     产图自动入版本钩子（persist_generation 成功后调用，best-effort）：
     work_id 不匹配（生成上下文与实体归属作品不一致）时拒绝，防串库。

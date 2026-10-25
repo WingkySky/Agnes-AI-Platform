@@ -10,15 +10,15 @@
 import copy
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlalchemy.future import select
 
 from app.core.database import get_async_db
 from app.core.response import ok
 from app.core.security import get_current_user
 from app.models.user import User
-from app.models.user_preference import UserPreference, DEFAULT_PREFERENCES
-from sqlalchemy.future import select
+from app.models.user_preference import DEFAULT_PREFERENCES, UserPreference
 
 logger = logging.getLogger("agnes_platform")
 router = APIRouter(prefix="/preferences", tags=["用户偏好设置"])

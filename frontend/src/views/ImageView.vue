@@ -368,7 +368,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  MagicStick, Download, Link, PictureFilled, Edit, EditPen, Loading, CircleCloseFilled, VideoPlay, Share, InfoFilled, Aim
+  MagicStick, Download, Link, PictureFilled, Edit, EditPen, CircleCloseFilled, VideoPlay, Share, InfoFilled, Aim
 } from '@element-plus/icons-vue'
 import PresetPlazaDialog from '@/components/presets/PresetPlazaDialog.vue'
 import PromptOptimizeDialog from '@/components/PromptOptimizeDialog.vue'

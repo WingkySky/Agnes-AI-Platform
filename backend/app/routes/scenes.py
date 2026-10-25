@@ -8,7 +8,6 @@
 # - POST   /api/scenes/preview-prompt  预览翻译后的 prompt
 # =====================================================
 
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,15 +18,14 @@ from app.core.security import get_current_user
 from app.models.user import User
 from app.schemas.scene import (
     SceneCreate,
-    SceneUpdate,
-    SceneResponse,
     SceneListResponse,
     ScenePromptPreviewRequest,
     ScenePromptPreviewResponse,
+    SceneResponse,
+    SceneUpdate,
 )
 from app.services import scene_service as svc
 from app.services.scene_service import scene_to_prompt_suffix
-
 
 router = APIRouter(prefix="/scenes", tags=["3D 场景（导演台）"])
 
@@ -36,8 +34,8 @@ router = APIRouter(prefix="/scenes", tags=["3D 场景（导演台）"])
 async def list_scenes(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    search: Optional[str] = Query(None, description="按名称/描述搜索"),
-    is_public: Optional[bool] = Query(None),
+    search: str | None = Query(None, description="按名称/描述搜索"),
+    is_public: bool | None = Query(None),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):

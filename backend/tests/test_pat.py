@@ -5,7 +5,7 @@
 from datetime import datetime
 
 import pytest
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy.future import select
 
 from app.core.database import get_async_db

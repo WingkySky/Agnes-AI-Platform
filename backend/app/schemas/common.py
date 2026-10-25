@@ -2,10 +2,10 @@
 # 通用 / 历史记录相关的 Pydantic Schema
 # =====================================================
 
-from typing import Optional, Dict, Any, List
 from datetime import datetime
-from pydantic import BaseModel, Field, field_validator
+from typing import Any
 
+from pydantic import BaseModel, Field, field_validator
 
 
 class ImageSizeOption(BaseModel):
@@ -27,27 +27,27 @@ class ModelGenParams(BaseModel):
     已知键在此定义为唯一出处；新增键 = 扩展本 schema + 对应规则实现。
     NULL/缺省表示无特例，注册表按模型名自动画像兜底。
     """
-    max_ref_images: Optional[int] = Field(
+    max_ref_images: int | None = Field(
         default=None,
         description="单次生成参考图/参考帧上限（超出由后端截断、前端提前截断）；None=不限制",
     )
-    watermark_param_off: Optional[bool] = Field(
+    watermark_param_off: bool | None = Field(
         default=None,
         description="请求是否携带厂商官方 watermark=false（关闭「AI生成」显式标识水印）；None=按自动画像",
     )
-    size_rule: Optional[str] = Field(
+    size_rule: str | None = Field(
         default=None,
         description="尺寸归一化规则名，如 seedream（合法总像素 [2K,4K]，越界按宽高比映射 2K 推荐档）；None=原样透传",
     )
-    image_sizes: Optional[List[ImageSizeOption]] = Field(
+    image_sizes: list[ImageSizeOption] | None = Field(
         default=None,
         description="覆盖该模型的尺寸选项（结构化同全局 IMAGE_SIZE_OPTIONS）；None=用全局",
     )
-    default_size: Optional[str] = Field(
+    default_size: str | None = Field(
         default=None,
         description="覆盖该模型的默认尺寸；None=用全局默认",
     )
-    video_durations: Optional[List[int]] = Field(
+    video_durations: list[int] | None = Field(
         default=None,
         description="该模型支持的时长档位（秒，视频生成）；None=用全局 video_durations。上游 API 未暴露能力前由平台内部配置，避免越界时长导致生成失败",
     )
@@ -59,11 +59,11 @@ class ModelInfo(BaseModel):
     name: str = Field(description="模型显示名称，如 Agnes Image 2.1 Flash")
     type: str = Field(description="模型类型：image / video / chat")
     provider: str = Field(default="Unknown", description="模型供应商，如 Agnes / 字节跳动 / OpenAI")
-    capabilities: List[str] = Field(
+    capabilities: list[str] = Field(
         default_factory=list,
         description="模型能力标签，如 text2image, image2image, text2video, image2video, keyframes",
     )
-    gen_params: Optional[ModelGenParams] = Field(
+    gen_params: ModelGenParams | None = Field(
         default=None,
         description="生成能力配置（None=无特例，按模型名自动画像）",
     )
@@ -94,7 +94,7 @@ class WatermarkConfigPublic(BaseModel):
     opacity: int = Field(default=50, description="透明度（0-100）")
     position: str = Field(default="bottom-right", description="位置：top-left / top-right / bottom-left / bottom-right / center")
     margin: int = Field(default=20, description="边距（像素）")
-    image_url: Optional[str] = Field(default=None, description="图片水印 URL")
+    image_url: str | None = Field(default=None, description="图片水印 URL")
     image_width: int = Field(default=120, description="图片水印宽度")
 
 
@@ -108,17 +108,17 @@ class ConfigResponse(BaseModel):
     """前端可用配置（不含敏感信息）"""
 
     # 可用模型列表（结构化，按类型自动分类）
-    models: List[ModelInfo] = Field(
+    models: list[ModelInfo] = Field(
         default_factory=list,
         description="所有可用模型列表",
     )
 
     # 图片尺寸选项（结构化，含比例信息）
-    image_sizes: List[str] = Field(
+    image_sizes: list[str] = Field(
         default=["1024x768", "1024x1024", "768x1024", "512x512"],
         description="支持的图片尺寸选项（兼容旧版）",
     )
-    image_size_options: List[ImageSizeOption] = Field(
+    image_size_options: list[ImageSizeOption] = Field(
         default_factory=list,
         description="图片尺寸选项（结构化，含比例和标签）",
     )
@@ -128,7 +128,7 @@ class ConfigResponse(BaseModel):
     )
 
     # 视频宽高比选项
-    video_aspect_ratios: List[VideoAspectRatioOption] = Field(
+    video_aspect_ratios: list[VideoAspectRatioOption] = Field(
         default_factory=list,
         description="视频宽高比选项",
     )
@@ -138,7 +138,7 @@ class ConfigResponse(BaseModel):
     )
 
     # 视频分辨率选项
-    video_resolutions: List[VideoResolutionOption] = Field(
+    video_resolutions: list[VideoResolutionOption] = Field(
         default_factory=list,
         description="视频分辨率选项（以高度为基准）",
     )
@@ -148,7 +148,7 @@ class ConfigResponse(BaseModel):
     )
 
     # 视频帧数选项（需满足 8n+1 规则）
-    video_num_frames: List[int] = Field(
+    video_num_frames: list[int] = Field(
         default=[9, 33, 49, 81, 121, 161, 241, 441],
         description="支持的视频帧数选项（需满足 8n+1）",
     )
@@ -156,7 +156,7 @@ class ConfigResponse(BaseModel):
     # 视频时长选项（秒）
     # 官方 Q&A 限制：FPS 与时长联动：
     #   24 FPS 不超过 15s；30 FPS 不超过 10s；60 FPS 不超过 5s
-    video_durations: List[int] = Field(
+    video_durations: list[int] = Field(
         default=[3, 5, 7, 10, 15],
         description="视频时长选项（秒），前端会按 FPS 联动过滤",
     )
@@ -166,7 +166,7 @@ class ConfigResponse(BaseModel):
     )
 
     # 视频帧率选项
-    video_frame_rates: List[int] = Field(
+    video_frame_rates: list[int] = Field(
         default=[24, 30, 60],
         description="视频帧率选项（FPS）",
     )
@@ -180,13 +180,13 @@ class ConfigResponse(BaseModel):
     max_upload_size_mb: int = 10
 
     # 错误类目合同（code + 能否手动重试；文案由前端 i18n 按 errors.category_<code> 渲染）
-    error_categories: List[ErrorCategoryMeta] = Field(
+    error_categories: list[ErrorCategoryMeta] = Field(
         default_factory=list,
         description="生成错误类目语义表（error_taxonomy 唯一出处）",
     )
 
     # 水印配置（公开，前端 CSS 水印用）
-    watermark: Optional[WatermarkConfigPublic] = None
+    watermark: WatermarkConfigPublic | None = None
 
 
 # =====================================================
@@ -205,13 +205,13 @@ class GenerationContext(BaseModel):
     - asset_name：归档后的资产名（分镜序号 / 角色名 / 节点名 …）
     """
     source: str = Field(default="independent", description="来源：independent / canvas / project")
-    container_type: Optional[str] = Field(default=None, description="容器类型：project / canvas_script / canvas")
-    container_id: Optional[str] = Field(default=None, description="容器 ID（项目 ID / 剧本面板 ID / 'canvas'）")
-    container_name: Optional[str] = Field(default=None, description="容器名快照")
-    asset_type: Optional[str] = Field(default=None, description="归档资产类型：material / clip / character / scene / final")
-    asset_name: Optional[str] = Field(default=None, description="归档资产名")
-    entity_id: Optional[int] = Field(default=None, description="画布实体卡挂链实体：生成成功自动建版本并采用")
-    version_role: Optional[str] = Field(default=None, description="实体表现图角色：design（默认，新版本）/ angle（多角度派生，追加进采用版本）")
+    container_type: str | None = Field(default=None, description="容器类型：project / canvas_script / canvas")
+    container_id: str | None = Field(default=None, description="容器 ID（项目 ID / 剧本面板 ID / 'canvas'）")
+    container_name: str | None = Field(default=None, description="容器名快照")
+    asset_type: str | None = Field(default=None, description="归档资产类型：material / clip / character / scene / final")
+    asset_name: str | None = Field(default=None, description="归档资产名")
+    entity_id: int | None = Field(default=None, description="画布实体卡挂链实体：生成成功自动建版本并采用")
+    version_role: str | None = Field(default=None, description="实体表现图角色：design（默认，新版本）/ angle（多角度派生，追加进采用版本）")
 
     @field_validator("source")
     @classmethod
@@ -229,29 +229,29 @@ class GenerationRecord(BaseModel):
     id: int
     type: str                      # 'image' | 'video'
     prompt: str
-    model: Optional[str] = None
-    params: Optional[Dict[str, Any]] = None
-    mode: Optional[str] = None     # 'text2image' | 'image2image' | 'text2video' | 'image2video' | 'keyframes'
-    result_url: Optional[str] = None
+    model: str | None = None
+    params: dict[str, Any] | None = None
+    mode: str | None = None     # 'text2image' | 'image2image' | 'text2video' | 'image2video' | 'keyframes'
+    result_url: str | None = None
     status: str
     # 任务失败归因（任务视图：失败原因与类目透出，成功为 NULL）
-    error_category: Optional[str] = None
-    error_message: Optional[str] = None
-    task_id: Optional[str] = None
+    error_category: str | None = None
+    error_message: str | None = None
+    task_id: str | None = None
     credits_consumed: int = 0       # 本次任务消耗的积分数（与积分流水 ref_id 对应）
     is_public: bool = False         # 是否公开到广场
     likes_count: int = 0            # 点赞数
-    created_at: Optional[datetime] = None
+    created_at: datetime | None = None
     # 内容审核相关
-    moderation_status: Optional[str] = None   # approved / pending / rejected
-    moderation_reason: Optional[str] = None   # 审核原因
-    moderation_flags: Optional[List[str]] = None  # 命中的敏感词/违规类别
+    moderation_status: str | None = None   # approved / pending / rejected
+    moderation_reason: str | None = None   # 审核原因
+    moderation_flags: list[str] | None = None  # 命中的敏感词/违规类别
     # 创作归属（历史瘦身：画布/项目生成不进默认历史，可按来源筛选回看）
     source: str = "independent"                # independent / canvas / project
-    container_type: Optional[str] = None       # project / canvas_script / canvas
-    container_id: Optional[str] = None
+    container_type: str | None = None       # project / canvas_script / canvas
+    container_id: str | None = None
     # 统一资产层：成功生成自动入库后的资产行 id（前端「查看资产」跳转）
-    asset_id: Optional[int] = None
+    asset_id: int | None = None
 
     class Config:
         from_attributes = True    # Pydantic v2 对应原来的 orm_mode
@@ -262,7 +262,7 @@ class HistoryListResponse(BaseModel):
     total: int                                          # 当前筛选条件下的总记录数
     page: int
     page_size: int
-    items: List[GenerationRecord]
+    items: list[GenerationRecord]
     total_image_count: int = 0                           # 图片记录全局总数（不受筛选影响）
     total_video_count: int = 0                           # 视频记录全局总数（不受筛选影响）
 
@@ -279,7 +279,7 @@ class DeleteResponse(BaseModel):
 
 class BatchDeleteRequest(BaseModel):
     """批量删除请求体（接收记录 ID 列表）"""
-    ids: List[int] = Field(..., description="要删除的记录 ID 列表")
+    ids: list[int] = Field(..., description="要删除的记录 ID 列表")
 
 
 class BatchDeleteResponse(BaseModel):
@@ -287,4 +287,4 @@ class BatchDeleteResponse(BaseModel):
     success: bool
     message: str
     deleted_count: int = Field(description="实际成功删除的记录数量")
-    failed_ids: List[int] = Field(default_factory=list, description="删除失败的记录 ID 列表")
+    failed_ids: list[int] = Field(default_factory=list, description="删除失败的记录 ID 列表")

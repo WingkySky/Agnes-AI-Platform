@@ -74,7 +74,7 @@ class _ServerSession:
         if not self._ready.is_set():
             try:
                 await asyncio.wait_for(self._ready.wait(), timeout=CONNECT_TIMEOUT)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 await self.close()
                 raise RuntimeError("MCP 服务器连接超时")
         if self._error:
@@ -88,7 +88,10 @@ class _ServerSession:
 
             from mcp import ClientSession, StdioServerParameters
             from mcp.client.stdio import stdio_client
-            from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
+            from mcp.client.streamable_http import (
+                create_mcp_http_client,
+                streamable_http_client,
+            )
 
             extra_client = None
             if self._server.transport == "stdio":

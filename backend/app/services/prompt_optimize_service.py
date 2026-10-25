@@ -7,7 +7,7 @@
 
 import logging
 import re
-from typing import Any, Optional
+from typing import Any
 
 from app.services.llm import call_llm, parse_json_loose
 
@@ -99,7 +99,7 @@ def _build_prompt(prompt: str, mode: str, target: str, model_id: str, reference_
     return "\n".join(parts)
 
 
-def _normalize_result(data: Any) -> Optional[dict]:
+def _normalize_result(data: Any) -> dict | None:
     """校验并规整 LLM 返回结构；不合法返回 None"""
     if not isinstance(data, dict):
         return None
@@ -129,14 +129,14 @@ async def optimize_prompt(
     mode: str,
     target: str,
     model_id: str = "",
-    reference_names: Optional[list[str]] = None,
+    reference_names: list[str] | None = None,
 ) -> dict:
     """
     优化提示词并返回结构化结果（positive/negative/changes/assumptions/variants）。
     LLM 异常与两次解析失败统一抛 RuntimeError（路由层映射 502）。
     """
     llm_prompt = _build_prompt(prompt, mode, target, model_id, reference_names or [])
-    last_error: Optional[Exception] = None
+    last_error: Exception | None = None
     for _ in range(2):
         try:
             text = await call_llm(llm_prompt)

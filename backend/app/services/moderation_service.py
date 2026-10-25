@@ -14,14 +14,15 @@ import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import List, Tuple, Optional, Dict, Any
+from typing import Any
+
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.database import async_session
 from app.models.generation import Generation
-from app.models.sensitive_word import SensitiveWord, DEFAULT_SENSITIVE_WORDS
+from app.models.sensitive_word import DEFAULT_SENSITIVE_WORDS, SensitiveWord
 
 logger = logging.getLogger("agnes_platform")
 
@@ -29,7 +30,7 @@ logger = logging.getLogger("agnes_platform")
 # ---------- 敏感词进程内缓存 ----------
 # 缓存结构：(words_list, updated_at)，TTL 60 秒
 # 敏感词表更新不频繁，但每次审核都全表加载开销大，因此做进程内缓存
-_sensitive_words_cache: tuple[List[str], float] | None = None
+_sensitive_words_cache: tuple[list[str], float] | None = None
 _SENSITIVE_WORDS_CACHE_TTL = 60.0  # 秒
 
 
@@ -60,7 +61,7 @@ async def ensure_default_sensitive_words(db: AsyncSession) -> None:
 async def check_sensitive_text(
     db: AsyncSession,
     text: str,
-) -> Tuple[bool, List[str]]:
+) -> tuple[bool, list[str]]:
     """
     检查文本中是否包含敏感词。
     返回：(是否命中, 命中的敏感词列表)
@@ -70,7 +71,7 @@ async def check_sensitive_text(
 
     # 先查进程内缓存（60 秒 TTL）
     global _sensitive_words_cache
-    words_lower: List[str] = []
+    words_lower: list[str] = []
     if _sensitive_words_cache is not None:
         cached_words, updated_at = _sensitive_words_cache
         if time.time() - updated_at < _SENSITIVE_WORDS_CACHE_TTL:
@@ -150,7 +151,7 @@ _MODERATION_SYSTEM_PROMPT = """你是一个内容安全审核员。请仔细检�
 - confidence 范围 0-1，表示判断的置信度"""
 
 
-async def _download_image_as_base64(image_url: str) -> Optional[str]:
+async def _download_image_as_base64(image_url: str) -> str | None:
     """
     下载图片并转为 base64 data URI。
     失败返回 None。
@@ -185,7 +186,7 @@ async def _download_image_as_base64(image_url: str) -> Optional[str]:
         return None
 
 
-async def _extract_video_first_frame(video_url: str) -> Optional[str]:
+async def _extract_video_first_frame(video_url: str) -> str | None:
     """
     提取视频首帧图片并转为 base64 data URI。
     使用 ffmpeg 提取，失败返回 None。
@@ -250,7 +251,7 @@ async def _extract_video_first_frame(video_url: str) -> Optional[str]:
                 pass
 
 
-def _parse_moderation_result(content: str) -> Dict[str, Any]:
+def _parse_moderation_result(content: str) -> dict[str, Any]:
     """
     解析 AI 返回的审核结果 JSON。
     返回：{is_violation: bool, categories: [...], reason: str, confidence: float}
@@ -293,7 +294,7 @@ def _parse_moderation_result(content: str) -> Dict[str, Any]:
     }
 
 
-async def _moderate_frame_with_ai(frame_b64: str, user_text: str, scene: str = "") -> Dict[str, Any]:
+async def _moderate_frame_with_ai(frame_b64: str, user_text: str, scene: str = "") -> dict[str, Any]:
     """
     用多模态聊天模型审核单帧图片内容
     （模型解析、messages 构造、chat_text 调用、结果解析与异常降级）。
@@ -306,7 +307,10 @@ async def _moderate_frame_with_ai(frame_b64: str, user_text: str, scene: str = "
 
     # 审核为系统级任务：管理员配置 model.moderation_chat > 系统默认对话模型
     try:
-        from app.services.model_registry import resolve_system_chat_model_id, SYSTEM_CHAT_MODEL_KEYS
+        from app.services.model_registry import (
+            SYSTEM_CHAT_MODEL_KEYS,
+            resolve_system_chat_model_id,
+        )
         model = await resolve_system_chat_model_id(None, SYSTEM_CHAT_MODEL_KEYS["moderation"])
     except Exception:
         model = ""
@@ -344,8 +348,8 @@ async def _moderate_frame_with_ai(frame_b64: str, user_text: str, scene: str = "
 
 async def moderate_image_with_ai(
     image_url: str,
-    prompt: Optional[str] = None,
-) -> Dict[str, Any]:
+    prompt: str | None = None,
+) -> dict[str, Any]:
     """
     使用 AI 多模态模型审核图片内容。
 
@@ -375,8 +379,8 @@ async def moderate_image_with_ai(
 
 async def moderate_video_with_ai(
     video_url: str,
-    prompt: Optional[str] = None,
-) -> Dict[str, Any]:
+    prompt: str | None = None,
+) -> dict[str, Any]:
     """
     使用 AI 审核视频内容（提取首帧进行审核）。
 
@@ -397,9 +401,9 @@ async def moderate_video_with_ai(
 
 async def moderate_generation_with_ai(
     gen_type: str,
-    result_url: Optional[str],
-    prompt: Optional[str] = None,
-) -> Dict[str, Any]:
+    result_url: str | None,
+    prompt: str | None = None,
+) -> dict[str, Any]:
     """
     统一入口：根据生成类型（image/video）调用对应的 AI 审核。
 
@@ -424,8 +428,8 @@ async def moderate_generation_with_ai(
 async def run_async_asset_moderation(
     asset_id: int,
     gen_type: str,
-    result_url: Optional[str],
-    prompt: Optional[str] = None,
+    result_url: str | None,
+    prompt: str | None = None,
 ) -> None:
     """
     后台异步任务：调用 AI 多模态模型审核资产内容（图片/视频）。
@@ -518,8 +522,8 @@ def queue_ai_moderation(record: Generation) -> None:
 async def run_async_generation_moderation(
     record_id: int,
     gen_type: str,
-    result_url: Optional[str],
-    prompt: Optional[str],
+    result_url: str | None,
+    prompt: str | None,
 ) -> None:
     """
     后台异步任务：调用 AI 多模态模型审核图片/视频内容。

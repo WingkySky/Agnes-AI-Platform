@@ -17,8 +17,7 @@ import platform
 import sys
 import time
 import zipfile
-from datetime import datetime, timezone
-from typing import List, Optional
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -64,7 +63,7 @@ def sanitize_pair(key: str, value: str) -> str:
     return value
 
 
-def _truncate(text: Optional[str], limit: int) -> Optional[str]:
+def _truncate(text: str | None, limit: int) -> str | None:
     if not text:
         return text
     return text[:limit] + ("…" if len(text) > limit else "")
@@ -87,14 +86,14 @@ def _tail_lines(path: str, max_lines: int) -> str:
         return ""
 
 
-def _env_keys() -> List[str]:
+def _env_keys() -> list[str]:
     """.env 只列键名不列值；文件缺失返回空"""
     path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env")
     if not os.path.isfile(path):
         return []
     try:
         keys = []
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
+        with open(path, encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
                 if line and not line.startswith("#") and "=" in line:
@@ -116,14 +115,14 @@ def _version_label() -> str:
     """优先读仓库根 VERSION 文件，缺失回落 dev"""
     path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "VERSION")
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             return f.read().strip() or "dev"
     except Exception:
         return "dev"
 
 
 def _meta_text(started_at: float) -> str:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     lines = [
         f"exported_at_utc: {now.isoformat()}",
         f"version: {_version_label()}",
@@ -136,7 +135,7 @@ def _meta_text(started_at: float) -> str:
     return "\n".join(lines) + "\n"
 
 
-async def _generations_recent(db: AsyncSession, limit: int) -> List[dict]:
+async def _generations_recent(db: AsyncSession, limit: int) -> list[dict]:
     rows = (
         await db.scalars(
             select(Generation).order_by(Generation.id.desc()).limit(limit)
@@ -162,7 +161,7 @@ async def _generations_recent(db: AsyncSession, limit: int) -> List[dict]:
     ]
 
 
-async def _api_calls_recent(db: AsyncSession, limit: int) -> List[dict]:
+async def _api_calls_recent(db: AsyncSession, limit: int) -> list[dict]:
     rows = (
         await db.scalars(
             select(ApiCallLog).order_by(ApiCallLog.id.desc()).limit(limit)
@@ -189,8 +188,8 @@ async def _api_calls_recent(db: AsyncSession, limit: int) -> List[dict]:
 
 
 async def _config_sanitized(db: AsyncSession) -> dict:
-    from app.models.system_config import SystemConfig
     from app.models.api_provider import ApiProvider
+    from app.models.system_config import SystemConfig
 
     configs = (await db.scalars(select(SystemConfig).order_by(SystemConfig.config_key))).all()
     providers = (await db.scalars(select(ApiProvider).order_by(ApiProvider.id))).all()
@@ -231,7 +230,7 @@ async def _table_stats(db: AsyncSession) -> dict:
     return out
 
 
-async def build_diagnostics_zip(db: AsyncSession, started_at: Optional[float] = None) -> bytes:
+async def build_diagnostics_zip(db: AsyncSession, started_at: float | None = None) -> bytes:
     """组装诊断 ZIP（内存）；started_at 缺省用模块加载时间近似进程启动"""
     started = started_at if started_at is not None else _MODULE_LOAD_TIME
     log_dir = settings.log_dir
@@ -257,7 +256,7 @@ async def build_diagnostics_zip(db: AsyncSession, started_at: Optional[float] = 
 
 
 def diagnostics_filename() -> str:
-    return f"agnes-diagnostics-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.zip"
+    return f"agnes-diagnostics-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}.zip"
 
 
 _MODULE_LOAD_TIME = time.time()

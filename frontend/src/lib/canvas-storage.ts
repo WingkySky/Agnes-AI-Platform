@@ -164,7 +164,7 @@ export async function loadCanvasData(): Promise<CanvasStorageData | null> {
     return data
   } catch (err) {
     canvasSaveStatus.error = true
-    // eslint-disable-next-line no-console
+     
     console.warn('[canvas-storage] 云端加载失败，回退本地', err)
     return loadCanvas()
   }
@@ -226,7 +226,7 @@ async function saveCanvasPrefsCloud(state: CanvasStorageData): Promise<void> {
       },
     })
   } catch (err) {
-    // eslint-disable-next-line no-console
+     
     console.warn('[canvas-storage] 偏好保存失败', err)
   }
 }
@@ -258,7 +258,7 @@ async function runCloudQueue(): Promise<void> {
     }
   } catch (err) {
     canvasSaveStatus.error = true
-    // eslint-disable-next-line no-console
+     
     console.warn('[canvas-storage] 云端保存失败', err)
   } finally {
     cloudInFlight = false
@@ -282,7 +282,7 @@ export async function createWorkspaceCloud(ws: Record<string, any>): Promise<voi
     })
     cloudRevisions.set(String(ws.id), created.revision)
   } catch (err) {
-    // eslint-disable-next-line no-console
+     
     console.warn('[canvas-storage] 云端创建工作区失败', err)
   }
 }
@@ -294,7 +294,7 @@ export async function deleteWorkspaceCloud(id: string): Promise<void> {
     await deleteWorkspaceApi(id)
     cloudRevisions.delete(String(id))
   } catch (err) {
-    // eslint-disable-next-line no-console
+     
     console.warn('[canvas-storage] 云端删除工作区失败', err)
   }
 }
@@ -311,7 +311,7 @@ export async function renameWorkspaceCloud(ws: Record<string, any>): Promise<voi
     cloudRevisions.set(String(ws.id), resp.revision)
   } catch (err) {
     // 404 由下次 _save 懒创建兜底；409 由下次 _save 冲突流程兜底
-    // eslint-disable-next-line no-console
+     
     console.warn('[canvas-storage] 云端重命名失败', err)
   }
 }
@@ -343,7 +343,7 @@ export async function pullRemoteWorkspaceCloud(wsId: string): Promise<Record<str
     cloudRevisions.set(String(wsId), detail.revision)
     return detail.data ?? {}
   } catch (err) {
-    // eslint-disable-next-line no-console
+     
     console.warn('[canvas-storage] 拉取云端工作区失败', err)
     return null
   }
@@ -497,7 +497,7 @@ async function performLocalSave(state: CanvasStorageData): Promise<void> {
     await canvasStore.setItem(key, plain)
   } catch (err) {
     // 持久化失败不应阻塞画布交互，仅打印警告便于排查
-    // eslint-disable-next-line no-console
+     
     console.warn('[canvas-storage] saveCanvas failed:', err)
   }
 }

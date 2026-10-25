@@ -138,7 +138,7 @@ async def main():
             # 查询所有内置元素
             result = await session.execute(
                 select(StyleElement)
-                .filter(StyleElement.is_builtin == True)
+                .filter(StyleElement.is_builtin.is_(True))
                 .order_by(StyleElement.layer, StyleElement.sort_order)
             )
             elements = list(result.scalars().all())
@@ -168,7 +168,7 @@ async def main():
                 # 间隔避免 API 限流
                 await asyncio.sleep(1)
 
-            print(f"\n==== 完成 ====")
+            print("\n==== 完成 ====")
             print(f"成功生成: {success}")
             print(f"已跳过: {skipped}")
             print(f"失败: {failed}")

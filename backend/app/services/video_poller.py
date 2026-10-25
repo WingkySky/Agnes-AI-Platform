@@ -16,11 +16,8 @@
 import asyncio
 import logging
 import time
-from typing import Dict, Optional
 
 from app.core.config import settings
-from app.services.agnes_client import agnes_client
-from app.services.provider_registry import provider_registry
 from app.services._generation_persist import (
     CLEANUP_INTERVAL_SEC,
     cleanup_expired_tasks,
@@ -31,6 +28,7 @@ from app.services._generation_persist import (
     refund_generation_credits,
 )
 from app.services.error_taxonomy import classify, classify_message
+from app.services.provider_registry import provider_registry
 
 logger = logging.getLogger("agnes_platform")
 
@@ -45,14 +43,14 @@ class VideoTask:
 
     def __init__(
         self,
-        task_id: Optional[str],
-        video_id: Optional[str],
+        task_id: str | None,
+        video_id: str | None,
         prompt: str,
-        params: Dict,
-        user_id: Optional[int] = None,
+        params: dict,
+        user_id: int | None = None,
         credits_consumed: int = 0,
-        preset_id: Optional[int] = None,
-        context: Optional[Dict] = None,
+        preset_id: int | None = None,
+        context: dict | None = None,
     ):
         self.task_id = task_id
         self.video_id = video_id
@@ -66,15 +64,15 @@ class VideoTask:
         self.context = context
         self.status = "processing"
         self.progress = 0
-        self.video_url: Optional[str] = None
-        self.error_message: Optional[str] = None
-        self.error_category: Optional[str] = None
+        self.video_url: str | None = None
+        self.error_message: str | None = None
+        self.error_category: str | None = None
         self.created_at = time.time()
         self.last_updated = self.created_at
-        self._poll_task: Optional[asyncio.Task] = None
+        self._poll_task: asyncio.Task | None = None
         self._cancelled = False
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             "task_id": self.task_id,
             "video_id": self.video_id,
@@ -100,10 +98,10 @@ class VideoPollerManager:
     """
 
     def __init__(self):
-        self._tasks: Dict[str, VideoTask] = {}
-        self._tasks_by_video_id: Dict[str, str] = {}
+        self._tasks: dict[str, VideoTask] = {}
+        self._tasks_by_video_id: dict[str, str] = {}
         self._lock = asyncio.Lock()
-        self._cleanup_task: Optional[asyncio.Task] = None
+        self._cleanup_task: asyncio.Task | None = None
         self._started = False
 
     # ---------- 启动后台清理协程 ----------
@@ -120,14 +118,14 @@ class VideoPollerManager:
     # ---------- 启动一个视频任务的后台轮询 ----------
     async def start_polling(
         self,
-        task_id: Optional[str],
-        video_id: Optional[str],
+        task_id: str | None,
+        video_id: str | None,
         prompt: str,
-        params: Dict,
-        user_id: Optional[int] = None,
+        params: dict,
+        user_id: int | None = None,
         credits_consumed: int = 0,
-        preset_id: Optional[int] = None,
-        context: Optional[Dict] = None,
+        preset_id: int | None = None,
+        context: dict | None = None,
     ) -> VideoTask:
         """
         创建 VideoTask 并启动后台协程轮询，不阻塞当前请求。
@@ -155,8 +153,8 @@ class VideoPollerManager:
 
     # ---------- 获取任务状态 ----------
     async def get_status(
-        self, task_id: Optional[str] = None, video_id: Optional[str] = None
-    ) -> Optional[VideoTask]:
+        self, task_id: str | None = None, video_id: str | None = None
+    ) -> VideoTask | None:
         """
         根据 task_id 或 video_id 查找任务状态（并发安全读取
         """
@@ -169,7 +167,7 @@ class VideoPollerManager:
 
     # ---------- 取消任务 ----------
     async def cancel(
-        self, task_id: Optional[str] = None, video_id: Optional[str] = None
+        self, task_id: str | None = None, video_id: str | None = None
     ):
         """
         中止指定视频任务的后台轮询（仅停止本地轮询，不保证服务端已终止）。
@@ -350,7 +348,7 @@ class VideoPollerManager:
         服务关闭时：取消所有进行中的轮询任务，取消清理协程。
         """
         async with self._lock:
-            for key, task in self._tasks.items():
+            for task in self._tasks.values():
                 if task._poll_task and not task._poll_task.done():
                     task._poll_task.cancel()
 

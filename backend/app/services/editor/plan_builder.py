@@ -23,9 +23,10 @@
 #   （PIP 片段间为硬切，转场仅在整轨 xfade 路径生效——v1 明确边界）
 # =====================================================
 
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from app.models.editing_project import EditingProject  # noqa: F401 — 语义引用（Plan 属剪辑工程域）
+
 
 # Plan 片段
 def _num(v, default=0.0) -> float:
@@ -37,9 +38,9 @@ def _num(v, default=0.0) -> float:
 
 def build_plan(
     document: dict,
-    resolve_path: Callable[[int], Optional[str]],
-    resolve_asset_kind: Optional[Callable[[int], Optional[str]]] = None,
-) -> Optional[dict]:
+    resolve_path: Callable[[int], str | None],
+    resolve_asset_kind: Callable[[int], str | None] | None = None,
+) -> dict | None:
     """
     document → Plan。
 

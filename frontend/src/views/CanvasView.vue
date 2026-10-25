@@ -600,7 +600,7 @@ import CanvasManagerPopover from '@/components/canvas/CanvasManagerPopover.vue'
 // 版本历史弹窗（自动快照 / 手动版本 / 还原）
 import CanvasHistoryDialog from '@/components/canvas/CanvasHistoryDialog.vue'
 // 画布积分预估与校验（生图/生视频/局部编辑前预检积分）
-import { CANVAS_GROUP_COLORS, type CanvasPanel, type CanvasConnection } from '@/stores/canvas'
+import { CANVAS_GROUP_COLORS, type CanvasPanel } from '@/stores/canvas'
 import { checkCreditsBeforeGenerate, showCostConsumedMessage } from '@/lib/canvas-credits'
 import {
   type CanvasTemplate,
@@ -608,7 +608,7 @@ import {
   createWorkspaceFromTemplate,
 } from '@/lib/canvas-templates'
 // 画布生成：上游节点查找（用于配置节点 prompt 为空时检查上游文本）+ 生成归档上下文
-import { getUpstreamNodes, buildCanvasContext, resumeLoadingCanvasNodes, resolvePromptMentions, executeSourceImageGeneration, executeSourceVideoGeneration, entityCardLinkId, buildReversePromptMessages, type CanvasGenerationStore, type GenerationContext } from '@/lib/canvas-generation'
+import { buildCanvasContext, resumeLoadingCanvasNodes, resolvePromptMentions, executeSourceImageGeneration, executeSourceVideoGeneration, entityCardLinkId, buildReversePromptMessages, type GenerationContext } from '@/lib/canvas-generation'
 import { sseChatComplete } from '@/lib/storyboard/transport'
 import { createBatchContent, fillCellFromNode, readBatchContent } from '@/lib/canvas-batch-table'
 // 分镜派生：单镜头图生视频 + 整组重跑的批量积分确认
@@ -621,10 +621,9 @@ import { computeArrangedLayout } from '@/lib/canvas-layout'
 import { generateCanvasTts, generateCanvasSubtitles, composeCanvasVideos, type CanvasSubtitleSegment } from '@/api/canvas'
 import { parseSrt } from '@/lib/canvas-media'
 import { planDropLayout } from '@/lib/canvas-drop'
-import { emotionGenerationSize, compositeEmotionFaces, emotionResultToFile, type EmotionFaceBox, type EmotionGeneratePayload, type EmotionJobRecord } from '@/lib/canvas-emotion'
+import { emotionResultToFile, type EmotionFaceBox, type EmotionGeneratePayload, type EmotionJobRecord } from '@/lib/canvas-emotion'
 import { detectFaces } from '@/lib/canvas-face-detection'
 import { getErrorMessage } from '@/lib/type-helpers'
-import type { ImageGenerationRequest } from '@/types'
 
 // ---------- 任务状态轮询响应（扩展字段） ----------
 /** 图片任务状态轮询响应（覆盖层可能在 status 外返回 image_url/error/data） */
@@ -641,14 +640,6 @@ interface ImageTaskPollStatus {
 }
 
 /** 视频任务状态轮询响应（扩展字段） */
-interface VideoTaskPollStatus {
-  status: string
-  progress?: number
-  message?: string | null
-  video_url?: string | null
-  error?: string | null
-}
-
 /** 从画布节点 content（Record<string, unknown>）中安全读取字符串字段 */
 function contentString(value: unknown): string {
   return typeof value === 'string' ? value : ''
@@ -657,7 +648,7 @@ function contentString(value: unknown): string {
 const { t } = useI18n()
 const { confirm } = useConfirm()
 const { copyText } = useCopyText()
-const { downloadViaProxy, downloadWatermarkedImage } = useDownload()
+const { downloadWatermarkedImage } = useDownload()
 
 const store = useCanvasStore()
 const chatStore = useChatStore()

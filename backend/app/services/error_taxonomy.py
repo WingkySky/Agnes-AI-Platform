@@ -15,7 +15,6 @@
 # =====================================================
 
 import re
-from typing import Optional, Tuple
 
 # 类目 → canRetry（dict 顺序即 config 下发顺序）
 CATEGORIES: dict[str, bool] = {
@@ -55,14 +54,14 @@ _KEYWORD_RULES: list[tuple[tuple[str, ...], str]] = [
 _TIMEOUT_PATTERN = re.compile(r"超时|timeout|timed out", re.IGNORECASE)
 
 
-def can_retry(category: Optional[str]) -> bool:
+def can_retry(category: str | None) -> bool:
     """类目 → 能否手动重试；无类目（旧数据）默认可重试（行为不变）"""
     if not category:
         return True
     return CATEGORIES.get(category, True)
 
 
-def _match_keywords(text: str) -> Optional[str]:
+def _match_keywords(text: str) -> str | None:
     lowered = (text or "").lower()
     for keywords, category in _KEYWORD_RULES:
         if any(kw in lowered for kw in keywords):
@@ -87,7 +86,7 @@ def classify_message(message: str, *, submitted: bool) -> str:
     return "unknown"
 
 
-def classify(exc: BaseException, *, submitted: bool = False, receipt: bool = False) -> Tuple[str, str]:
+def classify(exc: BaseException, *, submitted: bool = False, receipt: bool = False) -> tuple[str, str]:
     """
     异常 → (类目, 原始文案)。
 

@@ -85,3 +85,4 @@
 - 后端测试统一用 `backend/.venv/bin/python -m pytest`（环境里没有裸 `python`）；服务层自建 session 的模块（如 `provider_registry` 的 `new_async_session()`）不走请求注入的 `get_async_db`，相关测试需 monkeypatch 打桩隔离。
 - Mimosa PreToolUse 门禁对**新增代码**里的 `db.execute(select(...))`（含裸 `text()`、ORM `update()`）一律拦为「SQL 注入」高危误报（存量文件已基线不受影响），新写查询统一用 `db.scalars(select(...))`（`.first()` / `.all()`）写法才能落盘；i18n 文件的**键名**含 `password` 且值为拉丁字符会触发「硬编码凭据」误报，键名避免 password 字样（如用 `step_pw`）。两者均为误报类别，不要为迁就门禁改动真实语义。
 - 初始化已全部收敛到后端 lifespan 的 `app/seed/` ensure 链路（建表 → 默认超管 → 积分规则 → 角色/敏感词/系统配置 → 流水线种子 → 官方预设，全部幂等），不要新增手动初始化/种子脚本；`backend/ensure_secrets.py` 由启动脚本在 uvicorn 之前调用（config.py 的密钥校验发生在应用导入期，写回必须在此之前）。
+- 提交前双端 lint 必须通过：后端 `uvx ruff check backend`（配置 `backend/ruff.toml`，规则集 E4/E7/E9/F+I+UP+B，B008 已豁免 FastAPI 惯用法，B904/E402/`__init__` F401/DTZ 有按项目的豁免与取舍），前端 `npm run lint`（配置 `frontend/eslint.config.js`，规则从宽：正确性优先、不查风格、any 由 vue-tsc 把关）。规则调整改配置文件，不要在代码里堆 disable 注释。

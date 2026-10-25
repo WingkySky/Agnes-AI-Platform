@@ -7,7 +7,7 @@ import json
 import pytest
 
 from app.models.mcp_server import McpServer
-from app.services import memory_service, mcp_service
+from app.services import mcp_service, memory_service
 
 
 async def _seed_memory_server(db) -> McpServer:

@@ -11,7 +11,6 @@
 
 import asyncio
 import logging
-from typing import List
 
 logger = logging.getLogger("agnes_platform.media.transcribe")
 
@@ -70,7 +69,7 @@ async def transcribe_audio(
     language: str = "zh",
     model_size: str = "small",
     device: str = "cpu",
-) -> List[dict]:
+) -> list[dict]:
     """
     转写本地音频文件 → segment 级时间戳列表 [{start, end, text}]（秒）。
 

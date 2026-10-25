@@ -2,7 +2,8 @@
 # 图片生成相关的 Pydantic Schema
 # =====================================================
 
-from typing import List, Optional
+from typing import Optional
+
 from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.common import GenerationContext
@@ -21,45 +22,45 @@ class ImageGenerationRequest(BaseModel):
     model: str = Field(default="", description="模型名称（前端从 /api/config 获取可用模型列表）")
     size: str = Field(default="1024x1024", description="图片尺寸，格式: 宽x高")
     response_format: str = Field(default="url", description="响应格式: url 或 b64_json")
-    quality: Optional[str] = Field(default="standard", description="图片质量 (standard/hd)")
+    quality: str | None = Field(default="standard", description="图片质量 (standard/hd)")
 
     # ── 前端兼容字段：mode（自动转换为 is_image_to_image） ──
-    mode: Optional[str] = Field(default=None, description="【前端兼容】'text2image' 或 'image2image'")
+    mode: str | None = Field(default=None, description="【前端兼容】'text2image' 或 'image2image'")
 
     # ── 新字段：多图参考（推荐使用） ──
-    base64_images: Optional[List[str]] = Field(
+    base64_images: list[str] | None = Field(
         default=None,
         description="图生图时的多张参考图片(base64 data URI 或纯 base64 字符串)，支持多张",
     )
-    image_urls: Optional[List[str]] = Field(
+    image_urls: list[str] | None = Field(
         default=None,
         description="图生图时的多张参考图片 URL（公网可访问链接），支持多张",
     )
 
     # ── 旧字段：单图参考（保留以保持向后兼容，内部会自动合并到数组） ──
-    base64_image: Optional[str] = Field(
+    base64_image: str | None = Field(
         default=None,
         description="【旧字段，兼容用】单张参考图片 base64；新代码请使用 base64_images",
     )
-    image_url: Optional[str] = Field(
+    image_url: str | None = Field(
         default=None,
         description="【旧字段，兼容用】单张参考图片 URL；新代码请使用 image_urls",
     )
 
     # ── 蒙版局部编辑（inpainting）：黑白图 base64，白色为编辑区域 ──
-    mask: Optional[str] = Field(
+    mask: str | None = Field(
         default=None,
         description="蒙版图 base64 data URI（黑白图，白色为编辑区域），用于局部编辑",
     )
 
     # ── 摄像机参数：拼接到 prompt 末尾 ──
-    camera_params: Optional[dict] = Field(
+    camera_params: dict | None = Field(
         default=None,
         description="摄像机参数，含 enabled 子字段。enabled=True 时拼接到 prompt 末尾",
     )
 
     # ── 预设来源：用于追溯作品使用了哪个预设 ──
-    preset_id: Optional[int] = Field(
+    preset_id: int | None = Field(
         default=None,
         description="生成时使用的预设 ID（来自 PresetQuickPanel 选择），用于作品来源追溯",
     )
@@ -74,12 +75,12 @@ class ImageGenerationRequest(BaseModel):
     )
 
     @property
-    def all_reference_images(self) -> List[str]:
+    def all_reference_images(self) -> list[str]:
         """
         合并新旧字段，返回统一的参考图列表（每个元素是 data URI 或公网 URL）。
         优先级：新字段数组 > 旧字段单值。
         """
-        result: List[str] = []
+        result: list[str] = []
         # 新字段优先
         if self.base64_images:
             for img in self.base64_images:
@@ -143,15 +144,15 @@ class ImageGenerationRequest(BaseModel):
 
 class ImageGenerationResponse(BaseModel):
     """图片生成响应体"""
-    id: Optional[int] = None                   # 保存到数据库后的记录 ID
+    id: int | None = None                   # 保存到数据库后的记录 ID
     status: str = "success"                     # success / failed / pending
-    url: Optional[str] = None                   # 生成结果的 URL
-    b64_json: Optional[str] = None              # 如果 response_format=b64_json 则返回 base64
+    url: str | None = None                   # 生成结果的 URL
+    b64_json: str | None = None              # 如果 response_format=b64_json 则返回 base64
     model: str                                  # 使用的模型
     prompt: str                                 # 提示词
     size: str                                   # 图片尺寸
-    created_at: Optional[str] = None            # 创建时间（ISO 格式字符串）
-    message: Optional[str] = None               # 出错时的错误信息
+    created_at: str | None = None            # 创建时间（ISO 格式字符串）
+    message: str | None = None               # 出错时的错误信息
 
 
 class ImageRecordResponse(BaseModel):
@@ -159,11 +160,11 @@ class ImageRecordResponse(BaseModel):
     id: int
     type: str = "image"
     prompt: str
-    model: Optional[str] = None
-    params: Optional[dict] = None
-    result_url: Optional[str] = None
+    model: str | None = None
+    params: dict | None = None
+    result_url: str | None = None
     status: str
-    created_at: Optional[str] = None
+    created_at: str | None = None
 
     class Config:
         from_attributes = True

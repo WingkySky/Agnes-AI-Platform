@@ -6,9 +6,10 @@
 # =====================================================
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, JSON
-from app.core.database import Base
 
+from sqlalchemy import JSON, Column, DateTime, Integer, String, Text
+
+from app.core.database import Base
 
 # ---------- 权限点常量定义 ----------
 # 命名规范：模块:操作，如 plaza:moderate 表示广场内容审核权限

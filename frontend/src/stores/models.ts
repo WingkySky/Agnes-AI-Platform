@@ -8,7 +8,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getPlatformConfig } from '@/api/history'
 import { usePreferencesStore } from '@/stores/preferences'
-import type { ModelInfo, ConfigResponse, ImageSizeOption, VideoAspectRatioOption, VideoResolutionOption, WatermarkConfigPublic, ModelGenParams, ErrorCategoryMeta } from '@/types'
+import type { ModelInfo, ConfigResponse, ImageSizeOption, VideoAspectRatioOption, VideoResolutionOption, WatermarkConfigPublic, ModelGenParams } from '@/types'
 import {
   getModelParams as getLocalModelParams,
   type ModelParams,
