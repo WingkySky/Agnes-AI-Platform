@@ -1,0 +1,75 @@
+# =====================================================
+# PR CI：贡献者 PR 时的自动检查（lint + 测试 + 类型检查）
+# 只在 pull_request 触发；主仓库直接 push main 不跑（ maintainer 习惯提交前自测）
+# 首次贡献者的 fork PR 由 GitHub 平台默认机制拦截：需 maintainer 点「Approve and run」，
+# 同一贡献者之后的 PR 自动运行，无需额外配置
+# =====================================================
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: 后端 lint + 测试
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12" # 与 Dockerfile 运行时一致
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          pip install --quiet ruff
+          pip install --quiet -r requirements.txt
+
+      - name: ruff 检查
+        run: ruff check .
+
+      # CI 环境无 .env：用静态测试值绕过 config 导入期的密钥校验（仅测试环境，非生产凭据）
+      - name: pytest
+        env:
+          JWT_SECRET: ci-test-secret-0123456789abcdef0123456789abcdef
+          ENCRYPTION_KEY: ci-test-key-0123456789abcdef0123456789abcdef
+        run: python -m pytest -q
+
+  frontend:
+    name: 前端 lint + 类型检查 + 测试
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: eslint
+        run: npm run lint
+
+      - name: 类型检查
+        run: npm run type-check
+
+      - name: vitest
+        run: npm run test
