@@ -21,10 +21,13 @@ class Generation(Base):
     - params: JSON 格式的生成参数（尺寸、帧数、帧率、分辨率等）
     - image_input: base64 图片（可选，图生图/图生视频时使用）
     - result_url: 生成结果的 URL（图片/视频）
-    - status: 状态（success / failed / pending / cancelled）
+    - status: 状态（pending / processing / success / failed / cancelled / uncertain）
+      pending/processing = 提交后进行中（任务账本行，重启恢复的事实源）；
+      uncertain = 进程重启/崩溃后无法确认上游结局（已退积分，对应 submission_uncertain 类目）
     - error_category: 失败时的错误类目（error_taxonomy.CATEGORIES，见该模块；成功为 NULL）
     - error_message: 失败时的原始错误文案（成功为 NULL）
-    - task_id: Agnes AI 异步任务 ID（主要用于视频生成）
+    - task_id: 任务 ID（本地图片任务 id 或上游异步任务 task_id，账本匹配键之一）
+    - video_id: 上游视频任务 ID（与 task_id 互补的恢复凭据，上游可能只返回其一）
     - created_at: 创建时间
     - is_public: 是否公开到广场（默认 False）
     - public_shared_at: 首次设为公开的时间（用于广场「最新」排序）
@@ -53,8 +56,11 @@ class Generation(Base):
     error_category = Column(String(40), nullable=True, index=True)
     error_message = Column(Text, nullable=True)
     credits_consumed = Column(Integer, default=0, nullable=False)    # 本次任务消耗的积分数
-    task_id = Column(String(200), nullable=True, index=True)    # Agnes AI 异步任务 ID（主要用于视频生成）
+    task_id = Column(String(200), nullable=True, index=True)    # 任务 ID（本地图片任务 id 或上游异步 task_id）
+    video_id = Column(String(200), nullable=True, index=True)   # 上游视频任务 ID（与 task_id 互补的恢复凭据）
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    # 提交时的完整创作上下文（画布/项目归档打标），重启恢复续轮询时回填 start_polling 用
+    context = Column(JSON, nullable=True)
 
     # ===== 广场相关字段 =====
     is_public = Column(Boolean, default=False, nullable=False, index=True)       # 是否公开到广场
@@ -107,6 +113,7 @@ class Generation(Base):
             "error_message": self.error_message,
             "credits_consumed": self.credits_consumed,
             "task_id": self.task_id,
+            "video_id": self.video_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "is_public": self.is_public,
             "public_shared_at": self.public_shared_at.isoformat() if self.public_shared_at else None,
@@ -131,3 +138,7 @@ class Generation(Base):
 #   ALTER TABLE generations ADD COLUMN original_url TEXT;
 #   ALTER TABLE generations ADD COLUMN migrate_status VARCHAR(20);
 #   CREATE INDEX ix_generations_migrate_status ON generations(migrate_status);
+# 任务恢复体系（2026-10-25）：
+#   ALTER TABLE generations ADD COLUMN video_id VARCHAR(200);
+#   CREATE INDEX ix_generations_video_id ON generations(video_id);
+#   ALTER TABLE generations ADD COLUMN context JSON;

@@ -15,6 +15,7 @@
 
 import logging
 import uuid
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends, Request
@@ -35,6 +36,7 @@ from app.schemas.videos import (
     VideoStatusResponse,
 )
 from app.services.agnes_client import agnes_client
+from app.services._generation_persist import create_pending_generation
 from app.services.error_taxonomy import classify
 from app.services.provider_registry import provider_registry, _detect_capabilities
 from app.services.credits_service import consume_credits, get_video_cost_async
@@ -283,6 +285,21 @@ async def create_video_task(
         "seed": req.seed,
         "is_public": req.is_public,
     }
+    # 任务账本：提交即落 pending 行（重启恢复事实源；凭据 task_id+video_id 双存，终态由轮询器幂等 upsert 覆盖）
+    await create_pending_generation(
+        kind="video",
+        user_id=user_id,
+        prompt=prompt,
+        model=req.model,
+        params=params,
+        mode=req.mode,
+        task_id=real_ref_id,
+        video_id=video_id,
+        credits_consumed=cost,
+        preset_id=req.preset_id,
+        context=req.context.model_dump() if req.context else None,
+        log_prefix="[视频生成]",
+    )
     await poller_manager.start_polling(
         task_id=task_id,
         video_id=video_id,
@@ -349,26 +366,30 @@ async def get_video_status(
             elapsed_sec=cached_task.to_dict()["elapsed_sec"],
         ))
 
-    # 方式 2：从数据库查询已完成的记录（按用户隔离）
+    # 方式 2：从数据库查询任务账本/已完成记录（按用户隔离；凭据同时匹配 task_id 与 video_id）
     stmt = select(Generation).filter(
-        (Generation.task_id == task_id) & (Generation.type == "video")
+        ((Generation.task_id == task_id) | (Generation.video_id == task_id)) & (Generation.type == "video")
     )
     if current_user:
         stmt = stmt.filter(Generation.user_id == current_user.id)
     else:
         stmt = stmt.filter(Generation.user_id.is_(None))
-    result = await db.execute(stmt)
-    record = result.scalar_one_or_none()
+    record = (await db.scalars(stmt)).first()
 
     if record:
+        # uncertain 是 DB 审计态：前端终态集合只有 success/failed/cancelled，映射为 failed+类目透出
+        status = record.status
+        resp_status = "failed" if status == "uncertain" else status
+        elapsed = int((datetime.utcnow() - record.created_at).total_seconds()) if record.created_at else 0
         return ok(data=VideoStatusResponse(
             task_id=record.task_id,
-            status=record.status,
-            progress=100 if record.status == "success" else 0,
+            video_id=record.video_id,
+            status=resp_status,
+            progress=100 if resp_status == "success" else (50 if resp_status in ("pending", "processing") else 0),
             video_url=record.result_url,
-            message=record.error_message if record.status == "failed" else None,
+            message=record.error_message if resp_status == "failed" else None,
             error_category=record.error_category,
-            elapsed_sec=0,
+            elapsed_sec=elapsed,
         ))
 
     raise HTTPException(

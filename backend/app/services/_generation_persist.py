@@ -34,6 +34,77 @@ def as_container_id(value) -> Optional[str]:
     return None if value is None or value == "" else str(value)
 
 
+async def create_pending_generation(
+    *,
+    kind: str,                      # "image" / "video"（Generation.type）
+    user_id: Optional[int],
+    prompt: str,
+    model: str,
+    params: Dict,                   # 最小化参数（严禁 b64 大字段）
+    mode: Optional[str],
+    task_id: str,                   # 账本匹配键（图片=本地 task_id，视频=上游 task_id or video_id）
+    video_id: Optional[str] = None,  # 上游视频任务 ID（恢复凭据，与 task_id 互补）
+    credits_consumed: int = 0,
+    preset_id: Optional[int] = None,
+    context: Optional[Dict] = None,
+    log_prefix: str = "[任务账本]",
+) -> None:
+    """
+    提交任务时落 pending 账本行（任务恢复体系的事实源）。
+
+    保守初值防泄漏：is_public=False（不进广场）、moderation_status='approved'
+    （审核队列只查 pending，不会收录无结果空行）；终态时由 upsert 按真实值覆盖。
+    best-effort：写库失败仅告警，不影响提交主流程。
+    """
+    try:
+        async with new_async_session() as session:
+            session.add(Generation(
+                type=kind,
+                user_id=user_id,
+                prompt=prompt,
+                model=model,
+                params=params,
+                mode=mode,
+                status="pending",
+                credits_consumed=credits_consumed,
+                task_id=task_id,
+                video_id=video_id,
+                is_public=False,
+                moderation_status="approved",
+                preset_id=preset_id,
+                context=context,
+                source=(context or {}).get("source") or "independent",
+                container_type=(context or {}).get("container_type"),
+                container_id=as_container_id((context or {}).get("container_id")),
+            ))
+            await session.commit()
+        logger.info("%s pending 账本行已写入: task_id=%s kind=%s", log_prefix, task_id, kind)
+    except Exception as e:
+        logger.warning("%s pending 账本行写入失败（不影响主流程）: task_id=%s error=%s", log_prefix, task_id, e)
+
+
+async def _fetch_pending_row(
+    session,
+    *,
+    kind: str,
+    user_id: Optional[int],
+    record_task_id: Optional[str],
+):
+    """按 (user_id, task_id, type) 取进行中的账本行（终态行不匹配，重放安全）"""
+    if not record_task_id:
+        return None
+    stmt = select(Generation).filter(
+        Generation.task_id == record_task_id,
+        Generation.type == kind,
+        Generation.status.in_(("pending", "processing")),
+    )
+    if user_id is None:
+        stmt = stmt.filter(Generation.user_id.is_(None))
+    else:
+        stmt = stmt.filter(Generation.user_id == user_id)
+    return (await session.scalars(stmt)).first()
+
+
 async def confirm_generation_credits(task, ref_id, log_prefix: str) -> None:
     """生成成功后，把对应的预扣流水状态改为 confirmed（积分不变）"""
     if not task.user_id or not task.credits_consumed:
@@ -81,25 +152,35 @@ async def persist_generation_failure(
         return
     try:
         async with new_async_session() as session:
-            record = Generation(
-                type=kind,
-                user_id=task.user_id,
-                prompt=task.prompt,
-                model=task.params.get("model", ""),
-                params=record_params,
-                mode=task.params.get("mode"),
-                status="failed",
-                error_category=getattr(task, "error_category", None),
-                error_message=(task.error_message or "")[:2000] or None,
-                credits_consumed=0,  # 失败已退还预扣积分
-                task_id=record_task_id,
-                is_public=False,
-                preset_id=task.preset_id,
-                source=(task.context or {}).get("source") or "independent",
-                container_type=(task.context or {}).get("container_type"),
-                container_id=as_container_id((task.context or {}).get("container_id")),
+            # 幂等 upsert：已有 pending 账本行则原地置终态，避免重复行
+            record = await _fetch_pending_row(
+                session, kind=kind, user_id=task.user_id, record_task_id=record_task_id,
             )
-            session.add(record)
+            if record is not None:
+                record.status = "failed"
+                record.error_category = getattr(task, "error_category", None)
+                record.error_message = (task.error_message or "")[:2000] or None
+                record.credits_consumed = 0  # 失败已退还预扣积分
+            else:
+                record = Generation(
+                    type=kind,
+                    user_id=task.user_id,
+                    prompt=task.prompt,
+                    model=task.params.get("model", ""),
+                    params=record_params,
+                    mode=task.params.get("mode"),
+                    status="failed",
+                    error_category=getattr(task, "error_category", None),
+                    error_message=(task.error_message or "")[:2000] or None,
+                    credits_consumed=0,  # 失败已退还预扣积分
+                    task_id=record_task_id,
+                    is_public=False,
+                    preset_id=task.preset_id,
+                    source=(task.context or {}).get("source") or "independent",
+                    container_type=(task.context or {}).get("container_type"),
+                    container_id=as_container_id((task.context or {}).get("container_id")),
+                )
+                session.add(record)
             await session.commit()
             logger.info(
                 "%s 失败记录已落库: task_id=%s category=%s",
@@ -143,29 +224,49 @@ async def persist_generation(
                 except Exception as mod_err:
                     logger.warning("%s 自动预审失败: %s", log_prefix, mod_err)
 
-            record = Generation(
-                type=kind,
-                user_id=task.user_id,
-                prompt=task.prompt,
-                model=task.params.get("model", ""),
-                params=record_params,
-                mode=task.params.get("mode"),
-                result_url=result_url,  # 先用原始 URL，转存成功后再更新
-                status=task.status,
-                credits_consumed=task.credits_consumed,
-                task_id=record_task_id,
-                is_public=is_public,
-                public_shared_at=datetime.utcnow() if is_public else None,
-                moderation_status=moderation_status,
-                moderation_flags=moderation_flags,
-                moderation_reason=moderation_reason,
-                preset_id=task.preset_id,
-                # 创作归属：画布/项目生成打标，历史页据此默认过滤
-                source=(task.context or {}).get("source") or "independent",
-                container_type=(task.context or {}).get("container_type"),
-                container_id=as_container_id((task.context or {}).get("container_id")),
+            # 幂等 upsert：已有 pending 账本行则原地写终态（保持 record.id 与 created_at）
+            record = await _fetch_pending_row(
+                session, kind=kind, user_id=task.user_id, record_task_id=record_task_id,
             )
-            session.add(record)
+            if record is not None:
+                record.params = record_params
+                record.mode = task.params.get("mode")
+                record.result_url = result_url  # 先用原始 URL，转存成功后再更新
+                record.status = task.status
+                record.credits_consumed = task.credits_consumed
+                record.is_public = is_public
+                record.public_shared_at = datetime.utcnow() if is_public else None
+                record.moderation_status = moderation_status
+                record.moderation_flags = moderation_flags
+                record.moderation_reason = moderation_reason
+                record.preset_id = task.preset_id
+                record.source = (task.context or {}).get("source") or "independent"
+                record.container_type = (task.context or {}).get("container_type")
+                record.container_id = as_container_id((task.context or {}).get("container_id"))
+            else:
+                record = Generation(
+                    type=kind,
+                    user_id=task.user_id,
+                    prompt=task.prompt,
+                    model=task.params.get("model", ""),
+                    params=record_params,
+                    mode=task.params.get("mode"),
+                    result_url=result_url,  # 先用原始 URL，转存成功后再更新
+                    status=task.status,
+                    credits_consumed=task.credits_consumed,
+                    task_id=record_task_id,
+                    is_public=is_public,
+                    public_shared_at=datetime.utcnow() if is_public else None,
+                    moderation_status=moderation_status,
+                    moderation_flags=moderation_flags,
+                    moderation_reason=moderation_reason,
+                    preset_id=task.preset_id,
+                    # 创作归属：画布/项目生成打标，历史页据此默认过滤
+                    source=(task.context or {}).get("source") or "independent",
+                    container_type=(task.context or {}).get("container_type"),
+                    container_id=as_container_id((task.context or {}).get("container_id")),
+                )
+                session.add(record)
             await session.commit()  # 先提交拿到 record.id
 
             # ===== 资源转存：把上游 URL 转存到对象存储（仅对 HTTP/HTTPS URL，跳过 data URI） =====
@@ -261,6 +362,66 @@ async def persist_generation(
         )
     except Exception as e:
         logger.error("%s 数据库写入失败: %s", log_prefix, e)
+
+
+async def mark_row_cancelled(
+    *,
+    kind: str,
+    user_id: Optional[int],
+    record_task_id: Optional[str],
+    log_prefix: str,
+) -> None:
+    """取消任务时把 pending 账本行同步置 cancelled（退款由调用方既有路径处理）。best-effort。"""
+    try:
+        async with new_async_session() as session:
+            record = await _fetch_pending_row(
+                session, kind=kind, user_id=user_id, record_task_id=record_task_id,
+            )
+            if record is not None:
+                record.status = "cancelled"
+                await session.commit()
+                logger.info("%s 账本行已置 cancelled: task_id=%s", log_prefix, record_task_id)
+    except Exception as e:
+        logger.warning("%s 账本行置 cancelled 失败（不影响主流程）: task_id=%s error=%s", log_prefix, record_task_id, e)
+
+
+async def finalize_uncertain(
+    *,
+    kind: str,
+    user_id: Optional[int],
+    task_id: Optional[str],
+    reason: str,
+    log_prefix: str,
+) -> bool:
+    """
+    恢复对账：把无法确认结局的 pending/processing 账本行置 uncertain + 退还预扣积分。
+
+    返回是否有行被终态化（供恢复流程统计与测试断言）。refund_credits 按 pending 流水
+    过滤，重复对账幂等。best-effort：对账失败仅告警，留给下一轮周期再试。
+    """
+    if not task_id or not user_id:
+        return False
+    try:
+        async with new_async_session() as session:
+            record = await _fetch_pending_row(
+                session, kind=kind, user_id=user_id, record_task_id=task_id,
+            )
+            if record is None:
+                return False
+            record.status = "uncertain"
+            record.error_category = "submission_uncertain"
+            record.error_message = reason[:2000]
+            record.credits_consumed = 0  # 已退还预扣积分
+            await refund_credits(
+                session, user_id, task_id,
+                reason=f"任务恢复对账：{reason}",
+            )
+            await session.commit()
+            logger.warning("%s 任务结局不明已对账退款: task_id=%s kind=%s reason=%s", log_prefix, task_id, kind, reason)
+            return True
+    except Exception as e:
+        logger.error("%s 恢复对账失败（下轮再试）: task_id=%s error=%s", log_prefix, task_id, e)
+        return False
 
 
 async def cleanup_expired_tasks(

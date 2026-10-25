@@ -8,6 +8,15 @@
 
 - pydantic-settings 对 List 类型复杂字段做严格 JSON 预解码，`.env`/环境变量写逗号分隔格式（`FRONTEND_ORIGINS=http://a,http://b`）会在解码阶段直接抛 SettingsError（`parse_origins` validator 无机会运行）。`frontend_origins` 加 `NoDecode` 跳过预解码，交由既有 `parse_origins` 统一兼容 JSON 数组/逗号分隔两种格式；`.env.example` 注释同步。四场景实测：逗号分隔（环境变量/.env 文件）、JSON 数组、默认值全部正常，pytest 310 绿
 
+### 任务恢复体系（可靠性三件套 ①：重启不丢任务、积分对账退款）
+
+- **generations 表升级为任务账本**：提交即落 `pending` 行（新增 `video_id` 恢复凭据列——上游可能只返回 video_id 无 task_id、`context` 完整创作上下文列——恢复续轮询回填用；dev 库已 ALTER），终态由轮询器按 (user_id, task_id, type) **幂等 upsert** 同一行（`persist_generation`/`persist_generation_failure` 改 fetch-or-create，重放不重复插行不重复退款）；pending 行保守初值 `is_public=False`+`moderation_status='approved'`（不泄漏进广场/审核队列）
+- **启动恢复**（lifespan，poller 就绪后）：扫账本未终态行——**视频任务凭原 task_id/video_id 重注册续轮询（本地 task_id 不变，前端轮询无感）**；超等待窗口（2×video_poll_timeout_sec）的视频行与全部图片行（同步接口无上游凭据）置 `uncertain` + 退预扣积分（不自动重提，`submission_uncertain` 类目天然阻断自动重试）
+- **运行时对账兜底**：周期协程（5 分钟）扫 pending/processing 超 age 上限的行 → `uncertain` + 退款，覆盖轮询协程异常死亡漏置终态的场景；退款复用 `refund_credits` 按 pending 流水过滤，重复对账幂等
+- **轮询端点 DB 回退升级**：图片/视频状态端点内存 miss 时回退账本行——进行中返回 `pending`/`processing`（elapsed 从 created_at 推算，前端持续轮询）、终态返回结果、`uncertain` 映射为 `failed`+类目（DB 留 uncertain 审计；前端终态集合 success/failed/cancelled，uncertain 不外泄防永久轮询）；视频回退凭据扩为 `task_id OR video_id` 双匹配
+- **取消接账本**：图片 `_gen_loop` CancelledError、视频上游 cancelled/CancelledError 分支同步把账本行置 `cancelled`
+- 测试 pytest 319（+9：账本行保守初值/成功失败幂等 upsert/uncertain 对账+退款幂等/cancel 置位/恢复三态/空账本 noop/图片与视频端点回退）；vue-tsc + vitest 657 回归绿（前端零改动）；修 naive-UTC 时间戳 `.timestamp()` 被按本地时区解释导致 age 计算带时区偏移的坑（显式挂 UTC 后做差）
+
 ### 全局宿主头部新增「新建对话」按钮
 
 - Agent 宿主面板头部按钮组最左新增新建对话钮（lucide MessageSquarePlus，title/aria 复用既有 `agent.drawerNew` 中英文案），点击与展开态会话侧栏的「新建」同入口（`handleNewSession`：画布页自动带当前工作区上下文标记）；`@dblclick.stop` 防连点误触头部的双击档位切换

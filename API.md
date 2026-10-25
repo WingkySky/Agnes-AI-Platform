@@ -136,6 +136,8 @@ Swagger UI（交互式文档）：`http://localhost:8000/docs`
 
 创建图片生成异步任务（前端任务队列使用）。立即返回 `task_id`，通过 `GET /api/images/tasks/{task_id}` 轮询状态。
 
+**任务账本与恢复**：提交即落 `generations` pending 行（任务事实源）。后端重启后：视频任务凭 `task_id`/`video_id` 自动恢复续轮询（前端无感）；图片任务（同步接口无上游凭据）对账置 `uncertain` 并退还预扣积分，轮询端点返回 `failed` + `error_category=submission_uncertain`。`uncertain` 仅存于数据库审计，接口响应统一映射为 `failed`。
+
 **请求体：**
 
 | 字段 | 类型 | 必填 | 说明 |
@@ -300,7 +302,7 @@ Swagger UI（交互式文档）：`http://localhost:8000/docs`
 |------|------|------|
 | `task_id` | string | 任务 ID |
 | `video_id` | string | 视频 ID（推荐用于查询） |
-| `status` | string | `queued`/`processing`/`success`/`failed` |
+| `status` | string | `pending`/`processing`/`success`/`failed`/`cancelled`（内存 miss 时回退任务账本查询，进行中任务返回 `pending`/`processing`；`uncertain` 为 DB 审计态，响应统一映射 `failed`） |
 | `progress` | int | 进度百分比 0-100 |
 | `video_url` | string | 最终视频 URL，仅在 `success` 时可用（对应官方的 `remixed_from_video_id`） |
 | `error` | string | 错误信息，失败时返回 |

@@ -26,6 +26,7 @@ from app.services._generation_persist import (
     CLEANUP_INTERVAL_SEC,
     cleanup_expired_tasks,
     confirm_generation_credits,
+    mark_row_cancelled,
     persist_generation,
     persist_generation_failure,
     refund_generation_credits,
@@ -224,8 +225,11 @@ class ImagePollerManager:
         except asyncio.CancelledError:
             task.status = "cancelled"
             logger.info("[图片任务器] 任务被取消: task_id=%s", task_id)
-            # 任务取消：退还预扣的积分
+            # 任务取消：退还预扣的积分 + 账本行同步置 cancelled
             await self._refund_if_needed(task)
+            await mark_row_cancelled(
+                kind="image", user_id=task.user_id, record_task_id=task.task_id, log_prefix=LOG_PREFIX,
+            )
         except Exception as e:
             task.status = "failed"
             task.error_category, task.error_message = classify(e, submitted=True, receipt=False)

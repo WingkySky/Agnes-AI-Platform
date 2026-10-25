@@ -140,6 +140,15 @@ async def lifespan(app: FastAPI):
     await image_poller_manager.start()
     logger.info("✓ 图片任务器已就绪")
 
+    # 任务恢复：按账本（generations pending/processing 行）恢复在途任务 + 启动周期对账
+    # （必须在 provider_registry 初始化与两个 poller start 之后：恢复续轮询依赖 client 就绪）
+    from app.services.task_recovery import recover_pending_tasks, start_reconcile_loop
+    recovery_counts = await recover_pending_tasks()
+    if sum(recovery_counts.values()):
+        logger.warning("✓ 在途任务恢复: %s", recovery_counts)
+    start_reconcile_loop()
+    logger.info("✓ 任务对账协程已就绪")
+
     # 初始化内置角色（admin / moderator / user）
     from app.core.database import async_session
     from app.routes.admin_roles import ensure_default_roles

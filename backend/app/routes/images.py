@@ -34,6 +34,7 @@ from app.models.user import User
 from app.schemas.images import ImageGenerationRequest, ImageGenerationResponse, ImageRecordResponse
 from app.services.agnes_client import agnes_client
 from app.services.provider_registry import provider_registry
+from app.services._generation_persist import create_pending_generation
 from app.services.credits_service import confirm_credits, consume_credits, get_image_cost_async, refund_credits
 from app.services.error_taxonomy import classify, classify_message
 from app.services.image_poller import image_poller_manager
@@ -136,6 +137,25 @@ async def create_image_task_async(
             len(ref_imgs), len(b64_imgs), len(url_imgs), "yes" if req.mask and req.mask.strip() else "no", size, req.model,
         )
 
+    # 任务账本：提交即落 pending 行（重启恢复事实源；b64 大字段不入库，终态由轮询器幂等 upsert 覆盖）
+    ledger_params = {
+        k: v for k, v in params.items()
+        if k not in ("base64_image", "image_url", "base64_images", "image_urls", "mask", "is_public")
+    }
+    await create_pending_generation(
+        kind="image",
+        user_id=current_user.id,
+        prompt=prompt,
+        model=req.model,
+        params=ledger_params,
+        mode=mode,
+        task_id=task_id,
+        credits_consumed=cost,
+        preset_id=req.preset_id,
+        context=req.context.model_dump() if req.context else None,
+        log_prefix="[图片生成]",
+    )
+
     task = await image_poller_manager.create_task(
         prompt=prompt,
         params=params,
@@ -194,16 +214,20 @@ async def get_image_task_status(
             result = await db.execute(stmt)
             record = result.scalar_one_or_none()
             if record:
+                # uncertain 是 DB 审计态：前端终态集合只有 success/failed/cancelled，映射为 failed+类目透出
+                status = record.status
+                resp_status = "failed" if status == "uncertain" else status
+                elapsed = int((datetime.utcnow() - record.created_at).total_seconds()) if record.created_at else 0
                 return ok(data={
                     "task_id": task_id,
-                    "status": record.status,
-                    "progress": 100 if record.status == "success" else 0,
+                    "status": resp_status,
+                    "progress": 100 if resp_status == "success" else (50 if resp_status in ("pending", "processing") else 0),
                     "result_url": record.result_url,
                     "url": record.result_url,
-                    "message": record.error_message if record.status == "failed" else None,
+                    "message": record.error_message if resp_status == "failed" else None,
                     "error_category": record.error_category,
                     "credits_consumed": record.credits_consumed,
-                    "elapsed_sec": 0,
+                    "elapsed_sec": elapsed,
                 })
         except Exception as e:
             logger.warning("[图片生成] 数据库查询失败: %s", e)
