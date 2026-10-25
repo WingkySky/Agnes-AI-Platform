@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.0.13] - 2026-10-25
+
 ### 多渠道路由 failover（生成任务：主渠道失败自动切备用渠道）
 
 - **数据模型**：新表 `model_routes`（锚点模型 → 备用渠道裸对 (provider_id, model_id)，priority 越小越优先，启动 create_all 自动建；模型同步不触碰，删除锚点模型/渠道级联清理）——目标为裸对不要求存在定义行，同款渠道与等价模型均可作备用；`api_providers` 新增 `billing_tier`（free/paid，默认 paid，存量库手动 ALTER），仅用于配置时跨档警示不做硬闸（显式配置即授权，免费渠道永远不会被切到未配置的付费渠道）
