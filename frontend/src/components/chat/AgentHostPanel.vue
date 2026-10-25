@@ -18,6 +18,16 @@
         <span>{{ t('agent.drawerTitle') }}</span>
       </div>
       <div class="header-btns">
+        <button
+          type="button"
+          class="icon-btn"
+          :aria-label="t('agent.drawerNew')"
+          :title="t('agent.drawerNew')"
+          @dblclick.stop
+          @click="handleNewSession"
+        >
+          <MessageSquarePlus :size="14" />
+        </button>
         <div v-if="chat.mcpCapabilities.length || chat.memoryAvailable" class="cap-anchor">
           <button
             type="button"
@@ -274,7 +284,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Bot, Trash2, X, Loader2, Maximize2, Minimize2, ChevronDown, Check,
-  Eye, Hand, Zap,
+  Eye, Hand, Zap, MessageSquarePlus,
 } from 'lucide-vue-next'
 import { ChatDotRound } from '@element-plus/icons-vue'
 import type { CSSProperties } from 'vue'

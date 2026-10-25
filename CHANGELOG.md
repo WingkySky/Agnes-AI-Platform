@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 全局宿主头部新增「新建对话」按钮
+
+- Agent 宿主面板头部按钮组最左新增新建对话钮（lucide MessageSquarePlus，title/aria 复用既有 `agent.drawerNew` 中英文案），点击与展开态会话侧栏的「新建」同入口（`handleNewSession`：画布页自动带当前工作区上下文标记）；`@dblclick.stop` 防连点误触头部的双击档位切换
+
 ### 对话编排端点退役（画布两处 LLM 调用迁前端透传通道，chat_service -1700 行）
 
 - **历史归属改随节点存画布**：text 节点多轮对话历史从后端 `chat_sessions` 表迁到节点 `content.messages`（user/assistant 条目，守卫式校验剔除坏行），随画布本地+云端持久化、跟着节点复制/删除/跨设备走；旧 `chat_session_id` 字段废弃（项目未上线不兼容）。宿主会话列表不再混入以节点名命名的「幽灵会话」，聊天表回归宿主单一职责
