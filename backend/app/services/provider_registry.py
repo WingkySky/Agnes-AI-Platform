@@ -809,6 +809,26 @@ class ProviderRegistry:
                 return False
             was_default = provider.is_default
 
+            # 级联清理挂在「本渠道模型」上的备用路由（锚点模型随本渠道级联删除，
+            # 但 model_routes.anchor_model_id 无外键，需显式清理防孤儿行）
+            anchor_model_ids = (
+                await session.scalars(
+                    select(ModelDefinition.model_id).where(
+                        ModelDefinition.provider_id == provider_id
+                    )
+                )
+            ).all()
+            if anchor_model_ids:
+                await session.execute(
+                    delete(ModelRoute).where(ModelRoute.anchor_model_id.in_(anchor_model_ids))
+                )
+
+            # 显式删除模型定义（SQLite 默认不开外键 pragma，FK CASCADE 不生效；
+            # 孤儿模型会残留在生成页并静默回退默认渠道）
+            await session.execute(
+                delete(ModelDefinition).where(ModelDefinition.provider_id == provider_id)
+            )
+
             # 删除 Provider（级联删除模型定义）
             await session.execute(
                 delete(ApiProvider).where(ApiProvider.id == provider_id)

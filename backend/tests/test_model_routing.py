@@ -255,3 +255,23 @@ async def test_delete_model_cascades_routes(bound_db):
     assert deleted is True
     remaining = (await bound_db.scalars(select(ModelRoute).where(ModelRoute.anchor_model_id == "m1"))).all()
     assert remaining == []
+
+
+@pytest.mark.asyncio
+async def test_delete_provider_cascades_routes_both_sides(bound_db):
+    """删除渠道：挂在其模型上的路由（anchor 无外键）与指向它的路由（FK CASCADE）都要清"""
+    await _seed_provider(bound_db, 1, "被删渠道")
+    await _seed_provider(bound_db, 2, "存活渠道")
+    await _seed_def(bound_db, "m1", 1)
+    await _seed_def(bound_db, "m2", 2)
+    # 指向被删渠道的路由（FK CASCADE 管辖）+ 锚点在被删渠道上的路由（显式清理管辖）
+    await _seed_route(bound_db, "m2", 1, "m1")
+    await _seed_route(bound_db, "m1", 2, "m2")
+
+    deleted = await pr_module.provider_registry.delete_provider(1)
+    assert deleted is True
+    remaining = (await bound_db.scalars(select(ModelRoute))).all()
+    assert remaining == []
+    # 模型定义也随渠道删除（SQLite 无外键 pragma 不触发 CASCADE，需显式删除）
+    orphan_models = (await bound_db.scalars(select(ModelDefinition).where(ModelDefinition.provider_id == 1))).all()
+    assert orphan_models == []

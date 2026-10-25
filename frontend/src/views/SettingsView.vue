@@ -793,7 +793,7 @@ const providerNameById = computed(() => {
 
 // ---------- 模型备用路由（多渠道路由 failover） ----------
 const modelRoutes = ref<EditableModelRoute[]>([])
-const routeAddProviderId = ref<number>(0)
+const routeAddProviderId = ref<number | undefined>(undefined)
 const routeAddModelId = ref('')
 
 // 渠道档位反查表（跨档警示用）
@@ -846,7 +846,12 @@ function moveRoute(idx: number, delta: number) {
 }
 
 function addRoute() {
-  const result = appendModelRoute(modelRoutes.value, routeAddProviderId.value, routeAddModelId.value)
+  const providerId = routeAddProviderId.value
+  if (!providerId) {
+    ElMessage.warning(t('settings.routeProvider'))
+    return
+  }
+  const result = appendModelRoute(modelRoutes.value, providerId, routeAddModelId.value)
   if (result.duplicate) {
     ElMessage.warning(t('settings.routeDuplicate'))
     return
@@ -871,7 +876,7 @@ async function persistModelRoutes(modelId: string) {
 
 function openModelDialog(model?: ModelDefinition, presetProviderId?: number) {
   editingModel.value = model || null
-  routeAddProviderId.value = 0
+  routeAddProviderId.value = undefined
   routeAddModelId.value = ''
   modelRoutes.value = []
   if (model) {
