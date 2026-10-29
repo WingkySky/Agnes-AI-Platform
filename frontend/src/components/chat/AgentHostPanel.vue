@@ -3,7 +3,7 @@
     v-if="visible"
     ref="rootRef"
     class="agent-host-panel"
-    :class="{ 'is-expanded': isExpanded }"
+    :class="{ 'is-expanded': isExpanded, 'is-docked': isDock }"
     :style="[rootVars, panelPosStyle]"
   >
     <!-- 头部：标题 + 能力清单/展开/清空/关闭（标题区可拖动；双击在大小两档间切换） -->
@@ -62,14 +62,47 @@
           </div>
         </div>
         <button
+          v-if="isDock"
+          type="button"
+          class="icon-btn dock-sidebar-btn"
+          :class="{ 'is-active': dockSidebarOpen }"
+          :aria-label="t('agent.sessions')"
+          :title="t('agent.sessions')"
+          @click="dockSidebarOpen = !dockSidebarOpen"
+        >
+          <List :size="14" />
+        </button>
+        <button
+          v-if="modeState.mode === 'small'"
           type="button"
           class="icon-btn"
-          :aria-label="expandLabel"
-          :title="expandLabel"
-          @click="togglePreset()"
+          :class="{ 'is-pinned': modeState.pinned }"
+          :aria-label="pinLabel"
+          :title="pinLabel"
+          @click="togglePin"
         >
-          <Minimize2 v-if="isExpanded" :size="14" />
+          <PinOff v-if="modeState.pinned" :size="14" />
+          <Pin v-else :size="14" />
+        </button>
+        <button
+          type="button"
+          class="icon-btn"
+          :aria-label="modeState.mode === 'small' ? t('agent.expand') : t('agent.collapse')"
+          :title="modeState.mode === 'small' ? t('agent.expand') : t('agent.collapse')"
+          @click="setMode(modeState.mode === 'small' ? 'float' : 'small')"
+        >
+          <Minimize2 v-if="modeState.mode === 'float'" :size="14" />
           <Maximize2 v-else :size="14" />
+        </button>
+        <button
+          type="button"
+          class="icon-btn"
+          :class="{ 'is-active': isDock }"
+          :aria-label="isDock ? t('agent.undock') : t('agent.dock')"
+          :title="isDock ? t('agent.undock') : t('agent.dock')"
+          @click="setMode(isDock ? 'float' : 'dock')"
+        >
+          <PanelRight :size="14" />
         </button>
         <button type="button" class="icon-btn" :aria-label="t('agent.clear')" :title="t('agent.clear')" @click="clearActiveSession">
           <Trash2 :size="14" />
@@ -87,20 +120,24 @@
       <el-button type="primary" @click="handleNewSession">{{ t('chat.startChat') }}</el-button>
     </div>
 
-    <!-- 主体：展开态加会话侧栏 -->
+    <!-- 主体：展开态加会话侧栏（停靠档改为按需拉出的浮层，聊天区占满） -->
     <div v-else class="panel-body">
-      <ChatSessionSidebar
-        v-if="isExpanded"
-        :title="t('chat.title')"
-        :sessions="sessionViews"
-        :active-id="chat.activeSessionId"
-        :extra-commands="sessionExtraCommands"
-        @select="onSelectSession"
-        @create="onCreateSession"
-        @rename="onRenameSession"
-        @delete="onDeleteSession"
-        @extra="onSessionExtra"
-      />
+      <div
+        v-if="isExpanded && (!isDock || dockSidebarOpen)"
+        :class="['sidebar-holder', { 'as-overlay': isDock }]"
+      >
+        <ChatSessionSidebar
+          :title="t('chat.title')"
+          :sessions="sessionViews"
+          :active-id="chat.activeSessionId"
+          :extra-commands="sessionExtraCommands"
+          @select="onSelectSession"
+          @create="onCreateSession"
+          @rename="onRenameSession"
+          @delete="onDeleteSession"
+          @extra="onSessionExtra"
+        />
+      </div>
 
       <div class="panel-chat">
         <!-- 消息流（共享列表 + store 统一投影；领域渲染经插槽注入） -->
@@ -258,33 +295,36 @@
     </div>
 
     <!-- 拉伸把手：四边+四角恒备。贴内侧放置（overflow:hidden 会裁掉负偏移） -->
-    <div class="edge-handle edge-n" @pointerdown.stop="onResizePointerDown($event, 'n')" />
-    <div class="edge-handle edge-s" @pointerdown.stop="onResizePointerDown($event, 's')" />
-    <div class="edge-handle edge-e" @pointerdown.stop="onResizePointerDown($event, 'e')" />
-    <div class="edge-handle edge-w" @pointerdown.stop="onResizePointerDown($event, 'w')" />
-    <div class="edge-handle corner-nw" @pointerdown.stop="onResizePointerDown($event, 'nw')" />
-    <div class="edge-handle corner-ne" @pointerdown.stop="onResizePointerDown($event, 'ne')" />
-    <div class="edge-handle corner-sw" @pointerdown.stop="onResizePointerDown($event, 'sw')" />
-    <div class="edge-handle corner-se" @pointerdown.stop="onResizePointerDown($event, 'se')" />
+    <div v-if="!isDock" class="edge-handle edge-n" @pointerdown.stop="onResizePointerDown($event, 'n')" />
+    <div v-if="!isDock" class="edge-handle edge-s" @pointerdown.stop="onResizePointerDown($event, 's')" />
+    <div v-if="!isDock" class="edge-handle edge-e" @pointerdown.stop="onResizePointerDown($event, 'e')" />
+    <div v-if="isDock" class="edge-handle edge-w" @pointerdown.stop="onDockResizePointerDown($event)" />
+    <div v-else class="edge-handle edge-w" @pointerdown.stop="onResizePointerDown($event, 'w')" />
+    <div v-if="!isDock" class="edge-handle corner-nw" @pointerdown.stop="onResizePointerDown($event, 'nw')" />
+    <div v-if="!isDock" class="edge-handle corner-ne" @pointerdown.stop="onResizePointerDown($event, 'ne')" />
+    <div v-if="!isDock" class="edge-handle corner-sw" @pointerdown.stop="onResizePointerDown($event, 'sw')" />
+    <div v-if="!isDock" class="edge-handle corner-se" @pointerdown.stop="onResizePointerDown($event, 'se')" />
   </div>
 </template>
 
 <script setup lang="ts">
 /* =====================================================
- * AgentHostPanel — 全局 Agent 宿主（自绘浮层双形态）
- * 小态右停靠 360 ⇄ 展开态居中 86%（头部拖动/双击切换/位置记忆），
- * 无遮罩：小态点外部收起（页面仍可交互），展开态 Esc/按钮退出。
+ * AgentHostPanel — 全局 Agent 宿主（自绘浮层三形态）
+ * small 小态气泡（点外收起，可钉住）/ float 展开浮窗（点外不收）/
+ * dock 停靠侧栏（右侧全高，页面挤窄让位、永不点外收），
+ * 头部按钮三档切换；float/small 沿用几何记忆（宽度过阈值即展开态），
+ * dock 宽度独立记忆（agent-host-geom modeState）。导演台等全屏页可达。
  * 能力内置（自画布面板迁入）：三档权限胶囊、阶段/工具确认卡、
  * 风格卡片、能力清单（MCP/记忆）、会话侧栏（展开态）+ 画布会话跳转。
  * 发送链走 useChatComposer（与对话页/抽屉同源）；开关态 = chat store
  * agentDrawerOpen（顶栏按钮/Alt+A/粘贴互斥守卫语义不变）。
  * 主题 token 可选注入，缺省映射 agnes 全局变量（自动跟随深浅色）。
  * ===================================================== */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Bot, Trash2, X, Loader2, Maximize2, Minimize2, ChevronDown, Check,
-  Eye, Hand, Zap, MessageSquarePlus,
+  Eye, Hand, Zap, MessageSquarePlus, PanelRight, Pin, PinOff, List,
 } from 'lucide-vue-next'
 import { ChatDotRound } from '@element-plus/icons-vue'
 import type { CSSProperties } from 'vue'
@@ -304,9 +344,10 @@ import ChatInputBar from '@/components/chat/ChatInputBar.vue'
 import ChatSessionSidebar from '@/components/chat/ChatSessionSidebar.vue'
 import ChatPendingAttachments from '@/components/chat/ChatPendingAttachments.vue'
 import {
-  HOST_GEOM_KEY, HOST_MIN_W, HOST_MIN_H, clampGeom, isExpandedGeom, presetGeom, readGeom, saveGeom,
+  HOST_GEOM_KEY, HOST_MIN_W, HOST_MIN_H, clampGeom, clampDockWidth, isExpandedGeom, presetGeom, readGeom, saveGeom,
+  readHostModeState, saveHostModeState,
 } from '@/components/chat/agent-host-geom'
-import type { PanelGeom } from '@/components/chat/agent-host-geom'
+import type { PanelGeom, HostMode, HostModeState } from '@/components/chat/agent-host-geom'
 import { DEFAULT_HOST_THEME } from '@/components/chat/agent-host-theme'
 import type { HostTheme } from '@/components/chat/agent-host-theme'
 import type { ChatSessionCommand, ChatSessionView, ChatStepView } from '@/components/chat/types'
@@ -354,7 +395,44 @@ const rootRef = ref<HTMLElement | null>(null)
 // ---------- 面板几何：唯一几何，尺寸决定形态（宽度过阈值即展开态），拖动/拉伸/双击共用（纯函数见 agent-host-geom） ----------
 const geom = ref<PanelGeom | null>(readGeom(HOST_GEOM_KEY))
 
-const isExpanded = computed(() => isExpandedGeom(geom.value))
+// ---------- 三态模式（small/float/dock）+ 小态钉住 + 停靠宽度（独立记忆） ----------
+const modeState = ref<HostModeState>(readHostModeState())
+const isDock = computed(() => modeState.value.mode === 'dock')
+const isExpanded = computed(() => isDock.value || isExpandedGeom(geom.value))
+
+function commitModeState(): void {
+  saveHostModeState(modeState.value)
+}
+
+/** 三档切换：small/float 沿用既有预设语义（每次切入重定预设），dock 用独立宽度无需动几何 */
+function setMode(mode: HostMode): void {
+  modeState.value = { ...modeState.value, mode }
+  commitModeState()
+  if (mode !== 'dock') dockSidebarOpen.value = false
+  if (mode === 'small') applyPreset('small')
+  else if (mode === 'float') applyPreset('expanded')
+}
+
+function togglePin(): void {
+  modeState.value = { ...modeState.value, pinned: !modeState.value.pinned }
+  commitModeState()
+}
+
+const pinLabel = computed(() => (modeState.value.pinned ? t('agent.unpin') : t('agent.pin')))
+
+/** 停靠档会话浮层开关（聊天区默认占满，点 header 按钮临时拉出列表） */
+const dockSidebarOpen = ref(false)
+
+// 停靠激活 → 同步给 App.vue（页面挤压 class）+ 写 :root 停靠宽度变量
+watchEffect(() => {
+  chat.setAgentDocked(visible.value && isDock.value)
+  const root = document.documentElement
+  if (visible.value && isDock.value) {
+    root.style.setProperty('--agent-dock-w', `${clampDockWidth(modeState.value.dockWidth, window.innerWidth)}px`)
+  } else {
+    root.style.removeProperty('--agent-dock-w')
+  }
+})
 
 /** 视口钳位后落盘 */
 function commitGeom(g: PanelGeom): void {
@@ -363,6 +441,16 @@ function commitGeom(g: PanelGeom): void {
 }
 
 const panelPosStyle = computed<CSSProperties>(() => {
+  if (isDock.value) {
+    return {
+      left: 'auto',
+      right: '0',
+      top: '0',
+      bottom: 'auto',
+      width: `${clampDockWidth(modeState.value.dockWidth, window.innerWidth)}px`,
+      height: '100dvh',
+    }
+  }
   const g = geom.value
   if (!g) return {}
   return {
@@ -385,7 +473,29 @@ function togglePreset(): void {
 }
 
 function onHeaderDblClick(): void {
+  if (isDock.value) return
   togglePreset()
+}
+
+/** 停靠档西缘拉伸：只调宽度（西缘拖右=收窄），窄屏钳视口 */
+function onDockResizePointerDown(e: PointerEvent): void {
+  const startX = e.clientX
+  const baseW = modeState.value.dockWidth
+  const move = (ev: PointerEvent): void => {
+    modeState.value = {
+      ...modeState.value,
+      dockWidth: clampDockWidth(baseW - (ev.clientX - startX), window.innerWidth),
+    }
+    document.documentElement.style.setProperty('--agent-dock-w', `${clampDockWidth(modeState.value.dockWidth, window.innerWidth)}px`)
+  }
+  const up = (): void => {
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', up)
+    commitModeState()
+  }
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', up)
+  e.preventDefault()
 }
 
 function beginPointerTracking(
@@ -412,8 +522,9 @@ function baseGeom(): PanelGeom | null {
   return { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
 }
 
-/** 头部拖动移位（按钮不触发） */
+/** 头部拖动移位（按钮不触发；停靠档头部不拖动） */
 function onHeaderPointerDown(e: PointerEvent): void {
+  if (isDock.value) return
   if (e.target instanceof Element && e.target.closest('button')) return
   const base = baseGeom()
   if (!base) return
@@ -488,7 +599,6 @@ const rootVars = computed<CSSProperties>(() => ({
   '--cb-pill-text': props.theme.toolbar.item,
 }))
 
-const expandLabel = computed(() => (isExpanded.value ? t('agent.collapse') : t('agent.expand')))
 
 // ---------- 会话侧栏（展开态）+ 画布会话跳转 ----------
 const sessionViews = computed<ChatSessionView[]>(() =>
@@ -501,6 +611,8 @@ const sessionExtraCommands = computed<ChatSessionCommand[]>(() => [
 
 /** 切换会话（画布会话跳画布续聊：内核依赖画布上下文，同对话页规则） */
 function onSelectSession(id: number | string): void {
+  // 停靠档的会话浮层：选完即收（普通侧栏不受影响）
+  dockSidebarOpen.value = false
   const session = chat.sessions.find((s) => s.id === Number(id))
   if (session?.session_type === 'canvas') {
     close()
@@ -684,7 +796,9 @@ function onGlobalKeydown(e: KeyboardEvent): void {
     }
     if (isExpanded.value) {
       e.preventDefault()
-      applyPreset('small')
+      // 停靠/浮窗 → 回小态（小态再按 Esc 无动作，与既有语义一致）
+      if (isDock.value) setMode('small')
+      else applyPreset('small')
     }
   }
 }
@@ -697,8 +811,12 @@ function onGlobalPointerDown(e: PointerEvent): void {
     closeMenu()
     toolsOpen.value = false
   }
-  // 小态点外部收起（页面仍可交互；展开态不收）
-  if (!isExpanded.value && (!target || !target.closest('.agent-host-panel'))) {
+  // 停靠档会话浮层：点浮层与拉出按钮之外收起
+  if (dockSidebarOpen.value && (!target || (!target.closest('.sidebar-holder') && !target.closest('.dock-sidebar-btn')))) {
+    dockSidebarOpen.value = false
+  }
+  // 小态点外部收起（未钉住时；浮窗/停靠不收，页面始终可交互）
+  if (modeState.value.mode === 'small' && !modeState.value.pinned && (!target || !target.closest('.agent-host-panel'))) {
     close()
   }
 }
@@ -760,6 +878,30 @@ watch(
     var(--agnes-bg-elevated, #171a26);
 }
 
+/* 停靠档：右侧全高侧栏（几何见 panelPosStyle dock 分支），方角+左侧投影 */
+.agent-host-panel.is-docked {
+  border-radius: 0;
+  border-top: none;
+  border-bottom: none;
+  border-right: none;
+  box-shadow: -10px 0 28px rgba(0, 0, 0, 0.18);
+}
+
+/* 会话侧栏容器：float 常驻为 flex 子项；dock 按需拉出为盖在聊天区上的浮层 */
+.sidebar-holder {
+  display: flex;
+  flex-shrink: 0;
+}
+
+.sidebar-holder.as-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 8;
+  box-shadow: 10px 0 26px rgba(0, 0, 0, 0.32);
+}
+
 .panel-header {
   display: flex;
   align-items: center;
@@ -768,6 +910,10 @@ watch(
   border-bottom: 1px solid transparent;
   cursor: grab;
   touch-action: none;
+}
+
+.agent-host-panel.is-docked .panel-header {
+  cursor: default;
 }
 
 .panel-header:active {
@@ -1019,6 +1165,7 @@ watch(
   flex: 1;
   display: flex;
   min-height: 0;
+  position: relative; /* 停靠档会话浮层的定位基准 */
 }
 
 .panel-chat {

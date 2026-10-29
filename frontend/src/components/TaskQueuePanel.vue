@@ -165,11 +165,17 @@ onMounted(() => {
   position: fixed;
   bottom: 24px;
   right: 24px;
+  transition: right 0.3s ease;
   z-index: 1000;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 12px;
+}
+
+/* Agent 面板停靠档激活时右移让位（app-root.agent-docked 由 App.vue 挂） */
+:global(.agent-docked) .task-queue-panel {
+  right: calc(24px + var(--agent-dock-w, 420px));
 }
 
 /* 悬浮按钮 */

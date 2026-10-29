@@ -11,7 +11,7 @@
 
 <template>
   <el-config-provider :locale="epLocale">
-    <div class="app-root" :class="{ 'no-header': isStandaloneRoute || isWorkbenchRoute, 'sidebar-open': sidebarOpen }">
+    <div class="app-root" :class="{ 'no-header': isStandaloneRoute || isWorkbenchRoute, 'sidebar-open': sidebarOpen, 'agent-docked': chatStore.agentDocked }">
       <!-- 侧边栏遮罩层 -->
       <div v-if="!isStandaloneRoute && sidebarOpen" class="sidebar-overlay" @click="sidebarOpen = false"></div>
 
@@ -790,6 +790,15 @@ const epLocale = computed(() => {
 .app-main.standalone {
   padding: 0;
   max-width: none;
+}
+
+/* Agent 面板停靠档：header/main/footer 统一右移让位（内容不被遮挡），
+   放在 canvas-mode/standalone 之后以覆盖其 padding:0 */
+.app-root.agent-docked .app-header,
+.app-root.agent-docked .app-main,
+.app-root.agent-docked .app-footer {
+  padding-right: var(--agent-dock-w, 420px);
+  transition: padding 0.3s ease;
 }
 
 /* ---- 页脚 ---- */

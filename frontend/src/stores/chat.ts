@@ -30,13 +30,14 @@ import { AgentKernel } from '@/lib/agent/kernel'
 import type { KernelEvent, AgentImageAttachment, HostTool } from '@/lib/agent/kernel'
 import { createAgentModel } from '@/lib/agent/provider'
 import { CHAT_TOOLS, canvasHostTools } from '@/lib/agent/chat-tools'
+import { SCENE_TOOLS } from '@/lib/agent/scene-tools'
 import type { CanvasPlacementPlan, CanvasTarget, CanvasExecutionRoute } from '@/lib/agent/chat-tools'
 import { applyCanvasOps, createWorkspace, getWorkspaceRevision, listWorkspaces } from '@/api/canvasWorkspace'
 import { getPreferences, patchPreferences } from '@/api/preferences'
 import { useCanvasStore } from '@/stores/canvas'
 import { isCloudChannel } from '@/lib/canvas-storage'
 import { CHAT_SYSTEM_PROMPT_BASE, buildChatSystemPrompt } from '@/lib/agent/chat-system-prompt'
-import { CANVAS_CONTEXT_SECTION } from '@/lib/agent/system-prompt'
+import { CANVAS_CONTEXT_SECTION, SCENE_CONTEXT_SECTION } from '@/lib/agent/system-prompt'
 import { listAgentSkills } from '@/lib/agent/skills'
 import { toBackendMessages } from '@/lib/agent/session-store'
 import { setDelegateProgressSink } from '@/lib/agent/subagent'
@@ -65,7 +66,7 @@ import type {
 } from '@/types'
 
 /** Agent 宿主种类（scope 注册制：页面挂载时注册，驱动深度工具注入与提示词上下文） */
-export type AgentHostKind = 'canvas' | 'editor'
+export type AgentHostKind = 'canvas' | 'editor' | 'scene'
 
 /** 页面注册的执行 scope（workspaceId/projectId 供批次 2 反向控制桥路由） */
 export interface AgentScope {
@@ -77,6 +78,7 @@ export interface AgentScope {
 /** 各宿主注册后附加的系统提示段（静态映射，注册方无需感知提示词内容） */
 const HOST_CONTEXT_SECTIONS: Partial<Record<AgentHostKind, string>> = {
   canvas: CANVAS_CONTEXT_SECTION,
+  scene: SCENE_CONTEXT_SECTION,
 }
 
 /** 桥目标轮询定时器（进程级单例，store 重建不叠加） */
@@ -401,6 +403,8 @@ export const useChatStore = defineStore('chat', {
     bridgeTargets: BridgeTarget[]
     /** 全局 Agent 抽屉开关（顶栏按钮 / Alt+A / 抽屉内关闭共用同一事实源） */
     agentDrawerOpen: boolean
+    /** 面板停靠档激活（dock 模式且开着）：App.vue 加挤压 class */
+    agentDocked: boolean
     // 是否已完成初始化（配合 keep-alive）
     _initialized: boolean
   } => ({
@@ -426,6 +430,7 @@ export const useChatStore = defineStore('chat', {
     agentScopes: {},
     bridgeTargets: [],
     agentDrawerOpen: false,
+    agentDocked: false,
     _initialized: false,
   }),
   getters: {
@@ -598,11 +603,14 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    /** extraTools 装配：MCP 工具 + 画布深度工具（本页 scope 或桥上有画布页，能力按可达性组装） */
+    /** extraTools 装配：MCP 工具 + 画布深度工具（本页 scope 或桥上有画布页，能力按可达性组装）+ 导演台工具（本页 scope） */
     _extraTools(): HostTool[] {
       const tools = [...mcpToolsCache]
       if (this.agentScopes.canvas || this.bridgeTargets.some((t) => t.host === 'canvas')) {
         tools.push(...canvasHostTools())
+      }
+      if (this.agentScopes.scene) {
+        tools.push(...SCENE_TOOLS)
       }
       return tools
     },
@@ -912,10 +920,16 @@ export const useChatStore = defineStore('chat', {
     /** 全局 Agent 抽屉开关 */
     setAgentDrawerOpen(open: boolean): void {
       this.agentDrawerOpen = open
+      if (!open) this.agentDocked = false
     },
 
     toggleAgentDrawer(): void {
       this.agentDrawerOpen = !this.agentDrawerOpen
+    },
+
+    /** 面板停靠档激活（AgentHostPanel 同步）：App.vue 挤压页面让位 */
+    setAgentDocked(active: boolean): void {
+      this.agentDocked = active
     },
 
     /** scope 注册（页面 onMounted）：幂等覆盖同 host 旧值，热更池内全部内核 */

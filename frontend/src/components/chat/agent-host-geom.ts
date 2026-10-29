@@ -70,3 +70,49 @@ export function presetGeom(kind: 'small' | 'expanded', maxW: number, maxH: numbe
     height: Math.max(HOST_MIN_H, maxH - 112),
   }, maxW, maxH)
 }
+
+// =====================================================
+// 三态模式（small 小态气泡 / float 展开浮窗 / dock 停靠侧栏）
+// =====================================================
+
+export const HOST_MODE_KEY = 'agnes_agent_host_mode'
+export type HostMode = 'small' | 'float' | 'dock'
+export const HOST_DOCK_MIN_W = 240
+export const HOST_DOCK_MAX_W = 560
+
+export interface HostModeState {
+  mode: HostMode
+  /** 仅 small 档生效：钉住后点外不收起 */
+  pinned: boolean
+  dockWidth: number
+}
+
+/** 读三态记忆（损坏/缺省回 small+未钉+420） */
+export function readHostModeState(key = HOST_MODE_KEY): HostModeState {
+  try {
+    const raw = localStorage.getItem(key)
+    if (!raw) return { mode: 'small', pinned: false, dockWidth: 420 }
+    const g = JSON.parse(raw) as Partial<HostModeState>
+    const mode: HostMode = g.mode === 'float' || g.mode === 'dock' ? g.mode : 'small'
+    return {
+      mode,
+      pinned: g.pinned === true,
+      dockWidth: typeof g.dockWidth === 'number' && Number.isFinite(g.dockWidth) ? g.dockWidth : 420,
+    }
+  } catch {
+    return { mode: 'small', pinned: false, dockWidth: 420 }
+  }
+}
+
+export function saveHostModeState(state: HostModeState, key = HOST_MODE_KEY): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(state))
+  } catch {
+    // 记忆失败不影响切换
+  }
+}
+
+/** 停靠宽度钳位：240~560，窄屏再钳到视口（至少留 56px 页面） */
+export function clampDockWidth(w: number, vw: number): number {
+  return Math.max(HOST_DOCK_MIN_W, Math.min(w, HOST_DOCK_MAX_W, Math.max(HOST_DOCK_MIN_W, vw - 56)))
+}

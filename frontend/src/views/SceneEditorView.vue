@@ -44,6 +44,15 @@
         <el-tooltip :content="t('scene3d.fullViewportHint') + ' (F)'">
           <el-button size="small" plain :icon="FullScreen" @click="toggleFullscreenViewport" />
         </el-tooltip>
+        <el-tooltip :content="t('agent.drawerTitle') + ' (Alt+A)'">
+          <el-button
+            size="small"
+            plain
+            :type="chatStore.agentDrawerOpen ? 'primary' : 'default'"
+            :icon="ChatDotRound"
+            @click="chatStore.toggleAgentDrawer()"
+          />
+        </el-tooltip>
       </div>
     </header>
 
@@ -203,9 +212,12 @@ import {
   ArrowUp,
   ArrowDown,
 } from '@element-plus/icons-vue'
+import { ChatDotRound } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'
 import { useConfirm } from '@/composables/useConfirm'
 import { useScenesStore } from '@/stores/scenes'
+import { useChatStore } from '@/stores/chat'
+import { registerSceneBridge, unregisterSceneBridge } from '@/lib/agent/scene-bridge'
 import { useModelsStore } from '@/stores/models'
 import { useTaskQueueStore } from '@/stores/taskQueue'
 import Scene3DEditor from '@/components/scene/Scene3DEditor.vue'
@@ -241,6 +253,7 @@ const { t } = useI18n()
 const { confirm } = useConfirm()
 const router = useRouter()
 const scenesStore = useScenesStore()
+const chatStore = useChatStore()
 const modelsStore = useModelsStore()
 const queue = useTaskQueueStore()
 
@@ -776,15 +789,26 @@ function onKeydown(e: KeyboardEvent) {
   else if (e.key === 'Escape' && fullscreenViewport.value) fullscreenViewport.value = false
 }
 
+// ---------- Agent 对话式调度（b4）：注册 scope + 数据桥（工具层经桥读写编辑态） ----------
 onMounted(() => {
   window.addEventListener('keydown', onKeydown)
   loadScenes()
   fetchPreview()
+  chatStore.registerAgentScope({ host: 'scene' })
+  registerSceneBridge({
+    getScene: () => sceneData.value,
+    applyScene: (next) => { sceneData.value = next },
+    getSelection: () => selected.value,
+    getSceneId: () => currentId.value,
+    getSceneName: () => currentName.value,
+  })
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
   onDragEnd()
+  chatStore.unregisterAgentScope('scene')
+  unregisterSceneBridge()
 })
 </script>
 

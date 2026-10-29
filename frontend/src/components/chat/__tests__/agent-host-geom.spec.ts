@@ -1,8 +1,10 @@
-/* AgentHostPanel 几何纯函数：形态推导/钳位/预设/位置记忆 */
+/* AgentHostPanel 几何纯函数：形态推导/钳位/预设/位置记忆/三态模式 */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
-  HOST_GEOM_KEY, clampGeom, isExpandedGeom, presetGeom, readGeom, saveGeom,
+  HOST_GEOM_KEY, HOST_MODE_KEY, HOST_DOCK_MIN_W, HOST_DOCK_MAX_W,
+  clampGeom, clampDockWidth, isExpandedGeom, presetGeom, readGeom, saveGeom,
+  readHostModeState, saveHostModeState,
 } from '../agent-host-geom'
 
 const store = new Map<string, string>()
@@ -76,5 +78,43 @@ describe('位置记忆', () => {
     expect(readGeom(HOST_GEOM_KEY)).toBeNull()
     localStorage.setItem(HOST_GEOM_KEY, JSON.stringify({ left: 1 }))
     expect(readGeom(HOST_GEOM_KEY)).toBeNull()
+  })
+})
+
+describe('三态模式记忆', () => {
+  it('缺省回 small+未钉+420', () => {
+    expect(readHostModeState()).toEqual({ mode: 'small', pinned: false, dockWidth: 420 })
+  })
+
+  it('保存回读三态', () => {
+    saveHostModeState({ mode: 'dock', pinned: false, dockWidth: 480 })
+    expect(readHostModeState()).toEqual({ mode: 'dock', pinned: false, dockWidth: 480 })
+    saveHostModeState({ mode: 'small', pinned: true, dockWidth: 420 })
+    const s = readHostModeState()
+    expect(s.mode).toBe('small')
+    expect(s.pinned).toBe(true)
+  })
+
+  it('损坏数据与非法 mode 回退缺省', () => {
+    localStorage.setItem(HOST_MODE_KEY, '{broken')
+    expect(readHostModeState().mode).toBe('small')
+    localStorage.setItem(HOST_MODE_KEY, JSON.stringify({ mode: 'weird', dockWidth: 'x' }))
+    const s = readHostModeState()
+    expect(s.mode).toBe('small')
+    expect(s.dockWidth).toBe(420)
+  })
+})
+
+describe('clampDockWidth', () => {
+  it('钳到 240~560 区间', () => {
+    expect(clampDockWidth(100, 1920)).toBe(HOST_DOCK_MIN_W)
+    expect(clampDockWidth(999, 1920)).toBe(HOST_DOCK_MAX_W)
+    expect(clampDockWidth(420, 1920)).toBe(420)
+  })
+
+  it('窄屏钳到视口（至少留 56px 页面），但不低于下限', () => {
+    expect(clampDockWidth(560, 500)).toBe(444)
+    expect(clampDockWidth(420, 800)).toBe(420)  // 放得下不放大
+    expect(clampDockWidth(420, 260)).toBe(HOST_DOCK_MIN_W)
   })
 })

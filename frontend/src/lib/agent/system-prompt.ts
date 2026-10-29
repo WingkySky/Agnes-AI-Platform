@@ -38,6 +38,9 @@ export const CANVAS_CONTEXT_SECTION = `画布深度工具已可用（当前处�
 
 ${CANVAS_PIPELINE_BODY}`
 
+/** 导演台上下文段：scene_* 工具可用时附加到对话系统提示 */
+export const SCENE_CONTEXT_SECTION = `导演台工具已可用（当前处于 3D 场景导演台页）：scene_read（读全量场景数据，编辑前必读）/ scene_edit（对话式改场景：相机拉远近推、主光移位换色、主体增删摆姿势、道具布景、镜头增删改景别运镜关键帧）。场景数据以 id 寻址；scene_edit 是分集合替换语义且整批原子生效，校验失败会返回具体错误，修正后重试即可。修改只作用于编辑态，保存由用户在导演台顶栏确认；需要生成画面时不要自行调用生成工具，等用户明确要求。`
+
 /** 组装系统提示：基础段 + 可用技能段（渐进披露——正文经 agent_load_skill 按需加载） */
 export function buildAgentSystemPrompt(skills: AgentSkill[]): string {
   const section = buildSkillsSection(skills)
