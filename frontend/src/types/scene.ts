@@ -24,6 +24,8 @@ export interface SubjectData {
   z: number
   rotation: Vec3
   pose?: SubjectPose
+  /** 走位路径（b3：数据+编辑+渲染；沿径动画后置） */
+  motionPath?: MotionPath
   visible?: boolean
   locked?: boolean
 }
@@ -73,6 +75,24 @@ export interface PropData {
 export interface EnvironmentData {
   type: 'studio' | 'indoor' | 'outdoor' | 'night' | 'custom'
   label: string
+}
+
+/** 运镜/走位路径形状 */
+export type PathShape = 'line' | 'ring' | 'rectangle' | 'pencil'
+
+/** 路径：世界坐标采样点串（xz 平面 + y 高度） */
+export interface MotionPath {
+  shape: PathShape
+  points: Vec3[]
+  /** true=沿行进方向朝前；false=恒对准注视点 */
+  facePath: boolean
+}
+
+/** 镜头运镜路径：路径 + 采样参数 */
+export interface ShotCameraPath {
+  path: MotionPath
+  /** 采样机位关键帧数（含首尾） */
+  sampleCount: number
 }
 
 /** 舞台级设置 */
@@ -128,6 +148,8 @@ export interface ShotData {
   keyframes: CameraKeyframe[]
   /** 镜头附加描述（编译进 prompt 后缀） */
   prompt?: string
+  /** 运镜路径（采样生成 keyframes 的来源） */
+  cameraPath?: ShotCameraPath | null
   /** 预演截图封面 */
   coverUrl?: string | null
   /** 批量派生任务留痕 */

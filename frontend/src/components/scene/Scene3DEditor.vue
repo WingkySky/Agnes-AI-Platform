@@ -20,7 +20,12 @@
 <template>
   <div class="scene3d-editor">
     <!-- 3D 渲染容器 -->
-    <div ref="containerEl" class="scene3d-canvas" @click="onCanvasClick">
+    <div
+      ref="containerEl"
+      :class="['scene3d-canvas', { drawing }]"
+      @click="onCanvasClick"
+      @dblclick="onCanvasDblClick"
+    >
       <!-- 画幅取景框（纯参考叠加，不拦截交互） -->
       <div v-if="aspectRatio" class="aspect-frame-overlay">
         <div class="aspect-frame-box" :style="frameBoxStyle">
@@ -35,6 +40,9 @@
           {{ t('scene3d.playbackStop') }}
         </el-button>
       </div>
+
+      <!-- 路径绘制提示 -->
+      <div v-if="drawing" class="scene3d-draw-hint">{{ t('scene3d.pathDrawHint') }}</div>
     </div>
 
     <!-- 工具栏：元素选择/添加/删除 + 模式 + FOV + 画幅 + 跟随 + 漫游 + 拍照 -->
@@ -230,6 +238,8 @@ const emit = defineEmits<{
   captured: [dataUrl: string]
   /** 选中元素变化（面板联动） */
   select: [payload: { type: 'camera' | 'subject' | 'light' | 'prop'; index: number }]
+  /** 铅笔绘制完成（kind=目标：主体走位/镜头运镜） */
+  'path-drawn': [payload: { kind: 'subject' | 'shot'; points: Vec3[] }]
 }>()
 
 const containerEl = ref<HTMLDivElement>()
@@ -619,6 +629,8 @@ function initThree() {
   transformControls = new TransformControls(viewCamera, renderer.domElement)
   transformControls.addEventListener('dragging-changed', (e: any) => {
     if (orbitControls) orbitControls.enabled = !e.value
+    // 松手后路径折线跟随顶点新位置（拖动中不重建避免抖动）
+    if (!e.value) rebuildPathGroups()
   })
   transformControls.addEventListener('objectChange', syncToModel)
   // Three.js 0.185+ TransformControls 不再直接继承 Object3D，需用 getHelper()
@@ -788,6 +800,8 @@ function setGizmosVisible(visible: boolean) {
   cameraMeshes.forEach(m => (m.visible = visible))
   cameraArrows.forEach(a => (a.visible = visible))
   lightMeshes.forEach(m => (m.visible = visible))
+  Object.values(pathGroups).forEach(g => g && (g.visible = visible))
+  if (drawGroup) drawGroup.visible = visible
   if (transformControls) transformControls.getHelper().visible = visible
 }
 
@@ -803,6 +817,115 @@ async function captureViewport() {
   emit('captured', dataUrl)
 }
 
+// ---------- 运镜/走位路径（b3）：渲染 + 铅笔绘制 + 点拖拽 ----------
+type PathKind = 'subject' | 'shot'
+const PATH_COLORS: Record<PathKind, number> = { subject: 0x67c23a, shot: 0x409eff }
+const drawing = ref(false)
+let drawKind: PathKind | null = null
+let drawPoints: Vec3[] = []
+let drawGroup: THREE.Group | null = null
+let pathGroups: Record<PathKind, THREE.Group | null> = { subject: null, shot: null }
+const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
+
+/** 路径组：虚线感折线 + 可拖顶点小球 */
+function buildPathGroup(kind: PathKind, points: Vec3[], interactive: boolean): THREE.Group {
+  const group = new THREE.Group()
+  const color = PATH_COLORS[kind]
+  const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.85 })
+  const geo = new THREE.BufferGeometry().setFromPoints(points.map(p => new THREE.Vector3(p.x, p.y, p.z)))
+  group.add(new THREE.Line(geo, mat))
+  points.forEach((p, i) => {
+    const sphere = new THREE.Mesh(
+      new THREE.SphereGeometry(0.14, 12, 12),
+      new THREE.MeshStandardMaterial({ color, transparent: true, opacity: 0.9 }),
+    )
+    sphere.position.set(p.x, p.y, p.z)
+    if (interactive) sphere.userData = { type: 'pathpoint', kind, index: i }
+    group.add(sphere)
+  })
+  return group
+}
+
+/** 重建路径渲染：选中主体的走位路径 + activeShot 的运镜路径 */
+function rebuildPathGroups() {
+  if (!scene) return
+  for (const g of Object.values(pathGroups)) if (g) scene.remove(g)
+  pathGroups = { subject: null, shot: null }
+  const d = props.modelValue
+  if (activeTarget.value === 'subject') {
+    const s = d.subjects?.[activeIndex.value]
+    if (s?.motionPath?.points?.length) {
+      const g = buildPathGroup('subject', s.motionPath.points, true)
+      scene.add(g)
+      pathGroups.subject = g
+    }
+  }
+  const shot = d.shots?.find(x => x.id === d.activeShotId)
+  if (shot?.cameraPath?.path?.points?.length) {
+    const g = buildPathGroup('shot', shot.cameraPath.path.points, true)
+    scene.add(g)
+    pathGroups.shot = g
+  }
+}
+
+function rebuildDrawPreview() {
+  if (!scene) return
+  if (drawGroup) scene.remove(drawGroup)
+  drawGroup = null
+  if (drawKind && drawPoints.length) {
+    drawGroup = buildPathGroup(drawKind, drawPoints, false)
+    scene.add(drawGroup)
+  }
+}
+
+/** 铅笔绘制：进入后点击地面加点，双击结束（≥2 点才上抛），Esc 取消 */
+function startDrawPath(kind: PathKind) {
+  drawKind = kind
+  drawPoints = []
+  drawing.value = true
+  if (transformControls) transformControls.detach()
+  rebuildDrawPreview()
+}
+
+function cancelDrawPath() {
+  drawKind = null
+  drawPoints = []
+  drawing.value = false
+  rebuildDrawPreview()
+}
+
+function finishDrawPath() {
+  if (drawKind) {
+    // 去掉双击产生的重复近点
+    const deduped: Vec3[] = []
+    for (const p of drawPoints) {
+      const last = deduped[deduped.length - 1]
+      if (!last || Math.hypot(p.x - last.x, p.z - last.z) > 0.3) deduped.push(p)
+    }
+    if (deduped.length >= 2) emit('path-drawn', { kind: drawKind, points: deduped })
+  }
+  cancelDrawPath()
+}
+
+function onCanvasDblClick() {
+  if (drawing.value) finishDrawPath()
+}
+
+/** 拖拽路径顶点 → 回写 model 路径点（不动元素同步链路） */
+function syncPathPoint(mesh: THREE.Object3D) {
+  const { kind, index } = mesh.userData as { kind: PathKind; index: number }
+  const newData: SceneData = JSON.parse(JSON.stringify(props.modelValue))
+  const pos = { x: round(mesh.position.x), y: round(mesh.position.y), z: round(mesh.position.z) }
+  if (kind === 'subject') {
+    const s = newData.subjects[activeTarget.value === 'subject' ? activeIndex.value : -1]
+    if (s?.motionPath) s.motionPath.points[index] = pos
+  } else {
+    const shot = newData.shots.find(x => x.id === newData.activeShotId)
+    if (shot?.cameraPath) shot.cameraPath.path.points[index] = pos
+  }
+  emit('update:modelValue', newData)
+}
+
 // ---------- 点击 3D 元素直接选中 ----------
 function onCanvasClick(e: MouseEvent) {
   if (transformControls?.dragging || playback) return
@@ -812,11 +935,22 @@ function onCanvasClick(e: MouseEvent) {
   pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1
   raycaster.setFromCamera(pointer, viewCamera)
 
+  // 铅笔绘制模式：点击地面加点
+  if (drawing.value && drawKind) {
+    const hit = new THREE.Vector3()
+    if (raycaster.ray.intersectPlane(groundPlane, hit)) {
+      drawPoints.push({ x: round(hit.x), y: 1.6, z: round(hit.z) })
+      rebuildDrawPreview()
+    }
+    return
+  }
+
   const targets: THREE.Object3D[] = []
   cameraMeshes.forEach(m => targets.push(m))
   subjectMeshes.forEach(m => targets.push(m))
   lightMeshes.forEach(g => g.traverse(child => targets.push(child)))
   propMeshes.forEach(m => targets.push(m))
+  Object.values(pathGroups).forEach(g => g && g.children.forEach(c => targets.push(c)))
 
   const hits = raycaster.intersectObjects(targets, true)
   if (hits.length === 0) return
@@ -825,7 +959,12 @@ function onCanvasClick(e: MouseEvent) {
   while (obj && !obj.userData?.type) obj = obj.parent
   if (!obj) return
 
-  const type = obj.userData.type as TargetType
+  const type = obj.userData.type as TargetType | 'pathpoint'
+  if (type === 'pathpoint') {
+    // 路径顶点：附着变换手柄拖动（不动元素选中态）
+    if (transformControls) transformControls.attach(obj)
+    return
+  }
   if (type === 'camera') {
     const idx = cameraMeshes.indexOf(obj as THREE.Group)
     if (idx >= 0) select('camera', idx)
@@ -859,6 +998,7 @@ function select(type: TargetType, index: number) {
     fovValue.value = cameras[index]?.fov ?? 50
   }
   attachActive()
+  rebuildPathGroups()
   emit('select', { type, index })
 }
 
@@ -1004,6 +1144,12 @@ function removeElement() {
 
 // ---------- 把 3D 对象位置/方向/旋转同步回 modelValue ----------
 function syncToModel() {
+  // 路径顶点拖拽：只回写路径点，不走元素同步
+  const attached = transformControls?.object as THREE.Object3D | undefined
+  if (attached?.userData?.type === 'pathpoint') {
+    syncPathPoint(attached)
+    return
+  }
   const newData: SceneData = JSON.parse(JSON.stringify(props.modelValue))
   // 同步机位（位置 + 被拖动相机的朝向 → target）
   cameraMeshes.forEach((m, i) => {
@@ -1176,6 +1322,7 @@ function applySceneData(data: SceneData) {
   if (!scene) return
   const d = data
   rebuildElements()
+  rebuildPathGroups()
   if (activeTarget.value === 'camera') {
     const cam = d.cameras?.[activeIndex.value] || d.cameras?.[0]
     if (cam) fovValue.value = cam.fov
@@ -1237,6 +1384,10 @@ function onKeyDown(e: KeyboardEvent) {
   // 输入框内不触发
   const target = e.target as HTMLElement
   if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+  if (e.key === 'Escape' && drawing.value) {
+    cancelDrawPath()
+    return
+  }
 
   const key = e.key.toLowerCase()
   if (key === '1') setActiveTarget('camera')
@@ -1303,6 +1454,8 @@ defineExpose({
   enterRoam,
   focusCamera,
   activeCameraPose,
+  startDrawPath,
+  cancelDrawPath,
 })
 
 onMounted(() => {
@@ -1348,6 +1501,26 @@ onUnmounted(() => {
   min-height: 280px;
   cursor: pointer;
   position: relative;
+}
+
+.scene3d-canvas.drawing {
+  cursor: crosshair;
+}
+
+/* 路径绘制提示条 */
+.scene3d-draw-hint {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  background: var(--agnes-bg-elevated);
+  border: 1px solid var(--agnes-border-faint);
+  border-radius: 6px;
+  backdrop-filter: blur(4px);
+  z-index: 11;
+  font-size: 12px;
+  color: var(--agnes-text-primary);
 }
 
 /* 画幅取景框叠加层（纯参考，不拦截交互） */

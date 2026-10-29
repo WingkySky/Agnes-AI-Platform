@@ -69,7 +69,13 @@
       <div v-if="showPanel('left')" class="v-grip" @mousedown="startDrag('left', $event)" />
 
       <main class="wb-viewport">
-        <Scene3DEditor ref="viewportRef" v-model="sceneData" @captured="onCaptured" @select="onSelect" />
+        <Scene3DEditor
+          ref="viewportRef"
+          v-model="sceneData"
+          @captured="onCaptured"
+          @select="onSelect"
+          @path-drawn="onPathDrawn"
+        />
       </main>
 
       <div v-if="showPanel('right')" class="v-grip" @mousedown="startDrag('right', $event)" />
@@ -81,6 +87,10 @@
           :prompt-suffix="promptSuffix"
           :prompt-details="promptDetails"
           @add-keyframe="addKeyframeFromViewport"
+          @gen-path="onGenPath"
+          @draw-path="kind => viewportRef?.startDrawPath(kind)"
+          @clear-path="onClearPath"
+          @sample-path="onSamplePath"
         />
         <div class="aside-collapse right" :title="t('scene3d.collapseRight') + ' ( ] )'" @click="togglePanel('right')">
           <el-icon><ArrowRight /></el-icon>
@@ -217,12 +227,13 @@ import {
   normalizeSceneData,
 } from '@/lib/scene/normalize'
 import { buildShotDeriveParams } from '@/lib/scene/derive'
+import { makePath, samplePathFrames } from '@/lib/scene/path'
 import {
   loadWorkbenchLayout,
   saveWorkbenchLayout,
   type WorkbenchLayout,
 } from '@/lib/scene/workbench-layout'
-import type { Scene3D, SceneData, ShotData } from '@/types/scene'
+import type { MotionPath, Scene3D, SceneData, ShotData } from '@/types/scene'
 
 type TreeType = 'camera' | 'subject' | 'light' | 'prop'
 
@@ -560,6 +571,78 @@ function addKeyframeFromViewport() {
       s.id === shot.id ? { ...s, keyframes: [...s.keyframes, frame].sort((a, b) => a.time - b.time) } : s,
     ),
   }
+}
+
+// ---------- 运镜/走位路径（b3） ----------
+type PathKind = 'subject' | 'shot'
+
+/** 形状路径的生成中心：第一主体（胸口）优先，退镜头注视点 */
+function pathCenter(): { x: number; y: number; z: number } {
+  const d = sceneData.value
+  const sub = d.subjects[0]
+  if (sub) return { x: sub.x, y: 1, z: sub.z }
+  const shot = d.shots.find(x => x.id === d.activeShotId)
+  const cam = shot ? d.cameras.find(c => c.id === shot.cameraId) : pickActiveCamera(d)
+  return cam?.target ?? { x: 0, y: 0, z: 0 }
+}
+
+function onGenPath(kind: PathKind, shape: 'line' | 'ring' | 'rectangle') {
+  const path = makePath(shape, pathCenter())
+  applyPath(kind, path)
+}
+
+function onClearPath(kind: PathKind) {
+  applyPath(kind, null)
+}
+
+/** 铅笔绘制完成 → pencil 路径落 model */
+function onPathDrawn({ kind, points }: { kind: PathKind; points: { x: number; y: number; z: number }[] }) {
+  applyPath(kind, { shape: 'pencil', facePath: true, points })
+}
+
+function applyPath(kind: PathKind, path: MotionPath | null) {
+  const d = sceneData.value
+  if (kind === 'shot') {
+    const shotId = d.activeShotId
+    sceneData.value = {
+      ...d,
+      shots: d.shots.map(s =>
+        s.id === shotId
+          ? { ...s, cameraPath: path ? { path, sampleCount: s.cameraPath?.sampleCount ?? 6 } : null }
+          : s,
+      ),
+    }
+  } else {
+    const idx = selected.value?.type === 'subject' ? selected.value.index : -1
+    if (idx < 0) {
+      ElMessage.warning(t('scene3d.pathNeedSubject'))
+      return
+    }
+    sceneData.value = {
+      ...d,
+      subjects: d.subjects.map((s, i) => (i === idx ? { ...s, motionPath: path ?? undefined } : s)),
+    }
+  }
+}
+
+/** 运镜路径 → 采样机位关键帧（预演/派生直接复用关键帧链路） */
+function onSamplePath() {
+  const shot = activeShot.value
+  if (!shot?.cameraPath) return
+  const cam = sceneData.value.cameras.find(c => c.id === shot.cameraId) ?? pickActiveCamera(sceneData.value)
+  if (!cam) return
+  const sub = sceneData.value.subjects[0]
+  const lookTarget = sub ? { x: sub.x, y: 1.2, z: sub.z } : cam.target
+  const frames = samplePathFrames(shot.cameraPath.path, shot.cameraPath.sampleCount, {
+    duration: shot.duration,
+    fov: cam.fov,
+    lookTarget,
+  })
+  sceneData.value = {
+    ...sceneData.value,
+    shots: sceneData.value.shots.map(s => (s.id === shot.id ? { ...s, keyframes: frames } : s)),
+  }
+  ElMessage.success(t('scene3d.sampleFramesDone', { n: frames.length }))
 }
 
 // ---------- 预演播放 ----------

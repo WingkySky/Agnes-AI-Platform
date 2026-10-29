@@ -30,6 +30,19 @@ class Vec3(BaseModel):
     z: float = 0.0
 
 
+class MotionPath(CamelModel):
+    """运镜/走位路径：世界坐标点串（xz 平面 + y 高度）"""
+    shape: str = Field(default="line", description="形状：line/ring/rectangle/pencil")
+    points: list[Vec3] = Field(default_factory=list, description="路径采样点")
+    face_path: bool = Field(default=True, description="true=沿行进方向朝前；false=恒对准注视点")
+
+
+class ShotCameraPath(CamelModel):
+    """镜头运镜路径：路径 + 采样参数"""
+    path: MotionPath = Field(default_factory=MotionPath)
+    sample_count: int = Field(default=6, ge=2, le=24, description="采样机位关键帧数（含首尾）")
+
+
 class SubjectPose(BaseModel):
     """主体姿势（预设起步，关节级编辑后置）"""
     preset: str = Field(default="stand", description="姿势预设 id")
@@ -44,6 +57,7 @@ class SubjectData(CamelModel):
     z: float = 0.0
     rotation: Vec3 = Field(default_factory=Vec3, description="主体旋转（欧拉角，度）")
     pose: SubjectPose | None = Field(default=None, description="姿势预设")
+    motion_path: MotionPath | None = Field(default=None, description="走位路径（数据+编辑+渲染，沿径动画后置）")
     visible: bool = Field(default=True, description="是否可见")
     locked: bool = Field(default=False, description="是否锁定（锁定不可选中/删除）")
 
@@ -121,6 +135,7 @@ class ShotData(CamelModel):
     camera_move: CameraMoveType = Field(default="static", description="运镜（9 种）")
     keyframes: list[CameraKeyframe] = Field(default_factory=list, description="相机关键帧（≥1）")
     prompt: str = Field(default="", description="镜头附加描述")
+    camera_path: ShotCameraPath | None = Field(default=None, description="运镜路径（采样生成 keyframes 的来源）")
     cover_url: str | None = Field(default=None, description="预演截图封面")
     derived_task_ids: list[str] = Field(default_factory=list, description="批量派生任务留痕")
 

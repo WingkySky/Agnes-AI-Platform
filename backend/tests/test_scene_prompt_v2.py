@@ -49,6 +49,11 @@ def _shot(camera_id: str = "cam-b", shot_size: str = "close_up", move: str = "pu
         "id": "shot-1", "cameraId": camera_id, "duration": 4, "fps": 24,
         "shotSize": shot_size, "cameraMove": move,
         "keyframes": [], "prompt": "雨夜巷战", "coverUrl": None, "derivedTaskIds": [],
+        "cameraPath": {
+            "path": {"shape": "ring", "facePath": False,
+                     "points": [{"x": 5, "y": 1.6, "z": 0}, {"x": 0, "y": 1.6, "z": 5}]},
+            "sampleCount": 6,
+        },
     }
 
 
@@ -149,10 +154,12 @@ async def test_create_and_update_roundtrip_camel_case(memory_db):
         resp = await client.post("/api/scenes", json={"name": "v2 场景", "scene_data": data})
         assert resp.status_code == 200
         stored = resp.json()["data"]
-        # 落库/响应保持 camelCase（前端形态）；主体姿势预设透传
+        # 落库/响应保持 camelCase（前端形态）；主体姿势预设与运镜路径透传
         assert stored["scene_data"]["cameras"][0]["id"] == "cam-a"
         assert stored["scene_data"]["shots"][0]["cameraId"] == "cam-b"
         assert stored["scene_data"]["subjects"][0]["pose"]["preset"] == "arms_crossed"
+        assert stored["scene_data"]["shots"][0]["cameraPath"]["path"]["shape"] == "ring"
+        assert stored["scene_data"]["shots"][0]["cameraPath"]["sampleCount"] == 6
 
         data["shots"][0]["shotSize"] = "wide"
         upd = await client.put(f"/api/scenes/{stored['id']}", json={"scene_data": data})

@@ -4255,6 +4255,23 @@ const enUS = {
     pose_look_back: 'Looking back',
     pose_head_down: 'Head down',
     pose_talk_gesture: 'Talking gesture',
+
+    // ------ Motion paths (b3) ------
+    pathCameraTitle: 'Camera path',
+    pathSubjectTitle: 'Blocking path',
+    path_line: 'Line',
+    path_ring: 'Orbit',
+    path_rectangle: 'Rectangle',
+    path_pencil: 'Pencil',
+    pathGenHint: 'Generate shape (around first subject)',
+    pathDraw: 'Draw with pencil',
+    pathDrawHint: 'Drawing: click ground to add points · double-click to finish · Esc to cancel',
+    pathClear: 'Clear',
+    pathPoints: '{n} points',
+    pathNeedSubject: 'Select a subject first to edit its blocking path',
+    sampleCount: 'Sample frames',
+    sampleFrames: 'Sample into keyframes',
+    sampleFramesDone: 'Generated {n} camera keyframes',
   },
 
   // ------ Project management (Episode Isolation) ------

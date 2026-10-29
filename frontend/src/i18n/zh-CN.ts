@@ -4247,6 +4247,23 @@ const zhCN = {
     pose_look_back: '回头',
     pose_head_down: '垂头',
     pose_talk_gesture: '交谈手势',
+
+    // ------ 运镜/走位路径（b3） ------
+    pathCameraTitle: '运镜路径',
+    pathSubjectTitle: '走位路径',
+    path_line: '直线',
+    path_ring: '环绕',
+    path_rectangle: '矩形',
+    path_pencil: '铅笔手绘',
+    pathGenHint: '生成形状（围绕第一主体）',
+    pathDraw: '铅笔绘制',
+    pathDrawHint: '绘制中：点击地面加点 · 双击结束 · Esc 取消',
+    pathClear: '清除',
+    pathPoints: '{n} 个点',
+    pathNeedSubject: '先选中一个主体再编辑走位路径',
+    sampleCount: '采样帧数',
+    sampleFrames: '采样生成关键帧',
+    sampleFramesDone: '已生成 {n} 个机位关键帧',
   },
 
   // ------ 项目管理（集数隔离） ------

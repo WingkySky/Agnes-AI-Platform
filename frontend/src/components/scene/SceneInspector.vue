@@ -48,6 +48,29 @@
         >
           <el-option v-for="p in posePresetIds" :key="p" :label="t(`scene3d.pose_${p}`)" :value="p" />
         </el-select>
+        <!-- 走位路径（b3） -->
+        <label class="field">{{ t('scene3d.pathSubjectTitle') }}</label>
+        <div v-if="subject.motionPath" class="path-info">
+          <el-tag size="small" effect="plain">{{ t('scene3d.path_' + subject.motionPath.shape) }}</el-tag>
+          <span class="path-pts">{{ t('scene3d.pathPoints', { n: subject.motionPath.points.length }) }}</span>
+          <el-button size="small" link type="danger" @click="$emit('clear-path', 'subject')">{{ t('scene3d.pathClear') }}</el-button>
+        </div>
+        <div v-else class="path-gen-row">
+          <el-select
+            :model-value="''"
+            size="small"
+            style="flex: 1"
+            :placeholder="t('scene3d.pathGenHint')"
+            @change="(v: 'line' | 'ring' | 'rectangle') => $emit('gen-path', 'subject', v)"
+          >
+            <el-option value="line" :label="t('scene3d.path_line')" />
+            <el-option value="ring" :label="t('scene3d.path_ring')" />
+            <el-option value="rectangle" :label="t('scene3d.path_rectangle')" />
+          </el-select>
+        </div>
+        <el-button size="small" plain style="margin-top: 6px" @click="$emit('draw-path', 'subject')">
+          {{ t('scene3d.pathDraw') }}
+        </el-button>
       </template>
       <template v-else-if="selected?.type === 'light' && light">
         <label class="field">{{ t('scene3d.lightIntensity') }}</label>
@@ -121,6 +144,57 @@
         :placeholder="t('scene3d.shotPromptPlaceholder')"
         @update:model-value="(v: string) => patchShot({ prompt: v })"
       />
+
+      <!-- 运镜路径（b3）：形状生成/铅笔绘制/采样关键帧 -->
+      <label class="field">{{ t('scene3d.pathCameraTitle') }}</label>
+      <template v-if="shot.cameraPath">
+        <div class="path-info">
+          <el-tag size="small" effect="plain">{{ t('scene3d.path_' + shot.cameraPath.path.shape) }}</el-tag>
+          <span class="path-pts">{{ t('scene3d.pathPoints', { n: shot.cameraPath.path.points.length }) }}</span>
+          <el-button size="small" link type="danger" @click="$emit('clear-path', 'shot')">{{ t('scene3d.pathClear') }}</el-button>
+        </div>
+        <div class="field-row" style="margin-top: 6px">
+          <div class="field-col">
+            <label class="field">{{ t('scene3d.sampleCount') }}</label>
+            <el-input-number
+              :model-value="shot.cameraPath.sampleCount"
+              size="small"
+              :min="2"
+              :max="24"
+              @change="(v?: number) => v != null && patchCameraPath({ sampleCount: v })"
+            />
+          </div>
+          <div class="field-col sample-col">
+            <el-button
+              size="small"
+              type="primary"
+              plain
+              :disabled="shot.cameraPath.path.points.length < 2"
+              @click="$emit('sample-path')"
+            >
+              {{ t('scene3d.sampleFrames') }}
+            </el-button>
+          </div>
+        </div>
+      </template>
+      <template v-else>
+        <div class="path-gen-row">
+          <el-select
+            :model-value="''"
+            size="small"
+            style="flex: 1"
+            :placeholder="t('scene3d.pathGenHint')"
+            @change="(v: 'line' | 'ring' | 'rectangle') => $emit('gen-path', 'shot', v)"
+          >
+            <el-option value="line" :label="t('scene3d.path_line')" />
+            <el-option value="ring" :label="t('scene3d.path_ring')" />
+            <el-option value="rectangle" :label="t('scene3d.path_rectangle')" />
+          </el-select>
+        </div>
+      </template>
+      <el-button size="small" plain style="margin-top: 6px" @click="$emit('draw-path', 'shot')">
+        {{ t('scene3d.pathDraw') }}
+      </el-button>
 
       <!-- 关键帧 -->
       <div class="section-title sub">
@@ -204,6 +278,10 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:modelValue': [value: SceneData]
   'add-keyframe': []
+  'gen-path': [kind: 'subject' | 'shot', shape: 'line' | 'ring' | 'rectangle']
+  'draw-path': [kind: 'subject' | 'shot']
+  'clear-path': [kind: 'subject' | 'shot']
+  'sample-path': []
 }>()
 
 const { t } = useI18n()
@@ -292,6 +370,15 @@ function patchShot(patch: Partial<ShotData>) {
   const shotId = props.shot?.id
   if (!shotId) return
   const shots = props.modelValue.shots.map(s => (s.id === shotId ? { ...s, ...patch } : s))
+  emitData({ shots })
+}
+
+function patchCameraPath(patch: Partial<NonNullable<ShotData['cameraPath']>>) {
+  const shotId = props.shot?.id
+  if (!shotId) return
+  const shots = props.modelValue.shots.map(s =>
+    s.id === shotId && s.cameraPath ? { ...s, cameraPath: { ...s.cameraPath, ...patch } } : s,
+  )
   emitData({ shots })
 }
 
@@ -386,6 +473,28 @@ function detailLabel(key: string): string {
 
 .field-col {
   flex: 1;
+}
+
+.sample-col {
+  display: flex;
+  align-items: flex-end;
+  padding-bottom: 2px;
+}
+
+.path-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.path-pts {
+  font-size: 12px;
+  color: var(--agnes-text-secondary);
+}
+
+.path-gen-row {
+  display: flex;
+  gap: 6px;
 }
 
 .hint {
