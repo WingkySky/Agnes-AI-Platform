@@ -26,6 +26,7 @@ import {
   getEditorRenderStatus,
   updateEditorProject,
 } from '@/api/editor'
+import type { QualityReport } from '@/api/editor'
 import type { UnifiedAsset } from '@/api/assets'
 import { getAsset } from '@/api/assets'
 import {
@@ -113,6 +114,7 @@ export const useEditorStore = defineStore('editor', () => {
   const renderError = ref<string | null>(null)
   const finalUrl = ref<string | null>(null)
   const coverUrl = ref<string | null>(null)
+  const qualityReport = ref<QualityReport | null>(null)
 
   // ---------- 素材缓存（预览/时间线取 url） ----------
   const assetCache = shallowRef<Map<number, UnifiedAsset>>(new Map())
@@ -146,6 +148,7 @@ export const useEditorStore = defineStore('editor', () => {
     renderError.value = detail.render_error
     finalUrl.value = detail.final_url
     coverUrl.value = detail.cover_url
+    qualityReport.value = detail.quality_report ?? null
     history.clear()
     dirty.value = false
     loaded.value = true
@@ -341,6 +344,7 @@ export const useEditorStore = defineStore('editor', () => {
       renderProgress.value = status.render_progress
       if (status.render_status === 'succeeded') {
         finalUrl.value = status.final_url
+        qualityReport.value = status.quality_report ?? null
         ElMessage.success(t('editor.renderDone'))
         void writeBackToCanvas()
         return
@@ -564,6 +568,7 @@ export const useEditorStore = defineStore('editor', () => {
     previewingAsset.value = null
     renderStatus.value = 'idle'
     finalUrl.value = null
+    qualityReport.value = null
   }
 
   return {
@@ -572,7 +577,7 @@ export const useEditorStore = defineStore('editor', () => {
     previewingAsset, startAssetPreview, endAssetPreview,
     snappingEnabled, setSnapping,
     dirty, saving, lastSavedAt,
-    renderStatus, renderProgress, renderError, finalUrl,
+    renderStatus, renderProgress, renderError, finalUrl, qualityReport,
     assetCache,
     load, fetchAsset, apply, applyOrToast, undo, redo, healDurations,
     placeAsset, appendAssetToTrack, createTopTrackOfKind, setCoverUrl, detachAudio, splitSelectedAtPlayhead, duplicateClip,

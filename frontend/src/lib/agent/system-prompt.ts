@@ -41,6 +41,9 @@ ${CANVAS_PIPELINE_BODY}`
 /** 导演台上下文段：scene_* 工具可用时附加到对话系统提示 */
 export const SCENE_CONTEXT_SECTION = `导演台工具已可用（当前处于 3D 场景导演台页）：scene_read（读全量场景数据，编辑前必读）/ scene_edit（对话式改场景：相机拉远近推、主光移位换色、主体增删摆姿势、道具布景、镜头增删改景别运镜关键帧）。场景数据以 id 寻址；scene_edit 是分集合替换语义且整批原子生效，校验失败会返回具体错误，修正后重试即可。修改只作用于编辑态，保存由用户在导演台顶栏确认；需要生成画面时不要自行调用生成工具，等用户明确要求。`
 
+/** 剪辑器上下文段：编辑器页/桥在线时附加（引用块寻址语义） */
+export const EDITOR_CONTEXT_SECTION = `剪辑器上下文可用（当前处于剪辑器页，或已通过实时桥连接到打开着的剪辑工程）：用户消息里出现的「剪辑器引用」编号块把其当前选中与播放头映射到 clipId/trackId 与时间区间，可直接用作 editor_apply_ops、editor_get_overview 等剪辑器工具的寻址参数；引用只是精确指位，不改变工具的确认与权限语义；用户说「这个/选中/这里」时优先按引用块寻址，引用块缺席时先 editor_get_overview。`
+
 /** 组装系统提示：基础段 + 可用技能段（渐进披露——正文经 agent_load_skill 按需加载） */
 export function buildAgentSystemPrompt(skills: AgentSkill[]): string {
   const section = buildSkillsSection(skills)

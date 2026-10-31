@@ -28,8 +28,10 @@ import { applyCommand, cmd, EditorCommandError, EDITOR_OPS, type EditorOp } from
 import { probeMediaDuration, probeElementDuration } from '@/lib/editor-media'
 import { segmentsDuration, segmentsToClips } from '@/lib/editor-rough-cut'
 import type { EditorClip, EditorDocument, EditorTrack } from '@/lib/editor-types'
+import type { QualityReport } from '@/api/editor'
 import type { AgentToolResult } from './tools'
 import { noteToolRoute } from './tools'
+import { editorRefTimecode } from './editor-bridge'
 import { autoPlacePref, resolveTarget } from './chat-tools'
 import { relayCall, listBridgeTargets } from './bridge'
 import { useEditorStore } from '@/stores/editor'
@@ -101,16 +103,23 @@ function hasTarget(r: { uid: string; title: string } | { error: string }): r is 
   return !('error' in r)
 }
 
-/** 拉素材详情（带缓存；404/无权按缺失败处理，由调用方报错） */
-/** apply_ops 核心链路：探测补全 → 命令表 fail-closed 校验（任一失败不落盘）→ PUT（写前快照） */
-export async function applyOpsToProject(
-  uid: string,
-  ops: ToolOp[],
-  snapshotReason: string,
-): Promise<{ ok: true; doc: EditorDocument; revision: number } | { ok: false; error: string }> {
-  const detail = await getEditorProject(uid)
-  const doc = detail.document
+/** 409 冲突重放上限（首次保存 + 最多 2 次基于最新文档的重放） */
+const REBASE_ATTEMPTS = 3
 
+function conflictErrorText(e: unknown): string {
+  const err = e as { detail?: { message?: string } | string; message?: string }
+  const d = err?.detail
+  if (typeof d === 'string' && d) return d
+  if (d && typeof d === 'object' && typeof d.message === 'string') return d.message
+  return err?.message || '文档已被其他会话修改'
+}
+
+/** 探测补全 + 命令表 fail-closed 校验（对给定文档应用整批 ops，任一失败整体不通过）。
+ *  会向 ops 载荷回填缺省值（clip.id/start/duration、轨道）；回填值幂等，冲突重放可安全重跑。 */
+async function prepareOpsOnDocument(
+  ops: ToolOp[],
+  doc: EditorDocument,
+): Promise<{ ok: true; next: EditorDocument } | { ok: false; error: string }> {
   // 探测补全（先于命令表校验，使校验面向真实值）：addClip 的轨道/位置/时长缺省值。
   // 同批次 addTrack/removeTrack 的效果累积进工作轨表——否则新轨上的 addClip 看不到轨，
   // 跳过 id/时长补全，命令表报 invalid_payload（真实链路撞过）
@@ -198,8 +207,36 @@ export async function applyOpsToProject(
       throw e
     }
   }
-  const saved = await saveEditorDocument(uid, next, detail.revision, snapshotReason)
-  return { ok: true, doc: next, revision: saved.revision }
+  return { ok: true, next }
+}
+
+/** apply_ops 核心链路：GET → 探测补全 + 命令表校验 → PUT（写前快照）；
+ *  409 冲突重放：拉最新文档（含用户改动）重放整批 ops 再保存，天然保留人改；
+ *  重放后 op 校验失败/重试耗尽 → 整批不落盘并报结构化错误 */
+export async function applyOpsToProject(
+  uid: string,
+  ops: ToolOp[],
+  snapshotReason: string,
+): Promise<{ ok: true; doc: EditorDocument; revision: number } | { ok: false; error: string }> {
+  let detail = await getEditorProject(uid)
+  for (let attempt = 0; attempt < REBASE_ATTEMPTS; attempt++) {
+    const prepared = await prepareOpsOnDocument(ops, detail.document)
+    if (!prepared.ok) return prepared
+    try {
+      const saved = await saveEditorDocument(uid, prepared.next, detail.revision, snapshotReason)
+      return { ok: true, doc: prepared.next, revision: saved.revision }
+    } catch (e) {
+      if ((e as { status?: number }).status !== 409) throw e
+      if (attempt === REBASE_ATTEMPTS - 1) {
+        return {
+          ok: false,
+          error: `保存冲突：${conflictErrorText(e)}；已基于最新文档重放 ${REBASE_ATTEMPTS - 1} 次仍冲突（用户可能正在连续编辑或渲染进行中），请稍后重试`,
+        }
+      }
+      detail = await getEditorProject(uid)
+    }
+  }
+  return { ok: false, error: '保存冲突：重试耗尽' }
 }
 
 export function applyOpsSummary(doc: EditorDocument, revision: number, okMessage: string): AgentToolResult {
@@ -213,6 +250,19 @@ export function applyOpsSummary(doc: EditorDocument, revision: number, okMessage
       message: okMessage,
     },
   }
+}
+
+const QUALITY_LABELS: Record<string, string> = { black: '黑场', freeze: '冻结', silence: '静音' }
+
+/** 渲染质检摘要（工具结果文本；无报告/质检失败返回空串） */
+export function qualitySummary(report: QualityReport | null | undefined): string {
+  if (!report?.available) return ''
+  const issues = report.issues ?? []
+  if (!issues.length) return '；质检通过（无黑场/冻结/静音异常）'
+  const suspect = issues.filter((i) => i.suspect).length
+  const lines = issues.slice(0, 6).map((i) =>
+    `${editorRefTimecode(i.start)}-${editorRefTimecode(i.end)} ${QUALITY_LABELS[i.type] ?? i.type}（${i.suspect ? '疑似问题' : '可能刻意'}）`)
+  return `；质检 ${issues.length} 处（疑似 ${suspect}）：${lines.join('、')}${issues.length > 6 ? '…' : ''}`
 }
 
 /** 写类工具执行路由（批次 2 反向控制桥）：
@@ -543,7 +593,8 @@ const editorRenderTool = {
             data: {
               render_status: 'succeeded',
               final_url: absolute,
-              message: `渲染完成：${absolute}${placedMessage}`,
+              ...(status.quality_report ? { quality_report: status.quality_report } : {}),
+              message: `渲染完成：${absolute}${placedMessage}${qualitySummary(status.quality_report)}`,
             },
           }
         }
@@ -582,9 +633,10 @@ const editorGetRenderStatusTool = {
         ok: true,
         data: {
           ...status,
-          message: status.render_status === 'succeeded' && status.final_url
-            ? `成片：${status.final_url}`
-            : `渲染状态：${status.render_status}`,
+          message:
+            (status.render_status === 'succeeded' && status.final_url
+              ? `成片：${status.final_url}`
+              : `渲染状态：${status.render_status}`) + qualitySummary(status.quality_report),
         },
       }
     } catch (e) {

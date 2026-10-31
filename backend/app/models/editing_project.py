@@ -43,6 +43,9 @@ class EditingProject(Base):
     render_progress = Column(String(20), nullable=True)                 # 归一化 "3/8" 或 "composing"
     render_document = Column(JSON, nullable=True)                       # 渲染提交时快照（编辑不干扰渲染）
     render_client_op_id = Column(String(64), nullable=True)             # 幂等去重
+    #   存量库升级（dev 库已执行）：
+    #   ALTER TABLE editing_projects ADD COLUMN quality_report JSON;
+    quality_report = Column(JSON, nullable=True)                        # 成片质检报告（黑场/冻结/静音 + suspect 标注）
     source_workspace_id = Column(String(64), nullable=True)             # 来源画布（送进剪辑器，成片回写用）
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

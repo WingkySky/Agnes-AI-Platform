@@ -24,7 +24,9 @@ import { EDITOR_TOOLS } from '@/lib/agent/editor-tools'
 import { updateEditorProject } from '@/api/editor'
 import { useRename } from '@/composables/useRename'
 import { useUserStore } from '@/stores/user'
-import { clipEnd } from '@/lib/editor-types'
+import { clipEnd, sourceSpan, type EditorClip } from '@/lib/editor-types'
+import { ensureThumbs, thumbKey } from '@/lib/editor-strips'
+import { registerEditorBridge, unregisterEditorBridge, editorRefTimecode } from '@/lib/agent/editor-bridge'
 import { useI18n } from '@/i18n'
 
 const route = useRoute()
@@ -56,6 +58,15 @@ const saveLabel = computed(() => {
   return ''
 })
 
+// ---------- 渲染质检（报告由渲染收尾自动生成；徽标点击开详情，条目点击跳播放头） ----------
+const qualityOpen = ref(false)
+const suspectCount = computed(() => (store.qualityReport?.issues ?? []).filter((i) => i.suspect).length)
+
+function seekToIssue(start: number): void {
+  store.playhead = Math.max(0, start)
+  qualityOpen.value = false
+}
+
 function goBack(): void {
   if (store.workId) router.push(`/works/${store.workId}`)
   else if (window.history.length > 1) router.back()
@@ -69,6 +80,78 @@ async function renameProject(): Promise<void> {
   await updateEditorProject(store.uid, { title: name })
   store.title = name
   ElMessage.success(t('common.renameDone'))
+}
+
+// ---------- 选区引用桥（Agent 输入区「引用选中」/ Ctrl+Shift+L 取此处上下文） ----------
+
+/** 片段缩略图（时间线帧缓存取中点帧，未就绪短等一次；失败静默降级无图） */
+async function clipThumbDataUrl(url: string, clip: EditorClip): Promise<string | undefined> {
+  let handle = ensureThumbs(url, clip, () => {})
+  if (!handle) {
+    await new Promise((r) => setTimeout(r, 200))
+    handle = ensureThumbs(url, clip, () => {})
+  }
+  if (!handle) return undefined
+  const key = thumbKey(Math.max(0, clip.trimStart) + sourceSpan(clip) / 2)
+  let bmp = handle.frames.get(key)
+  if (!bmp) {
+    await new Promise((r) => setTimeout(r, 500))
+    bmp = handle.frames.get(key)
+  }
+  if (!bmp) return undefined
+  const canvas = document.createElement('canvas')
+  canvas.width = 160
+  canvas.height = 90
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return undefined
+  const scale = Math.max(160 / bmp.width, 90 / bmp.height)
+  const sw = 160 / scale
+  const sh = 90 / scale
+  ctx.drawImage(bmp, (bmp.width - sw) / 2, (bmp.height - sh) / 2, sw, sh, 0, 0, 160, 90)
+  return canvas.toDataURL('image/jpeg', 0.7)
+}
+
+async function buildClipRef(clipId: string) {
+  const clip = store.doc?.clips.find((c) => c.id === clipId)
+  if (!clip || !store.uid) return null
+  let assetName: string | undefined
+  let thumb: string | undefined
+  if (clip.assetId != null) {
+    const asset = await store.fetchAsset(clip.assetId)
+    if (asset) {
+      assetName = asset.name
+      if (asset.media_type === 'video') thumb = await clipThumbDataUrl(asset.asset_url, clip)
+    }
+  }
+  const track = store.doc?.tracks.find((tr) => tr.id === clip.trackId)
+  const name = clip.text?.trim() || assetName || clipId
+  const start = Math.round(clip.start * 1000) / 1000
+  const end = Math.round((clip.start + clip.duration) * 1000) / 1000
+  return {
+    kind: 'clip' as const,
+    projectId: store.uid,
+    clipId: clip.id,
+    trackId: clip.trackId,
+    assetId: clip.assetId,
+    assetName,
+    trackKind: track?.kind,
+    start,
+    end,
+    label: `${name} ${editorRefTimecode(start)}-${editorRefTimecode(end)}`,
+    ...(thumb ? { thumb } : {}),
+  }
+}
+
+function buildTrackRef(trackId: string) {
+  const track = store.doc?.tracks.find((tr) => tr.id === trackId)
+  if (!track || !store.uid) return Promise.resolve(null)
+  return Promise.resolve({
+    kind: 'track' as const,
+    projectId: store.uid,
+    trackId: track.id,
+    trackKind: track.kind,
+    label: `${trackId}（${t(`editor.trackKinds.${track.kind}`)}）`,
+  })
 }
 
 // ---------- 可拖拽分隔条（面板尺寸本地持久化，刷新恢复） ----------
@@ -209,6 +292,18 @@ onMounted(() => {
   store.startRemotePoll()
   // Agent scope 注册（批次 2 反向控制桥路由元数据；editor_* 工具本身常驻）
   chatStore.registerAgentScope({ host: 'editor', projectId: String(route.params.uid || '') })
+  // 选区引用桥：Agent 输入区「引用选中」/ Ctrl+Shift+L 取当前选中与播放头
+  registerEditorBridge({
+    uid: String(route.params.uid || ''),
+    getRefContext: () => (store.loaded && store.uid ? {
+      projectId: store.uid,
+      selectedClipId: store.selectedClipId,
+      selectedTrackId: store.selectedTrackId,
+      playhead: store.playhead,
+      buildClipRef,
+      buildTrackRef,
+    } : null),
+  })
   // 反向控制桥：本页注册为剪辑工程执行者（跨页 Agent 排时间线实时可见）
   editorBridge = startBridgeClient({
     host: 'editor',
@@ -233,6 +328,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
   chatStore.unregisterAgentScope('editor')
+  unregisterEditorBridge()
   editorBridge?.stop()
   editorBridge = null
   store.stopRemotePoll()
@@ -258,6 +354,24 @@ onBeforeUnmount(() => {
         <a v-if="store.finalUrl" :href="store.finalUrl" target="_blank" class="final-link">
           <el-button :icon="Download" text size="small">{{ t('editor.finalOutput') }}</el-button>
         </a>
+        <el-tag
+          v-if="store.qualityReport?.available && suspectCount > 0"
+          type="warning"
+          size="small"
+          class="quality-tag"
+          @click="qualityOpen = true"
+        >
+          {{ t('editor.qualityIssues', { n: suspectCount }) }}
+        </el-tag>
+        <el-tag
+          v-else-if="store.qualityReport?.available"
+          type="success"
+          size="small"
+          class="quality-tag"
+          @click="qualityOpen = true"
+        >
+          {{ t('editor.qualityOk') }}
+        </el-tag>
         <el-button type="primary" :icon="VideoPlay" :disabled="!canRender || store.renderStatus === 'rendering'" @click="store.submitRender()">
           {{ t('editor.render') }}
         </el-button>
@@ -277,6 +391,22 @@ onBeforeUnmount(() => {
         <EditorTimeline :total-duration="totalDuration" />
       </div>
     </div>
+
+    <!-- 渲染质检详情：类型/时间码/刻意标注，条目点击跳时间线播放头 -->
+    <el-dialog v-model="qualityOpen" :title="t('editor.qualityTitle')" width="480px" append-to-body>
+      <p v-if="!store.qualityReport?.issues?.length" class="quality-empty">{{ t('editor.qualityEmpty') }}</p>
+      <ul v-else class="quality-list">
+        <li v-for="(issue, i) in store.qualityReport.issues" :key="i">
+          <button type="button" class="quality-row" @click="seekToIssue(issue.start)">
+            <el-tag :type="issue.suspect ? 'danger' : 'info'" size="small">
+              {{ t(`editor.qualityType.${issue.type}`) }}
+            </el-tag>
+            <span class="quality-time">{{ editorRefTimecode(issue.start) }} - {{ editorRefTimecode(issue.end) }}</span>
+            <span class="quality-note">{{ issue.suspect ? t('editor.qualitySuspect') : t('editor.qualityIntentional') }}</span>
+          </button>
+        </li>
+      </ul>
+    </el-dialog>
 
     <!-- Agent 跨页操作徽标（批次 3 过程可视化）：桥执行期间亮起、回执后熄灭 -->
     <Transition name="agent-badge">
@@ -324,6 +454,18 @@ onBeforeUnmount(() => {
   min-width: 64px;
 }
 .final-link { text-decoration: none; }
+/* 质检徽标可点击 + 详情列表 */
+.quality-tag { cursor: pointer; }
+.quality-empty { margin: 0; font-size: 13px; color: var(--el-text-color-secondary); }
+.quality-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.quality-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 6px 8px; border: none; border-radius: 6px; background: transparent;
+  cursor: pointer; text-align: left; color: inherit; font-size: 13px;
+}
+.quality-row:hover { background: var(--el-fill-color-light); }
+.quality-time { font-family: ui-monospace, monospace; }
+.quality-note { margin-left: auto; font-size: 12px; color: var(--el-text-color-secondary); }
 .editor-body {
   flex: 1;
   display: flex;

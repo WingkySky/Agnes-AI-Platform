@@ -8,6 +8,7 @@
  * ===================================================== */
 
 import type { AgentSessionSyncPayload } from '@/types'
+import type { EditorRefPayload } from './editor-bridge'
 
 /** 消息投影入参（结构兼容画布 AgentMessage 与对话页内核投影消息，避免循环依赖） */
 export interface ProjectableMessage {
@@ -20,6 +21,8 @@ export interface ProjectableMessage {
   media?: Array<{ type: string; url: string; task_id?: string; status: string }>
   /** 用户输入的 URL 附件（对话页：图片/视频/文档链接，并入 attachments 行） */
   urlAttachments?: Array<{ name: string; url: string; mime_type?: string }>
+  /** 剪辑器选区引用（并入 attachments 行的 editor_ref 字段） */
+  editorRefs?: EditorRefPayload[]
 }
 
 /** 消息投影：内核消息 → chat_messages 行（展示/总结用，不参与恢复） */
@@ -37,6 +40,12 @@ export function toBackendMessages(messages: ProjectableMessage[]): AgentSessionS
         name: att.name,
         url: att.url,
         mime_type: att.mime_type || 'application/url',
+        size: 0,
+      })),
+      ...(m.editorRefs ?? []).map((ref) => ({
+        name: ref.label,
+        editor_ref: ref,
+        mime_type: 'editor/ref',
         size: 0,
       })),
     ]

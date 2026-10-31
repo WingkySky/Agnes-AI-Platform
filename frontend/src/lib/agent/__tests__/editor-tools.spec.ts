@@ -340,3 +340,62 @@ describe('宿主 generation 组门（kernel + policy）', () => {
     expect(resolveHostGenerationGate('editor_render', 'readonly', []).action).toBe('reject')
   })
 })
+
+describe('editor_apply_ops 409 冲突重放', () => {
+  function conflictErr(currentRevision: number): Error {
+    return Object.assign(new Error('conflict'), {
+      status: 409,
+      detail: { message: '文档已被其他会话修改', current_revision: currentRevision },
+    })
+  }
+
+  it('首次保存 409：拉最新文档重放成功，用户改动保留', async () => {
+    const userDoc = baseDoc()
+    userDoc.clips.push({ id: 'c_user', trackId: 'v1', assetId: 7, start: 0, duration: 2.5, trimStart: 0, props: {} })
+    getProject
+      .mockResolvedValueOnce({ uid: 'u1', title: '工程', revision: 3, document: baseDoc() } as never)
+      .mockResolvedValueOnce({ uid: 'u1', title: '工程', revision: 9, document: userDoc } as never)
+    saveDoc.mockRejectedValueOnce(conflictErr(9)).mockResolvedValueOnce({ revision: 10, saved_at: '' })
+    const r = await runOps({
+      editing_project_id: 'u1',
+      ops: [{ op: 'addClip', payload: { clip: { id: 'c_agent', trackId: 'v1', assetId: 7, start: 2.5, duration: 2.5, trimStart: 0, props: {} } } }],
+    }) as { ok: boolean }
+    expect(r.ok).toBe(true)
+    expect(getProject).toHaveBeenCalledTimes(2)
+    const second = saveDoc.mock.calls[1]
+    expect(second[2]).toBe(9) // base_revision=用户新版本
+    const savedClips = (second[1] as { clips: Array<{ id: string }> }).clips.map((c) => c.id)
+    expect(savedClips).toContain('c_user') // 人改保留
+    expect(savedClips).toContain('c_agent') // agent ops 重放成功
+  })
+
+  it('重放后 op 校验失败（片段被用户删除）：整批拒绝并报错误码', async () => {
+    const docWith = baseDoc()
+    docWith.clips.push({ id: 'c_gone', trackId: 'v1', assetId: 7, start: 0, duration: 2.5, trimStart: 0, props: {} })
+    getProject
+      .mockResolvedValueOnce({ uid: 'u1', title: '工程', revision: 3, document: docWith } as never)
+      .mockResolvedValueOnce({ uid: 'u1', title: '工程', revision: 9, document: baseDoc() } as never)
+    saveDoc.mockRejectedValueOnce(conflictErr(9))
+    const r = await runOps({
+      editing_project_id: 'u1',
+      ops: [{ op: 'removeClip', payload: { clipId: 'c_gone' } }],
+    }) as { ok: boolean; error: string }
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('clip_not_found')
+    expect(saveDoc).toHaveBeenCalledTimes(1) // 重放失败不再保存
+  })
+
+  it('重试耗尽：报保存冲突与后端原因', async () => {
+    mockProject()
+    saveDoc.mockRejectedValue(conflictErr(9))
+    const r = await runOps({
+      editing_project_id: 'u1',
+      ops: [{ op: 'addClip', payload: { clip: { trackId: 'v1', assetId: 7 } } }],
+    }) as { ok: boolean; error: string }
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('保存冲突')
+    expect(r.error).toContain('文档已被其他会话修改')
+    expect(getProject).toHaveBeenCalledTimes(3) // 首次 + 2 次重放
+    expect(saveDoc).toHaveBeenCalledTimes(3)
+  })
+})

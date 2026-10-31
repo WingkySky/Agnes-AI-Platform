@@ -43,6 +43,12 @@ export interface ChatMediaView {
   status: 'pending' | 'processing' | 'success' | 'failed'
 }
 
+/** 用户消息里的剪辑器引用芯片（编号+缩略图+标签） */
+export interface ChatRefView {
+  label: string
+  thumb?: string
+}
+
 /** 一条消息的渲染视图 */
 export interface ChatBubbleItem {
   id: string
@@ -52,6 +58,8 @@ export interface ChatBubbleItem {
   streaming?: boolean
   images?: ChatImageView[]
   attachments?: ChatAttachmentView[]
+  /** 剪辑器选区引用芯片（用户消息） */
+  refs?: ChatRefView[]
   media?: ChatMediaView[]
   steps?: ChatStepView[]
   createdAt?: string

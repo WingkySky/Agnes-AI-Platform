@@ -19,6 +19,13 @@
       <div class="cb-bubble">
         <!-- ===== 用户消息 ===== -->
         <template v-if="item.role === 'user'">
+          <!-- 剪辑器选区引用芯片（编号+缩略图+标签） -->
+          <div v-if="item.refs?.length" class="cb-refs">
+            <span v-for="(r, i) in item.refs" :key="'ref-' + i" class="cb-ref-chip" :title="r.label">
+              <img v-if="r.thumb" :src="r.thumb" alt="" class="cb-ref-thumb" />
+              <span class="cb-ref-label">{{ i + 1 }}. {{ r.label }}</span>
+            </span>
+          </div>
           <!-- 附件卡（视频块 / 文档卡 / 图片缩略，对话页 URL 识别附件） -->
           <div v-if="item.attachments?.length" class="cb-attachments">
             <template v-for="(att, idx) in item.attachments" :key="'att-' + idx">
@@ -413,6 +420,42 @@ function mediaImageIndex(currentIdx: number): number {
 
 .cb-step-summary a:hover {
   text-decoration: underline;
+}
+
+/* ---- 用户剪辑器引用芯片 ---- */
+.cb-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.cb-ref-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 240px;
+  padding: 3px 8px 3px 4px;
+  border-radius: 8px;
+  border: 1px solid var(--agnes-border-strong, rgba(100, 150, 220, 0.3));
+  background: var(--agnes-surface-hover, rgba(139, 147, 168, 0.14));
+  font-size: 11px;
+  color: var(--cb-muted, var(--agnes-text-muted, #8b93a8));
+}
+
+.cb-ref-thumb {
+  width: 32px;
+  height: 18px;
+  border-radius: 4px;
+  object-fit: cover;
+  display: block;
+  flex-shrink: 0;
+}
+
+.cb-ref-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ---- 用户附图 ---- */

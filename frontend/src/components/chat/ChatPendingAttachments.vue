@@ -5,7 +5,14 @@
       :key="'pending-' + idx"
       class="pending-attachment"
     >
-      <img v-if="att.base64" :src="att.base64" :alt="att.name" class="pending-attachment-thumb" />
+      <template v-if="att.editor_ref">
+        <img v-if="att.editor_ref.thumb" :src="att.editor_ref.thumb" :alt="att.name" class="pending-attachment-thumb" />
+        <div v-else class="pending-attachment-url">
+          <el-icon :size="18"><Film /></el-icon>
+          <span class="url-text" :title="att.editor_ref.label">{{ att.editor_ref.label }}</span>
+        </div>
+      </template>
+      <img v-else-if="att.base64" :src="att.base64" :alt="att.name" class="pending-attachment-thumb" />
       <div v-else-if="att.url" class="pending-attachment-url">
         <el-icon :size="18"><Document /></el-icon>
         <span class="url-text" :title="att.url">{{ truncateUrl(att.url) }}</span>
@@ -24,7 +31,7 @@
 
 <script setup lang="ts">
 /* 待发送附件预览条（对话页/全局抽屉共享） */
-import { Document } from '@element-plus/icons-vue'
+import { Document, Film } from '@element-plus/icons-vue'
 import type { MessageAttachment } from '@/types'
 import { truncateUrl } from '@/composables/useChatComposer'
 

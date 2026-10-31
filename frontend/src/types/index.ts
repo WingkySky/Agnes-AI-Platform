@@ -4,6 +4,8 @@
  * 命名规则：前端 Request/Response 类型与后端 Schema 一一对应
  * ===================================================== */
 
+import type { EditorRefPayload } from '@/lib/agent/editor-bridge'
+
 // =====================================================
 // 通用类型
 // =====================================================
@@ -395,6 +397,8 @@ export interface MessageAttachment {
   mime_type: string
   source?: 'url' | 'upload'
   _link_type?: 'image' | 'video' | 'document' | 'webpage'
+  /** 剪辑器选区引用（EditorRefPayload，随消息落库恢复） */
+  editor_ref?: EditorRefPayload
 }
 
 /** 创建会话请求 — 对齐 CreateSessionRequest */

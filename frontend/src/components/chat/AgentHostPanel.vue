@@ -238,9 +238,20 @@
           @pick-files="onFilesPicked"
           @drop-files="onFilesPicked"
         >
-          <!-- 权限模式胶囊（输入行内下拉，图标+名称+描述+对勾） -->
+          <!-- 权限模式胶囊（输入行内下拉，图标+名称+描述+对勾）+ 剪辑器引用（桥在线时） -->
           <template #leading>
             <div class="agent-menu-anchor">
+              <button
+                v-if="editorRefAvailable"
+                type="button"
+                class="pill-btn ref-pill"
+                :title="t('agent.editorRefButton')"
+                :aria-label="t('agent.editorRefButton')"
+                @click.stop="insertEditorRef"
+              >
+                <Crosshair :size="13" />
+                <span class="pill-text">{{ t('agent.editorRefButton') }}</span>
+              </button>
               <button
                 type="button"
                 class="pill-btn mode-pill"
@@ -324,7 +335,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect
 import { useRouter } from 'vue-router'
 import {
   Bot, Trash2, X, Loader2, Maximize2, Minimize2, ChevronDown, Check,
-  Eye, Hand, Zap, MessageSquarePlus, PanelRight, Pin, PinOff, List,
+  Eye, Hand, Zap, MessageSquarePlus, PanelRight, Pin, PinOff, List, Crosshair,
 } from 'lucide-vue-next'
 import { ChatDotRound } from '@element-plus/icons-vue'
 import type { CSSProperties } from 'vue'
@@ -337,6 +348,7 @@ import { useModelsStore } from '@/stores/models'
 import { useConfirm } from '@/composables/useConfirm'
 import { useChatComposer } from '@/composables/useChatComposer'
 import { toolStepLabel } from '@/lib/agent/tool-labels'
+import { getEditorBridge } from '@/lib/agent/editor-bridge'
 import ChatMessageList from '@/components/chat/ChatMessageList.vue'
 import ChatSkillMenu from '@/components/chat/ChatSkillMenu.vue'
 import ChatModelPill from '@/components/chat/ChatModelPill.vue'
@@ -388,6 +400,33 @@ const {
 
 /** 附件选择器放宽到文本文档（useChatComposer 会解析为文本拼进输入框） */
 const ATTACH_ACCEPT = 'image/*,.txt,.md,.markdown,.json,.csv,.log,.ts,.tsx,.js,.mjs,.py,.html,.css,.xml,.yml,.yaml,.pdf,.docx'
+
+// ---------- 剪辑器选区引用（桥在线时可用；输入区按钮 + Ctrl/Cmd+Shift+L） ----------
+const editorRefAvailable = computed(() => chat.agentScopes.editor && !!getEditorBridge())
+
+async function insertEditorRef(): Promise<void> {
+  if (!visible.value) chat.setAgentDrawerOpen(true)
+  const ctx = getEditorBridge()?.getRefContext()
+  if (!ctx) {
+    ElMessage.info(t('agent.editorRefNone'))
+    return
+  }
+  const ref = ctx.selectedClipId
+    ? await ctx.buildClipRef(ctx.selectedClipId)
+    : ctx.selectedTrackId ? await ctx.buildTrackRef(ctx.selectedTrackId) : null
+  if (!ref) {
+    ElMessage.info(t('agent.editorRefNone'))
+    return
+  }
+  const dup = pendingAttachments.value.some((a) =>
+    a.editor_ref && a.editor_ref.kind === ref.kind
+    && a.editor_ref.clipId === ref.clipId && a.editor_ref.trackId === ref.trackId)
+  if (dup) {
+    ElMessage.info(t('agent.editorRefDuplicate'))
+    return
+  }
+  pendingAttachments.value.push({ name: ref.label, editor_ref: ref, size: 0, mime_type: 'editor/ref' })
+}
 
 const listRef = ref<InstanceType<typeof ChatMessageList> | null>(null)
 const rootRef = ref<HTMLElement | null>(null)
@@ -787,6 +826,13 @@ function onGlobalKeydown(e: KeyboardEvent): void {
     chat.toggleAgentDrawer()
     return
   }
+  // 剪辑器选区引用：Ctrl/Cmd+Shift+L（⌘L 是浏览器地址栏保留键，取 Shift 变体）
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'l' && editorRefAvailable.value) {
+    e.preventDefault()
+    e.stopPropagation()
+    void insertEditorRef()
+    return
+  }
   if (e.key === 'Escape' && visible.value) {
     if (openMenu.value || toolsOpen.value) {
       e.preventDefault()
@@ -1066,15 +1112,17 @@ watch(
   background: var(--cb-item-hover, rgba(128, 128, 128, 0.18));
 }
 
-/* 小面板自适应：360px 下模式胶囊图标化、模型胶囊限宽，把空间让给输入框 */
-.agent-host-panel:not(.is-expanded) .pill-btn.mode-pill {
+/* 小面板自适应：360px 下模式/引用胶囊图标化、模型胶囊限宽，把空间让给输入框 */
+.agent-host-panel:not(.is-expanded) .pill-btn.mode-pill,
+.agent-host-panel:not(.is-expanded) .pill-btn.ref-pill {
   width: 32px;
   padding: 0;
   justify-content: center;
 }
 
 .agent-host-panel:not(.is-expanded) .pill-btn.mode-pill .pill-text,
-.agent-host-panel:not(.is-expanded) .pill-btn.mode-pill .pill-chevron {
+.agent-host-panel:not(.is-expanded) .pill-btn.mode-pill .pill-chevron,
+.agent-host-panel:not(.is-expanded) .pill-btn.ref-pill .pill-text {
   display: none;
 }
 

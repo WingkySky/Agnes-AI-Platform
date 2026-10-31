@@ -34,6 +34,7 @@ def _to_dict(p: EditingProject) -> dict:
         "revision": p.revision,
         "final_url": p.final_url,
         "cover_url": p.cover_url,
+        "quality_report": p.quality_report,
         "render_status": p.render_status,
         "render_error": p.render_error,
         "render_progress": p.render_progress,

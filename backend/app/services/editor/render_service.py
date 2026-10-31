@@ -46,6 +46,7 @@ from app.models.editing_project import (
 )
 from app.services.editor.media_source import resolve_asset_local_file
 from app.services.editor.plan_builder import build_plan, timeline_total
+from app.services.editor.quality_check import analyze_quality
 from app.services.media.subtitle_format import build_ass
 from app.services.media_compose import run_ffmpeg
 from app.services.upload_service import UPLOADS_DIR
@@ -61,6 +62,7 @@ def render_status_payload(project: EditingProject) -> dict:
         "render_progress": project.render_progress,
         "final_url": project.final_url,
         "render_error": project.render_error,
+        "quality_report": project.quality_report,
     }
 
 
@@ -210,6 +212,11 @@ async def _render_project(db: AsyncSession, project: EditingProject) -> None:
     project.render_status = RENDER_SUCCEEDED
     project.render_progress = None
     project.render_error = None
+    # 6. 成片质检（best-effort：失败置 available=False，不影响渲染成功状态）
+    project.quality_report = await analyze_quality(
+        final_path, snapshot,
+        {aid for aid, a in assets.items() if a.kind == "image"},
+    )
     await db.commit()
 
     # 存储配额记账（best-effort，软处理：失败不影响渲染结果）

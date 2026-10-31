@@ -28,6 +28,21 @@ export interface EditingProjectBrief {
 /** 剪辑工程详情（含 document） */
 export interface EditingProjectDetail extends EditingProjectBrief {
   document: EditorDocument
+  quality_report?: QualityReport | null
+}
+
+/** 成片质检报告（黑场/冻结/静音 + suspect 标注；available=false 为质检失败降级） */
+export interface QualityIssue {
+  type: 'black' | 'freeze' | 'silence'
+  start: number
+  end: number
+  suspect: boolean
+}
+
+export interface QualityReport {
+  available: boolean
+  reason?: string
+  issues?: QualityIssue[]
 }
 
 /** 新建剪辑工程（document / asset_ids 二选一或都缺省=空工程） */
@@ -131,6 +146,7 @@ export interface RenderStatus {
   render_progress: string | null
   final_url: string | null
   render_error: string | null
+  quality_report?: QualityReport | null
 }
 
 /** 提交渲染（提交时快照 + clientOperationId 幂等） */

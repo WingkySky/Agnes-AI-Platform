@@ -49,6 +49,7 @@ class EditorProjectBrief(BaseModel):
 
 class EditorProjectDetail(EditorProjectBrief):
     document: dict[str, Any]
+    quality_report: dict[str, Any] | None = None   # 成片质检报告（黑场/冻结/静音 + suspect 标注）
 
 
 class EditorProjectListResponse(BaseModel):

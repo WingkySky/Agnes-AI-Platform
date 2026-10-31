@@ -46,7 +46,7 @@ router = APIRouter(
 
 
 def _brief(p) -> dict:
-    return {k: v for k, v in project_service._to_dict(p).items() if k != "document"}
+    return {k: v for k, v in project_service._to_dict(p).items() if k not in ("document", "quality_report")}
 
 
 @router.post("", summary="新建剪辑工程")

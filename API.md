@@ -542,12 +542,12 @@ Swagger UI（交互式文档）：`http://localhost:8000/docs`
 |------|------|------|
 | POST | `/api/editor/projects` | 新建剪辑工程。请求体 `{ title, work_id?, source_workspace_id?, document?, asset_ids? }`；`document` 缺省生成空时间线（三轨）；`asset_ids`（画布圈选素材）按序建草稿（视频/图片排主轨、音频排音频轨，视频 duration=0 由前端元数据补正），素材必须已入库且属当前用户 |
 | GET | `/api/editor/projects` | 本人工程列表。查询参数：`work_id`（可选筛），按 `updated_at` 倒序 |
-| GET | `/api/editor/projects/{uid}` | 工程详情（含 document/revision/渲染状态）；非本人 403 |
+| GET | `/api/editor/projects/{uid}` | 工程详情（含 document/revision/渲染状态/`quality_report` 质检报告）；非本人 403 |
 | PATCH | `/api/editor/projects/{uid}` | 编辑标题/挂靠作品（可选字段，仅更新提交项） |
 | DELETE | `/api/editor/projects/{uid}` | 删除工程（成片文件仍保留在资产库） |
 | PUT | `/api/editor/projects/{uid}/document` | 保存时间线。请求体 `{ document, base_revision, snapshot_reason? }`；乐观锁不符 409 + `current_revision`（前端拉远端+冲突副本流程）；渲染进行中同样 409；`snapshot_reason` 仅 agent 工具层携带，触发**写前**快照（新表 `editor_snapshots`，create_all 自动建；5 分钟窗口 + 内容哈希去重） |
 | POST | `/api/editor/projects/{uid}/render` | 提交渲染（`client_operation_id` 幂等）。服务端深拷贝 document 快照（`render_document`）后异步执行，立即返回状态；后台任务：素材本地化（远程 URL SSRF 校验后收口转存）→ 逐片段归一化（进度 `k/n`）→ 轨内 xfade/concat + 跨轨 overlay（PIP）→ 音频 adelay/amix（含未静音视频片段的自带音频，无声视频经 ffprobe 过滤）→ ASS 字幕硬烧 → 成片落 `uploads/editor/` 并自动入资产库（`source=compose`，`type=final`），`final_url` 挂工程 |
-| GET | `/api/editor/projects/{uid}/render` | 轮询渲染状态：`render_status`（idle/rendering/succeeded/failed）+ `render_progress`（`k/n` / `composing`）+ `final_url` + `render_error`（失败为 stderr 尾部）；应用启动时遗留 rendering 自动复位 failed |
+| GET | `/api/editor/projects/{uid}/render` | 轮询渲染状态：`render_status`（idle/rendering/succeeded/failed）+ `render_progress`（`k/n` / `composing`）+ `final_url` + `render_error`（失败为 stderr 尾部）+ `quality_report` 成片质检（渲染成功后自动单 pass 分析：blackdetect 黑场 / freezedetect 冻结 / silencedetect 静音，逐条 `{type, start, end, suspect}`，落在淡变/黑场转场/图片静帧窗口的标 `suspect=false`（可能刻意）；质检失败降级 `{available:false}` 不影响渲染状态；列表接口不携带该字段）；应用启动时遗留 rendering 自动复位 failed |
 | GET | `/api/editor/projects/{uid}/revision` | 远端 revision 轻查询（编辑器页轮询感知 agent/外部写入）：`{ revision, render_status, updated_at }` |
 | GET | `/api/editor/projects/{uid}/snapshots` | agent 写前快照列表（不含 data，时间倒序，最多 50 条） |
 | GET | `/api/editor/projects/{uid}/snapshots/{snapshot_id}` | 快照全量（含 `data`）；还原=把 `data` 作为 document 走正常保存链路（无独立还原端点，仿画布快照）；跨工程/不存在 404 |

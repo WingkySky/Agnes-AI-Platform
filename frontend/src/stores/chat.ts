@@ -37,7 +37,9 @@ import { getPreferences, patchPreferences } from '@/api/preferences'
 import { useCanvasStore } from '@/stores/canvas'
 import { isCloudChannel } from '@/lib/canvas-storage'
 import { CHAT_SYSTEM_PROMPT_BASE, buildChatSystemPrompt } from '@/lib/agent/chat-system-prompt'
-import { CANVAS_CONTEXT_SECTION, SCENE_CONTEXT_SECTION } from '@/lib/agent/system-prompt'
+import { CANVAS_CONTEXT_SECTION, SCENE_CONTEXT_SECTION, EDITOR_CONTEXT_SECTION } from '@/lib/agent/system-prompt'
+import { getEditorBridge, buildEditorRefBlock } from '@/lib/agent/editor-bridge'
+import type { EditorRefPayload } from '@/lib/agent/editor-bridge'
 import { listAgentSkills } from '@/lib/agent/skills'
 import { toBackendMessages } from '@/lib/agent/session-store'
 import { setDelegateProgressSink } from '@/lib/agent/subagent'
@@ -79,6 +81,7 @@ export interface AgentScope {
 const HOST_CONTEXT_SECTIONS: Partial<Record<AgentHostKind, string>> = {
   canvas: CANVAS_CONTEXT_SECTION,
   scene: SCENE_CONTEXT_SECTION,
+  editor: EDITOR_CONTEXT_SECTION,
 }
 
 /** 桥目标轮询定时器（进程级单例，store 重建不叠加） */
@@ -93,6 +96,8 @@ export interface ChatKernelMessage {
   images?: AgentImageAttachment[]
   /** 用户输入 URL 附件（图片/视频/文档链接，渲染卡片 + 落库） */
   urlAttachments?: MessageAttachment[]
+  /** 剪辑器选区引用（编辑器页「引用选中」捕获；落库 + 历史重建重放编号块） */
+  editorRefs?: EditorRefPayload[]
   /** 生成产物（占位→轮询回填→随全量同步落库） */
   media: MediaItem[]
   steps: AgentStepRecord[]
@@ -246,6 +251,7 @@ export function toChatBubbleItems(messages: ChatKernelMessage[], streaming: bool
       content: m.content,
       streaming: streaming && isLast && m.role === 'assistant',
       images: m.images?.length ? m.images.map((i) => ({ src: imageDataUrl(i) })) : undefined,
+      refs: m.editorRefs?.length ? m.editorRefs.map((r) => ({ label: r.label, thumb: r.thumb })) : undefined,
       attachments: m.urlAttachments?.length
         ? m.urlAttachments
             .filter((a) => a && (a.url || a.base64 || a.base64_image))
@@ -271,8 +277,13 @@ function messagesFromRows(rows: ChatMessage[]): ChatKernelMessage[] {
     if (r.role !== 'user' && r.role !== 'assistant') continue
     const images: AgentImageAttachment[] = []
     const urlAttachments: MessageAttachment[] = []
+    const editorRefs: EditorRefPayload[] = []
     for (const att of r.attachments ?? []) {
       if (!att) continue
+      if (att.editor_ref) {
+        editorRefs.push(att.editor_ref)
+        continue
+      }
       const b64 = typeof att.base64_image === 'string' ? att.base64_image : att.base64
       if (typeof b64 === 'string' && b64.startsWith('data:')) {
         const mime = b64.slice(5, b64.indexOf(';'))
@@ -287,6 +298,7 @@ function messagesFromRows(rows: ChatMessage[]): ChatKernelMessage[] {
       content: r.content || '',
       images: images.length ? images : undefined,
       urlAttachments: urlAttachments.length ? urlAttachments : undefined,
+      editorRefs: editorRefs.length ? editorRefs : undefined,
       media: (r.media_items ?? []).filter((m) => m && typeof m.type === 'string'),
       steps: (r.steps ?? []).filter((s): s is AgentStepRecord => isRecord(s) && typeof s.callId === 'string'),
       createdAt: r.created_at,
@@ -313,13 +325,19 @@ export function chatContextFromRows(rows: ChatMessage[]): unknown {
     if (r.role === 'user') {
       const content: Array<Record<string, unknown>> = []
       if (r.content) content.push({ type: 'text', text: r.content })
+      const refs: EditorRefPayload[] = []
       for (const att of r.attachments ?? []) {
         const b64 = typeof att?.base64_image === 'string' ? att.base64_image : att?.base64
         if (typeof b64 === 'string' && b64.startsWith('data:')) {
           const mime = b64.slice(5, b64.indexOf(';'))
           content.push({ type: 'image', data: b64.slice(b64.indexOf(',') + 1), mimeType: mime || 'image/png' })
+        } else if (att?.editor_ref) {
+          refs.push(att.editor_ref)
         }
       }
+      // 历史重建重放引用编号块（与发送时同源纯函数；无选中/播放头上下文，只放编号行）
+      const refBlock = buildEditorRefBlock(refs)
+      if (refBlock) content.push({ type: 'text', text: refBlock })
       msgs.push({ role: 'user', content: content.length ? content : '', timestamp: Date.now() })
       continue
     }
@@ -861,10 +879,15 @@ export const useChatStore = defineStore('chat', {
       this.messages = this._messagesOf(sessionId)
       this.runningSessions[String(sessionId)] = { thinking: true }
       delete this.errors[String(sessionId)]
-      // 附件分流：base64 图片进内核（模型可见），URL/文档类渲染卡片并随行落库
+      // 附件分流：剪辑器引用独立成桶；base64 图片进内核（模型可见），URL/文档类渲染卡片并随行落库
       const images: AgentImageAttachment[] = []
       const urlAttachments: MessageAttachment[] = []
+      const editorRefs: EditorRefPayload[] = []
       for (const att of attachments) {
+        if (att.editor_ref) {
+          editorRefs.push(att.editor_ref)
+          continue
+        }
         const b64 = typeof att.base64_image === 'string' ? att.base64_image : att.base64
         if (typeof b64 === 'string' && b64.startsWith('data:')) {
           const mime = att.mime_type || b64.slice(5, b64.indexOf(';'))
@@ -873,12 +896,22 @@ export const useChatStore = defineStore('chat', {
           urlAttachments.push(att)
         }
       }
+      // 动态引用块：编号映射 + 当前选中/播放头（编辑器桥在线时），追加进给 LLM 的文本（用户原文不动）
+      const refCtx = getEditorBridge()?.getRefContext() ?? null
+      const refBlock = buildEditorRefBlock(editorRefs, refCtx ? {
+        projectId: refCtx.projectId,
+        selectedClipId: refCtx.selectedClipId,
+        selectedTrackId: refCtx.selectedTrackId,
+        playhead: refCtx.playhead,
+      } : undefined)
+      const kernelText = refBlock ? (trimmed ? `${trimmed}\n\n${refBlock}` : refBlock) : trimmed
       this._messagesOf(sessionId).push({
         id: uid(),
         role: 'user',
         content: trimmed,
         images: images.length ? images : undefined,
         urlAttachments: urlAttachments.length ? urlAttachments : undefined,
+        editorRefs: editorRefs.length ? editorRefs : undefined,
         media: [],
         steps: [],
         createdAt: new Date().toISOString(),
@@ -887,7 +920,7 @@ export const useChatStore = defineStore('chat', {
         const k = await this._kernelFor(sessionId)
         await this._applySkillsPrompt(k)
         await this._persist(sessionId)
-        await k.send(trimmed, images)
+        await k.send(kernelText, images)
       } catch (e) {
         this.errors[String(sessionId)] = e instanceof Error ? e.message : String(e)
       } finally {
@@ -1271,6 +1304,7 @@ export const useChatStore = defineStore('chat', {
         content: m.content,
         images: m.images,
         urlAttachments: m.urlAttachments?.filter((a): a is MessageAttachment & { url: string } => typeof a?.url === 'string'),
+        editorRefs: m.editorRefs,
         media: m.media,
         steps: m.steps,
         createdAt: m.createdAt,
