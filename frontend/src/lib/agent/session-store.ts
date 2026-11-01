@@ -9,6 +9,7 @@
 
 import type { AgentSessionSyncPayload } from '@/types'
 import type { EditorRefPayload } from './editor-bridge'
+import type { CanvasRefPayload } from './canvas-bridge'
 
 /** 消息投影入参（结构兼容画布 AgentMessage 与对话页内核投影消息，避免循环依赖） */
 export interface ProjectableMessage {
@@ -23,6 +24,8 @@ export interface ProjectableMessage {
   urlAttachments?: Array<{ name: string; url: string; mime_type?: string }>
   /** 剪辑器选区引用（并入 attachments 行的 editor_ref 字段） */
   editorRefs?: EditorRefPayload[]
+  /** 画布节点引用（并入 attachments 行的 canvas_ref 字段） */
+  canvasRefs?: CanvasRefPayload[]
 }
 
 /** 消息投影：内核消息 → chat_messages 行（展示/总结用，不参与恢复） */
@@ -46,6 +49,12 @@ export function toBackendMessages(messages: ProjectableMessage[]): AgentSessionS
         name: ref.label,
         editor_ref: ref,
         mime_type: 'editor/ref',
+        size: 0,
+      })),
+      ...(m.canvasRefs ?? []).map((ref) => ({
+        name: ref.label,
+        canvas_ref: ref,
+        mime_type: 'canvas/ref',
         size: 0,
       })),
     ]

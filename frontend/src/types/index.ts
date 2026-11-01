@@ -5,6 +5,7 @@
  * ===================================================== */
 
 import type { EditorRefPayload } from '@/lib/agent/editor-bridge'
+import type { CanvasRefPayload } from '@/lib/agent/canvas-bridge'
 
 // =====================================================
 // 通用类型
@@ -399,6 +400,8 @@ export interface MessageAttachment {
   _link_type?: 'image' | 'video' | 'document' | 'webpage'
   /** 剪辑器选区引用（EditorRefPayload，随消息落库恢复） */
   editor_ref?: EditorRefPayload
+  /** 画布节点引用（CanvasRefPayload，随消息落库恢复） */
+  canvas_ref?: CanvasRefPayload
 }
 
 /** 创建会话请求 — 对齐 CreateSessionRequest */

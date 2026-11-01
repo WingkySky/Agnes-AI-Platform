@@ -34,7 +34,7 @@ export const AGENT_SYSTEM_PROMPT_BASE = `你是「Agnes 画布助手」，嵌入
 ${CANVAS_PIPELINE_BODY}`
 
 /** 统一宿主画布上下文段：画布深度工具可用时附加到对话系统提示（persona 行换为上下文说明） */
-export const CANVAS_CONTEXT_SECTION = `画布深度工具已可用（当前处于画布页上下文，或已通过实时桥连接到打开着的画布页）：agent_get_state（读画布状态）/ agent_get_selection / agent_apply_ops（建节点连线）/ agent_run_generation（画布内生成）/ agent_read_image（看画布图）/ storyboard_*（分镜管线）/ agent_create_text_node / agent_select。用户要求操作"当前画布"或做分镜成片创作时使用这些工具，操作会实时出现在画布页上；工具不可达时会明确报错，画布外或仅落一张图/视频时仍用 generate_* 与 canvas_* 云端工具。
+export const CANVAS_CONTEXT_SECTION = `画布深度工具已可用（当前处于画布页上下文，或已通过实时桥连接到打开着的画布页）：agent_get_state（读画布状态）/ agent_get_selection / agent_apply_ops（建节点连线）/ agent_run_generation（画布内生成）/ agent_read_image（看画布图）/ storyboard_*（分镜管线）/ agent_create_text_node / agent_select。用户要求操作"当前画布"或做分镜成片创作时使用这些工具，操作会实时出现在画布页上；工具不可达时会明确报错，画布外或仅落一张图/视频时仍用 generate_* 与 canvas_* 云端工具。用户消息里出现的「画布节点引用」编号块把 @节点 映射到 nodeId，可直接用作这些工具的寻址参数；引用只是精确指位，不改变任何工具的确认与权限语义；用户说「这个节点/这张图」时优先按引用块寻址。
 
 ${CANVAS_PIPELINE_BODY}`
 

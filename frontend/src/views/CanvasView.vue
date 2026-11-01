@@ -559,6 +559,7 @@ import { useCanvasStore } from '@/stores/canvas'
 
 import { startBridgeClient, BRIDGE_CANVAS_TOOLS } from '@/lib/agent/bridge'
 import type { BridgeClientHandle, BridgeExecutor } from '@/lib/agent/bridge'
+import { registerCanvasBridge, unregisterCanvasBridge, canvasNodeTypeLabel, type CanvasNodeSummary } from '@/lib/agent/canvas-bridge'
 import { AGENT_TOOLS } from '@/lib/agent/tools'
 import { useUserStore } from '@/stores/user'
 import { useChatStore } from '@/stores/chat'
@@ -3981,6 +3982,38 @@ watch(() => store.activeWorkspaceId, () => {
 
 let canvasBridge: BridgeClientHandle | null = null
 
+// ---------- 节点引用桥（Agent 输入区 @ 弹层 / 「引用选中」） ----------
+
+function canvasNodeSummaries(): CanvasNodeSummary[] {
+  return store.panels.map((p) => {
+    const isMedia = p.type === 'image' || p.type === 'video'
+    const mediaUrl = isMedia && p.content?.status === 'success' ? String(p.content?.content || '') : ''
+    return {
+      id: p.id,
+      type: p.type || 'text',
+      name: p.name || '',
+      ...(mediaUrl ? { mediaUrl } : {}),
+    }
+  })
+}
+
+function buildCanvasNodeRef(nodeId: string) {
+  const p = store.panels.find((x) => x.id === nodeId)
+  if (!p || !store.activeWorkspaceId) return null
+  const isMedia = p.type === 'image' || p.type === 'video'
+  const mediaUrl = isMedia && p.content?.status === 'success' ? String(p.content?.content || '') : ''
+  const type = p.type || 'text'
+  return {
+    kind: 'node' as const,
+    workspaceId: store.activeWorkspaceId,
+    nodeId: p.id,
+    nodeType: type,
+    name: p.name || '',
+    label: `${p.name || p.id}（${canvasNodeTypeLabel(type)}）`,
+    ...(mediaUrl ? { mediaUrl } : {}),
+  }
+}
+
 // Agent 跨页操作徽标状态：亮灭与内容由桥客户端 onActivity 驱动（并发计数在桥内）
 const bridgeBadge = reactive({ on: false, label: '' })
 
@@ -4017,6 +4050,16 @@ onMounted(async () => {
   chatStore.registerAgentScope({ host: 'canvas' })
   // 反向控制桥：本页注册为画布执行者（跨页 Agent 操作实时可见）
   startCanvasBridge()
+  // 节点引用桥：Agent 输入区 @ 弹层 / 「引用选中」取实时节点索引
+  registerCanvasBridge({
+    workspaceId: store.activeWorkspaceId || '',
+    getRefContext: () => (store.activeWorkspaceId ? {
+      workspaceId: store.activeWorkspaceId,
+      listNodes: canvasNodeSummaries,
+      buildNodeRef: buildCanvasNodeRef,
+      getSelectedNodeId: () => store.selectedPanelId,
+    } : null),
+  })
   // 刷新后节点里的 blob object URL 已失效，按 assetId 从素材库重建
   await remapAssetUrls()
   // 统一资产层：旧 uid 型 assetId 懒迁移为数字 id（幂等）
@@ -4048,6 +4091,7 @@ onBeforeUnmount(() => {
   // 停止远端 revision 轻轮询；注销画布深度工具 scope 与桥执行者
   store.stopRemotePoll()
   chatStore.unregisterAgentScope('canvas')
+  unregisterCanvasBridge()
   canvasBridge?.stop()
   canvasBridge = null
   // 移除全局事件监听

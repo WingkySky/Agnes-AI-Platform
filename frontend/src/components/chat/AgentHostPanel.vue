@@ -232,7 +232,7 @@
           :has-attachments="pendingAttachments.length > 0"
           :accept="ATTACH_ACCEPT"
           :paste-images="false"
-          @keydown="onDraftKeydown"
+          @keydown="onDraftKeydownWithMenus"
           @send="handleSend"
           @stop="chat.requestStop()"
           @pick-files="onFilesPicked"
@@ -242,7 +242,7 @@
           <template #leading>
             <div class="agent-menu-anchor">
               <button
-                v-if="editorRefAvailable"
+                v-if="hostRefAvailable"
                 type="button"
                 class="pill-btn ref-pill"
                 :title="t('agent.editorRefButton')"
@@ -292,6 +292,13 @@
           </template>
 
           <template #attachments>
+            <ChatNodeMenu
+              v-if="atMenuVisible"
+              :items="filteredNodes"
+              :highlight="nodeHighlight"
+              @pick="pickNodeWithRef"
+              @hover="(i: number) => (nodeHighlight = i)"
+            />
             <ChatPendingAttachments :attachments="pendingAttachments" @remove="removePendingAttachment" />
             <ChatSkillMenu
               v-if="skillMenuVisible"
@@ -347,8 +354,11 @@ import { useCanvasStore } from '@/stores/canvas'
 import { useModelsStore } from '@/stores/models'
 import { useConfirm } from '@/composables/useConfirm'
 import { useChatComposer } from '@/composables/useChatComposer'
+import { useAtNodes } from '@/composables/useAtNodes'
 import { toolStepLabel } from '@/lib/agent/tool-labels'
 import { getEditorBridge } from '@/lib/agent/editor-bridge'
+import { getCanvasBridge, type CanvasNodeSummary, type CanvasRefPayload } from '@/lib/agent/canvas-bridge'
+import ChatNodeMenu from '@/components/chat/ChatNodeMenu.vue'
 import ChatMessageList from '@/components/chat/ChatMessageList.vue'
 import ChatSkillMenu from '@/components/chat/ChatSkillMenu.vue'
 import ChatModelPill from '@/components/chat/ChatModelPill.vue'
@@ -401,11 +411,52 @@ const {
 /** 附件选择器放宽到文本文档（useChatComposer 会解析为文本拼进输入框） */
 const ATTACH_ACCEPT = 'image/*,.txt,.md,.markdown,.json,.csv,.log,.ts,.tsx,.js,.mjs,.py,.html,.css,.xml,.yml,.yaml,.pdf,.docx'
 
-// ---------- 剪辑器选区引用（桥在线时可用；输入区按钮 + Ctrl/Cmd+Shift+L） ----------
+// ---------- 剪辑器/画布选区引用（桥在线时可用；输入区按钮 + Ctrl/Cmd+Shift+L） ----------
 const editorRefAvailable = computed(() => chat.agentScopes.editor && !!getEditorBridge())
+const canvasRefAvailable = computed(() => chat.agentScopes.canvas && !!getCanvasBridge())
+const hostRefAvailable = computed(() => editorRefAvailable.value || canvasRefAvailable.value)
+
+/** @ 节点引用弹层（画布桥在线时输入 @ 触发） */
+const {
+  atMenuVisible, filteredNodes, highlight: nodeHighlight, pickNode, handleMenuKeydown: handleNodeMenuKeydown,
+} = useAtNodes(inputText, () => chat.agentDrawerOpen)
+
+function onDraftKeydownWithMenus(e: KeyboardEvent): void {
+  if (handleNodeMenuKeydown(e, pickNodeWithRef)) return
+  onDraftKeydown(e)
+}
+
+function pushCanvasRef(ref: CanvasRefPayload): boolean {
+  const dup = pendingAttachments.value.some((a) => a.canvas_ref && a.canvas_ref.nodeId === ref.nodeId)
+  if (dup) return false
+  pendingAttachments.value.push({ name: ref.label, canvas_ref: ref, size: 0, mime_type: 'canvas/ref' })
+  return true
+}
+
+/** @ 弹层选中：token 替换 + 引用卡入待发 */
+function pickNodeWithRef(node: CanvasNodeSummary): void {
+  pickNode(node)
+  const ref = getCanvasBridge()?.getRefContext()?.buildNodeRef(node.id)
+  if (ref && !pushCanvasRef(ref)) ElMessage.info(t('agent.editorRefDuplicate'))
+}
 
 async function insertEditorRef(): Promise<void> {
   if (!visible.value) chat.setAgentDrawerOpen(true)
+  // 画布宿主：引用当前选中节点
+  if (canvasRefAvailable.value && chat.agentScopes.canvas) {
+    const ctx = getCanvasBridge()?.getRefContext()
+    const nodeId = ctx?.getSelectedNodeId()
+    const ref = ctx && nodeId ? ctx.buildNodeRef(nodeId) : null
+    if (ref) {
+      if (pushCanvasRef(ref)) return
+      ElMessage.info(t('agent.editorRefDuplicate'))
+      return
+    }
+    if (!editorRefAvailable.value) {
+      ElMessage.info(t('agent.canvasRefNone'))
+      return
+    }
+  }
   const ctx = getEditorBridge()?.getRefContext()
   if (!ctx) {
     ElMessage.info(t('agent.editorRefNone'))
@@ -829,8 +880,8 @@ function onGlobalKeydown(e: KeyboardEvent): void {
     chat.toggleAgentDrawer()
     return
   }
-  // 剪辑器选区引用：Ctrl/Cmd+Shift+L（⌘L 是浏览器地址栏保留键，取 Shift 变体）
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'l' && editorRefAvailable.value) {
+  // 剪辑器/画布选区引用：Ctrl/Cmd+Shift+L（⌘L 是浏览器地址栏保留键，取 Shift 变体）
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'l' && hostRefAvailable.value) {
     e.preventDefault()
     e.stopPropagation()
     void insertEditorRef()

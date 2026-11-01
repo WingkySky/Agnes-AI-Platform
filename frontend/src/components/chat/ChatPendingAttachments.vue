@@ -12,6 +12,13 @@
           <span class="url-text" :title="att.editor_ref.label">{{ att.editor_ref.label }}</span>
         </div>
       </template>
+      <template v-else-if="att.canvas_ref">
+        <img v-if="att.canvas_ref.mediaUrl" :src="att.canvas_ref.mediaUrl" :alt="att.name" class="pending-attachment-thumb" />
+        <div v-else class="pending-attachment-url">
+          <el-icon :size="18"><Share /></el-icon>
+          <span class="url-text" :title="att.name">{{ att.name }}</span>
+        </div>
+      </template>
       <img v-else-if="att.base64" :src="att.base64" :alt="att.name" class="pending-attachment-thumb" />
       <div v-else-if="att.url" class="pending-attachment-url">
         <el-icon :size="18"><Document /></el-icon>
@@ -31,7 +38,7 @@
 
 <script setup lang="ts">
 /* 待发送附件预览条（对话页/全局抽屉共享） */
-import { Document, Film } from '@element-plus/icons-vue'
+import { Document, Film, Share } from '@element-plus/icons-vue'
 import type { MessageAttachment } from '@/types'
 import { truncateUrl } from '@/composables/useChatComposer'
 
