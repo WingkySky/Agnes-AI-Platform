@@ -78,6 +78,15 @@ describe('buildEditorRefBlock', () => {
     expect(block).not.toContain('当前选中')
     expect(editorRefLine(clipRef, 3)).toContain('[3] 片段 clip_abc')
   })
+
+  it('I/O 区间引用行', () => {
+    const rangeRef: EditorRefPayload = {
+      kind: 'range', projectId: 'p1', start: 2, end: 6.5, label: '区间 0:02.0-0:06.5',
+    }
+    const block = buildEditorRefBlock([rangeRef, trackRef])
+    expect(block).toContain('[1] 时间段 0:02.0-0:06.5（I/O 区间）')
+    expect(block).toContain('[2] 轨道 a1（音频）')
+  })
 })
 
 describe('引用落库与恢复往返', () => {

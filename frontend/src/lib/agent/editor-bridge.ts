@@ -9,14 +9,14 @@
 
 /** 编辑器引用载荷（附件 editor_ref 字段与消息 editorRefs 数组共用形状） */
 export interface EditorRefPayload {
-  kind: 'clip' | 'track'
+  kind: 'clip' | 'track' | 'range'
   projectId: string
   clipId?: string
   trackId?: string
   assetId?: number | null
   assetName?: string
   trackKind?: 'video' | 'audio' | 'subtitle'
-  /** 时间线域秒 */
+  /** 时间线域秒（clip=片段区间，range=I/O 区间） */
   start?: number
   end?: number
   /** 人类可读短标签（引用卡/编号行共用） */
@@ -25,14 +25,18 @@ export interface EditorRefPayload {
   thumb?: string
 }
 
-/** 编辑器页提供的实时上下文（选中态 + 引用构造器） */
+/** 编辑器页提供的实时上下文（选中态 + I/O 区间 + 引用构造器） */
 export interface EditorRefContext {
   projectId: string
   selectedClipId: string | null
   selectedTrackId: string | null
   playhead: number
+  /** I/O 点（会话本地态；齐备且 out>in 才可作区域引用） */
+  inPoint: number | null
+  outPoint: number | null
   buildClipRef(clipId: string): Promise<EditorRefPayload | null>
   buildTrackRef(trackId: string): Promise<EditorRefPayload | null>
+  buildRangeRef(): EditorRefPayload | null
 }
 
 export interface EditorBridgeApi {
@@ -68,6 +72,9 @@ export function editorRefTimecode(sec: number | undefined): string {
 export function editorRefLine(ref: EditorRefPayload, n: number): string {
   if (ref.kind === 'track') {
     return `[${n}] 轨道 ${ref.trackId}（${TRACK_KIND_LABELS[ref.trackKind ?? ''] ?? ref.trackKind ?? '未知'}）`
+  }
+  if (ref.kind === 'range') {
+    return `[${n}] 时间段 ${editorRefTimecode(ref.start)}-${editorRefTimecode(ref.end)}（I/O 区间）`
   }
   const span = ref.start != null ? ` ${editorRefTimecode(ref.start)}-${editorRefTimecode(ref.end)}` : ''
   const name = ref.assetName ? `「${ref.assetName}」` : ''

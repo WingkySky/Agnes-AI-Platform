@@ -411,21 +411,24 @@ async function insertEditorRef(): Promise<void> {
     ElMessage.info(t('agent.editorRefNone'))
     return
   }
-  const ref = ctx.selectedClipId
+  // I/O 区间齐备先加区间引用，再补片段/轨道引用（一击多卡）
+  const refs = [ctx.buildRangeRef()]
+  const picked = ctx.selectedClipId
     ? await ctx.buildClipRef(ctx.selectedClipId)
     : ctx.selectedTrackId ? await ctx.buildTrackRef(ctx.selectedTrackId) : null
-  if (!ref) {
-    ElMessage.info(t('agent.editorRefNone'))
-    return
+  if (picked) refs.push(picked)
+  let added = 0
+  for (const ref of refs) {
+    if (!ref) continue
+    const dup = pendingAttachments.value.some((a) =>
+      a.editor_ref && a.editor_ref.kind === ref.kind
+      && a.editor_ref.clipId === ref.clipId && a.editor_ref.trackId === ref.trackId
+      && a.editor_ref.start === ref.start)
+    if (dup) continue
+    pendingAttachments.value.push({ name: ref.label, editor_ref: ref, size: 0, mime_type: 'editor/ref' })
+    added++
   }
-  const dup = pendingAttachments.value.some((a) =>
-    a.editor_ref && a.editor_ref.kind === ref.kind
-    && a.editor_ref.clipId === ref.clipId && a.editor_ref.trackId === ref.trackId)
-  if (dup) {
-    ElMessage.info(t('agent.editorRefDuplicate'))
-    return
-  }
-  pendingAttachments.value.push({ name: ref.label, editor_ref: ref, size: 0, mime_type: 'editor/ref' })
+  if (!added) ElMessage.info(t('agent.editorRefNone'))
 }
 
 const listRef = ref<InstanceType<typeof ChatMessageList> | null>(null)

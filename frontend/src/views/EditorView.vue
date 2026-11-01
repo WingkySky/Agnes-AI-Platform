@@ -69,6 +69,17 @@ function seekToIssue(start: number): void {
   qualityOpen.value = false
 }
 
+/** 让 Agent 修复质检问题：打开 Agent 面板并发送带问题清单的修复请求 */
+function askAgentFixQuality(): void {
+  const issues = store.qualityReport?.issues ?? []
+  const lines = issues
+    .map((i) => `- ${editorRefTimecode(i.start)}-${editorRefTimecode(i.end)} ${t(`editor.qualityType.${i.type}`)}${i.suspect ? '' : `（${t('editor.qualityIntentional')}）`}`)
+    .join('\n')
+  qualityOpen.value = false
+  chatStore.setAgentDrawerOpen(true)
+  void chatStore.send(t('editor.qualityFixMsg', { n: issues.length, issues: lines }))
+}
+
 // ---------- 导出（下拉：设置/GIF/音频/剪映草稿；设置弹窗写入 setDocumentMeta op） ----------
 const exportOpen = ref(false)
 const historyOpen = ref(false)
@@ -222,6 +233,19 @@ function buildTrackRef(trackId: string) {
   })
 }
 
+function buildRangeRef() {
+  const a = store.inPoint
+  const b = store.outPoint
+  if (a == null || b == null || b <= a || !store.uid) return null
+  return {
+    kind: 'range' as const,
+    projectId: store.uid,
+    start: a,
+    end: b,
+    label: t('editor.refRangeLabel', { a: editorRefTimecode(a), b: editorRefTimecode(b) }),
+  }
+}
+
 // ---------- 可拖拽分隔条（面板尺寸本地持久化，刷新恢复） ----------
 
 const LAYOUT_KEY = 'agnes_editor_layout'
@@ -338,6 +362,12 @@ function onKeydown(e: KeyboardEvent): void {  const target = e.target as HTMLEle
   } else if ((e.key === 'm' || e.key === 'M') && !mod && !e.altKey) {
     e.preventDefault()  // 打标记（M 惯例）
     store.addMarkerAtPlayhead()
+  } else if ((e.key === 'i' || e.key === 'I') && !mod && !e.altKey && !e.shiftKey) {
+    e.preventDefault()  // 设入点（I/O 惯例；同点再按=清除）
+    store.toggleInPoint()
+  } else if ((e.key === 'o' || e.key === 'O') && !mod && !e.altKey && !e.shiftKey) {
+    e.preventDefault()  // 设出点
+    store.toggleOutPoint()
   } else if ((e.key === 'b' || e.key === 'B') && mod) {
     e.preventDefault()  // 分割（剪映 Ctrl+B / Premiere Ctrl+K 惯例）
     store.splitSelectedAtPlayhead()
@@ -370,7 +400,7 @@ onMounted(() => {
   store.startRemotePoll()
   // Agent scope 注册（批次 2 反向控制桥路由元数据；editor_* 工具本身常驻）
   chatStore.registerAgentScope({ host: 'editor', projectId: String(route.params.uid || '') })
-  // 选区引用桥：Agent 输入区「引用选中」/ Ctrl+Shift+L 取当前选中与播放头
+  // 选区引用桥：Agent 输入区「引用选中」/ Ctrl+Shift+L 取当前选中、I/O 区间与播放头
   registerEditorBridge({
     uid: String(route.params.uid || ''),
     getRefContext: () => (store.loaded && store.uid ? {
@@ -378,8 +408,11 @@ onMounted(() => {
       selectedClipId: store.selectedClipId,
       selectedTrackId: store.selectedTrackId,
       playhead: store.playhead,
+      inPoint: store.inPoint,
+      outPoint: store.outPoint,
       buildClipRef,
       buildTrackRef,
+      buildRangeRef,
     } : null),
   })
   // 反向控制桥：本页注册为剪辑工程执行者（跨页 Agent 排时间线实时可见）
@@ -536,6 +569,12 @@ onBeforeUnmount(() => {
           </button>
         </li>
       </ul>
+      <template #footer>
+        <el-button @click="qualityOpen = false">{{ t('common.close') }}</el-button>
+        <el-button type="primary" :disabled="!store.qualityReport?.issues?.length" @click="askAgentFixQuality">
+          {{ t('editor.qualityFixButton') }}
+        </el-button>
+      </template>
     </el-dialog>
 
     <!-- Agent 跨页操作徽标（批次 3 过程可视化）：桥执行期间亮起、回执后熄灭 -->

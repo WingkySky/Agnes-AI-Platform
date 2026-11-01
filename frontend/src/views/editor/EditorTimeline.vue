@@ -740,6 +740,8 @@ const shortcutList = computed(() => [
   { keys: `${mod}+B`, label: t('editor.split') },
   { keys: `${mod}+C`, label: t('editor.shortcutDuplicate') },
   { keys: 'Delete', label: t('common.delete') },
+  { keys: 'M', label: t('editor.ops.addMarker') },
+  { keys: 'I/O', label: `${t('editor.ioIn')} / ${t('editor.ioOut')}` },
   { keys: '←/→', label: t('editor.shortcutStepFrame') },
   { keys: 'Shift+←/→', label: t('editor.shortcutStepSecond') },
   { keys: 'Home/End', label: t('editor.shortcutHomeEnd') },
@@ -754,6 +756,18 @@ const rulerTicks = computed(() => {  const step = rulerStepSec(PX_PER_SEC.value)
 })
 
 const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PER_SEC.value))
+
+// ---------- I/O 点可视化（标尺括号 + 区间淡色带；会话本地态不落文档） ----------
+
+const ioBand = computed((): Record<string, string> => {
+  const a = store.inPoint
+  const b = store.outPoint
+  if (a == null || b == null || b <= a) return {}
+  return {
+    left: `${TRACK_HEAD_W + timeToX(a, PX_PER_SEC.value)}px`,
+    width: `${timeToX(b - a, PX_PER_SEC.value)}px`,
+  }
+})
 </script>
 
 <template>
@@ -819,6 +833,19 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
             @pointerdown.stop="store.playhead = m.time"
             @dblclick.stop="store.applyOrToast({ op: 'removeMarker', payload: { markerId: m.id } }, t('editor.ops.removeMarker'))"
           />
+          <!-- I/O 点（I/O 键；同点再按=清除） -->
+          <div
+            v-if="store.inPoint != null"
+            class="io-tick io-in"
+            :style="{ left: `${TRACK_HEAD_W + timeToX(store.inPoint, PX_PER_SEC)}px` }"
+            :title="t('editor.ioIn')"
+          >I</div>
+          <div
+            v-if="store.outPoint != null"
+            class="io-tick io-out"
+            :style="{ left: `${TRACK_HEAD_W + timeToX(store.outPoint, PX_PER_SEC)}px` }"
+            :title="t('editor.ioOut')"
+          >O</div>
         </div>
 
         <!-- 轨道 -->
@@ -942,6 +969,9 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
             </button>
           </div>
         </div>
+
+        <!-- I/O 区间淡色带（齐备且 out>in 时显示；盖在 lane 区、不挡交互） -->
+        <div v-if="ioBand.left" class="io-band" :style="ioBand" />
 
         <!-- 框选矩形（拖动中） -->
         <div v-if="marquee" class="marquee-rect" :style="marqueeStyle" />
@@ -1095,6 +1125,33 @@ const playheadLeft = computed(() => TRACK_HEAD_W + timeToX(store.playhead, PX_PE
   background: var(--el-color-primary-light-8);
   pointer-events: none;
   z-index: 5;
+}
+/* I/O 点标尺括号 + 区间淡色带 */
+.io-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  font-weight: 700;
+  color: #fff;
+  pointer-events: none;
+  z-index: 4;
+}
+.io-in { background: var(--el-color-success); margin-left: -3px; }
+.io-out { background: var(--el-color-danger); }
+.io-band {
+  position: absolute;
+  top: 22px;
+  bottom: 0;
+  background: rgba(64, 158, 255, 0.07);
+  border-left: 1px solid var(--el-color-success);
+  border-right: 1px solid var(--el-color-danger);
+  pointer-events: none;
+  z-index: 0;
 }
 .track-row {
   display: flex;

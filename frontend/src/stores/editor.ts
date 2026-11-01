@@ -79,6 +79,9 @@ export const useEditorStore = defineStore('editor', () => {
   const selectedTrackId = ref<string | null>(null)
   const playhead = ref(0)
   const isPlaying = ref(false)
+  /** I/O 点（入出点，会话本地 UI 态不落文档；区域引用/区间操作用） */
+  const inPoint = ref<number | null>(null)
+  const outPoint = ref<number | null>(null)
   const history = new EditorHistory()
 
   // ---------- 素材临时预览（会话内 UI 态，不入文档/撤销栈/保存） ----------
@@ -540,6 +543,25 @@ export const useEditorStore = defineStore('editor', () => {
     )
   }
 
+  // ---------- I/O 点（同点再按=清除；out<=in 冲突时清除冲突侧） ----------
+
+  function toggleInPoint(): void {
+    const t = Math.round(playhead.value * 1000) / 1000
+    inPoint.value = inPoint.value != null && Math.abs(inPoint.value - t) < 1e-3 ? null : t
+    if (inPoint.value != null && outPoint.value != null && outPoint.value <= inPoint.value) outPoint.value = null
+  }
+
+  function toggleOutPoint(): void {
+    const t = Math.round(playhead.value * 1000) / 1000
+    outPoint.value = outPoint.value != null && Math.abs(outPoint.value - t) < 1e-3 ? null : t
+    if (inPoint.value != null && outPoint.value != null && outPoint.value <= inPoint.value) inPoint.value = null
+  }
+
+  function clearPoints(): void {
+    inPoint.value = null
+    outPoint.value = null
+  }
+
   /** 复制片段到原片段尾部（原轨放不下回退同类型空闲轨/新建轨） */
   async function duplicateClip(clipId: string): Promise<void> {
     const d = doc.value
@@ -674,6 +696,8 @@ export const useEditorStore = defineStore('editor', () => {
     selectedClipId.value = null
     selectedClipIds.value = []
     selectedTrackId.value = null
+    inPoint.value = null
+    outPoint.value = null
     playhead.value = 0
     previewingAsset.value = null
     renderStatus.value = 'idle'
@@ -683,7 +707,7 @@ export const useEditorStore = defineStore('editor', () => {
 
   return {
     uid, title, workId, sourceWorkspaceId, revision, loaded,
-    doc, selectedClipId, selectedClipIds, selectedTrackId, playhead, isPlaying, history,
+    doc, selectedClipId, selectedClipIds, selectedTrackId, playhead, isPlaying, inPoint, outPoint, history,
     previewingAsset, startAssetPreview, endAssetPreview,
     snappingEnabled, setSnapping,
     dirty, saving, lastSavedAt,
@@ -691,7 +715,7 @@ export const useEditorStore = defineStore('editor', () => {
     assetCache,
     load, fetchAsset, apply, applyBatch, applyOrToast, undo, redo, healDurations,
     placeAsset, appendAssetToTrack, createTopTrackOfKind, setCoverUrl, detachAudio, splitSelectedAtPlayhead, duplicateClip,
-    freezeFrame, addMarkerAtPlayhead,
+    freezeFrame, addMarkerAtPlayhead, toggleInPoint, toggleOutPoint, clearPoints,
     probeMediaDuration,
     saveNow, scheduleSave, submitRender, rename,
     startRemotePoll, stopRemotePoll, pollRemoteNow,
