@@ -137,7 +137,9 @@ def validate_document_skeleton(doc: Any) -> dict:
                     _fail(f"clips[{i}].props.style.font 必须为 1~64 字符")
                 elif k == "position" and v not in _SUBTITLE_POSITIONS:
                     _fail(f"clips[{i}].props.style.position 非法")
-                elif k not in ("color", "size", "font", "position"):
+                elif k in ("x", "y") and (not isinstance(v, (int, float)) or not (0 <= v <= 1)):
+                    _fail(f"clips[{i}].props.style.{k} 必须为 0~1")
+                elif k not in ("color", "size", "font", "position", "x", "y"):
                     _fail(f"clips[{i}].props.style.{k} 未知键")
         points = props.get("volumePoints")
         if points is not None:

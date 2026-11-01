@@ -135,6 +135,12 @@ function normalizeStyleDelta(delta: unknown): Record<string, unknown> {
       if (value !== 'bottom' && value !== 'center' && value !== 'top') {
         throw new EditorCommandError('invalid_payload', 'style.position')
       }
+    } else if (key === 'x' || key === 'y') {
+      // 自由位置（归一化中心，0~1；钳两位小数）
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
+        throw new EditorCommandError('invalid_payload', `style.${key}`)
+      }
+      out[key] = Math.round(value * 1000) / 1000
     } else {
       throw new EditorCommandError('invalid_payload', `unknown style key: ${key}`)
     }

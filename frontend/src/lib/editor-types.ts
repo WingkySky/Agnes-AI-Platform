@@ -67,8 +67,9 @@ export interface ClipProps {
   camera?: { type: string; strength: number }
   /** 音画分离后源片段静音：自带音频不再进预览与渲染 */
   muted?: boolean
-  /** 字幕逐 cue 样式覆盖（仅字幕片段；缺键继承工程 subtitleStyle） */
-  style?: { font?: string; color?: string; size?: number; position?: 'bottom' | 'center' | 'top' }
+  /** 字幕逐 cue 样式覆盖（仅字幕片段；缺键继承工程 subtitleStyle）。
+   *  x/y=拖拽后的归一化中心位（0~1，相对画面区；存在则覆盖 position 预设位） */
+  style?: { font?: string; color?: string; size?: number; position?: 'bottom' | 'center' | 'top'; x?: number; y?: number }
   /** 音量包络关键帧（相对片段坐标 t:0~1 升序，v:0~2；gain = volume × 插值 × fadeAlpha） */
   volumePoints?: Array<{ t: number; v: number }>
 }

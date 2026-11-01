@@ -187,6 +187,10 @@ async def _render_project(db: AsyncSession, project: EditingProject) -> None:
             "font_color": style.get("color") or "#FFFFFF",
             "outline_width": 2 if style.get("outline") else 0,
             "position": style.get("position") or "bottom",
+            # PlayRes=实际视频分辨率：\pos 逐 cue 坐标与字幕尺寸随视频正确缩放
+            # （此前硬编码 1280x720，非 720p 工程字幕缩放错误）
+            "width": plan["width"],
+            "height": plan["height"],
         }
         ass_path = os.path.join(EDITOR_OUTPUTS_DIR, f"subs_{uuid.uuid4().hex[:12]}.ass")
         Path(ass_path).write_text(build_ass(ass_events, ass_style), encoding="utf-8")

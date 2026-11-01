@@ -8,7 +8,7 @@
  * - 字幕层与控制条两路径共用；激活片段素材缓存两条路径共用
  * ===================================================== */
 
-import { computed, onBeforeUnmount, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { Headset } from '@element-plus/icons-vue'
 import { ArrowLeftToLine, ArrowRightToLine, ChevronsLeft, ChevronsRight, Pause, Play, StepBack, StepForward } from 'lucide-vue-next'
 
@@ -56,16 +56,111 @@ const videoTracks = computed(() =>
   (store.doc?.tracks ?? []).filter((tr) => tr.kind === 'video').sort((a, b) => a.order - b.order),
 )
 
-/** 逐 cue 样式覆盖（缺键继承工程 subtitleStyle；position 用 align-self 模拟 top/center/bottom） */
+/** 逐 cue 样式覆盖（缺键继承工程 subtitleStyle；position 用 align-self 模拟 top/center/bottom）。
+ *  x/y 自由位=绝对定位在画面归一化中心（与渲染 \an5\pos 语义一致）；拖拽/缩放手势本地态实时覆盖。 */
 function subtitleClipStyle(clip: EditorClip): Record<string, string> {
   const style = clip.props.style
-  if (!style) return {}
+  if (!style && subDrag.value?.id !== clip.id) return {}
   const out: Record<string, string> = {}
-  if (style.font) out.fontFamily = `"${style.font}", "Noto Sans CJK SC", sans-serif`
-  if (style.color) out.color = style.color
-  if (style.size) out.fontSize = `${style.size * 0.5}px`
-  if (style.position) out.alignSelf = style.position === 'top' ? 'flex-start' : style.position === 'center' ? 'center' : 'flex-end'
+  const drag = subDrag.value?.id === clip.id ? subDrag.value : null
+  const scale = subScale.value?.id === clip.id ? subScale.value : null
+  const font = style?.font
+  const color = style?.color
+  const size = scale ? scale.size : style?.size
+  const position = style?.position
+  const x = drag ? drag.x : style?.x
+  const y = drag ? drag.y : style?.y
+  if (font) out.fontFamily = `"${font}", "Noto Sans CJK SC", sans-serif`
+  if (color) out.color = color
+  if (size) out.fontSize = `${size * 0.5}px`
+  if (x != null && y != null) {
+    out.position = 'absolute'
+    out.left = `${x * 100}%`
+    out.top = `${y * 100}%`
+    out.transform = 'translate(-50%, -50%)'
+    out.alignSelf = 'unset'
+  } else if (position) {
+    out.alignSelf = position === 'top' ? 'flex-start' : position === 'center' ? 'center' : 'flex-end'
+  }
   return out
+}
+
+// ---------- 字幕预览交互：点选/拖动改位/缩放把手（手势本地态，pointerup 一次入栈可撤销） ----------
+
+const stageRef = ref<HTMLElement | null>(null)
+const subDrag = ref<{ id: string; x: number; y: number } | null>(null)
+const subScale = ref<{ id: string; size: number } | null>(null)
+
+function stageRect(): DOMRect | null {
+  return stageRef.value?.getBoundingClientRect() ?? null
+}
+
+function onSubtitlePointerDown(e: PointerEvent, clip: EditorClip): void {
+  e.stopPropagation()
+  store.select(clip.id)
+  store.endAssetPreview()
+  store.isPlaying = false
+  const rect = stageRect()
+  if (!rect || clip.trackId !== subtitleTrackId()) return
+  const startX = e.clientX
+  const startY = e.clientY
+  const origX = clip.props.style?.x ?? (rect.left + rect.width / 2 === 0 ? 0.5 : (e.clientX - rect.left) / rect.width)
+  const origY = clip.props.style?.y ?? (e.clientY - rect.top) / rect.height
+  // 首次拖动：以当前渲染位置为自由位起点（预设位=居中/底部近似当前位置）
+  const baseX = clip.props.style?.x ?? Math.min(0.98, Math.max(0.02, (e.clientX - rect.left) / rect.width))
+  const baseY = clip.props.style?.y ?? Math.min(0.98, Math.max(0.02, (e.clientY - rect.top) / rect.height))
+  void origX; void origY
+  let moved = false
+  const move = (ev: PointerEvent): void => {
+    const dx = (ev.clientX - startX) / rect.width
+    const dy = (ev.clientY - startY) / rect.height
+    if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) < 4) return
+    moved = true
+    subDrag.value = {
+      id: clip.id,
+      x: Math.round(Math.min(0.98, Math.max(0.02, baseX + dx)) * 1000) / 1000,
+      y: Math.round(Math.min(0.98, Math.max(0.02, baseY + dy)) * 1000) / 1000,
+    }
+  }
+  const up = (): void => {
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', up)
+    const d = subDrag.value
+    subDrag.value = null
+    if (!d || !moved) return
+    const style = { ...(clip.props.style ?? {}), x: d.x, y: d.y }
+    store.applyOrToast({ op: 'setClipProperty', payload: { clipId: clip.id, props: { style } } }, t('editor.cueStyleMove'))
+  }
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', up)
+}
+
+function onSubtitleScaleDown(e: PointerEvent, clip: EditorClip): void {
+  e.stopPropagation()
+  const startY = e.clientY
+  const origSize = clip.props.style?.size ?? store.doc?.subtitleStyle?.size ?? 48
+  subScale.value = { id: clip.id, size: origSize }
+  const move = (ev: PointerEvent): void => {
+    const s = subScale.value
+    if (!s) return
+    // 竖直拖动 → 字号（向上放大）；步进 1px 钳 8~200
+    s.size = Math.round(Math.min(200, Math.max(8, origSize - (ev.clientY - startY) / 2)))
+  }
+  const up = (): void => {
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', up)
+    const s = subScale.value
+    subScale.value = null
+    if (!s || s.size === origSize) return
+    const style = { ...(clip.props.style ?? {}), size: s.size }
+    store.applyOrToast({ op: 'setClipProperty', payload: { clipId: clip.id, props: { style } } }, t('editor.cueStyleSize'))
+  }
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', up)
+}
+
+function subtitleTrackId(): string | null {
+  return store.doc?.tracks.find((tr) => tr.kind === 'subtitle')?.id ?? null
 }
 const audioTracks = computed(() =>
   (store.doc?.tracks ?? []).filter((tr) => tr.kind === 'audio'),
@@ -116,15 +211,18 @@ watch(audioStates, (states) => {
   for (const s of Object.values(states)) if (s.assetId != null && !s.url) void store.fetchAsset(s.assetId)
 }, { immediate: true })
 
+/** 字幕全程显示（非播放头区间的半透明，可点选/拖动编辑——标准剪辑器行为） */
 const activeSubtitles = computed(() =>
   (store.doc?.clips ?? [])
     .filter((c) => {
       const track = store.doc?.tracks.find((tr) => tr.id === c.trackId)
-      return track?.kind === 'subtitle' && !track.flags.hidden
-        && store.playhead >= c.start && store.playhead < clipEnd(c) && c.text
+      return track?.kind === 'subtitle' && !track.flags.hidden && c.text
     })
     .sort((a, b) => a.start - b.start),
 )
+
+const isSubtitleActive = (clip: EditorClip): boolean =>
+  store.playhead >= clip.start && store.playhead < clipEnd(clip)
 
 function clipRectStyle(clip: EditorClip): Record<string, string> {
   const r = clip.props.rect ?? { x: 0, y: 0, w: 1, h: 1 }
@@ -272,7 +370,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="preview">
     <div class="stage-wrap">
-      <div class="stage" :style="stageStyle">
+      <div ref="stageRef" class="stage" :style="stageStyle">
         <template v-if="store.doc">
           <EditorCanvasStage v-if="useCanvasPath" />
           <template v-else>
@@ -299,9 +397,23 @@ onBeforeUnmount(() => {
               v-for="clip in activeSubtitles"
               :key="clip.id"
               class="subtitle-text"
-              :style="{ ...subtitleStyleVars, ...subtitleClipStyle(clip), opacity: clipFadeAlphaAt(clip, store.playhead) }"
+              :class="{
+                'is-selected': store.selectedClipId === clip.id,
+                'is-idle': !isSubtitleActive(clip),
+              }"
+              :style="{
+                ...subtitleStyleVars,
+                ...subtitleClipStyle(clip),
+                opacity: isSubtitleActive(clip) ? clipFadeAlphaAt(clip, store.playhead) : 0.4,
+              }"
+              @pointerdown.stop="onSubtitlePointerDown($event, clip)"
             >
               {{ clip.text }}
+              <span
+                v-if="store.selectedClipId === clip.id"
+                class="subtitle-scale-handle"
+                @pointerdown.stop="onSubtitleScaleDown($event, clip)"
+              />
             </p>
           </div>
         </template>
@@ -386,14 +498,14 @@ onBeforeUnmount(() => {
 }
 .subtitle-layer {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 6%;
+  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: flex-end;
   gap: 2px;
-  pointer-events: none;
+  padding-bottom: 6%;
+  pointer-events: none; /* 层空白区穿透到画面；文本自身 auto 可点选 */
 }
 .subtitle-text {
   margin: 0;
@@ -401,6 +513,25 @@ onBeforeUnmount(() => {
   color: #fff;
   font-size: 24px;
   line-height: 1.3;
+  pointer-events: auto; /* 可点选/拖动 */
+  position: relative;
+  cursor: move;
+  touch-action: none;
+  user-select: none;
+}
+.subtitle-text.is-idle { opacity: 0.4; }
+.subtitle-text.is-selected { outline: 1.5px dashed var(--el-color-primary); outline-offset: 3px; }
+.subtitle-scale-handle {
+  position: absolute;
+  right: -7px;
+  bottom: -7px;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: var(--el-color-primary);
+  border: 2px solid #fff;
+  cursor: nwse-resize;
+  touch-action: none;
 }
 .stage-empty {
   position: absolute;

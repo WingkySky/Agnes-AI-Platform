@@ -155,11 +155,16 @@ void import('@/api/editor').then(({ getEditorFonts }) => {
     .finally(() => { fontsLoading.value = false })
 })
 
-/** 逐 cue 样式覆盖：值=null 删键回继承 */
-function setCueStyle(key: 'font' | 'color' | 'size' | 'position', value: unknown): void {
+/** 逐 cue 样式覆盖：值=null 删键回继承；position 变更顺带清自由位（回到预设布局） */
+function setCueStyle(key: 'font' | 'color' | 'size' | 'position' | 'x', value: unknown): void {
   if (!selected.value) return
+  const inner: Record<string, unknown> = { [key]: value }
+  if (key === 'position') {
+    inner.x = null
+    inner.y = null
+  }
   store.applyOrToast(
-    { op: 'setClipProperty', payload: { clipId: selected.value.id, props: { style: { [key]: value } } } },
+    { op: 'setClipProperty', payload: { clipId: selected.value.id, props: { style: inner } } },
     t('editor.ops.setClipProperty'),
   )
 }
@@ -284,6 +289,13 @@ function removeSelected(): void {
             <el-option value="top" :label="t('editor.cuePosTop')" />
           </el-select>
           <el-button size="small" text :disabled="!selected.props.style?.position" @click="setCueStyle('position', null)">{{ t('editor.cueStyleInherit') }}</el-button>
+        </div>
+        <div class="prop-row">
+          <label>{{ t('editor.cueFreePos') }}</label>
+          <span class="cue-pos-state">
+            {{ selected.props.style?.x != null ? t('editor.cueFreePosOn') : t('editor.cueFreePosOff') }}
+          </span>
+          <el-button size="small" text :disabled="selected.props.style?.x == null" @click="setCueStyle('x', null)">{{ t('editor.cuePosReset') }}</el-button>
         </div>
       </template>
 

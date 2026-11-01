@@ -72,11 +72,14 @@ def build_ass(clips: list[dict], style: dict | None = None) -> str:
     # 位置：bottom→2 (默认), top→8, center→5
     alignment = {"bottom": 2, "top": 8, "center": 5}.get(s.get("position", "bottom"), 2)
     margin_v = int(s.get("margin_vertical", 60))
+    # PlayRes=实际视频分辨率（\pos 逐 cue 坐标空间；字幕尺寸随视频分辨率正确缩放）
+    play_w = max(2, int(s.get("width") or 1280))
+    play_h = max(2, int(s.get("height") or 720))
 
     header = f"""[Script Info]
 ScriptType: v4.00+
-PlayResX: 1280
-PlayResY: 720
+PlayResX: {play_w}
+PlayResY: {play_h}
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
@@ -104,7 +107,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 override += f"{{\\1c{to_ass_color(style['color'])}}}"
             if isinstance(style.get("size"), (int, float)):
                 override += "{\\fs" + str(int(style["size"])) + "}"
-            if style.get("position") in ("bottom", "center", "top"):
+            # 自由位置（预览拖拽产物）：x/y 为归一化中心 → \an5\pos(x*W, y*H) 覆盖预设位
+            free_pos = isinstance(style.get("x"), (int, float)) and isinstance(style.get("y"), (int, float))
+            if free_pos:
+                px = round(max(0.0, min(1.0, float(style["x"]))) * play_w, 2)
+                py = round(max(0.0, min(1.0, float(style["y"]))) * play_h, 2)
+                override += f"{{\\an5\\pos({px},{py})}}"  # 自由位=中心锚；跳过 position \an 防覆盖
+            if style.get("position") in ("bottom", "center", "top") and not free_pos:
                 override += "{\\an" + {"bottom": "2", "center": "5", "top": "8"}[style["position"]] + "}"
         # 整条淡变（毫秒）；未配置时不加覆盖块，输出与旧版一致
         fi = float(clip.get("fade_in") or 0)
