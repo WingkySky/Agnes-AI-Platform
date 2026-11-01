@@ -62,6 +62,13 @@ class SubtitlePreviewRequest(BaseModel):
     track_id: str
 
 
+class ExportFinalRequest(BaseModel):
+    """成片后处理导出：GIF（可选宽/帧率）或仅音频"""
+    format: str  # 'gif' | 'audio'
+    width: int | None = None
+    fps: int | None = None
+
+
 class RoughCutAnalyzeRequest(BaseModel):
     """AI 粗剪分析：silence=剔除静音（输出有声段），scenes=场景切分（输出镜头段）"""
     mode: str  # 'silence' | 'scenes'

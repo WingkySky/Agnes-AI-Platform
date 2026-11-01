@@ -7,7 +7,7 @@
 
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Download, Edit, Loading, VideoPlay } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowDown, Download, Edit, Loading, VideoPlay } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import type { Ref } from 'vue'
 
@@ -15,13 +15,14 @@ import EditorAssets from '@/views/editor/EditorAssets.vue'
 import EditorPreview from '@/views/editor/EditorPreview.vue'
 import EditorTimeline from '@/views/editor/EditorTimeline.vue'
 import EditorInspector from '@/views/editor/EditorInspector.vue'
+import EditorHistoryDialog from '@/views/editor/EditorHistoryDialog.vue'
 import { useEditorStore } from '@/stores/editor'
 import { useChatStore } from '@/stores/chat'
 import { startBridgeClient, BRIDGE_EDITOR_TOOLS } from '@/lib/agent/bridge'
 import type { BridgeClientHandle } from '@/lib/agent/bridge'
 import { toolStepLabel } from '@/lib/agent/tool-labels'
 import { EDITOR_TOOLS } from '@/lib/agent/editor-tools'
-import { updateEditorProject } from '@/api/editor'
+import { updateEditorProject, exportFinal, exportJianyingDraft } from '@/api/editor'
 import { useRename } from '@/composables/useRename'
 import { useUserStore } from '@/stores/user'
 import { clipEnd, sourceSpan, type EditorClip } from '@/lib/editor-types'
@@ -65,6 +66,72 @@ const suspectCount = computed(() => (store.qualityReport?.issues ?? []).filter((
 function seekToIssue(start: number): void {
   store.playhead = Math.max(0, start)
   qualityOpen.value = false
+}
+
+// ---------- 导出（下拉：设置/GIF/音频/剪映草稿；设置弹窗写入 setDocumentMeta op） ----------
+const exportOpen = ref(false)
+const historyOpen = ref(false)
+
+const EXPORT_PRESETS = [
+  { key: 'vertical', width: 1080, height: 1920 },
+  { key: 'landscape720', width: 1280, height: 720 },
+  { key: 'landscape1080', width: 1920, height: 1080 },
+  { key: 'square', width: 1080, height: 1080 },
+] as const
+
+const expWidth = ref(1280)
+const expHeight = ref(720)
+const expFps = ref(30)
+
+function openExportSettings(): void {
+  expWidth.value = store.doc?.width ?? 1280
+  expHeight.value = store.doc?.height ?? 720
+  expFps.value = store.doc?.timebase ?? 30
+  exportOpen.value = true
+}
+
+function applyExportSettings(): void {
+  const ok = store.applyOrToast(
+    { op: 'setDocumentMeta', payload: { width: expWidth.value, height: expHeight.value, timebase: expFps.value } },
+    t('editor.ops.setDocumentMeta'),
+  )
+  if (ok) {
+    exportOpen.value = false
+    ElMessage.success(t('editor.exportApplied'))
+  }
+}
+
+/** 导出下拉命令：GIF/音频走成片后处理（blob 下载带鉴权），剪映草稿同理 */
+async function onExportCommand(command: string): Promise<void> {
+  if (command === 'settings') return openExportSettings()
+  if (command === 'history') return void (historyOpen.value = true)
+  try {
+    if (command === 'jianying') {
+      ElMessage.info(t('editor.exportStarted'))
+      const blob = await exportJianyingDraft(store.uid)
+      downloadBlob(blob, `${store.title || 'draft'}.zip`)
+    } else {
+      if (!store.finalUrl) {
+        ElMessage.warning(t('editor.exportNoFinal'))
+        return
+      }
+      ElMessage.info(t('editor.exportStarted'))
+      const blob = await exportFinal(store.uid, { format: command as 'gif' | 'audio' })
+      downloadBlob(blob, `${store.title || 'export'}.${command === 'gif' ? 'gif' : 'm4a'}`)
+    }
+    ElMessage.success(t('editor.exportDone'))
+  } catch (e) {
+    ElMessage.error((e instanceof Error ? e.message : '') || t('editor.exportFailed'))
+  }
+}
+
+function downloadBlob(blob: Blob, name: string): void {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 function goBack(): void {
@@ -354,6 +421,18 @@ onBeforeUnmount(() => {
         <a v-if="store.finalUrl" :href="store.finalUrl" target="_blank" class="final-link">
           <el-button :icon="Download" text size="small">{{ t('editor.finalOutput') }}</el-button>
         </a>
+        <el-dropdown class="export-dd" @command="onExportCommand">
+          <el-button text size="small">{{ t('editor.exportMenu') }}<el-icon class="export-dd-arrow"><ArrowDown /></el-icon></el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="settings">{{ t('editor.exportSettings') }}</el-dropdown-item>
+              <el-dropdown-item command="history">{{ t('editor.historyTitle') }}</el-dropdown-item>
+              <el-dropdown-item command="gif" divided :disabled="!store.finalUrl">{{ t('editor.exportGif') }}</el-dropdown-item>
+              <el-dropdown-item command="audio" :disabled="!store.finalUrl">{{ t('editor.exportAudio') }}</el-dropdown-item>
+              <el-dropdown-item command="jianying" :disabled="!store.doc?.clips.length">{{ t('editor.exportJianying') }}</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <el-tag
           v-if="store.qualityReport?.available && suspectCount > 0"
           type="warning"
@@ -391,6 +470,46 @@ onBeforeUnmount(() => {
         <EditorTimeline :total-duration="totalDuration" />
       </div>
     </div>
+
+    <!-- 导出设置（分辨率/帧率 → setDocumentMeta op，入撤销栈；字幕字号自动随宽度缩放） -->
+    <el-dialog v-model="exportOpen" :title="t('editor.exportSettings')" width="460px" append-to-body>
+      <div class="exp-presets">
+        <button
+          v-for="p in EXPORT_PRESETS"
+          :key="p.key"
+          type="button"
+          class="exp-preset"
+          :class="{ active: expWidth === p.width && expHeight === p.height }"
+          @click="expWidth = p.width; expHeight = p.height"
+        >
+          <span class="exp-preset-name">{{ t(`editor.exportPreset.${p.key}`) }}</span>
+          <span class="exp-preset-dim">{{ p.width }}×{{ p.height }}</span>
+        </button>
+      </div>
+      <div class="exp-row">
+        <span>{{ t('editor.exportSize') }}</span>
+        <el-input-number v-model="expWidth" :min="16" :max="7680" :step="2" controls-position="right" />
+        <span>×</span>
+        <el-input-number v-model="expHeight" :min="16" :max="7680" :step="2" controls-position="right" />
+      </div>
+      <div class="exp-row">
+        <span>{{ t('editor.exportFps') }}</span>
+        <el-radio-group v-model="expFps">
+          <el-radio-button :value="24">24</el-radio-button>
+          <el-radio-button :value="25">25</el-radio-button>
+          <el-radio-button :value="30">30</el-radio-button>
+          <el-radio-button :value="60">60</el-radio-button>
+        </el-radio-group>
+      </div>
+      <p class="exp-note">{{ t('editor.exportScaleNote') }}</p>
+      <template #footer>
+        <el-button @click="exportOpen = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="applyExportSettings">{{ t('common.confirm') }}</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 版本历史还原 -->
+    <EditorHistoryDialog :open="historyOpen" @close="historyOpen = false" />
 
     <!-- 渲染质检详情：类型/时间码/刻意标注，条目点击跳时间线播放头 -->
     <el-dialog v-model="qualityOpen" :title="t('editor.qualityTitle')" width="480px" append-to-body>
@@ -454,6 +573,20 @@ onBeforeUnmount(() => {
   min-width: 64px;
 }
 .final-link { text-decoration: none; }
+/* 导出下拉 + 设置弹窗 */
+.export-dd { margin-left: 2px; }
+.export-dd-arrow { margin-left: 2px; }
+.exp-presets { display: flex; gap: 8px; margin-bottom: 14px; }
+.exp-preset {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 10px 4px; border: 1px solid var(--el-border-color); border-radius: 8px;
+  background: transparent; cursor: pointer; color: inherit;
+}
+.exp-preset.active { border-color: var(--el-color-primary); background: var(--el-color-primary-light-9); }
+.exp-preset-name { font-size: 12px; }
+.exp-preset-dim { font-size: 11px; color: var(--el-text-color-secondary); font-family: ui-monospace, monospace; }
+.exp-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; font-size: 13px; }
+.exp-note { margin: 0; font-size: 12px; color: var(--el-text-color-secondary); }
 /* 质检徽标可点击 + 详情列表 */
 .quality-tag { cursor: pointer; }
 .quality-empty { margin: 0; font-size: 13px; color: var(--el-text-color-secondary); }

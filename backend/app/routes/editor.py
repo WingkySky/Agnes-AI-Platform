@@ -15,8 +15,13 @@
 # =====================================================
 
 
+import os
+import shutil
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.background import BackgroundTask
 
 from app.core.database import get_async_db
 from app.core.response import ok
@@ -28,10 +33,13 @@ from app.schemas.editor import (
     EditorProjectCreate,
     EditorProjectListResponse,
     EditorProjectUpdate,
+    ExportFinalRequest,
     RoughCutAnalyzeRequest,
     SubtitlePreviewRequest,
 )
 from app.services.editor import (
+    export_service,
+    jianying_export,
     project_service,
     render_service,
     rough_cut_service,
@@ -189,6 +197,34 @@ async def get_render(
 ):
     project = await project_service.get_owned_project(db, uid, current_user)
     return ok(data=render_service.render_status_payload(project))
+
+
+@router.post("/{uid}/export", summary="成片后处理导出（GIF / 仅音频）")
+async def export_final(
+    uid: str,
+    body: ExportFinalRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await project_service.get_owned_project(db, uid, current_user)
+    result = await export_service.export_final(project, body.format, body.width, body.fps, db=db)
+    return ok(data=result)
+
+
+@router.get("/{uid}/export/jianying", summary="导出剪映草稿包（draft_info.json + 素材 zip）")
+async def export_jianying(
+    uid: str,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await project_service.get_owned_project(db, uid, current_user)
+    zip_path, folder = await jianying_export.export_jianying_zip(db, project)
+    return FileResponse(
+        zip_path,
+        media_type="application/zip",
+        filename=f"{folder}.zip",
+        background=BackgroundTask(shutil.rmtree, os.path.dirname(zip_path), ignore_errors=True),
+    )
 
 
 @router.post("/{uid}/subtitles/preview", summary="whisper 转写字幕草稿（指定音频轨）")

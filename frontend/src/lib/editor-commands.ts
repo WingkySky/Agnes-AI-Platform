@@ -60,7 +60,7 @@ export const EDITOR_OPS = [
   'addClip', 'moveClip', 'trimClip', 'splitClip', 'removeClip', 'detachAudio', 'setClipProperty',
   'addSubtitle', 'removeSubtitle', 'rebuildSubtitleClips',
   'addTrack', 'removeTrack', 'setTrackFlags', 'moveTrack',
-  'setTransition', 'removeTransition', 'setClipEffects',
+  'setTransition', 'removeTransition', 'setClipEffects', 'setDocumentMeta',
 ] as const
 export type EditorOp = (typeof EDITOR_OPS)[number]
 
@@ -542,6 +542,41 @@ const commands: Record<EditorOp, (doc: EditorDocument, payload: CommandPayload) 
       else props.effects = effects
       return { ...clip, props }
     })
+  },
+
+  /** 工程级元数据（画布/帧率）：与渲染契约同域（后端骨架校验 16~7680、帧率四档白名单）；
+   *  全缺省零变更原样返回（结构共享）。宽度变更时字幕字号按比例缩放保持视觉占比。 */
+  setDocumentMeta: (doc, payload) => {
+    const { width, height, timebase } = payload
+    if (width === undefined && height === undefined && timebase === undefined) return doc
+    let nextWidth = doc.width
+    let nextHeight = doc.height
+    if (width !== undefined) {
+      if (typeof width !== 'number' || !Number.isInteger(width) || width % 2 || width < 16 || width > 7680) {
+        throw new EditorCommandError('invalid_payload', 'width')
+      }
+      nextWidth = width
+    }
+    if (height !== undefined) {
+      if (typeof height !== 'number' || !Number.isInteger(height) || height % 2 || height < 16 || height > 7680) {
+        throw new EditorCommandError('invalid_payload', 'height')
+      }
+      nextHeight = height
+    }
+    if (timebase !== undefined && timebase !== 24 && timebase !== 25 && timebase !== 30 && timebase !== 60) {
+      throw new EditorCommandError('invalid_payload', 'timebase')
+    }
+    let subtitleStyle = doc.subtitleStyle
+    if (nextWidth !== doc.width && subtitleStyle) {
+      subtitleStyle = { ...subtitleStyle, size: Math.max(12, Math.round(subtitleStyle.size * nextWidth / doc.width)) }
+    }
+    return {
+      ...doc,
+      width: nextWidth,
+      height: nextHeight,
+      ...(timebase !== undefined ? { timebase: timebase as number } : {}),
+      ...(subtitleStyle !== doc.subtitleStyle ? { subtitleStyle } : {}),
+    }
   },
 }
 

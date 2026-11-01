@@ -552,6 +552,8 @@ Swagger UI（交互式文档）：`http://localhost:8000/docs`
 | GET | `/api/editor/projects/{uid}/snapshots` | agent 写前快照列表（不含 data，时间倒序，最多 50 条） |
 | GET | `/api/editor/projects/{uid}/snapshots/{snapshot_id}` | 快照全量（含 `data`）；还原=把 `data` 作为 document 走正常保存链路（无独立还原端点，仿画布快照）；跨工程/不存在 404 |
 | POST | `/api/editor/projects/{uid}/subtitles/preview` | whisper 转写字幕草稿。请求体 `{ track_id }`（音频轨）；返回 `{ segments: [{start,end,text}] }`（时间线时间，已按片段 trimStart/时长裁剪）；入轨由前端 `rebuildSubtitleClips` 命令完成；服务器未装 faster-whisper 返回 503 |
+| POST | `/api/editor/projects/{uid}/export` | 成片后处理导出（需已渲染成功）。请求体 `{ format: 'gif'\|'audio', width?, fps? }`；gif=调色板两遍（默认 480px/12fps，成片 >120s 拒绝 400），audio=提取混音 aac 192k；返回 `{ format, url, size }`（产物落 uploads/editor/ + 存储配额记账，不入资产库） |
+| GET | `/api/editor/projects/{uid}/export/jianying` | 导出剪映草稿包（zip：`draft_info.json` + `draft_meta_info.json` + `assets/` 素材直拷）。document → 草稿映射：轨结构（order 小=底层=剪映主轨在前）/ 微秒帧对齐时间 / trimStart·变速·音量·静音 / PIP rect→半画布坐标（y 向上）/ 转场统一「叠化」/ 效果器黑白·模糊按内置名称 / 字幕走剪映字幕轨（flag=1 + subtitle_taskinfo）；运镜不导出；素材 path 为草稿内相对路径（解压到剪映草稿目录后打开） |
 
 **document 骨架**：`{ timebase, width, height, tracks: [{id, kind: video/audio/subtitle, order, flag: hidden/locked/muted/null}], clips: [{id, trackId, assetId, start, duration, trimStart, props, text?}], subtitleStyle? }`；`props` 含 `speed/volume/fadeIn/fadeOut/rect(0~1 x/y/w/h, PIP)/transition({type: crossfade/fade/wipe, duration})/muted`（转场挂在前一片段，与同轨后一片段之间生效；`muted=true` 表示音画分离后源片段静音，自带音频不进预览与渲染）。
 

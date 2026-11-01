@@ -331,8 +331,41 @@ describe('fail-closed', () => {
     expect(() => applyCommand(doc, broken)).toThrow(/unknown_op/)
     expect(doc.clips.length).toBe(4)
   })
-  it('op 表恰好 17 个', () => {
-    expect(EDITOR_OPS.length).toBe(17)
+  it('op 表恰好 18 个', () => {
+    expect(EDITOR_OPS.length).toBe(18)
+  })
+})
+
+// ---------- setDocumentMeta（工程级画布/帧率） ----------
+
+describe('setDocumentMeta', () => {
+  it('合法变更画布与帧率；字幕字号随宽度比例缩放', () => {
+    const doc = baseDoc()
+    const next = applyCommand(doc, cmd('setDocumentMeta', { width: 1920, height: 1080, timebase: 60 }))
+    expect(next.width).toBe(1920)
+    expect(next.height).toBe(1080)
+    expect(next.timebase).toBe(60)
+    expect(next.subtitleStyle?.size).toBe(72) // 48 × 1920/1280
+    // 片段与轨道引用保持（结构共享）
+    expect(next.clips).toBe(doc.clips)
+    expect(next.tracks).toBe(doc.tracks)
+  })
+
+  it('仅改帧率不动字幕字号；全缺省零变更原样返回', () => {
+    const doc = baseDoc()
+    const fpsOnly = applyCommand(doc, cmd('setDocumentMeta', { timebase: 24 }))
+    expect(fpsOnly.width).toBe(1280)
+    expect(fpsOnly.subtitleStyle).toBe(doc.subtitleStyle)
+    expect(applyCommand(doc, cmd('setDocumentMeta', {}))).toBe(doc)
+  })
+
+  it('fail-closed：奇数宽/超界/非法帧率', () => {
+    const doc = baseDoc()
+    expect(() => applyCommand(doc, cmd('setDocumentMeta', { width: 1081 }))).toThrow(/invalid_payload/)
+    expect(() => applyCommand(doc, cmd('setDocumentMeta', { width: 8 }))).toThrow(/invalid_payload/)
+    expect(() => applyCommand(doc, cmd('setDocumentMeta', { width: 8192 }))).toThrow(/invalid_payload/)
+    expect(() => applyCommand(doc, cmd('setDocumentMeta', { timebase: 45 }))).toThrow(/invalid_payload/)
+    expect(doc.width).toBe(1280)
   })
 })
 

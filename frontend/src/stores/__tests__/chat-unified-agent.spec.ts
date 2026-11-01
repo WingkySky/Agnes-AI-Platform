@@ -62,6 +62,7 @@ vi.mock('@/lib/agent/chat-system-prompt', () => ({
 vi.mock('@/lib/agent/system-prompt', () => ({
   CANVAS_CONTEXT_SECTION: 'CANVAS_SECTION',
   SCENE_CONTEXT_SECTION: 'SCENE_SECTION',
+  EDITOR_CONTEXT_SECTION: 'EDITOR_SECTION',
 }))
 
 vi.mock('@/lib/agent/skills', () => ({

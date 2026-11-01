@@ -158,3 +158,15 @@ export function submitEditorRender(uid: string, clientOperationId?: string): Pro
 export function getEditorRenderStatus(uid: string): Promise<RenderStatus> {
   return client.get(`/api/editor/projects/${uid}/render`)
 }
+
+// ---------- 导出 ----------
+
+/** 成片后处理导出（GIF/仅音频）→ 文件流 */
+export function exportFinal(uid: string, body: { format: 'gif' | 'audio'; width?: number; fps?: number }): Promise<Blob> {
+  return client.post(`/api/editor/projects/${uid}/export`, body, { responseType: 'blob', timeout: 600000 })
+}
+
+/** 剪映草稿包（draft_info.json + 素材 zip）→ 文件流 */
+export function exportJianyingDraft(uid: string): Promise<Blob> {
+  return client.get(`/api/editor/projects/${uid}/export/jianying`, { responseType: 'blob', timeout: 600000 })
+}
