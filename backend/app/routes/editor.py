@@ -39,6 +39,7 @@ from app.schemas.editor import (
 )
 from app.services.editor import (
     export_service,
+    font_service,
     jianying_export,
     project_service,
     render_service,
@@ -89,6 +90,14 @@ async def list_projects(
         items=[EditorProjectBrief(**_brief(p)) for p in items],
     )
     return ok(data=data.model_dump())
+
+
+@router.get("/fonts", summary="服务器可用字体族（fc-list 枚举，字幕烧录字体下拉用）")
+async def list_fonts(
+    current_user: User = Depends(get_current_user),
+):
+    fonts = await font_service.list_fonts()
+    return ok(data={"fonts": fonts})
 
 
 @router.get("/{uid}", summary="剪辑工程详情")

@@ -19,6 +19,7 @@ import { useI18n } from '@/i18n'
 import { ImagePlay, Wand2 } from 'lucide-vue-next'
 import EditorCoverDialog from './EditorCoverDialog.vue'
 import EditorSubtitleDialog from './EditorSubtitleDialog.vue'
+import EditorSubtitleStyleDialog from './EditorSubtitleStyleDialog.vue'
 import EditorRoughCutDialog from './EditorRoughCutDialog.vue'
 import { MIN_CLIP_DURATION, clipEnd, type EditorClip, type EditorTrack, type TrackFlagKey, type TrackKind, type TrackTransition, type TransitionType } from '@/lib/editor-types'
 import type { EditorCommand } from '@/lib/editor-commands'
@@ -749,6 +750,7 @@ interface JunctionState { x: number; y: number; trackId: string; clipId: string;
 const junctionMenu = ref<JunctionState | null>(null)
 const coverDialogVisible = ref(false)
 const subtitleDialogVisible = ref(false)
+const subtitleStyleDialogVisible = ref(false)
 const roughCutDialogVisible = ref(false)
 
 function openJunctionMenu(e: MouseEvent, clip: EditorClip, transition: TrackTransition | null): void {
@@ -884,6 +886,7 @@ const ctxItems = computed<CtxItem[]>(() => {
     return [
       { label: t('editor.importSrt'), disabled: false, run: () => importSrt(trackId) },
       { label: t('editor.exportSrt'), disabled: !hasClips, run: () => exportSrt(trackId) },
+      { label: t('editor.subtitleStyleTitle'), disabled: false, run: () => (subtitleStyleDialogVisible.value = true) },
     ]
   }
   if (m.kind === 'video' || m.kind === 'audio') {
@@ -1252,6 +1255,7 @@ const ioBand = computed((): Record<string, string> => {
 
     <EditorCoverDialog v-model="coverDialogVisible" />
     <EditorSubtitleDialog v-model="subtitleDialogVisible" />
+    <EditorSubtitleStyleDialog :open="subtitleStyleDialogVisible" @close="subtitleStyleDialogVisible = false" />
     <EditorRoughCutDialog v-model="roughCutDialogVisible" />
   </div>
 </template>

@@ -95,6 +95,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         override = ""
         style = clip.get("style")
         if isinstance(style, dict):
+            if isinstance(style.get("font"), str) and style["font"].strip():
+                # \fn 字体名：剥掉会破坏 ASS override 块的字符
+                safe_font = str(style["font"]).replace("{", "").replace("}", "").replace("\\", "").strip()
+                if safe_font:
+                    override += "{\\fn" + safe_font + "}"
             if isinstance(style.get("color"), str) and len(style["color"]) == 7:
                 override += f"{{\\1c{to_ass_color(style['color'])}}}"
             if isinstance(style.get("size"), (int, float)):

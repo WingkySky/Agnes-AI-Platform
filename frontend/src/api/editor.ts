@@ -159,6 +159,22 @@ export function getEditorRenderStatus(uid: string): Promise<RenderStatus> {
   return client.get(`/api/editor/projects/${uid}/render`)
 }
 
+// ---------- 字体（服务端 fc-list 枚举，字幕烧录可用族） ----------
+
+let fontsCache: string[] | null = null
+
+/** 服务器可用字体族（模块级缓存一次；fc-list 不可用返回空数组，UI 退化为自由填写） */
+export async function getEditorFonts(): Promise<string[]> {
+  if (fontsCache) return fontsCache
+  try {
+    const data = await client.get('/api/editor/fonts') as { fonts?: string[] }
+    fontsCache = data.fonts ?? []
+  } catch {
+    fontsCache = []
+  }
+  return fontsCache
+}
+
 // ---------- 导出 ----------
 
 /** 成片后处理导出（GIF/仅音频）→ 文件流 */

@@ -44,6 +44,7 @@ const subtitleStyleVars = computed<Record<string, string>>(() => {
   const style = store.doc?.subtitleStyle
   if (!style) return emptyStyle
   return {
+    fontFamily: `"${style.font}", "Noto Sans CJK SC", sans-serif`,
     fontSize: `${style.size * 0.5}px`,
     color: style.color,
     fontWeight: style.outline ? '700' : '400',
@@ -60,6 +61,7 @@ function subtitleClipStyle(clip: EditorClip): Record<string, string> {
   const style = clip.props.style
   if (!style) return {}
   const out: Record<string, string> = {}
+  if (style.font) out.fontFamily = `"${style.font}", "Noto Sans CJK SC", sans-serif`
   if (style.color) out.color = style.color
   if (style.size) out.fontSize = `${style.size * 0.5}px`
   if (style.position) out.alignSelf = style.position === 'top' ? 'flex-start' : style.position === 'center' ? 'center' : 'flex-end'

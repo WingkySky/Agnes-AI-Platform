@@ -133,9 +133,11 @@ def validate_document_skeleton(doc: Any) -> dict:
                     _fail(f"clips[{i}].props.style.color 必须为 #RRGGBB")
                 elif k == "size" and (not isinstance(v, int) or not (8 <= v <= 200)):
                     _fail(f"clips[{i}].props.style.size 必须为 8~200 整数")
+                elif k == "font" and (not isinstance(v, str) or not v.strip() or len(v) > 64):
+                    _fail(f"clips[{i}].props.style.font 必须为 1~64 字符")
                 elif k == "position" and v not in _SUBTITLE_POSITIONS:
                     _fail(f"clips[{i}].props.style.position 非法")
-                elif k not in ("color", "size", "position"):
+                elif k not in ("color", "size", "font", "position"):
                     _fail(f"clips[{i}].props.style.{k} 未知键")
         points = props.get("volumePoints")
         if points is not None:
@@ -156,8 +158,21 @@ def validate_document_skeleton(doc: Any) -> dict:
             _fail(f"clips[{i}].linkId 必须为字符串")
 
     style = doc.get("subtitleStyle")
-    if style is not None and not isinstance(style, dict):
-        _fail("subtitleStyle 必须为对象")
+    if style is not None:
+        # 工程级字幕样式：全字段深校验（font 建议取 GET /fonts 枚举的服务器可用族；
+        # libass 对未知族静默回退，这里只卡形状与值域）
+        if not isinstance(style, dict):
+            _fail("subtitleStyle 必须为对象")
+        if not isinstance(style.get("font"), str) or not style["font"].strip() or len(style["font"]) > 64:
+            _fail("subtitleStyle.font 必须为 1~64 字符")
+        if not isinstance(style.get("size"), int) or not (8 <= style["size"] <= 200):
+            _fail("subtitleStyle.size 必须为 8~200 整数")
+        if not isinstance(style.get("color"), str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", style["color"]):
+            _fail("subtitleStyle.color 必须为 #RRGGBB")
+        if not isinstance(style.get("outline"), bool):
+            _fail("subtitleStyle.outline 必须为布尔")
+        if style.get("position") not in _SUBTITLE_POSITIONS:
+            _fail("subtitleStyle.position 非法")
 
     markers = doc.get("markers")
     if markers is not None:

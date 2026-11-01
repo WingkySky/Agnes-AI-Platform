@@ -62,7 +62,7 @@ export const EDITOR_OPS = [
   'addTrack', 'removeTrack', 'setTrackFlags', 'moveTrack',
   'setTransition', 'removeTransition', 'setClipEffects', 'setDocumentMeta',
   'addMarker', 'removeMarker', 'rippleRemoveClip', 'closeGaps',
-  'replaceSource', 'unlinkClip',
+  'replaceSource', 'unlinkClip', 'setSubtitleStyle',
 ] as const
 export type EditorOp = (typeof EDITOR_OPS)[number]
 
@@ -123,6 +123,14 @@ function normalizeStyleDelta(delta: unknown): Record<string, unknown> {
       if (typeof value !== 'number' || !Number.isInteger(value) || value < 8 || value > 200) {
         throw new EditorCommandError('invalid_payload', 'style.size')
       }
+    } else if (key === 'font') {
+      // 字体名清洗：剥掉会破坏 ASS override 块/名字边界的字符，trim 后须非空
+      const cleaned = typeof value === 'string' ? value.replace(/[{}\\]/g, '').trim() : ''
+      if (!cleaned || value.length > 64) {
+        throw new EditorCommandError('invalid_payload', 'style.font')
+      }
+      out[key] = cleaned
+      continue // 已写入清洗值，跳过末尾原样落盘
     } else if (key === 'position') {
       if (value !== 'bottom' && value !== 'center' && value !== 'top') {
         throw new EditorCommandError('invalid_payload', 'style.position')
@@ -783,6 +791,35 @@ const commands: Record<EditorOp, (doc: EditorDocument, payload: CommandPayload) 
       delete next.linkId
       return next
     })
+  },
+
+  /** 工程级字幕样式整体替换（字段与 SubtitleStyle 契约一致；形状校验 fail-closed） */
+  setSubtitleStyle: (doc, payload) => {
+    const style = payload.style as Record<string, unknown> | null
+    if (typeof style !== 'object' || style === null || Array.isArray(style)) {
+      throw new EditorCommandError('invalid_payload', 'style')
+    }
+    const font = style.font
+    const size = style.size
+    const color = style.color
+    const outline = style.outline
+    const position = style.position
+    if (typeof font !== 'string' || !font.trim() || font.length > 64) {
+      throw new EditorCommandError('invalid_payload', 'style.font')
+    }
+    if (typeof size !== 'number' || !Number.isInteger(size) || size < 8 || size > 200) {
+      throw new EditorCommandError('invalid_payload', 'style.size')
+    }
+    if (typeof color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(color)) {
+      throw new EditorCommandError('invalid_payload', 'style.color')
+    }
+    if (typeof outline !== 'boolean') {
+      throw new EditorCommandError('invalid_payload', 'style.outline')
+    }
+    if (position !== 'bottom' && position !== 'center' && position !== 'top') {
+      throw new EditorCommandError('invalid_payload', 'style.position')
+    }
+    return { ...doc, subtitleStyle: { font: font.trim(), size, color, outline, position } }
   },
 }
 

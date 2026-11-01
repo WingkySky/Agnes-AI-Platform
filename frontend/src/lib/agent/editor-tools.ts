@@ -462,7 +462,7 @@ const editorApplyOpsTool = {
     'unlinkClip {clipId}（解除音画联动 linkId）；' +
     'setClipProperty {clipId,props:{speed?,volume?,fadeIn?,fadeOut?,muted?,rect?,volumePoints?,style?}}（键传 null 删除；' +
     'volumePoints=[{t:0~1,v:0~2}] 音量包络关键帧相对片段坐标（≤16 点 t 升序，渲染线性插值）；' +
-    'style 仅字幕片段：{color?:#RRGGBB,size?:8~200,position?:bottom|center|top} 逐条覆盖工程字幕样式，内键 null 回继承）；' +
+    'style 仅字幕片段：{font?,color?,size?,position?} 逐条覆盖工程字幕样式（font 建议取 /api/editor/fonts 枚举），内键 null 回继承）；' +
     'addSubtitle {clip:{id,trackId,start,duration,text}}；removeSubtitle {clipId}；' +
     'rebuildSubtitleClips {trackId,clips:[{id,start,duration,text}]}（全量替换该字幕轨）；' +
     'addTrack {track:{id,kind,order?}}；removeTrack {trackId}（非空轨拒绝）；' +
@@ -470,6 +470,7 @@ const editorApplyOpsTool = {
     'setTransition {trackId,afterClipId,type:crossfade|fade|wipe,duration,transitionId}（同轨紧随片段衔接点）；' +
     'removeTransition {trackId,afterClipId}；setClipEffects {clipId,effects:[{id,type:grayscale|blur,strength}]}；' +
     'setDocumentMeta {width?,height?,timebase?}（工程画布 16~7680 偶数与帧率 24/25/30/60；宽度变更时字幕字号自动按比例缩放）；' +
+    'setSubtitleStyle {style:{font,size,color,outline,position}}（工程级字幕样式整体替换，font 建议取 GET /api/editor/fonts 枚举的服务器可用族）；' +
     'addMarker {marker:{id,time,label?}}（时间线标记）；removeMarker {markerId}；' +
     'rippleRemoveClip {clipId}（波纹删除：删片段并左移同轨后续片段补位）；closeGaps {trackId}（闭合同轨空隙，字幕轨不支持）。' +
     '注意：视频/音频轨禁止重叠（overlap 拒绝）；转场只对同轨相邻片段生效。',

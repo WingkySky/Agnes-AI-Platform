@@ -145,8 +145,18 @@ function setProp(key: string, value: unknown): void {
 /** 工程级字幕样式（逐 cue 缺键时继承显示） */
 const docStyle = computed(() => store.doc?.subtitleStyle ?? null)
 
+/** 服务器可用字体族（字幕烧录白名单；模块级缓存） */
+const fonts = ref<string[]>([])
+const fontsLoading = ref(false)
+void import('@/api/editor').then(({ getEditorFonts }) => {
+  fontsLoading.value = true
+  getEditorFonts()
+    .then((list) => { fonts.value = list })
+    .finally(() => { fontsLoading.value = false })
+})
+
 /** 逐 cue 样式覆盖：值=null 删键回继承 */
-function setCueStyle(key: 'color' | 'size' | 'position', value: unknown): void {
+function setCueStyle(key: 'font' | 'color' | 'size' | 'position', value: unknown): void {
   if (!selected.value) return
   store.applyOrToast(
     { op: 'setClipProperty', payload: { clipId: selected.value.id, props: { style: { [key]: value } } } },
@@ -228,6 +238,22 @@ function removeSelected(): void {
         <el-input type="textarea" :rows="3" :model-value="selected.text" @change="onSubtitleText" />
         <!-- 逐 cue 样式覆盖（缺键继承工程 subtitleStyle；恢复继承=null 删键） -->
         <label class="cue-style-title">{{ t('editor.cueStyleTitle') }}</label>
+        <div class="prop-row">
+          <label>{{ t('editor.cueStyleFont') }}</label>
+          <el-select
+            size="small"
+            filterable
+            allow-create
+            default-first-option
+            :loading="fontsLoading"
+            :model-value="selected.props.style?.font ?? docStyle?.font ?? ''"
+            :placeholder="t('editor.cueStyleFontInherit')"
+            @change="(v: string) => setCueStyle('font', v)"
+          >
+            <el-option v-for="f in fonts" :key="f" :value="f" :label="f" />
+          </el-select>
+          <el-button size="small" text :disabled="!selected.props.style?.font" @click="setCueStyle('font', null)">{{ t('editor.cueStyleInherit') }}</el-button>
+        </div>
         <div class="prop-row">
           <label>{{ t('editor.cueStyleColor') }}</label>
           <el-color-picker

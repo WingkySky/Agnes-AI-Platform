@@ -94,7 +94,7 @@ describe('setClipProperty style / volumePoints', () => {
     doc = applyCommand(doc, cmd('setClipProperty', { clipId: 't1', props: { style: { color: null } } }))
     expect(doc.clips.find((c) => c.id === 't1')!.props.style).toBeUndefined()
     expect(() => applyCommand(doc, cmd('setClipProperty', { clipId: 't1', props: { style: { color: 'red' } } }))).toThrow(/invalid_payload/)
-    expect(() => applyCommand(doc, cmd('setClipProperty', { clipId: 't1', props: { style: { font: 'x' } } }))).toThrow(/invalid_payload/)
+    expect(() => applyCommand(doc, cmd('setClipProperty', { clipId: 't1', props: { style: { font: '   ' } } }))).toThrow(/invalid_payload/)
   })
 
   it('volumePoints 校验：t 升序/值域/点数', () => {
@@ -112,5 +112,24 @@ describe('clipFadeAlphaAt 不受包络影响', () => {
     clip.props.fadeIn = 2
     expect(clipFadeAlphaAt(clip, 3)).toBe(0.5)
     expect(volumeEnvelopeAt(clip, 3)).toBe(0) // 包络独立计算
+  })
+})
+
+describe('setSubtitleStyle / style.font', () => {
+  it('工程字幕样式整体替换 + fail-closed', () => {
+    let doc = baseDoc()
+    doc = applyCommand(doc, cmd('setSubtitleStyle', { style: { font: 'Noto Serif CJK SC', size: 56, color: '#FFEE00', outline: false, position: 'top' } }))
+    expect(doc.subtitleStyle).toEqual({ font: 'Noto Serif CJK SC', size: 56, color: '#FFEE00', outline: false, position: 'top' })
+    expect(() => applyCommand(doc, cmd('setSubtitleStyle', { style: { font: '', size: 48, color: '#FFFFFF', outline: true, position: 'bottom' } }))).toThrow(/invalid_payload/)
+    expect(() => applyCommand(doc, cmd('setSubtitleStyle', { style: { font: 'F', size: 300, color: '#FFFFFF', outline: true, position: 'bottom' } }))).toThrow(/invalid_payload/)
+  })
+
+  it('逐 cue style.font 校验 + 特殊字符清洗', () => {
+    let doc = baseDoc()
+    doc = applyCommand(doc, cmd('setClipProperty', { clipId: 't1', props: { style: { font: 'Noto Serif CJK SC' } } }))
+    expect(doc.clips.find((c) => c.id === 't1')!.props.style!.font).toBe('Noto Serif CJK SC')
+    doc = applyCommand(doc, cmd('setClipProperty', { clipId: 't1', props: { style: { font: '  Fancy{Font}\\' } } }))
+    expect(doc.clips.find((c) => c.id === 't1')!.props.style!.font).toBe('FancyFont')
+    expect(() => applyCommand(doc, cmd('setClipProperty', { clipId: 't1', props: { style: { font: '' } } }))).toThrow(/invalid_payload/)
   })
 })
