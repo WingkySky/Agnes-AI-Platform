@@ -457,7 +457,9 @@ const editorApplyOpsTool = {
     '视频/音频 duration 可省自动探测真实时长，图片默认 3 秒；assetId 必须是素材库已有素材——agent 生成的配音/成片会自动入库并返回 asset_id；' +
     '音频素材只能进音频轨、视频/图片素材进视频轨，类型不符会被拒绝）；' +
     'moveClip {clipId,start,trackId?}；trimClip {clipId,start?,duration?,trimStart?}；splitClip {clipId,at,newId}；' +
-    'removeClip {clipId}；detachAudio {clipId,trackId,newId}（视频片段音画分离，trackId=目标音频轨）；' +
+    'removeClip {clipId}；detachAudio {clipId,trackId,newId}（视频片段音画分离，trackId=目标音频轨，自动成 linkId 组）；' +
+    'replaceSource {clipId,assetId,start?,duration?,trimStart?}（换源：保留位置与属性只换素材文件，类型需匹配轨——视频轨收 video/image、音频轨收 audio）；' +
+    'unlinkClip {clipId}（解除音画联动 linkId）；' +
     'setClipProperty {clipId,props:{speed?,volume?,fadeIn?,fadeOut?,muted?,rect?}}（键传 null 删除）；' +
     'addSubtitle {clip:{id,trackId,start,duration,text}}；removeSubtitle {clipId}；' +
     'rebuildSubtitleClips {trackId,clips:[{id,start,duration,text}]}（全量替换该字幕轨）；' +

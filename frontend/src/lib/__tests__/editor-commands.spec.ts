@@ -331,8 +331,8 @@ describe('fail-closed', () => {
     expect(() => applyCommand(doc, broken)).toThrow(/unknown_op/)
     expect(doc.clips.length).toBe(4)
   })
-  it('op 表恰好 22 个', () => {
-    expect(EDITOR_OPS.length).toBe(22)
+  it('op 表恰好 24 个', () => {
+    expect(EDITOR_OPS.length).toBe(24)
   })
 })
 
@@ -426,6 +426,55 @@ describe('rippleRemoveClip / closeGaps', () => {
     expect(next.clips.find((c) => c.id === 'c2')!.start).toBe(4)
     // 其他轨不动
     expect(next.clips.find((c) => c.id === 'p1')!.start).toBe(1)
+  })
+})
+
+// ---------- 换源 / 音画联动 ----------
+
+describe('replaceSource / unlinkClip / detachAudio linkId', () => {
+  it('换源：保留 start/props 只换 assetId；覆盖值生效', () => {
+    const doc = baseDoc() // c1 asset 10
+    const next = applyCommand(doc, cmd('replaceSource', { clipId: 'c1', assetId: 99 }))
+    const c1 = next.clips.find((c) => c.id === 'c1')!
+    expect(c1.assetId).toBe(99)
+    expect(c1.start).toBe(0)
+    expect(c1.duration).toBe(4)
+    expect(c1.trimStart).toBe(1)
+    expect(c1.props).toBe(doc.clips[0]!.props)
+    const next2 = applyCommand(next, cmd('replaceSource', { clipId: 'c1', assetId: 100, start: 2, duration: 1.5, trimStart: 0 }))
+    const c1b = next2.clips.find((c) => c.id === 'c1')!
+    expect(c1b.start).toBe(2)
+    expect(c1b.duration).toBe(1.5)
+    expect(c1b.trimStart).toBe(0)
+  })
+
+  it('换源：同素材且无覆盖零变更原样返回', () => {
+    const doc = baseDoc()
+    expect(applyCommand(doc, cmd('replaceSource', { clipId: 'c1', assetId: 10 }))).toBe(doc)
+  })
+
+  it('fail-closed：非法 assetId / 片段不存在', () => {
+    const doc = baseDoc()
+    expect(() => applyCommand(doc, cmd('replaceSource', { clipId: 'c1', assetId: 'x' }))).toThrow(/invalid_payload/)
+    expect(() => applyCommand(doc, cmd('replaceSource', { clipId: 'nope', assetId: 1 }))).toThrow(/clip_not_found/)
+  })
+
+  it('detachAudio 带 linkId：两个片段成组', () => {
+    const doc = baseDoc()
+    const next = applyCommand(doc, cmd('detachAudio', { clipId: 'c1', trackId: 'a1', newId: 'a_c1', linkId: 'L1' }))
+    expect(next.clips.find((c) => c.id === 'c1')!.linkId).toBe('L1')
+    const a = next.clips.find((c) => c.id === 'a_c1')!
+    expect(a.linkId).toBe('L1')
+    expect(a.trackId).toBe('a1')
+    expect(a.start).toBe(0)
+  })
+
+  it('unlinkClip 清 linkId；其他片段保持', () => {
+    let doc = baseDoc()
+    doc = applyCommand(doc, cmd('detachAudio', { clipId: 'c1', trackId: 'a1', newId: 'a_c1', linkId: 'L1' }))
+    const next = applyCommand(doc, cmd('unlinkClip', { clipId: 'c1' }))
+    expect(next.clips.find((c) => c.id === 'c1')!.linkId).toBeUndefined()
+    expect(next.clips.find((c) => c.id === 'a_c1')!.linkId).toBe('L1')
   })
 })
 

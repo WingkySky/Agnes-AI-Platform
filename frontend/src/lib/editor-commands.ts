@@ -62,6 +62,7 @@ export const EDITOR_OPS = [
   'addTrack', 'removeTrack', 'setTrackFlags', 'moveTrack',
   'setTransition', 'removeTransition', 'setClipEffects', 'setDocumentMeta',
   'addMarker', 'removeMarker', 'rippleRemoveClip', 'closeGaps',
+  'replaceSource', 'unlinkClip',
 ] as const
 export type EditorOp = (typeof EDITOR_OPS)[number]
 
@@ -344,6 +345,11 @@ const commands: Record<EditorOp, (doc: EditorDocument, payload: CommandPayload) 
     )) {
       throw new EditorCommandError('overlap', targetTrack.id)
     }
+    // 音画联动组：payload.linkId 可选（UI 层生成传入）；成对写入，组内移动/删除联动
+    const linkId = payload.linkId
+    if (linkId !== undefined && (typeof linkId !== 'string' || !linkId)) {
+      throw new EditorCommandError('invalid_payload', 'linkId')
+    }
     const detached: EditorClip = {
       id: newId,
       trackId: targetTrack.id,
@@ -353,8 +359,11 @@ const commands: Record<EditorOp, (doc: EditorDocument, payload: CommandPayload) 
       trimStart: clip.trimStart,
       // 变速跟着媒体走（音频同一素材同速率）；音量/fade 从零起调，源片段静音
       props: clip.props.speed !== undefined ? { speed: clip.props.speed } : {},
+      ...(typeof linkId === 'string' ? { linkId } : {}),
     }
-    const clips = doc.clips.map((c) => (c.id === clip.id ? { ...c, props: { ...c.props, muted: true } } : c))
+    const clips = doc.clips.map((c) => (c.id === clip.id
+      ? { ...c, props: { ...c.props, muted: true }, ...(typeof linkId === 'string' ? { linkId } : {}) }
+      : c))
     return { ...doc, clips: [...clips, detached] }
   },
 
@@ -646,6 +655,38 @@ const commands: Record<EditorOp, (doc: EditorDocument, payload: CommandPayload) 
       cursor += c.duration
     }
     return { ...doc, clips: doc.clips.map((c) => (offset.has(c.id) ? { ...c, start: Math.max(0, Math.round((c.start + offset.get(c.id)!) * 1000) / 1000) } : c)) }
+  },
+
+  /** 换源：保留 start/duration/trimStart/props 只换素材文件（类型匹配由调用方保证，与 addClip 同约定）；
+   *  start/duration/trimStart 可选覆盖（UI 层对新素材探测后钳制传入）；linkId 保留（音画组不变） */
+  replaceSource: (doc, payload) => {
+    const assetId = payload.assetId
+    if (typeof assetId !== 'number' || !Number.isInteger(assetId)) {
+      throw new EditorCommandError('invalid_payload', 'assetId')
+    }
+    // 同素材且无覆盖：结构共享零变更（在 withClip 之外短路，否则新建 clips 数组破坏引用相等）
+    const target = doc.clips.find((c) => c.id === payload.clipId)
+    if (target && target.assetId === assetId
+      && payload.start === undefined && payload.duration === undefined && payload.trimStart === undefined) {
+      return doc
+    }
+    return withClip(doc, payload.clipId as string, (clip) => {
+      const start = payload.start !== undefined ? requireNonNegative(payload.start, 'start') : clip.start
+      let duration = payload.duration !== undefined ? requirePositive(payload.duration, 'duration') : clip.duration
+      if (duration < MIN_CLIP_DURATION) duration = MIN_CLIP_DURATION
+      const trimStart = payload.trimStart !== undefined ? requireNonNegative(payload.trimStart, 'trimStart') : clip.trimStart
+      return { ...clip, assetId, start: Math.round(start * 1000) / 1000, duration: Math.round(duration * 1000) / 1000, trimStart: Math.round(trimStart * 1000) / 1000 }
+    })
+  },
+
+  /** 解除音画联动：清 linkId（组成员各自调用；同组其他片段保持） */
+  unlinkClip: (doc, payload) => {
+    return withClip(doc, payload.clipId as string, (clip) => {
+      if (!clip.linkId) return clip
+      const next = { ...clip }
+      delete next.linkId
+      return next
+    })
   },
 }
 

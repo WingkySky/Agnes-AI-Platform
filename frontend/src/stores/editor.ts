@@ -519,7 +519,42 @@ export const useEditorStore = defineStore('editor', () => {
       ElMessage.warning(t('editor.errors.noTrack'))
       return
     }
-    applyOrToast({ op: 'detachAudio', payload: { clipId, newId: newId('clip'), trackId: track.id } }, t('editor.ops.detachAudio'))
+    applyOrToast({ op: 'detachAudio', payload: { clipId, newId: newId('clip'), trackId: track.id, linkId: newId('link') } }, t('editor.ops.detachAudio'))
+  }
+
+  /** 换源：保留位置/属性只换素材文件；对新素材探测时长并钳制源内跨度（越界回 0 入点/截短） */
+  async function replaceClipSource(clipId: string, newAsset: UnifiedAsset): Promise<void> {
+    const d = doc.value
+    if (!d) return
+    const clip = d.clips.find((c) => c.id === clipId)
+    const track = d.tracks.find((tr) => tr.id === clip?.trackId)
+    if (!clip || !track) return
+    if (track.kind === 'audio' && newAsset.media_type !== 'audio') {
+      ElMessage.warning(t('editor.replaceTypeMismatch'))
+      return
+    }
+    if (track.kind === 'video' && newAsset.media_type !== 'video' && newAsset.media_type !== 'image') {
+      ElMessage.warning(t('editor.replaceTypeMismatch'))
+      return
+    }
+    let trimStart = 0
+    let duration = clip.duration
+    const speed = clip.props.speed ?? 1
+    if (newAsset.media_type !== 'image') {
+      const srcDur = await probeMediaDuration(newAsset.asset_url)
+      if (!(srcDur > 0)) {
+        ElMessage.warning(t('editor.replaceProbeFail'))
+        return
+      }
+      trimStart = Math.min(clip.trimStart, Math.max(0, srcDur - 0.1))
+      const maxDuration = Math.max(0, srcDur - trimStart) / speed
+      if (duration > maxDuration) duration = Math.max(0.1, Math.round(maxDuration * 1000) / 1000)
+    }
+    const ok = applyOrToast(
+      { op: 'replaceSource', payload: { clipId, assetId: newAsset.id, start: clip.start, duration: Math.round(duration * 1000) / 1000, trimStart: Math.round(trimStart * 1000) / 1000 } },
+      t('editor.ops.replaceSource'),
+    )
+    if (ok) ElMessage.success(t('editor.replaceDone'))
   }
 
   /** 播放头处分割选中片段（时间线按钮 / S 键共用） */
@@ -560,6 +595,30 @@ export const useEditorStore = defineStore('editor', () => {
   function clearPoints(): void {
     inPoint.value = null
     outPoint.value = null
+  }
+
+  /** 删除片段（音画联动组整组删；单历史） */
+  function removeClipWithLink(clipId: string): void {
+    const d = doc.value
+    const clip = d?.clips.find((c) => c.id === clipId)
+    if (!d || !clip) return
+    const ids = clip.linkId
+      ? [clipId, ...d.clips.filter((c) => c.linkId === clip.linkId && c.id !== clipId).map((c) => c.id)]
+      : [clipId]
+    if (ids.length === 1) {
+      applyOrToast({ op: 'removeClip', payload: { clipId } }, t('editor.ops.removeClip'))
+      return
+    }
+    applyBatch(ids.map((id) => ({ op: 'removeClip', payload: { clipId: id } } as EditorCommand)), t('editor.ops.removeClip'))
+  }
+
+  /** 解除音画联动（整组拆链；单历史） */
+  function unlinkClipGroup(clipId: string): void {
+    const d = doc.value
+    const clip = d?.clips.find((c) => c.id === clipId)
+    if (!d || !clip?.linkId) return
+    const ids = [clipId, ...d.clips.filter((c) => c.linkId === clip.linkId && c.id !== clipId).map((c) => c.id)]
+    applyBatch(ids.map((id) => ({ op: 'unlinkClip', payload: { clipId: id } } as EditorCommand)), t('editor.ops.unlinkClip'))
   }
 
   /** 复制片段到原片段尾部（原轨放不下回退同类型空闲轨/新建轨） */
@@ -723,6 +782,7 @@ export const useEditorStore = defineStore('editor', () => {
     load, fetchAsset, apply, applyBatch, applyOrToast, undo, redo, healDurations,
     placeAsset, appendAssetToTrack, createTopTrackOfKind, setCoverUrl, detachAudio, splitSelectedAtPlayhead, duplicateClip,
     freezeFrame, addMarkerAtPlayhead, toggleInPoint, toggleOutPoint, clearPoints,
+    replaceClipSource, removeClipWithLink, unlinkClipGroup,
     probeMediaDuration,
     saveNow, scheduleSave, submitRender, rename,
     startRemotePoll, stopRemotePoll, pollRemoteNow,

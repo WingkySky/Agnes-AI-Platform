@@ -353,7 +353,7 @@ function onKeydown(e: KeyboardEvent): void {  const target = e.target as HTMLEle
       )
     } else if (store.selectedClipId) {
       e.preventDefault()
-      store.applyOrToast({ op: 'removeClip', payload: { clipId: store.selectedClipId } }, t('editor.ops.removeClip'))
+      store.removeClipWithLink(store.selectedClipId)
     } else if (store.selectedTrackId) {
       // 轨非空时命令层拒绝并 toast（track_not_empty）
       e.preventDefault()

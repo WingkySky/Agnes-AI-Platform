@@ -82,6 +82,8 @@ export interface EditorClip {
   props: ClipProps
   /** 字幕片段文本（仅 subtitle 轨） */
   text?: string
+  /** 音画联动组 id（detachAudio 成对分配；组内移动/删除联动，trim 各自独立） */
+  linkId?: string
 }
 
 export interface SubtitleStyle {

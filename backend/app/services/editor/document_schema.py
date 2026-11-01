@@ -123,6 +123,8 @@ def validate_document_skeleton(doc: Any) -> dict:
                 _fail(f"clips[{i}].props.camera.strength 必须在 0~1")
         if c.get("text") is not None and not isinstance(c.get("text"), str):
             _fail(f"clips[{i}].text 必须为字符串")
+        if c.get("linkId") is not None and not isinstance(c.get("linkId"), str):
+            _fail(f"clips[{i}].linkId 必须为字符串")
 
     style = doc.get("subtitleStyle")
     if style is not None and not isinstance(style, dict):

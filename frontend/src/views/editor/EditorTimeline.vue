@@ -10,9 +10,9 @@
  * ===================================================== */
 
 import { computed, onUnmounted, ref, type Component } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Close, Delete, Headset, Mute, QuestionFilled, RefreshLeft, RefreshRight, Scissor, Switch } from '@element-plus/icons-vue'
-import { Eye, EyeOff, Flag, GripVertical, Headphones, Lock, LockOpen, Subtitles, Volume2, VolumeX } from 'lucide-vue-next'
+import { Eye, EyeOff, Flag, GripVertical, Headphones, Link2, Lock, LockOpen, Subtitles, Volume2, VolumeX } from 'lucide-vue-next'
 
 import { useEditorStore } from '@/stores/editor'
 import { useI18n } from '@/i18n'
@@ -114,11 +114,15 @@ function clipStyle(clip: EditorClip): Record<string, string> {
 
 interface DragRender {
   clipId: string; start: number; duration: number; trimStart: number
-  mode: 'move' | 'trim-left' | 'trim-right'; trackId: string; originTrackId: string; kind: string; toNewTrack?: boolean
-  /** 整体拖移组（多选）：随主片段同位移的其余片段（不含主片段；trackId 不变） */
+  mode: 'move' | 'trim-left' | 'trim-right' | 'slip'; trackId: string; originTrackId: string; kind: string; toNewTrack?: boolean
+  /** 整体拖移组（多选+音画联动）：随主片段同位移的其余片段（不含主片段；trackId 不变） */
   group?: Array<{ id: string; start: number; current: number }>
 }
 const dragRender = ref<DragRender | null>(null)
+/** slip 滑切预览（源内入点滑动，位置/时长不变；缩略图条随 trimStart 重绘） */
+const slipRender = ref<{ clipId: string; trimStart: number } | null>(null)
+/** 拖素材悬停的换源目标片段 */
+const dropClipTarget = ref<string | null>(null)
 
 /** 指针所在的可放置轨道（同类型且未锁定），无效返回 null（目标保持粘性） */
 function laneUnderPointer(clientY: number, kind: string): string | null {
@@ -276,23 +280,88 @@ function clipSelected(clip: EditorClip): boolean {
   return store.selectedClipIds.includes(clip.id)
 }
 
-/** 片段按下：Ctrl/Cmd 切换多选；已在多选组里则整组拖移；否则单选 */
+/** 片段按下：Alt+拖=滑切（源内滑动）；Ctrl/Cmd 切换多选；已在多选/联动组里则整组拖移；否则单选 */
 function onClipPointerDown(e: PointerEvent, clip: EditorClip, mode: DragRender['mode']): void {
+  if (mode === 'move' && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+    void beginSlip(e, clip)
+    return
+  }
   if (mode === 'move' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
     e.stopPropagation()
     store.selectMany([clip.id], 'toggle')
     return
   }
   const groupIds = mode === 'move' && clipSelected(clip)
-    ? store.selectedClipIds
-    : null
-  if (!groupIds) store.select(clip.id)
-  const group = (groupIds ?? [])
+    ? [...store.selectedClipIds]
+    : mode === 'move' ? [clip.id] : []
+  if (!clipSelected(clip)) store.select(clip.id)
+  // 音画联动：拖组内任一片段，同组其余片段自动并入（无论是否多选）
+  if (mode === 'move' && clip.linkId) {
+    for (const c of store.doc?.clips ?? []) {
+      if (c.linkId === clip.linkId && c.id !== clip.id && !groupIds.includes(c.id)) groupIds.push(c.id)
+    }
+  }
+  const group = groupIds
     .map((id) => store.doc?.clips.find((c) => c.id === id))
     .filter((c): c is EditorClip => !!c)
     .filter((c) => c.id === clip.id || !store.doc?.tracks.find((tr) => tr.id === c.trackId)?.flags.locked)
     .map((c) => ({ id: c.id, start: c.start }))
   beginDrag(e, clip, mode, group)
+}
+
+/** slip 滑切：位置/时长不变，源内入点滑动（Alt+拖块主体）；越界钳制在源可用跨度内 */
+async function beginSlip(e: PointerEvent, clip: EditorClip): Promise<void> {
+  e.stopPropagation()
+  store.select(clip.id)
+  const track = store.doc?.tracks.find((tr) => tr.id === clip.trackId)
+  if (!track || track.kind === 'subtitle' || clip.assetId == null) return
+  const asset = await store.fetchAsset(clip.assetId)
+  if (!asset?.asset_url || asset.media_type === 'image') {
+    ElMessage.info(t('editor.slipNoMedia'))
+    return
+  }
+  const origTrim = clip.trimStart
+  const startX = e.clientX
+  // probe 期间可能已松手（快速点按）：先挂一次性取消哨兵，再异步探测
+  let cancelled = false
+  const cancel = (): void => { cancelled = true }
+  window.addEventListener('pointerup', cancel, { once: true })
+  try {
+    const srcDur = await store.probeMediaDuration(asset.asset_url)
+    const speed = clip.props.speed ?? 1
+    const maxTrim = Math.max(0, srcDur - clip.duration * speed)
+    if (cancelled || !(srcDur > 0) || maxTrim <= 0) {
+      if (!cancelled && maxTrim <= 0) ElMessage.info(t('editor.slipNoRoom'))
+      return
+    }
+    slipRender.value = { clipId: clip.id, trimStart: origTrim }
+    const move = (ev: PointerEvent): void => {
+      const s = slipRender.value
+      if (!s) return
+      // 屏幕位移 → 时间线位移 → 源内位移（×speed）；拖左=入点前移看更早的画面
+      const delta = ((ev.clientX - startX) / PX_PER_SEC.value) * speed
+      s.trimStart = Math.round(Math.min(maxTrim, Math.max(0, origTrim + delta)) * 1000) / 1000
+    }
+    const up = (): void => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      const s = slipRender.value
+      slipRender.value = null
+      if (s && s.trimStart !== origTrim) {
+        store.applyOrToast({ op: 'trimClip', payload: { clipId: clip.id, trimStart: s.trimStart } }, t('editor.ops.trimClip'))
+      }
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  } finally {
+    window.removeEventListener('pointerup', cancel)
+  }
+}
+
+/** slip 中传给素材条的片段（trimStart 实时跟随，缩略图随源内滑动） */
+function renderClip(clip: EditorClip): EditorClip {
+  const s = slipRender.value
+  return s?.clipId === clip.id ? { ...clip, trimStart: s.trimStart } : clip
 }
 
 interface MarqueeState { x0: number; y0: number; x1: number; y1: number }
@@ -435,12 +504,12 @@ function reorderMark(trackId: string): '' | 'dragging' | 'above' | 'below' {
   return ''
 }
 
-/** 删除选中片段（时间线工具栏按钮，与 Delete 键同路径；多选整批单历史） */
+/** 删除选中片段（音画联动组整组删；多选整批单历史） */
 function deleteSelected(): void {
   const ids = store.selectedClipIds
   if (!ids.length) return
   if (ids.length === 1) {
-    store.applyOrToast({ op: 'removeClip', payload: { clipId: ids[0] } }, t('editor.ops.removeClip'))
+    store.removeClipWithLink(ids[0])
     return
   }
   store.applyBatch(
@@ -477,6 +546,41 @@ async function onDropAsset(e: DragEvent, trackId: string): Promise<void> {
   }
   // 放置回退（占用轨→同类型空闲轨→自动开新轨）+ 探测时长 + 重复落点防线都在 placeAsset
   await store.placeAsset(asset, { trackId, start: Math.round(start * 1000) / 1000 })
+}
+
+/** 拖素材悬停的换源目标判定：媒体轨片段且素材类型匹配 */
+function canReplace(clip: EditorClip, kind: string): boolean {
+  if (kind === 'subtitle' || clip.assetId == null) return false
+  const dragType = store.assetCache.get(lastDragAssetId())?.media_type
+  if (!dragType) return true // 素材未缓存时先允许悬停高亮，drop 时再校验
+  return kind === 'audio' ? dragType === 'audio' : dragType === 'video' || dragType === 'image'
+}
+
+/** 最近一次拖入的素材 id（EditorAssets 卡片 dragstart 写入 dataTransfer；缓存同款便于悬停判定） */
+let lastDragAsset = 0
+function lastDragAssetId(): number {
+  return lastDragAsset
+}
+
+/** 拖素材到片段上松手 = 换源（保留位置与属性，confirm 后替换） */
+async function onDropReplace(e: DragEvent, clip: EditorClip): Promise<void> {
+  dropClipTarget.value = null
+  const assetId = Number(e.dataTransfer?.getData('text/asset-id'))
+  if (!assetId || clip.assetId == null) return
+  lastDragAsset = assetId
+  if (assetId === clip.assetId) return
+  const asset = await store.fetchAsset(assetId)
+  if (!asset) return
+  try {
+    await ElMessageBox.confirm(
+      t('editor.replaceConfirm', { name: asset.name || assetId }),
+      t('editor.ops.replaceSource'),
+      { confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel'), type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  await store.replaceClipSource(clip.id, asset)
 }
 
 // ---------- 片段标注（音频/转场/淡变可视化） ----------
@@ -655,7 +759,14 @@ const ctxItems = computed<CtxItem[]>(() => {
         run: () => store.applyOrToast({ op: 'rippleRemoveClip', payload: { clipId: clip.id } }, t('editor.ops.rippleRemoveClip')),
       })
     }
-    items.push({ label: t('common.delete'), disabled: false, run: () => store.applyOrToast({ op: 'removeClip', payload: { clipId: clip.id } }, t('editor.ops.removeClip')) })
+    if (clip.linkId) {
+      items.push({
+        label: t('editor.menuUnlink'),
+        disabled: false,
+        run: () => store.unlinkClipGroup(clip.id),
+      })
+    }
+    items.push({ label: t('common.delete'), disabled: false, run: () => store.removeClipWithLink(clip.id) })
     return items
   }
   if (m.kind === 'subtitle' && m.trackId) {
@@ -739,6 +850,7 @@ const shortcutList = computed(() => [
   { keys: 'Space', label: `${t('editor.play')}/${t('editor.pause')}` },
   { keys: `${mod}+B`, label: t('editor.split') },
   { keys: `${mod}+C`, label: t('editor.shortcutDuplicate') },
+  { keys: 'Alt+拖', label: t('editor.shortcutSlip') },
   { keys: 'Delete', label: t('common.delete') },
   { keys: 'M', label: t('editor.ops.addMarker') },
   { keys: 'I/O', label: `${t('editor.ioIn')} / ${t('editor.ioOut')}` },
@@ -922,12 +1034,16 @@ const ioBand = computed((): Record<string, string> => {
                 ghost: dragRender?.clipId === clip.id || !!dragRender?.group?.some((g) => g.id === clip.id),
                 draggedOut: dragRender?.clipId === clip.id && dragRender?.trackId !== dragRender?.originTrackId,
                 enveloped: !!clipEnvelope(clip),
+                'drop-replace': dropClipTarget === clip.id,
               }"
               :style="clipStyle(clip)"
               @pointerdown="onClipPointerDown($event, clip, 'move')"
               @contextmenu.prevent.stop="openClipMenu($event, clip, row.track.kind)"
+              @dragover.prevent.stop="canReplace(clip, row.track.kind) && (dropClipTarget = clip.id)"
+              @dragleave.stop="dropClipTarget === clip.id && (dropClipTarget = null)"
+              @drop.prevent.stop="onDropReplace($event, clip)"
             >
-              <EditorClipMedia v-if="row.track.kind !== 'subtitle'" :clip="clip" :kind="row.track.kind" />
+              <EditorClipMedia v-if="row.track.kind !== 'subtitle'" :clip="renderClip(clip)" :kind="row.track.kind" />
               <svg v-if="clipEnvelope(clip)" class="clip-envelope" viewBox="0 0 100 100" preserveAspectRatio="none">
                 <path
                   :d="`${clipEnvelope(clip)} Z`"
@@ -946,6 +1062,9 @@ const ioBand = computed((): Record<string, string> => {
                   <Mute v-if="audioBadge(clip, row.track.kind) === 'muted'" />
                   <Headset v-else />
                 </el-icon>
+              </span>
+              <span v-if="clip.linkId" class="clip-audio clip-link" :title="t('editor.linkBadge')">
+                <el-icon><Link2 /></el-icon>
               </span>
               <span class="clip-handle right" @pointerdown="onClipPointerDown($event, clip, 'trim-right')" />
             </div>
@@ -1322,6 +1441,8 @@ const ioBand = computed((): Record<string, string> => {
   pointer-events: none;
 }
 .clip-audio :deep(.el-icon) { font-size: 12px; }
+.clip-link { right: 26px; color: var(--el-color-success); }
+.clip-block.drop-replace { outline: 2px dashed var(--el-color-success); }
 .junction-btn {
   position: absolute;
   top: 50%;
