@@ -465,7 +465,9 @@ const editorApplyOpsTool = {
     'setTrackFlags {trackId,flags:{hidden?,locked?,muted?,solo?}}；moveTrack {trackId,toIndex}；' +
     'setTransition {trackId,afterClipId,type:crossfade|fade|wipe,duration,transitionId}（同轨紧随片段衔接点）；' +
     'removeTransition {trackId,afterClipId}；setClipEffects {clipId,effects:[{id,type:grayscale|blur,strength}]}；' +
-    'setDocumentMeta {width?,height?,timebase?}（工程画布 16~7680 偶数与帧率 24/25/30/60；宽度变更时字幕字号自动按比例缩放）。' +
+    'setDocumentMeta {width?,height?,timebase?}（工程画布 16~7680 偶数与帧率 24/25/30/60；宽度变更时字幕字号自动按比例缩放）；' +
+    'addMarker {marker:{id,time,label?}}（时间线标记）；removeMarker {markerId}；' +
+    'rippleRemoveClip {clipId}（波纹删除：删片段并左移同轨后续片段补位）；closeGaps {trackId}（闭合同轨空隙，字幕轨不支持）。' +
     '注意：视频/音频轨禁止重叠（overlap 拒绝）；转场只对同轨相邻片段生效。',
   parameters: Type.Object({
     editing_project_id: Type.Optional(Type.String({ description: '剪辑工程 uid（缺省=用户名下唯一工程）' })),

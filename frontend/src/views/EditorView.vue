@@ -26,6 +26,7 @@ import { updateEditorProject, exportFinal, exportJianyingDraft } from '@/api/edi
 import { useRename } from '@/composables/useRename'
 import { useUserStore } from '@/stores/user'
 import { clipEnd, sourceSpan, type EditorClip } from '@/lib/editor-types'
+import type { EditorCommand } from '@/lib/editor-commands'
 import { ensureThumbs, thumbKey } from '@/lib/editor-strips'
 import { registerEditorBridge, unregisterEditorBridge, editorRefTimecode } from '@/lib/agent/editor-bridge'
 import { useI18n } from '@/i18n'
@@ -319,7 +320,14 @@ function onKeydown(e: KeyboardEvent): void {  const target = e.target as HTMLEle
       store.selectTrack(null)
     }
   } else if (e.key === 'Delete' || e.key === 'Backspace') {
-    if (store.selectedClipId) {
+    if (store.selectedClipIds.length > 1) {
+      // 多选整批删除（单历史）
+      e.preventDefault()
+      store.applyBatch(
+        store.selectedClipIds.map((id) => ({ op: 'removeClip', payload: { clipId: id } } as EditorCommand)),
+        t('editor.ops.removeClip'),
+      )
+    } else if (store.selectedClipId) {
       e.preventDefault()
       store.applyOrToast({ op: 'removeClip', payload: { clipId: store.selectedClipId } }, t('editor.ops.removeClip'))
     } else if (store.selectedTrackId) {
@@ -327,6 +335,9 @@ function onKeydown(e: KeyboardEvent): void {  const target = e.target as HTMLEle
       e.preventDefault()
       store.applyOrToast({ op: 'removeTrack', payload: { trackId: store.selectedTrackId } }, t('editor.ops.removeTrack'))
     }
+  } else if ((e.key === 'm' || e.key === 'M') && !mod && !e.altKey) {
+    e.preventDefault()  // 打标记（M 惯例）
+    store.addMarkerAtPlayhead()
   } else if ((e.key === 'b' || e.key === 'B') && mod) {
     e.preventDefault()  // 分割（剪映 Ctrl+B / Premiere Ctrl+K 惯例）
     store.splitSelectedAtPlayhead()

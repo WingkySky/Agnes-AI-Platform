@@ -99,6 +99,15 @@ export interface EditorDocument {
   tracks: EditorTrack[]
   clips: EditorClip[]
   subtitleStyle?: SubtitleStyle
+  /** 时间线标记（打点/跳转；随文档持久化，入撤销栈） */
+  markers?: EditorMarker[]
+}
+
+/** 时间线标记：time 秒；label 可选备注 */
+export interface EditorMarker {
+  id: string
+  time: number
+  label?: string
 }
 
 /** 片段最短时长（秒），trim 下限 */

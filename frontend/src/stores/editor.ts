@@ -25,19 +25,21 @@ import {
   submitEditorRender,
   getEditorRenderStatus,
   updateEditorProject,
+  uploadEditorCover,
 } from '@/api/editor'
 import type { QualityReport } from '@/api/editor'
 import type { UnifiedAsset } from '@/api/assets'
-import { getAsset } from '@/api/assets'
+import { getAsset, createAsset } from '@/api/assets'
 import {
   EditorCommandError,
   applyCommand,
+  cmd,
   type EditorCommand,
 } from '@/lib/editor-commands'
 import { EditorHistory } from '@/lib/editor-history'
 import { reflowPlaceholders } from '@/lib/editor-derive'
 import { canPlaceOnTrack, findFreeTrack } from '@/lib/editor-placement'
-import { probeMediaDuration as probeMediaDurationWithFallback, probeElementDuration } from '@/lib/editor-media'
+import { probeMediaDuration as probeMediaDurationWithFallback, probeElementDuration, createVideoSink } from '@/lib/editor-media'
 import { clipEnd, type EditorDocument, type EditorTrack } from '@/lib/editor-types'
 
 const AUTOSAVE_INTERVAL_MS = 2000
@@ -71,6 +73,8 @@ export const useEditorStore = defineStore('editor', () => {
   // ---------- 文档与编辑态 ----------
   const doc = shallowRef<EditorDocument | null>(null)
   const selectedClipId = ref<string | null>(null)
+  /** 多选（批量操作；含 selectedClipId），顺序=选择序 */
+  const selectedClipIds = ref<string[]>([])
   /** 轨道选中（点轨头/轨道空白处）：与片段选中互斥，Delete 键删空轨 */
   const selectedTrackId = ref<string | null>(null)
   const playhead = ref(0)
@@ -197,6 +201,27 @@ export const useEditorStore = defineStore('editor', () => {
     doc.value = next
     dirty.value = true
     scheduleSave()
+  }
+
+  /** 批量命令：整批 fail-closed（任一失败全不落），单条历史（一次撤销整批） */
+  function applyBatch(commands: EditorCommand[], label: string): boolean {
+    if (!doc.value || !commands.length) return false
+    let next = doc.value
+    try {
+      for (const c of commands) next = applyCommand(next, c)
+    } catch (err) {
+      if (err instanceof EditorCommandError) {
+        ElMessage.warning(t(`editor.errors.${err.code}`))
+      } else {
+        ElMessage.error(t('editor.errors.unknown'))
+      }
+      return false
+    }
+    history.push({ undoDoc: doc.value, redoDoc: next, label })
+    doc.value = next
+    dirty.value = true
+    scheduleSave()
+    return true
   }
 
   function applyOrToast(command: EditorCommand, label: string): boolean {
@@ -507,6 +532,14 @@ export const useEditorStore = defineStore('editor', () => {
     applyOrToast({ op: 'splitClip', payload: { clipId, at: Math.round(playhead.value * 1000) / 1000, newId: newId('clip') } }, t('editor.ops.splitClip'))
   }
 
+  /** 播放头处打标记（M 键/工具栏共用；随文档持久化） */
+  function addMarkerAtPlayhead(): void {
+    applyOrToast(
+      { op: 'addMarker', payload: { marker: { id: newId('marker'), time: Math.round(playhead.value * 1000) / 1000 } } },
+      t('editor.ops.addMarker'),
+    )
+  }
+
   /** 复制片段到原片段尾部（原轨放不下回退同类型空闲轨/新建轨） */
   async function duplicateClip(clipId: string): Promise<void> {
     const d = doc.value
@@ -545,12 +578,88 @@ export const useEditorStore = defineStore('editor', () => {
 
   function select(clipId: string | null): void {
     selectedClipId.value = clipId
+    selectedClipIds.value = clipId ? [clipId] : []
     if (clipId) selectedTrackId.value = null
+  }
+
+  /** 多选（Ctrl/Cmd 点选切换、框选批量）：主选中=最后加入者 */
+  function selectMany(ids: string[], mode: 'replace' | 'toggle' = 'replace'): void {
+    if (mode === 'toggle') {
+      const set = new Set(selectedClipIds.value)
+      for (const id of ids) {
+        if (set.has(id)) set.delete(id)
+        else set.add(id)
+      }
+      const next = selectedClipIds.value.filter((id) => set.has(id))
+        .concat([...set].filter((id) => !selectedClipIds.value.includes(id)))
+      selectedClipIds.value = next
+      selectedClipId.value = next[next.length - 1] ?? null
+    } else {
+      selectedClipIds.value = [...ids]
+      selectedClipId.value = ids[ids.length - 1] ?? null
+    }
+    if (selectedClipIds.value.length) selectedTrackId.value = null
   }
 
   function selectTrack(trackId: string | null): void {
     selectedTrackId.value = trackId
     if (trackId) selectedClipId.value = null
+  }
+
+  /** 冻结帧：播放头处截帧成图片素材，splitClip+右移+插入 3s 静帧（applyBatch 单历史） */
+  async function freezeFrame(clipId: string): Promise<void> {
+    const d = doc.value
+    if (!d) return
+    const clip = d.clips.find((c) => c.id === clipId)
+    const track = d.tracks.find((tr) => tr.id === clip?.trackId)
+    if (!clip || !track || track.kind !== 'video') return
+    if (playhead.value <= clip.start || playhead.value >= clipEnd(clip)) {
+      ElMessage.warning(t('editor.freezeOutsideClip'))
+      return
+    }
+    const asset = clip.assetId != null ? await fetchAsset(clip.assetId) : null
+    if (!asset?.asset_url || asset.media_type !== 'video') {
+      ElMessage.warning(t('editor.freezeNoFrame'))
+      return
+    }
+    const srcTime = clip.trimStart + (playhead.value - clip.start) * (clip.props.speed ?? 1)
+    const sink = await createVideoSink(asset.asset_url)
+    const frame = sink ? await sink.getCanvas(srcTime) : null
+    if (!frame) {
+      ElMessage.warning(t('editor.freezeNoFrame'))
+      return
+    }
+    const out = document.createElement('canvas')
+    out.width = frame.canvas.width
+    out.height = frame.canvas.height
+    out.getContext('2d')?.drawImage(frame.canvas, 0, 0)
+    const blob = await new Promise<Blob | null>((resolve) => out.toBlob(resolve, 'image/jpeg', 0.9))
+    if (!blob) return
+    const at = Math.round(playhead.value * 1000) / 1000
+    const FREEZE_DUR = 3
+    try {
+      const file = new File([blob], `${asset.name || 'freeze'}.jpg`, { type: 'image/jpeg' })
+      const { url } = await uploadEditorCover(file)
+      const imageAsset = await createAsset({
+        url, media_type: 'image', name: `${asset.name || clip.id} ${t('editor.freezeName')}`,
+      })
+      const shiftIds = d.clips
+        .filter((c) => c.trackId === track.id && c.start >= at - 1e-6)
+        .map((c) => ({ id: c.id, start: c.start }))
+      const ok = applyBatch([
+        cmd('splitClip', { clipId, at, newId: newId('clip') }),
+        ...shiftIds.map((c) => cmd('moveClip', { clipId: c.id, start: Math.round((c.start + FREEZE_DUR) * 1000) / 1000 })),
+        cmd('addClip', {
+          clip: {
+            id: newId('clip'), trackId: track.id, assetId: imageAsset.id,
+            start: at, duration: FREEZE_DUR, trimStart: 0, props: {},
+          },
+        }),
+      ], t('editor.ops.freezeFrame'))
+      if (ok) ElMessage.success(t('editor.freezeDone'))
+    } catch {
+      ElMessage.error(t('editor.freezeFailed'))
+    }
   }
 
   function reset(): void {
@@ -563,6 +672,7 @@ export const useEditorStore = defineStore('editor', () => {
     dirty.value = false
     history.clear()
     selectedClipId.value = null
+    selectedClipIds.value = []
     selectedTrackId.value = null
     playhead.value = 0
     previewingAsset.value = null
@@ -573,17 +683,18 @@ export const useEditorStore = defineStore('editor', () => {
 
   return {
     uid, title, workId, sourceWorkspaceId, revision, loaded,
-    doc, selectedClipId, selectedTrackId, playhead, isPlaying, history,
+    doc, selectedClipId, selectedClipIds, selectedTrackId, playhead, isPlaying, history,
     previewingAsset, startAssetPreview, endAssetPreview,
     snappingEnabled, setSnapping,
     dirty, saving, lastSavedAt,
     renderStatus, renderProgress, renderError, finalUrl, qualityReport,
     assetCache,
-    load, fetchAsset, apply, applyOrToast, undo, redo, healDurations,
+    load, fetchAsset, apply, applyBatch, applyOrToast, undo, redo, healDurations,
     placeAsset, appendAssetToTrack, createTopTrackOfKind, setCoverUrl, detachAudio, splitSelectedAtPlayhead, duplicateClip,
+    freezeFrame, addMarkerAtPlayhead,
     probeMediaDuration,
     saveNow, scheduleSave, submitRender, rename,
     startRemotePoll, stopRemotePoll, pollRemoteNow,
-    select, selectTrack, reset, newId,
+    select, selectMany, selectTrack, reset, newId,
   }
 })

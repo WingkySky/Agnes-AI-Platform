@@ -61,6 +61,7 @@ export const EDITOR_OPS = [
   'addSubtitle', 'removeSubtitle', 'rebuildSubtitleClips',
   'addTrack', 'removeTrack', 'setTrackFlags', 'moveTrack',
   'setTransition', 'removeTransition', 'setClipEffects', 'setDocumentMeta',
+  'addMarker', 'removeMarker', 'rippleRemoveClip', 'closeGaps',
 ] as const
 export type EditorOp = (typeof EDITOR_OPS)[number]
 
@@ -577,6 +578,74 @@ const commands: Record<EditorOp, (doc: EditorDocument, payload: CommandPayload) 
       ...(timebase !== undefined ? { timebase: timebase as number } : {}),
       ...(subtitleStyle !== doc.subtitleStyle ? { subtitleStyle } : {}),
     }
+  },
+
+  /** 时间线标记 upsert（id 相同覆盖）；time 非负 */
+  addMarker: (doc, payload) => {
+    const marker = payload.marker as { id?: unknown; time?: unknown; label?: unknown } | undefined
+    if (!marker || typeof marker.id !== 'string' || !marker.id
+      || typeof marker.time !== 'number' || !Number.isFinite(marker.time) || marker.time < 0) {
+      throw new EditorCommandError('invalid_payload', 'marker')
+    }
+    if (marker.label !== undefined && typeof marker.label !== 'string') {
+      throw new EditorCommandError('invalid_payload', 'marker.label')
+    }
+    const markerOut = { id: marker.id, time: Math.round(marker.time * 1000) / 1000, ...(typeof marker.label === 'string' && marker.label ? { label: marker.label } : {}) }
+    const rest = (doc.markers ?? []).filter((m) => m.id !== marker.id)
+    return { ...doc, markers: [...rest, markerOut].sort((a, b) => a.time - b.time) }
+  },
+
+  removeMarker: (doc, payload) => {
+    const id = payload.markerId
+    if (typeof id !== 'string' || !id) throw new EditorCommandError('invalid_payload', 'markerId')
+    if (!(doc.markers ?? []).some((m) => m.id === id)) {
+      throw new EditorCommandError('invalid_payload', `no marker ${id}`)
+    }
+    return { ...doc, markers: (doc.markers ?? []).filter((m) => m.id !== id) }
+  },
+
+  /** 波纹删除：删片段并把同轨其后片段整体左移补位（跨轨不受影响；转场清理同 removeClip） */
+  rippleRemoveClip: (doc, payload) => {
+    const { clip } = findClip(doc, payload.clipId)
+    const track = findTrack(doc, clip.trackId)
+    if (track.kind === 'subtitle') {
+      throw new EditorCommandError('invalid_payload', 'ripple requires media track')
+    }
+    const removedEnd = clipEnd(clip)
+    const tracks = doc.tracks.map((t) => (
+      t.transitions?.some((tr) => tr.afterClipId === clip.id)
+        ? { ...t, transitions: t.transitions.filter((tr) => tr.afterClipId !== clip.id) }
+        : t
+    ))
+    return {
+      ...doc,
+      tracks,
+      clips: doc.clips
+        .filter((c) => c.id !== clip.id)
+        .map((c) => (
+          c.trackId === track.id && c.start >= removedEnd - 1e-6
+            ? { ...c, start: Math.max(0, Math.round((c.start - clip.duration) * 1000) / 1000) }
+            : c
+        )),
+    }
+  },
+
+  /** 闭合同轨空隙：该轨片段按序收紧（从 0 起光标铺满），字幕轨豁免（cue 可共存） */
+  closeGaps: (doc, payload) => {
+    const track = findTrack(doc, payload.trackId)
+    if (track.kind === 'subtitle') {
+      throw new EditorCommandError('invalid_payload', 'closeGaps requires media track')
+    }
+    const ordered = doc.clips
+      .filter((c) => c.trackId === track.id)
+      .sort((a, b) => a.start - b.start || a.id.localeCompare(b.id))
+    let cursor = 0
+    const offset = new Map<string, number>()
+    for (const c of ordered) {
+      offset.set(c.id, Math.round((cursor - c.start) * 1000) / 1000)
+      cursor += c.duration
+    }
+    return { ...doc, clips: doc.clips.map((c) => (offset.has(c.id) ? { ...c, start: Math.max(0, Math.round((c.start + offset.get(c.id)!) * 1000) / 1000) } : c)) }
   },
 }
 

@@ -288,6 +288,22 @@ def test_plan_camera_carried_and_schema_validated():
         validate_document_skeleton(bad2)
 
 
+def test_schema_markers_validated():
+    """markers 可选数组：合法透传 / 非法形状与重复 id 拒绝"""
+    from app.services.editor.document_schema import validate_document_skeleton
+    doc = _doc()
+    doc["markers"] = [{"id": "m1", "time": 1.5, "label": "开场"}, {"id": "m2", "time": 4}]
+    assert validate_document_skeleton(doc) is doc
+    bad = _doc()
+    bad["markers"] = [{"id": "m1", "time": -1}]
+    with pytest.raises(Exception, match="markers"):
+        validate_document_skeleton(bad)
+    dup = _doc()
+    dup["markers"] = [{"id": "m1", "time": 1}, {"id": "m1", "time": 2}]
+    with pytest.raises(Exception, match="重复"):
+        validate_document_skeleton(dup)
+
+
 def test_render_command_fullframe_xfade_and_pip():
     plan = build_plan(_doc(), lambda aid: PATHS.get(aid))
     normalized = {"c1": "/tmp/n1.mp4", "c2": "/tmp/n2.mp4", "p1": "/tmp/n3.mp4"}

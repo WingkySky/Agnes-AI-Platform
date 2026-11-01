@@ -331,8 +331,8 @@ describe('fail-closed', () => {
     expect(() => applyCommand(doc, broken)).toThrow(/unknown_op/)
     expect(doc.clips.length).toBe(4)
   })
-  it('op 表恰好 18 个', () => {
-    expect(EDITOR_OPS.length).toBe(18)
+  it('op 表恰好 22 个', () => {
+    expect(EDITOR_OPS.length).toBe(22)
   })
 })
 
@@ -366,6 +366,66 @@ describe('setDocumentMeta', () => {
     expect(() => applyCommand(doc, cmd('setDocumentMeta', { width: 8192 }))).toThrow(/invalid_payload/)
     expect(() => applyCommand(doc, cmd('setDocumentMeta', { timebase: 45 }))).toThrow(/invalid_payload/)
     expect(doc.width).toBe(1280)
+  })
+})
+
+// ---------- 标记 / 波纹删除 / 闭 gap ----------
+
+describe('addMarker / removeMarker', () => {
+  it('打标记 upsert（同 id 覆盖）且按 time 排序', () => {
+    const doc = baseDoc()
+    let next = applyCommand(doc, cmd('addMarker', { marker: { id: 'm2', time: 5 } }))
+    next = applyCommand(next, cmd('addMarker', { marker: { id: 'm1', time: 2, label: '开场' } }))
+    expect(next.markers).toEqual([
+      { id: 'm1', time: 2, label: '开场' },
+      { id: 'm2', time: 5 },
+    ])
+    next = applyCommand(next, cmd('addMarker', { marker: { id: 'm2', time: 1 } }))
+    expect(next.markers).toEqual([
+      { id: 'm2', time: 1 },
+      { id: 'm1', time: 2, label: '开场' },
+    ])
+  })
+
+  it('fail-closed：非法形状 / 删除不存在 / 原文档不受影响', () => {
+    const doc = baseDoc()
+    expect(() => applyCommand(doc, cmd('addMarker', { marker: { id: '', time: -1 } }))).toThrow(/invalid_payload/)
+    expect(() => applyCommand(doc, cmd('removeMarker', { markerId: 'nope' }))).toThrow(/invalid_payload/)
+    expect(doc.markers).toBeUndefined()
+  })
+})
+
+describe('rippleRemoveClip / closeGaps', () => {
+  it('波纹删除：同轨后续左移补位，跨轨不动', () => {
+    const doc = baseDoc() // v1: c1(0-4) c2(4-7)；v2: p1(1-3)
+    const next = applyCommand(doc, cmd('rippleRemoveClip', { clipId: 'c1' }))
+    expect(next.clips.find((c) => c.id === 'c1')).toBeUndefined()
+    expect(next.clips.find((c) => c.id === 'c2')!.start).toBe(0)
+    expect(next.clips.find((c) => c.id === 'p1')!.start).toBe(1)
+  })
+
+  it('波纹删除清理指向被删片段的转场', () => {
+    const doc = baseDoc()
+    const withTr = applyCommand(doc, cmd('setTransition', {
+      trackId: 'v1', afterClipId: 'c1', transitionId: 'tr1', type: 'crossfade', duration: 0.5,
+    }))
+    const next = applyCommand(withTr, cmd('rippleRemoveClip', { clipId: 'c1' }))
+    expect(next.tracks.find((t) => t.id === 'v1')!.transitions).toEqual([])
+  })
+
+  it('fail-closed：字幕轨不支持波纹/闭 gap', () => {
+    const doc = baseDoc()
+    expect(() => applyCommand(doc, cmd('rippleRemoveClip', { clipId: 't1' }))).toThrow(/invalid_payload/)
+    expect(() => applyCommand(doc, cmd('closeGaps', { trackId: 's1' }))).toThrow(/invalid_payload/)
+  })
+
+  it('closeGaps：收紧同轨空隙（片段依序铺满）', () => {
+    const doc = baseDoc()
+    let next = applyCommand(doc, cmd('moveClip', { clipId: 'c2', start: 6 })) // 造 2s 空隙
+    next = applyCommand(next, cmd('closeGaps', { trackId: 'v1' }))
+    expect(next.clips.find((c) => c.id === 'c2')!.start).toBe(4)
+    // 其他轨不动
+    expect(next.clips.find((c) => c.id === 'p1')!.start).toBe(1)
   })
 })
 

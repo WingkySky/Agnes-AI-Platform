@@ -127,6 +127,20 @@ def validate_document_skeleton(doc: Any) -> dict:
     style = doc.get("subtitleStyle")
     if style is not None and not isinstance(style, dict):
         _fail("subtitleStyle 必须为对象")
+
+    markers = doc.get("markers")
+    if markers is not None:
+        if not isinstance(markers, list):
+            _fail("markers 必须为数组")
+        marker_ids = set()
+        for i, mk in enumerate(markers):
+            if not isinstance(mk, dict) or not mk.get("id") or not _num(mk.get("time")) or mk["time"] < 0:
+                _fail(f"markers[{i}] 形状非法")
+            if mk["id"] in marker_ids:
+                _fail(f"markers[{i}].id 重复: {mk['id']}")
+            marker_ids.add(mk["id"])
+            if mk.get("label") is not None and not isinstance(mk.get("label"), str):
+                _fail(f"markers[{i}].label 必须为字符串")
     return doc
 
 
