@@ -121,6 +121,8 @@ interface DragRender {
 const dragRender = ref<DragRender | null>(null)
 /** slip 滑切预览（源内入点滑动，位置/时长不变；缩略图条随 trimStart 重绘） */
 const slipRender = ref<{ clipId: string; trimStart: number } | null>(null)
+/** roll 滚动修剪预览（相邻切点滚动：左片段右缘与右片段左缘同步移动，总长不变） */
+const rollRender = ref<{ prevId: string; prevDur: number; selfId: string; selfStart: number; selfDur: number; selfTrim: number; nextStart: number } | null>(null)
 /** 拖素材悬停的换源目标片段 */
 const dropClipTarget = ref<string | null>(null)
 
@@ -280,11 +282,17 @@ function clipSelected(clip: EditorClip): boolean {
   return store.selectedClipIds.includes(clip.id)
 }
 
-/** 片段按下：Alt+拖=滑切（源内滑动）；Ctrl/Cmd 切换多选；已在多选/联动组里则整组拖移；否则单选 */
+/** 片段按下：Alt+拖块=滑切；Alt+拖缘=滚动修剪；Ctrl/Cmd 切换多选；已在多选/联动组里则整组拖移；否则单选 */
 function onClipPointerDown(e: PointerEvent, clip: EditorClip, mode: DragRender['mode']): void {
-  if (mode === 'move' && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
-    void beginSlip(e, clip)
-    return
+  if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+    if (mode === 'move') {
+      void beginSlip(e, clip)
+      return
+    }
+    if (mode === 'trim-left' || mode === 'trim-right') {
+      void beginRoll(e, clip, mode)
+      return
+    }
   }
   if (mode === 'move' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
     e.stopPropagation()
@@ -361,7 +369,97 @@ async function beginSlip(e: PointerEvent, clip: EditorClip): Promise<void> {
 /** slip 中传给素材条的片段（trimStart 实时跟随，缩略图随源内滑动） */
 function renderClip(clip: EditorClip): EditorClip {
   const s = slipRender.value
-  return s?.clipId === clip.id ? { ...clip, trimStart: s.trimStart } : clip
+  if (s?.clipId === clip.id) return { ...clip, trimStart: s.trimStart }
+  const r = rollRender.value
+  if (r) {
+    if (r.prevId === clip.id) return { ...clip, duration: r.prevDur }
+    if (r.selfId === clip.id) return { ...clip, start: r.selfStart, duration: r.selfDur, trimStart: r.selfTrim }
+  }
+  return clip
+}
+
+/** roll 滚动修剪：Alt+拖缘=相邻切点滚动（左片段右缘=右片段左缘同步移动，总长不变）。
+ *  无相邻片段则不启动（普通修剪走无修饰键手势）。双源素材时长探测做源内钳制，
+ *  probe 期间松手取消（slip 同款哨兵）。 */
+async function beginRoll(e: PointerEvent, clip: EditorClip, side: 'trim-left' | 'trim-right'): Promise<void> {
+  e.stopPropagation()
+  store.select(clip.id)
+  const doc = store.doc
+  const track = doc?.tracks.find((tr) => tr.id === clip.trackId)
+  if (!doc || !track || track.kind === 'subtitle') return
+  const ordered = doc.clips.filter((c) => c.trackId === track.id).sort((a, b) => a.start - b.start)
+  const idx = ordered.findIndex((c) => c.id === clip.id)
+  if (idx < 0) return
+  const left = side === 'trim-left' ? ordered[idx - 1] : clip
+  const right = side === 'trim-left' ? clip : ordered[idx + 1]
+  if (!left || !right) return
+  if (Math.abs(clipEnd(left) - right.start) >= 0.02) return // 无缝邻接才成 roll
+  const locked = doc.tracks.find((tr) => tr.id === left.trackId)?.flags.locked
+    || doc.tracks.find((tr) => tr.id === right.trackId)?.flags.locked
+  if (locked) return
+
+  let cancelled = false
+  const cancel = (): void => { cancelled = true }
+  window.addEventListener('pointerup', cancel, { once: true })
+  const startX = e.clientX
+  try {
+    // 双源探测（图片素材 Infinity=无源内钳制）
+    const probeOf = async (c: EditorClip): Promise<number> => {
+      if (c.assetId == null) return Infinity
+      const a = await store.fetchAsset(c.assetId)
+      if (!a?.asset_url || a.media_type === 'image') return Infinity
+      return store.probeMediaDuration(a.asset_url)
+    }
+    const [leftSrc, rightSrc] = await Promise.all([probeOf(left), probeOf(right)])
+    const leftSpeed = left.props.speed ?? 1
+    const rightSpeed = right.props.speed ?? 1
+    const rightEnd = clipEnd(right)
+    // 切点域：两片段各保 MIN 时长；左源出点/右源出点不越源（右入点不越源起点）
+    const cutMin = Math.max(
+      left.start + MIN_CLIP_DURATION,
+      rightEnd - (rightSrc - right.trimStart) / rightSpeed,
+      right.start - right.trimStart / rightSpeed,
+    )
+    const cutMax = Math.min(
+      rightEnd - MIN_CLIP_DURATION,
+      left.start + (leftSrc - left.trimStart) / leftSpeed,
+    )
+    if (cancelled || !(cutMax > cutMin)) return
+    const origCut = clipEnd(left)
+    rollRender.value = {
+      prevId: left.id, prevDur: left.duration,
+      selfId: right.id, selfStart: right.start, selfDur: right.duration, selfTrim: right.trimStart,
+      nextStart: right.start,
+    }
+    const move = (ev: PointerEvent): void => {
+      const rr = rollRender.value
+      if (!rr) return
+      const cut = Math.round(Math.min(cutMax, Math.max(cutMin, origCut + (ev.clientX - startX) / PX_PER_SEC.value)) * 1000) / 1000
+      rr.prevDur = Math.round((cut - left.start) * 1000) / 1000
+      rr.selfStart = cut
+      rr.selfDur = Math.round((rightEnd - cut) * 1000) / 1000
+      rr.selfTrim = Math.round((right.trimStart + (cut - right.start) * rightSpeed) * 1000) / 1000
+      rr.nextStart = cut
+    }
+    const up = (): void => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      const rr = rollRender.value
+      rollRender.value = null
+      if (!rr || (rr.prevDur === left.duration && rr.selfStart === right.start)) return
+      // 顺序敏感：切点右移=左片段先长进去会撞右片段旧位置——右片段先让位；左移反之
+      const leftCmd = { op: 'trimClip', payload: { clipId: left.id, duration: rr.prevDur } }
+      const rightCmd = { op: 'trimClip', payload: { clipId: right.id, start: rr.selfStart, duration: rr.selfDur, trimStart: rr.selfTrim } }
+      const cmds: EditorCommand[] = rr.selfStart >= right.start
+        ? [rightCmd, leftCmd] as EditorCommand[]
+        : [leftCmd, rightCmd] as EditorCommand[]
+      store.applyBatch(cmds, t('editor.ops.trimClip'))
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  } finally {
+    window.removeEventListener('pointerup', cancel)
+  }
 }
 
 interface MarqueeState { x0: number; y0: number; x1: number; y1: number }
@@ -851,6 +949,7 @@ const shortcutList = computed(() => [
   { keys: `${mod}+B`, label: t('editor.split') },
   { keys: `${mod}+C`, label: t('editor.shortcutDuplicate') },
   { keys: 'Alt+拖', label: t('editor.shortcutSlip') },
+  { keys: 'Alt+拖缘', label: t('editor.shortcutRoll') },
   { keys: 'Delete', label: t('common.delete') },
   { keys: 'M', label: t('editor.ops.addMarker') },
   { keys: 'I/O', label: `${t('editor.ioIn')} / ${t('editor.ioOut')}` },

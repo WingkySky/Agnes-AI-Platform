@@ -1131,6 +1131,7 @@ const enUS = {
     slipNoMedia: 'No slippable media source on this clip',
     slipNoRoom: 'No slip room within the source',
     shortcutSlip: 'Slip (slide within source)',
+    shortcutRoll: 'Roll edit (adjacent cut point)',
     linkBadge: 'Audio/video linked: move/delete as a group',
     menuUnlink: 'Unlink audio/video',
     replaceConfirm: 'Replace clip source with "{name}"? (position and properties kept)',

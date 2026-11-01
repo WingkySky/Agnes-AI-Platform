@@ -1113,6 +1113,7 @@ const zhCN = {
     slipNoMedia: '该片段没有可滑动的媒体源',
     slipNoRoom: '源内没有滑动余量',
     shortcutSlip: '滑切（源内滑动）',
+    shortcutRoll: '滚动修剪（相邻切点）',
     linkBadge: '音画联动：移动/删除成组',
     menuUnlink: '解除音画联动',
     replaceConfirm: '将片段素材替换为「{name}」？（保留位置与属性）',

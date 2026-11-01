@@ -99,11 +99,15 @@ def classify_report(issues: list[dict], intentional: dict, silent_expected: bool
 
 
 async def _run_analysis(path: str) -> str:
-    """单 pass 分析（-f null 不落产物），返回 stderr 检测日志。"""
+    """单 pass 分析（-f null 不落产物），返回 stderr 检测日志。
+
+    vf/af 链头部先做 pts 归零（setpts=PTS-STARTPTS / aresample first_pts=0）：
+    ffmpeg 8 的 filter graph 时基可能带大偏移（实测 silence_start 输出 5.8e9 级
+    绝对时间戳），不归零会让检测区间整体漂出成片时长。"""
     cmd = [
         "ffmpeg", "-nostats", "-i", path,
-        "-vf", f"blackdetect=d={BLACK_MIN_D},freezedetect=n=-60dB:d={FREEZE_MIN_D}",
-        "-af", f"silencedetect=n=-30dB:d={SILENCE_MIN_D}",
+        "-vf", f"setpts=PTS-STARTPTS,blackdetect=d={BLACK_MIN_D},freezedetect=n=-60dB:d={FREEZE_MIN_D}",
+        "-af", f"aresample=async=1:first_pts=0,silencedetect=n=-30dB:d={SILENCE_MIN_D}",
         "-f", "null", "-",
     ]
     proc = await asyncio.create_subprocess_exec(

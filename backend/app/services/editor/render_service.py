@@ -55,6 +55,9 @@ logger = logging.getLogger("agnes_platform.editor.render")
 
 EDITOR_OUTPUTS_DIR = os.path.join(UPLOADS_DIR, "editor")
 
+# 归一化并发路数（ffmpeg 子进程并行；4 路在双核/四核机器上均有收益且不挤占终版合成）
+NORM_CONCURRENCY = 4
+
 
 def render_status_payload(project: EditingProject) -> dict:
     return {
@@ -243,19 +246,31 @@ async def _has_audio_stream(path: str) -> bool:
 
 
 async def _normalize_segments(db: AsyncSession, project: EditingProject, plan: dict) -> tuple[dict, dict[str, str]]:
-    """逐片段截取+变速+归一化；进度写 render_progress。"""
+    """逐片段截取+变速+效果器+归一化（并发池，NORM_CONCURRENCY 路），进度按完成数写 render_progress。"""
     segs = [s for t in plan["video_tracks"] for s in t["segments"]]
     total = len(segs)
+    if not total:
+        return plan, {}
+    sem = asyncio.Semaphore(NORM_CONCURRENCY)
+
+    async def _one(seg: dict) -> str:
+        async with sem:
+            out = os.path.join(EDITOR_OUTPUTS_DIR, f".norm_{uuid.uuid4().hex[:12]}.mp4")
+            await run_ffmpeg(
+                _segment_normalize_cmd(seg, plan["width"], plan["height"], plan["timebase"], out),
+                timeout=900,
+                error_label=f"片段归一化（{seg['clip_id']}）",
+            )
+            return seg["clip_id"], out
+
+    tasks = [asyncio.create_task(_one(seg)) for seg in segs]
     normalized: dict[str, str] = {}
-    for i, seg in enumerate(segs):
-        out = os.path.join(EDITOR_OUTPUTS_DIR, f".norm_{uuid.uuid4().hex[:12]}.mp4")
-        await run_ffmpeg(
-            _segment_normalize_cmd(seg, plan["width"], plan["height"], plan["timebase"], out),
-            timeout=900,
-            error_label=f"片段归一化（{seg['clip_id']}）",
-        )
-        normalized[seg["clip_id"]] = out
-        project.render_progress = f"{i + 1}/{total}"
+    done = 0
+    for coro in asyncio.as_completed(tasks):
+        clip_id, out = await coro
+        normalized[clip_id] = out
+        done += 1
+        project.render_progress = f"{done}/{total}"
         await db.commit()
     return plan, normalized
 
@@ -432,7 +447,13 @@ def build_render_command(
         1 if _track_is_single_layer(track) else len(track["segments"])
         for track in plan["video_tracks"]
     )
-    direct_single = has_video and overlay_layer_count == 1
+    # 单条全帧轨直出的前置条件：轨道链锚点在 0——chain_start>0 时整轨链 pts 从锚点起，
+    # 直出会让 mux 丢掉前导黑场（成片比时间线短 chain_start 且整体前移），须走黑基座+开窗路径
+    first_track = plan["video_tracks"][0] if plan["video_tracks"] else None
+    direct_single = (
+        has_video and overlay_layer_count == 1
+        and first_track is not None and first_track["chain_start"] <= 1e-6
+    )
     needs_base = has_video and not direct_single
 
     overlay_items: list[tuple[str, int, int, str]] = []  # (label, x, y, enable)

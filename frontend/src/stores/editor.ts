@@ -13,6 +13,7 @@
 import { defineStore } from 'pinia'
 import { ref, shallowRef, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import localforage from 'localforage'
 
 import { t } from '@/i18n'
 import { applyCanvasOps } from '@/api/canvasWorkspace'
@@ -36,7 +37,7 @@ import {
   cmd,
   type EditorCommand,
 } from '@/lib/editor-commands'
-import { EditorHistory } from '@/lib/editor-history'
+import { EditorHistory, type HistorySnapshot } from '@/lib/editor-history'
 import { reflowPlaceholders } from '@/lib/editor-derive'
 import { canPlaceOnTrack, findFreeTrack } from '@/lib/editor-placement'
 import { probeMediaDuration as probeMediaDurationWithFallback, probeElementDuration, createVideoSink } from '@/lib/editor-media'
@@ -156,9 +157,9 @@ export const useEditorStore = defineStore('editor', () => {
     finalUrl.value = detail.final_url
     coverUrl.value = detail.cover_url
     qualityReport.value = detail.quality_report ?? null
-    history.clear()
     dirty.value = false
     loaded.value = true
+    await restoreHistory(projectUid, detail.document, detail.revision)
     void healDurations()
   }
 
@@ -195,6 +196,45 @@ export const useEditorStore = defineStore('editor', () => {
     )
   }
 
+  // ---------- 撤销栈持久化（localforage 按 uid+revision 链校验恢复；快照尾 redoDoc 与远端一致才可信） ----------
+
+  function historyKey(projectUid: string): string {
+    return `agnes_editor_hist:${projectUid}`
+  }
+
+  function persistHistory(): void {
+    if (!uid.value) return
+    const snap = history.serialize(revision.value)
+    void (snap
+      ? localforage.setItem<HistorySnapshot>(historyKey(uid.value), snap)
+      : localforage.removeItem(historyKey(uid.value))
+    ).catch(() => { /* 存储不可用静默（撤销仍内存可用） */ })
+  }
+
+  let histTimer: ReturnType<typeof setTimeout> | null = null
+  function persistHistorySoon(): void {
+    if (histTimer) return
+    histTimer = setTimeout(() => {
+      histTimer = null
+      persistHistory()
+    }, 800)
+  }
+
+  /** 恢复：快照 revision 与远端一致且栈尾 redoDoc 与文档逐字相等才还原（链断即弃） */
+  async function restoreHistory(projectUid: string, serverDoc: EditorDocument, serverRevision: number): Promise<void> {
+    history.clear()
+    try {
+      const snap = await localforage.getItem<HistorySnapshot | null>(historyKey(projectUid))
+      const top = snap?.entries?.[snap.entries.length - 1]
+      if (snap && snap.revision === serverRevision && top
+        && JSON.stringify(top.redoDoc) === JSON.stringify(serverDoc)) {
+        history.restore(snap)
+      }
+    } catch {
+      history.clear()
+    }
+  }
+
   // ---------- 命令进入 ----------
 
   function apply(command: EditorCommand, label: string): void {
@@ -204,6 +244,7 @@ export const useEditorStore = defineStore('editor', () => {
     doc.value = next
     dirty.value = true
     scheduleSave()
+    persistHistorySoon()
   }
 
   /** 批量命令：整批 fail-closed（任一失败全不落），单条历史（一次撤销整批） */
@@ -224,6 +265,7 @@ export const useEditorStore = defineStore('editor', () => {
     doc.value = next
     dirty.value = true
     scheduleSave()
+    persistHistorySoon()
     return true
   }
 
@@ -248,6 +290,7 @@ export const useEditorStore = defineStore('editor', () => {
       doc.value = entry.undoDoc
       dirty.value = true
       scheduleSave()
+      persistHistorySoon()
     }
   }
 
@@ -258,6 +301,7 @@ export const useEditorStore = defineStore('editor', () => {
       doc.value = entry.redoDoc
       dirty.value = true
       scheduleSave()
+      persistHistorySoon()
     }
   }
 
@@ -281,6 +325,7 @@ export const useEditorStore = defineStore('editor', () => {
       revision.value = result.revision
       dirty.value = false
       lastSavedAt.value = result.saved_at
+      persistHistory()
     } catch (err) {
       const status = (err as Error & { status?: number }).status
       if (status === 409) await handleConflict()
@@ -306,6 +351,7 @@ export const useEditorStore = defineStore('editor', () => {
     doc.value = remote.document
     dirty.value = false
     history.clear()
+    void localforage.removeItem(historyKey(uid.value)).catch(() => {})
     ElMessage.info(t('editor.conflictReloaded'))
   }
 
