@@ -322,11 +322,14 @@ def _segment_normalize_cmd(seg: dict, width: int, height: int, fps: int, out_pat
     zoompan = _camera_zoompan(seg.get("camera"), seg["duration"], fps, w, h)
     if zoompan:
         vf.append(zoompan)
+    # 图片静帧：-loop 1 循环单帧铺满时长（image2 对 -t 输入选项不循环，零帧输出会产出无流 mp4）
+    if seg.get("kind") == "image":
+        input_opts = ["-loop", "1", "-t", f"{src_span:.6f}", "-i", seg["asset_path"]]
+    else:
+        input_opts = ["-ss", f"{seg['trim_start']}", "-t", f"{src_span:.6f}", "-i", seg["asset_path"]]
     return [
         "ffmpeg", "-y",
-        "-ss", f"{seg['trim_start']}",
-        "-t", f"{src_span:.6f}",
-        "-i", seg["asset_path"],
+        *input_opts,
         "-vf", ",".join(vf),
         "-an",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",

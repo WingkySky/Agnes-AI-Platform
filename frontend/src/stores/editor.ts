@@ -625,7 +625,10 @@ export const useEditorStore = defineStore('editor', () => {
 
   function selectTrack(trackId: string | null): void {
     selectedTrackId.value = trackId
-    if (trackId) selectedClipId.value = null
+    if (trackId) {
+      selectedClipId.value = null
+      selectedClipIds.value = []
+    }
   }
 
   /** 冻结帧：播放头处截帧成图片素材，splitClip+右移+插入 3s 静帧（applyBatch 单历史） */
@@ -666,11 +669,15 @@ export const useEditorStore = defineStore('editor', () => {
         url, media_type: 'image', name: `${asset.name || clip.id} ${t('editor.freezeName')}`,
       })
       const shiftIds = d.clips
-        .filter((c) => c.trackId === track.id && c.start >= at - 1e-6)
+        .filter((c) => c.trackId === track.id && c.start >= at - 1e-6 && c.id !== clipId)
         .map((c) => ({ id: c.id, start: c.start }))
+      // 顺序敏感：先右移后续片段、再右移 split 右半、最后插入静帧——
+      // 逐条 overlap 校验按当前态判定，右半先动会撞上尚未让位的后续片段
+      const rightId = newId('clip')
       const ok = applyBatch([
-        cmd('splitClip', { clipId, at, newId: newId('clip') }),
+        cmd('splitClip', { clipId, at, newId: rightId }),
         ...shiftIds.map((c) => cmd('moveClip', { clipId: c.id, start: Math.round((c.start + FREEZE_DUR) * 1000) / 1000 })),
+        cmd('moveClip', { clipId: rightId, start: Math.round((at + FREEZE_DUR) * 1000) / 1000 }),
         cmd('addClip', {
           clip: {
             id: newId('clip'), trackId: track.id, assetId: imageAsset.id,

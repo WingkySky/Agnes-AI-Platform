@@ -925,7 +925,7 @@ const ioBand = computed((): Record<string, string> => {
               }"
               :style="clipStyle(clip)"
               @pointerdown="onClipPointerDown($event, clip, 'move')"
-              @contextmenu.prevent="openClipMenu($event, clip, row.track.kind)"
+              @contextmenu.prevent.stop="openClipMenu($event, clip, row.track.kind)"
             >
               <EditorClipMedia v-if="row.track.kind !== 'subtitle'" :clip="clip" :kind="row.track.kind" />
               <svg v-if="clipEnvelope(clip)" class="clip-envelope" viewBox="0 0 100 100" preserveAspectRatio="none">

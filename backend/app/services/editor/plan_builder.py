@@ -88,6 +88,8 @@ def build_plan(
             "clip_id": clip.get("id"),
             "asset_id": asset_id,
             "asset_path": path,
+            # 素材种类（image 归一化需 -loop 1 静帧铺满时长；无 resolve_asset_kind 时 None=按视频处理）
+            "kind": (resolve_asset_kind(asset_id) if resolve_asset_kind is not None else None),
             "start": _num(clip.get("start")),
             "duration": duration,
             "trim_start": _num(clip.get("trimStart")),
