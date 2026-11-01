@@ -104,6 +104,61 @@ function requireNonNegative(v: unknown, name: string): number {
   return v
 }
 
+/** 字幕逐 cue 样式增量校验：内键 color/size/position，null 删除该键（合并语义见 setClipProperty） */
+function normalizeStyleDelta(delta: unknown): Record<string, unknown> {
+  if (typeof delta !== 'object' || delta === null || Array.isArray(delta)) {
+    throw new EditorCommandError('invalid_payload', 'style')
+  }
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(delta)) {
+    if (value === null) {
+      out[key] = null
+      continue
+    }
+    if (key === 'color') {
+      if (typeof value !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(value)) {
+        throw new EditorCommandError('invalid_payload', 'style.color')
+      }
+    } else if (key === 'size') {
+      if (typeof value !== 'number' || !Number.isInteger(value) || value < 8 || value > 200) {
+        throw new EditorCommandError('invalid_payload', 'style.size')
+      }
+    } else if (key === 'position') {
+      if (value !== 'bottom' && value !== 'center' && value !== 'top') {
+        throw new EditorCommandError('invalid_payload', 'style.position')
+      }
+    } else {
+      throw new EditorCommandError('invalid_payload', `unknown style key: ${key}`)
+    }
+    out[key] = value
+  }
+  return out
+}
+
+/** 音量包络点数组校验：[{t:0~1, v:0~2}] ≤16 点、t 升序去重 */
+function normalizeVolumePoints(value: unknown): Array<{ t: number; v: number }> {
+  if (!Array.isArray(value)) {
+    throw new EditorCommandError('invalid_payload', 'volumePoints')
+  }
+  if (value.length > 16) {
+    throw new EditorCommandError('invalid_payload', 'volumePoints.length')
+  }
+  const out: Array<{ t: number; v: number }> = value.map((raw) => {
+    const p = raw as Record<string, unknown>
+    if (typeof p?.t !== 'number' || !Number.isFinite(p.t) || p.t < 0 || p.t > 1
+      || typeof p?.v !== 'number' || !Number.isFinite(p.v) || p.v < 0 || p.v > 2) {
+      throw new EditorCommandError('invalid_payload', 'volumePoints[]')
+    }
+    return { t: Math.round(p.t * 1000) / 1000, v: Math.round(p.v * 100) / 100 }
+  })
+  for (let i = 1; i < out.length; i++) {
+    if (out[i]!.t <= out[i - 1]!.t) {
+      throw new EditorCommandError('invalid_payload', 'volumePoints.t 升序')
+    }
+  }
+  return out
+}
+
 /** 校验并规范 setClipProperty 的 props 增量（浅合并语义，null 删除键） */
 function normalizePropsDelta(delta: unknown): Partial<Record<keyof ClipProps, unknown>> {
   if (typeof delta !== 'object' || delta === null || Array.isArray(delta)) {
@@ -140,6 +195,17 @@ function normalizePropsDelta(delta: unknown): Partial<Record<keyof ClipProps, un
         || typeof c.strength !== 'number' || !Number.isFinite(c.strength) || c.strength < 0 || c.strength > 1) {
         throw new EditorCommandError('invalid_payload', 'camera')
       }
+    } else if (key === 'style') {
+      // 字幕逐 cue 样式增量：嵌套合并（normalizeStyleDelta 校验，null 内键删除）
+      out[key as keyof ClipProps] = normalizeStyleDelta(value) as unknown as ClipProps[keyof ClipProps]
+      continue
+    } else if (key === 'volumePoints') {
+      if (value === null) {
+        out[key as keyof ClipProps] = null
+        continue
+      }
+      out[key as keyof ClipProps] = normalizeVolumePoints(value) as unknown as ClipProps[keyof ClipProps]
+      continue
     } else {
       throw new EditorCommandError('invalid_payload', `unknown prop: ${key}`)
     }
@@ -293,17 +359,36 @@ const commands: Record<EditorOp, (doc: EditorDocument, payload: CommandPayload) 
       throw new EditorCommandError('duplicate_id', newId)
     }
     const speed = clip.props.speed ?? 1
+    // 属性拆分（语义 v2：后半段继承属性）——包络点按切分比例重映射；
+    // fade 按半段归属拆分：前半丢 fadeOut（尾部已非片段末）、后半丢 fadeIn（头部已非片段首）
+    const cutFrac = (at - clip.start) / clip.duration
+    const remapPoints = (pts: Array<{ t: number; v: number }>, from: number, to: number) =>
+      pts
+        .filter((p) => p.t >= from && p.t <= to)
+        .map((p) => ({ t: Math.round(((p.t - from) / (to - from)) * 1000) / 1000, v: p.v }))
+    const splitProps = (half: 'first' | 'second'): ClipProps => {
+      const next: ClipProps = { ...clip.props }
+      if (next.volumePoints?.length) {
+        const pts = half === 'first'
+          ? remapPoints(next.volumePoints, 0, cutFrac)
+          : remapPoints(next.volumePoints, cutFrac, 1)
+        if (pts.length) next.volumePoints = pts
+        else delete next.volumePoints
+      }
+      delete next[half === 'first' ? 'fadeOut' : 'fadeIn']
+      return next
+    }
     const second: EditorClip = {
       ...clip,
       id: newId,
       start: at,
       duration: clipEnd(clip) - at,
-      // 源内入点按变速换算；属性留前半段，后半段取默认（设计档 splitClip 语义）
+      // 源内入点按变速换算；属性继承（包络重映射 + fade 拆分）
       trimStart: clip.trimStart + (at - clip.start) * speed,
-      props: {},
+      props: splitProps('second'),
       ...(track.kind === 'subtitle' ? { text: clip.text ?? '' } : {}),
     }
-    const first: EditorClip = { ...clip, duration: at - clip.start }
+    const first: EditorClip = { ...clip, duration: at - clip.start, props: splitProps('first') }
     const clips = doc.clips.map((c) => (c.id === clip.id ? first : c))
     return { ...doc, clips: [...clips, second] }
   },
@@ -372,6 +457,17 @@ const commands: Record<EditorOp, (doc: EditorDocument, payload: CommandPayload) 
     return withClip(doc, payload.clipId as string, (clip) => {
       const props: ClipProps = { ...clip.props }
       for (const [key, value] of Object.entries(delta)) {
+        if (key === 'style') {
+          // 逐 cue 样式嵌套合并：内键 null 删除；合并后为空则整键删除
+          const merged: Record<string, unknown> = { ...(props.style as Record<string, unknown> | undefined) }
+          for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+            if (v === null) delete merged[k]
+            else merged[k] = v
+          }
+          if (Object.keys(merged).length) props.style = merged as ClipProps['style']
+          else delete props.style
+          continue
+        }
         if (value === null) delete props[key as keyof ClipProps]
         else (props as Record<string, unknown>)[key] = value
       }

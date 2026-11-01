@@ -177,7 +177,8 @@ async def _render_project(db: AsyncSession, project: EditingProject) -> None:
         style = plan.get("subtitle_style") or {}
         ass_events = [
             {"start_time": e["start"], "duration": e["end"] - e["start"], "text": e["text"],
-             "fade_in": e.get("fade_in", 0), "fade_out": e.get("fade_out", 0)}
+             "fade_in": e.get("fade_in", 0), "fade_out": e.get("fade_out", 0),
+             "style": e.get("style")}
             for e in plan["subtitle_events"]
         ]
         ass_style = {
@@ -389,11 +390,47 @@ def _atempo_chain(speed: float) -> list[str]:
     return [f"atempo={f}" for f in factors]
 
 
+def _volume_expression(points: list[dict], duration: float, base: float) -> str | None:
+    """音量包络点 → ffmpeg volume 表达式（分段线性插值，eval=frame 按 t 采样）。
+    t 为片段本地秒（points.t 是相对 0~1 的片段坐标）。返回 None 表示无包络。"""
+    if not points:
+        return None
+    secs = [round(max(0.0, min(1.0, float(p["t"]))) * duration, 4) for p in points]
+    vals = [round(float(p["v"]), 4) for p in points]
+
+    def val_at(x: float) -> str:
+        if x <= secs[0]:
+            return f"{vals[0]}"
+        if x >= secs[-1]:
+            return f"{vals[-1]}"
+        for i in range(len(secs) - 1):
+            if secs[i] <= x <= secs[i + 1]:
+                span = secs[i + 1] - secs[i]
+                if span <= 0:
+                    return f"{vals[i]}"
+                k = (x - secs[i]) / span
+                return f"({vals[i]}+{k:.6f}*({vals[i + 1]}-{vals[i]}))"
+        return f"{vals[-1]}"
+
+    expr = f"between(t,0,{secs[0]})*{val_at(secs[0] / 2)}"
+    for i in range(len(secs) - 1):
+        mid = round((secs[i] + secs[i + 1]) / 2, 4)
+        expr += f"+between(t,{secs[i]},{secs[i + 1]})*{val_at(mid)}"
+    expr += f"+between(t,{secs[-1]},{duration:.4f})*{val_at((secs[-1] + duration) / 2)}"
+    # 与基础音量相乘
+    return f"({expr})*{base}"
+
+
 def _audio_filter_for(seg: dict) -> str:
     """单音频段滤镜：变速 → 音量 → fade"""
     parts: list[str] = []
     parts += _atempo_chain(seg["speed"])
-    if seg["volume"] != 1.0:
+    points = seg.get("volume_points")
+    if points:
+        # 包络：volume 表达式（分段线性 × 基础音量），eval=frame 按 t 采样
+        expr = _volume_expression(points, seg["duration"], float(seg["volume"]))
+        parts.append(f"volume='{expr}':eval=frame")
+    elif seg["volume"] != 1.0:
         parts.append(f"volume={seg['volume']}")
     if seg["fade_in"] > 0:
         parts.append(f"afade=t=in:st=0:d={seg['fade_in']}")

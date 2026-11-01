@@ -76,7 +76,7 @@ def test_plan_video_tracks_and_transition_compression():
     assert audio["start"] == 0 and audio["render_start"] == 0 and audio["volume"] == 0.8
     # 字幕事件（fade 默认 0）
     assert plan["subtitle_events"] == [
-        {"start": 0.5, "end": 2.0, "text": "你好字幕", "fade_in": 0.0, "fade_out": 0.0},
+        {"start": 0.5, "end": 2.0, "text": "你好字幕", "fade_in": 0.0, "fade_out": 0.0, "style": None},
     ]
     # 总时长 = max(轨 total 6.5, 音频 2) = 6.5
     assert timeline_total(plan) == 6.5
@@ -134,7 +134,7 @@ def test_plan_hidden_subtitle_track_no_events_and_solo_ignored():
     doc["tracks"][3]["flags"] = {"solo": True}
     doc["tracks"][0]["flags"] = {"solo": True}
     plan2 = build_plan(doc, lambda aid: PATHS.get(aid))
-    assert plan2["subtitle_events"] == [{"start": 0.5, "end": 2.0, "text": "你好字幕", "fade_in": 0.0, "fade_out": 0.0}]
+    assert plan2["subtitle_events"] == [{"start": 0.5, "end": 2.0, "text": "你好字幕", "fade_in": 0.0, "fade_out": 0.0, "style": None}]
     assert {t["track_id"] for t in plan2["video_tracks"]} == {"v1", "v2"}
 
 
@@ -338,6 +338,23 @@ def test_xfade_name_and_audio_filter():
     assert _audio_filter_for({**seg, "speed": 4.0, "volume": 1.0, "fade_in": 0}).startswith("atempo=2.0,atempo=2.0")
 
 
+def test_audio_filter_volume_envelope_expression():
+    """音量包络：volume 表达式分段线性（eval=frame），afade 保持链序相乘"""
+    from app.services.editor.render_service import _volume_expression
+    seg = {
+        "speed": 1.0, "volume": 1.0, "fade_in": 0, "fade_out": 0, "duration": 4,
+        "volume_points": [{"t": 0.25, "v": 1.0}, {"t": 0.75, "v": 0.2}],
+    }
+    f = _audio_filter_for(seg)
+    assert f.startswith("volume='") and ":eval=frame" in f
+    assert "between(t,1.0,3.0)" in f and "afade" not in f
+    expr = _volume_expression(seg["volume_points"], 4.0, 1.0)
+    # 两点线性：中段插值项系数 0.25（每秒 -0.2）
+    assert "(1.0+0.500000*(0.2-1.0))" in expr.replace(" ", "")
+    # 无包络走原路径
+    assert _audio_filter_for({k: v for k, v in seg.items() if k != "volume_points"}) == "anull"
+
+
 # ---------- 画面淡变：全帧 RGB fade / PIP alpha fade / 字幕 \fad ----------
 
 def test_plan_subtitle_fade_fields():
@@ -370,6 +387,17 @@ def test_build_ass_fade_override():
     assert "\\fad(" not in build_ass(ev)  # 未配置淡变：输出与旧版一致
     out = build_ass([{**ev[0], "fade_in": 0.3, "fade_out": 0.5}])
     assert "{\\fad(300,500)}你好" in out
+
+
+def test_build_ass_per_cue_style():
+    """逐 cue 样式：inline override tags（颜色 BGR 倒序/字号/位置），无覆盖时输出不变"""
+    from app.services.media.subtitle_format import build_ass
+    ev = [{"start_time": 0.5, "duration": 1.5, "text": "你好"}]
+    base = build_ass(ev)
+    assert "\\1c" not in base and "\\fs" not in base
+    out = build_ass([{**ev[0], "style": {"color": "#FF0000", "size": 24, "position": "center"}}])
+    assert "{\\1c&H000000FF}{\\fs24}{\\an5}" in out  # BGR 倒序（to_ass_color 带alpha 00）
+    assert "{\\1c" not in build_ass([{**ev[0], "style": {}}])  # 空 style 不加 tags
 
 
 # ---------- 端点行为 ----------

@@ -20,7 +20,26 @@ export function clipFadeAlphaAt(clip: EditorClip, now: number): number {
   return factor
 }
 
-/** 片段在时间线时刻 now 的瞬时增益（未钳制，volume 允许 0~2 提升量） */
+/** 音量包络：volumePoints 相对片段坐标（t 0~1 升序）线性插值，段外持端点值；无点=1 */
+export function volumeEnvelopeAt(clip: EditorClip, now: number): number {
+  const points = clip.props.volumePoints
+  if (!points?.length) return 1
+  const frac = Math.min(1, Math.max(0, (now - clip.start) / clip.duration))
+  if (frac <= points[0]!.t) return points[0]!.v
+  if (frac >= points[points.length - 1]!.t) return points[points.length - 1]!.v
+  for (let i = 1; i < points.length; i++) {
+    if (frac <= points[i]!.t) {
+      const a = points[i - 1]!
+      const b = points[i]!
+      const k = (frac - a.t) / (b.t - a.t)
+      return a.v + k * (b.v - a.v)
+    }
+  }
+  return points[points.length - 1]!.v
+}
+
+/** 片段在时间线时刻 now 的瞬时增益（未钳制，volume 允许 0~2 提升量）。
+ *  含音量包络（volumePoints 线性插值）× fade 楔子（与渲染端 volume 表达式+afade 链序语义一致）。 */
 export function clipGainAt(clip: EditorClip, now: number): number {
-  return (clip.props.volume ?? 1) * clipFadeAlphaAt(clip, now)
+  return (clip.props.volume ?? 1) * volumeEnvelopeAt(clip, now) * clipFadeAlphaAt(clip, now)
 }

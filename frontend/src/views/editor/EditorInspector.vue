@@ -7,6 +7,7 @@
  * ===================================================== */
 
 import { computed, ref, watch } from 'vue'
+import { Delete } from '@element-plus/icons-vue'
 
 import { useEditorStore } from '@/stores/editor'
 import { useI18n } from '@/i18n'
@@ -141,6 +142,51 @@ function setProp(key: string, value: unknown): void {
   store.applyOrToast({ op: 'setClipProperty', payload: { clipId: selected.value.id, props: { [key]: value } } }, t('editor.ops.setClipProperty'))
 }
 
+/** 工程级字幕样式（逐 cue 缺键时继承显示） */
+const docStyle = computed(() => store.doc?.subtitleStyle ?? null)
+
+/** 逐 cue 样式覆盖：值=null 删键回继承 */
+function setCueStyle(key: 'color' | 'size' | 'position', value: unknown): void {
+  if (!selected.value) return
+  store.applyOrToast(
+    { op: 'setClipProperty', payload: { clipId: selected.value.id, props: { style: { [key]: value } } } },
+    t('editor.ops.setClipProperty'),
+  )
+}
+
+/** 音量包络点列表（相对片段坐标 t 0~1）编辑 */
+const envelopePoints = computed(() => selected.value?.props.volumePoints ?? [])
+
+function addEnvelopePoint(): void {
+  const clip = selected.value
+  if (!clip) return
+  const points = [...(clip.props.volumePoints ?? [])]
+  if (points.length >= 16) return
+  // 新点插到末尾前 0.1 处（t 升序约束内取安全值）
+  const lastT = points.length ? points[points.length - 1]!.t : 0
+  const t = Math.min(0.99, lastT + 0.1 < 1 ? lastT + 0.1 : 0.99)
+  points.push({ t: Math.round(t * 1000) / 1000, v: Math.round((clip.props.volume ?? 1) * 100) / 100 })
+  points.sort((a, b) => a.t - b.t)
+  setProp('volumePoints', points)
+}
+
+function updateEnvelopePoint(index: number, key: 't' | 'v', value: number | undefined): void {
+  const clip = selected.value
+  const points = clip ? [...(clip.props.volumePoints ?? [])] : []
+  if (!clip || !points[index]) return
+  const v = typeof value === 'number' && Number.isFinite(value) ? value : points[index]![key]
+  points[index] = { ...points[index]!, [key]: key === 't' ? Math.round(Math.min(1, Math.max(0, v)) * 1000) / 1000 : Math.round(Math.min(2, Math.max(0, v)) * 100) / 100 }
+  points.sort((a, b) => a.t - b.t)
+  setProp('volumePoints', points)
+}
+
+function removeEnvelopePoint(index: number): void {
+  const clip = selected.value
+  if (!clip) return
+  const points = (clip.props.volumePoints ?? []).filter((_, i) => i !== index)
+  setProp('volumePoints', points.length ? points : null) // 空列表=删键
+}
+
 function detachSelectedAudio(): void {
   const clip = selected.value
   if (clip) void store.detachAudio(clip.id)
@@ -180,6 +226,39 @@ function removeSelected(): void {
       <template v-if="trackKind === 'subtitle'">
         <label>{{ t('editor.subtitleText') }}</label>
         <el-input type="textarea" :rows="3" :model-value="selected.text" @change="onSubtitleText" />
+        <!-- 逐 cue 样式覆盖（缺键继承工程 subtitleStyle；恢复继承=null 删键） -->
+        <label class="cue-style-title">{{ t('editor.cueStyleTitle') }}</label>
+        <div class="prop-row">
+          <label>{{ t('editor.cueStyleColor') }}</label>
+          <el-color-picker
+            size="small"
+            :model-value="selected.props.style?.color ?? docStyle?.color ?? '#FFFFFF'"
+            @change="(v: string | null) => setCueStyle('color', v)"
+          />
+          <el-button size="small" text :disabled="!selected.props.style?.color" @click="setCueStyle('color', null)">{{ t('editor.cueStyleInherit') }}</el-button>
+        </div>
+        <div class="prop-row">
+          <label>{{ t('editor.cueStyleSize') }}</label>
+          <el-input-number
+            size="small"
+            :min="8"
+            :max="200"
+            :step="2"
+            controls-position="right"
+            :model-value="selected.props.style?.size ?? docStyle?.size ?? 48"
+            @change="(v: number | undefined) => setCueStyle('size', v ?? null)"
+          />
+          <el-button size="small" text :disabled="!selected.props.style?.size" @click="setCueStyle('size', null)">{{ t('editor.cueStyleInherit') }}</el-button>
+        </div>
+        <div class="prop-row">
+          <label>{{ t('editor.cueStylePosition') }}</label>
+          <el-select size="small" :model-value="selected.props.style?.position ?? docStyle?.position ?? 'bottom'" @change="(v: string) => setCueStyle('position', v)">
+            <el-option value="bottom" :label="t('editor.cuePosBottom')" />
+            <el-option value="center" :label="t('editor.cuePosCenter')" />
+            <el-option value="top" :label="t('editor.cuePosTop')" />
+          </el-select>
+          <el-button size="small" text :disabled="!selected.props.style?.position" @click="setCueStyle('position', null)">{{ t('editor.cueStyleInherit') }}</el-button>
+        </div>
       </template>
 
       <template v-else>
@@ -332,6 +411,36 @@ function removeSelected(): void {
           />
           <span class="prop-value">{{ sliderValue('fadeOut', selected.props.fadeOut ?? 0).toFixed(1) }}s</span>
         </div>
+
+        <!-- 音量包络点（相对片段坐标；预览/渲染线性插值） -->
+        <div class="env-header">
+          <label>{{ t('editor.envPointsTitle') }}</label>
+          <el-button size="small" text :disabled="envelopePoints.length >= 16" @click="addEnvelopePoint">{{ t('editor.envPointAdd') }}</el-button>
+        </div>
+        <div v-for="(p, i) in envelopePoints" :key="i" class="env-row">
+          <span class="env-idx">{{ i + 1 }}</span>
+          <el-input-number
+            size="small"
+            :min="0"
+            :max="1"
+            :step="0.05"
+            :precision="3"
+            controls-position="right"
+            :model-value="p.t"
+            @change="(v: number | undefined) => updateEnvelopePoint(i, 't', v)"
+          />
+          <el-input-number
+            size="small"
+            :min="0"
+            :max="2"
+            :step="0.1"
+            :precision="2"
+            controls-position="right"
+            :model-value="p.v"
+            @change="(v: number | undefined) => updateEnvelopePoint(i, 'v', v)"
+          />
+          <el-button size="small" text :icon="Delete" class="env-del" @click="removeEnvelopePoint(i)" />
+        </div>
       </template>
 
       <div class="actions">
@@ -372,4 +481,12 @@ function removeSelected(): void {
 .rect-hint { margin: 0; font-size: 11px; color: var(--el-text-color-secondary); }
 .actions { margin-top: 12px; display: flex; gap: 8px; }
 .empty { color: var(--el-text-color-secondary); text-align: center; padding: 32px 0; }
+/* 逐 cue 样式 + 包络点列表 */
+.cue-style-title { margin-top: 6px; font-weight: 600; }
+.env-header { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; }
+.env-header label { margin: 0; }
+.env-row { display: flex; align-items: center; gap: 6px; }
+.env-idx { width: 14px; font-size: 11px; color: var(--el-text-color-secondary); text-align: right; }
+.env-row :deep(.el-input-number) { width: 92px; }
+.env-del { color: var(--el-text-color-secondary); }
 </style>

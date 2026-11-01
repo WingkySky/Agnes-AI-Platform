@@ -25,6 +25,7 @@ import type { EditorCommand } from '@/lib/editor-commands'
 import { TRANSITION_TYPES } from '@/lib/editor-fx-registry'
 import { formatSrtCues, parseSrt } from '@/lib/canvas-media'
 import { clearStripCaches } from '@/lib/editor-strips'
+import { clipFadeAlphaAt, volumeEnvelopeAt } from '@/lib/editor-audio'
 import { useDownload } from '@/composables/useDownload'
 import EditorClipMedia from './EditorClipMedia.vue'
 import {
@@ -690,14 +691,24 @@ function audioBadge(clip: EditorClip, kind: string): 'muted' | 'audio' | null {
   return kind === 'video' && clip.assetId != null ? 'audio' : null
 }
 
-/** 片段淡变包络（剪映式穹顶）：淡入/淡出把整块内容塑成穹顶——上边缘沿包络曲线走，
- * 两端低（fade 区四分之一椭圆：边缘陡、顶部收平）、中间满高，曲线之上露出底色。
- * 音频=音量包络，视频/字幕=不透明度包络，全轨道共用同一种剪映淡变语言。
- * 返回开路 path（不含 Z，供描边复用）；无淡变返回 null（保持满框矩形）。 */
+/** 片段淡变包络（剪映式穹顶）：fade × 音量包络复合曲线。
+ *  无包络点：解析椭圆楔子（原形态）；有包络点：按 fade×包络采样 32 点拟合上边缘。 */
 function clipEnvelope(clip: EditorClip): string | null {
-  if ((clip.props.fadeIn ?? 0) <= 0 && (clip.props.fadeOut ?? 0) <= 0) return null
+  if ((clip.props.fadeIn ?? 0) <= 0 && (clip.props.fadeOut ?? 0) <= 0 && !clip.props.volumePoints?.length) return null
   const w = clip.duration * PX_PER_SEC.value
   if (w <= 0) return null
+  if (clip.props.volumePoints?.length) {
+    // 复合曲线采样：高度 = fadeAlpha(t) × envelope(t)，绝对 t = start + t×duration
+    const N = 32
+    const pts: string[] = []
+    for (let i = 0; i <= N; i++) {
+      const frac = i / N
+      const now = clip.start + frac * clip.duration
+      const h = Math.min(1, clipFadeAlphaAt(clip, now) * volumeEnvelopeAt(clip, now))
+      pts.push(`${(frac * 100).toFixed(2)} ${(100 - h * 100).toFixed(2)}`)
+    }
+    return `M 0 100 L ${pts.join(' L ')}`
+  }
   let fi = Math.min((clip.props.fadeIn ?? 0) * PX_PER_SEC.value / w, 1) * 100
   let fo = Math.min((clip.props.fadeOut ?? 0) * PX_PER_SEC.value / w, 1) * 100
   if (fi + fo > 100) {

@@ -460,7 +460,9 @@ const editorApplyOpsTool = {
     'removeClip {clipId}；detachAudio {clipId,trackId,newId}（视频片段音画分离，trackId=目标音频轨，自动成 linkId 组）；' +
     'replaceSource {clipId,assetId,start?,duration?,trimStart?}（换源：保留位置与属性只换素材文件，类型需匹配轨——视频轨收 video/image、音频轨收 audio）；' +
     'unlinkClip {clipId}（解除音画联动 linkId）；' +
-    'setClipProperty {clipId,props:{speed?,volume?,fadeIn?,fadeOut?,muted?,rect?}}（键传 null 删除）；' +
+    'setClipProperty {clipId,props:{speed?,volume?,fadeIn?,fadeOut?,muted?,rect?,volumePoints?,style?}}（键传 null 删除；' +
+    'volumePoints=[{t:0~1,v:0~2}] 音量包络关键帧相对片段坐标（≤16 点 t 升序，渲染线性插值）；' +
+    'style 仅字幕片段：{color?:#RRGGBB,size?:8~200,position?:bottom|center|top} 逐条覆盖工程字幕样式，内键 null 回继承）；' +
     'addSubtitle {clip:{id,trackId,start,duration,text}}；removeSubtitle {clipId}；' +
     'rebuildSubtitleClips {trackId,clips:[{id,start,duration,text}]}（全量替换该字幕轨）；' +
     'addTrack {track:{id,kind,order?}}；removeTrack {trackId}（非空轨拒绝）；' +

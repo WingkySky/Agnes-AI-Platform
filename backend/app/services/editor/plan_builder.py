@@ -95,6 +95,11 @@ def build_plan(
             "trim_start": _num(clip.get("trimStart")),
             "speed": _num(props.get("speed"), 1.0) or 1.0,
             "volume": _num(props.get("volume"), 1.0),
+            "volume_points": (
+                [{"t": _num(p.get("t")), "v": _num(p.get("v"))} for p in props["volumePoints"]]
+                if isinstance(props.get("volumePoints"), list) and props["volumePoints"]
+                else None
+            ),
             "fade_in": _num(props.get("fadeIn")),
             "fade_out": _num(props.get("fadeOut")),
             "muted": props.get("muted") is True,
@@ -214,7 +219,8 @@ def build_plan(
             {"start": _num(c.get("start")), "end": _num(c.get("start")) + _num(c.get("duration")),
              "text": str(c.get("text") or "").strip(),
              "fade_in": _num((c.get("props") or {}).get("fadeIn")),
-             "fade_out": _num((c.get("props") or {}).get("fadeOut"))}
+             "fade_out": _num((c.get("props") or {}).get("fadeOut")),
+             "style": (c.get("props") or {}).get("style") or None}
             for c in clips
             if isinstance(c, dict) and c.get("text")
             and kind_of.get(c.get("trackId")) == "subtitle"

@@ -54,6 +54,17 @@ const subtitleStyleVars = computed<Record<string, string>>(() => {
 const videoTracks = computed(() =>
   (store.doc?.tracks ?? []).filter((tr) => tr.kind === 'video').sort((a, b) => a.order - b.order),
 )
+
+/** 逐 cue 样式覆盖（缺键继承工程 subtitleStyle；position 用 align-self 模拟 top/center/bottom） */
+function subtitleClipStyle(clip: EditorClip): Record<string, string> {
+  const style = clip.props.style
+  if (!style) return {}
+  const out: Record<string, string> = {}
+  if (style.color) out.color = style.color
+  if (style.size) out.fontSize = `${style.size * 0.5}px`
+  if (style.position) out.alignSelf = style.position === 'top' ? 'flex-start' : style.position === 'center' ? 'center' : 'flex-end'
+  return out
+}
 const audioTracks = computed(() =>
   (store.doc?.tracks ?? []).filter((tr) => tr.kind === 'audio'),
 )
@@ -286,7 +297,7 @@ onBeforeUnmount(() => {
               v-for="clip in activeSubtitles"
               :key="clip.id"
               class="subtitle-text"
-              :style="{ ...subtitleStyleVars, opacity: clipFadeAlphaAt(clip, store.playhead) }"
+              :style="{ ...subtitleStyleVars, ...subtitleClipStyle(clip), opacity: clipFadeAlphaAt(clip, store.playhead) }"
             >
               {{ clip.text }}
             </p>

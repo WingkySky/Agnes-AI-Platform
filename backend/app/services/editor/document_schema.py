@@ -5,6 +5,7 @@
 # 形状合法、数值域、assetId 属主存在；不解释转场/变速等深语义。
 # =====================================================
 
+import re
 from typing import Any
 
 from fastapi import HTTPException
@@ -22,6 +23,7 @@ _EFFECT_TYPES = {"grayscale", "blur"}
 # 运镜预设白名单（与前端 editor-camera-registry 的 CAMERA_TYPES 对齐，新增运镜前后端各加一行）
 _CAMERA_TYPES = {"zoomIn", "zoomOut", "panLeft", "panRight", "panUp", "panDown"}
 _TRACK_FLAG_KEYS = {"hidden", "locked", "muted", "solo"}
+_SUBTITLE_POSITIONS = {"bottom", "center", "top"}
 
 
 def _fail(msg: str) -> None:
@@ -121,6 +123,33 @@ def validate_document_skeleton(doc: Any) -> dict:
                 _fail(f"clips[{i}].props.camera 形状非法")
             elif not _num(camera.get("strength")) or not (0 <= camera["strength"] <= 1):
                 _fail(f"clips[{i}].props.camera.strength 必须在 0~1")
+        style = props.get("style")
+        if style is not None:
+            # 字幕逐 cue 样式覆盖（缺键继承工程 subtitleStyle）
+            if not isinstance(style, dict) or not style:
+                _fail(f"clips[{i}].props.style 必须为非空对象")
+            for k, v in style.items():
+                if k == "color" and (not isinstance(v, str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", v)):
+                    _fail(f"clips[{i}].props.style.color 必须为 #RRGGBB")
+                elif k == "size" and (not isinstance(v, int) or not (8 <= v <= 200)):
+                    _fail(f"clips[{i}].props.style.size 必须为 8~200 整数")
+                elif k == "position" and v not in _SUBTITLE_POSITIONS:
+                    _fail(f"clips[{i}].props.style.position 非法")
+                elif k not in ("color", "size", "position"):
+                    _fail(f"clips[{i}].props.style.{k} 未知键")
+        points = props.get("volumePoints")
+        if points is not None:
+            # 音量包络关键帧：t 相对片段 0~1 升序去重，v 0~2
+            if not isinstance(points, list) or not points or len(points) > 16:
+                _fail(f"clips[{i}].props.volumePoints 必须为 1~16 个点的数组")
+            last_t = -1.0
+            for j, p in enumerate(points):
+                if not isinstance(p, dict) or not _num(p.get("t")) or not (0 <= p["t"] <= 1) \
+                        or not _num(p.get("v")) or not (0 <= p["v"] <= 2):
+                    _fail(f"clips[{i}].props.volumePoints[{j}] 形状非法")
+                if p["t"] <= last_t:
+                    _fail(f"clips[{i}].props.volumePoints[{j}].t 必须严格升序")
+                last_t = p["t"]
         if c.get("text") is not None and not isinstance(c.get("text"), str):
             _fail(f"clips[{i}].text 必须为字符串")
         if c.get("linkId") is not None and not isinstance(c.get("linkId"), str):
